@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{portalAdmin.title}">ポータル管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-globe2 me-2 text-info"></i><th:block th:text="#{portalAdmin.title}">ポータル管理</th:block></h2>
+    </div>
+
+    <ul class="nav nav-tabs nav-tabs-dark mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-orgs" type="button"
+                    th:text="#{portalAdmin.tab.orgs}">組織</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-invitations" type="button"
+                    th:text="#{portalAdmin.tab.invitations}">招待</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-sessions" type="button"
+                    th:text="#{portalAdmin.tab.sessions}">session</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-logs" type="button"
+                    th:text="#{portalAdmin.tab.logs}">アクセスログ</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-terms" type="button"
+                    th:text="#{portalAdmin.tab.terms}">利用規約</button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- 組織 -->
+        <div class="tab-pane fade show active" id="tab-orgs" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <p class="text-muted small mb-0" th:text="#{portalAdmin.orgs.guide}">顧客/BP組織とportal userを管理します。</p>
+                        <button class="btn btn-primary btn-sm" id="orgCreateButton"
+                                th:text="#{portalAdmin.orgs.create}">組織を作成</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th>ID</th>
+                                    <th th:text="#{portalAdmin.orgs.type}">種別</th>
+                                    <th th:text="#{portalAdmin.orgs.status}">状態</th>
+                                    <th th:text="#{portalAdmin.orgs.users}">ユーザー</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="orgTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <h5 th:text="#{portalAdmin.users.title}">ユーザー</h5>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th>ID</th>
+                                    <th th:text="#{portalAdmin.users.email}">email</th>
+                                    <th th:text="#{portalAdmin.users.status}">状態</th>
+                                    <th th:text="#{portalAdmin.users.mfa}">MFA</th>
+                                    <th th:text="#{portalAdmin.users.lastLogin}">最終ログイン</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 招待 -->
+        <div class="tab-pane fade" id="tab-invitations" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <p class="text-muted small mb-3" th:text="#{portalAdmin.invitations.guide}">72時間有効・1回限りの招待を発行します。</p>
+                    <form id="invitationForm" class="row g-2 mb-3">
+                        <div class="col-md-3">
+                            <select class="form-select" id="invitationOrgId" required>
+                                <option value="" th:text="#{portalAdmin.invitations.org}">組織を選択</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <input type="email" class="form-control" id="invitationEmail"
+                                   placeholder="email@example.com" required>
+                        </div>
+                        <div class="col-md-2">
+                            <select class="form-select" id="invitationRole">
+                                <option value="MEMBER" th:text="#{portalAdmin.invitations.roleMember}">メンバー</option>
+                                <option value="ADMIN" th:text="#{portalAdmin.invitations.roleAdmin}">組織管理者</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100"
+                                    th:text="#{portalAdmin.invitations.send}">招待を送る</button>
+                        </div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th th:text="#{portalAdmin.invitations.email}">email</th>
+                                    <th th:text="#{portalAdmin.invitations.role}">役割</th>
+                                    <th th:text="#{portalAdmin.invitations.expires}">期限</th>
+                                    <th th:text="#{portalAdmin.invitations.used}">使用</th>
+                                </tr>
+                            </thead>
+                            <tbody id="invitationTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- session -->
+        <div class="tab-pane fade" id="tab-sessions" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <p class="text-muted small mb-3" th:text="#{portalAdmin.sessions.guide}">ユーザーを選択すると有効sessionが表示されます。</p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <input type="number" class="form-control" id="sessionUserId"
+                                   placeholder="portal user ID" min="1" required>
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-secondary w-100" id="sessionLoadButton"
+                                    th:text="#{portalAdmin.sessions.load}">表示</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th>ID</th>
+                                    <th th:text="#{portalAdmin.sessions.issued}">発行</th>
+                                    <th th:text="#{portalAdmin.sessions.lastSeen}">最終アクセス</th>
+                                    <th th:text="#{portalAdmin.sessions.expires}">期限</th>
+                                    <th th:text="#{portalAdmin.sessions.ua}">User-Agent</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="sessionTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- アクセスログ -->
+        <div class="tab-pane fade" id="tab-logs" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <p class="text-muted small mb-3" th:text="#{portalAdmin.logs.guide}">portalのdownload/検収/提出/口座変更の監査記録（R4.2）。</p>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover align-middle mb-0">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th th:text="#{portalAdmin.logs.time}">日時</th>
+                                    <th th:text="#{portalAdmin.logs.user}">ユーザー</th>
+                                    <th th:text="#{portalAdmin.logs.org}">組織</th>
+                                    <th th:text="#{portalAdmin.logs.action}">操作</th>
+                                    <th th:text="#{portalAdmin.logs.target}">対象</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 利用規約 -->
+        <div class="tab-pane fade" id="tab-terms" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body">
+                    <p class="text-muted small mb-3" th:text="#{portalAdmin.terms.guide}">新しいversionを発行すると、未同意の全portal userへ再同意が要求されます（G3）。</p>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <input type="number" class="form-control" id="termsVersion" min="2" required
+                                   placeholder="新しいversion（例: 2）">
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-primary w-100" id="termsPublishButton"
+                                    th:text="#{portalAdmin.terms.publish}">発行</button>
+                        </div>
+                    </div>
+                    <p class="mt-3 mb-0" id="termsCurrent"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+<script th:src="@{/js/modules/portal-admin.js}"></script>
+</th:block>
+</body>
+</html>

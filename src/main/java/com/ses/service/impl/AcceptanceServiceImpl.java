@@ -16,6 +16,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.AcceptanceService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -31,6 +32,7 @@ import java.util.Set;
  * 状態機械はdesign §5.3: 未提出→提出済→検収済/差戻し、差戻し→再提出、検収済→取消（承認必須）。
  * 提出時点のwork record工数・金額・更新日時をsnapshotし、以後の工数変更で検収額を変えない。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Acceptance>
@@ -41,6 +43,9 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     private final CustomerContactMapper customerContactMapper;
     private final DataScopeService dataScopeService;
     private final com.ses.service.DocumentService documentService;
+    /** portal通知（R4.1）。portal未導入環境ではnull（Optional dependency） */
+    private final org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
+            portalNotificationServiceProvider;
 
     @Override
     public Page<AcceptanceGridDto> pageGrid(long current, long size, String workMonth,
@@ -94,6 +99,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setSubmittedAt(LocalDateTime.now());
         acceptance.setRejectComment(null);
         baseMapper.updateById(acceptance);
+        notifyCustomerSubmitted(contract.getCustomerId(), workMonth);
         return acceptance;
     }
 
@@ -137,6 +143,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setRejectComment(comment.trim());
         acceptance.setAcceptedAt(null);
         baseMapper.updateById(acceptance);
+        notifyCustomerRejected(acceptance.getContractId(), workMonth(acceptance));
         return acceptance;
     }
 
@@ -159,6 +166,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setSubmittedAt(LocalDateTime.now());
         acceptance.setRejectComment(null);
         baseMapper.updateById(acceptance);
+        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        notifyCustomerSubmitted(contract == null ? null : contract.getCustomerId(), acceptance.getWorkMonth());
         return acceptance;
     }
 
@@ -334,6 +343,48 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     }
 
     // ===== 内部ヘルパー =====
+
+    /** R4.1: 検収提出を顧客portal組織へ通知（送信失敗は業務を妨げない）。 */
+    private void notifyCustomerSubmitted(Long customerId, String workMonth) {
+        com.ses.service.portal.PortalNotificationService notification =
+                portalNotificationServiceProvider.getIfAvailable();
+        if (notification == null || customerId == null) {
+            return;
+        }
+        try {
+            notification.notifyCustomerOrganization(customerId, "ACCEPTANCE_SUBMITTED",
+                    "portal.notification.acceptanceSubmitted.subject",
+                    "portal.notification.acceptanceSubmitted.body",
+                    new Object[]{workMonth}, "/portal/customer");
+        } catch (RuntimeException e) {
+            log.warn("portal通知失敗: type=ACCEPTANCE_SUBMITTED customerId={} error={}", customerId, e.getMessage());
+        }
+    }
+
+    /** R4.1: 差戻しを顧客portal組織へ通知。 */
+    private void notifyCustomerRejected(Long contractId, String workMonth) {
+        com.ses.service.portal.PortalNotificationService notification =
+                portalNotificationServiceProvider.getIfAvailable();
+        if (notification == null || contractId == null) {
+            return;
+        }
+        try {
+            Contract contract = contractMapper.selectById(contractId);
+            if (contract == null || contract.getCustomerId() == null) {
+                return;
+            }
+            notification.notifyCustomerOrganization(contract.getCustomerId(), "ACCEPTANCE_REJECTED",
+                    "portal.notification.acceptanceRejected.subject",
+                    "portal.notification.acceptanceRejected.body",
+                    new Object[]{workMonth}, "/portal/customer");
+        } catch (RuntimeException e) {
+            log.warn("portal通知失敗: type=ACCEPTANCE_REJECTED contractId={} error={}", contractId, e.getMessage());
+        }
+    }
+
+    private static String workMonth(Acceptance acceptance) {
+        return acceptance == null ? null : acceptance.getWorkMonth();
+    }
 
     private void applySnapshot(Acceptance acceptance, WorkRecord workRecord) {
         acceptance.setWorkRecordId(workRecord.getId());

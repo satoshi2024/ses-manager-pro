@@ -92,6 +92,10 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private CustomerContactService customerContactService;
 
+    @Autowired
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
+            portalNotificationServiceProvider;
+
     private void checkClosing(String month) {
         // 締め設定行をロックし confirm と直列化する（締め成立後の請求差分commit防止 / R3R-05）。
         monthlyClosingService.assertOpenForUpdate(month);
@@ -576,6 +580,20 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
                     .setSql("version = version + 1"));
             if (updated == 0) {
                 throw BusinessException.of("error.common.optimisticLock");
+            }
+            // R4.1: 支払済をBP portal組織へ通知（送信失敗は業務を妨げない）
+            com.ses.service.portal.PortalNotificationService notification =
+                    portalNotificationServiceProvider.getIfAvailable();
+            if (notification != null && bpPayment.getBpCompanyId() != null) {
+                try {
+                    notification.notifyBpOrganization(bpPayment.getBpCompanyId(), "BP_PAYMENT_PAID",
+                            "portal.notification.bpPaymentPaid.subject",
+                            "portal.notification.bpPaymentPaid.body",
+                            new Object[]{workRecord == null ? "" : workRecord.getWorkMonth()}, "/portal/bp");
+                } catch (RuntimeException e) {
+                    log.warn("portal通知失敗: type=BP_PAYMENT_PAID bpCompanyId={} error={}",
+                            bpPayment.getBpCompanyId(), e.getMessage());
+                }
             }
         } else if ("未払".equals(status)) {
             int updated = bpPaymentMapper.update(null, new UpdateWrapper<BpPayment>()

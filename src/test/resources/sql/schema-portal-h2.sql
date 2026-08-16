@@ -15,6 +15,7 @@ ALTER TABLE t_invoice ADD COLUMN IF NOT EXISTS portal_inquiry VARCHAR(1000);
 ALTER TABLE t_invoice ALTER COLUMN status SET DATA TYPE ENUM('未送付','送付済','一部入金','入金済');
 
 -- ---- 1) ポータル組織 ----
+DROP TABLE IF EXISTS t_portal_access_log CASCADE;
 DROP TABLE IF EXISTS t_portal_session CASCADE;
 DROP TABLE IF EXISTS t_portal_terms_consent CASCADE;
 DROP TABLE IF EXISTS t_portal_user_permission CASCADE;
@@ -110,6 +111,17 @@ CREATE TABLE t_portal_terms_consent (
 );
 CREATE UNIQUE INDEX uk_portal_terms_consent ON t_portal_terms_consent(user_id, terms_version);
 
+-- ---- menu seed（V104相当。H2 replayはV104を流さないため、MenuPermissionFilterの認可に必要） ----
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+SELECT 'portal-admin', 'ポータル管理', '/portal-admin', '/api/portal-admin', 97
+WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'portal-admin');
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT '営業') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'portal-admin'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu tr WHERE tr.role = r.role AND tr.menu_id = m.id);
+
 -- ---- 6) ポータルsession（V104_1） ----
 CREATE TABLE t_portal_session (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -129,3 +141,21 @@ CREATE TABLE t_portal_session (
 CREATE UNIQUE INDEX uk_portal_session_token_hash ON t_portal_session(token_hash);
 CREATE INDEX idx_portal_session_user ON t_portal_session(user_id);
 CREATE INDEX idx_portal_session_revoked ON t_portal_session(revoked_at);
+
+-- ---- 7) ポータル操作監査ログ（V104_3。append-only） ----
+CREATE TABLE t_portal_access_log (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  portal_user_id BIGINT NOT NULL,
+  portal_org_id  BIGINT NOT NULL,
+  email          VARCHAR(255) NOT NULL,
+  org_type       VARCHAR(20) NOT NULL,
+  action         VARCHAR(50) NOT NULL,
+  target_type    VARCHAR(50),
+  target_id      BIGINT,
+  ip_hash        VARCHAR(64),
+  user_agent     VARCHAR(512),
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_portal_access_log_org ON t_portal_access_log(portal_org_id, created_at);
+CREATE INDEX idx_portal_access_log_user ON t_portal_access_log(portal_user_id, created_at);
+CREATE INDEX idx_portal_access_log_action ON t_portal_access_log(action, created_at);

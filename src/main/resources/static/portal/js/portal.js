@@ -56,19 +56,29 @@
         showError(elementId, message);
     }
 
-    /** ログイン完了後の遷移先（規約同意待ちは同意画面へ） */
+    /** ログイン完了後の遷移先（サーバー検証済みのreturn URL。規約同意待ちは同意画面へ） */
     function redirectAfterLogin(result) {
+        let target = '/portal';
+        const params = new URLSearchParams(window.location.search);
+        const rawReturn = params.get('return') || window.__PORTAL_RETURN_URL || '';
+        // クライアント側でも相対パスのみ許可（サーバー側検証済み値を優先）
+        if (rawReturn && rawReturn.startsWith('/') && !rawReturn.startsWith('//')
+            && !rawReturn.startsWith('/\\') && rawReturn.indexOf('://') < 0) {
+            target = rawReturn;
+        }
         if (result && result.termsPending) {
             window.location.href = '/portal/terms';
         } else {
-            window.location.href = '/portal';
+            window.location.href = target;
         }
     }
 
     const PortalAuth = {
 
         /** ログイン画面: password → MFAコード → MFA初期設定 → 遷移 */
-        initLoginPage: function () {
+        initLoginPage: function (options) {
+            const returnUrl = (options && options.returnUrl) || '/portal';
+            window.__PORTAL_RETURN_URL = returnUrl;
             const $form = $('#loginForm');
             const $mfaGroup = $('#mfaCodeGroup');
             const $mfaSetupSection = $('#mfaSetupSection');

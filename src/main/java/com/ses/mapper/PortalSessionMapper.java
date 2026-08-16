@@ -37,10 +37,11 @@ public interface PortalSessionMapper extends BaseMapper<PortalSession> {
 
     /**
      * 組織配下の全userの全有効sessionを失効させる（組織停止時）。
+     * H2互換のためJOINではなくINサブクエリで書く（MySQL/H2両対応）。
      */
-    @Update("UPDATE t_portal_session s JOIN t_portal_user u ON u.id = s.user_id"
-            + " SET s.revoked_at = #{now}, s.revoked_reason = #{reason}"
-            + " WHERE u.portal_org_id = #{portalOrgId} AND s.revoked_at IS NULL")
+    @Update("UPDATE t_portal_session SET revoked_at = #{now}, revoked_reason = #{reason}"
+            + " WHERE revoked_at IS NULL"
+            + " AND user_id IN (SELECT id FROM t_portal_user WHERE portal_org_id = #{portalOrgId})")
     int revokeAllForOrg(@Param("portalOrgId") Long portalOrgId, @Param("now") LocalDateTime now,
                         @Param("reason") String reason);
 }

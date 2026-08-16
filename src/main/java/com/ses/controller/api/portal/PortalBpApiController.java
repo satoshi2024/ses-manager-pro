@@ -43,6 +43,15 @@ public class PortalBpApiController {
 
     private final PortalBpService bpService;
     private final PortalAuthorizationService authorizationService;
+    private final com.ses.service.portal.PortalAuditService auditService;
+
+    private void audit(String action, String targetType, Long targetId, jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            auditService.record(authorizationService.requireUser(), action, targetType, targetId, request);
+        } catch (RuntimeException ignored) {
+            // 監査はbest-effort
+        }
+    }
 
     private Long bpCompanyId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -96,7 +105,8 @@ public class PortalBpApiController {
 
     /** 受領確認の一回性CAS（R3.2）。 */
     @PostMapping("/payments/{id}/confirm-receipt")
-    public ApiResult<Void> confirmReceipt(@PathVariable Long id) {
+    public ApiResult<Void> confirmReceipt(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("CONFIRM_RECEIPT", "BP_PAYMENT", id, request);
         bpService.confirmReceipt(id, bpCompanyId());
         return ApiResult.success(null);
     }
@@ -104,12 +114,13 @@ public class PortalBpApiController {
     // ===== 請求書/作業報告書の提出（R3.2。archive scan通過後のみ公開: R4.4） =====
 
     @PostMapping("/payments/{id}/submissions")
-    public ApiResult<PortalBpSubmissionDto> submitDocument(@PathVariable Long id,
+    public ApiResult<PortalBpSubmissionDto> submitDocument(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request,
                                                            @RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
             throw com.ses.common.exception.BusinessException.of(400, "error.portal.bp.documentRequired");
         }
         try {
+            audit("SUBMIT", "BP_PAYMENT", id, request);
             return ApiResult.success(bpService.submitDocument(id, bpCompanyId(),
                     file.getOriginalFilename(), file.getContentType(), file.getBytes()));
         } catch (IOException e) {
@@ -124,7 +135,9 @@ public class PortalBpApiController {
 
     @GetMapping("/payments/{paymentId}/submissions/{documentId}/download")
     public ResponseEntity<InputStreamResource> downloadSubmission(@PathVariable Long paymentId,
-                                                                  @PathVariable Long documentId) {
+                                                                  @PathVariable Long documentId,
+                                                                  jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_SUBMISSION", "BP_PAYMENT", paymentId, request);
         InputStream stream = bpService.downloadSubmission(documentId, paymentId, bpCompanyId());
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
@@ -144,7 +157,9 @@ public class PortalBpApiController {
     }
 
     @PostMapping("/bank-accounts")
-    public ApiResult<Void> requestBankAccountChange(@Valid @RequestBody PortalBpBankAccountRequest request) {
+    public ApiResult<Void> requestBankAccountChange(@Valid @RequestBody PortalBpBankAccountRequest request,
+                                                     jakarta.servlet.http.HttpServletRequest httpRequest) {
+        audit("BANK_REQUEST", "BP_BANK_ACCOUNT", null, httpRequest);
         bpService.requestBankAccountChange(bpCompanyId(), request);
         return ApiResult.success(null);
     }

@@ -42,6 +42,15 @@ public class PortalCustomerApiController {
 
     private final PortalCustomerService customerService;
     private final PortalAuthorizationService authorizationService;
+    private final com.ses.service.portal.PortalAuditService auditService;
+
+    private void audit(String action, String targetType, Long targetId, jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            auditService.record(authorizationService.requireUser(), action, targetType, targetId, request);
+        } catch (RuntimeException ignored) {
+            // 監査はbest-effort
+        }
+    }
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -61,7 +70,8 @@ public class PortalCustomerApiController {
     }
 
     @GetMapping("/quotations/{id}/download")
-    public ResponseEntity<byte[]> quotationPdf(@PathVariable Long id) {
+    public ResponseEntity<byte[]> quotationPdf(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_QUOTATION", "QUOTATION", id, request);
         byte[] bytes = customerService.quotationPdf(id, customerId(), Locale.getDefault());
         return pdfResponse(bytes, "見積書_" + id + ".pdf");
     }
@@ -76,7 +86,8 @@ public class PortalCustomerApiController {
     }
 
     @GetMapping("/sales-orders/{id}/acknowledgement/download")
-    public ResponseEntity<InputStreamResource> acknowledgementPdf(@PathVariable Long id) {
+    public ResponseEntity<InputStreamResource> acknowledgementPdf(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_SALES_ORDER", "SALES_ORDER", id, request);
         InputStream stream = customerService.acknowledgementPdf(id, customerId());
         return streamResponse(stream, "注文請書_" + id + ".pdf");
     }
@@ -97,7 +108,8 @@ public class PortalCustomerApiController {
     }
 
     @GetMapping("/contracts/{id}/document/download")
-    public ResponseEntity<InputStreamResource> contractDocumentPdf(@PathVariable Long id) {
+    public ResponseEntity<InputStreamResource> contractDocumentPdf(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_CONTRACT", "CONTRACT", id, request);
         InputStream stream = customerService.contractDocumentPdf(id, customerId());
         return streamResponse(stream, "契約書_" + id + ".pdf");
     }
@@ -120,23 +132,26 @@ public class PortalCustomerApiController {
 
     /** 検収（提出済→検収済。order specの状態CAS。二重検収は2件目が409: R5） */
     @PostMapping("/acceptances/{id}/accept")
-    public ApiResult<PortalAcceptanceDto> accept(@PathVariable Long id,
+    public ApiResult<PortalAcceptanceDto> accept(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest httpRequest,
                                                  @RequestBody(required = false) PortalAcceptanceActionRequest request) {
         Long contactId = request == null ? null : request.getCustomerContactId();
+        audit("ACCEPT", "ACCEPTANCE", id, httpRequest);
         customerService.portalAccept(id, contactId, customerId());
         return ApiResult.success(customerService.acceptance(id, customerId()));
     }
 
     /** 差戻し（提出済→差戻し。理由必須） */
     @PostMapping("/acceptances/{id}/reject")
-    public ApiResult<PortalAcceptanceDto> reject(@PathVariable Long id,
+    public ApiResult<PortalAcceptanceDto> reject(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest httpRequest,
                                                  @Valid @RequestBody PortalAcceptanceActionRequest request) {
+        audit("REJECT", "ACCEPTANCE", id, httpRequest);
         customerService.portalReject(id, request.getComment(), customerId());
         return ApiResult.success(customerService.acceptance(id, customerId()));
     }
 
     @GetMapping("/acceptances/{id}/document/download")
-    public ResponseEntity<InputStreamResource> acceptanceDocumentPdf(@PathVariable Long id) {
+    public ResponseEntity<InputStreamResource> acceptanceDocumentPdf(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_ACCEPTANCE", "ACCEPTANCE", id, request);
         InputStream stream = customerService.acceptanceDocumentPdf(id, customerId());
         return streamResponse(stream, "検収書_" + id + ".pdf");
     }
@@ -156,15 +171,17 @@ public class PortalCustomerApiController {
     }
 
     @GetMapping("/invoices/{id}/download")
-    public ResponseEntity<byte[]> invoicePdf(@PathVariable Long id) {
+    public ResponseEntity<byte[]> invoicePdf(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest request) {
+        audit("DOWNLOAD_INVOICE", "INVOICE", id, request);
         byte[] bytes = customerService.invoicePdf(id, customerId(), Locale.getDefault());
         return pdfResponse(bytes, "請求書_" + id + ".pdf");
     }
 
     /** 受領確認・支払予定日・問い合わせの登録（R2.3。入金済状態の変更APIは存在しない） */
     @PostMapping("/invoices/{id}/register")
-    public ApiResult<PortalInvoiceDto> registerInvoice(@PathVariable Long id,
+    public ApiResult<PortalInvoiceDto> registerInvoice(@PathVariable Long id, jakarta.servlet.http.HttpServletRequest httpRequest,
                                                        @Valid @RequestBody PortalInvoiceRegisterRequest request) {
+        audit("INVOICE_REGISTER", "INVOICE", id, httpRequest);
         return ApiResult.success(customerService.registerInvoice(id, customerId(), request));
     }
 

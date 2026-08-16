@@ -68,6 +68,10 @@
 <script th:src="@{/lib/jquery/jquery.min.js}"></script>
 <script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
 <script th:src="@{/portal/js/portal.js}"></script>
-<script>PortalAuth.initLoginPage();</script>
+<script>
+    PortalAuth.initLoginPage({
+        returnUrl: /*[[${returnUrl}]]*/ '/portal'
+    });
+</script>
 </body>
 </html>

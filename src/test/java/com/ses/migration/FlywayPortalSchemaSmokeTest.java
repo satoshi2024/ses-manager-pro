@@ -47,7 +47,8 @@ class FlywayPortalSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String table : new String[]{
                     "m_portal_organization", "t_portal_user", "t_portal_invitation",
-                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session"}) {
+                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session",
+                    "t_portal_access_log"}) {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "m_portal_organization", "customer_id");
@@ -206,14 +207,15 @@ class FlywayPortalSchemaSmokeTest {
         Flyway.configure()
                 .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("104_2")
+                .target("104_3")
                 .load()
                 .migrate();
 
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             for (String table : new String[]{
                     "m_portal_organization", "t_portal_user", "t_portal_invitation",
-                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session"}) {
+                    "t_portal_user_permission", "t_portal_terms_consent", "t_portal_session",
+                    "t_portal_access_log"}) {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "t_bp_payment", "received_confirmed_at");
@@ -227,7 +229,7 @@ class FlywayPortalSchemaSmokeTest {
             Flyway.configure()
                     .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                     .locations("classpath:db/migration")
-                    .target("104_2")
+                    .target("104_3")
                     .load()
                     .migrate();
             String freshShape = portalShape(MYSQL.createConnection(""));

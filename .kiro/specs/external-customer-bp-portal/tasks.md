@@ -72,7 +72,7 @@
     金額/支払状態を変更するAPIが存在しないこと。
   - **Demo**: BP提出→内部review→支払予定表示。口座変更を申請し承認前は旧口座のままであることを確認。
 
-- [ ] B1. 管理/通知/利用規約
+- [x] B1. 管理/通知/利用規約
   - **Objective**: 内部管理者がportal組織・user・招待・session・access logを管理でき、
     規約改定時に再同意が求められる。email通知のlinkがlogin後に目的画面へ安全に戻る。
   - **実装ガイダンス**: user/invite/session/log、terms consent、email preference。

@@ -1,4 +1,4 @@
-﻿package com.ses.portal;
+package com.ses.portal;
 
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;

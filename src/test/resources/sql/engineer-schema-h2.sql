@@ -2519,6 +2519,7 @@ CREATE INDEX idx_scenario_alloc_engineer ON t_staffing_scenario_allocation(engin
 -- 顧客・BP外部ポータル (V104, S13 external-customer-bp-portal)
 -- 本ファイルはFKを張る方針（既存t_engineer等と同じ）のため、portalもFK付きで再現する。
 -- ============================================================
+DROP TABLE IF EXISTS t_portal_access_log CASCADE;
 DROP TABLE IF EXISTS t_portal_session CASCADE;
 DROP TABLE IF EXISTS t_portal_terms_consent CASCADE;
 DROP TABLE IF EXISTS t_portal_user_permission CASCADE;
@@ -2623,3 +2624,20 @@ CREATE TABLE t_portal_session (
   UNIQUE KEY uk_portal_session_token_hash (token_hash),
   CONSTRAINT fk_portal_session_user FOREIGN KEY (user_id) REFERENCES t_portal_user(id)
 );
+
+CREATE TABLE t_portal_access_log (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  portal_user_id BIGINT NOT NULL,
+  portal_org_id  BIGINT NOT NULL,
+  email          VARCHAR(255) NOT NULL,
+  org_type       VARCHAR(20) NOT NULL,
+  action         VARCHAR(50) NOT NULL,
+  target_type    VARCHAR(50),
+  target_id      BIGINT,
+  ip_hash        VARCHAR(64),
+  user_agent     VARCHAR(512),
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_portal_access_log_org ON t_portal_access_log(portal_org_id, created_at);
+CREATE INDEX idx_portal_access_log_user ON t_portal_access_log(portal_user_id, created_at);
+CREATE INDEX idx_portal_access_log_action ON t_portal_access_log(action, created_at);
