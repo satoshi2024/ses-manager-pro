@@ -55,7 +55,7 @@ class SpecDispatchConsistencyTest {
         SPEC_BY_CONVERSATION.put("S10", "dispatch-outsourcing-compliance-ledger");
         SPEC_BY_CONVERSATION.put("S11", "attendance-leave-overtime-compliance");
         SPEC_BY_CONVERSATION.put("S12", "staffing-capacity-planning");
-        SPEC_BY_CONVERSATION.put("S13", "external-customer-bp-portal");
+        // SPEC_BY_CONVERSATION.put("S13", "external-customer-bp-portal"); // V104実装済み（予約→実在へ移行）
         SPEC_BY_CONVERSATION.put("S14", "engineer-self-service-portal-v2");
         SPEC_BY_CONVERSATION.put("S15", "accounting-payment-integration");
         SPEC_BY_CONVERSATION.put("S16", "jp-pint-digital-invoice");
@@ -68,15 +68,16 @@ class SpecDispatchConsistencyTest {
             "order-acceptance-workflow", List.of(80, 81),
             "attendance-leave-overtime-compliance", List.of(83),
             "dispatch-outsourcing-compliance-ledger", List.of(84),
-            "staffing-capacity-planning", List.of(103));
+            "staffing-capacity-planning", List.of(103),
+            "external-customer-bp-portal", List.of(104));
 
     /** S10の正式V84とは別に、R19-P1-01受理後のG2 follow-upはV102へ追加する。 */
     private static final Map<String, List<Integer>> FOLLOW_UP_MIGRATIONS = Map.of(
             "dispatch-outsourcing-compliance-ledger", List.of(102));
 
     private static final Pattern DESIGN_RESERVED = Pattern.compile("予約V(\\d+)");
-    private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|10|11|12)正式migration V(\\d+(?:/V\\d+)*)");
-    private static final Pattern TASKS_REALIZED = Pattern.compile("(?:(?:S(?:07|10|11|12))|本spec)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
+    private static final Pattern DESIGN_REALIZED = Pattern.compile("S(?:07|10|11|12|13)正式migration V(\\d+(?:/V\\d+)*)");
+    private static final Pattern TASKS_REALIZED = Pattern.compile("(?:(?:S(?:07|10|11|12|13))|本spec)の正式migrationは \\*\\*V(\\d+(?:/V\\d+)*)\\*\\*");
     private static final Pattern TASKS_HEADER = Pattern.compile("予約番号は \\*\\*V(\\d+)\\*\\*");
     private static final Pattern TASKS_GUIDANCE = Pattern.compile("\\*\\*V(\\d+)\\*\\*/V1/H2");
     private static final Pattern MIGRATION_LINE = Pattern.compile("^- Migration: V(\\d+)", Pattern.MULTILINE);

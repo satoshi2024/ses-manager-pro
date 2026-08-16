@@ -450,6 +450,7 @@ CREATE TABLE t_bp_payment (
   updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   version            INT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_work_record_layer (work_record_id, layer_order),
+  received_confirmed_at DATETIME,
   CONSTRAINT fk_bp_payment_parent FOREIGN KEY (parent_payment_id) REFERENCES t_bp_payment(id)
 );
 
@@ -2510,3 +2511,93 @@ CREATE TABLE t_staffing_scenario_allocation (
 );
 CREATE INDEX idx_scenario_alloc_scenario ON t_staffing_scenario_allocation(scenario_id);
 CREATE INDEX idx_scenario_alloc_engineer ON t_staffing_scenario_allocation(engineer_id);
+
+-- ============================================================
+-- 顧客・BP外部ポータル (V104, S13 external-customer-bp-portal)
+-- 本ファイルはFKを張る方針（既存t_engineer等と同じ）のため、portalもFK付きで再現する。
+-- ============================================================
+DROP TABLE IF EXISTS t_portal_terms_consent CASCADE;
+DROP TABLE IF EXISTS t_portal_user_permission CASCADE;
+DROP TABLE IF EXISTS t_portal_invitation CASCADE;
+DROP TABLE IF EXISTS t_portal_user CASCADE;
+DROP TABLE IF EXISTS m_portal_organization CASCADE;
+
+CREATE TABLE m_portal_organization (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL DEFAULT 'default',
+  type          VARCHAR(20) NOT NULL,
+  customer_id   BIGINT,
+  bp_company_id BIGINT,
+  status        VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_portal_org_customer (customer_id),
+  UNIQUE KEY uk_portal_org_bp (bp_company_id),
+  CONSTRAINT chk_portal_org_type CHECK (type IN ('CUSTOMER','BP')),
+  CONSTRAINT chk_portal_org_status CHECK (status IN ('ACTIVE','SUSPENDED')),
+  CONSTRAINT fk_portal_org_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id),
+  CONSTRAINT fk_portal_org_bp FOREIGN KEY (bp_company_id) REFERENCES m_bp_company(id)
+);
+
+CREATE TABLE t_portal_user (
+  id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+  portal_org_id          BIGINT NOT NULL,
+  email                  VARCHAR(255) NOT NULL,
+  display_name           VARCHAR(255),
+  password_hash          VARCHAR(255),
+  status                 VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  mfa_policy             VARCHAR(20) NOT NULL DEFAULT 'REQUIRED',
+  totp_secret_encrypted  VARCHAR(255),
+  totp_secret_key_version VARCHAR(64),
+  mfa_enabled_at         DATETIME,
+  recovery_code_hash     VARCHAR(255),
+  recovery_code_used_at  DATETIME,
+  last_login_at          DATETIME,
+  version                INT NOT NULL DEFAULT 0,
+  created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag           TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_portal_user_email (email),
+  CONSTRAINT chk_portal_user_status CHECK (status IN ('ACTIVE','SUSPENDED')),
+  CONSTRAINT chk_portal_user_mfa_policy CHECK (mfa_policy IN ('REQUIRED','OPTIONAL')),
+  CONSTRAINT fk_portal_user_org FOREIGN KEY (portal_org_id) REFERENCES m_portal_organization(id)
+);
+
+CREATE TABLE t_portal_invitation (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  portal_org_id BIGINT NOT NULL,
+  email         VARCHAR(255) NOT NULL,
+  role          VARCHAR(50) NOT NULL DEFAULT 'MEMBER',
+  token_hash    CHAR(64) NOT NULL,
+  expires_at    DATETIME NOT NULL,
+  used_at       DATETIME,
+  accepted_by   BIGINT,
+  invited_by    BIGINT,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag  TINYINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_portal_invite_token_hash (token_hash),
+  CONSTRAINT chk_portal_invite_role CHECK (role IN ('MEMBER','ADMIN')),
+  CONSTRAINT fk_portal_invite_org FOREIGN KEY (portal_org_id) REFERENCES m_portal_organization(id)
+);
+
+CREATE TABLE t_portal_user_permission (
+  id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id        BIGINT NOT NULL,
+  permission_key VARCHAR(100) NOT NULL,
+  created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_portal_user_permission (user_id, permission_key),
+  CONSTRAINT fk_portal_user_perm_user FOREIGN KEY (user_id) REFERENCES t_portal_user(id)
+);
+
+CREATE TABLE t_portal_terms_consent (
+  id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id       BIGINT NOT NULL,
+  terms_version VARCHAR(50) NOT NULL,
+  consented_at  DATETIME NOT NULL,
+  ip_hash       VARCHAR(64),
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_portal_terms_consent (user_id, terms_version),
+  CONSTRAINT fk_portal_terms_user FOREIGN KEY (user_id) REFERENCES t_portal_user(id)
+);

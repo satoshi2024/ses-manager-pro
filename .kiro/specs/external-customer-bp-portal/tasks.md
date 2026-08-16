@@ -7,11 +7,11 @@
 > ただし**本specは§2（認可母集団）の既定解が適用できない唯一のspec**である。portal userは`sys_user`ではなく、
 > DataScope・組織scope・menu権限のいずれも持たない。母集団の解決は `design.md` §6「決定表」を正とする。
 >
-> **Migration**: 本specの予約番号は **V104**。staffing(V103)のmerge後に着手する。
+> **Migration**: 本specの正式migrationは **V104**（実在。V1統合baseline・H2 replay・MySQL smokeと同期済み）。
 > `SecurityConfig.java`は本specの統合担当が先に変更・mergeし、engineer portal(S14)はその後。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. G3/G8と公開field inventory
+- [x] 0. G3/G8と公開field inventory
   - **Objective**: portalの公開domain・利用規約・本人確認方式が確定し、
     permission×画面×fieldのmatrixとして「顧客/BPに何を見せて何を見せないか」が表になる。
     以降のDTO実装が公開可否を推測せずに済む状態にする。

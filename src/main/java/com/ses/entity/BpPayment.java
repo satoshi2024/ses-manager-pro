@@ -27,6 +27,8 @@ public class BpPayment {
     private Long costCenterId;
     private String status;
     private LocalDate paidDate;
+    /** BPポータルの受領確認日時（V104。一度だけ設定。R3.2） */
+    private LocalDateTime receivedConfirmedAt;
     private String remarks;
     @TableLogic
     private Integer deletedFlag;

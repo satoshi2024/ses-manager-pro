@@ -9,6 +9,11 @@
 -- ============================================================
 -- テーブル削除（依存関係の逆順）
 -- ============================================================
+DROP TABLE IF EXISTS t_portal_terms_consent;
+DROP TABLE IF EXISTS t_portal_user_permission;
+DROP TABLE IF EXISTS t_portal_invitation;
+DROP TABLE IF EXISTS t_portal_user;
+DROP TABLE IF EXISTS m_portal_organization;
 DROP TABLE IF EXISTS t_notification_read;
 DROP TABLE IF EXISTS t_notification;
 DROP TABLE IF EXISTS t_compliance_operation_ledger;
@@ -2461,3 +2466,97 @@ CREATE TABLE IF NOT EXISTS t_staffing_scenario_allocation (
   CONSTRAINT fk_scenario_alloc_position FOREIGN KEY (position_id) REFERENCES t_project_position(id)
     ON UPDATE CASCADE ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='シナリオ仮配置';
+
+-- ---- 6) 顧客・BP外部ポータル（S13。V1 fresh baseline; V104がlegacy forward migration） ----
+-- 本specはplatform-invariants §2の認可母集団の既定解が適用できない唯一のspecであり、
+-- portal userの母集団は m_portal_organization → customer_id / bp_company_id から独立に導出する（design §6.2）。
+CREATE TABLE IF NOT EXISTS m_portal_organization (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  tenant_id     VARCHAR(64)  NOT NULL DEFAULT 'default' COMMENT 'テナントID（独立DB方式のため既定default）',
+  type          VARCHAR(20)  NOT NULL COMMENT '組織種別: CUSTOMER / BP',
+  customer_id   BIGINT                                  COMMENT '顧客ID（type=CUSTOMER時。1顧客1組織）',
+  bp_company_id BIGINT                                  COMMENT 'BP会社ID（type=BP時。1BP会社1組織）',
+  status        VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'  COMMENT '状態: ACTIVE / SUSPENDED（停止時は全portal session失効）',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag  TINYINT      NOT NULL DEFAULT 0         COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_portal_org_customer (customer_id),
+  UNIQUE KEY uk_portal_org_bp (bp_company_id),
+  INDEX idx_portal_org_status (status),
+  CONSTRAINT chk_portal_org_type CHECK (type IN ('CUSTOMER','BP')),
+  CONSTRAINT chk_portal_org_status CHECK (status IN ('ACTIVE','SUSPENDED')),
+  CONSTRAINT fk_portal_org_customer FOREIGN KEY (customer_id) REFERENCES m_customer (id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_portal_org_bp FOREIGN KEY (bp_company_id) REFERENCES m_bp_company (id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータル組織（顧客/BPの外部identity）';
+
+CREATE TABLE IF NOT EXISTS t_portal_user (
+  id                     BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  portal_org_id          BIGINT       NOT NULL COMMENT 'ポータル組織ID',
+  email                  VARCHAR(255) NOT NULL COMMENT 'login email（全組織で一意）',
+  display_name           VARCHAR(255) COMMENT '表示名（招待受諾時に設定）',
+  password_hash          VARCHAR(255) COMMENT 'パスワードhash（招待受諾時に設定。BCrypt）',
+  status                 VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT '状態: ACTIVE / SUSPENDED（停止時はsession失効）',
+  mfa_policy             VARCHAR(20)  NOT NULL DEFAULT 'REQUIRED' COMMENT 'MFA方針（既定REQUIRED=全user必須）',
+  totp_secret_encrypted  VARCHAR(255) COMMENT 'TOTP secret暗号化値（平文は保存しない）',
+  totp_secret_key_version VARCHAR(64) COMMENT 'TOTP secretの暗号鍵version',
+  mfa_enabled_at         DATETIME     COMMENT 'MFA設定完了日時（NULL=未設定でlogin不可）',
+  recovery_code_hash     VARCHAR(255) COMMENT '1回限りrecovery codeのhash',
+  recovery_code_used_at  DATETIME     COMMENT 'recovery code使用日時（NULL=未使用）',
+  last_login_at          DATETIME     COMMENT '最終login日時',
+  version                INT          NOT NULL DEFAULT 0 COMMENT '楽観ロック',
+  created_at             DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at             DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag           TINYINT      NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_portal_user_email (email),
+  INDEX idx_portal_user_org (portal_org_id),
+  INDEX idx_portal_user_status (status),
+  CONSTRAINT chk_portal_user_status CHECK (status IN ('ACTIVE','SUSPENDED')),
+  CONSTRAINT chk_portal_user_mfa_policy CHECK (mfa_policy IN ('REQUIRED','OPTIONAL')),
+  CONSTRAINT fk_portal_user_org FOREIGN KEY (portal_org_id) REFERENCES m_portal_organization (id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータルユーザー';
+
+CREATE TABLE IF NOT EXISTS t_portal_invitation (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  portal_org_id BIGINT       NOT NULL COMMENT 'ポータル組織ID',
+  email         VARCHAR(255) NOT NULL COMMENT '招待先email（このemailで受諾する）',
+  role          VARCHAR(50)  NOT NULL DEFAULT 'MEMBER' COMMENT '役割: MEMBER / ADMIN（組織管理者。2人目以降の招待は組織管理者の承認が必要: G3）',
+  token_hash    CHAR(64)     NOT NULL COMMENT '招待tokenのSHA-256 hash（平文は保存しない）',
+  expires_at    DATETIME     NOT NULL COMMENT '有効期限（既定72時間）',
+  used_at       DATETIME     COMMENT '使用日時。NULL=未使用（有効と同義ではない。期限を別途確認）',
+  accepted_by   BIGINT       COMMENT '受諾後に作成されたportal user ID',
+  invited_by    BIGINT       COMMENT '招待者（内部sys_user ID）',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
+  deleted_flag  TINYINT      NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
+  UNIQUE KEY uk_portal_invite_token_hash (token_hash),
+  INDEX idx_portal_invite_org_email (portal_org_id, email),
+  INDEX idx_portal_invite_expires (expires_at),
+  CONSTRAINT chk_portal_invite_role CHECK (role IN ('MEMBER','ADMIN')),
+  CONSTRAINT fk_portal_invite_org FOREIGN KEY (portal_org_id) REFERENCES m_portal_organization (id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータル招待';
+
+CREATE TABLE IF NOT EXISTS t_portal_user_permission (
+  id             BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  user_id        BIGINT       NOT NULL COMMENT 'portal user ID',
+  permission_key VARCHAR(100) NOT NULL COMMENT '権限キー（例: document.view / acceptance.operate / availability.manage / bank-account.request）',
+  created_at     DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  UNIQUE KEY uk_portal_user_permission (user_id, permission_key),
+  CONSTRAINT fk_portal_user_perm_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータルユーザー権限';
+
+CREATE TABLE IF NOT EXISTS t_portal_terms_consent (
+  id            BIGINT       AUTO_INCREMENT PRIMARY KEY COMMENT 'ID',
+  user_id       BIGINT       NOT NULL COMMENT 'portal user ID',
+  terms_version VARCHAR(50)  NOT NULL COMMENT '同意した利用規約version',
+  consented_at  DATETIME     NOT NULL COMMENT '同意日時',
+  ip_hash       VARCHAR(64)  COMMENT '同意時IPのSHA-256 hash（監査用。R4.2）',
+  created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+  UNIQUE KEY uk_portal_terms_consent (user_id, terms_version),
+  CONSTRAINT fk_portal_terms_user FOREIGN KEY (user_id) REFERENCES t_portal_user (id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ポータル利用規約同意';

@@ -51,6 +51,9 @@ public final class ActionPermissionResolver {
             Map.entry("organizations", "organization"),
             Map.entry("payroll", "payroll"),
             Map.entry("permission-groups", "permission"),
+            // external-customer-bp-portal(S13)。未登録のままだと/api/portal-admin/**が
+            // 管理者を含む全roleで403になる（CRM-R2-P1-01と同じ罠）。V104の権限seedと対にする。
+            Map.entry("portal-admin", "portal-admin"),
             Map.entry("profile", "profile"),
             Map.entry("project-ingestions", "project-ingestion"),
             Map.entry("projects", "project"),
