@@ -16,24 +16,13 @@ SET @sql_ecr_attach = (SELECT IF(COUNT(*) = 0,
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_engineer_change_request' AND column_name = 'attachment_document_id');
 PREPARE stmt_ecr_attach FROM @sql_ecr_attach; EXECUTE stmt_ecr_attach; DEALLOCATE PREPARE stmt_ecr_attach;
 
--- 2. t_survey_campaign: template snapshot JSON & version
+-- 2. t_survey_campaign: template snapshot JSON
 SET @sql_sc_snap = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_survey_campaign ADD COLUMN template_snapshot_json LONGTEXT NULL COMMENT ''campaign開始時の質問定義snapshot'' AFTER title',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_survey_campaign' AND column_name = 'template_snapshot_json');
 PREPARE stmt_sc_snap FROM @sql_sc_snap; EXECUTE stmt_sc_snap; DEALLOCATE PREPARE stmt_sc_snap;
 
-SET @sql_sc_snap_ver = (SELECT IF(COUNT(*) = 0,
-  'ALTER TABLE t_survey_campaign ADD COLUMN template_snapshot_version INT NULL COMMENT ''campaign開始時の質問定義version'' AFTER template_snapshot_json',
-  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_survey_campaign' AND column_name = 'template_snapshot_version');
-PREPARE stmt_sc_snap_ver FROM @sql_sc_snap_ver; EXECUTE stmt_sc_snap_ver; DEALLOCATE PREPARE stmt_sc_snap_ver;
-
--- 3. t_engineer: phone (連絡先電話番号)
-SET @sql_eng_phone = (SELECT IF(COUNT(*) = 0,
-  'ALTER TABLE t_engineer ADD COLUMN phone VARCHAR(50) NULL COMMENT ''連絡先電話番号'' AFTER nearest_station',
-  'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_engineer' AND column_name = 'phone');
-PREPARE stmt_eng_phone FROM @sql_eng_phone; EXECUTE stmt_eng_phone; DEALLOCATE PREPARE stmt_eng_phone;
-
--- 4. t_document_link: skill_sheet_confirmed_at / skill_sheet_confirmed_version (修復ガード)
+-- 3. t_document_link: skill_sheet_confirmed_at / skill_sheet_confirmed_version (修復ガード)
 SET @sql_doc_link1 = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_document_link ADD COLUMN skill_sheet_confirmed_at DATETIME NULL COMMENT ''スキルシート確認日時（NULL=未確認）'' AFTER target_id',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_document_link' AND column_name = 'skill_sheet_confirmed_at');

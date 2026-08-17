@@ -1,0 +1,90 @@
+{
+  "case_id": "MOD04-08",
+  "dimension": "E,D",
+  "category": "MOD-04",
+  "name": "商談確度0/100/範囲外、stage既定と異なる確度を理由なし/ありで保存",
+  "status": "PASS",
+  "duration_ms": 2535,
+  "duration_h": 0.000704,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-08.json",
+  "error": null,
+  "evidence_detail": {
+    "http_valid": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 14586,
+          "createdAt": "2026-08-18T00:07:13",
+          "updatedAt": "2026-08-18T00:07:13",
+          "deletedFlag": 0,
+          "customerId": 1,
+          "title": "有効商談-1786979233333",
+          "stage": "見込",
+          "expectedStartMonth": "2026-09",
+          "durationMonths": null,
+          "requiredCount": 1,
+          "unitPrice": null,
+          "expectedAmount": 5000000,
+          "probability": 20,
+          "probabilityOverrideReason": null,
+          "stageChangedAt": null,
+          "ownerUserId": null,
+          "nextActionDate": null,
+          "competitor": null,
+          "lostReason": null,
+          "convertedProjectId": null,
+          "convertedQuotationId": null,
+          "version": 1
+        }
+      }
+    },
+    "http_no_reason": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "error.opportunity.probabilityOverrideReasonRequired",
+        "data": null
+      }
+    },
+    "http_with_reason": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 14587,
+          "createdAt": "2026-08-18T00:07:13",
+          "updatedAt": "2026-08-18T00:07:13",
+          "deletedFlag": 0,
+          "customerId": 1,
+          "title": "理由あり確度商談-1786979233333",
+          "stage": "見込",
+          "expectedStartMonth": null,
+          "durationMonths": null,
+          "requiredCount": 1,
+          "unitPrice": null,
+          "expectedAmount": null,
+          "probability": 50,
+          "probabilityOverrideReason": "顧客要望による調整",
+          "stageChangedAt": null,
+          "ownerUserId": null,
+          "nextActionDate": null,
+          "competitor": null,
+          "lostReason": null,
+          "convertedProjectId": null,
+          "convertedQuotationId": null,
+          "version": 1
+        }
+      }
+    },
+    "db_override_record": {
+      "id": "14587",
+      "title": "理由あり確度商談-1786979233333",
+      "probability": "50",
+      "probability_override_reason": "顧客要望による調整"
+    },
+    "probability_boundary_enforced": true
+  }
+}

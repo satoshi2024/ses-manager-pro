@@ -1,0 +1,31 @@
+{
+  "case_id": "MOD05-03",
+  "dimension": "N,C,D",
+  "category": "MOD-05",
+  "name": "skill集合を全置換、空集合、同一要求再送、2セッション同時置換",
+  "status": "PASS",
+  "duration_ms": 2810,
+  "duration_h": 0.000781,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-03.json",
+  "error": null,
+  "evidence_detail": {
+    "http_replace": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_skills_after_replace": [
+      {
+        "skill_id": "3",
+        "is_must": "1"
+      },
+      {
+        "skill_id": "4",
+        "is_must": "0"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD05-11",
+  "dimension": "N,D,X",
+  "category": "MOD-05",
+  "name": "project ingestion を 取込待ち→抽出中→要確認→確定済 へ遷移させ、upload/paste の両経路と二重 confirm を実行",
+  "status": "PASS",
+  "duration_ms": 114,
+  "duration_h": 0.000032,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-11.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "ingestion_records_count": 5
+  }
+}

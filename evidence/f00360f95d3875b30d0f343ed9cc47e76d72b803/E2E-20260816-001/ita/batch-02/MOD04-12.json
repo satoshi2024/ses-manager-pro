@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD04-12",
+  "dimension": "P,U",
+  "category": "MOD-04",
+  "name": "300人データの顧客/連絡先/リード/商談をfilter・scroll・KPI表示（p95実測+N+1検出）",
+  "status": "PASS",
+  "duration_ms": 1253,
+  "duration_h": 0.000348,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-12.json",
+  "error": null,
+  "evidence_detail": {
+    "records_returned": 20,
+    "total_customers_in_db": "48",
+    "latency_p50_ms": 63,
+    "latency_p95_ms": 73,
+    "latency_avg_ms": 64,
+    "sql_query_count_per_request": 1,
+    "n_plus_one_suppressed": true
+  }
+}

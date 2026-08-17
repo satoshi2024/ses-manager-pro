@@ -161,16 +161,12 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         if (doc == null || (doc.getDeletedFlag() != null && doc.getDeletedFlag() != 0)) {
             throw BusinessException.of(404, "error.document.notFound");
         }
-        Long currentUserId = SecurityUtils.currentUserId();
-        boolean isOwner = (currentUserId != null && currentUserId.equals(doc.getCreatedBy()));
-        if (!isOwner) {
-            List<DocumentLink> links = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
-                    .eq(DocumentLink::getDocumentId, documentId)
-                    .eq(DocumentLink::getTargetType, "ENGINEER")
-                    .eq(DocumentLink::getTargetId, engineerId));
-            if (links.isEmpty()) {
-                throw BusinessException.of(404, "error.document.notFound");
-            }
+        List<DocumentLink> links = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, documentId)
+                .eq(DocumentLink::getTargetType, "ENGINEER")
+                .eq(DocumentLink::getTargetId, engineerId));
+        if (links.isEmpty()) {
+            throw BusinessException.of(404, "error.document.notFound");
         }
         List<com.ses.entity.DocumentVersion> versions = documentVersionMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()
@@ -200,7 +196,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 .set("status", STATUS_APPLIED)
                 .set("approval_request_id", approval.getId())
                 .set("version", version + 1)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -221,7 +217,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 .eq("id", id).eq("status", STATUS_APPLIED).eq("version", version)
                 .set("status", STATUS_WITHDRAWN)
                 .set("version", version + 1)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -323,7 +319,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 .eq(EngineerChangeRequest::getStatus, STATUS_APPLIED));
         Long currentUserId = SecurityUtils.currentUserId();
         String email = null;
-        String phone = null;
+        String phone = engineer.getPhone();
         if (currentUserId != null) {
             SysUser u = sysUserMapper.selectById(currentUserId);
             if (u != null) {
@@ -376,7 +372,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                         .sourceType("GENERATED")
                         .direction("INTERNAL")
                         .counterpartyType("INTERNAL")
-                        .transactionDate(LocalDate.now())
+                        .transactionDate(LocalDate.now(clock))
                         .businessKey(businessKey)
                         .versionDiscriminator(fingerprint)
                         .originalName("skill-sheet-" + engineerId + ".pdf")
@@ -391,11 +387,11 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 .orderByDesc(DocumentLink::getId)
                 .last("LIMIT 1"));
         if (link != null) {
-            link.setSkillSheetConfirmedAt(LocalDateTime.now());
+            link.setSkillSheetConfirmedAt(LocalDateTime.now(clock));
             link.setSkillSheetConfirmedVersion(fingerprint);
             documentLinkMapper.updateById(link);
         }
-        return new SkillSheetConfirmResult(fingerprint, LocalDateTime.now());
+        return new SkillSheetConfirmResult(fingerprint, LocalDateTime.now(clock));
     }
 
     @Override
@@ -620,7 +616,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         if ("HR".equals(role) || "管理者".equals(role) || organizationScopeService.hasFullAccess()) {
             return null;
         }
-        Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now());
+        Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now(clock));
         return allowed == null ? Set.of() : new HashSet<>(allowed);
     }
 

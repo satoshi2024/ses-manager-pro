@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD04-13",
+  "dimension": "N,S,D",
+  "category": "MOD-04",
+  "name": "customer timeline を担当/非担当で取得し、activity/contact/商談との整合を確認",
+  "status": "PASS",
+  "duration_ms": 891,
+  "duration_h": 0.000247,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-13.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "contacts_count": 1,
+    "activities_count": 0,
+    "opportunities_count": 0,
+    "sample_activities": [],
+    "db_activities": []
+  }
+}

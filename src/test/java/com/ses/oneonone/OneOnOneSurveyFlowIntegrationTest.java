@@ -66,6 +66,12 @@ class OneOnOneSurveyFlowIntegrationTest {
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     @Autowired
     private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+    @Autowired
+    private com.ses.mapper.SurveyTemplateMapper surveyTemplateMapper;
+    @Autowired
+    private com.ses.mapper.SurveyCampaignMapper surveyCampaignMapper;
+    @Autowired
+    private com.ses.mapper.SurveyResponseMapper surveyResponseMapper;
 
     @BeforeEach
     void setUp() {
@@ -232,6 +238,43 @@ class OneOnOneSurveyFlowIntegrationTest {
         BusinessException ex = assertThrows(BusinessException.class, () ->
                 oneOnOneService.create(engineerId, managerBUser, List.of(LocalDate.now().plusDays(4))));
         assertEquals(400, ex.getCode());
+
+        // 無効(status=0)のマネージャーはNG (400) (R1-P1-07)
+        sysUserMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<com.ses.entity.SysUser>()
+                .eq("id", managerAUser).set("status", 0));
+        BusinessException exInactive = assertThrows(BusinessException.class, () ->
+                oneOnOneService.create(engineerId, managerAUser, List.of(LocalDate.now().plusDays(4))));
+        assertEquals(400, exInactive.getCode());
+    }
+
+    @Test
+    void confidential秘密メモはHRのみまたは指定管理者のみ閲覧可能() {
+        long hrUser = insertUser("HR");
+        long regularAdmin = insertUser("管理者");
+        long salesUser = insertUser("営業");
+        long engineerUser = insertUser("要員");
+        long orgId = createOrg();
+        long engineerId = createEngineer(orgId);
+        link(engineerId, engineerUser);
+        assignPrimarySales(engineerId, salesUser);
+
+        authenticate(engineerUser, "要員");
+        OneOnOneRequestService.OneOnOneDto created = oneOnOneService.create(engineerId, salesUser,
+                List.of(LocalDate.now().plusDays(2)));
+
+        // HRが秘密メモを登録
+        authenticate(hrUser, "HR");
+        oneOnOneService.savePrivateNote(created.id(), "HRのみの秘密メモ");
+
+        // 一般管理者（明示権限グループ割当なし）はprivateNoteRefがnull (R1-P1-07)
+        authenticate(regularAdmin, "管理者");
+        OneOnOneRequestService.OneOnOneDto adminView = oneOnOneService.detailManagement(created.id());
+        assertNull(adminView.privateNoteRef(), "未指定一般管理者にはconfidentialメモは不可視");
+
+        // HRは閲覧可能
+        authenticate(hrUser, "HR");
+        OneOnOneRequestService.OneOnOneDto hrView = oneOnOneService.detailManagement(created.id());
+        assertNotNull(hrView.privateNoteRef(), "HRにはconfidentialメモが可視");
     }
 
     @Test
@@ -245,40 +288,116 @@ class OneOnOneSurveyFlowIntegrationTest {
         SurveyService.TemplateDto t = surveyService.createTemplate("KEY-BOUND-" + System.nanoTime(), "期間テスト", null,
                 List.of(new SurveyService.QuestionDef("q1", "設問1", "SCALE1_5", false)));
 
-        // 期間: 明日から5日後まで
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
-        LocalDate fiveDaysLater = LocalDate.now().plusDays(5);
-        SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "期間検証キャンペーン", tomorrow, fiveDaysLater);
+        // 期間: 本日から2日後まで
+        LocalDate today = LocalDate.now();
+        LocalDate twoDaysLater = today.plusDays(2);
+        SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "期間検証キャンペーン", today, twoDaysLater);
         surveyService.activateCampaign(c.id());
 
-        // 今日(開始前)はmyActiveCampaignsに含まれない
+        // 本日（開始日当日）はmyActiveCampaignsに含まれ回答可能
         authenticate(engineerUser, "要員");
         List<SurveyService.CampaignDto> active = surveyService.myActiveCampaigns(engineerId);
-        assertTrue(active.stream().noneMatch(camp -> camp.id().equals(c.id())));
+        assertTrue(active.stream().anyMatch(camp -> camp.id().equals(c.id())));
 
-        // 回答送信も期間外400
-        BusinessException exBefore = assertThrows(BusinessException.class, () ->
+        surveyService.submitAnswers(engineerId, c.id(), true, List.of(
+                new SurveyService.AnswerInput("q1", 4, null, "PUBLIC")));
+
+        // 終了日翌日以降は回答不可
+        surveyCampaignMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<com.ses.entity.SurveyCampaign>()
+                .eq("id", c.id())
+                .set("period_from", today.minusDays(5))
+                .set("period_to", today.minusDays(1)));
+
+        BusinessException exAfter = assertThrows(BusinessException.class, () ->
                 surveyService.submitAnswers(engineerId, c.id(), true, List.of(
                         new SurveyService.AnswerInput("q1", 5, null, "PUBLIC"))));
-        assertEquals(400, exBefore.getCode());
+        assertEquals(400, exAfter.getCode());
     }
 
     @Test
-    void サーベイのtemplateSnapshotVersionが保持される() {
+    void サーベイ作成後に元テンプレートが更新されてもsnapshotVersionと回答定義が保持される() {
         long hrUser = insertUser("HR");
-        authenticate(hrUser, "HR");
+        long engineerUser = insertUser("要員");
+        long engineerId = createEngineer();
+        link(engineerId, engineerUser);
 
-        SurveyService.TemplateDto t = surveyService.createTemplate("KEY-VER-" + System.nanoTime(), "バージョンテスト", null,
-                List.of(new SurveyService.QuestionDef("q1", "設問1", "SCALE1_5", false)));
+        authenticate(hrUser, "HR");
+        SurveyService.TemplateDto t = surveyService.createTemplate("KEY-VER-UPD-" + System.nanoTime(), "バージョンテスト", null,
+                List.of(new SurveyService.QuestionDef("q1", "設問1(v1)", "SCALE1_5", false)));
 
         SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "バージョン検証キャンペーン", null, null);
-        assertNotNull(c.templateVersion());
-        assertEquals(t.version(), c.templateVersion());
+        surveyService.activateCampaign(c.id());
+        assertEquals(1, c.templateVersion());
+
+        // 元テンプレートを更新（v2へ）
+        surveyTemplateMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<com.ses.entity.SurveyTemplate>()
+                .eq("id", t.id())
+                .set("version", 2)
+                .set("questions_json", "[{\"key\":\"q_v2\",\"label\":\"新設問\",\"type\":\"SCALE1_5\",\"confidential\":false}]"));
+
+        // 要員が回答送信 -> snapshotVersion (v1) が保存・返却されること (R1-P1-08)
+        authenticate(engineerUser, "要員");
+        SurveyService.MyCampaignDetail detail = surveyService.myCampaignDetail(engineerId, c.id());
+        assertEquals(1, detail.templateVersion(), "キャンペーンのsnapshot version (1) が返るべき");
+        assertEquals("q1", detail.questions().get(0).key(), "snapshotの設問が返るべき");
+
+        surveyService.submitAnswers(engineerId, c.id(), true, List.of(
+                new SurveyService.AnswerInput("q1", 5, null, "PUBLIC")));
+
+        com.ses.entity.SurveyResponse resp = surveyResponseMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.SurveyResponse>()
+                        .eq(com.ses.entity.SurveyResponse::getCampaignId, c.id())
+                        .eq(com.ses.entity.SurveyResponse::getEngineerId, engineerId));
+        assertNotNull(resp);
+        assertEquals(1, resp.getTemplateVersion(), "回答行のtemplate_versionはsnapshot version 1であるべき");
+    }
+
+    @Test
+    void 匿名性閾値未満の質問別リスク分析は集計から除外される() {
+        long hrUser = insertUser("HR");
+        long engUser1 = insertUser("要員");
+        long engUser2 = insertUser("要員");
+        long engId1 = createEngineer();
+        long engId2 = createEngineer();
+        link(engId1, engUser1);
+        link(engId2, engUser2);
+
+        authenticate(hrUser, "HR");
+        SurveyService.TemplateDto t = surveyService.createTemplate("KEY-ANON-" + System.nanoTime(), "匿名性テスト", null,
+                List.of(new SurveyService.QuestionDef("q1", "設問1", "SCALE1_5", false)));
+        SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "匿名性キャンペーン", null, null);
+        surveyService.activateCampaign(c.id());
+
+        // 2名回答
+        authenticate(engUser1, "要員");
+        surveyService.submitAnswers(engId1, c.id(), true, List.of(new SurveyService.AnswerInput("q1", 2, null, "PUBLIC")));
+        authenticate(engUser2, "要員");
+        surveyService.submitAnswers(engId2, c.id(), true, List.of(new SurveyService.AnswerInput("q1", 1, null, "PUBLIC")));
+
+        // minAnswers=3の場合、回答数2件は閾値未満（R1-P1-10）
+        systemConfigService.put("survey.min-answers", "3", "テスト用閾値3");
+        authenticate(hrUser, "HR");
+        SurveyService.AggregateResult agg = surveyService.aggregate(c.id());
+        assertNotNull(agg);
+        assertTrue(agg.retentionRisk().hidden(), "回答数がminAnswers未満のためリスクサマリーはhidden");
+        assertTrue(agg.retentionRisk().topRiskFactors().isEmpty(), "回答数がminAnswers未満のためリスクファクターは非表示");
+        assertTrue(agg.questions().get(0).hidden(), "質問別集計も非表示");
     }
 
     // ----------------------------------------------------------------
     // ヘルパー
     // ----------------------------------------------------------------
+
+    void assignPrimarySales(Long engineerId, Long salesUserId) {
+        engineerSalesMapper.delete(new LambdaQueryWrapper<EngineerSales>()
+                .eq(EngineerSales::getEngineerId, engineerId));
+        EngineerSales es = new EngineerSales();
+        es.setEngineerId(engineerId);
+        es.setSalesUserId(salesUserId);
+        es.setPrimaryFlag(1);
+        es.setAssignedAt(java.time.LocalDate.now());
+        engineerSalesMapper.insert(es);
+    }
 
     private long countNotification(Long userId, String type, String dedupeKeyBase) {
         return notificationMapper.selectCount(new LambdaQueryWrapper<Notification>()

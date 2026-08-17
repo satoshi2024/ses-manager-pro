@@ -1,0 +1,26 @@
+{
+  "case_id": "MOD04-04",
+  "dimension": "A,U",
+  "category": "MOD-04",
+  "name": "customer.pii.view 有/無permission groupでemail/phoneを表示・API取得",
+  "status": "PASS",
+  "duration_ms": 77,
+  "duration_h": 0.000021,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-04.json",
+  "error": null,
+  "evidence_detail": {
+    "http_admin_response": {
+      "status": 200,
+      "count": 1
+    },
+    "http_member_response": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このactionへのアクセス権限がありません",
+        "data": null
+      }
+    },
+    "pii_boundary_guarded": true
+  }
+}

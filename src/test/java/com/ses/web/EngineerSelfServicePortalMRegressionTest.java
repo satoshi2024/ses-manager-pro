@@ -622,12 +622,13 @@ class EngineerSelfServicePortalMRegressionTest {
         Long engineerId = createEngineer("Notif要員", null);
         link(engineerId, userId);
 
+        // menuKey省略overloadで発行し、resolverがcanonicalキー（myProfile/myExpenses）へ解決することを検証
         notificationService.publishToUser(userId, "CHANGE_REQUEST_APPLIED", "変更申請反映",
                 "[\"notification.msg.CHANGE_REQUEST_APPLIED\", \"プロフィール\"]", "/my/profile",
-                "cr-notif-" + System.nanoTime(), "myProfile");
+                "cr-notif-" + System.nanoTime());
         notificationService.publishToUser(userId, "EXPENSE_ACCOUNTING_SENT", "経費連携",
                 "[\"notification.msg.EXPENSE_ACCOUNTING_SENT\", \"2300\"]", "/my/expenses",
-                "exp-notif-" + System.nanoTime(), "myExpenses");
+                "exp-notif-" + System.nanoTime());
 
         long unread = notificationService.unreadCount(userId);
         assertTrue(unread >= 2);
@@ -636,6 +637,11 @@ class EngineerSelfServicePortalMRegressionTest {
         assertNotNull(page);
         assertTrue(page.getRecords().stream().anyMatch(n -> "CHANGE_REQUEST_APPLIED".equals(n.getType())));
         assertTrue(page.getRecords().stream().anyMatch(n -> "EXPENSE_ACCOUNTING_SENT".equals(n.getType())));
+
+        var rows = notificationMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.Notification>()
+                .eq(com.ses.entity.Notification::getRecipientUserId, userId));
+        assertTrue(rows.stream().anyMatch(n -> "CHANGE_REQUEST_APPLIED".equals(n.getType()) && "myProfile".equals(n.getMenuKey())));
+        assertTrue(rows.stream().anyMatch(n -> "EXPENSE_ACCOUNTING_SENT".equals(n.getType()) && "myExpenses".equals(n.getMenuKey())));
     }
 
     // ------------------------------------------------------------

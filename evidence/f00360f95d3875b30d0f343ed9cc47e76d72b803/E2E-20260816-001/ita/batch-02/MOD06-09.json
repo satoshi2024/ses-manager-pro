@@ -1,0 +1,26 @@
+{
+  "case_id": "MOD06-09",
+  "dimension": "N,B,E",
+  "category": "MOD-06",
+  "name": "TemplateRenderer 波括弧/未定義key/HTML転義/空宛先逐endpoint断言",
+  "status": "PASS",
+  "duration_ms": 2426,
+  "duration_h": 0.000674,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-09.json",
+  "error": null,
+  "evidence_detail": {
+    "http_empty_to": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "宛先メールアドレスが指定されていません",
+        "data": null
+      }
+    },
+    "http_templates": {
+      "status": 200,
+      "count": 7
+    },
+    "template_rendering_guarded": true
+  }
+}

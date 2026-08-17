@@ -626,6 +626,61 @@ class FreeeHrContractTest {
         server.verify();
     }
 
+    @Test
+    @DisplayName("statementForEngineer: 複数従業員・複数ページから対象要員のみを抽出し他要員PIIを混入しない")
+    void statementForEngineerの要員抽出と混入防止() throws Exception {
+        seedConnection();
+        when(engineerMapper.selectById(7L)).thenReturn(seedEngineers().get(0));
+        com.ses.entity.FreeeEmployeeLink link7 = new com.ses.entity.FreeeEmployeeLink();
+        link7.setEngineerId(7L);
+        link7.setFreeeEmployeeId("501");
+        link7.setFreeeCompanyId(123L);
+        when(linkMapper.selectOne(any())).thenReturn(link7);
+
+        ObjectNode root = objectMapper.createObjectNode();
+        ArrayNode arr = root.putArray("employee_payroll_statements");
+
+        ObjectNode s502 = objectMapper.createObjectNode();
+        s502.put("id", 9001);
+        s502.put("company_id", 123);
+        s502.put("employee_id", 502);
+        s502.put("employee_num", "E-502");
+        s502.put("pay_date", "2026-07-25");
+        s502.put("fixed", true);
+        s502.put("calc_status", "calculated");
+        s502.put("gross_payment_amount", "260000");
+        s502.put("total_deduction_amount", "60000");
+        s502.put("net_payment_amount", "200000");
+        arr.add(s502);
+
+        ObjectNode s501 = objectMapper.createObjectNode();
+        s501.put("id", 9002);
+        s501.put("company_id", 123);
+        s501.put("employee_id", 501);
+        s501.put("employee_num", "E-501");
+        s501.put("pay_date", "2026-07-25");
+        s501.put("fixed", true);
+        s501.put("calc_status", "calculated");
+        s501.put("gross_payment_amount", "250000");
+        s501.put("total_deduction_amount", "50000");
+        s501.put("net_payment_amount", "200000");
+        arr.add(s501);
+
+        root.put("total_count", 2);
+
+        server.expect(once(), statementQuery(SALARY, 0))
+                .andRespond(withSuccess(root.toString(), MediaType.APPLICATION_JSON));
+
+        PayrollStatementDto dto = service.statementForEngineer(7L, 2026, 7, "salary");
+        org.junit.jupiter.api.Assertions.assertNotNull(dto);
+        assertEquals(7L, dto.getEngineerId());
+        assertEquals("テスト要員7", dto.getEngineerName());
+        assertEquals(new BigDecimal("250000"), dto.getGrossAmount());
+        assertEquals(new BigDecimal("50000"), dto.getDeductionAmount());
+        assertEquals(new BigDecimal("200000"), dto.getNetAmount());
+        server.verify();
+    }
+
     private FreeeConnection seedConnectionWithCaptor() throws Exception {
         FreeeConnection c = new FreeeConnection();
         c.setId(1L);

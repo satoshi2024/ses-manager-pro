@@ -43,7 +43,14 @@ public class AuthorizationServiceImpl implements AuthorizationService {
             return false;
         }
         String role = SecurityUtils.currentRole();
-        if (ROLE_ADMIN.equals(role)) {
+        if ("one-on-one.confidential".equals(actionKey)) {
+            if (ROLE_HR.equals(role)) {
+                return true;
+            }
+            if (!ROLE_ADMIN.equals(role)) {
+                return false;
+            }
+        } else if (ROLE_ADMIN.equals(role)) {
             return true;
         }
         if (ADMIN_ONLY_ACTIONS.contains(actionKey)) {
@@ -93,6 +100,9 @@ public class AuthorizationServiceImpl implements AuthorizationService {
     private boolean legacyRoleAllows(String role, String actionKey) {
         if (role == null) {
             return false;
+        }
+        if ("one-on-one.confidential".equals(actionKey)) {
+            return ROLE_HR.equals(role);
         }
         if (ROLE_ADMIN.equals(role)) {
             return true;

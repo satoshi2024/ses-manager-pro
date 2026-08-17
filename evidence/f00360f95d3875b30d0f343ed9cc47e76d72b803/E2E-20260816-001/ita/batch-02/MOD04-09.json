@@ -1,0 +1,26 @@
+{
+  "case_id": "MOD04-09",
+  "dimension": "N,E,D",
+  "category": "MOD-04",
+  "name": "許可遷移を順に実行し、失注理由なし、終端後編集、飛越しを試験",
+  "status": "PASS",
+  "duration_ms": 1800,
+  "duration_h": 0.0005,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-09.json",
+  "error": null,
+  "evidence_detail": {
+    "http_transitions": {
+      "s1": 200,
+      "s2": 200,
+      "lost_no_reason": 400,
+      "lost_with_reason": 200
+    },
+    "db_final_state": {
+      "id": "14588",
+      "stage": "失注",
+      "lost_reason": "他社採用のため",
+      "version": "4"
+    },
+    "lost_reason_enforced": true
+  }
+}

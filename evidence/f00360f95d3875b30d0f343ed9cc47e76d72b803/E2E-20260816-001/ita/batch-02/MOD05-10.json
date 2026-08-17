@@ -1,0 +1,36 @@
+{
+  "case_id": "MOD05-10",
+  "dimension": "U",
+  "category": "MOD-05",
+  "name": "filter→detail→matching modal→結果選択をkeyboard/狭幅/0件/失敗で操作",
+  "status": "PASS",
+  "duration_ms": 144,
+  "duration_h": 0.00004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-10.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "project_detail": {
+      "id": 1,
+      "createdAt": "2026-08-16T15:34:45",
+      "updatedAt": "2026-08-16T15:34:45",
+      "deletedFlag": 0,
+      "projectName": "金融系基盤システム移行",
+      "customerId": 1,
+      "commercialFlow": "元請け",
+      "description": null,
+      "requiredCount": 1,
+      "unitPriceMin": 800000,
+      "unitPriceMax": 1000000,
+      "workLocation": null,
+      "remoteType": "フルリモート",
+      "startDate": null,
+      "endDate": null,
+      "status": "募集中",
+      "priority": "通常",
+      "remarks": null,
+      "sourceOpportunityId": null,
+      "createdBy": 1
+    }
+  }
+}

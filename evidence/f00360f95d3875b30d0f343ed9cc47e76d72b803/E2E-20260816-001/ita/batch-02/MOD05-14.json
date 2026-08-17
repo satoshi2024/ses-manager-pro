@@ -1,0 +1,24 @@
+{
+  "case_id": "MOD05-14",
+  "dimension": "E,C,D",
+  "category": "MOD-05",
+  "name": "AI 系 endpoint（match/engineer-to-projects、matching/project/{id}、chat、proposal-draft）の provider 例外・scope 外・並行要求を実行",
+  "status": "PASS",
+  "duration_ms": 152,
+  "duration_h": 0.000042,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-14.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "draft_response": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": {
+        "emailText": "この度はお世話になります。株式会社SESの営業担当です。貴社の「Webシステム開発」案件につきまして、弊社の優秀なエンジニア（Y.T）をご提案させていただきます。",
+        "matchReason": "JavaおよびSpring BootでのAPI開発経験が豊富であり、貴社案件の要件に合致しています。",
+        "sellingPoints": "コミュニケーション能力が高く、チーム開発でのリーダー経験もあります。",
+        "matchScore": 85
+      }
+    }
+  }
+}

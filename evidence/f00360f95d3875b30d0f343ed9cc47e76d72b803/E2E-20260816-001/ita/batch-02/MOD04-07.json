@@ -1,0 +1,92 @@
+{
+  "case_id": "MOD04-07",
+  "dimension": "N,D",
+  "category": "MOD-04",
+  "name": "リード登録後、隣接stage更新と商談化を実行",
+  "status": "PASS",
+  "duration_ms": 3241,
+  "duration_h": 0.0009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-07.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 14067,
+          "createdAt": "2026-08-18T00:07:10",
+          "updatedAt": "2026-08-18T00:07:10",
+          "deletedFlag": 0,
+          "companyName": "見込顧客-1786979230108",
+          "companyNameNormalized": "見込顧客-1786979230108",
+          "contactName": "リード担当",
+          "contactEmail": "lead_1786979230108@example.com",
+          "contactEmailNormalized": "lead1786979230108@example.com",
+          "contactPhone": "03-1111-2222",
+          "contactPhoneNormalized": "0311112222",
+          "source": "Web",
+          "sourceCost": null,
+          "ownerUserId": null,
+          "status": "未対応",
+          "convertedCustomerId": null,
+          "convertedOpportunityId": null,
+          "version": 1
+        }
+      }
+    },
+    "http_update": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 14067,
+          "createdAt": "2026-08-18T00:07:10",
+          "updatedAt": "2026-08-18T00:07:10",
+          "deletedFlag": 0,
+          "companyName": "見込顧客-1786979230108",
+          "companyNameNormalized": "見込顧客-1786979230108",
+          "contactName": "リード担当",
+          "contactEmail": null,
+          "contactEmailNormalized": null,
+          "contactPhone": null,
+          "contactPhoneNormalized": null,
+          "source": null,
+          "sourceCost": null,
+          "ownerUserId": null,
+          "status": "対応中",
+          "convertedCustomerId": null,
+          "convertedOpportunityId": null,
+          "version": 2
+        }
+      }
+    },
+    "http_convert": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "leadId": 14067,
+          "customerId": 2078,
+          "opportunityId": 14585
+        }
+      }
+    },
+    "db_lead_sql": "SELECT * FROM t_lead WHERE id = 14067;",
+    "db_lead_result": {
+      "id": "14067",
+      "company_name": "見込顧客-1786979230108",
+      "status": "転換済",
+      "version": "3"
+    },
+    "db_opportunity_result": {
+      "id": "14585",
+      "title": "見込顧客-1786979230108 商談",
+      "customer_id": "2078",
+      "stage": "見込"
+    }
+  }
+}

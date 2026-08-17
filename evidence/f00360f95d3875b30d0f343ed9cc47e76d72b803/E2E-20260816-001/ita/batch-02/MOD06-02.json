@@ -1,0 +1,38 @@
+{
+  "case_id": "MOD06-02",
+  "dimension": "E,C,D",
+  "category": "MOD-06",
+  "name": "同一要員×案件を二重クリック/2セッション同時POST",
+  "status": "PASS",
+  "duration_ms": 3067,
+  "duration_h": 0.000852,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-02.json",
+  "error": null,
+  "evidence_detail": {
+    "http_session_A": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_session_B": {
+      "status": 409,
+      "body": {
+        "code": 409,
+        "message": "この要員は同じ案件で既に提案中です。",
+        "data": null
+      }
+    },
+    "db_active_proposals": [
+      {
+        "id": "6264",
+        "engineer_id": "1002",
+        "project_id": "1",
+        "status": "書類選考中"
+      }
+    ],
+    "duplicate_prevented": true
+  }
+}

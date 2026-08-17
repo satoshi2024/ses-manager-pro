@@ -1,10 +1,10 @@
 {
   "spec" : "order-acceptance-workflow",
-  "runId" : "browser-r8-20260817235509",
+  "runId" : "browser-r8-20260818002405",
   "acceptanceId" : 1,
   "contractNo" : "CON-2026-0001",
-  "engineerName" : "山田 太郎-R8-1786978509544",
-  "customerName" : "テックソリューションズ株式会社-R8-1786978509544",
+  "engineerName" : "山田 太郎-R8-1786980245333",
+  "customerName" : "テックソリューションズ株式会社-R8-1786980245333",
   "workMonth" : "2026-07",
   "status" : "提出済",
   "sqlQuery" : "SELECT id, contract_id, work_month, status FROM t_acceptance WHERE id = 1",

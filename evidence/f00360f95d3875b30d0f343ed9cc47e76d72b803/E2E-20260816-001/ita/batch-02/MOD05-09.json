@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD05-09",
+  "dimension": "P",
+  "category": "MOD-05",
+  "name": "255要員×案件の逆引きmatchingをcold/warmで複数回実行（p50/p95/SQL回数）",
+  "status": "PASS",
+  "duration_ms": 190,
+  "duration_h": 0.000053,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-09.json",
+  "error": null,
+  "evidence_detail": {
+    "cold_run_ms": 11,
+    "warm_p50_ms": 13,
+    "warm_p95_ms": 30,
+    "warm_avg_ms": 16,
+    "sql_query_count_per_request": 2,
+    "n_plus_one_suppressed": true
+  }
+}

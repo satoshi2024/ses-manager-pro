@@ -31,6 +31,7 @@ public class MyChangeRequestApiController {
     private final EngineerChangeRequestService changeRequestService;
     private final com.ses.service.DocumentService documentService;
     private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
+    private final java.time.Clock clock;
 
     private Long currentEngineerId() {
         Long engineerId = linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
@@ -62,23 +63,21 @@ public class MyChangeRequestApiController {
         Long engineerId = currentEngineerId();
         try {
             com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                    .documentType("OTHER")
+                    .documentType("CHANGE_REQUEST_ATTACHMENT")
                     .title(file.getOriginalFilename() == null ? "attachment" : file.getOriginalFilename())
                     .originalName(file.getOriginalFilename() == null ? "attachment" : file.getOriginalFilename())
                     .contentType(file.getContentType() == null ? "application/octet-stream" : file.getContentType())
-                    .sourceType("UPLOADED")
-                    .direction("INBOUND")
+                    .sourceType("RECEIVED")
+                    .direction("INCOMING")
                     .counterpartyType("INTERNAL")
-                    .transactionDate(java.time.LocalDate.now())
+                    .transactionDate(java.time.LocalDate.now(clock))
                     .businessKey("CR_ATTACH:" + engineerId + ":" + System.nanoTime())
                     .versionDiscriminator("v1")
+                    .targetType("ENGINEER")
+                    .targetId(engineerId)
+                    .createdBy(SecurityUtils.currentUserId())
                     .build();
             com.ses.entity.Document document = documentService.registerReceived(req, file.getInputStream());
-            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
-            link.setDocumentId(document.getId());
-            link.setTargetType("ENGINEER");
-            link.setTargetId(engineerId);
-            documentLinkMapper.insert(link);
             return ApiResult.success(Map.of("documentId", document.getId(), "originalName", document.getTitle()));
         } catch (java.io.IOException e) {
             throw BusinessException.of(500, "error.file.readFailed");

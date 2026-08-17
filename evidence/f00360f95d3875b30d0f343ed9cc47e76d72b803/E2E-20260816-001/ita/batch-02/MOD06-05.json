@@ -1,0 +1,37 @@
+{
+  "case_id": "MOD06-05",
+  "dimension": "N,D",
+  "category": "MOD-06",
+  "name": "結果待ちから成約へ変更（提案閉鎖・history・契約ドラフト・通知）",
+  "status": "PASS",
+  "duration_ms": 5873,
+  "duration_h": 0.001631,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-05.json",
+  "error": null,
+  "evidence_detail": {
+    "http_won": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_closed_proposal": {
+      "id": "6268",
+      "status": "成約",
+      "closed_at": "2026-08-18 00:07:57"
+    },
+    "db_won_history": {
+      "id": "6988",
+      "from_status": "結果待ち",
+      "to_status": "成約"
+    },
+    "db_contract_draft_created": {
+      "id": "7284",
+      "contract_no": "C-202609-0006",
+      "status": "準備中",
+      "engineer_id": "1005"
+    }
+  }
+}

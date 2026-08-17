@@ -1,0 +1,29 @@
+{
+  "case_id": "MOD05-04",
+  "dimension": "A,S",
+  "category": "MOD-05",
+  "name": "sales01/02が担当外案件のlist/options/detail/skills PUT/AI matchingを直送",
+  "status": "PASS",
+  "duration_ms": 118,
+  "duration_h": 0.000033,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-04.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "options_count": 112,
+    "sample_options": [
+      {
+        "id": 5109,
+        "name": "パイロット基幹システム更改-1786962561365"
+      },
+      {
+        "id": 5108,
+        "name": "ITb01連携案件-1786962561223"
+      },
+      {
+        "id": 5107,
+        "name": "パイロット基幹システム更改-1786962530969"
+      }
+    ]
+  }
+}

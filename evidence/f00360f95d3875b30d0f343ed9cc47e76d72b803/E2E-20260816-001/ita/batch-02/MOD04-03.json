@@ -1,0 +1,44 @@
+{
+  "case_id": "MOD04-03",
+  "dimension": "A,S",
+  "category": "MOD-04",
+  "name": "sales01/02と組織scopeでcustomer list/options/detail/update/deleteを相互試験",
+  "status": "PASS",
+  "duration_ms": 1117,
+  "duration_h": 0.00031,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-03.json",
+  "error": null,
+  "evidence_detail": {
+    "http_options": {
+      "status": 200,
+      "count": 47
+    },
+    "http_detail": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 1,
+          "createdAt": "2026-08-16T15:34:45",
+          "updatedAt": "2026-08-16T15:34:45",
+          "deletedFlag": 0,
+          "companyName": "株式会社アルファテクノロジー",
+          "companyNameKana": null,
+          "contactPerson": "佐藤 一郎",
+          "contactEmail": null,
+          "contactPhone": null,
+          "address": null,
+          "commercialFlow": "元請け",
+          "trustLevel": "A",
+          "remarks": null
+        }
+      }
+    },
+    "db_customer_verified": {
+      "id": "1",
+      "company_name": "株式会社アルファテクノロジー"
+    },
+    "scope_proven": true
+  }
+}

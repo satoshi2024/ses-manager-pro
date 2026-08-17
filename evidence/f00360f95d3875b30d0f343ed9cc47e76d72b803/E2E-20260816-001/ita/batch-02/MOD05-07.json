@@ -1,0 +1,34 @@
+{
+  "case_id": "MOD05-07",
+  "dimension": "E,D",
+  "category": "MOD-05",
+  "name": "null/不存在engineerId・projectId、AI無効時chat、provider例外を実行",
+  "status": "PASS",
+  "duration_ms": 147,
+  "duration_h": 0.000041,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-07.json",
+  "error": null,
+  "evidence_detail": {
+    "http_not_found_matching": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": [
+          {
+            "projectId": null,
+            "projectName": null,
+            "score": 92,
+            "reason": "JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。",
+            "sellingPoints": "金融系の業務知識が豊富です。",
+            "engineerId": 201,
+            "engineerName": "山田 太郎 (Mock)",
+            "proposedPrice": 75,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          }
+        ]
+      }
+    }
+  }
+}

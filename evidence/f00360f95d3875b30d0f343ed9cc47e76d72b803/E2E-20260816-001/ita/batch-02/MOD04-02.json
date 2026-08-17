@@ -1,0 +1,30 @@
+{
+  "case_id": "MOD04-02",
+  "dimension": "B,E,D",
+  "category": "MOD-04",
+  "name": "会社名空白/100/101文字、信用度1/2文字、住所255/256文字、存在しないIDを送信",
+  "status": "PASS",
+  "duration_ms": 167,
+  "duration_h": 0.000046,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-02.json",
+  "error": null,
+  "evidence_detail": {
+    "http_empty_name": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "入力内容に誤りがあります：会社名は必須です",
+        "data": null
+      }
+    },
+    "http_not_found": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "閲覧権限がないか、対象が存在しません",
+        "data": null
+      }
+    },
+    "validation_guarded": true
+  }
+}

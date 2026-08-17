@@ -94,7 +94,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .description(description == null ? null : description.trim())
                 .questionsJson(writeJson(questions))
                 .status("DRAFT")
-                .version(0)
+                .version(1)
                 .createdBy(SecurityUtils.currentUserId())
                 .build();
         templateMapper.insert(template);
@@ -225,8 +225,7 @@ public class SurveyServiceImpl implements SurveyService {
                         .and(w -> w.isNull(SurveyCampaign::getPeriodTo).or().ge(SurveyCampaign::getPeriodTo, today))
                         .orderByDesc(SurveyCampaign::getId))
                 .stream()
-                .map(c -> new CampaignDto(c.getId(), c.getTemplateId(), c.getTitle(), c.getPeriodFrom(),
-                        c.getPeriodTo(), c.getStatus(), templateVersionOf(c.getTemplateId())))
+                .map(this::toCampaignDto)
                 .toList();
     }
 
@@ -255,8 +254,11 @@ public class SurveyServiceImpl implements SurveyService {
                 .eq(SurveyResponse::getCampaignId, campaignId)
                 .eq(SurveyResponse::getEngineerId, engineerId)
                 .eq(SurveyResponse::getConsentFlag, 1)) > 0;
+        Integer version = campaign.getTemplateSnapshotVersion() != null
+                ? campaign.getTemplateSnapshotVersion()
+                : templateVersionOf(campaign.getTemplateId());
         return new MyCampaignDetail(campaignId, campaign.getTitle(), campaign.getPeriodFrom(), campaign.getPeriodTo(),
-                questions, answers, templateVersionOf(campaign.getTemplateId()), consent);
+                questions, answers, version, consent);
     }
 
     @Override
@@ -282,7 +284,9 @@ public class SurveyServiceImpl implements SurveyService {
                 : requireTemplate(campaign.getTemplateId()).getQuestionsJson();
         Map<String, QuestionDef> defs = readQuestions(questionsJson).stream()
                 .collect(Collectors.toMap(QuestionDef::key, Function.identity()));
-        Integer version = templateVersionOf(campaign.getTemplateId());
+        Integer version = campaign.getTemplateSnapshotVersion() != null
+                ? campaign.getTemplateSnapshotVersion()
+                : templateVersionOf(campaign.getTemplateId());
         int v = version == null ? 0 : version;
         for (AnswerInput input : answers) {
             QuestionDef def = defs.get(input.questionKey());

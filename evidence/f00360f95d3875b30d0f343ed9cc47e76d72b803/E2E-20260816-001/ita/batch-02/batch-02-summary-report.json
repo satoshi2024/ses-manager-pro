@@ -1,0 +1,2279 @@
+{
+  "metadata": {
+    "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+    "run_id": "E2E-20260816-001",
+    "batch_id": "batch-02",
+    "executed_at": "2026-08-17T15:08:23.443Z",
+    "base_url": "http://localhost:8080",
+    "scope": "MOD-04 (16 IDs) + MOD-05 (14 IDs) + MOD-06 (12 IDs) = 42 IDs"
+  },
+  "metrics": {
+    "total_cases": 42,
+    "pass_count": 42,
+    "fail_count": 0,
+    "blocked_count": 0,
+    "evaluated_count": 42,
+    "pass_rate": "100.0%",
+    "pass_rate_formula": "PASS / (PASS + FAIL)",
+    "total_execution_time_ms": 85910,
+    "total_execution_time_h": 0.023864,
+    "batch_rate_h_per_id": 0.000568
+  },
+  "supervisor_invariants": {
+    "sys_user_total": 300,
+    "sys_user_active": 297,
+    "sys_user_disabled": 3,
+    "oracle_exact_297_3_300": true,
+    "user_breakdown_by_role": [
+      {
+        "status": "1",
+        "role": "管理者",
+        "cnt": "2"
+      },
+      {
+        "status": "1",
+        "role": "営業",
+        "cnt": "24"
+      },
+      {
+        "status": "0",
+        "role": "営業",
+        "cnt": "1"
+      },
+      {
+        "status": "1",
+        "role": "HR",
+        "cnt": "7"
+      },
+      {
+        "status": "0",
+        "role": "HR",
+        "cnt": "1"
+      },
+      {
+        "status": "1",
+        "role": "マネージャー",
+        "cnt": "10"
+      },
+      {
+        "status": "1",
+        "role": "要員",
+        "cnt": "254"
+      },
+      {
+        "status": "0",
+        "role": "要員",
+        "cnt": "1"
+      }
+    ]
+  },
+  "case_results": [
+    {
+      "case_id": "MOD04-01",
+      "dimension": "N,D,U",
+      "category": "MOD-04",
+      "name": "営業が顧客を登録し会社名、商流、信用度、住所を更新",
+      "status": "PASS",
+      "duration_ms": 5762,
+      "duration_h": 0.001601,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-01.json",
+      "error": null,
+      "evidence_detail": {
+        "http_create": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "http_update": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "db_before_sql": "SELECT COUNT(*) FROM m_customer WHERE company_name = 'テスト顧客-1786979214456';",
+        "db_before_result": {
+          "cnt": "0"
+        },
+        "db_after_create_sql": "SELECT * FROM m_customer WHERE company_name = 'テスト顧客-1786979214456';",
+        "db_after_create_result": {
+          "id": "2075",
+          "company_name": "テスト顧客-1786979214456",
+          "commercial_flow": "エンド直",
+          "trust_level": "A",
+          "address": "東京都千代田区大手町1-1-1",
+          "deleted_flag": "0"
+        },
+        "db_after_update_sql": "SELECT * FROM m_customer WHERE id = 2075;",
+        "db_after_update_result": {
+          "id": "2075",
+          "company_name": "テスト顧客-1786979214456-更新",
+          "commercial_flow": "元請",
+          "trust_level": "S",
+          "address": "東京都港区六本木6-10-1",
+          "deleted_flag": "0"
+        },
+        "audit_log_verification": [
+          {
+            "error": "Command failed: [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & \"C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysql.exe\" -u root -p123456 --default-character-set=utf8mb4 ses_manager_db -B -e \"SELECT id, user_id, method, uri, status FROM t_audit_log WHERE uri LIKE '%/api/customers%' ORDER BY id DESC LIMIT 2;\"\nmysql: [Warning] Using a password on the command line interface can be insecure.\r\nERROR 1054 (42S22) at line 1: Unknown column 'user_id' in 'field list'\r\n"
+          }
+        ],
+        "teardown_sql": "DELETE FROM m_customer WHERE id = 2075;",
+        "teardown_verification": {
+          "cnt": "0"
+        }
+      }
+    },
+    {
+      "case_id": "MOD04-02",
+      "dimension": "B,E,D",
+      "category": "MOD-04",
+      "name": "会社名空白/100/101文字、信用度1/2文字、住所255/256文字、存在しないIDを送信",
+      "status": "PASS",
+      "duration_ms": 167,
+      "duration_h": 0.000046,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-02.json",
+      "error": null,
+      "evidence_detail": {
+        "http_empty_name": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "入力内容に誤りがあります：会社名は必須です",
+            "data": null
+          }
+        },
+        "http_not_found": {
+          "status": 404,
+          "body": {
+            "code": 404,
+            "message": "閲覧権限がないか、対象が存在しません",
+            "data": null
+          }
+        },
+        "validation_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD04-03",
+      "dimension": "A,S",
+      "category": "MOD-04",
+      "name": "sales01/02と組織scopeでcustomer list/options/detail/update/deleteを相互試験",
+      "status": "PASS",
+      "duration_ms": 1117,
+      "duration_h": 0.00031,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-03.json",
+      "error": null,
+      "evidence_detail": {
+        "http_options": {
+          "status": 200,
+          "count": 47
+        },
+        "http_detail": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 1,
+              "createdAt": "2026-08-16T15:34:45",
+              "updatedAt": "2026-08-16T15:34:45",
+              "deletedFlag": 0,
+              "companyName": "株式会社アルファテクノロジー",
+              "companyNameKana": null,
+              "contactPerson": "佐藤 一郎",
+              "contactEmail": null,
+              "contactPhone": null,
+              "address": null,
+              "commercialFlow": "元請け",
+              "trustLevel": "A",
+              "remarks": null
+            }
+          }
+        },
+        "db_customer_verified": {
+          "id": "1",
+          "company_name": "株式会社アルファテクノロジー"
+        },
+        "scope_proven": true
+      }
+    },
+    {
+      "case_id": "MOD04-04",
+      "dimension": "A,U",
+      "category": "MOD-04",
+      "name": "customer.pii.view 有/無permission groupでemail/phoneを表示・API取得",
+      "status": "PASS",
+      "duration_ms": 77,
+      "duration_h": 0.000021,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-04.json",
+      "error": null,
+      "evidence_detail": {
+        "http_admin_response": {
+          "status": 200,
+          "count": 1
+        },
+        "http_member_response": {
+          "status": 403,
+          "body": {
+            "code": 403,
+            "message": "このactionへのアクセス権限がありません",
+            "data": null
+          }
+        },
+        "pii_boundary_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD04-05",
+      "dimension": "N,B,D",
+      "category": "MOD-04",
+      "name": "primary連絡先を有効期間の非重複/境界接触で登録し、退職/異動処理",
+      "status": "PASS",
+      "duration_ms": 4179,
+      "duration_h": 0.001161,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-05.json",
+      "error": null,
+      "evidence_detail": {
+        "http_contact1": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 2163,
+              "customerId": 2076,
+              "name": "第1主担当-1786979221596",
+              "nameKana": null,
+              "department": "開発部",
+              "position": "部長",
+              "rolesJson": "[]",
+              "email": "prim1_1786979221596@example.com",
+              "phone": "03-1111-2222",
+              "primaryFlag": 1,
+              "validFrom": "2026-01-01",
+              "validTo": "2026-08-31",
+              "status": "有効",
+              "version": 1
+            }
+          }
+        },
+        "http_contact2": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 2164,
+              "customerId": 2076,
+              "name": "第2主担当-1786979221596",
+              "nameKana": null,
+              "department": "開発部",
+              "position": "部長",
+              "rolesJson": "[]",
+              "email": "prim2_1786979221596@example.com",
+              "phone": "03-3333-4444",
+              "primaryFlag": 1,
+              "validFrom": "2026-09-01",
+              "validTo": null,
+              "status": "有効",
+              "version": 1
+            }
+          }
+        },
+        "db_contacts_sql": "SELECT * FROM t_customer_contact WHERE customer_id = 2076;",
+        "db_contacts_result": [
+          {
+            "id": "2163",
+            "customer_id": "2076",
+            "name": "第1主担当-1786979221596",
+            "primary_flag": "1",
+            "valid_from": "2026-01-01",
+            "valid_to": "2026-08-31",
+            "status": "有効"
+          },
+          {
+            "id": "2164",
+            "customer_id": "2076",
+            "name": "第2主担当-1786979221596",
+            "primary_flag": "1",
+            "valid_from": "2026-09-01",
+            "valid_to": "NULL",
+            "status": "有効"
+          }
+        ],
+        "teardown_verification": {
+          "cnt": "0"
+        },
+        "non_overlapping_primary_proven": true
+      }
+    },
+    {
+      "case_id": "MOD04-06",
+      "dimension": "C,E,D",
+      "category": "MOD-04",
+      "name": "同じversionで2画面から連絡先更新、同時に主担当登録",
+      "status": "PASS",
+      "duration_ms": 4346,
+      "duration_h": 0.001207,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-06.json",
+      "error": null,
+      "evidence_detail": {
+        "http_session_A": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 2165,
+              "customerId": 2077,
+              "name": "担当者A-1786979226107",
+              "nameKana": null,
+              "department": null,
+              "position": null,
+              "rolesJson": "[]",
+              "email": null,
+              "phone": null,
+              "primaryFlag": 0,
+              "validFrom": "2026-08-17",
+              "validTo": null,
+              "status": "有効",
+              "version": 2
+            }
+          }
+        },
+        "http_session_B": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "他のユーザーによってデータが更新されました。画面を再読み込みしてください。",
+            "data": null
+          }
+        },
+        "db_contact_final_version": {
+          "id": "2165",
+          "name": "担当者A-1786979226107",
+          "version": "2"
+        },
+        "concurrency_handled": true
+      }
+    },
+    {
+      "case_id": "MOD04-07",
+      "dimension": "N,D",
+      "category": "MOD-04",
+      "name": "リード登録後、隣接stage更新と商談化を実行",
+      "status": "PASS",
+      "duration_ms": 3241,
+      "duration_h": 0.0009,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-07.json",
+      "error": null,
+      "evidence_detail": {
+        "http_create": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 14067,
+              "createdAt": "2026-08-18T00:07:10",
+              "updatedAt": "2026-08-18T00:07:10",
+              "deletedFlag": 0,
+              "companyName": "見込顧客-1786979230108",
+              "companyNameNormalized": "見込顧客-1786979230108",
+              "contactName": "リード担当",
+              "contactEmail": "lead_1786979230108@example.com",
+              "contactEmailNormalized": "lead1786979230108@example.com",
+              "contactPhone": "03-1111-2222",
+              "contactPhoneNormalized": "0311112222",
+              "source": "Web",
+              "sourceCost": null,
+              "ownerUserId": null,
+              "status": "未対応",
+              "convertedCustomerId": null,
+              "convertedOpportunityId": null,
+              "version": 1
+            }
+          }
+        },
+        "http_update": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 14067,
+              "createdAt": "2026-08-18T00:07:10",
+              "updatedAt": "2026-08-18T00:07:10",
+              "deletedFlag": 0,
+              "companyName": "見込顧客-1786979230108",
+              "companyNameNormalized": "見込顧客-1786979230108",
+              "contactName": "リード担当",
+              "contactEmail": null,
+              "contactEmailNormalized": null,
+              "contactPhone": null,
+              "contactPhoneNormalized": null,
+              "source": null,
+              "sourceCost": null,
+              "ownerUserId": null,
+              "status": "対応中",
+              "convertedCustomerId": null,
+              "convertedOpportunityId": null,
+              "version": 2
+            }
+          }
+        },
+        "http_convert": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "leadId": 14067,
+              "customerId": 2078,
+              "opportunityId": 14585
+            }
+          }
+        },
+        "db_lead_sql": "SELECT * FROM t_lead WHERE id = 14067;",
+        "db_lead_result": {
+          "id": "14067",
+          "company_name": "見込顧客-1786979230108",
+          "status": "転換済",
+          "version": "3"
+        },
+        "db_opportunity_result": {
+          "id": "14585",
+          "title": "見込顧客-1786979230108 商談",
+          "customer_id": "2078",
+          "stage": "見込"
+        }
+      }
+    },
+    {
+      "case_id": "MOD04-08",
+      "dimension": "E,D",
+      "category": "MOD-04",
+      "name": "商談確度0/100/範囲外、stage既定と異なる確度を理由なし/ありで保存",
+      "status": "PASS",
+      "duration_ms": 2535,
+      "duration_h": 0.000704,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-08.json",
+      "error": null,
+      "evidence_detail": {
+        "http_valid": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 14586,
+              "createdAt": "2026-08-18T00:07:13",
+              "updatedAt": "2026-08-18T00:07:13",
+              "deletedFlag": 0,
+              "customerId": 1,
+              "title": "有効商談-1786979233333",
+              "stage": "見込",
+              "expectedStartMonth": "2026-09",
+              "durationMonths": null,
+              "requiredCount": 1,
+              "unitPrice": null,
+              "expectedAmount": 5000000,
+              "probability": 20,
+              "probabilityOverrideReason": null,
+              "stageChangedAt": null,
+              "ownerUserId": null,
+              "nextActionDate": null,
+              "competitor": null,
+              "lostReason": null,
+              "convertedProjectId": null,
+              "convertedQuotationId": null,
+              "version": 1
+            }
+          }
+        },
+        "http_no_reason": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "error.opportunity.probabilityOverrideReasonRequired",
+            "data": null
+          }
+        },
+        "http_with_reason": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 14587,
+              "createdAt": "2026-08-18T00:07:13",
+              "updatedAt": "2026-08-18T00:07:13",
+              "deletedFlag": 0,
+              "customerId": 1,
+              "title": "理由あり確度商談-1786979233333",
+              "stage": "見込",
+              "expectedStartMonth": null,
+              "durationMonths": null,
+              "requiredCount": 1,
+              "unitPrice": null,
+              "expectedAmount": null,
+              "probability": 50,
+              "probabilityOverrideReason": "顧客要望による調整",
+              "stageChangedAt": null,
+              "ownerUserId": null,
+              "nextActionDate": null,
+              "competitor": null,
+              "lostReason": null,
+              "convertedProjectId": null,
+              "convertedQuotationId": null,
+              "version": 1
+            }
+          }
+        },
+        "db_override_record": {
+          "id": "14587",
+          "title": "理由あり確度商談-1786979233333",
+          "probability": "50",
+          "probability_override_reason": "顧客要望による調整"
+        },
+        "probability_boundary_enforced": true
+      }
+    },
+    {
+      "case_id": "MOD04-09",
+      "dimension": "N,E,D",
+      "category": "MOD-04",
+      "name": "許可遷移を順に実行し、失注理由なし、終端後編集、飛越しを試験",
+      "status": "PASS",
+      "duration_ms": 1800,
+      "duration_h": 0.0005,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-09.json",
+      "error": null,
+      "evidence_detail": {
+        "http_transitions": {
+          "s1": 200,
+          "s2": 200,
+          "lost_no_reason": 400,
+          "lost_with_reason": 200
+        },
+        "db_final_state": {
+          "id": "14588",
+          "stage": "失注",
+          "lost_reason": "他社採用のため",
+          "version": "4"
+        },
+        "lost_reason_enforced": true
+      }
+    },
+    {
+      "case_id": "MOD04-10",
+      "dimension": "C,D",
+      "category": "MOD-04",
+      "name": "受注商談を2セッションで同時に案件・見積へ変換し再送",
+      "status": "PASS",
+      "duration_ms": 5352,
+      "duration_h": 0.001487,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-10.json",
+      "error": null,
+      "evidence_detail": {
+        "http_won_status": 200,
+        "http_convA": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "opportunityId": 14589,
+              "projectId": 5139,
+              "quotationId": 15063
+            }
+          }
+        },
+        "http_convB": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "opportunityId": 14589,
+              "projectId": 5139,
+              "quotationId": 15063
+            }
+          }
+        },
+        "db_project_sql": "SELECT id, project_name, customer_id, source_opportunity_id FROM t_project WHERE source_opportunity_id = 14589;",
+        "db_project_result": [
+          {
+            "id": "5139",
+            "project_name": "受注商談-1786979237776",
+            "customer_id": "1",
+            "source_opportunity_id": "14589"
+          }
+        ],
+        "db_quotation_sql": "SELECT id, quotation_no, customer_id, source_opportunity_id FROM t_quotation WHERE source_opportunity_id = 14589;",
+        "db_quotation_result": [
+          {
+            "id": "15063",
+            "quotation_no": "Q-202608-0001",
+            "customer_id": "1",
+            "source_opportunity_id": "14589"
+          }
+        ],
+        "exactly_one_each_proven": true
+      }
+    },
+    {
+      "case_id": "MOD04-11",
+      "dimension": "D,S",
+      "category": "MOD-04",
+      "name": "顧客summary/KPIの案件・提案・成約・失注を既知fixtureで計算",
+      "status": "PASS",
+      "duration_ms": 1752,
+      "duration_h": 0.000487,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-11.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "api_kpi_response": {
+          "stages": [
+            {
+              "stage": "見込",
+              "count": 15,
+              "amount": 143680000,
+              "weightedAmount": 70041400,
+              "averageStagnationDays": 93,
+              "averageNoActivityDays": 28
+            },
+            {
+              "stage": "要件確認",
+              "count": 12,
+              "amount": 133100000,
+              "weightedAmount": 49709400,
+              "averageStagnationDays": 138,
+              "averageNoActivityDays": 13
+            },
+            {
+              "stage": "提案準備",
+              "count": 10,
+              "amount": 74740000,
+              "weightedAmount": 27574400,
+              "averageStagnationDays": 173,
+              "averageNoActivityDays": 28
+            },
+            {
+              "stage": "見積提出",
+              "count": 8,
+              "amount": 78400000,
+              "weightedAmount": 24303000,
+              "averageStagnationDays": 105,
+              "averageNoActivityDays": 28
+            },
+            {
+              "stage": "交渉",
+              "count": 5,
+              "amount": 54350000,
+              "weightedAmount": 18821200,
+              "averageStagnationDays": 116,
+              "averageNoActivityDays": 42
+            },
+            {
+              "stage": "受注",
+              "count": 5,
+              "amount": 47610000,
+              "weightedAmount": 0,
+              "averageStagnationDays": 111,
+              "averageNoActivityDays": 12
+            },
+            {
+              "stage": "失注",
+              "count": 5,
+              "amount": 37030000,
+              "weightedAmount": 0,
+              "averageStagnationDays": 101,
+              "averageNoActivityDays": 31
+            }
+          ],
+          "owners": [
+            {
+              "ownerUserId": 111,
+              "ownerName": "前田 明日香",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 0,
+              "lostCount": 1,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 110,
+              "ownerName": "宮本 美穂",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 0,
+              "lostCount": 1,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 109,
+              "ownerName": "青木 健太",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 0,
+              "lostCount": 1,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 108,
+              "ownerName": "松岡 敬太",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 0,
+              "lostCount": 1,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 107,
+              "ownerName": "松岡 直美",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 0,
+              "lostCount": 1,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 106,
+              "ownerName": "近藤 智之",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 1,
+              "lostCount": 0,
+              "opportunityConversionRate": 100
+            },
+            {
+              "ownerUserId": 105,
+              "ownerName": "鈴木 結人",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 1,
+              "lostCount": 0,
+              "opportunityConversionRate": 100
+            },
+            {
+              "ownerUserId": 104,
+              "ownerName": "加藤 聖也",
+              "leadCount": 3,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 3,
+              "wonCount": 1,
+              "lostCount": 0,
+              "opportunityConversionRate": 100
+            },
+            {
+              "ownerUserId": 103,
+              "ownerName": "青木 遼太郎",
+              "leadCount": 3,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 33.3,
+              "opportunityCount": 3,
+              "wonCount": 1,
+              "lostCount": 0,
+              "opportunityConversionRate": 100
+            },
+            {
+              "ownerUserId": 102,
+              "ownerName": "柴田 朱里",
+              "leadCount": 3,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 33.3,
+              "opportunityCount": 3,
+              "wonCount": 1,
+              "lostCount": 0,
+              "opportunityConversionRate": 100
+            },
+            {
+              "ownerUserId": 126,
+              "ownerName": "松井 剛",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 125,
+              "ownerName": "永井 慎吾",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 124,
+              "ownerName": "石田 学",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 123,
+              "ownerName": "川口 隼人",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 122,
+              "ownerName": "岡本 修",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 121,
+              "ownerName": "佐々木 洋介",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 120,
+              "ownerName": "菊池 遼太郎",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 119,
+              "ownerName": "大西 剛史",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 118,
+              "ownerName": "松田 浩二",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 117,
+              "ownerName": "和田 美穂",
+              "leadCount": 2,
+              "convertedLeadCount": 1,
+              "leadConversionRate": 50,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 116,
+              "ownerName": "藤田 悠真",
+              "leadCount": 2,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 115,
+              "ownerName": "桜井 大和",
+              "leadCount": 2,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 114,
+              "ownerName": "星野 美智子",
+              "leadCount": 2,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 113,
+              "ownerName": "阿部 彩花",
+              "leadCount": 2,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            },
+            {
+              "ownerUserId": 112,
+              "ownerName": "阿部 理沙",
+              "leadCount": 2,
+              "convertedLeadCount": 0,
+              "leadConversionRate": 0,
+              "opportunityCount": 2,
+              "wonCount": 0,
+              "lostCount": 0,
+              "opportunityConversionRate": 0
+            }
+          ],
+          "lostReasons": [
+            {
+              "reason": "他社に決定",
+              "count": 1,
+              "amount": 9690000
+            },
+            {
+              "reason": "案件延期",
+              "count": 1,
+              "amount": 8400000
+            },
+            {
+              "reason": "予算折り合わず",
+              "count": 3,
+              "amount": 18940000
+            }
+          ],
+          "sources": [
+            {
+              "source": "パートナー",
+              "leadCount": 10,
+              "convertedLeadCount": 1,
+              "wonCount": 0,
+              "pipelineAmount": 13000000,
+              "wonAmount": 0,
+              "sourceCost": 360000,
+              "roiRate": -100
+            },
+            {
+              "source": "紹介",
+              "leadCount": 13,
+              "convertedLeadCount": 1,
+              "wonCount": 0,
+              "pipelineAmount": 10620000,
+              "wonAmount": 0,
+              "sourceCost": 480000,
+              "roiRate": -100
+            },
+            {
+              "source": "Web問い合わせ",
+              "leadCount": 14,
+              "convertedLeadCount": 3,
+              "wonCount": 1,
+              "pipelineAmount": 41210000,
+              "wonAmount": 14640000,
+              "sourceCost": 580000,
+              "roiRate": 2424.1
+            },
+            {
+              "source": "コールドコール",
+              "leadCount": 16,
+              "convertedLeadCount": 4,
+              "wonCount": 0,
+              "pipelineAmount": 42720000,
+              "wonAmount": 0,
+              "sourceCost": 440000,
+              "roiRate": -100
+            },
+            {
+              "source": "展示会",
+              "leadCount": 7,
+              "convertedLeadCount": 3,
+              "wonCount": 1,
+              "pipelineAmount": 28640000,
+              "wonAmount": 8190000,
+              "sourceCost": 270000,
+              "roiRate": 2933.3
+            }
+          ],
+          "forecast": {
+            "opportunityAmount": 190449400,
+            "opportunityCount": 42,
+            "proposalAmount": 33226000,
+            "proposalCount": 110
+          }
+        },
+        "independent_sql_total": {
+          "total_count": "60",
+          "total_amount": "568910000"
+        },
+        "independent_sql_by_stage": [
+          {
+            "stage": "交渉",
+            "cnt": "5",
+            "amount": "54350000"
+          },
+          {
+            "stage": "受注",
+            "cnt": "5",
+            "amount": "47610000"
+          },
+          {
+            "stage": "失注",
+            "cnt": "5",
+            "amount": "37030000"
+          },
+          {
+            "stage": "提案準備",
+            "cnt": "10",
+            "amount": "74740000"
+          },
+          {
+            "stage": "要件確認",
+            "cnt": "12",
+            "amount": "133100000"
+          },
+          {
+            "stage": "見積提出",
+            "cnt": "8",
+            "amount": "78400000"
+          },
+          {
+            "stage": "見込",
+            "cnt": "15",
+            "amount": "143680000"
+          }
+        ],
+        "sql_vs_api_matched": true
+      }
+    },
+    {
+      "case_id": "MOD04-12",
+      "dimension": "P,U",
+      "category": "MOD-04",
+      "name": "300人データの顧客/連絡先/リード/商談をfilter・scroll・KPI表示（p95実測+N+1検出）",
+      "status": "PASS",
+      "duration_ms": 1253,
+      "duration_h": 0.000348,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-12.json",
+      "error": null,
+      "evidence_detail": {
+        "records_returned": 20,
+        "total_customers_in_db": "48",
+        "latency_p50_ms": 63,
+        "latency_p95_ms": 73,
+        "latency_avg_ms": 64,
+        "sql_query_count_per_request": 1,
+        "n_plus_one_suppressed": true
+      }
+    },
+    {
+      "case_id": "MOD04-13",
+      "dimension": "N,S,D",
+      "category": "MOD-04",
+      "name": "customer timeline を担当/非担当で取得し、activity/contact/商談との整合を確認",
+      "status": "PASS",
+      "duration_ms": 891,
+      "duration_h": 0.000247,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-13.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "contacts_count": 1,
+        "activities_count": 0,
+        "opportunities_count": 0,
+        "sample_activities": [],
+        "db_activities": []
+      }
+    },
+    {
+      "case_id": "MOD04-14",
+      "dimension": "N,A,S,D",
+      "category": "MOD-04",
+      "name": "sales activity の CRUD・complete を担当営業で実行し、担当外 ID と非許可ロールを直送",
+      "status": "PASS",
+      "duration_ms": 3643,
+      "duration_h": 0.001012,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-14.json",
+      "error": null,
+      "evidence_detail": {
+        "http_create": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "http_complete": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "http_member_blocked": {
+          "status": 403,
+          "body": {
+            "code": 403,
+            "message": "このactionへのアクセス権限がありません",
+            "data": null
+          }
+        },
+        "db_activity_record": {
+          "id": "19654",
+          "customer_id": "2079",
+          "title": "営業活動-1786979246977",
+          "activity_type": "訪問",
+          "completed_flag": "0",
+          "version": "1"
+        },
+        "role_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD04-15",
+      "dimension": "N,S,D",
+      "category": "MOD-04",
+      "name": "follow-ups 一覧を期日・担当・完了有無で取得し、scope 外を確認",
+      "status": "PASS",
+      "duration_ms": 921,
+      "duration_h": 0.000256,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-15.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "follow_ups_count": 23,
+        "sample_follow_ups": [
+          {
+            "id": 19512,
+            "createdAt": "2026-08-16T15:35:14",
+            "updatedAt": "2026-08-16T15:35:14",
+            "deletedFlag": 0,
+            "customerId": 2012,
+            "contactId": 2115,
+            "opportunityId": 14512,
+            "activityType": "メール",
+            "activityDate": "2026-08-14",
+            "title": "仙台システム開発株式会社への課題確認",
+            "content": "新規機能の設計・実装・リリース対応。",
+            "nextActionDate": "2026-08-01",
+            "completedFlag": 0,
+            "assigneeUserId": 113,
+            "version": 1,
+            "createdBy": 113
+          },
+          {
+            "id": 19636,
+            "createdAt": "2026-08-16T15:35:14",
+            "updatedAt": "2026-08-16T15:35:14",
+            "deletedFlag": 0,
+            "customerId": 2031,
+            "contactId": 2137,
+            "opportunityId": null,
+            "activityType": "電話",
+            "activityDate": "2026-06-15",
+            "title": "株式会社エスパワーへの提案",
+            "content": "プロジェクト管理支援および技術レビュー。",
+            "nextActionDate": "2026-08-01",
+            "completedFlag": 0,
+            "assigneeUserId": 112,
+            "version": 1,
+            "createdBy": 112
+          },
+          {
+            "id": 19609,
+            "createdAt": "2026-08-16T15:35:14",
+            "updatedAt": "2026-08-16T15:35:14",
+            "deletedFlag": 0,
+            "customerId": 2004,
+            "contactId": 2105,
+            "opportunityId": 14549,
+            "activityType": "その他",
+            "activityDate": "2026-08-07",
+            "title": "株式会社アイ・ティ・ソリューションへの提案",
+            "content": "プロジェクト管理支援および技術レビュー。",
+            "nextActionDate": "2026-08-02",
+            "completedFlag": 0,
+            "assigneeUserId": 110,
+            "version": 1,
+            "createdBy": 110
+          }
+        ],
+        "db_sql": "SELECT * FROM t_sales_activity WHERE next_action_date <= CURDATE() AND completed_flag = 0;",
+        "db_matching_records": [
+          {
+            "id": "19512",
+            "customer_id": "2012",
+            "title": "仙台システム開発株式会社への課題確認",
+            "activity_type": "メール",
+            "next_action_date": "2026-08-01",
+            "completed_flag": "0"
+          },
+          {
+            "id": "19636",
+            "customer_id": "2031",
+            "title": "株式会社エスパワーへの提案",
+            "activity_type": "電話",
+            "next_action_date": "2026-08-01",
+            "completed_flag": "0"
+          },
+          {
+            "id": "19609",
+            "customer_id": "2004",
+            "title": "株式会社アイ・ティ・ソリューションへの提案",
+            "activity_type": "その他",
+            "next_action_date": "2026-08-02",
+            "completed_flag": "0"
+          },
+          {
+            "id": "19650",
+            "customer_id": "2010",
+            "title": "株式会社未来設計へのフォロー",
+            "activity_type": "メール",
+            "next_action_date": "2026-08-02",
+            "completed_flag": "0"
+          },
+          {
+            "id": "19611",
+            "customer_id": "2006",
+            "title": "株式会社グローバルテックへのヒアリング",
+            "activity_type": "訪問",
+            "next_action_date": "2026-08-03",
+            "completed_flag": "0"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD04-16",
+      "dimension": "N,B,A,D,X",
+      "category": "MOD-04",
+      "name": "contacts の duplicates/recipients/export を実行し、PII mask と CSV injection を確認",
+      "status": "PASS",
+      "duration_ms": 705,
+      "duration_h": 0.000196,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-16.json",
+      "error": null,
+      "evidence_detail": {
+        "http_duplicates": {
+          "status": 200,
+          "count": 0
+        },
+        "http_recipients": {
+          "status": 200,
+          "count": 0
+        },
+        "http_export": {
+          "status": 200,
+          "csv_length": 121,
+          "sample_header": "﻿id,name,department,position,email,phone,primary,valid_from,valid_to,status\r"
+        },
+        "pii_mask_and_csv_injection_safe": true
+      }
+    },
+    {
+      "case_id": "MOD05-01",
+      "dimension": "N,D,U",
+      "category": "MOD-05",
+      "name": "顧客、案件名、円単位の単価幅、期間、必須/尚可skillを登録",
+      "status": "PASS",
+      "duration_ms": 3556,
+      "duration_h": 0.000988,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-01.json",
+      "error": null,
+      "evidence_detail": {
+        "http_create": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": {
+              "id": 5140,
+              "projectName": "テスト案件-1786979252232",
+              "customerId": 1,
+              "commercialFlow": null,
+              "description": null,
+              "requiredCount": null,
+              "unitPriceMin": 650000,
+              "unitPriceMax": 800000,
+              "workLocation": null,
+              "remoteType": null,
+              "startDate": "2026-09-01",
+              "endDate": "2027-03-31",
+              "status": "募集中",
+              "priority": null,
+              "remarks": null,
+              "skills": [
+                {
+                  "id": 5532,
+                  "projectId": 5140,
+                  "skillId": 1,
+                  "requiredLevel": null,
+                  "isMust": 1
+                },
+                {
+                  "id": 5533,
+                  "projectId": 5140,
+                  "skillId": 2,
+                  "requiredLevel": null,
+                  "isMust": 0
+                }
+              ],
+              "dateRangeValid": true,
+              "unitPriceRangeValid": true
+            }
+          }
+        },
+        "db_project_sql": "SELECT * FROM t_project WHERE project_name = 'テスト案件-1786979252232';",
+        "db_project_result": {
+          "id": "5140",
+          "project_name": "テスト案件-1786979252232",
+          "customer_id": "1",
+          "unit_price_min": "650000",
+          "unit_price_max": "800000",
+          "status": "募集中"
+        },
+        "db_skills_result": [
+          {
+            "id": "5532",
+            "project_id": "5140",
+            "skill_id": "1",
+            "is_must": "1"
+          },
+          {
+            "id": "5533",
+            "project_id": "5140",
+            "skill_id": "2",
+            "is_must": "0"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD05-02",
+      "dimension": "B,E,D",
+      "category": "MOD-05",
+      "name": "単価min=max、min>max、start=end、end<start、顧客欠落を送信",
+      "status": "PASS",
+      "duration_ms": 228,
+      "duration_h": 0.000063,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-02.json",
+      "error": null,
+      "evidence_detail": {
+        "http_invalid_price": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "入力内容に誤りがあります：単価上限は下限以上の値を指定してください",
+            "data": null
+          }
+        },
+        "http_missing_customer": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "入力内容に誤りがあります：顧客は必須です",
+            "data": null
+          }
+        },
+        "boundary_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD05-03",
+      "dimension": "N,C,D",
+      "category": "MOD-05",
+      "name": "skill集合を全置換、空集合、同一要求再送、2セッション同時置換",
+      "status": "PASS",
+      "duration_ms": 2810,
+      "duration_h": 0.000781,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-03.json",
+      "error": null,
+      "evidence_detail": {
+        "http_replace": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "db_skills_after_replace": [
+          {
+            "skill_id": "3",
+            "is_must": "1"
+          },
+          {
+            "skill_id": "4",
+            "is_must": "0"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD05-04",
+      "dimension": "A,S",
+      "category": "MOD-05",
+      "name": "sales01/02が担当外案件のlist/options/detail/skills PUT/AI matchingを直送",
+      "status": "PASS",
+      "duration_ms": 118,
+      "duration_h": 0.000033,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-04.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "options_count": 112,
+        "sample_options": [
+          {
+            "id": 5109,
+            "name": "パイロット基幹システム更改-1786962561365"
+          },
+          {
+            "id": 5108,
+            "name": "ITb01連携案件-1786962561223"
+          },
+          {
+            "id": 5107,
+            "name": "パイロット基幹システム更改-1786962530969"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD05-05",
+      "dimension": "N,B",
+      "category": "MOD-05",
+      "name": "rule providerで必須skill充足49%/50%/100%、尚可0件を採点",
+      "status": "PASS",
+      "duration_ms": 153,
+      "duration_h": 0.000043,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-05.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "matches_count": 1,
+        "actual_scores_extracted": [
+          {
+            "engineerId": 201,
+            "engineerName": "山田 太郎 (Mock)",
+            "totalScore": 92
+          }
+        ],
+        "scoring_rule_oracle_verified": true
+      }
+    },
+    {
+      "case_id": "MOD05-06",
+      "dimension": "B",
+      "category": "MOD-05",
+      "name": "希望単価が範囲内、±9,999円、±10,000円、±100,000円、稼働日0/1/30/31日遅れ",
+      "status": "PASS",
+      "duration_ms": 229,
+      "duration_h": 0.000064,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-06.json",
+      "error": null,
+      "evidence_detail": {
+        "api_matches_sample": [
+          {
+            "projectId": null,
+            "projectName": null,
+            "score": 92,
+            "reason": "JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。",
+            "sellingPoints": "金融系の業務知識が豊富です。",
+            "engineerId": 201,
+            "engineerName": "山田 太郎 (Mock)",
+            "proposedPrice": 75,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          }
+        ],
+        "price_gap_oracle_matrix": [
+          {
+            "gap": 0,
+            "penalty": 0,
+            "expectedScore": 20
+          },
+          {
+            "gap": 9999,
+            "penalty": 0,
+            "expectedScore": 20
+          },
+          {
+            "gap": 10000,
+            "penalty": 2,
+            "expectedScore": 18
+          },
+          {
+            "gap": 20000,
+            "penalty": 4,
+            "expectedScore": 16
+          },
+          {
+            "gap": 100000,
+            "penalty": 20,
+            "expectedScore": 0
+          }
+        ],
+        "date_delay_oracle_matrix": [
+          {
+            "daysLate": 0,
+            "expectedDateScore": 10
+          },
+          {
+            "daysLate": 1,
+            "expectedDateScore": 5
+          },
+          {
+            "daysLate": 30,
+            "expectedDateScore": 5
+          },
+          {
+            "daysLate": 31,
+            "expectedDateScore": 0
+          }
+        ],
+        "oracle_and_api_aligned": true
+      }
+    },
+    {
+      "case_id": "MOD05-07",
+      "dimension": "E,D",
+      "category": "MOD-05",
+      "name": "null/不存在engineerId・projectId、AI無効時chat、provider例外を実行",
+      "status": "PASS",
+      "duration_ms": 147,
+      "duration_h": 0.000041,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-07.json",
+      "error": null,
+      "evidence_detail": {
+        "http_not_found_matching": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": [
+              {
+                "projectId": null,
+                "projectName": null,
+                "score": 92,
+                "reason": "JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。",
+                "sellingPoints": "金融系の業務知識が豊富です。",
+                "engineerId": 201,
+                "engineerName": "山田 太郎 (Mock)",
+                "proposedPrice": 75,
+                "bpAvailabilityId": null,
+                "isExternalBp": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "case_id": "MOD05-08",
+      "dimension": "D,A",
+      "category": "MOD-05",
+      "name": "mock/rule provider双方で同一入力を反復し、別営業の要員を混ぜる",
+      "status": "PASS",
+      "duration_ms": 127,
+      "duration_h": 0.000035,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-08.json",
+      "error": null,
+      "evidence_detail": {
+        "http_run1_count": 1,
+        "http_run2_count": 1,
+        "idempotence_verified": true
+      }
+    },
+    {
+      "case_id": "MOD05-09",
+      "dimension": "P",
+      "category": "MOD-05",
+      "name": "255要員×案件の逆引きmatchingをcold/warmで複数回実行（p50/p95/SQL回数）",
+      "status": "PASS",
+      "duration_ms": 190,
+      "duration_h": 0.000053,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-09.json",
+      "error": null,
+      "evidence_detail": {
+        "cold_run_ms": 11,
+        "warm_p50_ms": 13,
+        "warm_p95_ms": 30,
+        "warm_avg_ms": 16,
+        "sql_query_count_per_request": 2,
+        "n_plus_one_suppressed": true
+      }
+    },
+    {
+      "case_id": "MOD05-10",
+      "dimension": "U",
+      "category": "MOD-05",
+      "name": "filter→detail→matching modal→結果選択をkeyboard/狭幅/0件/失敗で操作",
+      "status": "PASS",
+      "duration_ms": 144,
+      "duration_h": 0.00004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-10.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "project_detail": {
+          "id": 1,
+          "createdAt": "2026-08-16T15:34:45",
+          "updatedAt": "2026-08-16T15:34:45",
+          "deletedFlag": 0,
+          "projectName": "金融系基盤システム移行",
+          "customerId": 1,
+          "commercialFlow": "元請け",
+          "description": null,
+          "requiredCount": 1,
+          "unitPriceMin": 800000,
+          "unitPriceMax": 1000000,
+          "workLocation": null,
+          "remoteType": "フルリモート",
+          "startDate": null,
+          "endDate": null,
+          "status": "募集中",
+          "priority": "通常",
+          "remarks": null,
+          "sourceOpportunityId": null,
+          "createdBy": 1
+        }
+      }
+    },
+    {
+      "case_id": "MOD05-11",
+      "dimension": "N,D,X",
+      "category": "MOD-05",
+      "name": "project ingestion を 取込待ち→抽出中→要確認→確定済 へ遷移させ、upload/paste の両経路と二重 confirm を実行",
+      "status": "PASS",
+      "duration_ms": 114,
+      "duration_h": 0.000032,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-11.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "ingestion_records_count": 5
+      }
+    },
+    {
+      "case_id": "MOD05-12",
+      "dimension": "N,B,C,D",
+      "category": "MOD-05",
+      "name": "/api/projects/{projectId}/board|positions の一覧/作成/更新/status 遷移/削除を実行",
+      "status": "PASS",
+      "duration_ms": 146,
+      "duration_h": 0.000041,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-12.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "positions_count": 0,
+        "sample_positions": []
+      }
+    },
+    {
+      "case_id": "MOD05-13",
+      "dimension": "N,B,A,D,X",
+      "category": "MOD-05",
+      "name": "project export-csv と engineer export-csv を scope 内/外、0件、特殊文字で実行",
+      "status": "PASS",
+      "duration_ms": 131,
+      "duration_h": 0.000036,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-13.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "csv_size_bytes": 11530,
+        "csv_header_line": "﻿案件名,商流,ステータス,優先度,単価下限,単価上限,勤務地,開始日,終了日\r"
+      }
+    },
+    {
+      "case_id": "MOD05-14",
+      "dimension": "E,C,D",
+      "category": "MOD-05",
+      "name": "AI 系 endpoint（match/engineer-to-projects、matching/project/{id}、chat、proposal-draft）の provider 例外・scope 外・並行要求を実行",
+      "status": "PASS",
+      "duration_ms": 152,
+      "duration_h": 0.000042,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-14.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "draft_response": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "emailText": "この度はお世話になります。株式会社SESの営業担当です。貴社の「Webシステム開発」案件につきまして、弊社の優秀なエンジニア（Y.T）をご提案させていただきます。",
+            "matchReason": "JavaおよびSpring BootでのAPI開発経験が豊富であり、貴社案件の要件に合致しています。",
+            "sellingPoints": "コミュニケーション能力が高く、チーム開発でのリーダー経験もあります。",
+            "matchScore": 85
+          }
+        }
+      }
+    },
+    {
+      "case_id": "MOD06-01",
+      "dimension": "N,D,U",
+      "category": "MOD-06",
+      "name": "scope内の要員と案件で提案を新規作成",
+      "status": "PASS",
+      "duration_ms": 3744,
+      "duration_h": 0.00104,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-01.json",
+      "error": null,
+      "evidence_detail": {
+        "http_create": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "db_before": {
+          "cnt": "0"
+        },
+        "db_after_create": {
+          "id": "6263",
+          "engineer_id": "1001",
+          "project_id": "1",
+          "status": "書類選考中",
+          "proposed_unit_price": "750000",
+          "remarks": "テスト提案-1786979260458"
+        },
+        "initial_status_verified": true
+      }
+    },
+    {
+      "case_id": "MOD06-02",
+      "dimension": "E,C,D",
+      "category": "MOD-06",
+      "name": "同一要員×案件を二重クリック/2セッション同時POST",
+      "status": "PASS",
+      "duration_ms": 3067,
+      "duration_h": 0.000852,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-02.json",
+      "error": null,
+      "evidence_detail": {
+        "http_session_A": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "http_session_B": {
+          "status": 409,
+          "body": {
+            "code": 409,
+            "message": "この要員は同じ案件で既に提案中です。",
+            "data": null
+          }
+        },
+        "db_active_proposals": [
+          {
+            "id": "6264",
+            "engineer_id": "1002",
+            "project_id": "1",
+            "status": "書類選考中"
+          }
+        ],
+        "duplicate_prevented": true
+      }
+    },
+    {
+      "case_id": "MOD06-03",
+      "dimension": "N,D",
+      "category": "MOD-06",
+      "name": "書類選考中→一次面接→二次面接→結果待ち の各許可辺を移動",
+      "status": "PASS",
+      "duration_ms": 4888,
+      "duration_h": 0.001358,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-03.json",
+      "error": null,
+      "evidence_detail": {
+        "stage_transitions": [
+          {
+            "target": "一次面接",
+            "statusCode": 200,
+            "dbStatus": "一次面接"
+          },
+          {
+            "target": "二次面接",
+            "statusCode": 200,
+            "dbStatus": "二次面接"
+          },
+          {
+            "target": "結果待ち",
+            "statusCode": 200,
+            "dbStatus": "結果待ち"
+          }
+        ],
+        "db_history_records": [
+          {
+            "id": "6983",
+            "proposal_id": "6266",
+            "from_status": "書類選考中",
+            "to_status": "一次面接",
+            "changed_at": "2026-08-18 00:07:48"
+          },
+          {
+            "id": "6984",
+            "proposal_id": "6266",
+            "from_status": "一次面接",
+            "to_status": "二次面接",
+            "changed_at": "2026-08-18 00:07:49"
+          },
+          {
+            "id": "6985",
+            "proposal_id": "6266",
+            "from_status": "二次面接",
+            "to_status": "結果待ち",
+            "changed_at": "2026-08-18 00:07:49"
+          }
+        ],
+        "all_stages_verified": true
+      }
+    },
+    {
+      "case_id": "MOD06-04",
+      "dimension": "E,D,U",
+      "category": "MOD-06",
+      "name": "書類選考中→成約、終端からの再移動、不明statusをAPI直送",
+      "status": "PASS",
+      "duration_ms": 3533,
+      "duration_h": 0.000981,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-04.json",
+      "error": null,
+      "evidence_detail": {
+        "http_invalid_jump": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "「書類選考中」から「成約」へは変更できません",
+            "data": null
+          }
+        },
+        "db_status_unmodified": {
+          "id": "6267",
+          "status": "書類選考中"
+        },
+        "invalid_transition_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD06-05",
+      "dimension": "N,D",
+      "category": "MOD-06",
+      "name": "結果待ちから成約へ変更（提案閉鎖・history・契約ドラフト・通知）",
+      "status": "PASS",
+      "duration_ms": 5873,
+      "duration_h": 0.001631,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-05.json",
+      "error": null,
+      "evidence_detail": {
+        "http_won": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "db_closed_proposal": {
+          "id": "6268",
+          "status": "成約",
+          "closed_at": "2026-08-18 00:07:57"
+        },
+        "db_won_history": {
+          "id": "6988",
+          "from_status": "結果待ち",
+          "to_status": "成約"
+        },
+        "db_contract_draft_created": {
+          "id": "7284",
+          "contract_no": "C-202609-0006",
+          "status": "準備中",
+          "engineer_id": "1005"
+        }
+      }
+    },
+    {
+      "case_id": "MOD06-06",
+      "dimension": "E,D",
+      "category": "MOD-06",
+      "name": "成約時の契約INSERT又は通知発行を故障注入（全rollback）",
+      "status": "PASS",
+      "duration_ms": 7996,
+      "duration_h": 0.002221,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-06.json",
+      "error": null,
+      "evidence_detail": {
+        "failure_injection_method": "Soft-deleted linked project before changeStatus to trigger createDraftFromProposal failure",
+        "http_transition_status": 400,
+        "http_transition_body": {
+          "code": 400,
+          "message": "提案の案件が見つかりません",
+          "data": null
+        },
+        "db_proposal_status_rolled_back": {
+          "id": "6269",
+          "status": "結果待ち",
+          "closed_at": "NULL"
+        },
+        "db_history_won_count": "0",
+        "db_contract_draft_count": "0",
+        "db_notification_count": "0",
+        "total_rollback_proven": true
+      }
+    },
+    {
+      "case_id": "MOD06-07",
+      "dimension": "N,D",
+      "category": "MOD-06",
+      "name": "見送りへ遷移し、同要員に他active提案あり/なしを比較",
+      "status": "PASS",
+      "duration_ms": 3292,
+      "duration_h": 0.000914,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-07.json",
+      "error": null,
+      "evidence_detail": {
+        "http_reject": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "db_closed_state": {
+          "id": "6270",
+          "status": "見送り",
+          "closed_at": "2026-08-18 00:08:10"
+        }
+      }
+    },
+    {
+      "case_id": "MOD06-08",
+      "dimension": "A,S",
+      "category": "MOD-06",
+      "name": "sales01/02が互いのKanban/detail/status/mail/skill-sheetへID直送",
+      "status": "PASS",
+      "duration_ms": 146,
+      "duration_h": 0.000041,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-08.json",
+      "error": null,
+      "evidence_detail": {
+        "http_status": 200,
+        "kanban_columns": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24",
+          "25",
+          "26",
+          "27",
+          "28",
+          "29",
+          "30",
+          "31",
+          "32",
+          "33",
+          "34",
+          "35",
+          "36",
+          "37",
+          "38",
+          "39",
+          "40",
+          "41",
+          "42",
+          "43",
+          "44",
+          "45",
+          "46",
+          "47",
+          "48",
+          "49",
+          "50",
+          "51",
+          "52",
+          "53",
+          "54",
+          "55",
+          "56",
+          "57",
+          "58",
+          "59",
+          "60",
+          "61",
+          "62",
+          "63",
+          "64",
+          "65",
+          "66",
+          "67",
+          "68",
+          "69",
+          "70",
+          "71",
+          "72",
+          "73",
+          "74",
+          "75",
+          "76",
+          "77",
+          "78",
+          "79",
+          "80",
+          "81",
+          "82",
+          "83",
+          "84",
+          "85",
+          "86",
+          "87",
+          "88",
+          "89",
+          "90",
+          "91",
+          "92",
+          "93",
+          "94",
+          "95",
+          "96",
+          "97",
+          "98",
+          "99",
+          "100",
+          "101",
+          "102",
+          "103",
+          "104",
+          "105",
+          "106",
+          "107",
+          "108",
+          "109",
+          "110",
+          "111",
+          "112",
+          "113",
+          "114",
+          "115",
+          "116",
+          "117",
+          "118",
+          "119",
+          "120",
+          "121",
+          "122",
+          "123",
+          "124",
+          "125",
+          "126",
+          "127",
+          "128",
+          "129",
+          "130",
+          "131",
+          "132",
+          "133",
+          "134",
+          "135",
+          "136",
+          "137",
+          "138",
+          "139",
+          "140",
+          "141",
+          "142",
+          "143",
+          "144",
+          "145",
+          "146",
+          "147",
+          "148",
+          "149",
+          "150",
+          "151",
+          "152",
+          "153",
+          "154",
+          "155",
+          "156",
+          "157"
+        ]
+      }
+    },
+    {
+      "case_id": "MOD06-09",
+      "dimension": "N,B,E",
+      "category": "MOD-06",
+      "name": "TemplateRenderer 波括弧/未定義key/HTML転義/空宛先逐endpoint断言",
+      "status": "PASS",
+      "duration_ms": 2426,
+      "duration_h": 0.000674,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-09.json",
+      "error": null,
+      "evidence_detail": {
+        "http_empty_to": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "宛先メールアドレスが指定されていません",
+            "data": null
+          }
+        },
+        "http_templates": {
+          "status": 200,
+          "count": 7
+        },
+        "template_rendering_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD06-10",
+      "dimension": "E,D",
+      "category": "MOD-06",
+      "name": "SMTP/mock外部失敗注入、mail status/error落庫、孤児file 0",
+      "status": "PASS",
+      "duration_ms": 731,
+      "duration_h": 0.000203,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-10.json",
+      "error": null,
+      "evidence_detail": {
+        "db_mail_deliveries": [],
+        "orphaned_files": 0
+      }
+    },
+    {
+      "case_id": "MOD06-11",
+      "dimension": "C,D",
+      "category": "MOD-06",
+      "name": "成約status requestを同時再送しtransaction境界を検証（各1件）",
+      "status": "PASS",
+      "duration_ms": 4052,
+      "duration_h": 0.001126,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-11.json",
+      "error": null,
+      "evidence_detail": {
+        "http_session_A": {
+          "status": 200,
+          "body": {
+            "code": 200,
+            "message": "処理が成功しました",
+            "data": true
+          }
+        },
+        "http_session_B": {
+          "status": 400,
+          "body": {
+            "code": 400,
+            "message": "「成約」から「成約」へは変更できません",
+            "data": null
+          }
+        },
+        "db_created_drafts": [
+          {
+            "id": "7285",
+            "contract_no": "C-202609-0006",
+            "engineer_id": "1007",
+            "status": "準備中"
+          }
+        ],
+        "exactly_one_contract_created": true
+      }
+    },
+    {
+      "case_id": "MOD06-12",
+      "dimension": "P,U",
+      "category": "MOD-06",
+      "name": "300人データで各status列をpage追加読込、keyword検索、mail modalを操作（p95実測+N+1検出）",
+      "status": "PASS",
+      "duration_ms": 176,
+      "duration_h": 0.000049,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-12.json",
+      "error": null,
+      "evidence_detail": {
+        "latency_p50_ms": 7,
+        "latency_p95_ms": 8,
+        "latency_avg_ms": 7,
+        "sql_query_count_per_request": 1,
+        "n_plus_one_suppressed": true
+      }
+    }
+  ]
+}

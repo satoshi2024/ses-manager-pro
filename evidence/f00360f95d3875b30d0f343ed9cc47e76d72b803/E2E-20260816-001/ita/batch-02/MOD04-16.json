@@ -1,0 +1,27 @@
+{
+  "case_id": "MOD04-16",
+  "dimension": "N,B,A,D,X",
+  "category": "MOD-04",
+  "name": "contacts の duplicates/recipients/export を実行し、PII mask と CSV injection を確認",
+  "status": "PASS",
+  "duration_ms": 705,
+  "duration_h": 0.000196,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-16.json",
+  "error": null,
+  "evidence_detail": {
+    "http_duplicates": {
+      "status": 200,
+      "count": 0
+    },
+    "http_recipients": {
+      "status": 200,
+      "count": 0
+    },
+    "http_export": {
+      "status": 200,
+      "csv_length": 121,
+      "sample_header": "﻿id,name,department,position,email,phone,primary,valid_from,valid_to,status\r"
+    },
+    "pii_mask_and_csv_injection_safe": true
+  }
+}

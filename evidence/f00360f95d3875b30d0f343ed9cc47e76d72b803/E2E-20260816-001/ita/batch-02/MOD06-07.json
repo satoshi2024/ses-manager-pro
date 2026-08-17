@@ -1,0 +1,26 @@
+{
+  "case_id": "MOD06-07",
+  "dimension": "N,D",
+  "category": "MOD-06",
+  "name": "見送りへ遷移し、同要員に他active提案あり/なしを比較",
+  "status": "PASS",
+  "duration_ms": 3292,
+  "duration_h": 0.000914,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-07.json",
+  "error": null,
+  "evidence_detail": {
+    "http_reject": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_closed_state": {
+      "id": "6270",
+      "status": "見送り",
+      "closed_at": "2026-08-18 00:08:10"
+    }
+  }
+}

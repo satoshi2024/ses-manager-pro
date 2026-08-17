@@ -1,0 +1,78 @@
+{
+  "case_id": "MOD05-01",
+  "dimension": "N,D,U",
+  "category": "MOD-05",
+  "name": "顧客、案件名、円単位の単価幅、期間、必須/尚可skillを登録",
+  "status": "PASS",
+  "duration_ms": 3556,
+  "duration_h": 0.000988,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-01.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 5140,
+          "projectName": "テスト案件-1786979252232",
+          "customerId": 1,
+          "commercialFlow": null,
+          "description": null,
+          "requiredCount": null,
+          "unitPriceMin": 650000,
+          "unitPriceMax": 800000,
+          "workLocation": null,
+          "remoteType": null,
+          "startDate": "2026-09-01",
+          "endDate": "2027-03-31",
+          "status": "募集中",
+          "priority": null,
+          "remarks": null,
+          "skills": [
+            {
+              "id": 5532,
+              "projectId": 5140,
+              "skillId": 1,
+              "requiredLevel": null,
+              "isMust": 1
+            },
+            {
+              "id": 5533,
+              "projectId": 5140,
+              "skillId": 2,
+              "requiredLevel": null,
+              "isMust": 0
+            }
+          ],
+          "dateRangeValid": true,
+          "unitPriceRangeValid": true
+        }
+      }
+    },
+    "db_project_sql": "SELECT * FROM t_project WHERE project_name = 'テスト案件-1786979252232';",
+    "db_project_result": {
+      "id": "5140",
+      "project_name": "テスト案件-1786979252232",
+      "customer_id": "1",
+      "unit_price_min": "650000",
+      "unit_price_max": "800000",
+      "status": "募集中"
+    },
+    "db_skills_result": [
+      {
+        "id": "5532",
+        "project_id": "5140",
+        "skill_id": "1",
+        "is_must": "1"
+      },
+      {
+        "id": "5533",
+        "project_id": "5140",
+        "skill_id": "2",
+        "is_must": "0"
+      }
+    ]
+  }
+}

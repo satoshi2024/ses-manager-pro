@@ -1,0 +1,46 @@
+{
+  "case_id": "MOD04-14",
+  "dimension": "N,A,S,D",
+  "category": "MOD-04",
+  "name": "sales activity の CRUD・complete を担当営業で実行し、担当外 ID と非許可ロールを直送",
+  "status": "PASS",
+  "duration_ms": 3643,
+  "duration_h": 0.001012,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-14.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_complete": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_member_blocked": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このactionへのアクセス権限がありません",
+        "data": null
+      }
+    },
+    "db_activity_record": {
+      "id": "19654",
+      "customer_id": "2079",
+      "title": "営業活動-1786979246977",
+      "activity_type": "訪問",
+      "completed_flag": "0",
+      "version": "1"
+    },
+    "role_guarded": true
+  }
+}

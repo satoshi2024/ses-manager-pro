@@ -178,11 +178,6 @@ public class ExpenseAccountingJobScheduler {
                 markFailure(expenseRequestId, claimed, "DB_COMMIT_FAILED");
                 return false;
             }
-            try {
-                notifyAccountingSent(claimed.expense());
-            } catch (Exception e) {
-                log.warn("[経費会計連携] 通知送信失敗（連携状態は成功維持）: expenseId={} error={}", expenseRequestId, e.getMessage());
-            }
         } else {
             markFailure(expenseRequestId, claimed,
                     result.errorCode() == null ? "SEND_FAILED" : result.errorCode());
@@ -267,6 +262,7 @@ public class ExpenseAccountingJobScheduler {
             if (jobUpdated != 1) {
                 throw new IllegalStateException("Job update failed for expenseRequestId=" + expenseRequestId);
             }
+            notifyAccountingSent(expense);
         });
     }
 

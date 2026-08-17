@@ -56,9 +56,11 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
             // 列shape
+            assertColumnExists(statement, "t_engineer", "phone");
             assertColumnExists(statement, "t_engineer_change_request", "reason");
             assertColumnExists(statement, "t_engineer_change_request", "attachment_document_id");
             assertColumnExists(statement, "t_survey_campaign", "template_snapshot_json");
+            assertColumnExists(statement, "t_survey_campaign", "template_snapshot_version");
             assertColumnExists(statement, "t_expense_request", "accounting_job_id");
             assertColumnExists(statement, "t_expense_request", "paid_at");
             assertColumnExists(statement, "t_one_on_one_request", "private_note_ref");

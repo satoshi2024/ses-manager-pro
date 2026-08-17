@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD05-13",
+  "dimension": "N,B,A,D,X",
+  "category": "MOD-05",
+  "name": "project export-csv と engineer export-csv を scope 内/外、0件、特殊文字で実行",
+  "status": "PASS",
+  "duration_ms": 131,
+  "duration_h": 0.000036,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-13.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "csv_size_bytes": 11530,
+    "csv_header_line": "﻿案件名,商流,ステータス,優先度,単価下限,単価上限,勤務地,開始日,終了日\r"
+  }
+}

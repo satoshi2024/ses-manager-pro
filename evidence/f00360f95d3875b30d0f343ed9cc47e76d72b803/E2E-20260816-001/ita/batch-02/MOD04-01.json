@@ -1,0 +1,60 @@
+{
+  "case_id": "MOD04-01",
+  "dimension": "N,D,U",
+  "category": "MOD-04",
+  "name": "営業が顧客を登録し会社名、商流、信用度、住所を更新",
+  "status": "PASS",
+  "duration_ms": 5762,
+  "duration_h": 0.001601,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-01.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_update": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_before_sql": "SELECT COUNT(*) FROM m_customer WHERE company_name = 'テスト顧客-1786979214456';",
+    "db_before_result": {
+      "cnt": "0"
+    },
+    "db_after_create_sql": "SELECT * FROM m_customer WHERE company_name = 'テスト顧客-1786979214456';",
+    "db_after_create_result": {
+      "id": "2075",
+      "company_name": "テスト顧客-1786979214456",
+      "commercial_flow": "エンド直",
+      "trust_level": "A",
+      "address": "東京都千代田区大手町1-1-1",
+      "deleted_flag": "0"
+    },
+    "db_after_update_sql": "SELECT * FROM m_customer WHERE id = 2075;",
+    "db_after_update_result": {
+      "id": "2075",
+      "company_name": "テスト顧客-1786979214456-更新",
+      "commercial_flow": "元請",
+      "trust_level": "S",
+      "address": "東京都港区六本木6-10-1",
+      "deleted_flag": "0"
+    },
+    "audit_log_verification": [
+      {
+        "error": "Command failed: [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & \"C:\\Program Files\\MySQL\\MySQL Server 8.4\\bin\\mysql.exe\" -u root -p123456 --default-character-set=utf8mb4 ses_manager_db -B -e \"SELECT id, user_id, method, uri, status FROM t_audit_log WHERE uri LIKE '%/api/customers%' ORDER BY id DESC LIMIT 2;\"\nmysql: [Warning] Using a password on the command line interface can be insecure.\r\nERROR 1054 (42S22) at line 1: Unknown column 'user_id' in 'field list'\r\n"
+      }
+    ],
+    "teardown_sql": "DELETE FROM m_customer WHERE id = 2075;",
+    "teardown_verification": {
+      "cnt": "0"
+    }
+  }
+}

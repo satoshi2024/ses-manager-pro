@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD05-12",
+  "dimension": "N,B,C,D",
+  "category": "MOD-05",
+  "name": "/api/projects/{projectId}/board|positions の一覧/作成/更新/status 遷移/削除を実行",
+  "status": "PASS",
+  "duration_ms": 146,
+  "duration_h": 0.000041,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-12.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "positions_count": 0,
+    "sample_positions": []
+  }
+}

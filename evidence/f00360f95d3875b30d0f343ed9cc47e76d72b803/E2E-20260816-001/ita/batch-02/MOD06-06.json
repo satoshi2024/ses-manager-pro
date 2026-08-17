@@ -1,0 +1,29 @@
+{
+  "case_id": "MOD06-06",
+  "dimension": "E,D",
+  "category": "MOD-06",
+  "name": "成約時の契約INSERT又は通知発行を故障注入（全rollback）",
+  "status": "PASS",
+  "duration_ms": 7996,
+  "duration_h": 0.002221,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-06.json",
+  "error": null,
+  "evidence_detail": {
+    "failure_injection_method": "Soft-deleted linked project before changeStatus to trigger createDraftFromProposal failure",
+    "http_transition_status": 400,
+    "http_transition_body": {
+      "code": 400,
+      "message": "提案の案件が見つかりません",
+      "data": null
+    },
+    "db_proposal_status_rolled_back": {
+      "id": "6269",
+      "status": "結果待ち",
+      "closed_at": "NULL"
+    },
+    "db_history_won_count": "0",
+    "db_contract_draft_count": "0",
+    "db_notification_count": "0",
+    "total_rollback_proven": true
+  }
+}

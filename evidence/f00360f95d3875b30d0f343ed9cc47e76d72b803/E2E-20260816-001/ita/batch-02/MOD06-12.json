@@ -1,0 +1,18 @@
+{
+  "case_id": "MOD06-12",
+  "dimension": "P,U",
+  "category": "MOD-06",
+  "name": "300人データで各status列をpage追加読込、keyword検索、mail modalを操作（p95実測+N+1検出）",
+  "status": "PASS",
+  "duration_ms": 176,
+  "duration_h": 0.000049,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-12.json",
+  "error": null,
+  "evidence_detail": {
+    "latency_p50_ms": 7,
+    "latency_p95_ms": 8,
+    "latency_avg_ms": 7,
+    "sql_query_count_per_request": 1,
+    "n_plus_one_suppressed": true
+  }
+}

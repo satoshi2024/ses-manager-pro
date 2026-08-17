@@ -1,0 +1,30 @@
+{
+  "case_id": "MOD05-02",
+  "dimension": "B,E,D",
+  "category": "MOD-05",
+  "name": "単価min=max、min>max、start=end、end<start、顧客欠落を送信",
+  "status": "PASS",
+  "duration_ms": 228,
+  "duration_h": 0.000063,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-02.json",
+  "error": null,
+  "evidence_detail": {
+    "http_invalid_price": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "入力内容に誤りがあります：単価上限は下限以上の値を指定してください",
+        "data": null
+      }
+    },
+    "http_missing_customer": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "入力内容に誤りがあります：顧客は必須です",
+        "data": null
+      }
+    },
+    "boundary_guarded": true
+  }
+}

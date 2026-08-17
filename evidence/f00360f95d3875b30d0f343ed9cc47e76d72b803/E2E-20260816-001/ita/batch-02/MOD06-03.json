@@ -1,0 +1,54 @@
+{
+  "case_id": "MOD06-03",
+  "dimension": "N,D",
+  "category": "MOD-06",
+  "name": "書類選考中→一次面接→二次面接→結果待ち の各許可辺を移動",
+  "status": "PASS",
+  "duration_ms": 4888,
+  "duration_h": 0.001358,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-03.json",
+  "error": null,
+  "evidence_detail": {
+    "stage_transitions": [
+      {
+        "target": "一次面接",
+        "statusCode": 200,
+        "dbStatus": "一次面接"
+      },
+      {
+        "target": "二次面接",
+        "statusCode": 200,
+        "dbStatus": "二次面接"
+      },
+      {
+        "target": "結果待ち",
+        "statusCode": 200,
+        "dbStatus": "結果待ち"
+      }
+    ],
+    "db_history_records": [
+      {
+        "id": "6983",
+        "proposal_id": "6266",
+        "from_status": "書類選考中",
+        "to_status": "一次面接",
+        "changed_at": "2026-08-18 00:07:48"
+      },
+      {
+        "id": "6984",
+        "proposal_id": "6266",
+        "from_status": "一次面接",
+        "to_status": "二次面接",
+        "changed_at": "2026-08-18 00:07:49"
+      },
+      {
+        "id": "6985",
+        "proposal_id": "6266",
+        "from_status": "二次面接",
+        "to_status": "結果待ち",
+        "changed_at": "2026-08-18 00:07:49"
+      }
+    ],
+    "all_stages_verified": true
+  }
+}

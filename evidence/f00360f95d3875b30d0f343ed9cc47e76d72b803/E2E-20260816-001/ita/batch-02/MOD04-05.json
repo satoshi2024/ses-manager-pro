@@ -1,0 +1,84 @@
+{
+  "case_id": "MOD04-05",
+  "dimension": "N,B,D",
+  "category": "MOD-04",
+  "name": "primary連絡先を有効期間の非重複/境界接触で登録し、退職/異動処理",
+  "status": "PASS",
+  "duration_ms": 4179,
+  "duration_h": 0.001161,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-05.json",
+  "error": null,
+  "evidence_detail": {
+    "http_contact1": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 2163,
+          "customerId": 2076,
+          "name": "第1主担当-1786979221596",
+          "nameKana": null,
+          "department": "開発部",
+          "position": "部長",
+          "rolesJson": "[]",
+          "email": "prim1_1786979221596@example.com",
+          "phone": "03-1111-2222",
+          "primaryFlag": 1,
+          "validFrom": "2026-01-01",
+          "validTo": "2026-08-31",
+          "status": "有効",
+          "version": 1
+        }
+      }
+    },
+    "http_contact2": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 2164,
+          "customerId": 2076,
+          "name": "第2主担当-1786979221596",
+          "nameKana": null,
+          "department": "開発部",
+          "position": "部長",
+          "rolesJson": "[]",
+          "email": "prim2_1786979221596@example.com",
+          "phone": "03-3333-4444",
+          "primaryFlag": 1,
+          "validFrom": "2026-09-01",
+          "validTo": null,
+          "status": "有効",
+          "version": 1
+        }
+      }
+    },
+    "db_contacts_sql": "SELECT * FROM t_customer_contact WHERE customer_id = 2076;",
+    "db_contacts_result": [
+      {
+        "id": "2163",
+        "customer_id": "2076",
+        "name": "第1主担当-1786979221596",
+        "primary_flag": "1",
+        "valid_from": "2026-01-01",
+        "valid_to": "2026-08-31",
+        "status": "有効"
+      },
+      {
+        "id": "2164",
+        "customer_id": "2076",
+        "name": "第2主担当-1786979221596",
+        "primary_flag": "1",
+        "valid_from": "2026-09-01",
+        "valid_to": "NULL",
+        "status": "有効"
+      }
+    ],
+    "teardown_verification": {
+      "cnt": "0"
+    },
+    "non_overlapping_primary_proven": true
+  }
+}

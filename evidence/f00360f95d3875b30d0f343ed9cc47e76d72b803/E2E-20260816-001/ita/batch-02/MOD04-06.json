@@ -1,0 +1,50 @@
+{
+  "case_id": "MOD04-06",
+  "dimension": "C,E,D",
+  "category": "MOD-04",
+  "name": "同じversionで2画面から連絡先更新、同時に主担当登録",
+  "status": "PASS",
+  "duration_ms": 4346,
+  "duration_h": 0.001207,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-06.json",
+  "error": null,
+  "evidence_detail": {
+    "http_session_A": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 2165,
+          "customerId": 2077,
+          "name": "担当者A-1786979226107",
+          "nameKana": null,
+          "department": null,
+          "position": null,
+          "rolesJson": "[]",
+          "email": null,
+          "phone": null,
+          "primaryFlag": 0,
+          "validFrom": "2026-08-17",
+          "validTo": null,
+          "status": "有効",
+          "version": 2
+        }
+      }
+    },
+    "http_session_B": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "他のユーザーによってデータが更新されました。画面を再読み込みしてください。",
+        "data": null
+      }
+    },
+    "db_contact_final_version": {
+      "id": "2165",
+      "name": "担当者A-1786979226107",
+      "version": "2"
+    },
+    "concurrency_handled": true
+  }
+}

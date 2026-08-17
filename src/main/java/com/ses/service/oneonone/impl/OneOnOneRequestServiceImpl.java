@@ -103,6 +103,9 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         if (!COUNTERPART_ROLES.contains(counterpart.getRole())) {
             throw BusinessException.of(400, "error.oneOnOne.invalidCounterpartRole");
         }
+        if (counterpart.getStatus() == null || counterpart.getStatus() != 1) {
+            throw BusinessException.of(400, "error.user.inactive");
+        }
         assertCounterpartRelationship(engineerId, counterpart);
         if (candidateDates == null || candidateDates.isEmpty() || candidateDates.size() > MAX_CANDIDATES) {
             throw BusinessException.of(400, "error.oneOnOne.invalidDates");
@@ -224,14 +227,14 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     public OneOnOneDto schedule(Long id, LocalDate scheduledAt) {
         OneOnOneRequest request = require(id);
         assertManagementAction(request);
-        if (scheduledAt == null || scheduledAt.isBefore(LocalDate.now())) {
+        if (scheduledAt == null || scheduledAt.isBefore(LocalDate.now(clock))) {
             throw BusinessException.of(400, "error.oneOnOne.invalidScheduledDate");
         }
         int updated = oneOnOneMapper.update(null, new UpdateWrapper<OneOnOneRequest>()
                 .eq("id", id).eq("status", STATUS_REQUESTED)
                 .set("status", STATUS_SCHEDULED)
                 .set("scheduled_at", scheduledAt)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -254,7 +257,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                 .eq("id", id).eq("status", STATUS_SCHEDULED)
                 .set("status", STATUS_DONE)
                 .set("employee_visible_note", employeeVisibleNote == null ? null : employeeVisibleNote.trim())
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -400,7 +403,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         int updated = oneOnOneMapper.update(null, new UpdateWrapper<OneOnOneRequest>()
                 .eq("id", request.getId()).eq("status", request.getStatus())
                 .set("status", target)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }

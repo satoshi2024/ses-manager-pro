@@ -1,0 +1,57 @@
+{
+  "case_id": "MOD04-10",
+  "dimension": "C,D",
+  "category": "MOD-04",
+  "name": "受注商談を2セッションで同時に案件・見積へ変換し再送",
+  "status": "PASS",
+  "duration_ms": 5352,
+  "duration_h": 0.001487,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-10.json",
+  "error": null,
+  "evidence_detail": {
+    "http_won_status": 200,
+    "http_convA": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "opportunityId": 14589,
+          "projectId": 5139,
+          "quotationId": 15063
+        }
+      }
+    },
+    "http_convB": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "opportunityId": 14589,
+          "projectId": 5139,
+          "quotationId": 15063
+        }
+      }
+    },
+    "db_project_sql": "SELECT id, project_name, customer_id, source_opportunity_id FROM t_project WHERE source_opportunity_id = 14589;",
+    "db_project_result": [
+      {
+        "id": "5139",
+        "project_name": "受注商談-1786979237776",
+        "customer_id": "1",
+        "source_opportunity_id": "14589"
+      }
+    ],
+    "db_quotation_sql": "SELECT id, quotation_no, customer_id, source_opportunity_id FROM t_quotation WHERE source_opportunity_id = 14589;",
+    "db_quotation_result": [
+      {
+        "id": "15063",
+        "quotation_no": "Q-202608-0001",
+        "customer_id": "1",
+        "source_opportunity_id": "14589"
+      }
+    ],
+    "exactly_one_each_proven": true
+  }
+}

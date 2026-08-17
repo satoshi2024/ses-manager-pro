@@ -146,9 +146,9 @@ public class NotificationServiceImpl implements NotificationService {
             // S14 engineer-self-service-portal-v2: 本人宛のself-service通知は要員が持つメニューへ紐付ける。
             // approval engineのAPPROVAL_*通知はmenuKey=approvalのため要員には不可視であり、
             // 各featureが本人向け通知を別途発行する（T089/T091実装ガイダンス）。
-            case "CHANGE_REQUEST_APPLIED" -> "my-profile";
-            case "EXPENSE_ACCOUNTING_SENT", "EXPENSE_PAID" -> "my-expenses";
-            case "SURVEY_CAMPAIGN" -> "my-surveys";
+            case "CHANGE_REQUEST_APPLIED" -> "myProfile";
+            case "EXPENSE_ACCOUNTING_SENT", "EXPENSE_PAID" -> "myExpenses";
+            case "SURVEY_CAMPAIGN" -> "mySurveys";
             default -> null;
         };
     }

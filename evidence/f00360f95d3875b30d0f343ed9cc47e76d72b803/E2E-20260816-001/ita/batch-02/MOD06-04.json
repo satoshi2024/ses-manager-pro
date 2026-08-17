@@ -1,0 +1,26 @@
+{
+  "case_id": "MOD06-04",
+  "dimension": "E,D,U",
+  "category": "MOD-06",
+  "name": "書類選考中→成約、終端からの再移動、不明statusをAPI直送",
+  "status": "PASS",
+  "duration_ms": 3533,
+  "duration_h": 0.000981,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-04.json",
+  "error": null,
+  "evidence_detail": {
+    "http_invalid_jump": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "「書類選考中」から「成約」へは変更できません",
+        "data": null
+      }
+    },
+    "db_status_unmodified": {
+      "id": "6267",
+      "status": "書類選考中"
+    },
+    "invalid_transition_blocked": true
+  }
+}

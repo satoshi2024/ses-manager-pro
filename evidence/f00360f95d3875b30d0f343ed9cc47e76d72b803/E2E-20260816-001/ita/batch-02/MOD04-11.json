@@ -1,0 +1,468 @@
+{
+  "case_id": "MOD04-11",
+  "dimension": "D,S",
+  "category": "MOD-04",
+  "name": "顧客summary/KPIの案件・提案・成約・失注を既知fixtureで計算",
+  "status": "PASS",
+  "duration_ms": 1752,
+  "duration_h": 0.000487,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-11.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "api_kpi_response": {
+      "stages": [
+        {
+          "stage": "見込",
+          "count": 15,
+          "amount": 143680000,
+          "weightedAmount": 70041400,
+          "averageStagnationDays": 93,
+          "averageNoActivityDays": 28
+        },
+        {
+          "stage": "要件確認",
+          "count": 12,
+          "amount": 133100000,
+          "weightedAmount": 49709400,
+          "averageStagnationDays": 138,
+          "averageNoActivityDays": 13
+        },
+        {
+          "stage": "提案準備",
+          "count": 10,
+          "amount": 74740000,
+          "weightedAmount": 27574400,
+          "averageStagnationDays": 173,
+          "averageNoActivityDays": 28
+        },
+        {
+          "stage": "見積提出",
+          "count": 8,
+          "amount": 78400000,
+          "weightedAmount": 24303000,
+          "averageStagnationDays": 105,
+          "averageNoActivityDays": 28
+        },
+        {
+          "stage": "交渉",
+          "count": 5,
+          "amount": 54350000,
+          "weightedAmount": 18821200,
+          "averageStagnationDays": 116,
+          "averageNoActivityDays": 42
+        },
+        {
+          "stage": "受注",
+          "count": 5,
+          "amount": 47610000,
+          "weightedAmount": 0,
+          "averageStagnationDays": 111,
+          "averageNoActivityDays": 12
+        },
+        {
+          "stage": "失注",
+          "count": 5,
+          "amount": 37030000,
+          "weightedAmount": 0,
+          "averageStagnationDays": 101,
+          "averageNoActivityDays": 31
+        }
+      ],
+      "owners": [
+        {
+          "ownerUserId": 111,
+          "ownerName": "前田 明日香",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 0,
+          "lostCount": 1,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 110,
+          "ownerName": "宮本 美穂",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 0,
+          "lostCount": 1,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 109,
+          "ownerName": "青木 健太",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 0,
+          "lostCount": 1,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 108,
+          "ownerName": "松岡 敬太",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 0,
+          "lostCount": 1,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 107,
+          "ownerName": "松岡 直美",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 0,
+          "lostCount": 1,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 106,
+          "ownerName": "近藤 智之",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 1,
+          "lostCount": 0,
+          "opportunityConversionRate": 100
+        },
+        {
+          "ownerUserId": 105,
+          "ownerName": "鈴木 結人",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 1,
+          "lostCount": 0,
+          "opportunityConversionRate": 100
+        },
+        {
+          "ownerUserId": 104,
+          "ownerName": "加藤 聖也",
+          "leadCount": 3,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 3,
+          "wonCount": 1,
+          "lostCount": 0,
+          "opportunityConversionRate": 100
+        },
+        {
+          "ownerUserId": 103,
+          "ownerName": "青木 遼太郎",
+          "leadCount": 3,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 33.3,
+          "opportunityCount": 3,
+          "wonCount": 1,
+          "lostCount": 0,
+          "opportunityConversionRate": 100
+        },
+        {
+          "ownerUserId": 102,
+          "ownerName": "柴田 朱里",
+          "leadCount": 3,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 33.3,
+          "opportunityCount": 3,
+          "wonCount": 1,
+          "lostCount": 0,
+          "opportunityConversionRate": 100
+        },
+        {
+          "ownerUserId": 126,
+          "ownerName": "松井 剛",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 125,
+          "ownerName": "永井 慎吾",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 124,
+          "ownerName": "石田 学",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 123,
+          "ownerName": "川口 隼人",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 122,
+          "ownerName": "岡本 修",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 121,
+          "ownerName": "佐々木 洋介",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 120,
+          "ownerName": "菊池 遼太郎",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 119,
+          "ownerName": "大西 剛史",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 118,
+          "ownerName": "松田 浩二",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 117,
+          "ownerName": "和田 美穂",
+          "leadCount": 2,
+          "convertedLeadCount": 1,
+          "leadConversionRate": 50,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 116,
+          "ownerName": "藤田 悠真",
+          "leadCount": 2,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 115,
+          "ownerName": "桜井 大和",
+          "leadCount": 2,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 114,
+          "ownerName": "星野 美智子",
+          "leadCount": 2,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 113,
+          "ownerName": "阿部 彩花",
+          "leadCount": 2,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        },
+        {
+          "ownerUserId": 112,
+          "ownerName": "阿部 理沙",
+          "leadCount": 2,
+          "convertedLeadCount": 0,
+          "leadConversionRate": 0,
+          "opportunityCount": 2,
+          "wonCount": 0,
+          "lostCount": 0,
+          "opportunityConversionRate": 0
+        }
+      ],
+      "lostReasons": [
+        {
+          "reason": "他社に決定",
+          "count": 1,
+          "amount": 9690000
+        },
+        {
+          "reason": "案件延期",
+          "count": 1,
+          "amount": 8400000
+        },
+        {
+          "reason": "予算折り合わず",
+          "count": 3,
+          "amount": 18940000
+        }
+      ],
+      "sources": [
+        {
+          "source": "パートナー",
+          "leadCount": 10,
+          "convertedLeadCount": 1,
+          "wonCount": 0,
+          "pipelineAmount": 13000000,
+          "wonAmount": 0,
+          "sourceCost": 360000,
+          "roiRate": -100
+        },
+        {
+          "source": "紹介",
+          "leadCount": 13,
+          "convertedLeadCount": 1,
+          "wonCount": 0,
+          "pipelineAmount": 10620000,
+          "wonAmount": 0,
+          "sourceCost": 480000,
+          "roiRate": -100
+        },
+        {
+          "source": "Web問い合わせ",
+          "leadCount": 14,
+          "convertedLeadCount": 3,
+          "wonCount": 1,
+          "pipelineAmount": 41210000,
+          "wonAmount": 14640000,
+          "sourceCost": 580000,
+          "roiRate": 2424.1
+        },
+        {
+          "source": "コールドコール",
+          "leadCount": 16,
+          "convertedLeadCount": 4,
+          "wonCount": 0,
+          "pipelineAmount": 42720000,
+          "wonAmount": 0,
+          "sourceCost": 440000,
+          "roiRate": -100
+        },
+        {
+          "source": "展示会",
+          "leadCount": 7,
+          "convertedLeadCount": 3,
+          "wonCount": 1,
+          "pipelineAmount": 28640000,
+          "wonAmount": 8190000,
+          "sourceCost": 270000,
+          "roiRate": 2933.3
+        }
+      ],
+      "forecast": {
+        "opportunityAmount": 190449400,
+        "opportunityCount": 42,
+        "proposalAmount": 33226000,
+        "proposalCount": 110
+      }
+    },
+    "independent_sql_total": {
+      "total_count": "60",
+      "total_amount": "568910000"
+    },
+    "independent_sql_by_stage": [
+      {
+        "stage": "交渉",
+        "cnt": "5",
+        "amount": "54350000"
+      },
+      {
+        "stage": "受注",
+        "cnt": "5",
+        "amount": "47610000"
+      },
+      {
+        "stage": "失注",
+        "cnt": "5",
+        "amount": "37030000"
+      },
+      {
+        "stage": "提案準備",
+        "cnt": "10",
+        "amount": "74740000"
+      },
+      {
+        "stage": "要件確認",
+        "cnt": "12",
+        "amount": "133100000"
+      },
+      {
+        "stage": "見積提出",
+        "cnt": "8",
+        "amount": "78400000"
+      },
+      {
+        "stage": "見込",
+        "cnt": "15",
+        "amount": "143680000"
+      }
+    ],
+    "sql_vs_api_matched": true
+  }
+}

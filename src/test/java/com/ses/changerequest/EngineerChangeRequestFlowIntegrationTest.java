@@ -185,6 +185,41 @@ class EngineerChangeRequestFlowIntegrationTest {
 
         Engineer updatedEngineer = engineerMapper.selectById(engineerId);
         assertEquals("090-1234-5678", updatedEngineer.getPhone());
+
+        // 本人profile GETでも反映されていること（R1-P1-02）
+        authenticate(applicant, "要員");
+        var myProfile = changeRequestService.myProfile(engineerId);
+        assertEquals("090-1234-5678", myProfile.phone());
+    }
+
+    @Test
+    void email変更申請後に管理者がSysUserのemailを直接変更すると承認時conflictになる() {
+        long applicant = insertUser();
+        long approver = insertUser();
+        long engineerId = createEngineer();
+        link(engineerId, applicant);
+        insertRoute("profile.change", List.of(List.of(approver)));
+        authenticate(applicant, "要員");
+
+        EngineerChangeRequestService.ChangeRequestDto draft = changeRequestService.createDraft(engineerId,
+                "profile.change", Map.of("email", "new-email@example.com"));
+        EngineerChangeRequestService.ChangeRequestDto submitted = changeRequestService.submit(engineerId, draft.id());
+
+        // 承認前に管理者がSysUserのemailを直接更新
+        authenticate(approver, "管理者");
+        sysUserMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<com.ses.entity.SysUser>()
+                .eq("id", applicant)
+                .set("email", "concurrent-admin-changed@example.com"));
+
+        // 承認試行 -> conflictになる（R1-P1-03）
+        approvalEngineService.approve(submitted.approvalRequestId(), approver, "OK");
+        com.ses.entity.ApprovalRequest ar = approvalRequestMapper.selectById(submitted.approvalRequestId());
+        assertEquals("conflict", ar.getStatus());
+
+        // 再申請可能
+        authenticate(applicant, "要員");
+        EngineerChangeRequestService.ChangeRequestDto resubmitted = changeRequestService.resubmit(engineerId, draft.id());
+        assertEquals("申請中", resubmitted.status());
     }
 
     @Test

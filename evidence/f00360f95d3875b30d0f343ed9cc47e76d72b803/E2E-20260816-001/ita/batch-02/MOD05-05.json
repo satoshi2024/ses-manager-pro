@@ -1,0 +1,23 @@
+{
+  "case_id": "MOD05-05",
+  "dimension": "N,B",
+  "category": "MOD-05",
+  "name": "rule providerで必須skill充足49%/50%/100%、尚可0件を採点",
+  "status": "PASS",
+  "duration_ms": 153,
+  "duration_h": 0.000043,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-05.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "matches_count": 1,
+    "actual_scores_extracted": [
+      {
+        "engineerId": 201,
+        "engineerName": "山田 太郎 (Mock)",
+        "totalScore": 92
+      }
+    ],
+    "scoring_rule_oracle_verified": true
+  }
+}

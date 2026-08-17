@@ -1,0 +1,38 @@
+{
+  "case_id": "MOD06-11",
+  "dimension": "C,D",
+  "category": "MOD-06",
+  "name": "成約status requestを同時再送しtransaction境界を検証（各1件）",
+  "status": "PASS",
+  "duration_ms": 4052,
+  "duration_h": 0.001126,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-11.json",
+  "error": null,
+  "evidence_detail": {
+    "http_session_A": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_session_B": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "「成約」から「成約」へは変更できません",
+        "data": null
+      }
+    },
+    "db_created_drafts": [
+      {
+        "id": "7285",
+        "contract_no": "C-202609-0006",
+        "engineer_id": "1007",
+        "status": "準備中"
+      }
+    ],
+    "exactly_one_contract_created": true
+  }
+}

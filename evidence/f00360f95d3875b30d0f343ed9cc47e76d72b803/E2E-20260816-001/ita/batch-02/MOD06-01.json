@@ -1,0 +1,33 @@
+{
+  "case_id": "MOD06-01",
+  "dimension": "N,D,U",
+  "category": "MOD-06",
+  "name": "scope内の要員と案件で提案を新規作成",
+  "status": "PASS",
+  "duration_ms": 3744,
+  "duration_h": 0.00104,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD06-01.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_before": {
+      "cnt": "0"
+    },
+    "db_after_create": {
+      "id": "6263",
+      "engineer_id": "1001",
+      "project_id": "1",
+      "status": "書類選考中",
+      "proposed_unit_price": "750000",
+      "remarks": "テスト提案-1786979260458"
+    },
+    "initial_status_verified": true
+  }
+}

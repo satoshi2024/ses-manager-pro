@@ -287,8 +287,15 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
         sb.append(engineer.getId()).append('|').append(engineer.getUpdatedAt());
         switch (change.getRequestType()) {
             case TYPE_PROFILE -> {
+                Long linkedUserId = linkedUserId(engineer.getId());
+                SysUser linkedUser = linkedUserId == null ? null : sysUserMapper.selectById(linkedUserId);
                 for (String field : PROFILE_ALLOWED.stream().sorted().toList()) {
-                    sb.append('|').append(field).append('=').append(fieldValue(engineer, field));
+                    if ("email".equals(field)) {
+                        String emailVal = (linkedUser == null || linkedUser.getEmail() == null) ? "" : linkedUser.getEmail();
+                        sb.append('|').append(field).append('=').append(emailVal);
+                    } else {
+                        sb.append('|').append(field).append('=').append(fieldValue(engineer, field));
+                    }
                 }
             }
             case TYPE_SKILL -> {

@@ -1,0 +1,73 @@
+{
+  "case_id": "MOD05-06",
+  "dimension": "B",
+  "category": "MOD-05",
+  "name": "希望単価が範囲内、±9,999円、±10,000円、±100,000円、稼働日0/1/30/31日遅れ",
+  "status": "PASS",
+  "duration_ms": 229,
+  "duration_h": 0.000064,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-06.json",
+  "error": null,
+  "evidence_detail": {
+    "api_matches_sample": [
+      {
+        "projectId": null,
+        "projectName": null,
+        "score": 92,
+        "reason": "JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。",
+        "sellingPoints": "金融系の業務知識が豊富です。",
+        "engineerId": 201,
+        "engineerName": "山田 太郎 (Mock)",
+        "proposedPrice": 75,
+        "bpAvailabilityId": null,
+        "isExternalBp": null
+      }
+    ],
+    "price_gap_oracle_matrix": [
+      {
+        "gap": 0,
+        "penalty": 0,
+        "expectedScore": 20
+      },
+      {
+        "gap": 9999,
+        "penalty": 0,
+        "expectedScore": 20
+      },
+      {
+        "gap": 10000,
+        "penalty": 2,
+        "expectedScore": 18
+      },
+      {
+        "gap": 20000,
+        "penalty": 4,
+        "expectedScore": 16
+      },
+      {
+        "gap": 100000,
+        "penalty": 20,
+        "expectedScore": 0
+      }
+    ],
+    "date_delay_oracle_matrix": [
+      {
+        "daysLate": 0,
+        "expectedDateScore": 10
+      },
+      {
+        "daysLate": 1,
+        "expectedDateScore": 5
+      },
+      {
+        "daysLate": 30,
+        "expectedDateScore": 5
+      },
+      {
+        "daysLate": 31,
+        "expectedDateScore": 0
+      }
+    ],
+    "oracle_and_api_aligned": true
+  }
+}

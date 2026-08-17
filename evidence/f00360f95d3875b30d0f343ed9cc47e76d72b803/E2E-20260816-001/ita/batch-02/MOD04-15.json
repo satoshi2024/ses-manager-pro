@@ -1,0 +1,114 @@
+{
+  "case_id": "MOD04-15",
+  "dimension": "N,S,D",
+  "category": "MOD-04",
+  "name": "follow-ups 一覧を期日・担当・完了有無で取得し、scope 外を確認",
+  "status": "PASS",
+  "duration_ms": 921,
+  "duration_h": 0.000256,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD04-15.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "follow_ups_count": 23,
+    "sample_follow_ups": [
+      {
+        "id": 19512,
+        "createdAt": "2026-08-16T15:35:14",
+        "updatedAt": "2026-08-16T15:35:14",
+        "deletedFlag": 0,
+        "customerId": 2012,
+        "contactId": 2115,
+        "opportunityId": 14512,
+        "activityType": "メール",
+        "activityDate": "2026-08-14",
+        "title": "仙台システム開発株式会社への課題確認",
+        "content": "新規機能の設計・実装・リリース対応。",
+        "nextActionDate": "2026-08-01",
+        "completedFlag": 0,
+        "assigneeUserId": 113,
+        "version": 1,
+        "createdBy": 113
+      },
+      {
+        "id": 19636,
+        "createdAt": "2026-08-16T15:35:14",
+        "updatedAt": "2026-08-16T15:35:14",
+        "deletedFlag": 0,
+        "customerId": 2031,
+        "contactId": 2137,
+        "opportunityId": null,
+        "activityType": "電話",
+        "activityDate": "2026-06-15",
+        "title": "株式会社エスパワーへの提案",
+        "content": "プロジェクト管理支援および技術レビュー。",
+        "nextActionDate": "2026-08-01",
+        "completedFlag": 0,
+        "assigneeUserId": 112,
+        "version": 1,
+        "createdBy": 112
+      },
+      {
+        "id": 19609,
+        "createdAt": "2026-08-16T15:35:14",
+        "updatedAt": "2026-08-16T15:35:14",
+        "deletedFlag": 0,
+        "customerId": 2004,
+        "contactId": 2105,
+        "opportunityId": 14549,
+        "activityType": "その他",
+        "activityDate": "2026-08-07",
+        "title": "株式会社アイ・ティ・ソリューションへの提案",
+        "content": "プロジェクト管理支援および技術レビュー。",
+        "nextActionDate": "2026-08-02",
+        "completedFlag": 0,
+        "assigneeUserId": 110,
+        "version": 1,
+        "createdBy": 110
+      }
+    ],
+    "db_sql": "SELECT * FROM t_sales_activity WHERE next_action_date <= CURDATE() AND completed_flag = 0;",
+    "db_matching_records": [
+      {
+        "id": "19512",
+        "customer_id": "2012",
+        "title": "仙台システム開発株式会社への課題確認",
+        "activity_type": "メール",
+        "next_action_date": "2026-08-01",
+        "completed_flag": "0"
+      },
+      {
+        "id": "19636",
+        "customer_id": "2031",
+        "title": "株式会社エスパワーへの提案",
+        "activity_type": "電話",
+        "next_action_date": "2026-08-01",
+        "completed_flag": "0"
+      },
+      {
+        "id": "19609",
+        "customer_id": "2004",
+        "title": "株式会社アイ・ティ・ソリューションへの提案",
+        "activity_type": "その他",
+        "next_action_date": "2026-08-02",
+        "completed_flag": "0"
+      },
+      {
+        "id": "19650",
+        "customer_id": "2010",
+        "title": "株式会社未来設計へのフォロー",
+        "activity_type": "メール",
+        "next_action_date": "2026-08-02",
+        "completed_flag": "0"
+      },
+      {
+        "id": "19611",
+        "customer_id": "2006",
+        "title": "株式会社グローバルテックへのヒアリング",
+        "activity_type": "訪問",
+        "next_action_date": "2026-08-03",
+        "completed_flag": "0"
+      }
+    ]
+  }
+}
