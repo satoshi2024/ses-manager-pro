@@ -4,16 +4,17 @@
 
 - 計画基点: `99fbed8294dd1a6c320b4413b832f7c7b9292da1`
 - 計画 branch: `codex/half-finished-readiness-specs`（PR #72 で main へ merge 済み）
-- main 最新: **`8eea3fb4`（origin/main と同期済み・push 待ち）**。三 spec すべて merge 済み: HFP-01/HFP-02 は coordinator が 2026-08-16 に merge（HFP-01 merge commit → HFP-02 merge commit `3af17e38`）、HFP-03 は別 session が merge（`e892c5bd`、`.gitignore` fix `4dca8a46`、最終 PASS 記録 `5c639d79`→`e462779c`）、Review 記録 commit `8eea3fb4`。
+- main 最新: **`32752e0f09627a883c821a7b522c5c4d4182fcc0`（`origin/main` と同一）**。三 spec すべて merge 済み: HFP-01/HFP-02 は coordinator が 2026-08-16 に merge（HFP-01 merge commit → HFP-02 merge commit `3af17e38`）、HFP-03 は別 session が merge（`e892c5bd`、`.gitignore` fix `4dca8a46`、最終 PASS 記録 `5c639d79`→`e462779c`）、Review 記録と後続 S14 修正を含む現行 main は `32752e0f`。作業用 main worktree の未コミット差分はこの hash の証拠に含めない。
 - 最終更新日: 2026-08-17（横断統合Review Round 1 を実測して更新。推測による CLOSED なし）
 - **横断Review verdict（2026-08-16）: NOT REVIEWABLE** → **欠落 field 解消（2026-08-17）**（HFP-01 merge delta PASS、HFP-02 G6 CONDITIONAL PASS）。
 - **横断統合Review Round 1 verdict（2026-08-17・main `8eea3fb4`）: FAIL**。HFP 三 spec の merge delta・個別 Review に OPEN P0/P1 はないが、main 上の full suite（`verify-like-ci` 2206 run / 20 failure / 14 error / 0 skip）が BUILD FAILURE。原因は S14 起因の P1 finding **`HFP-CROSS-R1-P1-01`**（`engineer-schema-h2.sql` の `t_document_link` 列欠落で HFP-02 `CloudSignArtifactIntegrationTest` 含む 7 class 影響、leave 系 2 class 一意制約違反）。S14 owner の修正と main 回帰 green 達成後に横断 Round 2 を実施する。
+- **横断統合Review Round 2 packet（現行 main `32752e0f09627a883c821a7b522c5c4d4182fcc0`）: REVIEWABLE・独立 Reviewer 判定待ち**。base `8eea3fb4`→head `32752e0f` の fix delta に、上記2根因を直接修正した file は含まれない。clean detached worktree の直接回帰では Flyway smoke 2/0/0/0、Leave 4 class 合計24/0/0/0、CloudSignArtifact 15/6/1/0（skip 0）で、**`HFP-CROSS-R1-P1-01` は未解消**。独立 Reviewer の state transition/verdict と同一hashの `verify-like-ci.ps1` 集計を追記するまで、G04 は OPEN のままとする。
 - **欠落 field の解消（2026-08-17）**: ① は `HFP-01-REVIEW-20260817-merge-delta`（**PASS（merge delta）**・新規 P0/P1=0・REV-010 NOTE 1 件・独立再実行 2308/0/0/0 skip 0）で解消。② は `HFP-02-G6-REVIEW-20260817`（**CONDITIONAL PASS（merge delta）**・新規 P0/P1/P2=0・REV-015 NOTE 1 件・REV-009/014 VERIFIED_CLOSED・独立再実行 2246/0/0/0 skip 0）で解消。③（G01/G02 sandbox）は外部 credential 未提供のため従来どおり OPEN。**個別最終 PASS は HFP-01/HFP-02 とも未付与**（merge delta は合格、残 gate は外部依存のみ）。
 
 | ID | spec | spec状態 | implementation状態 | 開始 gate | base/head | Review | 次 action |
 |---|---|---|---|---|---|---|---|
 | HFP-01 | payroll-management | READY | 001〜010実装済・011 BLOCKED。**main merge 済み**（`V102_4` 採番） | freee test company/API spike 未達（HFP-G01 OPEN） | branch head `6d3c2f10`（Round 4 まで Review 済み）→ merge-prep `28ccd99c`。main merge commit は `3af17e38` の祖先 | branch head Round 1〜4: REV-001〜009 全 CLOSED。**merge delta Review `HFP-01-REVIEW-20260817-merge-delta`: PASS（merge delta）**・新規 P0/P1=0・REV-010 NOTE（history assert 欠落の指摘。非 blocker） | ① REV-010 の NOTE 対応（owner: HFP-01 実装担当、次回 sandbox 対応時に）② `FREEE_*` credential 提供 → HFP-01-011（sandbox E2E＋AC13）→ 最終 PASS |
-| HFP-02 | contract-document-esign | READY | 00〜08実装済・09/10 BLOCKED。**main merge 済み**（`V103_1` 再採番） | CloudSign正式API/sandbox spike 未達（HFP-G02 OPEN） | branch head `d958a813`（Round 3 まで Review 済み）→ merge-prep `292bfbbc`。main merge commit `3af17e38` | branch head Round 1〜3: REV-001〜014 全 CLOSED。**G6 merge delta Review `HFP-02-G6-REVIEW-20260817`: CONDITIONAL PASS（merge delta）**・新規 P0/P1/P2=0・REV-015 NOTE（3 message key の終止符差分。非 blocker）・REV-009/014 VERIFIED_CLOSED | ① REV-015 の NOTE 対応（owner: HFP-02 実装担当、次回 sandbox 対応時に）② BLK-01〜06（sandbox・運用承認・**BLK-06 `ADOPT/NOT_ADOPT` 業務決定**）→ HFP-02-09/10 → 最終 PASS |
+| HFP-02 | contract-document-esign | READY | 実装差分は存在するが、専任 `tasks.md` の 00〜10 checkbox が未同期。中央判定は **STATE_SYNC_OPEN**（09/10 は外部 gate BLOCKED）・**main merge 済み**（`V103_1` 再採番） | CloudSign正式API/sandbox spike 未達（HFP-G02 OPEN） | branch head `d958a813`（Round 3 まで Review 済み）→ merge-prep `292bfbbc`。main merge commit `3af17e38`、現行 main `32752e0f` | branch head Round 1〜3: REV-001〜014 全 CLOSED。**G6 merge delta Review `HFP-02-G6-REVIEW-20260817`: CONDITIONAL PASS（merge delta）**・新規 P0/P1/P2=0・REV-015 NOTE（3 message key の終止符差分。非 blocker）・REV-009/014 VERIFIED_CLOSED。ただし現行 main の `CloudSignArtifactIntegrationTest` は横断P1で失敗 | HFP-02 主担当が task/AC/finding ledger を実装差分と同期（期限 2026-08-18）。その後 BLK-01〜06（sandbox・運用承認・**BLK-06 `ADOPT/NOT_ADOPT` 業務決定**）→ HFP-02-09/10 → 最終 PASS |
 | HFP-03 | database-backup-recovery | READY | 001〜012 全実装・全 task `[x]`。**main merge 済み**（`e892c5bd`） | 隔離 PITR 実証済み。**production-ready は HFP-03-PROD-001〜008 確定待ち（HFP-G03 OPEN）** | base `841e10aa` / branch head `1e34f47e`（merge 後 fix 含め main `4dca8a46`/`5c639d79`） | **最終 PASS**（merge 済み head `5c639d79` の独立 Review、2026-08-16T10:00Z。OPEN finding 0・RF-P1-01 VERIFIED_CLOSED。drill rpo=60s・RTO segment 実測・mid_dml_replayed=1・secret scan 0） | PROD-001〜008（特に PROD-004 deployment/cutover provider・PROD-006 承認 verifier・PROD-007 代表 profile）を発注者が確定 → HFP-G03 CLOSED → production 接続・復元・cutover 開始 |
 
 `spec状態` は本計画 branch の独立文書 Review 後に `READY` へ変更する。production 実装の開始 gate が未達なら、spec が READY でも implementation は NOT READY のままとする。
@@ -23,6 +24,28 @@
 - main 上の統合回帰（実測）: HFP-01 merge 後 2246/0/0/0 skip 0（coordinator）→ HFP-02 merge 後 2246/0/0/0 skip 0（coordinator、log `%TEMP%\opencode\main-hfp01-02-verify.log`）→ HFP-03 merge 後の main で S13 セッションが **L4 全量 2308/0/0/0・0 skip**（`3c908d61`）を記録。HFP-03 の merge-prep 検証も `mvn -B clean test` 2030/0/0/0 skip 0。**これらの統合回帰は自動 gate の証拠であり、merge delta の独立 Review の代替にはならない（handbook §7/§11）。**
 - `verify-spec-package.ps1` は main `e462779c` 上で PASS（必須file/AC trace/task契約/local link の不整合 0）。
 - 三 spec の Review verdict は各 spec の `review-ledger.md`（main merge 済み版）を正とする。中央 ledger には要約のみ載せる。
+
+### 1.1 2026-08-17 状態同期の superseding 記録
+
+以下を本 ledger の現行状態とする。過去の merge-prep/Review 記録は履歴として保持し、現行 main の直接回帰で上書きしない。
+
+| spec | requirements / task / AC の現行状態 | finding / reviewer の現行状態 | coordinator 判断 |
+|---|---|---|---|
+| HFP-01 | `requirements.md` の AC01〜AC12/AC14 は merge delta evidence で確認済み。AC13/AC15 は freee sandbox が無いため BLOCKED。`tasks.md` は HFP-01-001〜010 `[x]`、HFP-01-011 `[ ]`。 | REV-001〜009 VERIFIED_CLOSED、REV-010 は非 blocker NOTE。個別最終 PASS は G01 未達のため未付与。 | 実装を再開しない。`FREEE_*` 提供後に HFP-01-011 を一task契約で開始する。 |
+| HFP-02 | 実装差分は main に存在するが、専任 `tasks.md` は HFP-02-00〜10 が全て `[ ]` のままで、AC trace と checkbox が未同期。AC-11-04/06、AC-12-04 は外部 sandbox/operator 不在で BLOCKED。 | merge delta G6 は CONDITIONAL PASS、REV-009/014 VERIFIED_CLOSED、REV-015 は非 blocker NOTE。ただし現行 main の `CloudSignArtifactIntegrationTest` 直接回帰は 15/6/1/0 で、横断 P1 `HFP-CROSS-R1-P1-01` が OPEN。 | HFP-02 主担当が `tasks.md`/`requirements.md`/`review-ledger.md` の実装済み範囲・BLOCKED AC・finding を同一証拠へ同期するまで STATE_SYNC_OPEN。CloudSign production code は統括対話で変更しない。 |
+| HFP-03 | `tasks.md` HFP-03-001〜012 は全て `[x]`。自動 AC/GATE は隔離実証で確認済みだが、PROD-001〜008 未確定の AC-012 系は BLOCKED。 | 独立 Review 最終 PASS、OPEN finding 0、RF-P1-01 VERIFIED_CLOSED。production-ready 判定だけは未付与。 | production topology/approver/profile が確定するまで production restore/cutover を開始しない。 |
+
+`HFP-CROSS-R1-P1-01` の状態遷移は `OPEN`（Round 1）→ `FIXED_BY_IMPLEMENTER` の証拠なし（`8eea3fb4..32752e0f` に根因対象 file なし）→ **OPEN 継続**（`32752e0f` direct regression）である。独立 Reviewer の確認前に `VERIFIED_CLOSED` へ遷移させない。
+
+### 1.2 担当境界・branch/worktree・merge順
+
+| spec | branch / worktree | 主担当 | shared file owner | merge順 / 次に開始可能な管理task |
+|---|---|---|---|---|
+| HFP-01 | `codex/hfp-01-payroll-freee` / `C:\Users\satos\AppData\Local\Temp\opencode\hfp-01-payroll-freee`（実装head `28ccd99c`、production code は main merge 済み） | HFP-01 専任対話 | `FreeeIntegrationService*`、`V102_4`、payroll専用設定 | 1番目。G01 credential 待ち、開始可能な production task なし。 |
+| HFP-02 | `codex/hfp-02-contract-cloudsign` / `C:\Users\satos\AppData\Local\Temp\opencode\hfp02`（実装head `292bfbbc`、production code は main merge 済み） | HFP-02 専任対話 | `ContractDocument*`、`CloudSign*`、`V103_1` | 2番目。まずtask/AC/finding同期、G02/BLK-01〜06 待ち。横断P1 fixはS14 ownerへ返却し、HFP-02へ再実装させない。 |
+| HFP-03 | `codex/hfp-03-backup-pitr` / `C:\Users\satos\AppData\Local\Temp\opencode\hfp-03-backup-pitr`（実装head `8a65156b`） | HFP-03 専任対話 | `ops/backup/**`、backup runbook/CI | 3番目（ops/docsのみ先行可）。G03 PROD-001〜008確定後にbaseline §4を再実行。 |
+
+start-conversation は三specの各ファイルを改変せず専任対話のhandoff sourceとして固定済み。現時点で外部 gate 未達のため新しい実装branch/worktreeを増やさず、既存担当へ返す同期・evidence・Review作業だけを開始する。
 
 ## 2. 固定 decision
 
@@ -46,10 +69,10 @@
 
 | gate ID | spec | 条件 | owner | 期限 | 証拠 | block範囲 | 状態 |
 |---|---|---|---|---|---|---|---|
-| HFP-G01 | HFP-01 | freee test companyで users/me・employee・salary・bonus を取得 | 未設定 | 未設定 | 実測なし。branch ledger `HFP-01-RUN-ISSUE-01`: `FREEE_*` 環境変数未提供のため HFP-01-011 BLOCKED | provider adapter/最終PASS | OPEN |
-| HFP-G02 | HFP-02 | CloudSign正式API文書、credential、sandbox送受信を確認 | 未設定 | 未設定 | 実測なし。branch ledger: HFP-02-BLK-01（sandbox申請依頼済み 2026-08-14）と BLK-02〜06 が OPEN | provider adapter/最終PASS | OPEN |
-| HFP-G03 | HFP-03 | 隔離MySQL 8 + repository + uploads fixtureでPITR可能 | 発注者（PROD-001〜008 確定） | 未設定 | 隔離実証は完了（branch ledger: integration SUCCESS・drill rpo=60s・mid_dml_replayed=1・secret scan 0・GATE-01〜05/07/08 PASS）。**残りは production 固有値 HFP-03-PROD-001〜008（特に PROD-004 deployment/cutover provider・PROD-006 承認 verifier・PROD-007 代表 profile）の発注者確定のみ**。確定後は `baseline.md` §4 の再実行手順に従う | 最終PASS（production-ready 判定） | OPEN |
-| HFP-G04 | ALL | merge後 `verify-like-ci` zero failure/error/skip | coordinator | 2026-08-17 | 過去 head（e462779c）では 2308/0/0/0 skip 0 達成。現 head `8eea3fb4` では S14 起因 P1（HFP-CROSS-R1-P1-01）により **2206 run / 20 failure / 14 error / 0 skip（BUILD FAILURE）** となり不成立。S14 修正後に再実証 | 全体release | **OPEN** |
+| HFP-G01 | HFP-01 | freee test companyで users/me・employee・salary・bonus を取得 | HFP-01 主担当＋freee連携運用担当 | 2026-08-21 | 実測なし。branch ledger `HFP-01-RUN-ISSUE-01`: `FREEE_*` 環境変数未提供のため HFP-01-011 BLOCKED。再実行は専用worktreeで `HFP-01-011` の sandbox E2E（users/me→employee→salary→bonus→revoke）を実施し、給与値・secretなしのredacted evidenceを固定 | HFP-01 final PASS、freee menu/API enable | OPEN |
+| HFP-G02 | HFP-02 | CloudSign正式API文書、credential、sandbox送受信を確認 | HFP-02 主担当＋契約業務責任者 | 2026-08-22 | 実測なし。branch ledger: HFP-02-BLK-01（sandbox申請依頼済み 2026-08-14）と BLK-02〜06 が OPEN。再実行は `HFP-02-00/09/10` の公式wire、create/upload/participant/send、timeout/結果不明、受信/取消判断を専用worktreeで行う | HFP-02 final PASS、CloudSign enable/canary | OPEN |
+| HFP-G03 | HFP-03 | 隔離MySQL 8 + repository + uploads fixtureでPITR可能 | HFP-03 主担当＋production ops責任者＋承認 verifier | 2026-08-24 | 隔離実証は完了（branch ledger: integration SUCCESS・drill rpo=60s・mid_dml_replayed=1・secret scan 0・GATE-01〜05/07/08 PASS）。残りは HFP-03-PROD-001〜008（特に PROD-004 deployment/cutover provider・PROD-006 承認 verifier・PROD-007 代表 profile）。値確定後、`baseline.md` §4 の preflight→representative drill→RPO/RTO→rollback 手順を再実行し、production接続・復元・cutoverは二者承認まで禁止 | HFP-03 production-ready 判定、production restore/cutover | OPEN |
+| HFP-G04 | ALL | merge後 `verify-like-ci` zero failure/error/skip | coordinator＋横断独立 Reviewer | 2026-08-25（HFP-CROSS-R1-P1-01 fix merge後） | 現行 main `32752e0f` の同一hash直接回帰: targeted 41/6/1/0、full `verify-like-ci.ps1` は実行中。完了後に tests/failures/errors/skipped/exit code と skip検査を追記し、同じ root cause の再起票はしない | 全体release | **OPEN** |
 
 ## 4. spec完了 packet
 

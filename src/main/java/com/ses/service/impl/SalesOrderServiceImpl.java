@@ -289,7 +289,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         // R4.1: 注文請の公開（注文請提出）を顧客portal組織へ通知（失敗は業務を妨げない）
         if (StatusConstants.ORDER_ACK_SUBMITTED.equals(newStatus) && order.getCustomerId() != null) {
             com.ses.service.portal.PortalNotificationService notification =
-                    portalNotificationServiceProvider.getIfAvailable();
+                    portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
             if (notification != null) {
                 try {
                     notification.notifyCustomerOrganization(order.getCustomerId(),

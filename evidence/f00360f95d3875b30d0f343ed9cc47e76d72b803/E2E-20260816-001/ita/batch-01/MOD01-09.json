@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD01-09",
+  "dimension": "A,E,D",
+  "category": "MOD-01",
+  "name": "CSRFトークン欠落/不正拒否403・GET /logout無効化検証",
+  "status": "PASS",
+  "duration_ms": 103,
+  "duration_h": 0.000029,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-09.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_csrf_status": 403,
+    "get_logout_status": 404,
+    "session_preserved_after_get_logout": true
+  }
+}

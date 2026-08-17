@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD03-09",
+  "dimension": "E,D",
+  "category": "MOD-03",
+  "name": "無効営業（sales07）割当拒否及び副担当残存時の主担当解除拒否検証",
+  "status": "PASS",
+  "duration_ms": 1497,
+  "duration_h": 0.000416,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-09.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 400,
+    "disabled_sales_blocked": true
+  }
+}

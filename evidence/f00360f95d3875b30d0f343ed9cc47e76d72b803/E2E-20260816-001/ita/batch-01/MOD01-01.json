@@ -1,0 +1,22 @@
+{
+  "case_id": "MOD01-01",
+  "dimension": "N,D",
+  "category": "MOD-01",
+  "name": "有効な s300.admin01 で正しいパスワードを入力してログイン",
+  "status": "PASS",
+  "duration_ms": 2041,
+  "duration_h": 0.000567,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-01.json",
+  "error": null,
+  "evidence_detail": {
+    "login_success": true,
+    "db_user_state": {
+      "id": "101",
+      "username": "s300.admin01",
+      "failed_count": "0",
+      "locked_until": "NULL",
+      "status": "1"
+    },
+    "db_session_recorded": true
+  }
+}

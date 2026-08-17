@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD01-06",
+  "dimension": "A,U,D",
+  "category": "MOD-01",
+  "name": "営業ロールのメニュー権限削除後のAPI 403及び管理者superuser bypass維持検証",
+  "status": "PASS",
+  "duration_ms": 1164,
+  "duration_h": 0.000323,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-06.json",
+  "error": null,
+  "evidence_detail": {
+    "sales_blocked": true,
+    "sales_status": 403,
+    "admin_bypass": true,
+    "admin_status": 200
+  }
+}

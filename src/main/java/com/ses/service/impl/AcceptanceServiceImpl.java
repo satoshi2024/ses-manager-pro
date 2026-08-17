@@ -347,7 +347,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     /** R4.1: 検収提出を顧客portal組織へ通知（送信失敗は業務を妨げない）。 */
     private void notifyCustomerSubmitted(Long customerId, String workMonth) {
         com.ses.service.portal.PortalNotificationService notification =
-                portalNotificationServiceProvider.getIfAvailable();
+                portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
         if (notification == null || customerId == null) {
             return;
         }
@@ -364,7 +364,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     /** R4.1: 差戻しを顧客portal組織へ通知。 */
     private void notifyCustomerRejected(Long contractId, String workMonth) {
         com.ses.service.portal.PortalNotificationService notification =
-                portalNotificationServiceProvider.getIfAvailable();
+                portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
         if (notification == null || contractId == null) {
             return;
         }

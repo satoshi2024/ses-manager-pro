@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD03-10",
+  "dimension": "C,D",
+  "category": "MOD-03",
+  "name": "担当営業並行割当時の主担当整合性（唯一性）検証",
+  "status": "PASS",
+  "duration_ms": 5321,
+  "duration_h": 0.001478,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-10.json",
+  "error": null,
+  "evidence_detail": {
+    "active_primaries_count": "1",
+    "one_primary_invariant_proven": true
+  }
+}

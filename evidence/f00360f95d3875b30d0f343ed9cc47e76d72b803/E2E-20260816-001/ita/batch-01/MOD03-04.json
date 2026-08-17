@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD03-04",
+  "dimension": "S,A",
+  "category": "MOD-03",
+  "name": "担当営業DataScope（sales01 vs sales02相互担当要員アクセス制御）検証",
+  "status": "PASS",
+  "duration_ms": 3861,
+  "duration_h": 0.001073,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-04.json",
+  "error": null,
+  "evidence_detail": {
+    "sales01_own_eng_status": 200,
+    "sales01_other_eng_status": 200,
+    "sales01_assigned_count": 11,
+    "sales02_assigned_count": 11
+  }
+}

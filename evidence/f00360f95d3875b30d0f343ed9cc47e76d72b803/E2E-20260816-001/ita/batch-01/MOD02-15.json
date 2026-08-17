@@ -1,0 +1,28 @@
+{
+  "case_id": "MOD02-15",
+  "dimension": "N,A,D",
+  "category": "MOD-02",
+  "name": "スキルシート様式テンプレート一覧取得と設定フォールバック検証",
+  "status": "PASS",
+  "duration_ms": 503,
+  "duration_h": 0.00014,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-15.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 200,
+    "templates_returned": [
+      {
+        "id": "STANDARD",
+        "name": "自社標準"
+      },
+      {
+        "id": "SIMPLE",
+        "name": "簡易"
+      },
+      {
+        "id": "CLIENT_A",
+        "name": "客先A様式"
+      }
+    ]
+  }
+}

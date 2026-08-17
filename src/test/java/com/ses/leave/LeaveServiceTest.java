@@ -87,6 +87,8 @@ class LeaveServiceTest {
             jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
                     + "VALUES (?, ?, '通常', 480)", calendarId, date);
         }
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?", USER_ID, engineerId);
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (92023, 92024)");
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
@@ -114,6 +116,9 @@ class LeaveServiceTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?", USER_ID, engineerId);
+        jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id IN (92023, 92024)");
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id IN (92023, 92024)");
     }
 
     @Test

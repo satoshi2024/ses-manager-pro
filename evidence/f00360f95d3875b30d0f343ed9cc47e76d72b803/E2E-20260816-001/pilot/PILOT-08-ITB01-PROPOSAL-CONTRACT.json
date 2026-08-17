@@ -1,0 +1,21 @@
+{
+  "case_id": "PILOT-08-ITB01-PROPOSAL-CONTRACT",
+  "category": "ITb 連携",
+  "name": "Proposal成約からContract契約草稿自動生成連携",
+  "status": "PASS",
+  "duration_ms": 8317,
+  "duration_h": 0.00231,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-08-ITB01-PROPOSAL-CONTRACT.json",
+  "error": null,
+  "evidence_detail": {
+    "proposal_id": 6164,
+    "step1_create_code": 200,
+    "step2_interview_code": 200,
+    "step3_wait_result_code": 200,
+    "step4_closed_code": 200,
+    "auto_generated_contract_id": "7263",
+    "auto_generated_contract_no": "C-202609-0005",
+    "proposal_history_rows": 3,
+    "state_machine_and_contract_link_proven": true
+  }
+}

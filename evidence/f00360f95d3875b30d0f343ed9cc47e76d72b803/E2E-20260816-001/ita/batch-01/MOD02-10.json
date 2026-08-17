@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD02-10",
+  "dimension": "E,D,U",
+  "category": "MOD-02",
+  "name": "候補者論理削除（deleted_flag=1）と履歴保持・不存在IDの404検証",
+  "status": "PASS",
+  "duration_ms": 3649,
+  "duration_h": 0.001014,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-10.json",
+  "error": null,
+  "evidence_detail": {
+    "delete_status": 200,
+    "db_deleted_flag": "1",
+    "get_after_delete_status": 404
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "PILOT-02-TX-ROLLBACK",
+  "category": "更新 transaction",
+  "name": "多表更新と障害時トランザクションRollback検証",
+  "status": "PASS",
+  "duration_ms": 2103,
+  "duration_h": 0.000584,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-02-TX-ROLLBACK.json",
+  "error": null,
+  "evidence_detail": {
+    "commit_success": true,
+    "rollback_blocked_status": 403,
+    "db_admin_menus_before": 40,
+    "db_admin_menus_after": 40,
+    "rollback_integrity_verified": true
+  }
+}

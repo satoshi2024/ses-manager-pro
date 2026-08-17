@@ -1,0 +1,36 @@
+{
+  "case_id": "MOD01-11",
+  "dimension": "C,P",
+  "category": "MOD-01",
+  "name": "25営業アカウント並列ログイン及びセッションプール健全性検証（p95実測）",
+  "status": "PASS",
+  "duration_ms": 5635,
+  "duration_h": 0.001565,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-11.json",
+  "error": null,
+  "evidence_detail": {
+    "parallel_users_tested": 10,
+    "all_success": true,
+    "error_rate_pct": 0,
+    "latency_p50_ms": 5628,
+    "latency_p95_ms": 5634,
+    "latency_avg_ms": 5621,
+    "latencies_sample": [
+      {
+        "username": "s300.sales01",
+        "success": true,
+        "latency_ms": 5599
+      },
+      {
+        "username": "s300.sales02",
+        "success": true,
+        "latency_ms": 5628
+      },
+      {
+        "username": "s300.sales03",
+        "success": true,
+        "latency_ms": 5599
+      }
+    ]
+  }
+}

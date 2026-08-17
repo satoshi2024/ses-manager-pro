@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD03-11",
+  "dimension": "D,E",
+  "category": "MOD-03",
+  "name": "稼働中契約を持つ要員の削除ガード（整合性保護）検証",
+  "status": "PASS",
+  "duration_ms": 2298,
+  "duration_h": 0.000638,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-11.json",
+  "error": null,
+  "evidence_detail": {
+    "delete_status": 400,
+    "db_deleted_flag": "0",
+    "delete_guarded": true
+  }
+}

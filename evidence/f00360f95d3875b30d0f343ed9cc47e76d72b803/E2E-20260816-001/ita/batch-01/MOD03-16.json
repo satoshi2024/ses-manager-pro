@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD03-16",
+  "dimension": "N,A,D",
+  "category": "MOD-03",
+  "name": "要員ログインアカウント紐付け（Account Link）CRUD検証",
+  "status": "PASS",
+  "duration_ms": 175,
+  "duration_h": 0.000049,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-16.json",
+  "error": null,
+  "evidence_detail": {
+    "current_link": {
+      "id": 31001,
+      "engineerId": 1001,
+      "sysUserId": 145,
+      "linkedBy": 1,
+      "linkedAt": "2026-08-16T15:35:13"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD01-16",
+  "dimension": "E,C,D",
+  "category": "MOD-01",
+  "name": "通知Outbox（t_notification_outbox）状態遷移と二重送信防止検証",
+  "status": "PASS",
+  "duration_ms": 4880,
+  "duration_h": 0.001356,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-16.json",
+  "error": null,
+  "evidence_detail": {
+    "outbox_id": 2104,
+    "step1_pending": "PENDING",
+    "step2_processing": "PROCESSING",
+    "step3_sent": "SENT"
+  }
+}

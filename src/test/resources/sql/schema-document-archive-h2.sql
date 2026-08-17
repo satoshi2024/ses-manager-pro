@@ -72,13 +72,15 @@ CREATE TABLE t_document_version (
 );
 
 CREATE TABLE t_document_link (
-  id           BIGINT       AUTO_INCREMENT PRIMARY KEY,
-  document_id  BIGINT       NOT NULL,
-  target_type  VARCHAR(50)  NOT NULL,
-  target_id    BIGINT       NOT NULL,
-  created_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-  updated_at   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-  deleted_flag TINYINT      NOT NULL DEFAULT 0,
+  id                             BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  document_id                    BIGINT       NOT NULL,
+  target_type                    VARCHAR(50)  NOT NULL,
+  target_id                      BIGINT       NOT NULL,
+  skill_sheet_confirmed_at       TIMESTAMP    NULL,
+  skill_sheet_confirmed_version   VARCHAR(64)  NULL,
+  created_at                     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  updated_at                     TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  deleted_flag                   TINYINT      NOT NULL DEFAULT 0,
   CONSTRAINT uk_document_link UNIQUE (document_id, target_type, target_id)
 );
 

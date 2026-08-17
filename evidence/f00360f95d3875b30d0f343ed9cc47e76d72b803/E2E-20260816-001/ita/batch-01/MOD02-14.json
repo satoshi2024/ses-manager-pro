@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD02-14",
+  "dimension": "N,B,A,D",
+  "category": "MOD-02",
+  "name": "スキルタグ（Skill Tag）全件一覧取得・登録・重複名拒否検証",
+  "status": "PASS",
+  "duration_ms": 2337,
+  "duration_h": 0.000649,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-14.json",
+  "error": null,
+  "evidence_detail": {
+    "create_status": 200,
+    "tag_id": 55,
+    "in_list": true
+  }
+}

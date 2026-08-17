@@ -245,7 +245,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         // R4.1: 請求書の公開（送付済）を顧客portal組織へ通知（失敗は業務を妨げない）
         if ("送付済".equals(status) && invoice.getCustomerId() != null) {
             com.ses.service.portal.PortalNotificationService notification =
-                    portalNotificationServiceProvider.getIfAvailable();
+                    portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
             if (notification != null) {
                 try {
                     notification.notifyCustomerOrganization(invoice.getCustomerId(), "DOCUMENT_PUBLISHED_INVOICE",
@@ -598,7 +598,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             }
             // R4.1: 支払済をBP portal組織へ通知（送信失敗は業務を妨げない）
             com.ses.service.portal.PortalNotificationService notification =
-                    portalNotificationServiceProvider.getIfAvailable();
+                    portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
             if (notification != null && bpPayment.getBpCompanyId() != null) {
                 try {
                     notification.notifyBpOrganization(bpPayment.getBpCompanyId(), "BP_PAYMENT_PAID",

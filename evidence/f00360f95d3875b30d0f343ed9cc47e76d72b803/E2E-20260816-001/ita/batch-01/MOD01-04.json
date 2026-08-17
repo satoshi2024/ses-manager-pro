@@ -1,0 +1,22 @@
+{
+  "case_id": "MOD01-04",
+  "dimension": "N,E,D",
+  "category": "MOD-01",
+  "name": "管理者が5ロールのユーザー作成、重複username・不正値拒否検証",
+  "status": "PASS",
+  "duration_ms": 3284,
+  "duration_h": 0.000912,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-04.json",
+  "error": null,
+  "evidence_detail": {
+    "create_status": 200,
+    "created_user": {
+      "id": "419",
+      "username": "user_test_1786975140726",
+      "role": "要員",
+      "status": "1"
+    },
+    "duplicate_status": 400,
+    "duplicate_blocked": true
+  }
+}

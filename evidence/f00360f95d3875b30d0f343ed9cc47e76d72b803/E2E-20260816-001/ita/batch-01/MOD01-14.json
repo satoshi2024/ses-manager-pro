@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD01-14",
+  "dimension": "A,D",
+  "category": "MOD-01",
+  "name": "Break-Glass緊急アクセスインシデント起票・2人承認・完了ライフサイクル検証",
+  "status": "PASS",
+  "duration_ms": 6853,
+  "duration_h": 0.001904,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-14.json",
+  "error": null,
+  "evidence_detail": {
+    "incident_id": 7,
+    "step1_status": "PENDING",
+    "step2_1st_approval_status": "PENDING",
+    "step3_2nd_approval_status": "ACTIVE",
+    "step4_closed_status": "CLOSED",
+    "dual_approval_verified": true
+  }
+}

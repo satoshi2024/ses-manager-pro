@@ -1,0 +1,42 @@
+{
+  "case_id": "MOD02-03",
+  "dimension": "N,D",
+  "category": "MOD-02",
+  "name": "候補者ステージ遷移（POST /activities）と履歴記録検証",
+  "status": "PASS",
+  "duration_ms": 5530,
+  "duration_h": 0.001536,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-03.json",
+  "error": null,
+  "evidence_detail": {
+    "stages_executed": [
+      {
+        "stage": "書類選考",
+        "statusCode": 200,
+        "dbStage": "書類選考"
+      },
+      {
+        "stage": "一次面談",
+        "statusCode": 200,
+        "dbStage": "一次面談"
+      },
+      {
+        "stage": "最終面談",
+        "statusCode": 200,
+        "dbStage": "最終面談"
+      },
+      {
+        "stage": "内定",
+        "statusCode": 200,
+        "dbStage": "内定"
+      },
+      {
+        "stage": "入社",
+        "statusCode": 200,
+        "dbStage": "入社"
+      }
+    ],
+    "activity_history_count": 5,
+    "all_passed": true
+  }
+}

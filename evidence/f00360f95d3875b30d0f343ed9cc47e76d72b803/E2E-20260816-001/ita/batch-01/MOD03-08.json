@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD03-08",
+  "dimension": "N,D",
+  "category": "MOD-03",
+  "name": "担当営業割当（初回割当の主担当強制及び新主担当追加時の旧主担当降格）検証",
+  "status": "PASS",
+  "duration_ms": 6379,
+  "duration_h": 0.001772,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-08.json",
+  "error": null,
+  "evidence_detail": {
+    "first_primary_forced": true,
+    "old_primary_demoted": true
+  }
+}

@@ -1,0 +1,5616 @@
+{
+  "freeze_metadata": {
+    "frozen_at": "2026-08-16T15:37:00+09:00",
+    "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+    "run_id": "CI-20260816-001",
+    "summary": {
+      "total_page_routes": 118,
+      "total_api_endpoints": 629,
+      "total_templates": 77,
+      "total_entities": 148,
+      "total_tables_mapped": 148,
+      "total_version_locked_entities": 54,
+      "total_datascope_assertions": 96
+    },
+    "definition_scope_notes": {
+      "principle": "本インベントリは 300 人規模結合テスト計画における coverage/分母算出の唯一の計画正本である（計画正本原則）。",
+      "page_routes": {
+        "count": 118,
+        "rule": "src/main/java/com/ses/controller/page 配下の全コントローラで宣言された @GetMapping, @RequestMapping を抽出。配列で複数 path が指定された mapping はすべて個別 path として展開計上。/my/**, /error 等の画面もすべて含む。"
+      },
+      "api_endpoints": {
+        "count": 629,
+        "rule": "src/main/java/com/ses/controller/api 配下および全 REST コントローラ（OAuth, Freee 等を含む）で定義された @GetMapping, @PostMapping, @PutMapping, @DeleteMapping, @PatchMapping, @RequestMapping を網羅抽出。複数 path 指定は展開計上。/api/** プレフィックス外のコールバック(/integrations/**)も含む。"
+      },
+      "templates": {
+        "count": 77,
+        "rule": "src/main/resources/templates 配下の全 .html ファイル（layout 断片, error 画面, my 画面, 各機能 area 画面）を相対パスで計上。"
+      },
+      "entities": {
+        "count": 148,
+        "rule": "src/main/java/com/ses/entity 配下の全 Java クラスを計上。@TableName が付与された RDB マッピング対象（142件）および Entity パッケージ内の Value Object / 複合キー / 埋め込みモデル（5件）を含む。"
+      },
+      "optimistic_locking_version": {
+        "count": 54,
+        "rule": "全 Entity クラスのうち、MyBatis-Plus の @Version アノテーションが付与された楽観ロック対象フィールドを保持するクラスを抽出。"
+      },
+      "datascope_assertions": {
+        "count": 96,
+        "rule": "全 Java ソースコード（Controller, Service）において呼び出されている dataScopeService.assert*（assertAllowedCustomer, assertAllowedEngineer, assertAllowedProposal, assertAllowedContract 等）の呼出箇所を抽出。"
+      },
+      "coverage_gate_confirmation": "今後のすべての ITa/ITb/E2E/UI/Monkey/Security/Coverage の分母・網羅率計算は、本 freeze インベントリ（frozen-inventory.json）を正本として機械集計・判定する。"
+    }
+  },
+  "page_routes": [
+    {
+      "controller": "LoginPageController",
+      "verb": "GET",
+      "path": "/"
+    },
+    {
+      "controller": "AcceptancePageController",
+      "verb": "GET",
+      "path": "/acceptance"
+    },
+    {
+      "controller": "AcceptancePageController",
+      "verb": "ANY",
+      "path": "/acceptance/acceptance"
+    },
+    {
+      "controller": "AiPageController",
+      "verb": "ANY",
+      "path": "/ai/ai"
+    },
+    {
+      "controller": "AiPageController",
+      "verb": "GET",
+      "path": "/ai/matching"
+    },
+    {
+      "controller": "AnalyticsPageController",
+      "verb": "GET",
+      "path": "/analytics"
+    },
+    {
+      "controller": "AnalyticsPageController",
+      "verb": "ANY",
+      "path": "/analytics/analytics"
+    },
+    {
+      "controller": "AnalyticsPageController",
+      "verb": "GET",
+      "path": "/analytics/availability-calendar"
+    },
+    {
+      "controller": "AnalyticsPageController",
+      "verb": "GET",
+      "path": "/analytics/staffing-heatmap"
+    },
+    {
+      "controller": "AnalyticsPageController",
+      "verb": "GET",
+      "path": "/analytics/staffing-scenario-compare"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "GET",
+      "path": "/approval"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "ANY",
+      "path": "/approval/approval"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "GET",
+      "path": "/approval/inbox"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "GET",
+      "path": "/approval/requests"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "GET",
+      "path": "/approval/requests/{id}"
+    },
+    {
+      "controller": "ApprovalPageController",
+      "verb": "GET",
+      "path": "/approval/routes"
+    },
+    {
+      "controller": "AuditLogPageController",
+      "verb": "GET",
+      "path": "/audit-log"
+    },
+    {
+      "controller": "AuditLogPageController",
+      "verb": "ANY",
+      "path": "/audit-log/audit-log"
+    },
+    {
+      "controller": "BpAvailabilityIngestionPageController",
+      "verb": "GET",
+      "path": "/bp-availability-ingestion"
+    },
+    {
+      "controller": "BpAvailabilityIngestionPageController",
+      "verb": "ANY",
+      "path": "/bp-availability-ingestion/bp-availability-ingestion"
+    },
+    {
+      "controller": "BpAvailabilityIngestionPageController",
+      "verb": "GET",
+      "path": "/bp-availability-ingestion/review/{jobId}"
+    },
+    {
+      "controller": "BpAvailabilityPageController",
+      "verb": "ANY",
+      "path": "/bp-availability/bp-availability"
+    },
+    {
+      "controller": "BpAvailabilityPageController",
+      "verb": "GET",
+      "path": "/bp-availability/list"
+    },
+    {
+      "controller": "BpCompanyPageController",
+      "verb": "GET",
+      "path": "/bp-company"
+    },
+    {
+      "controller": "BpCompanyPageController",
+      "verb": "GET",
+      "path": "/bp-company/{id}"
+    },
+    {
+      "controller": "BpCompanyPageController",
+      "verb": "ANY",
+      "path": "/bp-company/bp-company"
+    },
+    {
+      "controller": "BpCompanyPageController",
+      "verb": "GET",
+      "path": "/bp-company/list"
+    },
+    {
+      "controller": "CandidatePageController",
+      "verb": "ANY",
+      "path": "/candidate/candidate"
+    },
+    {
+      "controller": "CandidatePageController",
+      "verb": "GET",
+      "path": "/candidate/detail"
+    },
+    {
+      "controller": "CandidatePageController",
+      "verb": "GET",
+      "path": "/candidate/list"
+    },
+    {
+      "controller": "CompliancePageController",
+      "verb": "GET",
+      "path": "/compliance"
+    },
+    {
+      "controller": "ComplianceGatePageController",
+      "verb": "GET",
+      "path": "/compliance-gate"
+    },
+    {
+      "controller": "ComplianceGatePageController",
+      "verb": "ANY",
+      "path": "/compliance-gate/compliance-gate"
+    },
+    {
+      "controller": "CompliancePageController",
+      "verb": "ANY",
+      "path": "/compliance/compliance"
+    },
+    {
+      "controller": "ContractDocumentPageController",
+      "verb": "GET",
+      "path": "/contract-document"
+    },
+    {
+      "controller": "ContractDocumentPageController",
+      "verb": "ANY",
+      "path": "/contract-document/contract-document"
+    },
+    {
+      "controller": "ContractPageController",
+      "verb": "ANY",
+      "path": "/contract/contract"
+    },
+    {
+      "controller": "ContractPageController",
+      "verb": "GET",
+      "path": "/contract/detail/{id}"
+    },
+    {
+      "controller": "ContractPageController",
+      "verb": "GET",
+      "path": "/contract/gantt"
+    },
+    {
+      "controller": "ContractPageController",
+      "verb": "GET",
+      "path": "/contract/list"
+    },
+    {
+      "controller": "ContractPageController",
+      "verb": "GET",
+      "path": "/contract/renewal-calendar"
+    },
+    {
+      "controller": "CrmPageController",
+      "verb": "ANY",
+      "path": "/crm/crm"
+    },
+    {
+      "controller": "CrmPageController",
+      "verb": "GET",
+      "path": "/crm/leads"
+    },
+    {
+      "controller": "CrmPageController",
+      "verb": "GET",
+      "path": "/crm/opportunities"
+    },
+    {
+      "controller": "CrmPageController",
+      "verb": "GET",
+      "path": "/crm/opportunities/kpi"
+    },
+    {
+      "controller": "CustomerPageController",
+      "verb": "GET",
+      "path": "/customer/{id}"
+    },
+    {
+      "controller": "CustomerPageController",
+      "verb": "ANY",
+      "path": "/customer/customer"
+    },
+    {
+      "controller": "CustomerPageController",
+      "verb": "GET",
+      "path": "/customer/list"
+    },
+    {
+      "controller": "LoginPageController",
+      "verb": "GET",
+      "path": "/dashboard"
+    },
+    {
+      "controller": "LoginPageController",
+      "verb": "GET",
+      "path": "/dashboard/profit"
+    },
+    {
+      "controller": "DocumentPageController",
+      "verb": "GET",
+      "path": "/document/detail/{id}"
+    },
+    {
+      "controller": "DocumentPageController",
+      "verb": "ANY",
+      "path": "/document/document"
+    },
+    {
+      "controller": "DocumentPageController",
+      "verb": "GET",
+      "path": "/document/list"
+    },
+    {
+      "controller": "EmailTemplatePageController",
+      "verb": "ANY",
+      "path": "/email/template/email/template"
+    },
+    {
+      "controller": "EmailTemplatePageController",
+      "verb": "GET",
+      "path": "/email/template/list"
+    },
+    {
+      "controller": "EngineerPageController",
+      "verb": "GET",
+      "path": "/engineer/detail"
+    },
+    {
+      "controller": "EngineerPageController",
+      "verb": "ANY",
+      "path": "/engineer/engineer"
+    },
+    {
+      "controller": "EngineerPageController",
+      "verb": "GET",
+      "path": "/engineer/form"
+    },
+    {
+      "controller": "EngineerPageController",
+      "verb": "GET",
+      "path": "/engineer/list"
+    },
+    {
+      "controller": "InvoicePageController",
+      "verb": "GET",
+      "path": "/invoice"
+    },
+    {
+      "controller": "InvoicePageController",
+      "verb": "GET",
+      "path": "/invoice/{id}/print"
+    },
+    {
+      "controller": "InvoicePageController",
+      "verb": "ANY",
+      "path": "/invoice/invoice"
+    },
+    {
+      "controller": "I18nJsController",
+      "verb": "GET",
+      "path": "/js/i18n.js"
+    },
+    {
+      "controller": "LeavePageController",
+      "verb": "GET",
+      "path": "/leave"
+    },
+    {
+      "controller": "LoginPageController",
+      "verb": "GET",
+      "path": "/login"
+    },
+    {
+      "controller": "ManagementAccountingPageController",
+      "verb": "GET",
+      "path": "/management-accounting"
+    },
+    {
+      "controller": "ManagementAccountingPageController",
+      "verb": "GET",
+      "path": "/management-accounting/list"
+    },
+    {
+      "controller": "ManagementAccountingPageController",
+      "verb": "ANY",
+      "path": "/management-accounting/management-accounting"
+    },
+    {
+      "controller": "MfaPageController",
+      "verb": "GET",
+      "path": "/mfa/challenge"
+    },
+    {
+      "controller": "MfaPageController",
+      "verb": "GET",
+      "path": "/mfa/setup"
+    },
+    {
+      "controller": "MonthlyClosingPageController",
+      "verb": "GET",
+      "path": "/monthly-closing"
+    },
+    {
+      "controller": "MonthlyClosingPageController",
+      "verb": "ANY",
+      "path": "/monthly-closing/monthly-closing"
+    },
+    {
+      "controller": "AttendancePageController",
+      "verb": "GET",
+      "path": "/my/attendance"
+    },
+    {
+      "controller": "LeavePageController",
+      "verb": "GET",
+      "path": "/my/leave"
+    },
+    {
+      "controller": "MyTimesheetPageController",
+      "verb": "ANY",
+      "path": "/my/my"
+    },
+    {
+      "controller": "MyTimesheetPageController",
+      "verb": "GET",
+      "path": "/my/timesheet"
+    },
+    {
+      "controller": "OrganizationPageController",
+      "verb": "GET",
+      "path": "/organization"
+    },
+    {
+      "controller": "OrganizationPageController",
+      "verb": "GET",
+      "path": "/organization/list"
+    },
+    {
+      "controller": "OrganizationPageController",
+      "verb": "ANY",
+      "path": "/organization/organization"
+    },
+    {
+      "controller": "PayrollPageController",
+      "verb": "GET",
+      "path": "/payroll"
+    },
+    {
+      "controller": "PayrollPageController",
+      "verb": "ANY",
+      "path": "/payroll/payroll"
+    },
+    {
+      "controller": "PortalPageController",
+      "verb": "GET",
+      "path": "/portal"
+    },
+    {
+      "controller": "PortalAdminPageController",
+      "verb": "GET",
+      "path": "/portal-admin"
+    },
+    {
+      "controller": "PortalPageController",
+      "verb": "GET",
+      "path": "/portal/accept-invitation"
+    },
+    {
+      "controller": "PortalPageController",
+      "verb": "GET",
+      "path": "/portal/customer"
+    },
+    {
+      "controller": "PortalPageController",
+      "verb": "GET",
+      "path": "/portal/login"
+    },
+    {
+      "controller": "PortalPageController",
+      "verb": "GET",
+      "path": "/portal/terms"
+    },
+    {
+      "controller": "ProjectIngestionPageController",
+      "verb": "GET",
+      "path": "/project-ingestion"
+    },
+    {
+      "controller": "ProjectIngestionPageController",
+      "verb": "ANY",
+      "path": "/project-ingestion/project-ingestion"
+    },
+    {
+      "controller": "ProjectIngestionPageController",
+      "verb": "GET",
+      "path": "/project-ingestion/review/{id}"
+    },
+    {
+      "controller": "ProjectPageController",
+      "verb": "GET",
+      "path": "/project/detail"
+    },
+    {
+      "controller": "ProjectPageController",
+      "verb": "GET",
+      "path": "/project/form"
+    },
+    {
+      "controller": "ProjectPageController",
+      "verb": "GET",
+      "path": "/project/list"
+    },
+    {
+      "controller": "ProjectPageController",
+      "verb": "ANY",
+      "path": "/project/project"
+    },
+    {
+      "controller": "ProposalPageController",
+      "verb": "GET",
+      "path": "/proposal/kanban"
+    },
+    {
+      "controller": "ProposalPageController",
+      "verb": "ANY",
+      "path": "/proposal/proposal"
+    },
+    {
+      "controller": "QuotationPageController",
+      "verb": "GET",
+      "path": "/quotation"
+    },
+    {
+      "controller": "QuotationPageController",
+      "verb": "ANY",
+      "path": "/quotation/quotation"
+    },
+    {
+      "controller": "ReconciliationPageController",
+      "verb": "GET",
+      "path": "/reconciliation"
+    },
+    {
+      "controller": "ReconciliationPageController",
+      "verb": "ANY",
+      "path": "/reconciliation/reconciliation"
+    },
+    {
+      "controller": "ResumeIngestionPageController",
+      "verb": "GET",
+      "path": "/resume-ingestion"
+    },
+    {
+      "controller": "ResumeIngestionPageController",
+      "verb": "ANY",
+      "path": "/resume-ingestion/resume-ingestion"
+    },
+    {
+      "controller": "ResumeIngestionPageController",
+      "verb": "GET",
+      "path": "/resume-ingestion/review/{id}"
+    },
+    {
+      "controller": "SalesOrderPageController",
+      "verb": "GET",
+      "path": "/sales-order"
+    },
+    {
+      "controller": "SalesOrderPageController",
+      "verb": "ANY",
+      "path": "/sales-order/sales-order"
+    },
+    {
+      "controller": "SalesPerformancePageController",
+      "verb": "GET",
+      "path": "/sales-performance"
+    },
+    {
+      "controller": "SalesPerformancePageController",
+      "verb": "ANY",
+      "path": "/sales-performance/sales-performance"
+    },
+    {
+      "controller": "SystemConfigPageController",
+      "verb": "GET",
+      "path": "/system-config"
+    },
+    {
+      "controller": "SystemConfigPageController",
+      "verb": "ANY",
+      "path": "/system-config/system-config"
+    },
+    {
+      "controller": "TasksPageController",
+      "verb": "GET",
+      "path": "/tasks"
+    },
+    {
+      "controller": "TasksPageController",
+      "verb": "ANY",
+      "path": "/tasks/tasks"
+    },
+    {
+      "controller": "TodoPageController",
+      "verb": "GET",
+      "path": "/todo"
+    },
+    {
+      "controller": "TodoPageController",
+      "verb": "ANY",
+      "path": "/todo/todo"
+    },
+    {
+      "controller": "UserPageController",
+      "verb": "GET",
+      "path": "/user/list"
+    },
+    {
+      "controller": "UserPageController",
+      "verb": "ANY",
+      "path": "/user/user"
+    },
+    {
+      "controller": "WorkRecordPageController",
+      "verb": "GET",
+      "path": "/work-record"
+    },
+    {
+      "controller": "AttendancePageController",
+      "verb": "GET",
+      "path": "/work-record/attendance"
+    },
+    {
+      "controller": "WorkRecordPageController",
+      "verb": "ANY",
+      "path": "/work-record/work-record"
+    }
+  ],
+  "api_endpoints": [
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "GET",
+      "path": "/api/acceptances"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/{id}/accept"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/{id}/cancel-approval"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/{id}/document"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "GET",
+      "path": "/api/acceptances/{id}/document/download"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/{id}/reject"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/{id}/resubmit"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "ANY",
+      "path": "/api/acceptances/api/acceptances"
+    },
+    {
+      "controller": "AcceptanceApiController",
+      "verb": "POST",
+      "path": "/api/acceptances/submit"
+    },
+    {
+      "controller": "AiApiController",
+      "verb": "ANY",
+      "path": "/api/ai/api/ai"
+    },
+    {
+      "controller": "AiProposalController",
+      "verb": "ANY",
+      "path": "/api/ai/api/ai"
+    },
+    {
+      "controller": "AiRestController",
+      "verb": "ANY",
+      "path": "/api/ai/api/ai"
+    },
+    {
+      "controller": "AiRestController",
+      "verb": "POST",
+      "path": "/api/ai/chat"
+    },
+    {
+      "controller": "AiApiController",
+      "verb": "POST",
+      "path": "/api/ai/match/engineer-to-projects"
+    },
+    {
+      "controller": "AiApiController",
+      "verb": "GET",
+      "path": "/api/ai/matching/project/{projectId}"
+    },
+    {
+      "controller": "AiProposalController",
+      "verb": "POST",
+      "path": "/api/ai/proposal-draft"
+    },
+    {
+      "controller": "AnalyticsApiController",
+      "verb": "ANY",
+      "path": "/api/analytics/api/analytics"
+    },
+    {
+      "controller": "StaffingHeatmapApiController",
+      "verb": "ANY",
+      "path": "/api/analytics/api/analytics"
+    },
+    {
+      "controller": "AnalyticsApiController",
+      "verb": "GET",
+      "path": "/api/analytics/availability-timeline"
+    },
+    {
+      "controller": "AnalyticsApiController",
+      "verb": "GET",
+      "path": "/api/analytics/bench"
+    },
+    {
+      "controller": "StaffingHeatmapApiController",
+      "verb": "GET",
+      "path": "/api/analytics/staffing-heatmap"
+    },
+    {
+      "controller": "StaffingHeatmapApiController",
+      "verb": "GET",
+      "path": "/api/analytics/staffing-heatmap/drilldown"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "GET",
+      "path": "/api/analytics/staffing-scenarios"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "POST",
+      "path": "/api/analytics/staffing-scenarios"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "DELETE",
+      "path": "/api/analytics/staffing-scenarios/{id}"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "PUT",
+      "path": "/api/analytics/staffing-scenarios/{id}"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "GET",
+      "path": "/api/analytics/staffing-scenarios/{id}/allocations"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "POST",
+      "path": "/api/analytics/staffing-scenarios/{id}/allocations"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "DELETE",
+      "path": "/api/analytics/staffing-scenarios/{id}/allocations/{allocationId}"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "ANY",
+      "path": "/api/analytics/staffing-scenarios/api/analytics/staffing-scenarios"
+    },
+    {
+      "controller": "StaffingScenarioApiController",
+      "verb": "GET",
+      "path": "/api/analytics/staffing-scenarios/compare"
+    },
+    {
+      "controller": "AnalyticsApiController",
+      "verb": "GET",
+      "path": "/api/analytics/utilization-trend"
+    },
+    {
+      "controller": "BpPaymentApiController",
+      "verb": "ANY",
+      "path": "/api/api"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "ANY",
+      "path": "/api/approval/api/approval"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "GET",
+      "path": "/api/approval/delegations"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "POST",
+      "path": "/api/approval/delegations"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "DELETE",
+      "path": "/api/approval/delegations/{id}"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "GET",
+      "path": "/api/approval/requests"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "GET",
+      "path": "/api/approval/requests/{id}"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests/{id}/approve"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "GET",
+      "path": "/api/approval/requests/{id}/export"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests/{id}/reject"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests/{id}/resubmit"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests/{id}/return"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "POST",
+      "path": "/api/approval/requests/{id}/withdraw"
+    },
+    {
+      "controller": "ApprovalApiController",
+      "verb": "ANY",
+      "path": "/api/approval/requests/api/approval/requests"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "GET",
+      "path": "/api/approval/responsibilities"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "POST",
+      "path": "/api/approval/responsibilities"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "DELETE",
+      "path": "/api/approval/responsibilities/{id}"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "GET",
+      "path": "/api/approval/routes"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "POST",
+      "path": "/api/approval/routes"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "PUT",
+      "path": "/api/approval/routes/{id}"
+    },
+    {
+      "controller": "ApprovalAdministrationApiController",
+      "verb": "POST",
+      "path": "/api/approval/routes/preview"
+    },
+    {
+      "controller": "AuditLogApiController",
+      "verb": "GET",
+      "path": "/api/audit-logs"
+    },
+    {
+      "controller": "AuditLogApiController",
+      "verb": "ANY",
+      "path": "/api/audit-logs/api/audit-logs"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "ANY",
+      "path": "/api/autocomplete/api/autocomplete"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/assignable-users"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/cost-centers"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/customer-options"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/customers"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/engineers"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/legal-entities"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/organizations"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/project-options"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/projects"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/sales-users"
+    },
+    {
+      "controller": "AutocompleteApiController",
+      "verb": "GET",
+      "path": "/api/autocomplete/users"
+    },
+    {
+      "controller": "BatchOperationApiController",
+      "verb": "ANY",
+      "path": "/api/batch-operations/api/batch-operations"
+    },
+    {
+      "controller": "BatchOperationApiController",
+      "verb": "POST",
+      "path": "/api/batch-operations/engineers/apply"
+    },
+    {
+      "controller": "BatchOperationApiController",
+      "verb": "POST",
+      "path": "/api/batch-operations/engineers/preview"
+    },
+    {
+      "controller": "BatchOperationApiController",
+      "verb": "POST",
+      "path": "/api/batch-operations/projects/apply"
+    },
+    {
+      "controller": "BatchOperationApiController",
+      "verb": "POST",
+      "path": "/api/batch-operations/projects/preview"
+    },
+    {
+      "controller": "EngineerBpAffiliationApiController",
+      "verb": "POST",
+      "path": "/api/bp-affiliations"
+    },
+    {
+      "controller": "EngineerBpAffiliationApiController",
+      "verb": "ANY",
+      "path": "/api/bp-affiliations/api/bp-affiliations"
+    },
+    {
+      "controller": "EngineerBpAffiliationApiController",
+      "verb": "GET",
+      "path": "/api/bp-affiliations/engineer/{engineerId}"
+    },
+    {
+      "controller": "EngineerBpAffiliationApiController",
+      "verb": "GET",
+      "path": "/api/bp-affiliations/engineer/{engineerId}/active"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "GET",
+      "path": "/api/bp-availabilities"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "DELETE",
+      "path": "/api/bp-availabilities/{id}"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "GET",
+      "path": "/api/bp-availabilities/{id}"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "PUT",
+      "path": "/api/bp-availabilities/{id}"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "POST",
+      "path": "/api/bp-availabilities/{id}/promote"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "POST",
+      "path": "/api/bp-availabilities/{id}/review"
+    },
+    {
+      "controller": "BpAvailabilityApiController",
+      "verb": "ANY",
+      "path": "/api/bp-availabilities/api/bp-availabilities"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "GET",
+      "path": "/api/bp-availability-ingestions"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "GET",
+      "path": "/api/bp-availability-ingestions/{id}"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "POST",
+      "path": "/api/bp-availability-ingestions/{id}/confirm"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "POST",
+      "path": "/api/bp-availability-ingestions/{id}/reject"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "POST",
+      "path": "/api/bp-availability-ingestions/{id}/reparse"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "PUT",
+      "path": "/api/bp-availability-ingestions/{id}/review"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "ANY",
+      "path": "/api/bp-availability-ingestions/api/bp-availability-ingestions"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "POST",
+      "path": "/api/bp-availability-ingestions/paste"
+    },
+    {
+      "controller": "BpAvailabilityIngestionApiController",
+      "verb": "POST",
+      "path": "/api/bp-availability-ingestions/upload"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/{id}"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "PUT",
+      "path": "/api/bp-companies/{id}"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/{id}/bank-accounts"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies/{id}/bank-accounts"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "PUT",
+      "path": "/api/bp-companies/{id}/bank-accounts/{accountId}/approval"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "PUT",
+      "path": "/api/bp-companies/{id}/compliance-applicability"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies/{id}/compliance-check"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/{id}/price-negotiations"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies/{id}/price-negotiations"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "PUT",
+      "path": "/api/bp-companies/{id}/status"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies/{id}/terms"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/{id}/terms/active"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "ANY",
+      "path": "/api/bp-companies/api/bp-companies"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/autocomplete"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "POST",
+      "path": "/api/bp-companies/generate-risk-notifications"
+    },
+    {
+      "controller": "BpCompanyApiController",
+      "verb": "GET",
+      "path": "/api/bp-companies/risk-summary"
+    },
+    {
+      "controller": "BpMigrationApiController",
+      "verb": "ANY",
+      "path": "/api/bp-migrations/api/bp-migrations"
+    },
+    {
+      "controller": "BpMigrationApiController",
+      "verb": "GET",
+      "path": "/api/bp-migrations/exceptions"
+    },
+    {
+      "controller": "BpMigrationApiController",
+      "verb": "POST",
+      "path": "/api/bp-migrations/resolve"
+    },
+    {
+      "controller": "BpMigrationApiController",
+      "verb": "POST",
+      "path": "/api/bp-migrations/run"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "GET",
+      "path": "/api/candidates"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "POST",
+      "path": "/api/candidates"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "DELETE",
+      "path": "/api/candidates/{id}"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "GET",
+      "path": "/api/candidates/{id}"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "PUT",
+      "path": "/api/candidates/{id}"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "GET",
+      "path": "/api/candidates/{id}/activities"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "POST",
+      "path": "/api/candidates/{id}/activities"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "POST",
+      "path": "/api/candidates/{id}/convert-to-engineer"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "PUT",
+      "path": "/api/candidates/{id}/converted-engineer"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "ANY",
+      "path": "/api/candidates/api/candidates"
+    },
+    {
+      "controller": "CandidateApiController",
+      "verb": "GET",
+      "path": "/api/candidates/overdue"
+    },
+    {
+      "controller": "CashFlowApiController",
+      "verb": "ANY",
+      "path": "/api/cashflow/api/cashflow"
+    },
+    {
+      "controller": "CashFlowApiController",
+      "verb": "GET",
+      "path": "/api/cashflow/export"
+    },
+    {
+      "controller": "CashFlowApiController",
+      "verb": "GET",
+      "path": "/api/cashflow/forecast"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/adoptions/{id}/revoke"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "ANY",
+      "path": "/api/compliance-gate/api/compliance-gate"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/approvals"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/assignments"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/assignments/{id}/end"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/capabilities"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/evidence-picker"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/external-reviews"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/mappings"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings/{id}"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings/{id}/external-reviews"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings/{id}/manifest"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/mappings/{id}/promote"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings/{id}/requirement-groups"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/mappings/{id}/requirement-groups"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/mappings/{id}/transition"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/mappings/{id}/verifications"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/requirement-groups/{groupId}/requirement-types"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/reviewer-types"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/reviewer-types"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/reviewer-types/{id}"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/reviewer-types/{id}/dynamic"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/reviewer-types/{id}/enabled"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/subjects"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/subjects"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/subjects/{id}/qualifications"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/subjects/{id}/qualifications"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/submitted-reviews/{id}/adoptions"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/submitted-reviews/{id}/adoptions/approve"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/submitted-reviews/{id}/adoptions/reject"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/submitted-reviews/{id}/verifications"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/verification-methods"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/verification-methods"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/verification-methods/{id}"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "GET",
+      "path": "/api/compliance-gate/verification-sources"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/verification-sources"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/verification-sources/{id}"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "POST",
+      "path": "/api/compliance-gate/verifications"
+    },
+    {
+      "controller": "ComplianceGateApiController",
+      "verb": "PUT",
+      "path": "/api/compliance-gate/verifications/{id}/revoke"
+    },
+    {
+      "controller": "ComplianceApiController",
+      "verb": "ANY",
+      "path": "/api/compliance/api/compliance"
+    },
+    {
+      "controller": "ComplianceApiController",
+      "verb": "GET",
+      "path": "/api/compliance/findings"
+    },
+    {
+      "controller": "ComplianceApiController",
+      "verb": "POST",
+      "path": "/api/compliance/rules/run"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contract-documents"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contract-documents/{id}"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contract-documents/{id}/artifacts/{kind}"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contract-documents/{id}/send"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contract-documents/{id}/sync"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "ANY",
+      "path": "/api/contract-documents/api/contract-documents"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contract-documents/contract/{contractId}"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contract-documents/templates"
+    },
+    {
+      "controller": "ContractDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contract-documents/templates"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "POST",
+      "path": "/api/contracts"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "DELETE",
+      "path": "/api/contracts/{id}"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts/{id}"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "PUT",
+      "path": "/api/contracts/{id}"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contracts/{id}/compliance-documents"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-documents/{deliveryId}/confirm"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "GET",
+      "path": "/api/contracts/{id}/compliance-documents/{deliveryId}/download"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-documents/generate"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-documents/preview"
+    },
+    {
+      "controller": "ComplianceFindingApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-findings/{findingId}/ack"
+    },
+    {
+      "controller": "ComplianceFindingApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-findings/{findingId}/exception"
+    },
+    {
+      "controller": "ComplianceFindingApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-findings/{findingId}/in-progress"
+    },
+    {
+      "controller": "ComplianceFindingApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/compliance-findings/{findingId}/resolve"
+    },
+    {
+      "controller": "ContractComplianceProfileApiController",
+      "verb": "GET",
+      "path": "/api/contracts/{id}/compliance-profile"
+    },
+    {
+      "controller": "ContractComplianceProfileApiController",
+      "verb": "PUT",
+      "path": "/api/contracts/{id}/compliance-profile"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts/{id}/price-revisions"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "POST",
+      "path": "/api/contracts/{id}/price-revisions"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "DELETE",
+      "path": "/api/contracts/{id}/price-revisions/{month}"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "PUT",
+      "path": "/api/contracts/{id}/renewal-decision"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "PUT",
+      "path": "/api/contracts/{id}/status"
+    },
+    {
+      "controller": "ComplianceDocumentApiController",
+      "verb": "ANY",
+      "path": "/api/contracts/api/contracts"
+    },
+    {
+      "controller": "ComplianceFindingApiController",
+      "verb": "ANY",
+      "path": "/api/contracts/api/contracts"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "ANY",
+      "path": "/api/contracts/api/contracts"
+    },
+    {
+      "controller": "ContractComplianceProfileApiController",
+      "verb": "ANY",
+      "path": "/api/contracts/api/contracts"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts/check-active"
+    },
+    {
+      "controller": "ExportApiController",
+      "verb": "GET",
+      "path": "/api/contracts/export"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "POST",
+      "path": "/api/contracts/generate-renewals"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts/options"
+    },
+    {
+      "controller": "ContractApiController",
+      "verb": "GET",
+      "path": "/api/contracts/renewal-calendar"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "GET",
+      "path": "/api/crm/leads"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "POST",
+      "path": "/api/crm/leads"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "GET",
+      "path": "/api/crm/leads/{id}"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "PUT",
+      "path": "/api/crm/leads/{id}"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "POST",
+      "path": "/api/crm/leads/{id}/convert"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "ANY",
+      "path": "/api/crm/leads/api/crm/leads"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "GET",
+      "path": "/api/crm/leads/assignees"
+    },
+    {
+      "controller": "LeadApiController",
+      "verb": "GET",
+      "path": "/api/crm/leads/duplicates"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "GET",
+      "path": "/api/crm/opportunities"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "POST",
+      "path": "/api/crm/opportunities"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "GET",
+      "path": "/api/crm/opportunities/{id}"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "PUT",
+      "path": "/api/crm/opportunities/{id}"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "POST",
+      "path": "/api/crm/opportunities/{id}/convert"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "PUT",
+      "path": "/api/crm/opportunities/{id}/stage"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "ANY",
+      "path": "/api/crm/opportunities/api/crm/opportunities"
+    },
+    {
+      "controller": "OpportunityApiController",
+      "verb": "GET",
+      "path": "/api/crm/opportunities/kpi"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "GET",
+      "path": "/api/customers"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "POST",
+      "path": "/api/customers"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "GET",
+      "path": "/api/customers/{customerId}/contacts"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "POST",
+      "path": "/api/customers/{customerId}/contacts"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "PUT",
+      "path": "/api/customers/{customerId}/contacts/{contactId}"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "PUT",
+      "path": "/api/customers/{customerId}/contacts/{contactId}/retire"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "ANY",
+      "path": "/api/customers/{customerId}/contacts/api/customers/{customerId}/contacts"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "GET",
+      "path": "/api/customers/{customerId}/contacts/duplicates"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "GET",
+      "path": "/api/customers/{customerId}/contacts/export"
+    },
+    {
+      "controller": "CustomerContactApiController",
+      "verb": "GET",
+      "path": "/api/customers/{customerId}/contacts/recipients"
+    },
+    {
+      "controller": "CustomerTimelineApiController",
+      "verb": "GET",
+      "path": "/api/customers/{customerId}/timeline"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "DELETE",
+      "path": "/api/customers/{id}"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "GET",
+      "path": "/api/customers/{id}"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "PUT",
+      "path": "/api/customers/{id}"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "GET",
+      "path": "/api/customers/{id}/activities"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "POST",
+      "path": "/api/customers/{id}/activities"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "DELETE",
+      "path": "/api/customers/{id}/activities/{activityId}"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "PUT",
+      "path": "/api/customers/{id}/activities/{activityId}"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "PUT",
+      "path": "/api/customers/{id}/activities/{activityId}/complete"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "GET",
+      "path": "/api/customers/{id}/summary"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "ANY",
+      "path": "/api/customers/api/customers"
+    },
+    {
+      "controller": "CustomerTimelineApiController",
+      "verb": "ANY",
+      "path": "/api/customers/api/customers"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "ANY",
+      "path": "/api/customers/api/customers"
+    },
+    {
+      "controller": "SalesActivityApiController",
+      "verb": "GET",
+      "path": "/api/customers/follow-ups"
+    },
+    {
+      "controller": "CustomerApiController",
+      "verb": "GET",
+      "path": "/api/customers/options"
+    },
+    {
+      "controller": "DashboardApiController",
+      "verb": "ANY",
+      "path": "/api/dashboard/api/dashboard"
+    },
+    {
+      "controller": "DashboardApiController",
+      "verb": "GET",
+      "path": "/api/dashboard/profit-analysis"
+    },
+    {
+      "controller": "ExportApiController",
+      "verb": "GET",
+      "path": "/api/dashboard/revenue-export"
+    },
+    {
+      "controller": "DashboardApiController",
+      "verb": "GET",
+      "path": "/api/dashboard/summary"
+    },
+    {
+      "controller": "DashboardApiController",
+      "verb": "GET",
+      "path": "/api/dashboard/utilization-forecast"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "GET",
+      "path": "/api/documents"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "GET",
+      "path": "/api/documents/{id}"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "POST",
+      "path": "/api/documents/{id}/disposal"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "POST",
+      "path": "/api/documents/{id}/legal-hold"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "GET",
+      "path": "/api/documents/{id}/versions/{versionNo}/download"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "ANY",
+      "path": "/api/documents/api/documents"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "POST",
+      "path": "/api/documents/disposal/{requestId}/approve"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "POST",
+      "path": "/api/documents/disposal/{requestId}/execute"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "POST",
+      "path": "/api/documents/disposal/{requestId}/reject"
+    },
+    {
+      "controller": "DocumentApiController",
+      "verb": "GET",
+      "path": "/api/documents/export/zip"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "GET",
+      "path": "/api/email-templates"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "POST",
+      "path": "/api/email-templates"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "DELETE",
+      "path": "/api/email-templates/{id}"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "GET",
+      "path": "/api/email-templates/{id}"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "PUT",
+      "path": "/api/email-templates/{id}"
+    },
+    {
+      "controller": "EmailTemplateApiController",
+      "verb": "ANY",
+      "path": "/api/email-templates/api/email-templates"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "GET",
+      "path": "/api/engineers"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "POST",
+      "path": "/api/engineers"
+    },
+    {
+      "controller": "EngineerAccountLinkApiController",
+      "verb": "DELETE",
+      "path": "/api/engineers/{engineerId}/account-link"
+    },
+    {
+      "controller": "EngineerAccountLinkApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/account-link"
+    },
+    {
+      "controller": "EngineerAccountLinkApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/account-link"
+    },
+    {
+      "controller": "EngineerAccountLinkApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{engineerId}/account-link/api/engineers/{engineerId}/account-link"
+    },
+    {
+      "controller": "EngineerAccountLinkApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/account-link/candidates"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/allocations"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/allocations"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{engineerId}/allocations/{allocationId}"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/allocations/{allocationId}/confirm"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/allocations/{allocationId}/discard"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/careers"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/careers"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "DELETE",
+      "path": "/api/engineers/{engineerId}/careers/{id}"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/careers/{id}"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{engineerId}/careers/{id}"
+    },
+    {
+      "controller": "EngineerCareerApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{engineerId}/careers/api/engineers/{engineerId}/careers"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/followups"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{engineerId}/followups"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "DELETE",
+      "path": "/api/engineers/{engineerId}/followups/{id}"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/followups/{id}"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{engineerId}/followups/{id}"
+    },
+    {
+      "controller": "EngineerFollowupApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{engineerId}/followups/api/engineers/{engineerId}/followups"
+    },
+    {
+      "controller": "RetentionRiskApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/retention-risk"
+    },
+    {
+      "controller": "RetentionRiskApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{engineerId}/retention-risk/api/engineers/{engineerId}/retention-risk"
+    },
+    {
+      "controller": "EngineerSkillApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{engineerId}/skills"
+    },
+    {
+      "controller": "EngineerSkillApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{engineerId}/skills"
+    },
+    {
+      "controller": "EngineerSkillApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{engineerId}/skills/api/engineers/{engineerId}/skills"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "DELETE",
+      "path": "/api/engineers/{id}"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{id}"
+    },
+    {
+      "controller": "SkillSheetApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/{id}/api/engineers/{id}"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}/proposal-history"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}/sales-reps"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "POST",
+      "path": "/api/engineers/{id}/sales-reps"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "DELETE",
+      "path": "/api/engineers/{id}/sales-reps/{assignmentId}"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "PUT",
+      "path": "/api/engineers/{id}/sales-reps/{assignmentId}/primary"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}/sales-reps/history"
+    },
+    {
+      "controller": "SkillSheetApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}/skill-sheet.pdf"
+    },
+    {
+      "controller": "SkillSheetApiController",
+      "verb": "GET",
+      "path": "/api/engineers/{id}/skill-sheet.xlsx"
+    },
+    {
+      "controller": "AllocationApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/api/engineers"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/api/engineers"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "ANY",
+      "path": "/api/engineers/api/engineers"
+    },
+    {
+      "controller": "ExportApiController",
+      "verb": "GET",
+      "path": "/api/engineers/export"
+    },
+    {
+      "controller": "CsvApiController",
+      "verb": "GET",
+      "path": "/api/engineers/export-csv"
+    },
+    {
+      "controller": "CsvApiController",
+      "verb": "POST",
+      "path": "/api/engineers/import-csv"
+    },
+    {
+      "controller": "EngineerApiController",
+      "verb": "GET",
+      "path": "/api/engineers/options"
+    },
+    {
+      "controller": "EngineerSalesApiController",
+      "verb": "GET",
+      "path": "/api/engineers/sales-user-options"
+    },
+    {
+      "controller": "FileApiController",
+      "verb": "POST",
+      "path": "/api/files"
+    },
+    {
+      "controller": "FileApiController",
+      "verb": "GET",
+      "path": "/api/files/{storedName}"
+    },
+    {
+      "controller": "FileApiController",
+      "verb": "POST",
+      "path": "/api/files/{storedName}/rescan"
+    },
+    {
+      "controller": "FileApiController",
+      "verb": "ANY",
+      "path": "/api/files/api/files"
+    },
+    {
+      "controller": "ExternalIdentityApiController",
+      "verb": "POST",
+      "path": "/api/identity-providers/{providerId}/external-identities"
+    },
+    {
+      "controller": "ExternalIdentityApiController",
+      "verb": "ANY",
+      "path": "/api/identity-providers/{providerId}/external-identities/api/identity-providers/{providerId}/external-identities"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/{id}"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/{id}/payments"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "POST",
+      "path": "/api/invoices/{id}/payments"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "DELETE",
+      "path": "/api/invoices/{id}/payments/{paymentId}"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/{id}/pdf"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/{id}/recipient-candidates"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "POST",
+      "path": "/api/invoices/{id}/reminder"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/{id}/reminders"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "PUT",
+      "path": "/api/invoices/{id}/status"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "PUT",
+      "path": "/api/invoices/{id}/void"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/aging"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/aging-export"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/aging/detail"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "ANY",
+      "path": "/api/invoices/api/invoices"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/bp-payments"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "PUT",
+      "path": "/api/invoices/bp-payments/{id}"
+    },
+    {
+      "controller": "BpPaymentApiController",
+      "verb": "DELETE",
+      "path": "/api/invoices/bp-payments/{id}/layer"
+    },
+    {
+      "controller": "BpPaymentApiController",
+      "verb": "PUT",
+      "path": "/api/invoices/bp-payments/{id}/layer"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "POST",
+      "path": "/api/invoices/generate"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "GET",
+      "path": "/api/invoices/reminder-templates"
+    },
+    {
+      "controller": "InvoiceApiController",
+      "verb": "POST",
+      "path": "/api/invoices/reminders"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "GET",
+      "path": "/api/leave"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "GET",
+      "path": "/api/leave/ledger/balance"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "POST",
+      "path": "/api/leave/ledger/grants"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "ANY",
+      "path": "/api/management-accounting/api/management-accounting"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "GET",
+      "path": "/api/management-accounting/budgets"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "POST",
+      "path": "/api/management-accounting/budgets"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "POST",
+      "path": "/api/management-accounting/budgets/csv"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "GET",
+      "path": "/api/management-accounting/drilldown"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "GET",
+      "path": "/api/management-accounting/export"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "GET",
+      "path": "/api/management-accounting/snapshots"
+    },
+    {
+      "controller": "ManagementAccountingApiController",
+      "verb": "GET",
+      "path": "/api/management-accounting/summary"
+    },
+    {
+      "controller": "MonthlyClosingApiController",
+      "verb": "ANY",
+      "path": "/api/monthly-closing/api/monthly-closing"
+    },
+    {
+      "controller": "MonthlyClosingApiController",
+      "verb": "POST",
+      "path": "/api/monthly-closing/confirm"
+    },
+    {
+      "controller": "MonthlyClosingApiController",
+      "verb": "POST",
+      "path": "/api/monthly-closing/reopen"
+    },
+    {
+      "controller": "MonthlyClosingApiController",
+      "verb": "GET",
+      "path": "/api/monthly-closing/summary"
+    },
+    {
+      "controller": "MyAcceptanceApiController",
+      "verb": "GET",
+      "path": "/api/my/acceptances"
+    },
+    {
+      "controller": "MyAcceptanceApiController",
+      "verb": "ANY",
+      "path": "/api/my/acceptances/api/my/acceptances"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "GET",
+      "path": "/api/my/attendance"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "DELETE",
+      "path": "/api/my/attendance/daily"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/my/attendance/daily"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/my/attendance/submit"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "GET",
+      "path": "/api/my/leave"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "POST",
+      "path": "/api/my/leave"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "POST",
+      "path": "/api/my/leave/{id}/cancel"
+    },
+    {
+      "controller": "LeaveApiController",
+      "verb": "POST",
+      "path": "/api/my/leave/{id}/resubmit"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "GET",
+      "path": "/api/my/timesheet"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "GET",
+      "path": "/api/my/timesheet/{workRecordId}/report.pdf"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "POST",
+      "path": "/api/my/timesheet/{workRecordId}/submit"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "ANY",
+      "path": "/api/my/timesheet/api/my/timesheet"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "DELETE",
+      "path": "/api/my/timesheet/daily"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "POST",
+      "path": "/api/my/timesheet/daily"
+    },
+    {
+      "controller": "MyTimesheetApiController",
+      "verb": "POST",
+      "path": "/api/my/timesheet/submit-by-month"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "GET",
+      "path": "/api/notifications"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "PUT",
+      "path": "/api/notifications/{id}/read"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "ANY",
+      "path": "/api/notifications/api/notifications"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "POST",
+      "path": "/api/notifications/generate"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "GET",
+      "path": "/api/notifications/page"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "PUT",
+      "path": "/api/notifications/read-all"
+    },
+    {
+      "controller": "NotificationApiController",
+      "verb": "GET",
+      "path": "/api/notifications/unread-count"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "GET",
+      "path": "/api/organizations"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "POST",
+      "path": "/api/organizations"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "DELETE",
+      "path": "/api/organizations/{id}"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "GET",
+      "path": "/api/organizations/{id}"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "PUT",
+      "path": "/api/organizations/{id}"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "POST",
+      "path": "/api/organizations/{id}/merge"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "PUT",
+      "path": "/api/organizations/{id}/status"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "GET",
+      "path": "/api/organizations/{userId}/assignments"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "POST",
+      "path": "/api/organizations/{userId}/assignments"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "DELETE",
+      "path": "/api/organizations/{userId}/assignments/{assignmentId}"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "POST",
+      "path": "/api/organizations/{userId}/transfer"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "ANY",
+      "path": "/api/organizations/api/organizations"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "GET",
+      "path": "/api/organizations/cost-centers"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "POST",
+      "path": "/api/organizations/cost-centers"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "DELETE",
+      "path": "/api/organizations/cost-centers/{id}"
+    },
+    {
+      "controller": "OrganizationApiController",
+      "verb": "PUT",
+      "path": "/api/organizations/cost-centers/{id}"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "ANY",
+      "path": "/api/payroll/api/payroll"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "GET",
+      "path": "/api/payroll/employees"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "GET",
+      "path": "/api/payroll/engineer-candidates"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "DELETE",
+      "path": "/api/payroll/links/{engineerId}"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "PUT",
+      "path": "/api/payroll/links/{engineerId}"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "GET",
+      "path": "/api/payroll/statements"
+    },
+    {
+      "controller": "FreeePayrollApiController",
+      "verb": "GET",
+      "path": "/api/payroll/status"
+    },
+    {
+      "controller": "PermissionGroupApiController",
+      "verb": "GET",
+      "path": "/api/permission-groups"
+    },
+    {
+      "controller": "PermissionGroupApiController",
+      "verb": "ANY",
+      "path": "/api/permission-groups/api/permission-groups"
+    },
+    {
+      "controller": "PermissionGroupApiController",
+      "verb": "GET",
+      "path": "/api/permission-groups/users/{userId}"
+    },
+    {
+      "controller": "PermissionGroupApiController",
+      "verb": "PUT",
+      "path": "/api/permission-groups/users/{userId}"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/access-logs"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "ANY",
+      "path": "/api/portal-admin/api/portal-admin"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/invitations"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/orgs"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "POST",
+      "path": "/api/portal-admin/orgs"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "PUT",
+      "path": "/api/portal-admin/orgs/{id}/status"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "POST",
+      "path": "/api/portal-admin/orgs/{orgId}/invitations"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/orgs/{orgId}/users"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/terms"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "PUT",
+      "path": "/api/portal-admin/terms"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "POST",
+      "path": "/api/portal-admin/users/{id}/mfa-reset"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "PUT",
+      "path": "/api/portal-admin/users/{id}/org-admin"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "GET",
+      "path": "/api/portal-admin/users/{id}/sessions"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "POST",
+      "path": "/api/portal-admin/users/{id}/sessions/revoke"
+    },
+    {
+      "controller": "PortalAdminApiController",
+      "verb": "PUT",
+      "path": "/api/portal-admin/users/{id}/status"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "POST",
+      "path": "/api/portal/auth/accept-invitation"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "ANY",
+      "path": "/api/portal/auth/api/portal/auth"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "POST",
+      "path": "/api/portal/auth/consent"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "POST",
+      "path": "/api/portal/auth/login"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "POST",
+      "path": "/api/portal/auth/logout"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "GET",
+      "path": "/api/portal/auth/me"
+    },
+    {
+      "controller": "PortalAuthApiController",
+      "verb": "POST",
+      "path": "/api/portal/auth/mfa/complete"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "ANY",
+      "path": "/api/portal/bp/api/portal/bp"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/availabilities"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "POST",
+      "path": "/api/portal/bp/availabilities"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "PUT",
+      "path": "/api/portal/bp/availabilities/{id}"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "POST",
+      "path": "/api/portal/bp/availabilities/{id}/stop"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/bank-accounts"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "POST",
+      "path": "/api/portal/bp/bank-accounts"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/payments"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/payments/{id}"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "POST",
+      "path": "/api/portal/bp/payments/{id}/confirm-receipt"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/payments/{id}/submissions"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "POST",
+      "path": "/api/portal/bp/payments/{id}/submissions"
+    },
+    {
+      "controller": "PortalBpApiController",
+      "verb": "GET",
+      "path": "/api/portal/bp/payments/{paymentId}/submissions/{documentId}/download"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/acceptances"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/acceptances/{id}"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "POST",
+      "path": "/api/portal/customer/acceptances/{id}/accept"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/acceptances/{id}/document/download"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "POST",
+      "path": "/api/portal/customer/acceptances/{id}/reject"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "ANY",
+      "path": "/api/portal/customer/api/portal/customer"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/contracts"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/contracts/{id}"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/contracts/{id}/document/download"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/invoices"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/invoices/{id}"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/invoices/{id}/download"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "POST",
+      "path": "/api/portal/customer/invoices/{id}/register"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/quotations"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/quotations/{id}/download"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/sales-orders"
+    },
+    {
+      "controller": "PortalCustomerApiController",
+      "verb": "GET",
+      "path": "/api/portal/customer/sales-orders/{id}/acknowledgement/download"
+    },
+    {
+      "controller": "ProfileApiController",
+      "verb": "ANY",
+      "path": "/api/profile/api/profile"
+    },
+    {
+      "controller": "ProfileApiController",
+      "verb": "PUT",
+      "path": "/api/profile/password"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "GET",
+      "path": "/api/project-ingestions"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "GET",
+      "path": "/api/project-ingestions/{id}"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "POST",
+      "path": "/api/project-ingestions/{id}/confirm"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "POST",
+      "path": "/api/project-ingestions/{id}/reject"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "POST",
+      "path": "/api/project-ingestions/{id}/reparse"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "PUT",
+      "path": "/api/project-ingestions/{id}/review"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "ANY",
+      "path": "/api/project-ingestions/api/project-ingestions"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "POST",
+      "path": "/api/project-ingestions/paste"
+    },
+    {
+      "controller": "ProjectIngestionApiController",
+      "verb": "POST",
+      "path": "/api/project-ingestions/upload"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "GET",
+      "path": "/api/projects"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "POST",
+      "path": "/api/projects"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "PUT",
+      "path": "/api/projects"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "DELETE",
+      "path": "/api/projects/{id}"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "GET",
+      "path": "/api/projects/{id}"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "GET",
+      "path": "/api/projects/{projectId}/board"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "GET",
+      "path": "/api/projects/{projectId}/positions"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "POST",
+      "path": "/api/projects/{projectId}/positions"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "DELETE",
+      "path": "/api/projects/{projectId}/positions/{positionId}"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "PUT",
+      "path": "/api/projects/{projectId}/positions/{positionId}"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "POST",
+      "path": "/api/projects/{projectId}/positions/{positionId}/status"
+    },
+    {
+      "controller": "ProjectSkillApiController",
+      "verb": "GET",
+      "path": "/api/projects/{projectId}/skills"
+    },
+    {
+      "controller": "ProjectSkillApiController",
+      "verb": "PUT",
+      "path": "/api/projects/{projectId}/skills"
+    },
+    {
+      "controller": "ProjectSkillApiController",
+      "verb": "ANY",
+      "path": "/api/projects/{projectId}/skills/api/projects/{projectId}/skills"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "ANY",
+      "path": "/api/projects/api/projects"
+    },
+    {
+      "controller": "ProjectPositionApiController",
+      "verb": "ANY",
+      "path": "/api/projects/api/projects"
+    },
+    {
+      "controller": "CsvApiController",
+      "verb": "GET",
+      "path": "/api/projects/export-csv"
+    },
+    {
+      "controller": "ProjectApiController",
+      "verb": "GET",
+      "path": "/api/projects/options"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "POST",
+      "path": "/api/proposals"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "GET",
+      "path": "/api/proposals/{id}"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "PUT",
+      "path": "/api/proposals/{id}"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "GET",
+      "path": "/api/proposals/{id}/detail"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "POST",
+      "path": "/api/proposals/{id}/send-mail"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "POST",
+      "path": "/api/proposals/{id}/skill-sheet/export"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "PUT",
+      "path": "/api/proposals/{id}/status"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "ANY",
+      "path": "/api/proposals/api/proposals"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "GET",
+      "path": "/api/proposals/duplicate-check"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "GET",
+      "path": "/api/proposals/kanban"
+    },
+    {
+      "controller": "ProposalApiController",
+      "verb": "GET",
+      "path": "/api/proposals/kanban/page"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "GET",
+      "path": "/api/quotations"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "POST",
+      "path": "/api/quotations"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "DELETE",
+      "path": "/api/quotations/{id}"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "GET",
+      "path": "/api/quotations/{id}"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "PUT",
+      "path": "/api/quotations/{id}"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "POST",
+      "path": "/api/quotations/{id}/create-draft"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "GET",
+      "path": "/api/quotations/{id}/pdf"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "POST",
+      "path": "/api/quotations/{id}/remarks"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "PUT",
+      "path": "/api/quotations/{id}/status"
+    },
+    {
+      "controller": "QuotationApiController",
+      "verb": "ANY",
+      "path": "/api/quotations/api/quotations"
+    },
+    {
+      "controller": "ReconciliationApiController",
+      "verb": "POST",
+      "path": "/api/reconciliation/{depositId}/apply"
+    },
+    {
+      "controller": "ReconciliationApiController",
+      "verb": "ANY",
+      "path": "/api/reconciliation/api/reconciliation"
+    },
+    {
+      "controller": "ReconciliationApiController",
+      "verb": "POST",
+      "path": "/api/reconciliation/fetch"
+    },
+    {
+      "controller": "ReconciliationApiController",
+      "verb": "GET",
+      "path": "/api/reconciliation/pending"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "GET",
+      "path": "/api/resume-ingestions"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "POST",
+      "path": "/api/resume-ingestions"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "GET",
+      "path": "/api/resume-ingestions/{id}"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "POST",
+      "path": "/api/resume-ingestions/{id}/confirm"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "POST",
+      "path": "/api/resume-ingestions/{id}/reject"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "POST",
+      "path": "/api/resume-ingestions/{id}/reparse"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "PUT",
+      "path": "/api/resume-ingestions/{id}/review"
+    },
+    {
+      "controller": "ResumeIngestionApiController",
+      "verb": "ANY",
+      "path": "/api/resume-ingestions/api/resume-ingestions"
+    },
+    {
+      "controller": "RoleMenuApiController",
+      "verb": "GET",
+      "path": "/api/role-menus"
+    },
+    {
+      "controller": "RoleMenuApiController",
+      "verb": "PUT",
+      "path": "/api/role-menus"
+    },
+    {
+      "controller": "RoleMenuApiController",
+      "verb": "ANY",
+      "path": "/api/role-menus/api/role-menus"
+    },
+    {
+      "controller": "RoleMenuApiController",
+      "verb": "GET",
+      "path": "/api/role-menus/menus"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "GET",
+      "path": "/api/sales-orders"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "DELETE",
+      "path": "/api/sales-orders/{id}"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "GET",
+      "path": "/api/sales-orders/{id}"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "PUT",
+      "path": "/api/sales-orders/{id}"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/acknowledgement-pdf"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "GET",
+      "path": "/api/sales-orders/{id}/acknowledgement-pdf/download"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/cancel-approval"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/condition-diff-approval"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/contract-drafts"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "GET",
+      "path": "/api/sales-orders/{id}/documents/{documentId}/download"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/source-document"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "POST",
+      "path": "/api/sales-orders/{id}/status"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "ANY",
+      "path": "/api/sales-orders/api/sales-orders"
+    },
+    {
+      "controller": "SalesOrderApiController",
+      "verb": "GET",
+      "path": "/api/sales-orders/po-duplicate"
+    },
+    {
+      "controller": "SalesPerformanceApiController",
+      "verb": "GET",
+      "path": "/api/sales-performance"
+    },
+    {
+      "controller": "SalesPerformanceApiController",
+      "verb": "ANY",
+      "path": "/api/sales-performance/api/sales-performance"
+    },
+    {
+      "controller": "SalesPerformanceApiController",
+      "verb": "GET",
+      "path": "/api/sales-performance/commission-rule"
+    },
+    {
+      "controller": "SavedViewApiController",
+      "verb": "GET",
+      "path": "/api/saved-views"
+    },
+    {
+      "controller": "SavedViewApiController",
+      "verb": "POST",
+      "path": "/api/saved-views"
+    },
+    {
+      "controller": "SavedViewApiController",
+      "verb": "DELETE",
+      "path": "/api/saved-views/{id}"
+    },
+    {
+      "controller": "SavedViewApiController",
+      "verb": "PUT",
+      "path": "/api/saved-views/{id}"
+    },
+    {
+      "controller": "SavedViewApiController",
+      "verb": "ANY",
+      "path": "/api/saved-views/api/saved-views"
+    },
+    {
+      "controller": "SearchApiController",
+      "verb": "GET",
+      "path": "/api/search"
+    },
+    {
+      "controller": "SearchApiController",
+      "verb": "ANY",
+      "path": "/api/search/api/search"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "ANY",
+      "path": "/api/security/api/security"
+    },
+    {
+      "controller": "BreakGlassIncidentApiController",
+      "verb": "POST",
+      "path": "/api/security/break-glass/incidents"
+    },
+    {
+      "controller": "BreakGlassIncidentApiController",
+      "verb": "POST",
+      "path": "/api/security/break-glass/incidents/{id}/approve"
+    },
+    {
+      "controller": "BreakGlassIncidentApiController",
+      "verb": "POST",
+      "path": "/api/security/break-glass/incidents/{id}/close"
+    },
+    {
+      "controller": "BreakGlassIncidentApiController",
+      "verb": "ANY",
+      "path": "/api/security/break-glass/incidents/api/security/break-glass/incidents"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/mfa/{userId}/reset"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/mfa/enable"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/mfa/setup"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "GET",
+      "path": "/api/security/mfa/status"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/mfa/verify"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "GET",
+      "path": "/api/security/sessions"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "DELETE",
+      "path": "/api/security/sessions/{sessionId}"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/sessions/revoke-all"
+    },
+    {
+      "controller": "SecuritySessionApiController",
+      "verb": "POST",
+      "path": "/api/security/sessions/revoke-others"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "GET",
+      "path": "/api/skill-tags"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "POST",
+      "path": "/api/skill-tags"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "DELETE",
+      "path": "/api/skill-tags/{id}"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "GET",
+      "path": "/api/skill-tags/{id}"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "PUT",
+      "path": "/api/skill-tags/{id}"
+    },
+    {
+      "controller": "SkillTagApiController",
+      "verb": "ANY",
+      "path": "/api/skill-tags/api/skill-tags"
+    },
+    {
+      "controller": "SkillSheetTemplateApiController",
+      "verb": "GET",
+      "path": "/api/skillsheet-templates"
+    },
+    {
+      "controller": "SkillSheetTemplateApiController",
+      "verb": "ANY",
+      "path": "/api/skillsheet-templates/api/skillsheet-templates"
+    },
+    {
+      "controller": "SystemConfigApiController",
+      "verb": "GET",
+      "path": "/api/system-configs"
+    },
+    {
+      "controller": "SystemConfigApiController",
+      "verb": "PUT",
+      "path": "/api/system-configs"
+    },
+    {
+      "controller": "SystemConfigApiController",
+      "verb": "ANY",
+      "path": "/api/system-configs/api/system-configs"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "GET",
+      "path": "/api/tasks"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "POST",
+      "path": "/api/tasks"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "PUT",
+      "path": "/api/tasks/{id}/details"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "PUT",
+      "path": "/api/tasks/{id}/status"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "ANY",
+      "path": "/api/tasks/api/tasks"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "POST",
+      "path": "/api/tasks/from-notification/{notificationId}"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "GET",
+      "path": "/api/tasks/overdue"
+    },
+    {
+      "controller": "TaskApiController",
+      "verb": "GET",
+      "path": "/api/tasks/page"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "GET",
+      "path": "/api/users"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "POST",
+      "path": "/api/users"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "DELETE",
+      "path": "/api/users/{id}"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "GET",
+      "path": "/api/users/{id}"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "PUT",
+      "path": "/api/users/{id}"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "PUT",
+      "path": "/api/users/{id}/status"
+    },
+    {
+      "controller": "UserApiController",
+      "verb": "ANY",
+      "path": "/api/users/api/users"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "PUT",
+      "path": "/api/work-records"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "POST",
+      "path": "/api/work-records/{id}/approve"
+    },
+    {
+      "controller": "BpPaymentApiController",
+      "verb": "GET",
+      "path": "/api/work-records/{id}/bp-payments"
+    },
+    {
+      "controller": "BpPaymentApiController",
+      "verb": "POST",
+      "path": "/api/work-records/{id}/bp-payments"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "GET",
+      "path": "/api/work-records/{id}/daily"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "POST",
+      "path": "/api/work-records/{id}/reject"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "GET",
+      "path": "/api/work-records/{id}/report.pdf"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "ANY",
+      "path": "/api/work-records/api/work-records"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "GET",
+      "path": "/api/work-records/attendance"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/{engineerId}/approve"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/{engineerId}/close"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/{engineerId}/reject"
+    },
+    {
+      "controller": "AttendanceApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/{engineerId}/reopen"
+    },
+    {
+      "controller": "AttendanceDiscrepancyApiController",
+      "verb": "GET",
+      "path": "/api/work-records/attendance/discrepancy"
+    },
+    {
+      "controller": "AttendanceDiscrepancyApiController",
+      "verb": "ANY",
+      "path": "/api/work-records/attendance/discrepancy/api/work-records/attendance/discrepancy"
+    },
+    {
+      "controller": "AttendanceDiscrepancyApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/discrepancy/confirm"
+    },
+    {
+      "controller": "AttendanceSyncApiController",
+      "verb": "ANY",
+      "path": "/api/work-records/attendance/sync/api/work-records/attendance/sync"
+    },
+    {
+      "controller": "AttendanceSyncApiController",
+      "verb": "GET",
+      "path": "/api/work-records/attendance/sync/export-csv"
+    },
+    {
+      "controller": "AttendanceSyncApiController",
+      "verb": "POST",
+      "path": "/api/work-records/attendance/sync/run"
+    },
+    {
+      "controller": "AttendanceSyncApiController",
+      "verb": "GET",
+      "path": "/api/work-records/attendance/sync/status"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "POST",
+      "path": "/api/work-records/confirm"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "GET",
+      "path": "/api/work-records/grid"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "GET",
+      "path": "/api/work-records/grid/page"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "GET",
+      "path": "/api/work-records/pending-approval-summary"
+    },
+    {
+      "controller": "WorkRecordApiController",
+      "verb": "POST",
+      "path": "/api/work-records/reopen"
+    },
+    {
+      "controller": "CustomErrorController",
+      "verb": "ANY",
+      "path": "/error/error"
+    },
+    {
+      "controller": "FreeeOAuthController",
+      "verb": "DELETE",
+      "path": "/integrations/freee"
+    },
+    {
+      "controller": "FreeeOAuthController",
+      "verb": "GET",
+      "path": "/integrations/freee/authorize"
+    },
+    {
+      "controller": "FreeeOAuthController",
+      "verb": "GET",
+      "path": "/integrations/freee/callback"
+    },
+    {
+      "controller": "FreeeOAuthController",
+      "verb": "ANY",
+      "path": "/integrations/freee/integrations/freee"
+    }
+  ],
+  "templates": [
+    "acceptance/list.html",
+    "ai/matching.html",
+    "analytics/availability-calendar.html",
+    "analytics/index.html",
+    "analytics/staffing-heatmap.html",
+    "analytics/staffing-scenario-compare.html",
+    "approval/detail.html",
+    "approval/inbox.html",
+    "approval/requests.html",
+    "approval/routes.html",
+    "attendance/management.html",
+    "attendance/my.html",
+    "audit-log/list.html",
+    "bp-availability-ingestion/list.html",
+    "bp-availability-ingestion/review.html",
+    "bp-availability/list.html",
+    "bp-company/detail.html",
+    "bp-company/list.html",
+    "candidate/detail.html",
+    "candidate/list.html",
+    "compliance/gate.html",
+    "compliance/list.html",
+    "contract-document/list.html",
+    "contract/detail.html",
+    "contract/gantt.html",
+    "contract/list.html",
+    "contract/renewal-calendar.html",
+    "crm/kpi.html",
+    "crm/leads.html",
+    "crm/opportunities.html",
+    "customer/detail.html",
+    "customer/list.html",
+    "dashboard/index.html",
+    "dashboard/profit.html",
+    "document/detail.html",
+    "document/list.html",
+    "email-template/list.html",
+    "engineer/detail.html",
+    "engineer/list.html",
+    "error.html",
+    "invoice/list.html",
+    "invoice/print.html",
+    "layout/base.html",
+    "layout/header.html",
+    "layout/sidebar.html",
+    "leave/management.html",
+    "leave/my.html",
+    "login.html",
+    "management-accounting/index.html",
+    "mfa/challenge.html",
+    "mfa/setup.html",
+    "monthly-closing/list.html",
+    "my-timesheet/index.html",
+    "organization/list.html",
+    "payroll/index.html",
+    "portal-admin/list.html",
+    "portal/accept-invitation.html",
+    "portal/bp/index.html",
+    "portal/customer/index.html",
+    "portal/index.html",
+    "portal/login.html",
+    "portal/terms.html",
+    "project-ingestion/list.html",
+    "project-ingestion/review.html",
+    "project/detail.html",
+    "project/list.html",
+    "proposal/kanban.html",
+    "quotation/list.html",
+    "reconciliation/list.html",
+    "resume-ingestion/list.html",
+    "resume-ingestion/review.html",
+    "sales-order/list.html",
+    "sales-performance/list.html",
+    "system-config/list.html",
+    "todo/list.html",
+    "user/list.html",
+    "work-record/list.html"
+  ],
+  "entities": [
+    {
+      "entity": "Acceptance",
+      "tableName": "t_acceptance",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "AiLog",
+      "tableName": "t_ai_log",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "AllocationPlan",
+      "tableName": "t_allocation_plan",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ApprovalAction",
+      "tableName": "t_approval_action",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalDelegation",
+      "tableName": "t_approval_delegation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalDelegationType",
+      "tableName": "t_approval_delegation_type",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalParticipant",
+      "tableName": "t_approval_participant",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalRequest",
+      "tableName": "t_approval_request",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ApprovalResponsibility",
+      "tableName": "t_approval_responsibility",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalRoute",
+      "tableName": "m_approval_route",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ApprovalRouteStep",
+      "tableName": "m_approval_route_step",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "AttendanceMonth",
+      "tableName": "t_attendance_month",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "AuditLog",
+      "tableName": "t_audit_log",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "Integer"
+        }
+      ]
+    },
+    {
+      "entity": "BankDeposit",
+      "tableName": "t_bank_deposit",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpAvailability",
+      "tableName": "t_bp_availability",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpAvailabilityIngestion",
+      "tableName": "t_bp_availability_ingestion",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpBankAccount",
+      "tableName": "t_bp_bank_account",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "BpCompany",
+      "tableName": "m_bp_company",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpContact",
+      "tableName": "t_bp_contact",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "BpEvaluation",
+      "tableName": "t_bp_evaluation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "BpPayment",
+      "tableName": "t_bp_payment",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpPriceNegotiation",
+      "tableName": "t_bp_price_negotiation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "BpTerms",
+      "tableName": "t_bp_terms",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "BreakGlassIncident",
+      "tableName": "t_break_glass_incident",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "Candidate",
+      "tableName": "t_candidate",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "CandidateActivity",
+      "tableName": "t_candidate_activity",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "CareerConsultingHistory",
+      "tableName": "t_career_consulting_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceBreakDetail",
+      "tableName": "t_compliance_break_detail",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceComplaintHistory",
+      "tableName": "t_compliance_complaint_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceExternalReviewAdoptionEvent",
+      "tableName": "t_compliance_external_review_adoption_event",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceExternalReviewerSubject",
+      "tableName": "t_compliance_external_reviewer_subject",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceExternalReviewerType",
+      "tableName": "m_compliance_external_reviewer_type",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceExternalReviewerVerificationEvent",
+      "tableName": "t_compliance_external_reviewer_verification_event",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceExternalReviewEvent",
+      "tableName": "t_compliance_external_review_event",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceFinding",
+      "tableName": "t_compliance_finding",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ComplianceMappingApprovalEvent",
+      "tableName": "t_compliance_mapping_approval_event",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceMappingReviewRequirementGroup",
+      "tableName": "m_compliance_mapping_review_requirement_group",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceMappingReviewRequirementType",
+      "tableName": "m_compliance_mapping_review_requirement_type",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceMappingSource",
+      "tableName": "m_compliance_mapping_source",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceMappingStatusEvent",
+      "tableName": "t_compliance_mapping_status_event",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceMappingVersion",
+      "tableName": "m_compliance_mapping_version",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ComplianceOperationLedger",
+      "tableName": "t_compliance_operation_ledger",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "state",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ComplianceResponsibleAssignment",
+      "tableName": "t_compliance_responsible_assignment",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceReviewerQualification",
+      "tableName": "t_compliance_reviewer_qualification",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceSnapshotOperation",
+      "tableName": "t_compliance_snapshot_operation",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ComplianceVerificationMethod",
+      "tableName": "m_compliance_verification_method",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceVerificationSource",
+      "tableName": "m_compliance_verification_source",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ComplianceWorkCalendar",
+      "tableName": "t_compliance_work_calendar",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "Contract",
+      "tableName": "t_contract",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ContractComplianceProfile",
+      "tableName": "t_contract_compliance_profile",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ContractComplianceSnapshot",
+      "tableName": "t_contract_compliance_snapshot",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ContractComplianceWorkerSnapshot",
+      "tableName": "t_contract_compliance_worker_snapshot",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ContractComplianceWorkerState",
+      "tableName": "t_contract_compliance_worker_state",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "ContractDocument",
+      "tableName": "t_contract_document",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        },
+        {
+          "field": "dispatchState",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ContractPriceHistory",
+      "tableName": "t_contract_price_history",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "ContractTemplate",
+      "tableName": "m_contract_template",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "CostCenter",
+      "tableName": "m_cost_center",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "Customer",
+      "tableName": "m_customer",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "CustomerContact",
+      "tableName": "t_customer_contact",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "DirectHireDisputeHistory",
+      "tableName": "t_direct_hire_dispute_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "Document",
+      "tableName": "t_document",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "DocumentAccessLog",
+      "tableName": "t_document_access_log",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "DocumentDelivery",
+      "tableName": "t_document_delivery",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "DocumentDisposalRequest",
+      "tableName": "t_document_disposal_request",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "DocumentHashClaim",
+      "tableName": "t_document_hash_claim",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "DocumentLink",
+      "tableName": "t_document_link",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "DocumentType",
+      "tableName": "m_document_type",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "DocumentVersion",
+      "tableName": "t_document_version",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EmailTemplate",
+      "tableName": "m_email_template",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EmployeeAttendance",
+      "tableName": "t_employee_attendance",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "EmployeeAttendanceBreak",
+      "tableName": "t_employee_attendance_break",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EmploymentStabilityHistory",
+      "tableName": "t_employment_stability_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "Engineer",
+      "tableName": "t_engineer",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "EngineerAccountingHistory",
+      "tableName": "t_engineer_accounting_history",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerAccountLink",
+      "tableName": "t_engineer_account_link",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerBpAffiliation",
+      "tableName": "t_engineer_bp_affiliation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerCareer",
+      "tableName": "t_engineer_career",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerFollowup",
+      "tableName": "t_engineer_followup",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerSales",
+      "tableName": "t_engineer_sales",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "EngineerSkill",
+      "tableName": "t_engineer_skill",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "FileSecurityMetadata",
+      "tableName": "t_file_security_metadata",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "FreeeConnection",
+      "tableName": "t_freee_connection",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "FreeeEmployeeLink",
+      "tableName": "t_freee_employee_link",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "IdentityProvider",
+      "tableName": "m_identity_provider",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Invoice",
+      "tableName": "t_invoice",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "InvoiceItem",
+      "tableName": "t_invoice_item",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "InvoicePayment",
+      "tableName": "t_invoice_payment",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Lead",
+      "tableName": "t_lead",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "LeaveLedger",
+      "tableName": "t_leave_ledger",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "LeaveRequest",
+      "tableName": "t_leave_request",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "LedgerWorkSnapshot",
+      "tableName": "t_ledger_work_snapshot",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "MailDelivery",
+      "tableName": "t_mail_delivery",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ManagementBudget",
+      "tableName": "t_management_budget",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "Menu",
+      "tableName": "m_menu",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "MfaAttemptGuard",
+      "tableName": "t_mfa_attempt_guard",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "MfaRecoveryCode",
+      "tableName": "t_mfa_recovery_code",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "MonthlyAccountingDimension",
+      "tableName": "t_monthly_accounting_dimension",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Notification",
+      "tableName": "t_notification",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "NotificationDifferenceHistory",
+      "tableName": "t_notification_difference_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "NotificationOutbox",
+      "tableName": "t_notification_outbox",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "NotificationRead",
+      "tableName": "t_notification_read",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Opportunity",
+      "tableName": "t_opportunity",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "OrganizationRelationHistory",
+      "tableName": "t_organization_relation_history",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "OrganizationUnit",
+      "tableName": "m_organization_unit",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "OvertimeAgreement",
+      "tableName": "m_overtime_agreement",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "OvertimeFollowup",
+      "tableName": "t_overtime_followup",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "PermissionGroup",
+      "tableName": "m_permission_group",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PermissionGroupAction",
+      "tableName": "t_permission_group_action",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PlannedIntroductionHistory",
+      "tableName": "t_planned_introduction_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "PlannedIntroductionTerms",
+      "tableName": "t_planned_introduction_terms",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "PortalAccessLog",
+      "tableName": "t_portal_access_log",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PortalInvitation",
+      "tableName": "t_portal_invitation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PortalOrganization",
+      "tableName": "m_portal_organization",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "PortalSession",
+      "tableName": "t_portal_session",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PortalTermsConsent",
+      "tableName": "t_portal_terms_consent",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "PortalUser",
+      "tableName": "t_portal_user",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "PortalUserPermission",
+      "tableName": "t_portal_user_permission",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Project",
+      "tableName": "t_project",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ProjectIngestion",
+      "tableName": "t_project_ingestion",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ProjectPosition",
+      "tableName": "t_project_position",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ProjectSkill",
+      "tableName": "t_project_skill",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Proposal",
+      "tableName": "t_proposal",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ProposalHistory",
+      "tableName": "t_proposal_history",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Quotation",
+      "tableName": "t_quotation",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "ResumeIngestion",
+      "tableName": "t_resume_ingestion",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "RoleMenu",
+      "tableName": "t_role_menu",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "SalesActivity",
+      "tableName": "t_sales_activity",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "SalesOrder",
+      "tableName": "t_sales_order",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "SalesOrderLine",
+      "tableName": "t_sales_order_line",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "SavedView",
+      "tableName": "m_saved_view",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "SkillTag",
+      "tableName": "m_skill_tag",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "StaffingScenario",
+      "tableName": "t_staffing_scenario",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "StaffingScenarioAllocation",
+      "tableName": "t_staffing_scenario_allocation",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "SystemConfig",
+      "tableName": "m_system_config",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "SysUser",
+      "tableName": "sys_user",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "Integer"
+        }
+      ]
+    },
+    {
+      "entity": "Task",
+      "tableName": "t_task",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "TaskNotificationLog",
+      "tableName": "t_task_notification_log",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "TrainingHistory",
+      "tableName": "t_training_history",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "UserExternalIdentity",
+      "tableName": "t_user_external_identity",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "UserMfa",
+      "tableName": "t_user_mfa",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "UserOrganization",
+      "tableName": "t_user_organization",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": []
+    },
+    {
+      "entity": "UserPermissionGroup",
+      "tableName": "t_user_permission_group",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "UserSession",
+      "tableName": "t_user_session",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "WorkCalendar",
+      "tableName": "m_work_calendar",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "WorkCalendarDay",
+      "tableName": "m_work_calendar_day",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    },
+    {
+      "entity": "Workplace",
+      "tableName": "m_workplace",
+      "hasOptimisticLock": true,
+      "versionField": "version",
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "WorkRecord",
+      "tableName": "t_work_record",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": [
+        {
+          "field": "status",
+          "type": "String"
+        }
+      ]
+    },
+    {
+      "entity": "WorkRecordDaily",
+      "tableName": "t_work_record_daily",
+      "hasOptimisticLock": false,
+      "versionField": null,
+      "statusFields": []
+    }
+  ],
+  "datascope_calls": [
+    {
+      "file": "src/main/java/com/ses/controller/api/AiApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AiApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AiRestController.java",
+      "method": "assertAllowedEngineer",
+      "args": "request.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AiRestController.java",
+      "method": "assertAllowedProject",
+      "args": "request.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/AllocationApiController.java",
+      "method": "assertAllowedProject",
+      "args": "position.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ContractApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "dto.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ContractApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "dto.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ContractApiController.java",
+      "method": "assertAllowedProject",
+      "args": "dto.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ContractDocumentApiController.java",
+      "method": "assertAllowedContract",
+      "args": "contractId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/CustomerApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/CustomerApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/CustomerApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerCareerApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerCareerApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerCareerApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerCareerApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerCareerApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerFollowupApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerFollowupApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerFollowupApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerFollowupApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerFollowupApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSalesApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSalesApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSalesApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSalesApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSalesApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "id"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSkillApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/EngineerSkillApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/InvoiceApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/InvoiceApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "invoice.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "p.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "project.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "existing.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "project.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "p.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectPositionApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectSkillApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProjectSkillApiController.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProposalApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "proposal.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProposalApiController.java",
+      "method": "assertAllowedProject",
+      "args": "proposal.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProposalApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "proposal.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/ProposalApiController.java",
+      "method": "assertAllowedProject",
+      "args": "proposal.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/QuotationApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "request.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/QuotationApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "request.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/QuotationApiController.java",
+      "method": "assertAllowedProject",
+      "args": "request.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/RetentionRiskApiController.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/controller/api/SalesActivityApiController.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/GeminiMatchingServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/GeminiMatchingServiceImpl.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/ProposalDraftServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/ProposalDraftServiceImpl.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/RuleMatchingServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/ai/impl/RuleMatchingServiceImpl.java",
+      "method": "assertAllowedProject",
+      "args": "projectId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/AcceptanceServiceImpl.java",
+      "method": "assertAllowedContractAsOf",
+      "args": "contractId, monthEnd(workMonth"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ComplianceDocumentServiceImpl.java",
+      "method": "assertAllowedContract",
+      "args": "contractId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ComplianceFindingActionServiceImpl.java",
+      "method": "assertAllowedContract",
+      "args": "contractId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ContractComplianceProfileServiceImpl.java",
+      "method": "assertAllowedContract",
+      "args": "contractId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/CustomerContactServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedContract",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedProject",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedProposal",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/DocumentServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "salesOrder.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/InvoiceServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/OpportunityServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ProposalServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "proposal.getEngineerId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ProposalServiceImpl.java",
+      "method": "assertAllowedProject",
+      "args": "proposal.getProjectId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ProposalServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ProposalServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/ProposalServiceImpl.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/SalesActivityServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/SalesOrderServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "request.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/SalesOrderServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "request.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/SalesOrderServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "customerId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/SalesOrderServiceImpl.java",
+      "method": "assertAllowedCustomer",
+      "args": "quotation.getCustomerId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/impl/WorkRecordServiceImpl.java",
+      "method": "assertAllowedContract",
+      "args": "contract.getId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedEngineer",
+      "args": "engineer.getId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedProposal",
+      "args": "proposal.getId("
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedCustomer",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedEngineer",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedContract",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedProject",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedProposal",
+      "args": "targetId"
+    },
+    {
+      "file": "src/main/java/com/ses/service/security/impl/FileScopeValidationService.java",
+      "method": "assertAllowedCustomer",
+      "args": "salesOrder.getCustomerId("
+    }
+  ]
+}

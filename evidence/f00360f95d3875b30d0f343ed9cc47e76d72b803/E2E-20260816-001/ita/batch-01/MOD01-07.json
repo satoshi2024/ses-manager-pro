@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD01-07",
+  "dimension": "N,B,C,D",
+  "category": "MOD-01",
+  "name": "TOTP設定・RFC 6238タイムステップコード検証・同一step再利用拒否検証",
+  "status": "BLOCKED",
+  "duration_ms": 0,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-07.json",
+  "error": null,
+  "evidence_detail": {
+    "reason": "環境設定理由（MFA未有効化、Break-Glassユーザー未指定）、非バグ",
+    "design_reference": "MfaServiceImpl.java L54-58 / OidcSecurityProperties.java L41-49",
+    "is_bug": false
+  }
+}
