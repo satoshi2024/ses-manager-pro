@@ -14,13 +14,14 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SalesOrderLineMapper;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.ContractService;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** 同一注文明細の契約化を実MySQL 2txで競合させ、DB一意制約を最終防衛線として固定する。 */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class ConcurrentContractizationTest {
 

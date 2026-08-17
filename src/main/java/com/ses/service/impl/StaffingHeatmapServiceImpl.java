@@ -98,6 +98,8 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
         Map<String, Map<YearMonth, MonthAccum>> locationAcc = new TreeMap<>();
 
         List<YearMonth> months = monthsBetween(from, to);
+        Map<Long, Map<YearMonth, StaffingCapacityService.EngineerMonthSupply>> supplyByEngineer =
+                supplyIndex(engineers, from, to, asOf);
 
         // ---- 需要（position） ----
         for (ProjectPosition position : positions) {
@@ -130,7 +132,7 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
             String primarySkill = primarySkillByEngineer.getOrDefault(engineer.getId(), GROUP_UNASSIGNED);
             for (YearMonth month : months) {
                 StaffingCapacityService.EngineerMonthSupply supply =
-                        capacityService.supply(engineer, month, asOf);
+                        supplyByEngineer.get(engineer.getId()).get(month);
                 BigDecimal supplyFte = supply.totalFte().setScale(2, RoundingMode.HALF_UP);
                 AllocationPlan attributed = attributionAllocation(engineer.getId(), allocations, month);
                 if (attributed == null || supplyFte.signum() <= 0) {
@@ -167,6 +169,8 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
         List<AllocationPlan> allocations = loadAllocations();
         List<Engineer> engineers = loadEngineers();
         Map<Long, String> primarySkillByEngineer = primarySkills(engineers);
+        Map<Long, Map<YearMonth, StaffingCapacityService.EngineerMonthSupply>> supplyByEngineer =
+                supplyIndex(engineers, month, month, asOf);
         Set<Long> projectIds = positions.stream().map(ProjectPosition::getProjectId).collect(Collectors.toSet());
         Map<Long, Project> projects = projectIds.isEmpty() ? Map.of()
                 : projectMapper.selectBatchIds(projectIds).stream()
@@ -197,7 +201,8 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
         // 供給側: 指定グループに帰属するengineer（対象月に供給>0）
         List<ShortfallDrilldownDto.EngineerLine> engineerLines = new ArrayList<>();
         for (Engineer engineer : engineers) {
-            StaffingCapacityService.EngineerMonthSupply supply = capacityService.supply(engineer, month, asOf);
+            StaffingCapacityService.EngineerMonthSupply supply =
+                    supplyByEngineer.get(engineer.getId()).get(month);
             if (supply.totalFte().signum() <= 0) {
                 continue;
             }
@@ -219,6 +224,19 @@ public class StaffingHeatmapServiceImpl implements StaffingHeatmapService {
             engineerLines.add(line);
         }
         return new ShortfallDrilldownDto(String.valueOf(month), dimension, group, positionLines, engineerLines);
+    }
+
+    private Map<Long, Map<YearMonth, StaffingCapacityService.EngineerMonthSupply>> supplyIndex(
+            List<Engineer> engineers, YearMonth from, YearMonth to, LocalDate asOf) {
+        return capacityService.supplyBatch(engineers, from, to, asOf).stream()
+                .collect(Collectors.groupingBy(
+                        StaffingCapacityService.EngineerMonthSupply::engineerId,
+                        LinkedHashMap::new,
+                        Collectors.toMap(
+                                StaffingCapacityService.EngineerMonthSupply::month,
+                                Function.identity(),
+                                (a, b) -> a,
+                                LinkedHashMap::new)));
     }
 
     // ---------------------------------------------------------------

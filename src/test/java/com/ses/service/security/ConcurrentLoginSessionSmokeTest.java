@@ -5,6 +5,7 @@ import com.ses.entity.SysUser;
 import com.ses.entity.UserSession;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserSessionMapper;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,7 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** R3-001: 永続session登録のMySQL lock回帰を実DBで検証する。 */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class ConcurrentLoginSessionSmokeTest {
 

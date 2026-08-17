@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 適用後のcommit revertをDB rollbackとして扱わず、forward repairのみ許可する契約を検証する。
  * 適用済みV84はinstalled_on/checksum付きで固定され、再実行はno-opでvalidateがPASSする。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV84PostApplyRollbackSmokeTest {
 

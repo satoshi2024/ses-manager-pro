@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.service.FreeeIntegrationService;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -11,7 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 同一refresh tokenの外部使用（token endpoint POST）は1回だけであり、
  * 新refresh tokenがDBへrotation保存されることを検証する（R12-2 / AC04）。</p>
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest
 @ActiveProfiles("test")

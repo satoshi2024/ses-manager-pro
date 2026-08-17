@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 旧shape列（snapshot_json / limitation_date / worker_limitation_date）の不存在、typed列の存在、
  * snapshot version一意・hash非一意、worker state FK/CAS、triggerによる直接UPDATE/DELETE拒否を検証する。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayDispatchComplianceSchemaSmokeTest {
 

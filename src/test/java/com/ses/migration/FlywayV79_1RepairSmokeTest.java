@@ -3,8 +3,9 @@ package com.ses.migration;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.exception.FlywayValidateException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * validate失敗、repair単独の危険性、forward DDL後のallowlist repairを個別に検証する。
  * 同じcontainer内のcleanは本番rollbackではなく、破棄可能な検証DBのrollback再適用rehearsalである。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV79_1RepairSmokeTest {
 

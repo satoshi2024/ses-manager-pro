@@ -24,6 +24,13 @@
         <caffeine.version>3.1.8</caffeine.version>
         <testcontainers.version>1.20.6</testcontainers.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- 既定のmvn testは高速feedback用。実MySQL/performanceは明示profileで実行する。 -->
+        <test.groups></test.groups>
+        <test.excluded-groups>mysql | performance</test.excluded-groups>
+        <junit.parallel.enabled>false</junit.parallel.enabled>
+        <junit.parallel.mode.default>same_thread</junit.parallel.mode.default>
+        <junit.parallel.mode.classes>same_thread</junit.parallel.mode.classes>
+        <junit.parallel.parallelism>1</junit.parallel.parallelism>
         <!-- JaCoCoのprepare-agentが差し込むJVM引数の受け皿。surefireの<argLine>で@{jacocoArgLine}として
              展開する。JaCoCoをskipした場合でも未解決にならないよう既定値を空で定義しておく。 -->
         <jacocoArgLine></jacocoArgLine>
@@ -218,7 +225,18 @@
                     <argLine>@{jacocoArgLine} -Duser.timezone=Asia/Tokyo -Duser.language=ja -Duser.country=JP -Dfile.encoding=UTF-8</argLine>
                     <systemPropertyVariables>
                         <api.version>1.40</api.version>
+                        <junit.jupiter.execution.parallel.enabled>${junit.parallel.enabled}</junit.jupiter.execution.parallel.enabled>
+                        <junit.jupiter.execution.parallel.mode.default>${junit.parallel.mode.default}</junit.jupiter.execution.parallel.mode.default>
+                        <junit.jupiter.execution.parallel.mode.classes.default>${junit.parallel.mode.classes}</junit.jupiter.execution.parallel.mode.classes.default>
+                        <junit.jupiter.execution.parallel.config.strategy>fixed</junit.jupiter.execution.parallel.config.strategy>
+                        <junit.jupiter.execution.parallel.config.fixed.parallelism>${junit.parallel.parallelism}</junit.jupiter.execution.parallel.config.fixed.parallelism>
+                        <!-- test側がdev profileを明示しても大量のSQL DEBUG logを再有効化させない。 -->
+                        <logging.level.com.ses.mapper>WARN</logging.level.com.ses.mapper>
+                        <logging.level.com.baomidou.mybatisplus>WARN</logging.level.com.baomidou.mybatisplus>
+                        <logging.level.org.flywaydb>WARN</logging.level.org.flywaydb>
                     </systemPropertyVariables>
+                    <groups>${test.groups}</groups>
+                    <excludedGroups>${test.excluded-groups}</excludedGroups>
                 </configuration>
             </plugin>
             <plugin>
@@ -284,4 +302,34 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Docker必須の実MySQL test。profile内は逐次実行し、CIでは独立jobへ分割して安全に並列化する。 -->
+        <profile>
+            <id>mysql-tests</id>
+            <properties>
+                <test.groups>mysql</test.groups>
+                <test.excluded-groups>__none__</test.excluded-groups>
+            </properties>
+        </profile>
+
+        <!-- wall-clock/heap計測はJaCoCo instrumentationの影響を除いて単独実行する。 -->
+        <profile>
+            <id>performance-tests</id>
+            <properties>
+                <test.groups>performance</test.groups>
+                <test.excluded-groups>__none__</test.excluded-groups>
+                <jacoco.skip>true</jacoco.skip>
+            </properties>
+        </profile>
+
+        <!-- ローカルでCI対象を1commandで再現するための逐次full suite。 -->
+        <profile>
+            <id>full-tests</id>
+            <properties>
+                <test.groups></test.groups>
+                <test.excluded-groups>__none__</test.excluded-groups>
+            </properties>
+        </profile>
+    </profiles>
 </project>

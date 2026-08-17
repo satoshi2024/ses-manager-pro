@@ -28,6 +28,22 @@ if (-not [string]::IsNullOrWhiteSpace($MavenExecutable)) {
     $mvn = $bundled
 }
 
+$bashExecutable = ''
+$bashCandidates = @(
+    'C:\Program Files\Git\bin\bash.exe',
+    'C:\Program Files\Git\usr\bin\bash.exe'
+)
+$bashCommand = Get-Command bash -ErrorAction SilentlyContinue
+if ($null -ne $bashCommand) {
+    $bashCandidates += $bashCommand.Source
+}
+foreach ($candidate in $bashCandidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+        $bashExecutable = $candidate
+        break
+    }
+}
+
 Write-Host '=== 前提ツールの確認（CIとの差分） ==='
 & $mvn -v 2>$null | Select-Object -First 1
 (& java -version 2>&1 | Select-Object -First 1)
@@ -38,17 +54,20 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     $dockerOk = ($LASTEXITCODE -eq 0)
 }
 if ($dockerOk) {
-    Write-Host 'Docker : あり  -> Flyway系のMySQL smoke（マイグレーション検証）が実行されます'
+    Write-Host 'Docker : あり  -> mysql-tests profileを実行できます'
 } else {
-    Write-Host 'Docker : なし  -> Flyway*SmokeTest / FlywayRepairRunbookTest / ConcurrentUpdateTest はskipされます。'
-    Write-Host '                 これらはMySQL方言・マイグレーション衝突を検出する唯一のテストで、CIでは必ず実行されます。'
-    Write-Host '                 つまり今の環境で緑でも、CIで落ちる可能性が残ります。'
+    Write-Host 'Docker : なし  -> CI full suiteは実行できません'
 }
 
 if (Get-Command node -ErrorAction SilentlyContinue) {
     Write-Host ('Node   : ' + (& node --version) + '  -> JS構文チェック(JsSyntaxCheckTest)が実行されます')
 } else {
-    Write-Host 'Node   : なし  -> JsSyntaxCheckTest はskipされます（CIでは必須）'
+    Write-Host 'Node   : なし  -> CI fast suiteは実行できません'
+}
+if (-not [string]::IsNullOrWhiteSpace($bashExecutable)) {
+    Write-Host ('Bash   : ' + $bashExecutable + '  -> backup integration suiteを実行できます')
+} else {
+    Write-Host 'Bash   : なし  -> backup integration suiteを実行できません'
 }
 Write-Host ''
 
@@ -57,44 +76,61 @@ if ($PreflightOnly) {
     exit 0
 }
 
-Write-Host '=== mvn -B clean test ==='
-& $mvn -B clean test @MavenArgs
-$testStatus = $LASTEXITCODE
-if ($testStatus -ne 0) {
-    Write-Error "Maven build/test failed (exit=$testStatus)."
+if (-not $dockerOk) {
+    Write-Error 'CI full suiteにはDockerが必須です。Docker Desktopを起動して再実行してください。'
+    exit 1
+}
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Error 'CI fast suiteにはNode.jsが必須です。Node.jsをPATHへ追加して再実行してください。'
+    exit 1
+}
+if ([string]::IsNullOrWhiteSpace($bashExecutable)) {
+    Write-Error 'CI backup integration gateにはBash（Git Bash可）が必須です。'
+    exit 1
 }
 
-Write-Host ''
-Write-Host '=== skipされたテストの確認（CIと同じ判定） ==='
-$skipped = @()
-if (Test-Path 'target\surefire-reports') {
-    $skipped = Get-ChildItem 'target\surefire-reports\*.xml' |
-        Where-Object { (Select-String -Path $_.FullName -Pattern 'skipped="[1-9]' -Quiet) }
-}
+$suites = @(
+    @{ Name = 'fast tests (H2 / unit / MVC)'; Profile = '' },
+    @{ Name = 'MySQL integration / Flyway'; Profile = 'mysql-tests' },
+    @{ Name = 'performance regression'; Profile = 'performance-tests' }
+)
 
-$skipStatus = 0
-if ($skipped.Count -gt 0) {
-    Write-Host ' 以下のテストがskipされました。CIはこの状態を失敗として扱います:'
-    $skipped | ForEach-Object { Write-Host ('  ' + $_.Name) }
-    if (-not $dockerOk) {
-        Write-Host ''
-        Write-Host 'Docker Desktop を起動してから再実行すると、CIと同じ範囲を検証できます。'
+foreach ($suite in $suites) {
+    Write-Host ''
+    Write-Host ('=== ' + $suite.Name + ' ===')
+    $suiteArgs = @('-B', 'clean', 'test')
+    if (-not [string]::IsNullOrWhiteSpace($suite.Profile)) {
+        $suiteArgs += ('-P' + $suite.Profile)
     }
-    $skipStatus = 1
-} elseif ($testStatus -eq 0) {
-    Write-Host 'skipされたテストはありません（CIと同じ範囲を検証できています）'
-} else {
-    Write-Host 'Maven失敗のため、skip 0を成功判定として扱いません。'
-}
+    & $mvn @suiteArgs @MavenArgs
+    $suiteStatus = $LASTEXITCODE
+    if ($suiteStatus -ne 0) {
+        # 長いworkspace pathでもPowerShellの自動改行で固定識別子が分断されないよう単独出力する。
+        Write-Host 'Maven build/test failed'
+        Write-Error ($suite.Name + " failed (exit=$suiteStatus).")
+        exit $suiteStatus
+    }
 
-if ($testStatus -ne 0) { exit $testStatus }
+    $skipped = @()
+    if (Test-Path 'target\surefire-reports') {
+        $skipped = Get-ChildItem 'target\surefire-reports\*.xml' |
+            Where-Object { (Select-String -Path $_.FullName -Pattern 'skipped="[1-9]' -Quiet) }
+    }
+    if ($skipped.Count -gt 0) {
+        Write-Host '以下のテストがskipされました。CIはこの状態を失敗として扱います:'
+        $skipped | ForEach-Object { Write-Host ('  ' + $_.Name) }
+        exit 1
+    }
+    Write-Host 'skipされたテストはありません'
+}
 
 Write-Host ''
 Write-Host '=== HFP-03-011: backup integration suite（実 MySQL PITR） ==='
 $integrationStatus = 1
 if ($dockerOk) {
     Write-Host 'Docker あり -> integration suite を実行します（数分かかります）'
-    if (bash ops/backup/tests/run-integration.sh) {
+    & $bashExecutable ops/backup/tests/run-integration.sh
+    if ($LASTEXITCODE -eq 0) {
         Write-Host 'integration suite: SUCCESS'
         $integrationStatus = 0
     } else {
@@ -104,5 +140,5 @@ if ($dockerOk) {
     Write-Host 'Docker なし -> integration suite は実行できません（CI では必須・失敗扱い）'
 }
 
-if ($skipStatus -ne 0 -or $integrationStatus -ne 0) { exit 1 }
+if ($integrationStatus -ne 0) { exit 1 }
 exit 0

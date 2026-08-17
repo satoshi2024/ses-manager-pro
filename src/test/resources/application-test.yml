@@ -79,6 +79,9 @@ mybatis-plus:
     map-underscore-to-camel-case: true
 
 app:
+  # scheduler専用テスト以外では定期実行を止め、テスト中のDB更新と非決定性を防ぐ。
+  scheduling:
+    enabled: false
   scheduler:
     lock:
       # H2/unknown DB productでShedLock usingDbTime()の警告・例外を発生させない。
@@ -103,4 +106,7 @@ menu:
 
 logging:
   level:
-    com.ses: DEBUG
+    # Mapper DEBUGは大量データテストで数十万行のSQLログを生成するため、既定では抑止する。
+    com.ses: INFO
+    com.ses.mapper: WARN
+    org.flywaydb: WARN

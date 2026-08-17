@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Dockerが無い環境ではTestcontainersの規約によりskipする。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayLegacyV71MigrationSmokeTest {
 

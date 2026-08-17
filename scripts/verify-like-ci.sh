@@ -22,43 +22,52 @@ java -version 2>&1 | head -1
 docker_ok=0
 if docker info > /dev/null 2>&1; then
   docker_ok=1
-  echo "Docker : あり  -> Flyway系のMySQL smoke（マイグレーション検証）が実行されます"
+  echo "Docker : あり  -> mysql-tests profileを実行できます"
 else
-  echo "Docker : なし  -> Flyway*SmokeTest / FlywayRepairRunbookTest / ConcurrentUpdateTest はskipされます。"
-  echo "                 これらはMySQL方言・マイグレーション衝突を検出する唯一のテストで、CIでは必ず実行されます。"
-  echo "                 つまり今の環境で緑でも、CIで落ちる可能性が残ります。"
+  echo "Docker : なし  -> CI full suiteは実行できません"
 fi
 
 if node --version > /dev/null 2>&1; then
+  node_ok=1
   echo "Node   : $(node --version)  -> JS構文チェック(JsSyntaxCheckTest)が実行されます"
 else
-  echo "Node   : なし  -> JsSyntaxCheckTest はskipされます（CIでは必須）"
+  node_ok=0
+  echo "Node   : なし  -> CI fast suiteは実行できません"
 fi
 echo
 
-echo "=== mvn -B clean test ==="
-"$MVN" -B clean test "$@"
-test_status=$?
+if [ "$docker_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
+  echo "DockerとNode.jsを準備してから再実行してください。" >&2
+  exit 1
+fi
 
-echo
-echo "=== skipされたテストの確認（CIと同じ判定） ==="
-skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml 2>/dev/null || true)
-if [ -n "$skipped_files" ]; then
-  echo "以下のテストがskipされました。CIはこの状態を失敗として扱います:"
-  echo "$skipped_files"
-  if [ "$docker_ok" -eq 0 ]; then
-    echo
-    echo "Dockerを起動してから再実行すると、CIと同じ範囲を検証できます。"
+run_suite() {
+  suite_name=$1
+  profile=$2
+  shift 2
+  echo
+  echo "=== $suite_name ==="
+  if [ -n "$profile" ]; then
+    "$MVN" -B clean test "-P$profile" "$@"
+  else
+    "$MVN" -B clean test "$@"
   fi
-  skip_status=1
-else
-  echo "skipされたテストはありません（CIと同じ範囲を検証できています）"
-  skip_status=0
-fi
+  suite_status=$?
+  if [ "$suite_status" -ne 0 ]; then
+    exit "$suite_status"
+  fi
+  skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml 2>/dev/null || true)
+  if [ -n "$skipped_files" ]; then
+    echo "以下のテストがskipされました。CIはこの状態を失敗として扱います:"
+    echo "$skipped_files"
+    exit 1
+  fi
+  echo "skipされたテストはありません"
+}
 
-if [ "$test_status" -ne 0 ]; then
-  exit "$test_status"
-fi
+run_suite "fast tests (H2 / unit / MVC)" "" "$@"
+run_suite "MySQL integration / Flyway" "mysql-tests" "$@"
+run_suite "performance regression" "performance-tests" "$@"
 
 echo
 echo "=== HFP-03-011: backup integration suite（実 MySQL PITR） ==="
@@ -76,7 +85,7 @@ else
   integration_status=1
 fi
 
-if [ "$skip_status" -ne 0 ] || [ "$integration_status" -ne 0 ]; then
+if [ "$integration_status" -ne 0 ]; then
   exit 1
 fi
 exit 0

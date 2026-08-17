@@ -7,11 +7,13 @@ import com.ses.entity.ProjectPosition;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.StaffingHeatmapService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -29,8 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>境界はCIで安定するよう余裕を持たせる（p95 < 10s・集計セル数はグループ×月に比例）。
  * 実測値はreview-ledgerに記録する。
  */
-@SpringBootTest
+@SpringBootTest(properties =
+        "spring.datasource.url=jdbc:h2:mem:staffing-performance;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
+@Transactional
+@Tag("performance")
 class StaffingPerformanceTest {
 
     @Autowired

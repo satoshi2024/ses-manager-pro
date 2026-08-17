@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: mvn test (H2, no MySQL required)
+  fast-test:
+    name: fast tests (H2 / unit / MVC)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,9 +28,45 @@ jobs:
         with:
           node-version: '20'
 
-      # Testcontainers（Flyway系のMySQL smoke, ConcurrentUpdateTest）に必要。
-      # Dockerが使えないとこれらは「skip」に化けるだけでビルドは緑になり、
-      # マイグレーションSQLの検証が丸ごと消える。ここで先に落として気付けるようにする。
+      # 既定profileはmysql/performance tagを明示的に除外する。環境依存skipではない。
+      - name: Run fast tests
+        run: mvn -B clean test
+
+      - name: Ensure no tests were skipped
+        run: |
+          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml || true)
+          if [ -n "$skipped_files" ]; then
+            echo "Error: Fast tests were skipped."
+            echo "$skipped_files"
+            exit 1
+          fi
+
+      - name: Upload fast-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-fast
+          path: target/surefire-reports/
+          retention-days: 7
+
+  mysql-test:
+    name: MySQL integration / Flyway (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
       - name: Verify Docker is available (required by Testcontainers tests)
         run: |
           if ! docker info > /dev/null 2>&1; then
@@ -39,9 +75,10 @@ jobs:
           fi
           docker version --format 'Docker Engine {{.Server.Version}} / API {{.Server.APIVersion}}'
 
-      # scripts/verify-like-ci.sh がローカルで実行するコマンドと揃えること。
-      - name: Run tests
-        run: mvn -B clean test
+      - name: Run MySQL tests
+        run: |
+          tests=$(paste -sd, "scripts/test-suites/mysql-shard-${{ matrix.shard }}.txt")
+          mvn -B clean test -Pmysql-tests -Dtest="$tests"
 
       # 「skipされたテストが1件も無いこと」がCIの契約。
       # Docker/Node/フォント等の環境差でテストが静かに消えるのを防ぐ。
@@ -52,17 +89,48 @@ jobs:
             echo "Error: Tests were skipped. This is not allowed to prevent silent regressions."
             echo "$skipped_files"
             echo ""
-            echo "Likely causes:"
-            echo "  - Docker unavailable       -> Flyway*SmokeTest / FlywayRepairRunbookTest / ConcurrentUpdateTest"
-            echo "  - Node.js unavailable      -> JsSyntaxCheckTest"
             exit 1
           fi
 
-      - name: Upload surefire reports
+      - name: Upload MySQL-test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports
+          name: surefire-reports-mysql-${{ matrix.shard }}
+          path: target/surefire-reports/
+          retention-days: 7
+
+  performance-test:
+    name: performance regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Run performance tests without JaCoCo instrumentation
+        run: mvn -B clean test -Pperformance-tests
+
+      - name: Ensure no tests were skipped
+        run: |
+          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml || true)
+          if [ -n "$skipped_files" ]; then
+            echo "Error: Performance tests were skipped."
+            echo "$skipped_files"
+            exit 1
+          fi
+
+      - name: Upload performance-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-performance
           path: target/surefire-reports/
           retention-days: 7
 

@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -13,6 +14,7 @@ import java.sql.Statement;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** 公開済みV63適用DBがchecksum repairなしで最新versionへupgradeできることを検証する。 */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV63UpgradeMigrationSmokeTest {
 

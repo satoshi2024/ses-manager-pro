@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * exact provenance付きV83公開形状＋既存契約fixtureへV84を適用し、
  * 新table作成・既存契約no-backfill・success/checksum固定を確認する。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV84LegacySchemaSmokeTest {
 
