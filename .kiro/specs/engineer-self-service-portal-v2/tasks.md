@@ -8,7 +8,7 @@
 > 本specの母集団は原則「本人のみ」であり、**engineer-account linkから解決する。
 > リクエストの`engineerId`を信用しない。**
 >
-> **Migration**: 本specの予約番号は **V105**。external portal(V104)のsecurity chain merge後に着手する。
+> **Migration**: 本specの正式migrationは **V105**（実在済み）。external portal(V104)のsecurity chain merge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
 - [x] F1. change/expense/1on1/survey DDL

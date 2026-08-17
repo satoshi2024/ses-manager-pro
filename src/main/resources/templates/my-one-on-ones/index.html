@@ -1,7 +1,65 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
-<head><meta charset="UTF-8"><title th:text="#{menu.myOneOnOnes}">1on1</title></head>
-<body><div layout:fragment="content">
-  <h2 class="h3 mb-4 text-light">1on1</h2>
-  <div class="card bg-card border-dark shadow-sm"><div class="card-body text-muted" th:text="#{my.oneOnOne.comingSoon}">準備中です</div></div>
-</div></body></html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.oneOnOne.title}">1on1</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-chat-dots me-2 text-primary"></i><th:block th:text="#{my.oneOnOne.title}">1on1</th:block></h2>
+        <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#oneOnOneModal">
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{my.oneOnOne.new}">1on1を申請</th:block>
+        </button>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small">
+                    <thead>
+                    <tr><th th:text="#{my.oneOnOne.counterpart}">相手</th><th th:text="#{my.oneOnOne.dates}">候補日</th>
+                        <th th:text="#{my.oneOnOne.scheduled}">確定日程</th><th th:text="#{my.oneOnOne.status}">状態</th>
+                        <th th:text="#{my.oneOnOne.note}">実施記録</th><th th:text="#{common.actions}">操作</th></tr>
+                    </thead>
+                    <tbody id="oneonone-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="oneOnOneModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header">
+                <h5 class="modal-title" th:text="#{my.oneOnOne.new}">1on1を申請</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2">
+                    <label class="form-label text-muted small" th:text="#{my.oneOnOne.counterpart}">相手</label>
+                    <select id="oneonone-counterpart" class="form-select bg-dark border-secondary text-light"></select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label text-muted small" th:text="#{my.oneOnOne.dates}">候補日（5日以内・未来日）</label>
+                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-1">
+                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-2">
+                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-3">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="oneonone-submit" th:text="#{my.oneOnOne.apply}">申請する</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/my-one-on-ones.js" th:src="@{/js/modules/my-one-on-ones.js}"></script>
+</th:block>
+</body>
+</html>

@@ -2747,7 +2747,7 @@ CREATE TABLE t_survey_response (
   question_key       VARCHAR(50)  NOT NULL COMMENT '質問キー',
   answer_value       INT          NULL COMMENT 'scale回答（1〜5。NULL=未回答）',
   comment            VARCHAR(1000) NULL COMMENT '任意コメント',
-  comment_visibility VARCHAR(10)  NOT NULL DEFAULT 'PUBLIC' COMMENT 'PUBLIC/CONFIDENTIAL',
+  comment_visibility VARCHAR(20)  NOT NULL DEFAULT 'PUBLIC' COMMENT 'PUBLIC/CONFIDENTIAL',
   consent_flag       TINYINT      NOT NULL DEFAULT 0 COMMENT '回答同意フラグ',
   template_version   INT          NOT NULL COMMENT '回答時template version',
   created_at         DATETIME     DEFAULT CURRENT_TIMESTAMP,

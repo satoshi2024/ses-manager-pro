@@ -133,7 +133,7 @@ CREATE TABLE t_survey_response (
   question_key       VARCHAR(50) NOT NULL,
   answer_value       INT,
   comment            VARCHAR(1000),
-  comment_visibility VARCHAR(10) NOT NULL DEFAULT 'PUBLIC',
+  comment_visibility VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
   consent_flag       TINYINT NOT NULL DEFAULT 0,
   template_version   INT NOT NULL,
   created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,

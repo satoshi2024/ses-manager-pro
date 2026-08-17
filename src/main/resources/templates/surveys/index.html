@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{menu.surveyManagement}">サーベイ管理</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-ui-checks me-2 text-primary"></i><th:block th:text="#{menu.surveyManagement}">サーベイ管理</th:block></h2>
+        <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#campaignModal">
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{survey.newCampaign}">キャンペーン作成</th:block>
+        </button>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{survey.campaigns}">キャンペーン</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small">
+                    <thead><tr><th th:text="#{survey.title}">タイトル</th><th th:text="#{survey.period}">期間</th>
+                        <th th:text="#{survey.status}">状態</th><th th:text="#{common.actions}">操作</th></tr></thead>
+                    <tbody id="campaign-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-header bg-transparent text-light" th:text="#{survey.templates}">テンプレート</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small">
+                    <thead><tr><th th:text="#{survey.templateKey}">キー</th><th th:text="#{survey.title}">タイトル</th>
+                        <th th:text="#{survey.status}">状態</th><th th:text="#{survey.questionCount}">質問数</th></tr></thead>
+                    <tbody id="template-body"></tbody>
+                </table>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#templateModal" th:text="#{survey.newTemplate}">テンプレート作成</button>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-header bg-transparent text-light" th:text="#{survey.aggregate}">集計</div>
+        <div class="card-body text-light small" id="aggregate-body">…</div>
+    </div>
+</div>
+
+<!-- キャンペーンモーダル -->
+<div class="modal fade" id="campaignModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header"><h5 class="modal-title" th:text="#{survey.newCampaign}">キャンペーン作成</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <select id="campaign-template" class="form-select bg-dark border-secondary text-light mb-2"></select>
+                <input type="text" id="campaign-title" class="form-control bg-dark border-secondary text-light mb-2" th:placeholder="#{survey.title}">
+                <div class="d-flex gap-2">
+                    <input type="date" id="campaign-from" class="form-control bg-dark border-secondary text-light">
+                    <input type="date" id="campaign-to" class="form-control bg-dark border-secondary text-light">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="campaign-save" th:text="#{survey.create}">作成</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- テンプレートモーダル -->
+<div class="modal fade" id="templateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header"><h5 class="modal-title" th:text="#{survey.newTemplate}">テンプレート作成</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <input type="text" id="template-key" class="form-control bg-dark border-secondary text-light mb-2" th:placeholder="#{survey.templateKey}">
+                <input type="text" id="template-title" class="form-control bg-dark border-secondary text-light mb-2" th:placeholder="#{survey.title}">
+                <div id="question-rows"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="question-add" th:text="#{survey.addQuestion}">+ 質問を追加</button>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="template-save" th:text="#{survey.create}">作成</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/survey-management.js" th:src="@{/js/modules/survey-management.js}"></script>
+</th:block>
+</body>
+</html>

@@ -1,7 +1,29 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout" layout:decorate="~{layout/base}">
-<head><meta charset="UTF-8"><title th:text="#{menu.mySurveys}">サーベイ</title></head>
-<body><div layout:fragment="content">
-  <h2 class="h3 mb-4 text-light">サーベイ</h2>
-  <div class="card bg-card border-dark shadow-sm"><div class="card-body text-muted" th:text="#{my.survey.comingSoon}">準備中です</div></div>
-</div></body></html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.survey.title}">サーベイ</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-ui-checks me-2 text-primary"></i><th:block th:text="#{my.survey.title}">サーベイ</th:block></h2>
+    </div>
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-body">
+            <div class="list-group list-group-flush bg-transparent" id="campaign-list"></div>
+        </div>
+    </div>
+    <div class="card bg-card border-dark shadow-sm" id="answer-card" style="display:none">
+        <div class="card-header bg-transparent text-light" id="answer-title"></div>
+        <div class="card-body text-light small" id="answer-body"></div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/my-surveys.js" th:src="@{/js/modules/my-surveys.js}"></script>
+</th:block>
+</body>
+</html>

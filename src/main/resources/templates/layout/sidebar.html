@@ -220,6 +220,18 @@
                         <span th:text="#{menu.expenseManagement}">経費管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('oneOnOneManagement')}">
+                    <a th:href="@{/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/one-on-ones') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-chat-dots me-2"></i>
+                        <span th:text="#{menu.oneOnOneManagement}">1on1管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('surveyManagement')}">
+                    <a th:href="@{/surveys}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/surveys') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-ui-checks me-2"></i>
+                        <span th:text="#{menu.surveyManagement}">サーベイ管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('invoice')}">
                     <a th:href="@{/invoice}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/invoice') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-receipt me-2"></i>
