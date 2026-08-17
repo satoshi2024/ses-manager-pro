@@ -24,7 +24,7 @@
   - **Demo**: 要員が変更申請を登録し、別要員のIDを指定して404になることを確認。
     allowlist外のfieldを送って拒否されることを確認。
 
-- [ ] A1. my dashboard/profile/skill申請
+- [x] A1. my dashboard/profile/skill申請
   - **Objective**: 要員が公開プロフィール・skill・careerの変更を申請でき、
     HR承認前はEngineer masterが一切変わらず、承認後に1回だけ反映される。
     本人はスキルシートの公開項目をpreviewできるが、原価・commissionは見られない。
@@ -36,7 +36,7 @@
     master側が同時更新された場合の競合検出。
   - **Demo**: skill申請→HR承認→sheet preview。承認前にmasterのskillが変わらないことをSQLで確認。
 
-- [ ] A2. 本人給与/勤怠導線
+- [x] A2. 本人給与/勤怠導線
   - **Objective**: 要員が自分の給与明細だけを再認証/MFA後に閲覧でき、
     勤怠・休暇・作業報告へmy dashboardから遷移できる。本人Aが本人Bの明細を取得できない。
   - **実装ガイダンス**: `/api/my/payroll`専用endpoint（design §3）。
@@ -49,7 +49,7 @@
     一覧レスポンスに金額が含まれないこと。
   - **Demo**: 本人が自分の明細だけ表示。MFA未実施の状態で明細APIが拒否されることを確認。
 
-- [ ] B1. 経費申請/承認/archive
+- [x] B1. 経費申請/承認/archive
   - **Objective**: 要員が交通費/立替経費を領収書付きで申請し、承認後に会計へ1回だけ連携される。
     同じ経費が二重に会計連携されない。未scan/感染の領収書は本人にも表示されない。
   - **実装ガイダンス**: receipt scan、approval adapter `EXPENSE_REQUEST`、accounting outbox link。
@@ -61,7 +61,7 @@
     任意科目codeの送信が拒否されること。
   - **Demo**: 経費→承認→会計待ち。同じ経費の連携を2回試行してjobが1件のみを確認。
 
-- [ ] B2. 1on1/survey/privacy
+- [x] B2. 1on1/survey/privacy
   - **Objective**: 要員が1on1候補日を申請して実施記録の公開部分を閲覧でき、
     稼動満足度・負荷・継続意向を定期回答できる。confidential相談はHR/指定管理者だけが見え、
     営業画面へ自由記述が出ない。少人数組織のsurvey集計は非表示になる。
