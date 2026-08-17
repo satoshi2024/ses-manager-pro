@@ -117,6 +117,7 @@ CREATE TABLE t_survey_campaign (
   template_id  BIGINT NOT NULL,
   title        VARCHAR(200) NOT NULL,
   template_snapshot_json CLOB,
+  template_snapshot_version INT,
   period_from  DATE,
   period_to    DATE,
   status       VARCHAR(20) NOT NULL DEFAULT 'DRAFT',

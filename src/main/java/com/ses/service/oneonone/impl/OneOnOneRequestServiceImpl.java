@@ -16,15 +16,20 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.OneOnOneRequestMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.oneonone.OneOnOneRequestService;
+import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -38,7 +43,8 @@ import java.util.stream.Collectors;
 /**
  * 1on1サービス実装（T092 / design §5/§6.2/§6.3）。
  * 母集団: 要員=本人のみ。HR/管理者=全件（private note可視）。マネージャー=組織scope配下（private不可視）。
- * 営業=担当要員のみ（公開部分のみ可視）。private_note_refはHR/管理者以外のDTOへ出さない。
+ * 営業=担当要員（private不可視）。
+ * private_noteはHRおよび明示designationされた管理者のみ閲覧・更新可能（非HR/一般管理者はnullマスク）。
  */
 @Service
 @RequiredArgsConstructor
@@ -51,11 +57,14 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     private final OneOnOneRequestMapper oneOnOneMapper;
     private final EngineerMapper engineerMapper;
     private final SysUserMapper sysUserMapper;
+    private final UserOrganizationMapper userOrganizationMapper;
     private final EngineerAccountLinkService accountLinkService;
     private final EngineerSalesService engineerSalesService;
     private final OrganizationScopeService organizationScopeService;
+    private final AuthorizationService authorizationService;
     private final DocumentService documentService;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     // ----------------------------------------------------------------
     // 本人
@@ -88,16 +97,19 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
             throw BusinessException.of(400, "error.oneOnOne.counterpartRequired");
         }
         SysUser counterpart = sysUserMapper.selectById(counterpartUserId);
-        if (counterpart == null || !COUNTERPART_ROLES.contains(counterpart.getRole())
-                || !Objects.equals(counterpart.getStatus(), 1)) {
-            throw BusinessException.of(400, "error.oneOnOne.invalidCounterpart");
+        if (counterpart == null) {
+            throw BusinessException.of(404, "error.user.notFound");
+        }
+        if (!COUNTERPART_ROLES.contains(counterpart.getRole())) {
+            throw BusinessException.of(400, "error.oneOnOne.invalidCounterpartRole");
         }
         assertCounterpartRelationship(engineerId, counterpart);
         if (candidateDates == null || candidateDates.isEmpty() || candidateDates.size() > MAX_CANDIDATES) {
             throw BusinessException.of(400, "error.oneOnOne.invalidDates");
         }
         List<LocalDate> normalized = candidateDates.stream().sorted().distinct().toList();
-        if (normalized.size() != candidateDates.size() || normalized.stream().anyMatch(d -> d.isBefore(LocalDate.now()))) {
+        LocalDate today = LocalDate.now(clock);
+        if (normalized.size() != candidateDates.size() || normalized.stream().anyMatch(d -> d.isBefore(today))) {
             throw BusinessException.of(400, "error.oneOnOne.invalidDates");
         }
         OneOnOneRequest request = OneOnOneRequest.builder()
@@ -127,7 +139,23 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
             return;
         }
         if ("マネージャー".equals(role)) {
-            return; // マネージャーは相談先として選択可
+            LocalDate asOf = LocalDate.now(clock);
+            Engineer engineer = engineerMapper.selectById(engineerId);
+            Long userId = linkedUserId(engineerId);
+            boolean directManaged = false;
+            if (userId != null) {
+                directManaged = userOrganizationMapper.selectActiveByManagerUserId(counterpart.getId(), asOf)
+                        .stream().anyMatch(uo -> uo.getUserId().equals(userId));
+            }
+            boolean orgManaged = false;
+            if (!directManaged && engineer != null && engineer.getOrganizationId() != null) {
+                Long managerOrgId = userOrganizationMapper.selectPrimaryOrganizationId(counterpart.getId(), asOf);
+                orgManaged = (managerOrgId != null && managerOrgId.equals(engineer.getOrganizationId()));
+            }
+            if (!directManaged && !orgManaged) {
+                throw BusinessException.of(400, "error.oneOnOne.notAssignedManager");
+            }
+            return;
         }
         throw BusinessException.of(400, "error.oneOnOne.invalidCounterpart");
     }
@@ -250,8 +278,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     @Transactional
     public OneOnOneDto savePrivateNote(Long id, String note) {
         OneOnOneRequest request = require(id);
-        String role = SecurityUtils.currentRole();
-        if (!"HR".equals(role) && !"管理者".equals(role)) {
+        if (!canAccessPrivateNote()) {
             throw BusinessException.of(403, "error.accessDenied");
         }
         if (note == null || note.trim().isEmpty()) {
@@ -272,7 +299,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                             .sourceType("GENERATED")
                             .direction("INTERNAL")
                             .counterpartyType("INTERNAL")
-                            .transactionDate(LocalDate.now())
+                            .transactionDate(LocalDate.now(clock))
                             .businessKey(businessKey)
                             .versionDiscriminator("v1")
                             .originalName("private-note-" + id + ".txt")
@@ -288,7 +315,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                             .sourceType("GENERATED")
                             .direction("INTERNAL")
                             .counterpartyType("INTERNAL")
-                            .transactionDate(LocalDate.now())
+                            .transactionDate(LocalDate.now(clock))
                             .businessKey(businessKey)
                             .versionDiscriminator("v" + (System.currentTimeMillis() % 1_000_000))
                             .originalName("private-note-" + id + ".txt")
@@ -300,7 +327,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         oneOnOneMapper.update(null, new UpdateWrapper<OneOnOneRequest>()
                 .eq("id", id)
                 .set("private_note_ref", String.valueOf(documentId))
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         return toDto(require(id), true);
     }
 
@@ -308,18 +335,33 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     // 内部
     // ----------------------------------------------------------------
 
+    private boolean canAccessPrivateNote() {
+        String role = SecurityUtils.currentRole();
+        if ("HR".equals(role)) {
+            return true;
+        }
+        if ("管理者".equals(role)) {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            return authorizationService == null || authorizationService.isAllowed(auth, "one-on-one.confidential");
+        }
+        return false;
+    }
+
     /** 管理画面の母集団（design §6.2）: HR/管理者=全件+private可視、マネージャー=組織scope、営業=担当要員。 */
     private Scope managementScope() {
         String role = SecurityUtils.currentRole();
         switch (role == null ? "" : role) {
-            case "HR", "管理者" -> {
+            case "HR" -> {
                 return new Scope(null, true);
+            }
+            case "管理者" -> {
+                return new Scope(null, canAccessPrivateNote());
             }
             case "マネージャー" -> {
                 if (organizationScopeService.hasFullAccess()) {
                     return new Scope(null, false);
                 }
-                Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now());
+                Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now(clock));
                 return new Scope(allowed == null ? Set.of() : new HashSet<>(allowed), false);
             }
             case "営業" -> {
@@ -454,6 +496,11 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("1on1 JSONのシリアライズに失敗しました", e);
         }
+    }
+
+    private Long linkedUserId(Long engineerId) {
+        EngineerAccountLink link = accountLinkService.findByEngineerId(engineerId);
+        return link == null ? null : link.getSysUserId();
     }
 
     private record Scope(Set<Long> engineerIds, boolean withPrivateNote) {

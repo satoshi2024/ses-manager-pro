@@ -29,6 +29,8 @@ public class MyChangeRequestApiController {
 
     private final EngineerAccountLinkService linkService;
     private final EngineerChangeRequestService changeRequestService;
+    private final com.ses.service.DocumentService documentService;
+    private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
 
     private Long currentEngineerId() {
         Long engineerId = linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
@@ -49,6 +51,38 @@ public class MyChangeRequestApiController {
     @GetMapping("/{id}")
     public ApiResult<EngineerChangeRequestService.ChangeRequestDto> detail(@PathVariable Long id) {
         return ApiResult.success(changeRequestService.detailOwn(currentEngineerId(), id));
+    }
+
+    @PostMapping(value = "/attachment", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<Map<String, Object>> uploadAttachment(
+            @org.springframework.web.bind.annotation.RequestPart("file") org.springframework.web.multipart.MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw BusinessException.of(400, "error.file.empty");
+        }
+        Long engineerId = currentEngineerId();
+        try {
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("OTHER")
+                    .title(file.getOriginalFilename() == null ? "attachment" : file.getOriginalFilename())
+                    .originalName(file.getOriginalFilename() == null ? "attachment" : file.getOriginalFilename())
+                    .contentType(file.getContentType() == null ? "application/octet-stream" : file.getContentType())
+                    .sourceType("UPLOADED")
+                    .direction("INBOUND")
+                    .counterpartyType("INTERNAL")
+                    .transactionDate(java.time.LocalDate.now())
+                    .businessKey("CR_ATTACH:" + engineerId + ":" + System.nanoTime())
+                    .versionDiscriminator("v1")
+                    .build();
+            com.ses.entity.Document document = documentService.registerReceived(req, file.getInputStream());
+            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
+            link.setDocumentId(document.getId());
+            link.setTargetType("ENGINEER");
+            link.setTargetId(engineerId);
+            documentLinkMapper.insert(link);
+            return ApiResult.success(Map.of("documentId", document.getId(), "originalName", document.getTitle()));
+        } catch (java.io.IOException e) {
+            throw BusinessException.of(500, "error.file.readFailed");
+        }
     }
 
     @PostMapping

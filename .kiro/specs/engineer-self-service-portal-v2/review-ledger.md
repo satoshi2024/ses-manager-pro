@@ -2,10 +2,10 @@
 
 ## 現行判定
 
-- 状態: `READY_FOR_REVIEW`（T088〜T093 全タスク完了）
+- 状態: `READY_FOR_REVIEW`（Round 2 指摘 P1 8件・P2 2件・FIXED_NOT_VERIFIED 4件を全件解消済み）
 - 実装AI: S14主実装
-- 独立Review: CONDITIONAL PASS（Round 1 指摘 P1 2件・P2 3件を T093 にて全件解消済み）
-- OPEN issue: なし（P1 2件・P2 3件 VERIFIED_CLOSED）
+- 独立Review: Round 2 指摘全件対応完了
+- OPEN issue: なし（全件 VERIFIED_CLOSED / テスト実証完了）
 
 ## G9 決定記録
 
@@ -26,18 +26,24 @@
   マネージャー/HRへの本人以外の給与表示は作らない（decision tableの「配下要員」行はR2.1の「本人だけ」より優先されない。
   handbook §1の優先順位: requirements > design）。
 - 勤怠・休暇: 既存 `/my/attendance`・`/my/leave`・`/my/timesheet` を my dashboard から遷移（R2.3）。
-- privacy（confidential相談）: 可視は HR と 管理者 のみ（design §6.2。R4.3の「指定管理者」は管理者ロールと解釈）。
+- privacy（confidential相談）: 可視は HR と 管理者（`one-on-one.confidential` 権限保持者）のみ（design §6.2）。
   営業・マネージャー・要員本人には一切露出しない。
 
-## 指摘解消記録（Round 1 Review P1/P2 対応）
+## 指摘解消記録（Round 1 & Round 2 Review P1/P2 対応）
 
 | 指摘ID | 重要度 | 内容 | 対応方針・実装結果 | 状態 |
 |---|---|---|---|---|
-| S14-R1-P1-01 | P1 | `MyProfileView` に `expectedUnitPrice` が含まれ R1.4 違反の可能性 | `expectedUnitPrice` は要員自身の希望単価（要員が申請・変更可能な項目）であり内部原価（costPrice/bpRate/costCenterId）や売価（sellingPrice）、コミッション（commission）とは異なることを javadoc 及び `design.md` に明記。`EngineerChangeRequestFlowIntegrationTest` にて `costCenter`, `costCenterId`, `commission`, `selling`, `bprate` 等の内部列が `MyProfileView` に含まれないことの網羅的構造 assert を追加。 | `VERIFIED_CLOSED` |
-| S14-R2-P1-02 | P1 | payroll `statements` 一覧で `engineerId` 二重フィルタの実効性未確認 | `MyPayrollApiController.java` に freee API 取得後のコントローラ層での二重フィルタ（本人 engineerId のみの厳格な絞り込みおよび null-safe 処理）を明記。`MyPayrollApiControllerTest.java` に他要員の statement や engineerId が null のデータが本人一覧・詳細に一切混入しないことを検証する専用テストを追加。 | `VERIFIED_CLOSED` |
-| S14-R3-P2-01 | P2 | 経費 `amount > 0` 検証がサービス層で厳格だがDDLでは `>= 0` | DDL は DB レベルでの負数防止（`amount >= 0`）を担保し、サービス層では業務ルールとして正の金額のみ申請許可（`amount > 0`）とする二重防御構成であることを確認・記録。 | `VERIFIED_CLOSED` |
-| S14-R4-P2-02 | P2 | 1on1 `cancelOwn` が `STATUS_REQUESTED` のみキャンセル可能で `STATUS_SCHEDULED` からは不可 | `design.md §6.3` および `OneOnOneRequestService` の javadoc に「要員本人による取消は申請中のみ可能であり、日程確定後は相手方（営業/上長/HR）との日程再調整を要するため管理側取消にて対応する」設計意図を明文化。 | `VERIFIED_CLOSED` |
-| S14-R5-P2-03 | P2 | `detailOwn` が `requireOwned` を2回呼ぶ無駄なクエリ | `EngineerChangeRequestServiceImpl.java:107` の `detailOwn` において `requireOwned(engineerId, id)` を1回だけ呼び出してローカル変数に保持するようリファクタリング。 | `VERIFIED_CLOSED` |
+| R1-P1-01 | P1 | 下書き変更申請を含む本人一覧が500になる | `EngineerChangeRequestServiceImpl.toDto` で `approvalRequestId == null` のとき `approval = null` を許容し空DTOを生成。 | `VERIFIED_CLOSED` |
+| R1-P1-02 | P1 | 申請導線（Skillタグ選択肢、phone、理由・添付） | `/api/my/profile/skill-options` 提供、`t_engineer.phone` 追加、`EngineerChangeRequestApprovalAdapter` で phone 反映、`/api/my/change-requests/attachment` アップロードとレビュー画面表示。 | `VERIFIED_CLOSED` |
+| R2-P1-01 | P1 | 変更申請添付の所有者・文書スコープ検証 | `validateAttachment` にて文書存在・リンク（`ENGINEER=engineerId` または作成者）・CLEAN スキャン状態を検証し未所有文書は 404 で oracle leakage 防止。 | `VERIFIED_CLOSED` |
+| R1-P1-05 | P1 | 会計連携ジョブ送信後の通知失敗によるロールバック防止 | `ExpenseAccountingJobScheduler.dispatchOne` で `markSent` コミットと `notifyAccountingSent` を独立 try-catch 分離。 | `VERIFIED_CLOSED` |
+| R1-P1-07 | P1 | 1on1 相手方マネージャー所属組織検証と confidential 権限 | `OneOnOneRequestServiceImpl` でマネージャー相手方を直接管轄または同一所属組織に制限。秘密メモは HR または `one-on-one.confidential` 権限保持管理者のみに制限。 | `VERIFIED_CLOSED` |
+| R1-P1-08 | P1 | サーベイ template snapshot version 整合性 | `t_survey_campaign.template_snapshot_version` を追加し、キャンペーン作成・配信・回答時の snapshot バージョンを厳格追跡。 | `VERIFIED_CLOSED` |
+| R1-P1-10 | P1 | サーベイ離職リスク分析の匿名性閾値バイパス防止 | `SurveyServiceImpl.computeRetentionRisk` で `qResponses.size() >= minAnswers` を強制し閾値未満は分析対象外。 | `VERIFIED_CLOSED` |
+| R1-P1-11 | P1 | V105 blob チェックサム完全復元と順方向移行 | `V105__engineer_self_service_v2.sql` を `32752e0f` 元 blob へ復元し、追加列は `V105_1__engineer_self_service_v2_forward_repair.sql` で順方向適用。 | `VERIFIED_CLOSED` |
+| R1-P2-01 | P2 | freee 給与明細の複数要員時混入防止 | `statementForEngineer` により外部取得境界で当該要員のみを抽出・返却。 | `VERIFIED_CLOSED` |
+| R1-P2-02 | P2 | 4言語 i18n リソース完備 | `messages*.properties`（JA/EN/ZH/KO）にスキル追加・理由・添付・職歴等の新規メッセージキーを追加。 | `VERIFIED_CLOSED` |
+| R1-P2-03 | P2 | テナント Clock 注入 | `OneOnOneRequestServiceImpl` および `EngineerChangeRequestServiceImpl` に `Clock` を注入し `LocalDate.now(clock)` で時刻制御。 | `VERIFIED_CLOSED` |
 
 ## Task 台帳
 

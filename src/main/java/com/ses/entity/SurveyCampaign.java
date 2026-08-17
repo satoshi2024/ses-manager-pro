@@ -32,6 +32,9 @@ public class SurveyCampaign extends BaseEntity {
     /** キャンペーン開始時の質問定義snapshot（JSON文字列） */
     private String templateSnapshotJson;
 
+    /** キャンペーン開始時の質問定義version */
+    private Integer templateSnapshotVersion;
+
     /** 回答期間開始 */
     private LocalDate periodFrom;
 

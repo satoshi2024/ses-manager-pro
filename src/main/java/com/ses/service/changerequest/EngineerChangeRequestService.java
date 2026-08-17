@@ -65,6 +65,12 @@ public interface EngineerChangeRequestService {
     /** 本人の変更申請件数（my dashboard表示用）。 */
     long pendingChangeRequestCount(Long engineerId);
 
+    /** スキルマスタ選択肢（要員ポータルスキル追加用）。 */
+    java.util.List<SkillOptionDto> listSkillOptions();
+
+    record SkillOptionDto(Long id, String skillName, String category) {
+    }
+
     record ChangeRequestDto(Long id, String requestType, String status, String payloadJson, String diffJson,
                             String reason, Long attachmentDocumentId,
                             Long approvalRequestId, String approvalStatus, java.time.LocalDateTime appliedAt,

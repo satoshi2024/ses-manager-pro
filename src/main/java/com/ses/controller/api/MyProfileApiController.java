@@ -40,6 +40,11 @@ public class MyProfileApiController {
         return ApiResult.success(changeRequestService.myProfile(currentEngineerId()));
     }
 
+    @GetMapping("/skill-options")
+    public ApiResult<java.util.List<EngineerChangeRequestService.SkillOptionDto>> skillOptions() {
+        return ApiResult.success(changeRequestService.listSkillOptions());
+    }
+
     @GetMapping("/skill-sheet")
     public ApiResult<EngineerChangeRequestService.SkillSheetPreview> skillSheetPreview() {
         return ApiResult.success(changeRequestService.skillSheetPreview(currentEngineerId()));

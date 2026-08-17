@@ -129,6 +129,8 @@ class EngineerSelfServicePortalMRegressionTest {
     @Autowired
     private SurveyService surveyService;
     @Autowired
+    private com.ses.service.NotificationService notificationService;
+    @Autowired
     private ApprovalEngineService approvalEngineService;
     @Autowired
     private ExpenseAccountingJobScheduler expenseScheduler;
@@ -594,6 +596,46 @@ class EngineerSelfServicePortalMRegressionTest {
         SurveyService.AggregateResult hrAgg = surveyService.aggregate(campaign.id());
         assertEquals(1, hrAgg.questions().get(0).answeredCount());
         assertEquals(new BigDecimal("5.00"), hrAgg.questions().get(0).average());
+    }
+
+    @Test
+    @DisplayName("freee給与明細取得で単一要員分のみ取得され他要員のデータは混入しない")
+    void freee給与明細取得で単一要員分のみ取得され他要員のデータは混入しない() {
+        Long userId = insertUser("要員", "freee-test");
+        Long engineerId = createEngineer("Freee要員", null);
+        link(engineerId, userId);
+        insertFreeeLink(engineerId);
+
+        when(freeeService.statementForEngineer(eq(engineerId), eq(2026), eq(8), eq("salary")))
+                .thenReturn(statementOf(engineerId, "Freee要員", "2026-08-25", "CONFIRMED"));
+
+        PayrollStatementDto dto = freeeService.statementForEngineer(engineerId, 2026, 8, "salary");
+        assertNotNull(dto);
+        assertEquals(engineerId, dto.getEngineerId());
+        assertEquals("Freee要員", dto.getEngineerName());
+    }
+
+    @Test
+    @DisplayName("要員ポータル通知がcanonicalキーで通知一覧および未読カウントへ集計される")
+    void 要員ポータル通知がcanonicalキーで通知一覧および未読カウントへ集計される() {
+        Long userId = insertUser("要員", "notif-test");
+        Long engineerId = createEngineer("Notif要員", null);
+        link(engineerId, userId);
+
+        notificationService.publishToUser(userId, "CHANGE_REQUEST_APPLIED", "変更申請反映",
+                "[\"notification.msg.CHANGE_REQUEST_APPLIED\", \"プロフィール\"]", "/my/profile",
+                "cr-notif-" + System.nanoTime(), "myProfile");
+        notificationService.publishToUser(userId, "EXPENSE_ACCOUNTING_SENT", "経費連携",
+                "[\"notification.msg.EXPENSE_ACCOUNTING_SENT\", \"2300\"]", "/my/expenses",
+                "exp-notif-" + System.nanoTime(), "myExpenses");
+
+        long unread = notificationService.unreadCount(userId);
+        assertTrue(unread >= 2);
+
+        var page = notificationService.pageForUser(userId, 1L, 10L, null, null);
+        assertNotNull(page);
+        assertTrue(page.getRecords().stream().anyMatch(n -> "CHANGE_REQUEST_APPLIED".equals(n.getType())));
+        assertTrue(page.getRecords().stream().anyMatch(n -> "EXPENSE_ACCOUNTING_SENT".equals(n.getType())));
     }
 
     // ------------------------------------------------------------

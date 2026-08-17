@@ -161,6 +161,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .periodFrom(periodFrom)
                 .periodTo(periodTo)
                 .templateSnapshotJson(template.getQuestionsJson())
+                .templateSnapshotVersion(template.getVersion())
                 .status("DRAFT")
                 .createdBy(SecurityUtils.currentUserId())
                 .build();
@@ -182,6 +183,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .eq("id", id).eq("status", "DRAFT")
                 .set("status", "ACTIVE")
                 .set("template_snapshot_json", template.getQuestionsJson())
+                .set("template_snapshot_version", template.getVersion())
                 .set("updated_at", java.time.LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
@@ -393,7 +395,7 @@ public class SurveyServiceImpl implements SurveyService {
                 List<SurveyResponse> qResponses = responses.stream()
                         .filter(r -> r.getQuestionKey().equals(q.key()) && r.getAnswerValue() != null)
                         .toList();
-                if (!qResponses.isEmpty()) {
+                if (qResponses.size() >= minAnswers) {
                     double avg = qResponses.stream().mapToInt(SurveyResponse::getAnswerValue).average().orElse(0.0);
                     BigDecimal qAvg = BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP);
                     if (avg < 3.0) {
@@ -601,9 +603,12 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     private CampaignDto toCampaignDto(SurveyCampaign campaign) {
+        Integer version = campaign.getTemplateSnapshotVersion() != null
+                ? campaign.getTemplateSnapshotVersion()
+                : templateVersionOf(campaign.getTemplateId());
         return new CampaignDto(campaign.getId(), campaign.getTemplateId(), campaign.getTitle(),
                 campaign.getPeriodFrom(), campaign.getPeriodTo(), campaign.getStatus(),
-                templateVersionOf(campaign.getTemplateId()));
+                version);
     }
 
     private List<QuestionDef> readQuestions(String json) {

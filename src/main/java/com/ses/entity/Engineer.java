@@ -31,6 +31,7 @@ public class Engineer extends BaseEntity {
     private LocalDate birthDate;
     private String nationality;
     private String nearestStation;
+    private String phone;
 
     /** 最寄り駅の都道府県 */
     private String prefecture;

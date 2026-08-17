@@ -172,12 +172,16 @@ public class ExpenseAccountingJobScheduler {
         if (result.success()) {
             try {
                 markSent(expenseRequestId, claimed, result.correlationId());
-                notifyAccountingSent(claimed.expense());
                 log.info("[経費会計連携] 会計連携済: expenseId={} correlationId={}", claimed.expense().getId(), result.correlationId());
             } catch (RuntimeException e) {
                 log.error("[経費会計連携] markSentコミット失敗（再試行可能へ戻します）: expenseId={}", expenseRequestId, e);
                 markFailure(expenseRequestId, claimed, "DB_COMMIT_FAILED");
                 return false;
+            }
+            try {
+                notifyAccountingSent(claimed.expense());
+            } catch (Exception e) {
+                log.warn("[経費会計連携] 通知送信失敗（連携状態は成功維持）: expenseId={} error={}", expenseRequestId, e.getMessage());
             }
         } else {
             markFailure(expenseRequestId, claimed,

@@ -15,6 +15,7 @@ import com.ses.entity.DocumentLink;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCareer;
 import com.ses.entity.EngineerChangeRequest;
+import com.ses.entity.SkillTag;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ContractMapper;
@@ -26,6 +27,7 @@ import com.ses.mapper.EngineerCareerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerChangeRequestMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.SkillTagMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.EngineerSalesService;
@@ -41,8 +43,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,6 +78,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private final EngineerMapper engineerMapper;
     private final EngineerCareerMapper engineerCareerMapper;
     private final EngineerSkillService engineerSkillService;
+    private final SkillTagMapper skillTagMapper;
     private final ApprovalRequestMapper approvalRequestMapper;
     private final DocumentLinkMapper documentLinkMapper;
     private final ContractMapper contractMapper;
@@ -88,6 +95,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private final OrganizationScopeService organizationScopeService;
     private final SkillSheetGenerator skillSheetGenerator;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     // ----------------------------------------------------------------
     // 本人
@@ -97,11 +105,11 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     @Transactional(readOnly = true)
     public Page<ChangeRequestDto> pageOwn(Long engineerId, String status, long current, long size) {
         LambdaQueryWrapper<EngineerChangeRequest> query = new LambdaQueryWrapper<EngineerChangeRequest>()
-                .eq(EngineerChangeRequest::getEngineerId, engineerId)
-                .orderByDesc(EngineerChangeRequest::getId);
+                .eq(EngineerChangeRequest::getEngineerId, engineerId);
         if (status != null && !status.isBlank()) {
             query.eq(EngineerChangeRequest::getStatus, status);
         }
+        query.orderByDesc(EngineerChangeRequest::getId);
         Page<EngineerChangeRequest> page = changeRequestMapper.selectPage(PageUtils.safePage(current, size), query);
         return toDtoPage(page, false);
     }
@@ -110,7 +118,18 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     @Transactional(readOnly = true)
     public ChangeRequestDto detailOwn(Long engineerId, Long id) {
         EngineerChangeRequest req = requireOwned(engineerId, id);
-        return toDto(req, approvalOf(req), null);
+        return toDto(req, null, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SkillOptionDto> listSkillOptions() {
+        return skillTagMapper.selectList(new LambdaQueryWrapper<SkillTag>()
+                        .orderByAsc(SkillTag::getCategory)
+                        .orderByAsc(SkillTag::getSkillName))
+                .stream()
+                .map(t -> new SkillOptionDto(t.getId(), t.getSkillName(), t.getCategory()))
+                .toList();
     }
 
     @Override
@@ -121,6 +140,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         if (attachmentDocumentId != null) {
             validateAttachment(engineerId, attachmentDocumentId);
         }
+        Engineer engineer = engineerOrThrow(engineerId);
         String diffJson = buildDiff(requestType, engineerId, payload);
         EngineerChangeRequest draft = EngineerChangeRequest.builder()
                 .engineerId(engineerId)
@@ -140,6 +160,17 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         com.ses.entity.Document doc = documentMapper.selectById(documentId);
         if (doc == null || (doc.getDeletedFlag() != null && doc.getDeletedFlag() != 0)) {
             throw BusinessException.of(404, "error.document.notFound");
+        }
+        Long currentUserId = SecurityUtils.currentUserId();
+        boolean isOwner = (currentUserId != null && currentUserId.equals(doc.getCreatedBy()));
+        if (!isOwner) {
+            List<DocumentLink> links = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                    .eq(DocumentLink::getDocumentId, documentId)
+                    .eq(DocumentLink::getTargetType, "ENGINEER")
+                    .eq(DocumentLink::getTargetId, engineerId));
+            if (links.isEmpty()) {
+                throw BusinessException.of(404, "error.document.notFound");
+            }
         }
         List<com.ses.entity.DocumentVersion> versions = documentVersionMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()

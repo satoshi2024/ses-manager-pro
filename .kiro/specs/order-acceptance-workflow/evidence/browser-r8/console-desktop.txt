@@ -1,6 +1,6 @@
 [Real Browser Console Export - desktop]
-URL: http://localhost:58302/acceptance?workMonth=2026-07&acceptanceId=1
-Timestamp: 2026-08-17T23:18:51.888469500
+URL: http://localhost:60243/acceptance?workMonth=2026-07&acceptanceId=1
+Timestamp: 2026-08-17T23:55:11.569109600
 
 [verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
 [verbose] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o

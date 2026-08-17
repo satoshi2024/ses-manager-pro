@@ -17,9 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadMasterSkills() {
-    SES.api.get('/api/skills', { current: 1, size: 200 })
+    SES.api.get('/api/my/profile/skill-options')
         .then(res => {
-            window._masterSkills = (res && res.records) ? res.records : (Array.isArray(res) ? res : []);
+            window._masterSkills = Array.isArray(res) ? res : ((res && res.records) ? res.records : []);
             if (window.myProfileData) buildChangeForm();
         })
         .catch(() => { window._masterSkills = []; });
@@ -155,11 +155,14 @@ function buildChangeForm() {
         <div class="mt-3 pt-2 border-top border-secondary">
             <div class="mb-2">
                 <label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.reason', '申請理由・備考'))}</label>
-                <input type="text" id="change-reason" class="form-control form-control-sm bg-dark border-secondary text-light" maxlength="1000" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.reasonPlaceholder', '変更理由（任意）'))}">
+                <input type="text" id="change-reason" class="form-control form-control-sm bg-dark border-secondary text-light" maxlength="1000" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.reason.placeholder', '変更理由（任意）'))}">
             </div>
             <div class="mb-2">
-                <label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.attachment', '証明書類・添付ファイル（文書ID、任意）'))}</label>
-                <input type="number" id="change-attachment-doc-id" class="form-control form-control-sm bg-dark border-secondary text-light" placeholder="Document ID">
+                <label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.attachment', '証明書類・添付ファイル（任意）'))}</label>
+                <div class="input-group input-group-sm">
+                    <input type="file" id="change-attachment-file" class="form-control form-control-sm bg-dark border-secondary text-light">
+                    <input type="number" id="change-attachment-doc-id" class="form-control form-control-sm bg-dark border-secondary text-light" style="max-width:140px" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.attachment.placeholder', '文書ID'))}">
+                </div>
             </div>
         </div>`;
 
@@ -178,14 +181,18 @@ function buildChangeForm() {
 
 function skillRow(s) {
     s = s || {};
-    const profs = ['初級', '中級', '上級'];
-    const opts = profs.map(p => `<option value="${p}" ${s.proficiency === p ? 'selected' : ''}>${p}</option>`).join('');
+    const profs = [
+        { code: '初級', label: SES.i18n.t('my.skill.proficiency.beginner', '初級') },
+        { code: '中級', label: SES.i18n.t('my.skill.proficiency.intermediate', '中級') },
+        { code: '上級', label: SES.i18n.t('my.skill.proficiency.advanced', '上級') }
+    ];
+    const opts = profs.map(p => `<option value="${p.code}" ${s.proficiency === p.code ? 'selected' : ''}>${SES.escapeHtml(p.label)}</option>`).join('');
     const skillOptions = (window._masterSkills || []).map(m =>
         `<option value="${m.id}" ${s.skillId === m.id ? 'selected' : ''}>${SES.escapeHtml(m.name || m.skillName || '')}</option>`
     ).join('');
 
     const selectOrInput = (window._masterSkills && window._masterSkills.length > 0)
-        ? `<select class="form-select form-select-sm bg-dark border-secondary text-light skill-select" style="min-width:140px"><option value="">-- スキル選択 --</option>${skillOptions}</select>`
+        ? `<select class="form-select form-select-sm bg-dark border-secondary text-light skill-select" style="min-width:140px"><option value="">-- ${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキル選択'))} --</option>${skillOptions}</select>`
         : `<input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-id" style="width:90px" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
 
     return `<div class="d-flex gap-2 mb-1 skill-row align-items-center">
@@ -202,7 +209,7 @@ function careerRow(c) {
     const f = (k, ph, type) => `<input type="${type || 'text'}" class="form-control form-control-sm bg-dark border-secondary text-light career-${k}" value="${SES.escapeHtml(String(c[k] ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.' + k, ph))}">`;
     return `<div class="career-row border-bottom border-secondary py-2">
         <div class="d-flex gap-2 mb-1">${f('periodFrom', '開始', 'date')} ${f('periodTo', '終了', 'date')} ${f('projectName', '案件名')}</div>
-        <div class="d-flex gap-2 mb-1">${f('clientIndustry', '業界')} ${f('role', '役割')} <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light career-teamSize" style="width:90px" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.career.teamSizePlaceholder', '規模'))}"></div>
+        <div class="d-flex gap-2 mb-1">${f('clientIndustry', '業界')} ${f('role', '役割')} <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light career-teamSize" style="width:90px" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.teamSize', '規模'))}"></div>
         ${f('techStack', '使用技術')}
         <textarea class="form-control form-control-sm bg-dark border-secondary text-light career-description mt-1" rows="2" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.description', '業務概要'))}">${SES.escapeHtml(String(c.description ?? ''))}</textarea>
         <button type="button" class="btn btn-sm btn-outline-danger mt-1 career-remove">- ${SES.escapeHtml(SES.i18n.t('common.delete', '削除'))}</button>
@@ -212,8 +219,32 @@ function careerRow(c) {
 async function submitChangeRequest() {
     const type = document.getElementById('change-type').value;
     const reason = document.getElementById('change-reason') ? document.getElementById('change-reason').value.trim() : null;
-    const attachmentDocIdRaw = document.getElementById('change-attachment-doc-id') ? document.getElementById('change-attachment-doc-id').value.trim() : null;
-    const attachmentDocumentId = attachmentDocIdRaw ? Number(attachmentDocIdRaw) : null;
+    let attachmentDocumentId = null;
+
+    const fileInput = document.getElementById('change-attachment-file');
+    if (fileInput && fileInput.files && fileInput.files[0]) {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        try {
+            const uploadRes = await fetch('/api/my/change-requests/attachment', {
+                method: 'POST',
+                headers: SES.csrf.header(),
+                body: formData
+            }).then(r => r.json());
+            if (uploadRes.code === 200 && uploadRes.data && uploadRes.data.documentId) {
+                attachmentDocumentId = uploadRes.data.documentId;
+            } else {
+                SES.toast.error(uploadRes.message || SES.i18n.t('error.file.uploadFailed', 'ファイルのアップロードに失敗しました'));
+                return;
+            }
+        } catch (e) {
+            SES.toast.error(SES.i18n.t('error.file.uploadFailed', 'ファイルのアップロードに失敗しました'));
+            return;
+        }
+    } else {
+        const attachmentDocIdRaw = document.getElementById('change-attachment-doc-id') ? document.getElementById('change-attachment-doc-id').value.trim() : null;
+        attachmentDocumentId = attachmentDocIdRaw ? Number(attachmentDocIdRaw) : null;
+    }
 
     if (type === 'profile.change') {
         const payload = {};

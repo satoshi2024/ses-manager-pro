@@ -10,6 +10,7 @@ import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.EngineerChangeRequest;
 import com.ses.entity.EngineerSkill;
 import com.ses.entity.Notification;
+import com.ses.entity.SkillTag;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ApprovalRouteMapper;
@@ -73,9 +74,131 @@ class EngineerChangeRequestFlowIntegrationTest {
     @Autowired
     private EngineerSkillMapper engineerSkillMapper;
     @Autowired
+    private com.ses.service.DocumentService documentService;
+    @Autowired
+    private com.ses.mapper.EngineerCareerMapper engineerCareerMapper;
+    @Autowired
     private SkillTagMapper skillTagMapper;
     @Autowired
     private NotificationMapper notificationMapper;
+
+    @Test
+    void 職務経歴変更申請でfingerprint競合時に再申請できる() {
+        long applicant = insertUser();
+        long approver = insertUser();
+        long engineerId = createEngineer();
+        link(engineerId, applicant);
+        insertRoute("career.change", List.of(List.of(approver)));
+        authenticate(applicant, "要員");
+
+        // 経歴Aを追加
+        com.ses.entity.EngineerCareer career = new com.ses.entity.EngineerCareer();
+        career.setEngineerId(engineerId);
+        career.setProjectName("旧案件");
+        career.setRole("SE");
+        career.setPeriodFrom(LocalDate.of(2023, 1, 1));
+        career.setPeriodTo(LocalDate.of(2023, 12, 31));
+        engineerCareerMapper.insert(career);
+
+        // 下書き作成
+        EngineerChangeRequestService.ChangeRequestDto draft = changeRequestService.createDraft(engineerId,
+                "career.change", Map.of("careers", List.of(
+                        Map.of("projectName", "新案件", "role", "PM",
+                                "periodFrom", "2024-01-01", "periodTo", "2024-06-30")
+                )));
+        EngineerChangeRequestService.ChangeRequestDto submitted = changeRequestService.submit(engineerId, draft.id());
+
+        // 申請中に直接経歴が変更されてfingerprintが変わったと仮定（別更新）
+        career.setProjectName("更新された旧案件");
+        engineerCareerMapper.updateById(career);
+
+        // 承認実行 -> 競合検知（ApprovalRequest.status が CONFLICT になる）
+        authenticate(approver, "管理者");
+        approvalEngineService.approve(submitted.approvalRequestId(), approver, "OK");
+
+        ApprovalRequest ar = approvalRequestMapper.selectById(submitted.approvalRequestId());
+        assertEquals("conflict", ar.getStatus());
+
+        // 再申請 -> 承認 -> 反映
+        authenticate(applicant, "要員");
+        EngineerChangeRequestService.ChangeRequestDto resubmitted = changeRequestService.resubmit(engineerId, draft.id());
+        assertEquals("申請中", resubmitted.status());
+
+        authenticate(approver, "管理者");
+        approvalEngineService.approve(resubmitted.approvalRequestId(), approver, "OK");
+
+        authenticate(applicant, "要員");
+        EngineerChangeRequestService.ChangeRequestDto approved = changeRequestService.detailOwn(engineerId, draft.id());
+        assertEquals("反映済", approved.status());
+    }
+
+    @Test
+    void 他要員や未所有の文書添付を指定すると404になる() {
+        long applicantA = insertUser();
+        long engineerIdA = createEngineer();
+        link(engineerIdA, applicantA);
+
+        long applicantB = insertUser();
+        long engineerIdB = createEngineer();
+        link(engineerIdB, applicantB);
+
+        // 要員Bが文書を作成
+        authenticate(applicantB, "要員");
+        com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                .documentType("OTHER")
+                .title("docB.pdf")
+                .originalName("docB.pdf")
+                .contentType("application/pdf")
+                .sourceType("UPLOADED")
+                .direction("INBOUND")
+                .counterpartyType("INTERNAL")
+                .transactionDate(LocalDate.now())
+                .businessKey("doc-b-" + System.nanoTime())
+                .versionDiscriminator("v1")
+                .build();
+        com.ses.entity.Document docB = documentService.registerReceived(req,
+                new java.io.ByteArrayInputStream("content".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        // 要員Aが要員Bの文書IDを指定して申請作成 -> 404
+        authenticate(applicantA, "要員");
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                changeRequestService.createDraft(engineerIdA, "profile.change",
+                        Map.of("nearestStation", "新駅"), "理由", docB.getId()));
+        assertEquals(404, ex.getCode());
+    }
+
+    @Test
+    void 電話番号変更申請が承認後に反映される() {
+        long applicant = insertUser();
+        long approver = insertUser();
+        long engineerId = createEngineer();
+        link(engineerId, applicant);
+        insertRoute("profile.change", List.of(List.of(approver)));
+        authenticate(applicant, "要員");
+
+        EngineerChangeRequestService.ChangeRequestDto draft = changeRequestService.createDraft(engineerId,
+                "profile.change", Map.of("phone", "090-1234-5678"));
+        EngineerChangeRequestService.ChangeRequestDto submitted = changeRequestService.submit(engineerId, draft.id());
+
+        authenticate(approver, "管理者");
+        approvalEngineService.approve(submitted.approvalRequestId(), approver, "OK");
+
+        Engineer updatedEngineer = engineerMapper.selectById(engineerId);
+        assertEquals("090-1234-5678", updatedEngineer.getPhone());
+    }
+
+    @Test
+    void スキルマスタ選択肢が取得できる() {
+        long applicant = insertUser();
+        long engineerId = createEngineer();
+        link(engineerId, applicant);
+        authenticate(applicant, "要員");
+
+        insertSkillTag();
+        List<EngineerChangeRequestService.SkillOptionDto> options = changeRequestService.listSkillOptions();
+        assertNotNull(options);
+        assertTrue(options.size() > 0);
+    }
 
     static final java.util.concurrent.atomic.AtomicInteger ROUTE_SEQ =
             new java.util.concurrent.atomic.AtomicInteger(2000);

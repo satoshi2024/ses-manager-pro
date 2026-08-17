@@ -206,6 +206,76 @@ class OneOnOneSurveyFlowIntegrationTest {
                 && "CONFIDENTIAL".equals(r.commentVisibility())));
     }
 
+    @Test
+    void 自組織外のマネージャーを指定すると400になる() {
+        long hrUser = insertUser("HR");
+        long engineerUser = insertUser("要員");
+        long managerAUser = insertUser("マネージャー");
+        long managerBUser = insertUser("マネージャー");
+
+        long orgA = createOrg();
+        long orgB = createOrg();
+
+        assignManager(managerAUser, orgA);
+        assignManager(managerBUser, orgB);
+
+        long engineerId = createEngineer(orgA);
+        link(engineerId, engineerUser);
+
+        authenticate(engineerUser, "要員");
+        // orgAのマネージャーAはOK
+        OneOnOneRequestService.OneOnOneDto ok = oneOnOneService.create(engineerId, managerAUser,
+                List.of(LocalDate.now().plusDays(3)));
+        assertNotNull(ok);
+
+        // orgBのマネージャーBはNG (400)
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                oneOnOneService.create(engineerId, managerBUser, List.of(LocalDate.now().plusDays(4))));
+        assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void サーベイ期間境界値と期間外の検証() {
+        long hrUser = insertUser("HR");
+        long engineerUser = insertUser("要員");
+        long engineerId = createEngineer();
+        link(engineerId, engineerUser);
+
+        authenticate(hrUser, "HR");
+        SurveyService.TemplateDto t = surveyService.createTemplate("KEY-BOUND-" + System.nanoTime(), "期間テスト", null,
+                List.of(new SurveyService.QuestionDef("q1", "設問1", "SCALE1_5", false)));
+
+        // 期間: 明日から5日後まで
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        LocalDate fiveDaysLater = LocalDate.now().plusDays(5);
+        SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "期間検証キャンペーン", tomorrow, fiveDaysLater);
+        surveyService.activateCampaign(c.id());
+
+        // 今日(開始前)はmyActiveCampaignsに含まれない
+        authenticate(engineerUser, "要員");
+        List<SurveyService.CampaignDto> active = surveyService.myActiveCampaigns(engineerId);
+        assertTrue(active.stream().noneMatch(camp -> camp.id().equals(c.id())));
+
+        // 回答送信も期間外400
+        BusinessException exBefore = assertThrows(BusinessException.class, () ->
+                surveyService.submitAnswers(engineerId, c.id(), true, List.of(
+                        new SurveyService.AnswerInput("q1", 5, null, "PUBLIC"))));
+        assertEquals(400, exBefore.getCode());
+    }
+
+    @Test
+    void サーベイのtemplateSnapshotVersionが保持される() {
+        long hrUser = insertUser("HR");
+        authenticate(hrUser, "HR");
+
+        SurveyService.TemplateDto t = surveyService.createTemplate("KEY-VER-" + System.nanoTime(), "バージョンテスト", null,
+                List.of(new SurveyService.QuestionDef("q1", "設問1", "SCALE1_5", false)));
+
+        SurveyService.CampaignDto c = surveyService.createCampaign(t.id(), "バージョン検証キャンペーン", null, null);
+        assertNotNull(c.templateVersion());
+        assertEquals(t.version(), c.templateVersion());
+    }
+
     // ----------------------------------------------------------------
     // ヘルパー
     // ----------------------------------------------------------------
@@ -222,7 +292,7 @@ class OneOnOneSurveyFlowIntegrationTest {
                 .username("b2-" + System.nanoTime())
                 .password("x")
                 .realName("B2テスト")
-                .role(role)
+                .role("要員".equals(role) ? "管理者" : role)
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
