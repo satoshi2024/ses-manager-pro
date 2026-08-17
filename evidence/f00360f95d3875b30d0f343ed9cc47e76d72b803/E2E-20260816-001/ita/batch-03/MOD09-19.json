@@ -4,8 +4,8 @@
   "category": "MOD-09",
   "name": "reminder-templates/recipient-candidates/reminders 一覧・個別/一括督促送信を scope 内/外、宛先なし、mail 失敗で実行",
   "status": "PASS",
-  "duration_ms": 30,
-  "duration_h": 0.000008,
+  "duration_ms": 177,
+  "duration_h": 0.000049,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-19.json",
   "error": null,
   "evidence_detail": {

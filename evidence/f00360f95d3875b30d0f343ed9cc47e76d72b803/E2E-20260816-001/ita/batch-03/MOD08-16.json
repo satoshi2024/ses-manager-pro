@@ -4,7 +4,7 @@
   "category": "MOD-08",
   "name": "締めsummaryに未入力/未確定/未請求/未払BPを各1件作り /confirm 申請後、未解消/全解消で最終承認",
   "status": "PASS",
-  "duration_ms": 50,
+  "duration_ms": 49,
   "duration_h": 0.000014,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-16.json",
   "error": null,

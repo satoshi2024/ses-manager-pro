@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "sales01/02と組織異動前後でlist/options/detail/update/delete/price/documentを直送",
   "status": "PASS",
-  "duration_ms": 69,
-  "duration_h": 0.000019,
+  "duration_ms": 309,
+  "duration_h": 0.000086,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-03.json",
   "error": null,
   "evidence_detail": {

@@ -4,7 +4,7 @@
   "category": "MOD-08",
   "name": "締め最終承認と勤怠保存/請求取消を同時実行し、同一申請approve二重送信、破損JSONも試験",
   "status": "PASS",
-  "duration_ms": 1,
+  "duration_ms": 0,
   "duration_h": 0,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-17.json",
   "error": null,

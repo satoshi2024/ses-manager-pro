@@ -3,21 +3,36 @@
   "dimension": "N,D,U",
   "category": "MOD-07",
   "name": "要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成",
-  "status": "FAIL",
-  "duration_ms": 931,
-  "duration_h": 0.000259,
+  "status": "PASS",
+  "duration_ms": 2701,
+  "duration_h": 0.00075,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-01.json",
   "error": null,
   "evidence_detail": {
     "http_create": {
-      "status": 403,
+      "status": 200,
       "body": {
-        "code": 403,
-        "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
-        "data": null
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 7296,
+          "negativeProfit": false,
+          "complianceFindings": []
+        }
       }
     },
+    "db_created_contract": {
+      "id": "7296",
+      "contract_no": "CNT-1786981594856",
+      "engineer_id": "1001",
+      "project_id": "1",
+      "customer_id": "1",
+      "sales_user_id": "102",
+      "selling_price": "850000",
+      "cost_price": "650000",
+      "is_draft": "1"
+    },
     "gross_profit_yen": 200000,
-    "fields_matched": false
+    "fields_matched": true
   }
 }

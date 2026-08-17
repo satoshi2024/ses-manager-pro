@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "契約の options/check-active/renewal-calendar を取得し、generate-renewals（管理者）を二重実行、export CSV を scope 内/外で実行",
   "status": "PASS",
-  "duration_ms": 43,
-  "duration_h": 0.000012,
+  "duration_ms": 375,
+  "duration_h": 0.000104,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-19.json",
   "error": null,
   "evidence_detail": {

@@ -4,16 +4,16 @@
   "category": "MOD-07",
   "name": "selling/cost=0、負数、精算min=max/min>max、start=end/end<start、commission 0/100/範囲外",
   "status": "PASS",
-  "duration_ms": 37,
-  "duration_h": 0.00001,
+  "duration_ms": 39,
+  "duration_h": 0.000011,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-02.json",
   "error": null,
   "evidence_detail": {
     "negative_price_response": {
-      "status": 403,
+      "status": 400,
       "body": {
-        "code": 403,
-        "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
+        "code": 400,
+        "message": "入力内容に誤りがあります：売上単価は0以上で入力してください",
         "data": null
       }
     },

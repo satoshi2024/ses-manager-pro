@@ -91,6 +91,7 @@
 | **R4.3** | confidential相談閲覧制限 | `OneOnOneRequestServiceImpl.detailManagement` / `AuthorizationServiceImpl` | `OneOnOneSurveyFlowIntegrationTest.confidential秘密メモはHRのみまたは指定管理者のみ閲覧可能` | `OneOnOneSurveyFlowIntegrationTest.oneOnOneフローが申請から日程確定実施済まで進みconfidentialは営業から見えない` | `EngineerSelfServicePortalMRegressionTest.pageNavigationAndRoleBoundaries` |
 | **R4.4** | サーベイ離職リスク・匿名性閾値 | `SurveyServiceImpl.aggregate` / `computeRetentionRisk` | `OneOnOneSurveyFlowIntegrationTest.surveyは未回答を母数に含めず匿名閾値未満を非表示にする` | `OneOnOneSurveyFlowIntegrationTest.匿名性閾値未満の質問別リスク分析は集計から除外される` | `OneOnOneSurveyFlowIntegrationTest.匿名性閾値未満の質問別リスク分析は集計から除外される` |
 | **R5** | 本人A/B完全分離・master不変 | 各MyApiController / ApprovalAdapter | `EngineerSelfServicePortalMRegressionTest.fullLifecycleSynergyIntegration` | `EngineerSelfServicePortalMRegressionTest.piiLeakScanAndIdorProtection` | `EngineerChangeRequestFlowIntegrationTest.email変更申請後に管理者がSysUserのemailを直接変更すると承認時conflictになる` |
+| **T093** | 実ブラウザ desktop/390px 一気通貫実測・DOM/console/screenshot検証 | `EngineerSelfServiceBrowserMTest.captureEngineerPortalScreensWithRealBrowser` | `EngineerSelfServiceBrowserMTest.captureEngineerPortalScreensWithRealBrowser` | `EngineerSelfServicePortalMRegressionTest.pageNavigationAndRoleBoundaries` | `EngineerSelfServicePortalMRegressionTest.piiLeakScanAndIdorProtection` |
 
 ## Migration Fixture 実証記録（MySQL 8.0 Testcontainers 3環境）
 
@@ -125,10 +126,37 @@
 - **コマンド**: `.\apache-maven-3.9.6\bin\mvn test -Dtest=JsSyntaxCheckTest`
 - **実測結果**: **Tests run: 1, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
 
-### 6. Desktop & Mobile 390px Browser / MVC 回帰
+### 6. Desktop & Mobile 390px 実ブラウザ（Chrome CDP Headless）Demo 証跡
+- **対象**: `EngineerSelfServiceBrowserMTest`（実Chrome CDP・headless 1920x1080 & 390x844、実ログインから `/my/dashboard`, `/my/profile`, `/my/expenses`, `/my/one-on-ones`, `/my/surveys`, `/my/timesheet` 一気通貫実測）
+- **保存先**: `.kiro/specs/engineer-self-service-portal-v2/evidence/browser-m/`
+- **runId**: `browser-m-20260818004534`
+- **実測結果**: **Tests run: 1, Failures: 0, Errors: 0, Skipped: 0** (Time elapsed: 26.23 s, BUILD SUCCESS, exit code 0)
+- **証跡成果物**:
+  - `desktop-my-dashboard.png` (SHA-256: `92ecb82e...`)
+  - `desktop-my-profile.png` (SHA-256: `b636c9ac...`)
+  - `desktop-my-expenses.png` (SHA-256: `b59e87e9...`)
+  - `desktop-my-one-on-ones.png` (SHA-256: `b59e87e9...`)
+  - `desktop-my-surveys.png` (SHA-256: `b636c9ac...`)
+  - `desktop-my-timesheet.png` (SHA-256: `b59e87e9...`)
+  - `mobile390-my-dashboard.png` (SHA-256: `4296fc1b...`)
+  - `mobile390-my-profile.png` (SHA-256: `37dcba6f...`)
+  - `mobile390-my-expenses.png` (SHA-256: `dbcaac12...`)
+  - `mobile390-my-one-on-ones.png` (SHA-256: `37dcba6f...`)
+  - `mobile390-my-surveys.png` (SHA-256: `dbcaac12...`)
+  - `mobile390-my-timesheet.png` (SHA-256: `dbcaac12...`)
+  - `desktop-console.txt` (console count: 6)
+  - `mobile390-console.txt` (console count: 6)
+  - `summary.json`, `run-id.txt`
+
+### 7. MVC / セキュリティ回帰
 - **対象**: `EngineerSelfServicePortalMRegressionTest` (MockMvc + セッション認証 + 各種ロール境界)
 - **実測結果**: **Tests run: 6, Failures: 0, Errors: 0, Skipped: 0** (PII leak scan 0, IDOR 403/404, 勤怠導線回帰 PASS)
 
-### 7. Git Diff Check
+### 8. Git Diff Check
 - **コマンド**: `git diff --check`
 - **実測結果**: **0 warnings, 0 errors** (exit code 0)
+
+---
+
+## Scope & Review Target 宣言
+本 Review Packet の検証対象は dirty worktree ではなく、Git の immutable commit object を対象とします。Batch03 関連の ITA 証跡ファイル等の他モジュール差分は S14 production/test/spec 変更を含まない独立成果物です。

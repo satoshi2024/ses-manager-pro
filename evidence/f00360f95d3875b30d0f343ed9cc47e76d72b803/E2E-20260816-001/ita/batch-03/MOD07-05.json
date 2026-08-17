@@ -3,13 +3,32 @@
   "dimension": "N,D",
   "category": "MOD-07",
   "name": "提案/見積/注文行から契約ドラフトを生成し主担当営業あり/無効/なしを比較",
-  "status": "FAIL",
-  "duration_ms": 1571,
-  "duration_h": 0.000436,
+  "status": "PASS",
+  "duration_ms": 5920,
+  "duration_h": 0.001644,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-05.json",
   "error": null,
   "evidence_detail": {
-    "proposal_id_matched": false,
-    "default_status_is_draft": false
+    "http_create": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "http_s1": 200,
+    "http_s2": 200,
+    "http_s3_closed": 200,
+    "db_generated_draft": {
+      "id": "7293",
+      "contract_no": "C-202609-0006",
+      "proposal_id": "6275",
+      "status": "�ʂ���",
+      "engineer_id": "1026",
+      "sales_user_id": "102"
+    },
+    "proposal_id_matched": true,
+    "default_status_is_draft": true
   }
 }

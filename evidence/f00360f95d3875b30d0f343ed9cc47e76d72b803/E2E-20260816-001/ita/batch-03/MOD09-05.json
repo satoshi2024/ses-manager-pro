@@ -4,16 +4,16 @@
   "category": "MOD-09",
   "name": "0/一部/残額ちょうど/1円超過の入金を追加し削除",
   "status": "PASS",
-  "duration_ms": 23,
-  "duration_h": 0.000006,
+  "duration_ms": 157,
+  "duration_h": 0.000044,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-05.json",
   "error": null,
   "evidence_detail": {
     "zero_amount_payment_response": {
-      "status": 403,
+      "status": 404,
       "body": {
-        "code": 403,
-        "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
+        "code": 404,
+        "message": "閲覧権限がないか、対象が存在しません",
         "data": null
       }
     },

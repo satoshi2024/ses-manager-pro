@@ -4,12 +4,12 @@
   "category": "MOD-08",
   "name": "紐付済み要員が本人契約へ日次開始/終了/休憩を保存し月提出",
   "status": "PASS",
-  "duration_ms": 39,
-  "duration_h": 0.000011,
+  "duration_ms": 112,
+  "duration_h": 0.000031,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-01.json",
   "error": null,
   "evidence_detail": {
-    "http_daily_status": 403,
+    "http_daily_status": 404,
     "http_attendance_status": 200,
     "work_month": "2026-08",
     "actual_hours_calculated": 8

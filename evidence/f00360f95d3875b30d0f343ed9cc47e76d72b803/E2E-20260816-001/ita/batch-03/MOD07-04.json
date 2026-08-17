@@ -4,13 +4,14 @@
   "category": "MOD-07",
   "name": "準備中→稼動中→終了、解約日必須/期間外、無効status辺を試験",
   "status": "PASS",
-  "duration_ms": 63,
-  "duration_h": 0.000017,
+  "duration_ms": 2712,
+  "duration_h": 0.000753,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-04.json",
   "error": null,
   "evidence_detail": {
-    "http_s1_active_submission": 400,
-    "http_s2_closed_submission": 400,
+    "http_s1_active_submission": 200,
+    "http_s2_closed_submission": 200,
+    "db_final_status": "�K��",
     "state_machine_guarded": true
   }
 }

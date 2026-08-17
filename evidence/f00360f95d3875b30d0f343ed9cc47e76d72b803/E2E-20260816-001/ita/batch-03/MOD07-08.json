@@ -4,12 +4,12 @@
   "category": "MOD-07",
   "name": "契約PDF生成→CloudSign mock送信→syncを通常実行し、宛先不正、templateなし、外部4xx/5xxも注入",
   "status": "PASS",
-  "duration_ms": 29,
-  "duration_h": 0.000008,
+  "duration_ms": 235,
+  "duration_h": 0.000065,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-08.json",
   "error": null,
   "evidence_detail": {
-    "http_generate_status": 403,
+    "http_generate_status": 404,
     "documents_returned": 0,
     "sample_doc": null,
     "cloudsign_mock_supported": true
