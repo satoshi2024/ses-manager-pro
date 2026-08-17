@@ -50,6 +50,20 @@ public final class NotificationLinks {
     /** 月次検収（/acceptance）— 検収未提出・期限超過・差戻し通知の遷移先。 */
     public static final String ACCEPTANCE = "/acceptance";
 
+    // ---- S14 engineer-self-service-portal-v2 の要員本人向けリンク ----
+    /** マイダッシュボード（/my/dashboard） */
+    public static final String MY_DASHBOARD = "/my/dashboard";
+    /** プロフィール・スキル申請（/my/profile）— 変更申請反映通知の遷移先。 */
+    public static final String MY_PROFILE = "/my/profile";
+    /** 給与明細（/my/payroll） */
+    public static final String MY_PAYROLL = "/my/payroll";
+    /** 経費申請（/my/expenses）— 会計連携・支払通知の遷移先。 */
+    public static final String MY_EXPENSES = "/my/expenses";
+    /** 1on1（/my/one-on-ones） */
+    public static final String MY_ONE_ON_ONES = "/my/one-on-ones";
+    /** サーベイ（/my/surveys）— キャンペーン配信通知の遷移先。 */
+    public static final String MY_SURVEYS = "/my/surveys";
+
     private NotificationLinks() {
     }
 

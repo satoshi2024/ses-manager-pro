@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.profile.title}">プロフィール・スキル</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-badge me-2 text-primary"></i><th:block th:text="#{my.profile.title}">プロフィール・スキル</th:block></h2>
+        <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#changeModal">
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{my.profile.newRequest}">変更を申請</th:block>
+        </button>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-header bg-transparent text-light"><i class="bi bi-person me-1"></i><th:block th:text="#{my.profile.section.profile}">公開プロフィール</th:block></div>
+                <div class="card-body text-light small" id="profile-body">…</div>
+            </div>
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-header bg-transparent text-light"><i class="bi bi-briefcase me-1"></i><th:block th:text="#{my.profile.section.contracts}">現在の契約（公開条件）</th:block></div>
+                <div class="card-body text-light small" id="contracts-body">…</div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-header bg-transparent text-light"><i class="bi bi-lightning-charge me-1"></i><th:block th:text="#{my.profile.section.skills}">スキル</th:block></div>
+                <div class="card-body text-light small" id="skills-body">…</div>
+            </div>
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-header bg-transparent text-light"><i class="bi bi-card-list me-1"></i><th:block th:text="#{my.profile.section.careers}">職務経歴</th:block></div>
+                <div class="card-body text-light small" id="careers-body">…</div>
+            </div>
+            <div class="card bg-card border-dark shadow-sm mb-3">
+                <div class="card-header bg-transparent text-light"><i class="bi bi-file-earmark-pdf me-1"></i><th:block th:text="#{my.profile.section.skillSheet}">スキルシート確認</th:block></div>
+                <div class="card-body text-light small" id="skillsheet-body">…</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mt-2">
+        <div class="card-header bg-transparent text-light"><i class="bi bi-inbox me-1"></i><th:block th:text="#{my.profile.section.requests}">変更申請</th:block></div>
+        <div class="card-body">
+            <table class="table table-dark table-striped align-middle small">
+                <thead><tr><th th:text="#{my.changeRequest.type}">種別</th><th th:text="#{my.changeRequest.status}">状態</th><th th:text="#{my.changeRequest.approvalStatus}">承認状態</th><th th:text="#{common.actions}">操作</th></tr></thead>
+                <tbody id="requests-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 変更申請モーダル -->
+<div class="modal fade" id="changeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header">
+                <h5 class="modal-title" th:text="#{my.profile.newRequest}">変更を申請</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label text-muted small" th:text="#{my.changeRequest.type}">種別</label>
+                    <select id="change-type" class="form-select bg-dark border-secondary text-light">
+                        <option value="profile.change" th:text="#{my.changeRequest.type.profile}">プロフィール</option>
+                        <option value="skill.change" th:text="#{my.changeRequest.type.skill}">スキル</option>
+                        <option value="career.change" th:text="#{my.changeRequest.type.career}">職務経歴</option>
+                    </select>
+                </div>
+                <div id="change-form" class="small"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                <button type="button" class="btn btn-primary" id="change-submit" th:text="#{my.changeRequest.submit}">申請する</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/my-profile.js" th:src="@{/js/modules/my-profile.js}"></script>
+</th:block>
+</body>
+</html>

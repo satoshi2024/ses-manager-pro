@@ -356,6 +356,11 @@ class ExpenseRequestFlowIntegrationTest {
     }
 
     void link(Long engineerId, Long sysUserId) {
+        // 共有H2には他classが残したlink行がありうるため、該当engineer/userの既存linkを先に削除する
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, engineerId));
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);

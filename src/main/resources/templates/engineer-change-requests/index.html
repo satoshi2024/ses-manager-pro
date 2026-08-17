@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{menu.engineerChangeRequests}">変更申請管理</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-person-gear me-2 text-primary"></i><th:block th:text="#{menu.engineerChangeRequests}">変更申請管理</th:block></h2>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="searchEngineerName" class="form-label text-muted small" th:text="#{changeRequest.engineerName}">要員名</label>
+                    <input type="text" class="form-control bg-dark border-secondary text-light" id="searchEngineerName" th:placeholder="#{changeRequest.engineerName.placeholder}">
+                </div>
+                <div class="col-md-3">
+                    <label for="searchType" class="form-label text-muted small" th:text="#{changeRequest.type}">種別</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchType">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="profile.change" th:text="#{changeRequest.type.profile}">プロフィール</option>
+                        <option value="skill.change" th:text="#{changeRequest.type.skill}">スキル</option>
+                        <option value="career.change" th:text="#{changeRequest.type.career}">職務経歴</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchStatus" class="form-label text-muted small" th:text="#{changeRequest.status}">状態</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchStatus">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="下書き" th:text="#{changeRequest.status.draft}">下書き</option>
+                        <option value="申請中" th:text="#{changeRequest.status.applied}">申請中</option>
+                        <option value="承認済" th:text="#{changeRequest.status.approved}">承認済</option>
+                        <option value="反映済" th:text="#{changeRequest.status.reflected}">反映済</option>
+                        <option value="取下げ" th:text="#{changeRequest.status.withdrawn}">取下げ</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search me-1"></i><th:block th:text="#{common.search}">検索</th:block></button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-striped align-middle small">
+                    <thead>
+                    <tr>
+                        <th th:text="#{changeRequest.id}">ID</th>
+                        <th th:text="#{changeRequest.engineerName}">要員</th>
+                        <th th:text="#{changeRequest.type}">種別</th>
+                        <th th:text="#{changeRequest.status}">状態</th>
+                        <th th:text="#{changeRequest.approvalStatus}">承認状態</th>
+                        <th th:text="#{changeRequest.reflect}">反映</th>
+                        <th th:text="#{common.actions}">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="requests-body"></tbody>
+                </table>
+            </div>
+            <div id="requests-pagination" class="d-flex justify-content-between align-items-center small text-muted mt-2"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 詳細モーダル -->
+<div class="modal fade" id="detailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header">
+                <h5 class="modal-title" th:text="#{changeRequest.detail}">変更申請詳細</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body small" id="detail-body">…</div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/engineer-change-requests.js" th:src="@{/js/modules/engineer-change-requests.js}"></script>
+</th:block>
+</body>
+</html>
