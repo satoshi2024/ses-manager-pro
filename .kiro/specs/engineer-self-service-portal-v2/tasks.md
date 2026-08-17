@@ -74,7 +74,7 @@
     最低回答数未満のsegmentが非表示になること、未回答が0点として集計されないこと、通知。
   - **Demo**: 回答→HR限定相談→followup。営業ログインで相談内容が取得できないことをAPIレスポンスで確認。
 
-- [ ] M. 回帰
+- [x] M. 回帰
   - **Objective**: 要員ログインから全my機能が一気通貫で動き、
     本人以外のデータが1件も漏れない。既存の`/my/timesheet`・Engineer・Payroll機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、

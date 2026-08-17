@@ -80,10 +80,12 @@ public class MyPayrollApiController {
             resp.put("statements", List.of());
             return noStore(ApiResult.success(resp));
         }
+        // freeeService.statements(year, month, type) から取得したリストに対し、
+        // コントローラ層で確実に本人の engineerId のみ抽出・二重防御する（他要員やnullのデータは一切漏洩しない）。
         List<PayrollStatementDto> all = fetchStatements(engineerId, year, month, type);
         resp.put("linked", true);
         resp.put("statements", all.stream()
-                .filter(s -> engineerId.equals(s.getEngineerId()))
+                .filter(s -> s != null && engineerId.equals(s.getEngineerId()))
                 .map(this::toSummary)
                 .toList());
         return noStore(ApiResult.success(resp));
@@ -106,7 +108,7 @@ public class MyPayrollApiController {
             throw BusinessException.of(404, "error.my.payroll.notFound");
         }
         PayrollStatementDto mine = fetchStatements(engineerId, year, month, type).stream()
-                .filter(s -> engineerId.equals(s.getEngineerId()))
+                .filter(s -> s != null && engineerId.equals(s.getEngineerId()))
                 .findFirst()
                 .orElseThrow(() -> BusinessException.of(404, "error.my.payroll.notFound"));
         return noStore(ApiResult.success(mine));

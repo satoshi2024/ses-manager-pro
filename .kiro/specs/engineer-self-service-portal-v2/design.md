@@ -102,6 +102,7 @@
 - 経費の会計連携は`accounting_job_id`のUNIQUEで冪等（R5）。
   同一経費から2件のjobを作らない。承認済経費の領収書差替えは**再申請**（R3.3）。
 - 領収書は archive のscanを通す。**未scan/感染時は本人にも表示しない**（R5、fail-closed）。
+- 1on1の本人による取消（`cancelOwn`）は「申請中」段階のみ可能。日程確定（`STATUS_SCHEDULED`）以降の取消は相手方（営業/上長/HR）との日程調整を伴うため管理側取消（`cancel`）にて対応する。
 
 ## 7. UI/test
 

@@ -64,6 +64,14 @@ public interface EngineerChangeRequestService {
                             boolean unappliedApproved, java.time.LocalDateTime createdAt, String engineerName) {
     }
 
+    /**
+     * 要員本人向けプロフィール閲覧モデル（R1.4）。
+     * <p>
+     * {@code expectedUnitPrice} は要員本人が設定・変更申請する「希望単価」であり、
+     * 会社側の内部原価（costPrice / bpRate / costCenterId）や売価（sellingPrice）、コミッション（commission）
+     * とは異なり、本人の希望条件として開示される。内部原価・コミッション・他要員情報は含まれない。
+     * </p>
+     */
     record MyProfileView(Long engineerId, String fullName, String fullNameKana, String initialName, String gender,
                          java.time.LocalDate birthDate, String nationality, String nearestStation, String prefecture,
                          String railwayCompany, String employmentType, String status,

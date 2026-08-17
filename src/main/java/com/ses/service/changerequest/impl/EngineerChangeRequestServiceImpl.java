@@ -104,7 +104,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     @Override
     @Transactional(readOnly = true)
     public ChangeRequestDto detailOwn(Long engineerId, Long id) {
-        return toDto(requireOwned(engineerId, id), approvalOf(requireOwned(engineerId, id)), null);
+        EngineerChangeRequest req = requireOwned(engineerId, id);
+        return toDto(req, approvalOf(req), null);
     }
 
     @Override

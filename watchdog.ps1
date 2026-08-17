@@ -6,17 +6,23 @@
 
 $ErrorActionPreference = 'Stop'
 
+# PowerShell 5.1 では System.Net.Http を明示的に読み込む必要がある
+Add-Type -AssemblyName System.Net.Http
+
 $ProjectRoot       = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BridgePath        = Join-Path $ProjectRoot '.opencode\task_bridge.json'
+$TemplatePath      = Join-Path $ProjectRoot '.opencode\task_bridge.template.json'
+$LockPath          = Join-Path $ProjectRoot '.opencode\watchdog.lock'
 $TurnPorts         = @{ 'impl' = 3000; 'review' = 3001 }
 $TurnMessages      = @{
-    'impl'   = '実装ターンです。.opencode/task_bridge.json を読み、task_description に従って実装を進めてください。完了後は impl_summary にまとめを書き、current_turn を review に変更してください。'
-    'review' = 'レビューターンです。.opencode/task_bridge.json と Git の変更を読み、review_criteria に従ってレビューしてください。全部合格なら status を DONE に、不合格なら review_feedback に戻し意見を書いて current_turn を impl に変更してください。'
+    'impl'   = '実装ターンです。.opencode/task_bridge.json を読み、task_description に従って実装を進めてください。完了後は impl_summary にまとめを書き、current_turn を review に変更してください。※task_bridge.json を更新する際は必ず有効な JSON で書き、文字列内の改行は \n エスケープにしてください（ファイル全体を壊さないこと）。'
+    'review' = 'レビューターンです。.opencode/task_bridge.json と Git の変更を読み、review_criteria に従ってレビューしてください。全部合格なら status を DONE に、不合格なら review_feedback に戻し意見を書いて current_turn を impl に変更してください。※task_bridge.json を更新する際は必ず有効な JSON で書き、文字列内の改行は \n エスケープにしてください（ファイル全体を壊さないこと）。'
 }
 $TaskTimeoutSec    = 180   # タスク実行のタイムアウト（秒）
 $PollIntervalSec   = 5     # ポーリング間隔（秒）
 $SessionTimeoutSec = 15    # session 作成 API のタイムアウト（秒）
 $MaxSessionRetry   = 3     # session 作成のリトライ回数
+$RecoveryAfterFails = 6    # この回数連続で読み込み失敗したらテンプレートから復元
 
 function TimeStamp { Get-Date -Format 'yyyy-MM-dd HH:mm:ss' }
 
@@ -25,12 +31,57 @@ function Log {
     Write-Host ("[{0}] [{1}] {2}" -f (TimeStamp), $Level, $Message)
 }
 
+# 単一インスタンス保証（二重起動による二重委譲を防ぐ）
+function Acquire-Lock {
+    $lock = $null
+    if (Test-Path -LiteralPath $LockPath) {
+        try { $lock = Get-Content -LiteralPath $LockPath -Raw | ConvertFrom-Json } catch { $lock = $null }
+    }
+    if ($lock -and $lock.pid) {
+        $proc = Get-Process -Id ([int]$lock.pid) -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -match 'powershell|pwsh') {
+            Log 'ERROR' ("既に別の watchdog が実行中です（PID {0}、開始 {1}）。そちらを停止してから再実行してください。" -f $lock.pid, $lock.started)
+            exit 1
+        }
+        Log 'WARN' ("古いロック（PID {0}）は生存プロセスではないため破棄します。" -f $lock.pid)
+    }
+    [System.IO.File]::WriteAllText(
+        $LockPath,
+        (@{ pid = $PID; started = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') } | ConvertTo-Json),
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+    Log 'INFO' "watchdog ロック取得: PID=$PID"
+}
+
+# 破損した task_bridge.json をバックアップし、テンプレートから復元する
+function Restore-BridgeFromTemplate {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $backup = Join-Path $ProjectRoot ".opencode\task_bridge.corrupt-$stamp.json"
+    try {
+        if (Test-Path -LiteralPath $BridgePath) {
+            [System.IO.File]::Copy($BridgePath, $backup, $true)
+            Log 'WARN' "破損した task_bridge.json をバックアップしました: $backup"
+        }
+        if (-not (Test-Path -LiteralPath $TemplatePath)) {
+            throw "テンプレート $TemplatePath が見つかりません"
+        }
+        $template = [System.IO.File]::ReadAllText($TemplatePath, [System.Text.Encoding]::UTF8)
+        [System.IO.File]::WriteAllText($BridgePath, $template, (New-Object System.Text.UTF8Encoding($false)))
+        Log 'INFO' 'task_bridge.json をテンプレートから復元しました（current_turn=impl, status=PENDING）'
+        return $true
+    } catch {
+        Log 'ERROR' ("ブリッジ復元に失敗: {0}" -f $_.Exception.Message)
+        return $false
+    }
+}
+
 function Read-Bridge {
     for ($i = 0; $i -lt 3; $i++) {
         try {
             $text = [System.IO.File]::ReadAllText($BridgePath, [System.Text.Encoding]::UTF8)
             return ($text | ConvertFrom-Json)
         } catch {
+            if ($i -eq 0) { $script:LastBridgeError = $_.Exception.Message }
             Start-Sleep -Milliseconds 500
         }
     }
@@ -137,30 +188,42 @@ function Invoke-Turn {
     }
     if (-not $sessionId) {
         Log 'ERROR' "port $port で session を作成できませんでした。opencode serve の起動を確認してください。"
-        return $false
+        return 'SESSION_ERROR'
     }
     Log 'INFO' "session=$sessionId turn=$turn port=$port"
     $message = $TurnMessages[$Turn]
     if (-not $message) { $message = 'Read .opencode/task_bridge.json and follow its instructions.' }
     try {
-        return (Send-TurnMessage -Port $port -SessionId $sessionId -Message $message)
+        $ok = Send-TurnMessage -Port $port -SessionId $sessionId -Message $message
+        return $(if ($ok) { 'OK' } else { 'RUN_ERROR' })
     } catch {
         Log 'ERROR' ("タスク実行に失敗: {0}" -f $_.Exception.Message)
-        return $false
+        return 'RUN_ERROR'
     }
 }
 
 Log 'INFO' "watchdog 開始: $BridgePath"
 Log 'INFO' 'impl=3000 / review=3001 / timeout=180s / poll=5s / Ctrl+C で停止'
 
+Acquire-Lock
+
+$readFailCount = 0
 $lastDispatchedText = $null
 while ($true) {
     $bridge = Read-Bridge
     $raw    = Read-BridgeRaw
     if ($null -eq $bridge) {
-        Log 'WARN' 'task_bridge.json を読み込めません（次のポーリングで再試行）'
+        $readFailCount++
+        if ($readFailCount -eq 1 -or ($readFailCount % 12) -eq 0) {
+            Log 'WARN' ("task_bridge.json を読み込めません（{0} 回連続）: {1}" -f $readFailCount, $script:LastBridgeError)
+        }
+        if ($readFailCount -ge $RecoveryAfterFails) {
+            $readFailCount = 0
+            Restore-BridgeFromTemplate | Out-Null
+        }
     }
     elseif ($bridge.status -ne 'DONE') {
+        $readFailCount = 0
         $turn = $bridge.current_turn
         $changed = ($raw -ne $lastDispatchedText)
         if ($bridge.status -eq 'PENDING' -and $changed) {
@@ -170,11 +233,15 @@ while ($true) {
                 Log 'INFO' "タスク委譲を開始: turn=$turn"
                 Set-BridgeStatus 'RUNNING' | Out-Null
                 $dispatchText = Read-BridgeRaw
-                $ok = Invoke-Turn -Turn $turn
+                $result = Invoke-Turn -Turn $turn
                 $after = Read-Bridge
-                if ($ok -and $after -and $after.current_turn -ne $turn) {
+                if ($result -eq 'OK' -and $after -and $after.current_turn -ne $turn) {
                     Log 'INFO' ("ターン切替を検出: {0} -> {1} (status={2})" -f $turn, $after.current_turn, $after.status)
                     if ($after.status -ne 'DONE') { Set-BridgeStatus 'PENDING' | Out-Null }
+                    $lastDispatchedText = $dispatchText
+                } elseif ($result -eq 'SESSION_ERROR') {
+                    Log 'WARN' 'session 作成失敗のため status を PENDING に戻し、次のポーリングで再試行します'
+                    Set-BridgeStatus 'PENDING' | Out-Null
                     $lastDispatchedText = $dispatchText
                 } else {
                     Log 'WARN' '進捗なし（タイムアウト/エラー）。status は RUNNING のまま保持します。task_bridge.json を確認してください。'

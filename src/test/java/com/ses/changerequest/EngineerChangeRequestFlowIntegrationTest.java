@@ -226,7 +226,7 @@ class EngineerChangeRequestFlowIntegrationTest {
         EngineerChangeRequestService.MyProfileView view =
                 changeRequestService.myProfile(engineerId);
 
-        // 本人レスポンス（MyProfileView / PublicContract）の構造に金銭項目が無いことを固定する
+        // 本人レスポンス（MyProfileView / PublicContract）の構造に内部原価・コミッション等の非公開項目が無いことを固定する
         java.util.List<String> profileFields = java.util.Arrays.stream(
                         EngineerChangeRequestService.MyProfileView.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList();
@@ -234,9 +234,14 @@ class EngineerChangeRequestFlowIntegrationTest {
                         EngineerChangeRequestService.PublicContract.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList();
         assertTrue(profileFields.stream().noneMatch(f -> f.toLowerCase().contains("cost")
+                        || f.toLowerCase().contains("costcenter")
                         || f.toLowerCase().contains("commission")
-                        || f.toLowerCase().contains("selling")),
-                "本人profileレスポンスに原価/commission/売価が含まれている: " + profileFields);
+                        || f.toLowerCase().contains("selling")
+                        || f.toLowerCase().contains("bprate")),
+                "本人profileレスポンスに内部原価/原価部門/commission/売価が含まれている: " + profileFields);
+        // expectedUnitPrice は要員の希望単価として本人が申請・閲覧可能であることを確認
+        assertTrue(profileFields.contains("expectedUnitPrice"),
+                "本人profileレスポンスに要員希望単価(expectedUnitPrice)が含まれていない: " + profileFields);
         assertTrue(contractFields.stream().noneMatch(f -> f.toLowerCase().contains("cost")
                         || f.toLowerCase().contains("commission")
                         || f.toLowerCase().contains("selling")

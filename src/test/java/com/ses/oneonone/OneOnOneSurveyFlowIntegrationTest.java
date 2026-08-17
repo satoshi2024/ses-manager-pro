@@ -237,6 +237,7 @@ class OneOnOneSurveyFlowIntegrationTest {
                 .organizationId(organizationId)
                 .build();
         engineerMapper.insert(engineer);
+        jdbcTemplate.update("DELETE FROM t_engineer_accounting_history WHERE engineer_id = ?", engineer.getId());
         return engineer.getId();
     }
 
@@ -252,6 +253,7 @@ class OneOnOneSurveyFlowIntegrationTest {
     }
 
     void assignManager(Long managerUserId, Long organizationId) {
+        jdbcTemplate.update("DELETE FROM t_user_organization WHERE user_id = ?", managerUserId);
         com.ses.entity.UserOrganization row = new com.ses.entity.UserOrganization();
         row.setUserId(managerUserId);
         row.setOrganizationId(organizationId);

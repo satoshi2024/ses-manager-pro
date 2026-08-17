@@ -199,6 +199,40 @@ class MyPayrollApiControllerTest {
     }
 
     @Test
+    @DisplayName("他要員のstatementやnullデータが本人一覧および詳細に一切混入しない（S14-R2-P1-02）")
+    void 他要員のstatementやnullデータは厳格に除外される() throws Exception {
+        // freeeService が複数人分（本人A、他者B、他者C、engineerIdがnullの行）を返却した場合
+        PayrollStatementDto nullIdStatement = statementOf(null, "不明", "2026-08-25", "calculated");
+        nullIdStatement.setEngineerId(null);
+        PayrollStatementDto otherStatementC = statementOf(99999L, "他要員C", "2026-08-25", "calculated");
+        when(freeeService.statements(anyInt(), anyInt(), anyString())).thenReturn(List.of(
+                otherStatementC,
+                nullIdStatement,
+                statementOf(ENGINEER_ID_A, "給与A", "2026-08-25", "calculated"),
+                statementOf(ENGINEER_ID_B, "給与B", "2026-08-25", "calculated")
+        ));
+
+        // 本人Aの一覧には本人Aの1件のみ返る
+        mockMvc.perform(get("/api/my/payroll/statements")
+                        .with(engineerUser(USER_ID_A))
+                        .param("year", "2026").param("month", "8").param("type", "salary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.statements.length()").value(1))
+                .andExpect(jsonPath("$.data.statements[0].payDate").value("2026-08-25"));
+
+        // 本人Aの詳細には本人Aの明細のみ返る
+        MockHttpSession session = reauthSession();
+        mockMvc.perform(get("/api/my/payroll/statement")
+                        .with(engineerUser(USER_ID_A)).session(session)
+                        .param("year", "2026").param("month", "8").param("type", "salary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.engineerId").value(ENGINEER_ID_A))
+                .andExpect(jsonPath("$.data.engineerName").value("給与A"));
+    }
+
+    @Test
     @DisplayName("controllerソースにengineerIdパラメータが存在しない（静的assert / design §3）")
     void controllerはengineerIdパラメータを受け取らない() throws Exception {
         String source = Files.readString(Path.of("src", "main", "java", "com", "ses",

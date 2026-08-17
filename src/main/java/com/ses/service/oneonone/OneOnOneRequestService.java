@@ -24,6 +24,7 @@ public interface OneOnOneRequestService {
 
     OneOnOneDto create(Long engineerId, Long counterpartUserId, List<LocalDate> candidateDates);
 
+    /** 本人による取消（申請中のみ可能。日程確定後は相手方との調整のため管理側取消を使用）。 */
     OneOnOneDto cancelOwn(Long engineerId, Long id);
 
     /** 管理 */
@@ -37,7 +38,7 @@ public interface OneOnOneRequestService {
     /** 実施済（日程確定→実施済。本人公開noteを記録）。 */
     OneOnOneDto complete(Long id, String employeeVisibleNote);
 
-    /** 取消（管理側。日程確定前後を問わず）。 */
+    /** 取消（管理側。日程確定前後を問わず取消可能）。 */
     OneOnOneDto cancel(Long id, String reason);
 
     /** confidential相談の保存・更新（HR/管理者のみ）。private_note_refを文書台帳(PRIVATE_NOTE)へ固定する。 */
