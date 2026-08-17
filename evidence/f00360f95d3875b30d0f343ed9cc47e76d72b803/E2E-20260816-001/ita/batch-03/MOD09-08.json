@@ -4,8 +4,8 @@
   "category": "MOD-09",
   "name": "期限超過invoiceへ有効な請求contactで督促、宛先なし、mail失敗、bulk一部scope外を試験",
   "status": "PASS",
-  "duration_ms": 187,
-  "duration_h": 0.000052,
+  "duration_ms": 197,
+  "duration_h": 0.000055,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-08.json",
   "error": null,
   "evidence_detail": {
