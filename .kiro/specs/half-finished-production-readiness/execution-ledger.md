@@ -4,9 +4,10 @@
 
 - 計画基点: `99fbed8294dd1a6c320b4413b832f7c7b9292da1`
 - 計画 branch: `codex/half-finished-readiness-specs`（PR #72 で main へ merge 済み）
-- main 最新: **`e462779c`（origin/main と同期済み・push 済み）**。三 spec すべて merge 済み: HFP-01/HFP-02 は coordinator が 2026-08-16 に merge（HFP-01 merge commit → HFP-02 merge commit `3af17e38`）、HFP-03 は別 session が merge（`e892c5bd`、`.gitignore` fix `4dca8a46`、最終 PASS 記録 `5c639d79`→`e462779c`）。
-- 最終更新日: 2026-08-16（merge・Review・gate を実測して更新。推測による CLOSED なし）
-- **横断Review verdict（2026-08-16）: NOT REVIEWABLE**。欠落 field: ① HFP-01 merge delta の独立 Review 未実施 ② HFP-02 G6（merge delta）の独立 Review 未実施 ③ G01/G02 の sandbox evidence（L4）未固定。
+- main 最新: **`8eea3fb4`（origin/main と同期済み・push 待ち）**。三 spec すべて merge 済み: HFP-01/HFP-02 は coordinator が 2026-08-16 に merge（HFP-01 merge commit → HFP-02 merge commit `3af17e38`）、HFP-03 は別 session が merge（`e892c5bd`、`.gitignore` fix `4dca8a46`、最終 PASS 記録 `5c639d79`→`e462779c`）、Review 記録 commit `8eea3fb4`。
+- 最終更新日: 2026-08-17（横断統合Review Round 1 を実測して更新。推測による CLOSED なし）
+- **横断Review verdict（2026-08-16）: NOT REVIEWABLE** → **欠落 field 解消（2026-08-17）**（HFP-01 merge delta PASS、HFP-02 G6 CONDITIONAL PASS）。
+- **横断統合Review Round 1 verdict（2026-08-17・main `8eea3fb4`）: FAIL**。HFP 三 spec の merge delta・個別 Review に OPEN P0/P1 はないが、main 上の full suite（`verify-like-ci` 2206 run / 20 failure / 14 error / 0 skip）が BUILD FAILURE。原因は S14 起因の P1 finding **`HFP-CROSS-R1-P1-01`**（`engineer-schema-h2.sql` の `t_document_link` 列欠落で HFP-02 `CloudSignArtifactIntegrationTest` 含む 7 class 影響、leave 系 2 class 一意制約違反）。S14 owner の修正と main 回帰 green 達成後に横断 Round 2 を実施する。
 - **欠落 field の解消（2026-08-17）**: ① は `HFP-01-REVIEW-20260817-merge-delta`（**PASS（merge delta）**・新規 P0/P1=0・REV-010 NOTE 1 件・独立再実行 2308/0/0/0 skip 0）で解消。② は `HFP-02-G6-REVIEW-20260817`（**CONDITIONAL PASS（merge delta）**・新規 P0/P1/P2=0・REV-015 NOTE 1 件・REV-009/014 VERIFIED_CLOSED・独立再実行 2246/0/0/0 skip 0）で解消。③（G01/G02 sandbox）は外部 credential 未提供のため従来どおり OPEN。**個別最終 PASS は HFP-01/HFP-02 とも未付与**（merge delta は合格、残 gate は外部依存のみ）。
 
 | ID | spec | spec状態 | implementation状態 | 開始 gate | base/head | Review | 次 action |
@@ -48,7 +49,7 @@
 | HFP-G01 | HFP-01 | freee test companyで users/me・employee・salary・bonus を取得 | 未設定 | 未設定 | 実測なし。branch ledger `HFP-01-RUN-ISSUE-01`: `FREEE_*` 環境変数未提供のため HFP-01-011 BLOCKED | provider adapter/最終PASS | OPEN |
 | HFP-G02 | HFP-02 | CloudSign正式API文書、credential、sandbox送受信を確認 | 未設定 | 未設定 | 実測なし。branch ledger: HFP-02-BLK-01（sandbox申請依頼済み 2026-08-14）と BLK-02〜06 が OPEN | provider adapter/最終PASS | OPEN |
 | HFP-G03 | HFP-03 | 隔離MySQL 8 + repository + uploads fixtureでPITR可能 | 発注者（PROD-001〜008 確定） | 未設定 | 隔離実証は完了（branch ledger: integration SUCCESS・drill rpo=60s・mid_dml_replayed=1・secret scan 0・GATE-01〜05/07/08 PASS）。**残りは production 固有値 HFP-03-PROD-001〜008（特に PROD-004 deployment/cutover provider・PROD-006 承認 verifier・PROD-007 代表 profile）の発注者確定のみ**。確定後は `baseline.md` §4 の再実行手順に従う | 最終PASS（production-ready 判定） | OPEN |
-| HFP-G04 | ALL | merge後 `verify-like-ci` zero failure/error/skip | coordinator | 2026-08-16 | 全 merge 済み main で実測: HFP-01 merge 後 2246/0/0/0・HFP-02 merge 後 2246/0/0/0（skip 0、log `%TEMP%\opencode\main-hfp01-02-verify.log`）→ HFP-03 merge 後 main で L4 全量 **2308/0/0/0・0 skip**（S13 セッション `3c908d61` 記録）。HFP-03 merge-prep も 2030/0/0/0 skip 0 | 全体release | **CLOSED** |
+| HFP-G04 | ALL | merge後 `verify-like-ci` zero failure/error/skip | coordinator | 2026-08-17 | 過去 head（e462779c）では 2308/0/0/0 skip 0 達成。現 head `8eea3fb4` では S14 起因 P1（HFP-CROSS-R1-P1-01）により **2206 run / 20 failure / 14 error / 0 skip（BUILD FAILURE）** となり不成立。S14 修正後に再実証 | 全体release | **OPEN** |
 
 ## 4. spec完了 packet
 
@@ -114,6 +115,24 @@
 - 記録: spec ledger `contract-document-esign/review-ledger.md` に `## 9. HFP-02-G6-REVIEW-20260817` 節を追記（約 L306〜360。追記のみ・未 commit。既存行の行末ノイズは混合改行＋`.gitattributes` eol=lf による表示差分で内容は無改変）。
 - 残 gate: G2（sandbox）・G5（運用承認）。spec 全体の最終 PASS は未付与。
 - scope 外観測（HFP 非帰属・S14 owner へ引き継ぎ）: 現在の main head（S14 進行中）では `MessageBundleConsistencyTest`（`my.payroll` key）と `SpecDispatchConsistencyTest`（S14 V105 予約不整合）が 2 件失敗する。固定 head `3af17e38` では発生せず。S14 セッションの進行中差分に起因。
+
+### 2026-08-17 横断統合Review Round 1（main `8eea3fb4`）
+
+- Reviewer: 横断 Reviewer。対象: main `8eea3fb4`（三 spec merge 済み＋S14 進行中 commit 混在）に対する横断判定。
+- verdict: **FAIL**
+- P0/P1/P2/NOTE: P1=1（`HFP-CROSS-R1-P1-01`、S14 起因・HFP 非帰属）
+- packet completeness: `verify-spec-package.ps1` PASS（HFP-01 AC15/T11、HFP-02 AC60/T11、HFP-03 AC36/T12）。各 ledger に trace/test/Demo/BLOCKED/rollback あり、中央 ledger と状態一致。
+- 横断 finding: **`HFP-CROSS-R1-P1-01` (P1・OPEN)**: main `8eea3fb4` で CI 同条件の full suite が 2206 run / 20 failure / 14 error / 0 skip で BUILD FAILURE。
+  - root cause (a): `t_document_link.skill_sheet_confirmed_at/version` が V1:774-775・V105:180-181・entity `DocumentLink.java:35,38` に存在する一方、H2 test schema（`engineer-schema-h2.sql`）に欠落（AGENTS.md の H2 同期 rule 違反）。これにより HFP-02 の `CloudSignArtifactIntegrationTest`（15 中 7 fail/error）含む 7 class が影響。
+  - root cause (b): leave 系 2 class の `T_ENGINEER_ACCOUNT_LINK` 一意制約違反。
+  - 両因とも S14 commit 群（`c06042f2`〜`d2944e27`）に起因し、HFP merge delta 起因ではない（`3af17e38..8eea3fb4` で HFP の production file・migration・H2 schema は無変更）。
+- 観点 1〜9 の HFP 側: migration 番号整合・config 非上書き・security 境界・secret scan 0 件・fail-closed 起動・consumer 非破壊・HFP-03 script fail-closed・merge 完全性はすべて合格。
+- release gate: G01/G02/G03 OPEN、G04 OPEN（回帰失敗により不成立）。
+- 次 action:
+  1. S14 owner が `HFP-CROSS-R1-P1-01` を修正（`engineer-schema-h2.sql` の `t_document_link` へ 2 列追加＋leave 系 root cause）→ main で verify-like-ci skip 0 green を再実証
+  2. fix delta と直接回帰のみを確認する横断 Round 2 で再判定
+  3. G01/G02 の owner/期限/再実行手順/本番 block を確定
+  4. G03 PROD-001〜008 確定 → HFP-03 production-ready
 
 ### 2026-08-16 横断Review（全体判定試行）
 
