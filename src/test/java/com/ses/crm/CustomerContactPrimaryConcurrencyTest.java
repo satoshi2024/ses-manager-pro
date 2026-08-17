@@ -7,6 +7,7 @@ import com.ses.entity.CustomerContact;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.CustomerContactService;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,7 +17,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** 有限期間の主担当を空顧客へ同時作成した場合の親行ロックを実MySQLで検証する。 */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class CustomerContactPrimaryConcurrencyTest {
 

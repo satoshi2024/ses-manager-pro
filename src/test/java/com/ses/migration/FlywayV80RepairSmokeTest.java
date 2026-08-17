@@ -2,8 +2,9 @@ package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * V80はR09-P2-02対応でmarker固定とUPDATEの後ろに明示COMMITを持つ。これにより
  * 途中失敗してもmarker行・backfill結果がROLLBACKされず、repair→再適用で新規契約を0化しない。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV80RepairSmokeTest {
 

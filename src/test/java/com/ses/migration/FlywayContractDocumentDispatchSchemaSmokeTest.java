@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * **V103_1（Flyway表記 V103.1）** へ再採番し、予約繰上げ文書は main の状態へ復旧した。
  * 順序は V103 < V103.1 < V104（S13予約）で、SpecDispatchConsistencyTest と両立する。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayContractDocumentDispatchSchemaSmokeTest {
 

@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -99,13 +100,226 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
     @Override
     @Transactional(readOnly = true)
     public List<EngineerMonthSupply> supplyBatch(List<Engineer> engineers, YearMonth from, YearMonth to, LocalDate asOf) {
+        if (engineers == null || engineers.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> engineerIds = engineers.stream()
+                .map(Engineer::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (engineerIds.isEmpty()) {
+            return List.of();
+        }
+
+        LocalDate rangeStart = from.atDay(1);
+        LocalDate rangeEnd = to.atEndOfMonth();
+
+        // 要員×月ごとにMapperを呼ばず、対象windowの入力を種類ごとに一括取得する。
+        List<WorkCalendar> calendars = workCalendarMapper.selectList(new LambdaQueryWrapper<WorkCalendar>()
+                .in(WorkCalendar::getEngineerId, engineerIds)
+                .eq(WorkCalendar::getStatus, "有効")
+                .le(WorkCalendar::getValidFrom, rangeEnd)
+                .and(w -> w.isNull(WorkCalendar::getValidTo)
+                        .or().ge(WorkCalendar::getValidTo, rangeStart)));
+        Map<Long, List<WorkCalendar>> calendarsByEngineer = calendars.stream()
+                .collect(Collectors.groupingBy(WorkCalendar::getEngineerId));
+
+        Set<Long> calendarIds = calendars.stream()
+                .map(WorkCalendar::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        List<WorkCalendarDay> calendarDays = calendarIds.isEmpty() ? List.of()
+                : workCalendarDayMapper.selectList(new LambdaQueryWrapper<WorkCalendarDay>()
+                .in(WorkCalendarDay::getCalendarId, calendarIds)
+                .between(WorkCalendarDay::getCalendarDate, rangeStart, rangeEnd));
+        Map<Long, List<WorkCalendarDay>> daysByCalendar = calendarDays.stream()
+                .collect(Collectors.groupingBy(WorkCalendarDay::getCalendarId));
+
+        List<LeaveRequest> leaves = leaveRequestMapper.selectList(new LambdaQueryWrapper<LeaveRequest>()
+                .in(LeaveRequest::getEngineerId, engineerIds)
+                .eq(LeaveRequest::getStatus, "承認済")
+                .le(LeaveRequest::getStartDate, rangeEnd)
+                .and(w -> w.isNull(LeaveRequest::getEndDate)
+                        .or().ge(LeaveRequest::getEndDate, rangeStart)));
+        Map<Long, List<LeaveRequest>> leavesByEngineer = leaves.stream()
+                .collect(Collectors.groupingBy(LeaveRequest::getEngineerId));
+
+        List<AllocationPlan> allocations = allocationMapper.selectList(new LambdaQueryWrapper<AllocationPlan>()
+                .in(AllocationPlan::getEngineerId, engineerIds)
+                .eq(AllocationPlan::getStatus, STATUS_CONFIRMED)
+                .le(AllocationPlan::getStartDate, rangeEnd));
+        Map<Long, List<AllocationPlan>> allocationsByEngineer = allocations.stream()
+                .collect(Collectors.groupingBy(AllocationPlan::getEngineerId));
+
+        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                .in(Contract::getEngineerId, engineerIds)
+                .in(Contract::getStatus,
+                        List.of(StatusConstants.CONTRACT_PREPARING, StatusConstants.CONTRACT_ACTIVE)));
+        Map<Long, Contract> contractsById = contracts.stream()
+                .collect(Collectors.toMap(Contract::getId, c -> c, (a, b) -> a));
+        Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
+                .collect(Collectors.groupingBy(Contract::getEngineerId));
+        boolean assumeRenew = allocations.stream().anyMatch(a -> a.getSourceContractId() != null)
+                && UtilizationCalcService.resolveAssumeRenew(systemConfigService);
+
         List<EngineerMonthSupply> result = new ArrayList<>();
         for (Engineer engineer : engineers) {
             for (YearMonth month = from; !month.isAfter(to); month = month.plusMonths(1)) {
-                result.add(supply(engineer, month, asOf));
+                result.add(supplyFromBatch(engineer, month,
+                        calendarsByEngineer.getOrDefault(engineer.getId(), List.of()), daysByCalendar,
+                        leavesByEngineer.getOrDefault(engineer.getId(), List.of()),
+                        allocationsByEngineer.getOrDefault(engineer.getId(), List.of()),
+                        contractsById, contractsByEngineer.getOrDefault(engineer.getId(), List.of()),
+                        assumeRenew));
             }
         }
         return result;
+    }
+
+    private EngineerMonthSupply supplyFromBatch(
+            Engineer engineer,
+            YearMonth month,
+            List<WorkCalendar> calendars,
+            Map<Long, List<WorkCalendarDay>> daysByCalendar,
+            List<LeaveRequest> leaves,
+            List<AllocationPlan> allocations,
+            Map<Long, Contract> contractsById,
+            List<Contract> engineerContracts,
+            boolean assumeRenew) {
+        LocalDate monthStart = month.atDay(1);
+        LocalDate monthEnd = month.atEndOfMonth();
+        LocalDate windowEnd = monthEnd;
+
+        Long calendarId = calendars.stream()
+                .filter(c -> c.getValidFrom() == null || !c.getValidFrom().isAfter(monthEnd))
+                .filter(c -> c.getValidTo() == null || !c.getValidTo().isBefore(monthStart))
+                .max(Comparator.comparing(WorkCalendar::getId,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .map(WorkCalendar::getId)
+                .orElse(null);
+        int workingDays = countWorkingDays(calendarId, monthStart, monthEnd, daysByCalendar);
+        int leaveDays = countLeaveDays(leaves, monthStart, monthEnd);
+        int availableDays = Math.max(0, workingDays - leaveDays);
+
+        LocalDate retirementLimit = null;
+        if (StatusConstants.ENGINEER_LEAVING.equals(engineer.getStatus())) {
+            retirementLimit = engineerContracts.stream()
+                    .map(Contract::getEndDate)
+                    .filter(Objects::nonNull)
+                    .max(Comparator.naturalOrder())
+                    .orElse(null);
+            if (retirementLimit != null && monthStart.isAfter(retirementLimit)) {
+                return new EngineerMonthSupply(engineer.getId(), month, workingDays, leaveDays, 0,
+                        BigDecimal.ZERO, BigDecimal.ZERO);
+            }
+            if (retirementLimit != null && windowEnd.isAfter(retirementLimit)) {
+                windowEnd = retirementLimit;
+            }
+        }
+
+        BigDecimal actualFte = sumActualFte(allocations, contractsById, calendarId, daysByCalendar,
+                monthStart, monthEnd, windowEnd, availableDays, assumeRenew);
+        BigDecimal planFte = sumPlanFte(allocations, calendarId, daysByCalendar,
+                monthStart, monthEnd, windowEnd, availableDays);
+        return new EngineerMonthSupply(engineer.getId(), month, workingDays, leaveDays, availableDays,
+                actualFte, planFte);
+    }
+
+    private BigDecimal sumActualFte(
+            List<AllocationPlan> allocations,
+            Map<Long, Contract> contractsById,
+            Long calendarId,
+            Map<Long, List<WorkCalendarDay>> daysByCalendar,
+            LocalDate monthStart,
+            LocalDate monthEnd,
+            LocalDate windowEnd,
+            int availableDays,
+            boolean assumeRenew) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (AllocationPlan row : allocations) {
+            if (row.getSourceContractId() == null
+                    || row.getStartDate() != null && row.getStartDate().isAfter(monthEnd)) {
+                continue;
+            }
+            Contract contract = contractsById.get(row.getSourceContractId());
+            if (contract == null || !isContractEffective(contract)) {
+                continue;
+            }
+            LocalDate rowStart = row.getStartDate() == null ? monthStart : row.getStartDate();
+            LocalDate effectiveEnd = row.getEndDate();
+            if (effectiveEnd != null && shouldRenew(contract, assumeRenew)) {
+                effectiveEnd = null;
+            }
+            LocalDate effectiveFrom = maxDate(rowStart, monthStart);
+            LocalDate effectiveTo = minDate(effectiveEnd, windowEnd);
+            if (effectiveFrom.isAfter(effectiveTo)) {
+                continue;
+            }
+            int inDays = countWorkingDays(calendarId, effectiveFrom, effectiveTo, daysByCalendar);
+            sum = sum.add(fteOf(inDays, availableDays, BigDecimal.valueOf(100)));
+        }
+        return sum;
+    }
+
+    private BigDecimal sumPlanFte(
+            List<AllocationPlan> allocations,
+            Long calendarId,
+            Map<Long, List<WorkCalendarDay>> daysByCalendar,
+            LocalDate monthStart,
+            LocalDate monthEnd,
+            LocalDate windowEnd,
+            int availableDays) {
+        BigDecimal sum = BigDecimal.ZERO;
+        for (AllocationPlan plan : allocations) {
+            if (plan.getSourceContractId() != null
+                    || !AllocationPlan.TYPE_PROJECT.equals(plan.getAllocationType())
+                    || plan.getStartDate() != null && plan.getStartDate().isAfter(monthEnd)
+                    || plan.getEndDate() != null && plan.getEndDate().isBefore(monthStart)) {
+                continue;
+            }
+            LocalDate effectiveFrom = maxDate(plan.getStartDate(), monthStart);
+            LocalDate effectiveTo = minDate(plan.getEndDate() == null ? windowEnd : plan.getEndDate(),
+                    windowEnd, monthEnd);
+            if (effectiveFrom.isAfter(effectiveTo)) {
+                continue;
+            }
+            int inDays = countWorkingDays(calendarId, effectiveFrom, effectiveTo, daysByCalendar);
+            BigDecimal percent = plan.getAllocationPercent() == null
+                    ? BigDecimal.valueOf(100) : plan.getAllocationPercent();
+            sum = sum.add(fteOf(inDays, availableDays, percent));
+        }
+        return sum;
+    }
+
+    private int countWorkingDays(Long calendarId, LocalDate from, LocalDate to,
+                                 Map<Long, List<WorkCalendarDay>> daysByCalendar) {
+        if (from.isAfter(to)) {
+            return 0;
+        }
+        if (calendarId == null) {
+            return countWeekdays(from, to);
+        }
+        List<WorkCalendarDay> rows = daysByCalendar.getOrDefault(calendarId, List.of()).stream()
+                .filter(d -> d.getCalendarDate() != null
+                        && !d.getCalendarDate().isBefore(from) && !d.getCalendarDate().isAfter(to))
+                .toList();
+        if (rows.isEmpty()) {
+            return countWeekdays(from, to);
+        }
+        int count = (int) rows.stream()
+                .filter(d -> DAY_TYPE_WORKING.equals(d.getDayType()))
+                .count();
+        return count > 0 ? count : countWeekdays(from, to);
+    }
+
+    private int countLeaveDays(List<LeaveRequest> leaves, LocalDate monthStart, LocalDate monthEnd) {
+        double days = 0;
+        for (LeaveRequest leave : leaves) {
+            days += leaveDayFraction(leave, monthStart, monthEnd);
+        }
+        return (int) Math.round(days);
     }
 
     @Override

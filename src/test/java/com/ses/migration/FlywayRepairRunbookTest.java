@@ -1,9 +1,10 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -13,6 +14,7 @@ import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayRepairRunbookTest {
 

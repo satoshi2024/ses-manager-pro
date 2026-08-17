@@ -121,8 +121,8 @@
 
    > 💡 `V1__create_tables.sql` は**統合ベーススキーマ**（後続の列追加を折り込み済み）です。列を追加する際は V1 の `CREATE TABLE` に追記し、後続マイグレーションで同じ列を再度 `ADD COLUMN` しないでください（空DBからの適用が「Duplicate column」で失敗します）。
    > 💡 既存の（旧 `sql/001`〜`008` を手動適用済みの）DBに対しては、`baseline-on-migrate: true` / `baseline-version: 9` により V1〜V9 は再実行されず V10 以降のみ適用されます。
-   > 💡 **テスト実行時はMySQL不要**です。`mvn test` は `src/test/resources/application-test.yml` によりH2インメモリDB（MySQL互換モード）を使用します。ただし実MySQL上でマイグレーションを検証する `FlywayMigrationSmokeTest`（Testcontainers）だけは **Docker があるときのみ実行**され、無い環境では自動スキップされます（CIでこの検証を回すには Docker が必要）。
-   > 💡 このため **ローカルの `mvn test` とCIは実行されるテストの集合が異なります**。push前は `scripts/verify-like-ci.sh`（Windowsは `scripts\verify-like-ci.ps1`）を使うと、CIと同じコマンドで実行したうえで自分の環境がskipしたテストを一覧表示します。詳細は `TESTING_GUIDE.md` の「3.4. CIと同じ条件で実行する」を参照してください。
+   > 💡 既定の `mvn test` はH2/unit/MVCの高速feedback suiteで、`mysql`/`performance` tagを明示的に除外します。Dockerの有無で実行範囲が変化することはありません。
+   > 💡 実MySQL/Flywayは `mvn test -Pmysql-tests`（Docker必須）、性能回帰は `mvn test -Pperformance-tests` で実行します。push前は `scripts/verify-like-ci.sh`（Windowsは `scripts\verify-like-ci.ps1`）を実行すると、CIと同じ3つのgateとbackup integrationを検証します。
 
 3. **プロジェクトのビルドと起動**:
    プロジェクトのルートディレクトリで以下のコマンドを実行します。

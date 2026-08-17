@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -13,6 +14,7 @@ import java.sql.Statement;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** V61とV62の間に締められた履歴を、推測で現在組織へ戻さないことを実MySQLで検証する。 */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayV62ClosedHistoryMigrationSmokeTest {
 

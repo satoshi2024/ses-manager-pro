@@ -2,8 +2,9 @@ package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * G2-MIG-17: 同名だが誤ったpartial indexを成功扱いせず、forward repairを要求する。
  * 適用後のgit revertをrollbackと扱わないため、MySQLの実DDL境界で検証する。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywayG2ForwardRepairSmokeTest {
 
