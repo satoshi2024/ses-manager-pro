@@ -302,3 +302,69 @@
 ### 8.3 状態
 
 - G2（sandbox E2E）・G5（production canary/運用承認）は従来どおり BLOCKED。G6（merge delta Review）は main merge 後に実施。
+
+---
+
+## 9. HFP-02-G6-REVIEW-20260817（merge delta 独立 Review）
+
+### 9.1 対象と固定
+
+| 項目 | 値 |
+|---|---|
+| reviewer | 独立 Review AI（実装AI・merge coordinator と別対話） |
+| base | `d958a813`（branch head。Round 1〜3 Review 済み） |
+| reviewed merge-prep head | `292bfbbc`（= main `ec6df710`（HFP-01 込み）merge ＋採番訂正・docs 復旧） |
+| main 上の merge 結果 | `3af17e38`（tree は `292bfbbc` と一致） |
+| 実行環境 | 本worktree（`c06042f2`）は他セッションの未コミット差分と利用者稼働中アプリ（`target/*.jar` lock）があるため、独立再実行は `%TEMP%\opencode\hfp02-g6-wt` の detached worktree（`3af17e38`）で実施。main worktree の dirty file・稼働中プロセスには触れていない |
+| 判定対象 | HFP-02-AC-11-05（skip 0）、HFP-02-AC-12-01（V1/V20 無編集・H2/entity/smoke 同期）、G6 相当（merge delta・共有 consumer・main 回帰）、REV-009/REV-014 の merge 時対応監査 |
+
+### 9.2 差分監査の結果
+
+- **採番訂正**: `V109__contract_document_cloudsign_dispatch.sql` → `V103_1` は blob 一致の純 `git mv`（`9edda25d` で同一）。smoke test の history 検証は `version='103.1'` に全4箇所更新済み。コード内に旧 `'109'` 参照・`V109` migration 残存なし。実 MySQL で V103 < V103.1 < V104 の順序適用（"now at version v103.1"）を確認。
+- **docs 復旧**: `git diff ec6df710..292bfbbc -- .kiro/specs/customer-product-expansion-2026/` および S12〜S17 spec dir（`staffing-capacity-planning`/`external-customer-bp-portal`/`engineer-self-service-portal-v2`/`accounting-payment-integration`/`jp-pint-digital-invoice`/`ai-feedback-learning`）は **空**（main 版と byte 一致）。HFP-02 由来の予約表繰上げ差分は残存しない。`SpecDispatchConsistencyTest` は `3af17e38` で green（9/9）。
+- **application.yml**: main 版＋cloudsign block（kill switch `enabled: ${CLOUDSIGN_ENABLED:false}` 既定 false）のみ。freee block（HFP-01）は無改変で共存。
+- **messages×4**: main 版＋6 key（cloudsign 2・contract.document 4）を末尾追加。`MessageBundleConsistencyTest` green（4 bundle の key parity 成立）。
+- **ApiAuditFilter**: `/api/payroll` 除外（HFP-01・main 経由）と `/api/contract-documents/\d+/artifacts/\w+` download 判定（HFP-02）が両立。controller の実 route（`@GetMapping("/{id}/artifacts/{kind}")`）と regex 一致、1 request = 1 audit row の構造維持。
+- **kill switch / fail-closed**: `queueSend` 先頭の `isEnabled()` 拒否（REV-003）、dispatch/poll/artifact の 3 scheduler・sync/artifact/reconciliation/token provider の enabled gate、`CloudSignProperties.@PostConstruct validate`（clientId/timeout/size fail-closed）がいずれも merge 後も維持。
+- **HFP-02 production file の無改変**: `d958a813..292bfbbc` で cloudsign/ContractDocument 系 production file・JS・template の差分は **空**（merge が HFP-02 ロジックを変更していない）。V1 差分（220行）は main 由来（staffing/compliance の同期）で `t_contract_document` に一切触れない。V20 は無変更。
+- **H2/entity 同期**: `schema-contract-document-h2.sql` に V103_1 の15列すべて存在。`ContractDocument` entity の15 field と一致。
+- **secret/PII**: coordinator 差分に client ID・token・実メール・PDF 本文なし（`masked@example.invalid`・`${CLOUDSIGN_*}` 等の placeholder のみ）。
+
+### 9.3 REV-009 / REV-014 の merge 時対応監査
+
+| Finding | 要求された対応 | 実測 | G6 判定 |
+|---|---|---|---|
+| REV-009 | coordinator 承認記録を execution-ledger へ追記（または該当 diff の revert 決定） | 繰上げ docs は main 版へ revert（byte 一致で確認）。HFP-D013 が「予約文書の繰上げは撤回して main 版へ復旧」を coordinator 決定として中央 ledger に記録 | **VERIFIED_CLOSED** |
+| REV-014 | merge 前の origin/main 取り込み→衝突再確認。採番判断を execution-ledger へ記録 | `292bfbbc` の親に main `ec6df710`（origin/main 取り込み済み）。衝突は application.yml / messages×4 / staffing tasks.md で main 側を正として解決（§8.1）。採番は V103_1 に再決定し HFP-D013 に記録。実 MySQL で衝突なしを実証 | **VERIFIED_CLOSED** |
+
+### 9.4 独立再実行（`3af17e38` detached worktree、Docker/Node 実在、skip 0）
+
+| # | command | tests | failures | errors | skipped | exit | 結果 |
+|---|---|---:|---:|---:|---:|---:|---|
+| 1 | `mvn -B clean test -Dtest=ReviewerVerificationMigrationOrderContractTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest,MessageBundleConsistencyTest` | 43 | 0 | 0 | 0 | 0 | PASS |
+| 2 | `mvn -B test -Dtest=CloudSign*,ContractDocument*,JsSyntaxCheckTest` | 106 | 0 | 0 | 0 | 0 | PASS |
+| 3 | `mvn -B test -Dtest=FlywayContractDocumentDispatchSchemaSmokeTest,FlywayMigrationSmokeTest,FlywayV102_4FreeeCompanyBoundarySmokeTest`（実 MySQL 8.0 Testcontainers） | 6 | 0 | 0 | 0 | 0 | PASS（Dispatch 2/0/0/0・Migration 2/0/0/0・V102_4 2/0/0/0） |
+| 4 | `scripts\verify-like-ci.ps1`（フルスイート） | 2246 | 0 | 0 | 0 | 0 | PASS（BUILD SUCCESS。skip 0 を script 判定でも確認。coordinator 実測 2246/0/0/0 と一致） |
+
+log: `%TEMP%\opencode\hfp02-g6-cmd1-3af17e38.log` / `hfp02-g6-cmd2.log` / `hfp02-g6-cmd3.log` / `hfp02-g6-cmd4-verify.log`
+
+### 9.5 Findings
+
+| Finding ID | Severity | 対象 | 内容 | 状態 |
+|---|---|---|---|---|
+| HFP-02-REV-015 | NOTE | messages_en/ko/zh_CN × 3 key（`error.cloudsign.rateLimited`・`error.contract.document.sourceInvalid/sourceMissing`） | merge-prep の手動統合時に branch 版へ終止符（"."/"。")が追加されている（branch head との text 差分）。key 名・意味は不変で functional/AC 影響なし。文言の意味変更なしという coordinator 記録との僅かな乖離の記録目的 | OPEN（非 block。次回文言整理時に吸収） |
+
+新規 P0/P1/P2 は 0。REV-001〜014 のうち本 Review 対象の REV-009/014 は VERIFIED_CLOSED（§9.3）。
+
+### 9.6 scope 外の観測（HFP-02 に非帰属・他 session/後続 commit の事象）
+
+- 本 worktree の HEAD `c06042f2`（S14 の V105 DDL commit、main+1）＋他セッションの **未追跡** `templates/my-payroll/index.html` の混在下で `mvn test` を実行すると 2 件失敗する: (a) `MessageBundleConsistencyTest.testTemplateMessageKeysExist`（未追跡 my-payroll template の `my.payroll.*` key が bundle に未登録）、(b) `SpecDispatchConsistencyTest`（S14 の実在 V105 と予約文書の不整合）。いずれも `3af17e38` では発生せず（§9.4 で green）、HFP-02 merge delta には非帰属。S14 セッション/coordinator の追跡対象として記録のみ行う。
+- main worktree の `target\ses-manager-pro-1.0.0-SNAPSHOT.jar` は利用者の稼働中アプリ（PID 37024・port 8080・2026-08-16 15:33 起動）が lock しており `clean` が失敗する。本 Review は detached worktree で回避し、当該プロセス・dirty file には触れていない。
+
+### 9.7 Verdict
+
+**CONDITIONAL PASS（merge delta）**
+
+- P0=0 / P1=0 / P2=0。REV-009・REV-014 は merge 差分で実質閉塞（VERIFIED_CLOSED）。HFP-02-AC-11-05（skip 0）・HFP-02-AC-12-01（V1/V20 無編集・latest+1 相当 V103_1・H2/entity/smoke 同期）を独立再実行で確認。
+- 残 gate は G2（HFP-02-09 sandbox E2E。BLK-01〜06）と G5（HFP-02-10 運用承認）のみ。これらは外部 credential/運用承認であり本 Review の範囲外（BLOCKED 維持）。**spec 全体の最終 PASS は付与しない**。
+- 本番 `cloudsign.enabled=true` は総合 PASS 後まで禁止を維持する。

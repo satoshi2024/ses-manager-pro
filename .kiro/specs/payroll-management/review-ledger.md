@@ -1118,3 +1118,55 @@ fix delta `203960a9..c3400aa0`（3 file、+146/−3）。REV-009の判定のみ�
 #### 残件
 
 - AC13/AC15・HFP-01-011・HFP-G01 は従来どおり BLOCKED（freee sandbox credential未提供）。
+
+---
+
+### HFP-01-REVIEW-20260817-merge-delta（独立Review: merge delta）
+
+| 項目 | 値 |
+|---|---|
+| Reviewer | 独立Review AI（実装AI・merge coordinator とは別の対話） |
+| 対象packet | 中央 `execution-ledger.md` §8.1（HFP-01 merge delta） |
+| base / reviewed head | `6d3c2f10`（branch head・Round 4 までReview済み） / `28ccd99c`（merge-prep head = `8858bc74` main `5246783a` merge ＋採番訂正） |
+| main 上の merge 結果 | `ec6df710`（第二親=`28ccd99c`、第一親=main `5246783a`）。`3af17e38` の第一親側。packet 固定の merge 済み main head は `e462779c` |
+| 判定対象 acceptance | HFP-01-AC14（main 上の S11/S15/CashFlow/migration/全回帰）、HFP-01-AC15 の merge delta 部分 |
+| Verdict | **PASS（merge delta）**。spec 全体の最終 PASS は付与しない（G01 sandbox OPEN のため） |
+
+#### merge delta の検証（Reviewer自身のdiff解析）
+
+- **採番訂正 commit（`8858bc74..28ccd99c`、9 file）**: migration は `git mv` で SQL 本文は branch 版（`6d3c2f10` の `V102_2__freee_company_boundary.sql`）と完全一致（ヘッダコメントのみ変更）。`FlywayV102_4FreeeCompanyBoundarySmokeTest` はクラス名・コメント・メソッド名の改名のみで assert 内容不変。`FlywayMigrationSmokeTest`/`FreeeCompanyBoundarySchemaH2Test`/`schema-freee-payroll-h2.sql` はコメント同期のみ。`research.md` §7・`design.md` §4.3・`review-conversation.md`・`review-ledger.md`（追記）は採番経緯の同期で production 意味の変更なし。
+- **merge 完全性**: `git diff 28ccd99c ec6df710` の freee/payroll/共有 file 差分は **0**（HFP-01 の内容が branch head と byte 一致のまま main へ merge されている）。
+- **共有 file の共存（auto-merge 結果）**: SecurityConfig の `/integrations/freee/**`→管理者、`/payroll/**`,`/api/payroll/**`→管理者+HR の静的 rule が main 側 compliance/staffing/portal 差分と共存したまま維持。`application.yml` の `freee.*` 7 key、`application-prod.yml` の prod 用 freee block 維持。messages×4 は branch 側 freee/payroll key を全包含（欠落 0、MessageBundleConsistencyTest green）。`engineer-schema-h2.sql` の freee 2 table＋`connection_status`/`freee_company_id`/複合 UNIQUE 維持。`ApiAuditFilter` の `/api/payroll` 除外維持（HFP-02 の artifact 判定は並存）。CSRF（Cookie/`X-XSRF-TOKEN`）構成は merge 後も変更なし。no-store は `FreeePayrollApiController`/`FreeeOAuthController`/`PayrollPageController` に残存。
+- **S11/S15/CashFlow の public contract**: `FreeeIntegrationService.apiGet/apiPost/bankDeposits/connected()` の signature と `CashFlowForecastServiceImpl.getEstimatedPayroll()`（design §14 優先順位）は merge 後も不変。
+- **secret/PII scan**: merge delta の追加行 18,000 行を token/JWT/API key/bearer/金額 pattern で scan → **0 件**。HEAD tree の conflict marker scan → 0（font binary の偽陽性のみ）。`git diff --check` は main 側 doc の空白 NOTE 1 件のみ（本 Review 対象外）。
+- **migration 順序の実測**: 実 MySQL 8 で `102.1→102.2→102.3→102.4(freee company boundary)→103` の順に適用されることを Flyway log で確認。legacy backfill・複数 company 時 NULL 残存の両経路 assert green。
+
+#### Findings
+
+| ID | Severity | Status | Requirement/AC | Evidence / 再現 | Expected / Impact | 最小修正 / 再test |
+|---|---|---|---|---|---|---|
+| HFP-01-REV-010 | NOTE | OPEN | —（packet 記述の正確性） | packet（execution-ledger §8.1）は smoke test 改名を「history 検証は version='102.4' 相当」と記述するが、`FlywayV102_4FreeeCompanyBoundarySmokeTest` に `flyway_schema_history` の version assert は存在しない（HFP-02 の `FlywayContractDocumentDispatchSchemaSmokeTest` は `version='103.1'` を assert）。schema 効果（column/index/backfill）の assert と適用順（Reviewer 実測）は揃っており要件違反ではない | packet の記述と実 test の間に齟齬がある（test 強度の過大記載）。実害なし（HFP-01-R12-3 は schema assert と実 MySQL smoke で充足） | 同 test に `SELECT success FROM flyway_schema_history WHERE version='102.4'` の assert を追加するか、packet の記述を訂正する。非 blocker |
+
+#### 独立再実行（commit 固定 head `e462779c` の隔離 worktree で実施。実測値は coordinator の記録に依存しない）
+
+| # | Command | run / fail / err / skip | exit | 状態 |
+|---|---|---|---|---|
+| 1 | `mvn -B clean test -Dtest=ReviewerVerificationMigrationOrderContractTest,SpecDispatchConsistencyTest,MigrationScriptIntegrityTest,FreeeCompanyBoundarySchemaH2Test,MessageBundleConsistencyTest` | 48 / 0 / 0 / 0 | 0 | PASS（migration 契約・H2 schema・i18n 整合） |
+| 2 | `mvn -B test -Dtest=FreeeOAuthContractTest,FreeeOAuthCallbackWebTest,FreeeHrContractTest,FreeeEmployeeMappingTest,PayrollReadModelTest,PayrollSecurityAuditTest,PayrollLandmarkA11yTest,FreeeIntegrationServiceApiTest,FreeeAttendanceProviderTest,PaymentReconciliationServiceImplTest,CashFlowForecastServiceTest,FreeeReauthPersistenceTest,FreeeConcurrentRefreshTest,JsSyntaxCheckTest,FreeeContractBaselineTest` | 139 / 0 / 0 / 0 | 0 | PASS（freee 全回帰。`FreeeConcurrentRefreshTest` は実 MySQL Testcontainers で外部 POST 1 回を assert） |
+| 3 | `mvn -B test -Dtest=FlywayMigrationSmokeTest,FlywayV102_4FreeeCompanyBoundarySmokeTest` | 4 / 0 / 0 / 0 | 0 | PASS（実 MySQL 8。空DB 全 migration＋legacy upgrade の両経路） |
+| 4 | `scripts\verify-like-ci.ps1` | mvn -B clean test: **2308 / 0 / 0 / 0・BUILD SUCCESS**（1:48h）。skip 検査 0（script 判定＋Reviewer の XML scan 0） | 1 ※ | PASS（mvn 本体と skip 0 契約は成立。最終 exit 1 は script 末尾の HFP-03 WSL integration 手順のみ＝本機 WSL bash 起動不能 `execvpe(/bin/bash) failed`。HFP-03 側の gate で本 Review の対象外） |
+
+#### 環境注記（判定への影響なし）
+
+- Review 中に main worktree の HEAD が `e462779c` → `fa3d696c`（S13 portal commit）→ `c06042f2`（self-service V105）へ前進した。`fa3d696c` では S13 の `FlywayPortalSchemaSmokeTest.java` に UTF-8 BOM が混入し main tree の testCompile が一時不能だった（S13 側で `d408b3ec` により修正済み。HFP-01 の scope 外・central backlog 扱い）。
+- main worktree は別セッションの pilot suite（`ops/pilot/run-pilot-suite.mjs`）が `target` の jar を lock しており `mvn clean` 不能だったため、独立再実行は commit 固定の隔離 worktree（`%TEMP%\opencode\ses-review-e462779c`）で実施した。merge delta 判定は commit 固定のため有効。
+- 最新 main（`c06042f2`）でも payroll 静的 rule・`/api/payroll` 監査除外・`freee.*` 設定・freee schema・message key の維持を再確認済み。
+- 利用者の未コミット差分（seed/pom/evidence 等）には一切触れていない。本節は追記のみで commit しない（coordinator が確認後に commit）。
+
+#### Verdict 根拠
+
+- 新規 P0/P1: **0**。NOTE: 1（REV-010、非 blocker）。
+- HFP-01-AC14: 独立再実行で全て green（上表）。S11 `FreeeAttendanceProviderTest` 3/0/0/0、S15 `PaymentReconciliationServiceImplTest` 14/0/0/0、CashFlow 13/0/0/0、JS syntax 1/0/0/0 を含む。
+- HFP-01-AC15 の merge delta 部分: merge 結果が branch head（Round 4 まで Review 済み・全 Finding CLOSED）と byte 一致＋共有 consumer/main 回帰 green を独立確認。
+- AC13/AC15 の sandbox 部分・HFP-01-011・HFP-G01 は従来どおり BLOCKED（外部 credential 依存）。spec 全体の最終 PASS は付与しない。
+- 最終Verdict: **PASS（merge delta）**。残 gate は G01 sandbox のみ。
