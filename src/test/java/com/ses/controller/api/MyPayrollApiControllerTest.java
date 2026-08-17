@@ -28,7 +28,9 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -84,10 +86,17 @@ class MyPayrollApiControllerTest {
         insertUser(USER_ID_C, ENGINEER_ID_C, "未紐付けC", "secret-c");
         insertUser(USER_ID_D, ENGINEER_ID_D, "未連携D", "secret-d");
         insertAccountLink(ENGINEER_ID_D, USER_ID_D);
-        // 本人Aと他者Bの両方の明細をproviderが返しても、APIはAの分だけ返す（本人scope）。
-        when(freeeService.statements(anyInt(), anyInt(), anyString())).thenReturn(List.of(
-                statementOf(ENGINEER_ID_A, "給与A", "2026-08-25", "calculated"),
-                statementOf(ENGINEER_ID_B, "給与B", "2026-08-25", "calculated")));
+        when(freeeService.statementForEngineer(anyLong(), anyInt(), anyInt(), anyString()))
+                .thenAnswer(inv -> {
+                    Long engId = inv.getArgument(0);
+                    if (Long.valueOf(ENGINEER_ID_A).equals(engId)) {
+                        return statementOf(ENGINEER_ID_A, "給与A", "2026-08-25", "calculated");
+                    }
+                    if (Long.valueOf(ENGINEER_ID_B).equals(engId)) {
+                        return statementOf(ENGINEER_ID_B, "給与B", "2026-08-25", "calculated");
+                    }
+                    return null;
+                });
     }
 
     private RequestPostProcessor engineerUser(long userId) {
@@ -205,12 +214,8 @@ class MyPayrollApiControllerTest {
         PayrollStatementDto nullIdStatement = statementOf(null, "不明", "2026-08-25", "calculated");
         nullIdStatement.setEngineerId(null);
         PayrollStatementDto otherStatementC = statementOf(99999L, "他要員C", "2026-08-25", "calculated");
-        when(freeeService.statements(anyInt(), anyInt(), anyString())).thenReturn(List.of(
-                otherStatementC,
-                nullIdStatement,
-                statementOf(ENGINEER_ID_A, "給与A", "2026-08-25", "calculated"),
-                statementOf(ENGINEER_ID_B, "給与B", "2026-08-25", "calculated")
-        ));
+        when(freeeService.statementForEngineer(eq(ENGINEER_ID_A), anyInt(), anyInt(), anyString()))
+                .thenReturn(statementOf(ENGINEER_ID_A, "給与A", "2026-08-25", "calculated"));
 
         // 本人Aの一覧には本人Aの1件のみ返る
         mockMvc.perform(get("/api/my/payroll/statements")
@@ -359,7 +364,7 @@ class MyPayrollApiControllerTest {
     @Test
     @DisplayName("provider障害時は503系エラーで画面を壊さない")
     void provider障害は503系エラーを返す() throws Exception {
-        when(freeeService.statements(anyInt(), anyInt(), anyString()))
+        when(freeeService.statementForEngineer(anyLong(), anyInt(), anyInt(), anyString()))
                 .thenThrow(new RuntimeException("provider down"));
 
         mockMvc.perform(get("/api/my/payroll/statements")
@@ -379,8 +384,8 @@ class MyPayrollApiControllerTest {
     @Test
     @DisplayName("対象月に本人の明細が無い場合は詳細404")
     void 本人の明細が無い月は詳細404() throws Exception {
-        when(freeeService.statements(anyInt(), anyInt(), anyString()))
-                .thenReturn(List.of(statementOf(ENGINEER_ID_B, "給与B", "2026-08-25", "calculated")));
+        when(freeeService.statementForEngineer(eq(ENGINEER_ID_A), anyInt(), anyInt(), anyString()))
+                .thenReturn(null);
 
         mockMvc.perform(get("/api/my/payroll/statement")
                         .with(engineerUser(USER_ID_A)).session(reauthSession())

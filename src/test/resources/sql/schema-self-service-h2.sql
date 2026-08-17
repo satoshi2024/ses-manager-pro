@@ -26,6 +26,10 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
   SELECT 'my-timesheet', 'マイ勤怠', '/my', '/api/my', 92
   WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'my-timesheet');
 
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '要員', m.id FROM m_menu m WHERE m.menu_key = 'my-timesheet'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = '要員' AND rm.menu_id = m.id);
+
 -- V36/V37 相当: 通知宛先とAND勤怠差戻しコメント（MySQL migrationと同一構造へ同期）
 ALTER TABLE t_notification ADD COLUMN IF NOT EXISTS recipient_user_id BIGINT;
 ALTER TABLE t_work_record ADD COLUMN IF NOT EXISTS reject_comment VARCHAR(500);

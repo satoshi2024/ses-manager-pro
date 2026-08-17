@@ -66,6 +66,7 @@ public class SurveyServiceImpl implements SurveyService {
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
     private final ObjectMapper objectMapper;
+    private final java.time.Clock clock;
 
     // ----------------------------------------------------------------
     // template
@@ -159,6 +160,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .title(title.trim())
                 .periodFrom(periodFrom)
                 .periodTo(periodTo)
+                .templateSnapshotJson(template.getQuestionsJson())
                 .status("DRAFT")
                 .createdBy(SecurityUtils.currentUserId())
                 .build();
@@ -175,10 +177,12 @@ public class SurveyServiceImpl implements SurveyService {
             throw BusinessException.of(400, "error.survey.invalidTransition",
                     campaign.getStatus(), "ACTIVE");
         }
+        SurveyTemplate template = requireTemplate(campaign.getTemplateId());
         int updated = campaignMapper.update(null, new UpdateWrapper<SurveyCampaign>()
                 .eq("id", id).eq("status", "DRAFT")
                 .set("status", "ACTIVE")
-                .set("updated_at", java.time.LocalDateTime.now()));
+                .set("template_snapshot_json", template.getQuestionsJson())
+                .set("updated_at", java.time.LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -198,7 +202,7 @@ public class SurveyServiceImpl implements SurveyService {
         int updated = campaignMapper.update(null, new UpdateWrapper<SurveyCampaign>()
                 .eq("id", id).eq("status", "ACTIVE")
                 .set("status", "CLOSED")
-                .set("updated_at", java.time.LocalDateTime.now()));
+                .set("updated_at", java.time.LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -212,8 +216,11 @@ public class SurveyServiceImpl implements SurveyService {
     @Override
     @Transactional(readOnly = true)
     public List<CampaignDto> myActiveCampaigns(Long engineerId) {
+        LocalDate today = LocalDate.now(clock);
         return campaignMapper.selectList(new LambdaQueryWrapper<SurveyCampaign>()
                         .eq(SurveyCampaign::getStatus, "ACTIVE")
+                        .and(w -> w.isNull(SurveyCampaign::getPeriodFrom).or().le(SurveyCampaign::getPeriodFrom, today))
+                        .and(w -> w.isNull(SurveyCampaign::getPeriodTo).or().ge(SurveyCampaign::getPeriodTo, today))
                         .orderByDesc(SurveyCampaign::getId))
                 .stream()
                 .map(c -> new CampaignDto(c.getId(), c.getTemplateId(), c.getTitle(), c.getPeriodFrom(),
@@ -228,8 +235,15 @@ public class SurveyServiceImpl implements SurveyService {
         if (!"ACTIVE".equals(campaign.getStatus())) {
             throw BusinessException.of(400, "error.survey.notActive");
         }
-        SurveyTemplate template = requireTemplate(campaign.getTemplateId());
-        List<QuestionDef> questions = readQuestions(template.getQuestionsJson());
+        LocalDate today = LocalDate.now(clock);
+        if ((campaign.getPeriodFrom() != null && today.isBefore(campaign.getPeriodFrom()))
+                || (campaign.getPeriodTo() != null && today.isAfter(campaign.getPeriodTo()))) {
+            throw BusinessException.of(400, "error.survey.outOfPeriod");
+        }
+        String questionsJson = (campaign.getTemplateSnapshotJson() != null && !campaign.getTemplateSnapshotJson().isBlank())
+                ? campaign.getTemplateSnapshotJson()
+                : requireTemplate(campaign.getTemplateId()).getQuestionsJson();
+        List<QuestionDef> questions = readQuestions(questionsJson);
         Map<String, Integer> answers = responseMapper.selectList(new LambdaQueryWrapper<SurveyResponse>()
                         .eq(SurveyResponse::getCampaignId, campaignId)
                         .eq(SurveyResponse::getEngineerId, engineerId))
@@ -240,7 +254,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .eq(SurveyResponse::getEngineerId, engineerId)
                 .eq(SurveyResponse::getConsentFlag, 1)) > 0;
         return new MyCampaignDetail(campaignId, campaign.getTitle(), campaign.getPeriodFrom(), campaign.getPeriodTo(),
-                questions, answers, template.getVersion(), consent);
+                questions, answers, templateVersionOf(campaign.getTemplateId()), consent);
     }
 
     @Override
@@ -250,15 +264,24 @@ public class SurveyServiceImpl implements SurveyService {
         if (!"ACTIVE".equals(campaign.getStatus())) {
             throw BusinessException.of(400, "error.survey.notActive");
         }
+        LocalDate today = LocalDate.now(clock);
+        if ((campaign.getPeriodFrom() != null && today.isBefore(campaign.getPeriodFrom()))
+                || (campaign.getPeriodTo() != null && today.isAfter(campaign.getPeriodTo()))) {
+            throw BusinessException.of(400, "error.survey.outOfPeriod");
+        }
         if (!consent) {
             throw BusinessException.of(400, "error.survey.consentRequired");
         }
-        SurveyTemplate template = requireTemplate(campaign.getTemplateId());
         if (answers == null || answers.isEmpty()) {
             throw BusinessException.of(400, "error.survey.answersRequired");
         }
-        Map<String, QuestionDef> defs = readQuestions(template.getQuestionsJson()).stream()
+        String questionsJson = (campaign.getTemplateSnapshotJson() != null && !campaign.getTemplateSnapshotJson().isBlank())
+                ? campaign.getTemplateSnapshotJson()
+                : requireTemplate(campaign.getTemplateId()).getQuestionsJson();
+        Map<String, QuestionDef> defs = readQuestions(questionsJson).stream()
                 .collect(Collectors.toMap(QuestionDef::key, Function.identity()));
+        Integer version = templateVersionOf(campaign.getTemplateId());
+        int v = version == null ? 0 : version;
         for (AnswerInput input : answers) {
             QuestionDef def = defs.get(input.questionKey());
             if (def == null) {
@@ -282,7 +305,7 @@ public class SurveyServiceImpl implements SurveyService {
                         .comment(trimToNull(input.comment()))
                         .commentVisibility(visibility)
                         .consentFlag(1)
-                        .templateVersion(template.getVersion() == null ? 0 : template.getVersion())
+                        .templateVersion(v)
                         .build());
             } else {
                 responseMapper.update(null, new UpdateWrapper<SurveyResponse>()
@@ -291,8 +314,8 @@ public class SurveyServiceImpl implements SurveyService {
                         .set("comment", trimToNull(input.comment()))
                         .set("comment_visibility", visibility)
                         .set("consent_flag", 1)
-                        .set("template_version", template.getVersion() == null ? 0 : template.getVersion())
-                        .set("updated_at", java.time.LocalDateTime.now()));
+                        .set("template_version", v)
+                        .set("updated_at", java.time.LocalDateTime.now(clock)));
             }
         }
     }
@@ -305,28 +328,36 @@ public class SurveyServiceImpl implements SurveyService {
     @Transactional(readOnly = true)
     public AggregateResult aggregate(Long campaignId) {
         SurveyCampaign campaign = requireCampaign(campaignId);
-        SurveyTemplate template = requireTemplate(campaign.getTemplateId());
-        List<QuestionDef> questions = readQuestions(template.getQuestionsJson());
+        String questionsJson = (campaign.getTemplateSnapshotJson() != null && !campaign.getTemplateSnapshotJson().isBlank())
+                ? campaign.getTemplateSnapshotJson()
+                : requireTemplate(campaign.getTemplateId()).getQuestionsJson();
+        List<QuestionDef> questions = readQuestions(questionsJson);
         int minAnswers = Math.max(1, systemConfigService.getInt(MIN_ANSWERS_KEY, 3));
         boolean confidentialVisible = isHrOrAdmin();
 
-        List<SurveyResponse> responses = responseMapper.selectList(new LambdaQueryWrapper<SurveyResponse>()
-                .eq(SurveyResponse::getCampaignId, campaignId));
+        Set<Long> visibleEngineerIds = visibleEngineers();
+        if (visibleEngineerIds != null && visibleEngineerIds.isEmpty()) {
+            return new AggregateResult(campaignId, campaign.getTitle(), List.of(), List.of(), minAnswers,
+                    new RetentionRiskSummary(0, 0, null, List.of(), true));
+        }
+
+        LambdaQueryWrapper<SurveyResponse> responseQuery = new LambdaQueryWrapper<SurveyResponse>()
+                .eq(SurveyResponse::getCampaignId, campaignId);
+        if (visibleEngineerIds != null) {
+            responseQuery.in(SurveyResponse::getEngineerId, visibleEngineerIds);
+        }
+        List<SurveyResponse> responses = responseMapper.selectList(responseQuery);
 
         Map<Long, Long> orgOfEngineer = new java.util.HashMap<>();
         responses.stream().map(SurveyResponse::getEngineerId).distinct().forEach(id -> {
             Engineer e = engineerMapper.selectById(id);
             orgOfEngineer.put(id, e == null || e.getOrganizationId() == null ? 0L : e.getOrganizationId());
         });
-        Set<Long> visibleEngineerIds = visibleEngineers();
 
-        List<QuestionAggregate> overall = aggregateQuestions(questions, responses.stream()
-                .filter(r -> visibleEngineerIds.contains(r.getEngineerId()))
-                .toList(), confidentialVisible, minAnswers);
+        List<QuestionAggregate> overall = aggregateQuestions(questions, responses, confidentialVisible, minAnswers);
 
         // 組織segmentごとの集計（マネージャーは配下のみ表示。design §5の匿名閾値適用）
         Map<Long, List<SurveyResponse>> byOrg = responses.stream()
-                .filter(r -> visibleEngineerIds.contains(r.getEngineerId()))
                 .collect(Collectors.groupingBy(r -> orgOfEngineer.getOrDefault(r.getEngineerId(), 0L)));
         List<OrganizationSegment> segments = byOrg.entrySet().stream()
                 .map(e -> {
@@ -338,7 +369,51 @@ public class SurveyServiceImpl implements SurveyService {
                 .sorted(Comparator.comparing(OrganizationSegment::organizationId))
                 .toList();
 
-        return new AggregateResult(campaignId, campaign.getTitle(), overall, segments, minAnswers);
+        // リテンションリスク集計（R1-P1-10）
+        RetentionRiskSummary retentionRisk = computeRetentionRisk(questions, responses, minAnswers, confidentialVisible);
+
+        return new AggregateResult(campaignId, campaign.getTitle(), overall, segments, minAnswers, retentionRisk);
+    }
+
+    private RetentionRiskSummary computeRetentionRisk(List<QuestionDef> questions, List<SurveyResponse> responses,
+                                                      int minAnswers, boolean confidentialVisible) {
+        long answeredEngineers = responses.stream().map(SurveyResponse::getEngineerId).distinct().count();
+        if (answeredEngineers < minAnswers) {
+            return new RetentionRiskSummary(answeredEngineers, 0, null, List.of(), true);
+        }
+        List<RiskFactor> riskFactors = new ArrayList<>();
+        List<Integer> allScores = new ArrayList<>();
+        Map<Long, List<Integer>> engineerScores = new java.util.HashMap<>();
+
+        for (QuestionDef q : questions) {
+            if (q.confidential() && !confidentialVisible) {
+                continue;
+            }
+            if ("SCALE1_5".equals(q.type()) || "SCALE1_5_COMMENT".equals(q.type())) {
+                List<SurveyResponse> qResponses = responses.stream()
+                        .filter(r -> r.getQuestionKey().equals(q.key()) && r.getAnswerValue() != null)
+                        .toList();
+                if (!qResponses.isEmpty()) {
+                    double avg = qResponses.stream().mapToInt(SurveyResponse::getAnswerValue).average().orElse(0.0);
+                    BigDecimal qAvg = BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP);
+                    if (avg < 3.0) {
+                        riskFactors.add(new RiskFactor(q.key(), q.text(), qAvg, "スコア平均が基準値(3.0)未満です"));
+                    }
+                    for (SurveyResponse r : qResponses) {
+                        allScores.add(r.getAnswerValue());
+                        engineerScores.computeIfAbsent(r.getEngineerId(), k -> new ArrayList<>()).add(r.getAnswerValue());
+                    }
+                }
+            }
+        }
+        long atRiskCount = engineerScores.values().stream()
+                .filter(scores -> scores.stream().mapToInt(Integer::intValue).average().orElse(5.0) < 2.5)
+                .count();
+        BigDecimal overallAvg = allScores.isEmpty() ? null
+                : BigDecimal.valueOf(allScores.stream().mapToInt(Integer::intValue).average().orElse(0.0))
+                .setScale(2, RoundingMode.HALF_UP);
+
+        return new RetentionRiskSummary(answeredEngineers, atRiskCount, overallAvg, riskFactors, false);
     }
 
     private List<QuestionAggregate> aggregateQuestions(List<QuestionDef> questions, List<SurveyResponse> responses,
@@ -467,7 +542,7 @@ public class SurveyServiceImpl implements SurveyService {
             if (organizationScopeService.hasFullAccess()) {
                 return all;
             }
-            Set<Long> scoped = organizationScopeService.allowedEngineerIds(LocalDate.now());
+            Set<Long> scoped = organizationScopeService.allowedEngineerIds(LocalDate.now(clock));
             return scoped == null ? Set.of() : scoped;
         }
         return Set.of();
@@ -486,7 +561,7 @@ public class SurveyServiceImpl implements SurveyService {
         for (EngineerAccountLink link : links) {
             String message = "[\"notification.msg.SURVEY_CAMPAIGN\", \"" + campaign.getTitle() + "\"]";
             notificationService.publishToUser(link.getSysUserId(), "SURVEY_CAMPAIGN", "サーベイの回答をお願いします",
-                    message, "/my/surveys", "survey-campaign:" + campaign.getId(), "my-surveys");
+                    message, "/my/surveys", "survey-campaign:" + campaign.getId(), "mySurveys");
         }
     }
 

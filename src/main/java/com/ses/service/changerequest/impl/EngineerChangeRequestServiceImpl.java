@@ -20,6 +20,8 @@ import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.DocumentLinkMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCareerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerChangeRequestMapper;
@@ -63,7 +65,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private static final Set<String> PROFILE_ALLOWED = Set.of(
             "fullName", "fullNameKana", "initialName", "gender", "birthDate", "nationality",
             "nearestStation", "prefecture", "railwayCompany", "expectedUnitPrice",
-            "availableDate", "experienceYears", "japaneseLevel", "resumeSummary");
+            "availableDate", "experienceYears", "japaneseLevel", "resumeSummary",
+            "email", "phone");
 
     private final EngineerChangeRequestMapper changeRequestMapper;
     private final EngineerMapper engineerMapper;
@@ -79,6 +82,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     private final ApprovalTargetAdapterRegistry approvalTargetAdapterRegistry;
     private final ApprovalEngineService approvalEngineService;
     private final DocumentService documentService;
+    private final DocumentMapper documentMapper;
+    private final DocumentVersionMapper documentVersionMapper;
     private final NotificationService notificationService;
     private final OrganizationScopeService organizationScopeService;
     private final SkillSheetGenerator skillSheetGenerator;
@@ -110,19 +115,41 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
 
     @Override
     @Transactional
-    public ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload) {
+    public ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload,
+                                        String reason, Long attachmentDocumentId) {
         validatePayload(requestType, payload);
+        if (attachmentDocumentId != null) {
+            validateAttachment(engineerId, attachmentDocumentId);
+        }
         String diffJson = buildDiff(requestType, engineerId, payload);
         EngineerChangeRequest draft = EngineerChangeRequest.builder()
                 .engineerId(engineerId)
                 .requestType(requestType)
                 .payloadJson(writeJson(payload))
                 .diffJson(diffJson)
+                .reason(reason)
+                .attachmentDocumentId(attachmentDocumentId)
                 .status(STATUS_DRAFT)
                 .version(0)
                 .build();
         changeRequestMapper.insert(draft);
         return toDto(draft, null, null);
+    }
+
+    private void validateAttachment(Long engineerId, Long documentId) {
+        com.ses.entity.Document doc = documentMapper.selectById(documentId);
+        if (doc == null || (doc.getDeletedFlag() != null && doc.getDeletedFlag() != 0)) {
+            throw BusinessException.of(404, "error.document.notFound");
+        }
+        List<com.ses.entity.DocumentVersion> versions = documentVersionMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()
+                        .eq(com.ses.entity.DocumentVersion::getDocumentId, documentId)
+                        .orderByDesc(com.ses.entity.DocumentVersion::getVersionNo)
+                        .last("LIMIT 1"));
+        com.ses.entity.DocumentVersion latest = versions.isEmpty() ? null : versions.get(0);
+        if (latest == null || !"CLEAN".equals(latest.getScanStatus())) {
+            throw BusinessException.of(400, "error.document.notClean");
+        }
     }
 
     @Override
@@ -263,11 +290,20 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         long pending = changeRequestMapper.selectCount(new LambdaQueryWrapper<EngineerChangeRequest>()
                 .eq(EngineerChangeRequest::getEngineerId, engineerId)
                 .eq(EngineerChangeRequest::getStatus, STATUS_APPLIED));
+        Long currentUserId = SecurityUtils.currentUserId();
+        String email = null;
+        String phone = null;
+        if (currentUserId != null) {
+            SysUser u = sysUserMapper.selectById(currentUserId);
+            if (u != null) {
+                email = u.getEmail();
+            }
+        }
         return new MyProfileView(engineerId, engineer.getFullName(), engineer.getFullNameKana(), engineer.getInitialName(),
                 engineer.getGender(), engineer.getBirthDate(), engineer.getNationality(), engineer.getNearestStation(),
                 engineer.getPrefecture(), engineer.getRailwayCompany(), engineer.getEmploymentType(), engineer.getStatus(),
                 engineer.getExpectedUnitPrice(), engineer.getAvailableDate(), engineer.getExperienceYears(),
-                engineer.getJapaneseLevel(), engineer.getResumeSummary(), skills, careers, salesName, salesUserId,
+                engineer.getJapaneseLevel(), engineer.getResumeSummary(), email, phone, skills, careers, salesName, salesUserId,
                 contracts, pending);
     }
 
@@ -509,9 +545,14 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     private EngineerChangeRequest requireOwned(Long engineerId, Long id) {
-        EngineerChangeRequest request = require(id);
-        if (!Objects.equals(engineerId, request.getEngineerId())) {
-            throw BusinessException.of(403, "error.my.notOwner");
+        if (id == null || engineerId == null) {
+            throw BusinessException.of(404, "error.changeRequest.notFound");
+        }
+        EngineerChangeRequest request = changeRequestMapper.selectOne(new LambdaQueryWrapper<EngineerChangeRequest>()
+                .eq(EngineerChangeRequest::getId, id)
+                .eq(EngineerChangeRequest::getEngineerId, engineerId));
+        if (request == null) {
+            throw BusinessException.of(404, "error.changeRequest.notFound");
         }
         return request;
     }
@@ -563,7 +604,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                         .map(EngineerChangeRequest::getEngineerId).collect(Collectors.toSet()))
                 : Map.of();
         List<ChangeRequestDto> dtos = page.getRecords().stream()
-                .map(r -> toDto(r, approvals.get(r.getApprovalRequestId()), names.get(r.getEngineerId())))
+                .map(r -> toDto(r, r.getApprovalRequestId() == null ? null : approvals.get(r.getApprovalRequestId()),
+                        names.get(r.getEngineerId())))
                 .toList();
         Page<ChangeRequestDto> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(dtos);
@@ -592,7 +634,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         boolean unappliedApproved = STATUS_APPROVED.equals(request.getStatus())
                 && request.getAppliedAt() == null;
         return new ChangeRequestDto(request.getId(), request.getRequestType(), request.getStatus(),
-                request.getPayloadJson(), request.getDiffJson(), request.getApprovalRequestId(), approvalStatus,
+                request.getPayloadJson(), request.getDiffJson(), request.getReason(), request.getAttachmentDocumentId(),
+                request.getApprovalRequestId(), approvalStatus,
                 request.getAppliedAt(), unappliedApproved, request.getCreatedAt(), engineerName);
     }
 

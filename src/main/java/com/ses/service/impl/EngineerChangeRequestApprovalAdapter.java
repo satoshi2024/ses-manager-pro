@@ -47,7 +47,8 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
     private static final Set<String> PROFILE_ALLOWED = Set.of(
             "fullName", "fullNameKana", "initialName", "gender", "birthDate", "nationality",
             "nearestStation", "prefecture", "railwayCompany", "expectedUnitPrice",
-            "availableDate", "experienceYears", "japaneseLevel", "resumeSummary");
+            "availableDate", "experienceYears", "japaneseLevel", "resumeSummary",
+            "email", "phone");
 
     private final EngineerChangeRequestMapper changeRequestMapper;
     private final EngineerMapper engineerMapper;
@@ -57,6 +58,7 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
     private final EngineerSkillService engineerSkillService;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
     private final NotificationService notificationService;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Override
@@ -150,7 +152,7 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
         };
         String message = "[\"notification.msg.CHANGE_REQUEST_APPLIED\", \"" + prefix + "\"]";
         notificationService.publishToUser(sysUserId, "CHANGE_REQUEST_APPLIED", "変更申請が反映されました",
-                message, "/my/profile", "change-request-applied:" + change.getId(), "my-profile");
+                message, "/my/profile", "change-request-applied:" + change.getId(), "myProfile");
     }
 
     private void applyProfile(EngineerChangeRequest change) {
@@ -160,7 +162,21 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
             if (!PROFILE_ALLOWED.contains(e.getKey())) {
                 continue; // validatePayloadで拒否済み。防御的にスキップ（fail-safe）。
             }
-            applyField(engineer, e.getKey(), e.getValue());
+            if ("email".equals(e.getKey())) {
+                String email = str(e.getValue());
+                if (email != null && !email.isBlank()) {
+                    Long userId = linkedUserId(change.getEngineerId());
+                    if (userId != null) {
+                        com.ses.entity.SysUser u = sysUserMapper.selectById(userId);
+                        if (u != null) {
+                            u.setEmail(email);
+                            sysUserMapper.updateById(u);
+                        }
+                    }
+                }
+            } else {
+                applyField(engineer, e.getKey(), e.getValue());
+            }
         }
         engineerService.updateWithStatusGuard(engineer);
     }
@@ -292,8 +308,15 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
                                 .eq(EngineerCareer::getEngineerId, engineer.getId())
                                 .orderByAsc(EngineerCareer::getId));
                 for (EngineerCareer c : rows) {
-                    sb.append("|c").append(c.getPeriodFrom()).append(':').append(c.getPeriodTo()).append(':')
-                            .append(c.getProjectName() == null ? "" : c.getProjectName());
+                    sb.append("|c").append(c.getId()).append(':')
+                            .append(c.getPeriodFrom()).append(':')
+                            .append(c.getPeriodTo()).append(':')
+                            .append(c.getProjectName() == null ? "" : c.getProjectName()).append(':')
+                            .append(c.getClientIndustry() == null ? "" : c.getClientIndustry()).append(':')
+                            .append(c.getRole() == null ? "" : c.getRole()).append(':')
+                            .append(c.getDescription() == null ? "" : c.getDescription()).append(':')
+                            .append(c.getTechStack() == null ? "" : c.getTechStack()).append(':')
+                            .append(c.getTeamSize() == null ? "" : c.getTeamSize());
                 }
             }
             default -> {

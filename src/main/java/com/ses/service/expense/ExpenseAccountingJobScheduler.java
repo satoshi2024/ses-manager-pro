@@ -18,8 +18,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -48,7 +51,7 @@ public class ExpenseAccountingJobScheduler {
     static final String STATUS_SUCCEEDED = "SUCCEEDED";
     static final String STATUS_FAILED = "FAILED";
     static final int MAX_ATTEMPTS = 5;
-    static final String LINK_MENU_KEY = "my-expenses";
+    static final String LINK_MENU_KEY = "myExpenses";
     static final String LINK_URL = "/my/expenses";
 
     private final ExpenseRequestMapper expenseRequestMapper;
@@ -59,6 +62,13 @@ public class ExpenseAccountingJobScheduler {
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final PlatformTransactionManager transactionManager;
+
+    private TransactionTemplate requiresNewTx() {
+        TransactionTemplate tt = new TransactionTemplate(transactionManager);
+        tt.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tt;
+    }
 
     @Scheduled(cron = "0 * * * * *")
     @SchedulerLock(name = "expenseAccountingDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT5M")
@@ -80,14 +90,15 @@ public class ExpenseAccountingJobScheduler {
     }
 
     /** 30分以上claimされたままの行を再送可能へ戻す（クラッシュ耐性）。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recoverStaleRows() {
-        LocalDateTime now = LocalDateTime.now(clock);
-        jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
-                .eq("status", STATUS_PROCESSING)
-                .lt("updated_at", now.minusMinutes(30))
-                .set("status", STATUS_PENDING)
-                .set("next_attempt_at", now));
+        requiresNewTx().executeWithoutResult(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("status", STATUS_PROCESSING)
+                    .lt("updated_at", now.minusMinutes(30))
+                    .set("status", STATUS_PENDING)
+                    .set("next_attempt_at", now));
+        });
     }
 
     /** 承認済かつ未連携の経費へPENDING jobを作成する（UNIQUE(expense_request_id)衝突は冪等スキップ）。 */
@@ -159,7 +170,15 @@ public class ExpenseAccountingJobScheduler {
             }
         }
         if (result.success()) {
-            markSent(expenseRequestId, claimed, result.correlationId());
+            try {
+                markSent(expenseRequestId, claimed, result.correlationId());
+                notifyAccountingSent(claimed.expense());
+                log.info("[経費会計連携] 会計連携済: expenseId={} correlationId={}", claimed.expense().getId(), result.correlationId());
+            } catch (RuntimeException e) {
+                log.error("[経費会計連携] markSentコミット失敗（再試行可能へ戻します）: expenseId={}", expenseRequestId, e);
+                markFailure(expenseRequestId, claimed, "DB_COMMIT_FAILED");
+                return false;
+            }
         } else {
             markFailure(expenseRequestId, claimed,
                     result.errorCode() == null ? "SEND_FAILED" : result.errorCode());
@@ -180,97 +199,101 @@ public class ExpenseAccountingJobScheduler {
     }
 
     /** PENDINGかつ再試行期限到来のjobをPROCESSINGへclaimし、対象経費と合わせて返す。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ClaimedJob claim(Long expenseRequestId) {
-        LocalDateTime now = LocalDateTime.now(clock);
-        int updated = jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
-                .eq("expense_request_id", expenseRequestId)
-                .eq("status", STATUS_PENDING)
-                .and(w -> w.isNull("next_attempt_at").or().le("next_attempt_at", now))
-                .set("status", STATUS_PROCESSING)
-                .setSql("attempt_count = attempt_count + 1")
-                .set("updated_at", now));
-        if (updated != 1) {
-            return null;
-        }
-        ExpenseAccountingJob job = jobMapper.selectOne(new LambdaQueryWrapper<ExpenseAccountingJob>()
-                .eq(ExpenseAccountingJob::getExpenseRequestId, expenseRequestId));
-        if (job == null) {
-            return null;
-        }
-        ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
-        if (expense == null) {
-            // 経費行が存在しない（論理削除等）場合は即時終端させる。
-            jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+        return requiresNewTx().execute(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            int updated = jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
                     .eq("expense_request_id", expenseRequestId)
-                    .eq("status", STATUS_PROCESSING)
-                    .set("status", STATUS_FAILED)
-                    .set("last_error_code", "EXPENSE_NOT_FOUND")
-                    .set("next_attempt_at", null)
+                    .eq("status", STATUS_PENDING)
+                    .and(w -> w.isNull("next_attempt_at").or().le("next_attempt_at", now))
+                    .set("status", STATUS_PROCESSING)
+                    .setSql("attempt_count = attempt_count + 1")
                     .set("updated_at", now));
-            return null;
-        }
-        return new ClaimedJob(job, expense);
+            if (updated != 1) {
+                return null;
+            }
+            ExpenseAccountingJob job = jobMapper.selectOne(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getExpenseRequestId, expenseRequestId));
+            if (job == null) {
+                return null;
+            }
+            ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
+            if (expense == null) {
+                // 経費行が存在しない（論理削除等）場合は即時終端させる。
+                jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                        .eq("expense_request_id", expenseRequestId)
+                        .eq("status", STATUS_PROCESSING)
+                        .set("status", STATUS_FAILED)
+                        .set("last_error_code", "EXPENSE_NOT_FOUND")
+                        .set("next_attempt_at", null)
+                        .set("updated_at", now));
+                return null;
+            }
+            return new ClaimedJob(job, expense);
+        });
     }
 
     /** 送信成功の結果反映（REQUIRES_NEW）。expense.status=会計連携済 + accounting_job_id + 通知。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markSent(Long expenseRequestId, ClaimedJob claimed, String correlationId) {
-        LocalDateTime now = LocalDateTime.now(clock);
-        jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
-                .eq("expense_request_id", expenseRequestId)
-                .eq("status", STATUS_PROCESSING)
-                .set("status", STATUS_SUCCEEDED)
-                .set("correlation_id", correlationId)
-                .set("sent_at", now)
-                .set("last_error_code", null)
-                .set("next_attempt_at", null)
-                .set("updated_at", now));
+        requiresNewTx().executeWithoutResult(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            ExpenseRequest expense = claimed.expense();
+            int version = expense.getVersion() == null ? 0 : expense.getVersion();
+            int expUpdated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
+                    .eq("id", expense.getId())
+                    .eq("status", ExpenseRequestService.STATUS_APPROVED)
+                    .eq("version", version)
+                    .set("status", ExpenseRequestService.STATUS_ACCOUNTING_SENT)
+                    .set("accounting_job_id", claimed.job().getId())
+                    .set("version", version + 1)
+                    .set("updated_at", now));
+            if (expUpdated != 1) {
+                throw new IllegalStateException("Expense CAS update failed for expenseId=" + expense.getId());
+            }
 
-        ExpenseRequest expense = claimed.expense();
-        int version = expense.getVersion() == null ? 0 : expense.getVersion();
-        int updated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
-                .eq("id", expense.getId())
-                .eq("status", ExpenseRequestService.STATUS_APPROVED)
-                .eq("version", version)
-                .set("status", ExpenseRequestService.STATUS_ACCOUNTING_SENT)
-                .set("accounting_job_id", claimed.job().getId())
-                .set("version", version + 1)
-                .set("updated_at", now));
-        if (updated == 1) {
-            notifyAccountingSent(expense);
-            log.info("[経費会計連携] 会計連携済: expenseId={} correlationId={}", expense.getId(), correlationId);
-        }
-        // updated==0は二重実行等で他経路が既に連携済みのケース。job自体はSUCCEEDED済みのため何もしない。
+            int jobUpdated = jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("expense_request_id", expenseRequestId)
+                    .eq("status", STATUS_PROCESSING)
+                    .set("status", STATUS_SUCCEEDED)
+                    .set("correlation_id", correlationId)
+                    .set("sent_at", now)
+                    .set("last_error_code", null)
+                    .set("next_attempt_at", null)
+                    .set("updated_at", now));
+            if (jobUpdated != 1) {
+                throw new IllegalStateException("Job update failed for expenseRequestId=" + expenseRequestId);
+            }
+        });
     }
 
     /** 送信失敗の結果反映（REQUIRES_NEW）。max 5回でFAILED、それ以外はbackoff付きでPENDINGへ戻す。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markFailure(Long expenseRequestId, ClaimedJob claimed, String errorCode) {
-        LocalDateTime now = LocalDateTime.now(clock);
-        int attempts = claimed.job().getAttemptCount() == null
-                ? 1 : Math.max(claimed.job().getAttemptCount(), 1);
-        if (attempts >= MAX_ATTEMPTS) {
+        requiresNewTx().executeWithoutResult(st -> {
+            LocalDateTime now = LocalDateTime.now(clock);
+            int attempts = claimed.job().getAttemptCount() == null
+                    ? 1 : Math.max(claimed.job().getAttemptCount(), 1);
+            if (attempts >= MAX_ATTEMPTS) {
+                jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                        .eq("expense_request_id", expenseRequestId)
+                        .eq("status", STATUS_PROCESSING)
+                        .set("status", STATUS_FAILED)
+                        .set("last_error_code", errorCode)
+                        .set("next_attempt_at", null)
+                        .set("updated_at", now));
+                log.warn("[経費会計連携] 試行回数上限でFAILED: expenseId={} errorCode={}", expenseRequestId, errorCode);
+                return;
+            }
+            long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
             jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
                     .eq("expense_request_id", expenseRequestId)
                     .eq("status", STATUS_PROCESSING)
-                    .set("status", STATUS_FAILED)
+                    .set("status", STATUS_PENDING)
                     .set("last_error_code", errorCode)
-                    .set("next_attempt_at", null)
+                    .set("next_attempt_at", now.plusMinutes(backoffMinutes))
                     .set("updated_at", now));
-            log.warn("[経費会計連携] 試行回数上限でFAILED: expenseId={} errorCode={}", expenseRequestId, errorCode);
-            return;
-        }
-        long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
-        jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
-                .eq("expense_request_id", expenseRequestId)
-                .eq("status", STATUS_PROCESSING)
-                .set("status", STATUS_PENDING)
-                .set("last_error_code", errorCode)
-                .set("next_attempt_at", now.plusMinutes(backoffMinutes))
-                .set("updated_at", now));
-        log.warn("[経費会計連携] 再試行待ち: expenseId={} attempt={} backoff={}min errorCode={}",
-                expenseRequestId, attempts, backoffMinutes, errorCode);
+            log.warn("[経費会計連携] 再試行待ち: expenseId={} attempt={} backoff={}min errorCode={}",
+                    expenseRequestId, attempts, backoffMinutes, errorCode);
+        });
     }
 
     /** 本人へ会計連携通知を発行する（dedupeKeyで冪等）。 */

@@ -1,5 +1,6 @@
 package com.ses.leave;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.leave.LeaveApplyRequest;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalDelegation;
@@ -111,6 +112,10 @@ class LeaveApprovalFlowIntegrationTest {
         long calendarId = jdbcTemplate.queryForObject("SELECT id FROM m_work_calendar WHERE engineer_id = ?", Long.class, engineerId);
         jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
                 + "VALUES (?, '2026-08-03', '通常', 480)", calendarId);
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, APPLICANT_USER_ID)
+                .or()
+                .eq(EngineerAccountLink::getEngineerId, engineerId));
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(APPLICANT_USER_ID);
@@ -125,6 +130,8 @@ class LeaveApprovalFlowIntegrationTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, APPLICANT_USER_ID));
     }
 
     @Test

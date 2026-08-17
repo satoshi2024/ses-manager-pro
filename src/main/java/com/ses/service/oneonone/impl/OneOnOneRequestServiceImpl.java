@@ -71,14 +71,14 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
             query.eq(OneOnOneRequest::getStatus, status);
         }
         Page<OneOnOneRequest> page = oneOnOneMapper.selectPage(PageUtils.safePage(current, size), query);
-        return toDtoPage(page, true);
+        return toDtoPage(page, false);
     }
 
     @Override
     @Transactional(readOnly = true)
     public OneOnOneDto detailOwn(Long engineerId, Long id) {
         OneOnOneRequest request = requireOwned(engineerId, id);
-        return toDto(request, true);
+        return toDto(request, false);
     }
 
     @Override
@@ -92,6 +92,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                 || !Objects.equals(counterpart.getStatus(), 1)) {
             throw BusinessException.of(400, "error.oneOnOne.invalidCounterpart");
         }
+        assertCounterpartRelationship(engineerId, counterpart);
         if (candidateDates == null || candidateDates.isEmpty() || candidateDates.size() > MAX_CANDIDATES) {
             throw BusinessException.of(400, "error.oneOnOne.invalidDates");
         }
@@ -106,7 +107,29 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                 .status(STATUS_REQUESTED)
                 .build();
         oneOnOneMapper.insert(request);
-        return toDto(request, true);
+        return toDto(request, false);
+    }
+
+    private void assertCounterpartRelationship(Long engineerId, SysUser counterpart) {
+        String role = counterpart.getRole();
+        if ("HR".equals(role)) {
+            return; // HRは相談窓口として常に選択可
+        }
+        if ("営業".equals(role)) {
+            boolean isAssignedSales = engineerSalesService.list(new LambdaQueryWrapper<com.ses.entity.EngineerSales>()
+                    .eq(com.ses.entity.EngineerSales::getEngineerId, engineerId)
+                    .eq(com.ses.entity.EngineerSales::getSalesUserId, counterpart.getId())
+                    .isNull(com.ses.entity.EngineerSales::getReleasedAt))
+                    .size() > 0;
+            if (!isAssignedSales) {
+                throw BusinessException.of(400, "error.oneOnOne.notAssignedSales");
+            }
+            return;
+        }
+        if ("マネージャー".equals(role)) {
+            return; // マネージャーは相談先として選択可
+        }
+        throw BusinessException.of(400, "error.oneOnOne.invalidCounterpart");
     }
 
     @Override
@@ -118,7 +141,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                     request.getStatus(), STATUS_CANCELLED);
         }
         casStatus(request, STATUS_CANCELLED);
-        return toDto(requireOwned(engineerId, id), true);
+        return toDto(requireOwned(engineerId, id), false);
     }
 
     // ----------------------------------------------------------------
@@ -184,7 +207,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
-        return toDto(require(id), true);
+        return toDto(require(id), managementScope().withPrivateNote());
     }
 
     @Override
@@ -207,7 +230,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
-        return toDto(require(id), true);
+        return toDto(require(id), managementScope().withPrivateNote());
     }
 
     @Override
@@ -220,7 +243,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                     request.getStatus(), STATUS_CANCELLED);
         }
         casStatus(request, STATUS_CANCELLED);
-        return toDto(require(id), true);
+        return toDto(require(id), managementScope().withPrivateNote());
     }
 
     @Override
@@ -342,9 +365,14 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     private OneOnOneRequest requireOwned(Long engineerId, Long id) {
-        OneOnOneRequest request = require(id);
-        if (!Objects.equals(engineerId, request.getEngineerId())) {
-            throw BusinessException.of(403, "error.my.notOwner");
+        if (id == null || engineerId == null) {
+            throw BusinessException.of(404, "error.oneOnOne.notFound");
+        }
+        OneOnOneRequest request = oneOnOneMapper.selectOne(new LambdaQueryWrapper<OneOnOneRequest>()
+                .eq(OneOnOneRequest::getId, id)
+                .eq(OneOnOneRequest::getEngineerId, engineerId));
+        if (request == null) {
+            throw BusinessException.of(404, "error.oneOnOne.notFound");
         }
         return request;
     }

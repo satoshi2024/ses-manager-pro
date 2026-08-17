@@ -267,7 +267,7 @@ class ExpenseRequestFlowIntegrationTest {
         authenticate(userB, "要員");
         BusinessException denied = assertThrows(BusinessException.class, () ->
                 expenseRequestService.downloadReceipt(engineerB, draft.id()));
-        assertEquals(403, denied.getCode());
+        assertEquals(404, denied.getCode());
 
         Page<ExpenseRequestService.ExpenseRequestDto> mine = expenseRequestService.pageForEngineer(engineerB, null, 1, 100);
         assertTrue(mine.getRecords().stream().noneMatch(d -> d.id().equals(draft.id())));
@@ -352,6 +352,7 @@ class ExpenseRequestFlowIntegrationTest {
                 .organizationId(organizationId)
                 .build();
         engineerMapper.insert(engineer);
+        jdbcTemplate.update("DELETE FROM t_engineer_accounting_history WHERE engineer_id = ?", engineer.getId());
         return engineer.getId();
     }
 

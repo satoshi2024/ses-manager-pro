@@ -6,6 +6,8 @@ document.addEventListener('click', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => {
     window.myProfileData = null;
+    window._masterSkills = [];
+    loadMasterSkills();
     loadProfile();
     loadSkillSheet();
     loadRequests();
@@ -13,6 +15,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('change-type').addEventListener('change', buildChangeForm);
     document.getElementById('change-submit').addEventListener('click', submitChangeRequest);
 });
+
+function loadMasterSkills() {
+    SES.api.get('/api/skills', { current: 1, size: 200 })
+        .then(res => {
+            window._masterSkills = (res && res.records) ? res.records : (Array.isArray(res) ? res : []);
+            if (window.myProfileData) buildChangeForm();
+        })
+        .catch(() => { window._masterSkills = []; });
+}
 
 function loadProfile() {
     SES.api.get('/api/my/profile')
@@ -107,30 +118,58 @@ function buildChangeForm() {
     const holder = document.getElementById('change-form');
     const type = document.getElementById('change-type').value;
     if (!data) return;
+    let formHtml = '';
     if (type === 'profile.change') {
-        const fields = [['fullName','氏名','text'],['fullNameKana','氏名カナ','text'],['prefecture','都道府県','text'],
-            ['nearestStation','最寄駅','text'],['railwayCompany','鉄道会社・路線','text'],['availableDate','稼働可能日','date'],
-            ['experienceYears','経験年数','number'],['japaneseLevel','日本語レベル','text'],['resumeSummary','経歴要約','textarea'],
-            ['expectedUnitPrice','希望単価（円/月）','number']];
-        holder.innerHTML = fields.map(([key, labelKey, inputType]) => {
+        const fields = [
+            ['fullName', SES.i18n.t('my.profile.field.name', '氏名'), 'text'],
+            ['fullNameKana', SES.i18n.t('my.profile.field.kana', '氏名カナ'), 'text'],
+            ['email', SES.i18n.t('my.profile.field.email', 'メールアドレス'), 'email'],
+            ['phone', SES.i18n.t('my.profile.field.phone', '電話番号'), 'text'],
+            ['prefecture', SES.i18n.t('my.profile.field.prefecture', '都道府県'), 'text'],
+            ['nearestStation', SES.i18n.t('my.profile.field.station', '最寄駅'), 'text'],
+            ['railwayCompany', SES.i18n.t('my.profile.field.railway', '鉄道会社・路線'), 'text'],
+            ['availableDate', SES.i18n.t('my.profile.field.available', '稼働可能日'), 'date'],
+            ['experienceYears', SES.i18n.t('my.profile.field.experience', '経験年数'), 'number'],
+            ['japaneseLevel', SES.i18n.t('my.profile.field.japanese', '日本語レベル'), 'text'],
+            ['resumeSummary', SES.i18n.t('my.profile.field.summary', '経歴要約'), 'textarea'],
+            ['expectedUnitPrice', SES.i18n.t('my.profile.field.expectedUnitPrice', '希望単価（円/月）'), 'number']
+        ];
+        formHtml = fields.map(([key, labelText, inputType]) => {
             const val = data[key] ?? '';
             const input = inputType === 'textarea'
                 ? `<textarea class="form-control bg-dark border-secondary text-light" data-field="${key}" rows="3">${SES.escapeHtml(String(val))}</textarea>`
                 : `<input type="${inputType}" class="form-control bg-dark border-secondary text-light" data-field="${key}" value="${SES.escapeHtml(String(val))}">`;
-            return `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(labelKey)}</label>${input}</div>`;
+            return `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(labelText)}</label>${input}</div>`;
         }).join('');
     } else if (type === 'skill.change') {
         const rows = (data.skills || []).map(s => skillRow(s));
-        holder.innerHTML = `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.skillList','スキル一覧（熟練度・経験年数を更新）'))}</label><div id="skill-rows">${rows.join('') || skillRow()}</div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="skill-add">+ 行を追加</button></div>`;
-        holder.querySelector('#skill-add').addEventListener('click', () => {
-            const box = holder.querySelector('#skill-rows');
-            box.insertAdjacentHTML('beforeend', skillRow());
-        });
+        formHtml = `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.skillList', 'スキル一覧（熟練度・経験年数を更新または新規追加）'))}</label><div id="skill-rows">${rows.join('') || skillRow()}</div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="skill-add"><i class="bi bi-plus-lg me-1"></i>${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキルを追加'))}</button></div>`;
     } else {
         const rows = (data.careers || []).map(c => careerRow(c));
-        holder.innerHTML = `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.careerList','職務経歴（差し替え）'))}</label><div id="career-rows">${rows.join('') || careerRow()}</div>
-            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="career-add">+ 経歴を追加</button></div>`;
+        formHtml = `<div class="mb-2"><label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.careerList', '職務経歴（差し替え）'))}</label><div id="career-rows">${rows.join('') || careerRow()}</div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="career-add"><i class="bi bi-plus-lg me-1"></i>${SES.escapeHtml(SES.i18n.t('my.changeRequest.addCareer', '経歴を追加'))}</button></div>`;
+    }
+
+    const commonInputs = `
+        <div class="mt-3 pt-2 border-top border-secondary">
+            <div class="mb-2">
+                <label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.reason', '申請理由・備考'))}</label>
+                <input type="text" id="change-reason" class="form-control form-control-sm bg-dark border-secondary text-light" maxlength="1000" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.reasonPlaceholder', '変更理由（任意）'))}">
+            </div>
+            <div class="mb-2">
+                <label class="form-label text-muted small">${SES.escapeHtml(SES.i18n.t('my.changeRequest.attachment', '証明書類・添付ファイル（文書ID、任意）'))}</label>
+                <input type="number" id="change-attachment-doc-id" class="form-control form-control-sm bg-dark border-secondary text-light" placeholder="Document ID">
+            </div>
+        </div>`;
+
+    holder.innerHTML = formHtml + commonInputs;
+
+    if (type === 'skill.change') {
+        holder.querySelector('#skill-add').addEventListener('click', () => {
+            holder.querySelector('#skill-rows').insertAdjacentHTML('beforeend', skillRow());
+        });
+    } else if (type === 'career.change') {
         holder.querySelector('#career-add').addEventListener('click', () => {
             holder.querySelector('#career-rows').insertAdjacentHTML('beforeend', careerRow());
         });
@@ -139,13 +178,21 @@ function buildChangeForm() {
 
 function skillRow(s) {
     s = s || {};
-    const profs = ['初級','中級','上級'];
+    const profs = ['初級', '中級', '上級'];
     const opts = profs.map(p => `<option value="${p}" ${s.proficiency === p ? 'selected' : ''}>${p}</option>`).join('');
-    return `<div class="d-flex gap-2 mb-1 skill-row">
-        <input class="form-control form-control-sm bg-dark border-secondary text-light skill-name" value="${SES.escapeHtml(s.skillName || '')}" placeholder="スキル名" readonly>
+    const skillOptions = (window._masterSkills || []).map(m =>
+        `<option value="${m.id}" ${s.skillId === m.id ? 'selected' : ''}>${SES.escapeHtml(m.name || m.skillName || '')}</option>`
+    ).join('');
+
+    const selectOrInput = (window._masterSkills && window._masterSkills.length > 0)
+        ? `<select class="form-select form-select-sm bg-dark border-secondary text-light skill-select" style="min-width:140px"><option value="">-- スキル選択 --</option>${skillOptions}</select>`
+        : `<input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-id" style="width:90px" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
+
+    return `<div class="d-flex gap-2 mb-1 skill-row align-items-center">
+        ${selectOrInput}
         <input type="hidden" class="skill-id" value="${SES.escapeHtml(String(s.skillId ?? ''))}">
-        <select class="form-select form-select-sm bg-dark border-secondary text-light skill-proficiency" style="width:120px">${opts}</select>
-        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-years" style="width:90px" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="経験年">
+        <select class="form-select form-select-sm bg-dark border-secondary text-light skill-proficiency" style="width:110px">${opts}</select>
+        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-years" style="width:90px" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.skill.yearsPlaceholder', '年数'))}">
         <button type="button" class="btn btn-sm btn-outline-danger skill-remove">-</button>
     </div>`;
 }
@@ -153,17 +200,21 @@ function skillRow(s) {
 function careerRow(c) {
     c = c || {};
     const f = (k, ph, type) => `<input type="${type || 'text'}" class="form-control form-control-sm bg-dark border-secondary text-light career-${k}" value="${SES.escapeHtml(String(c[k] ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.' + k, ph))}">`;
-    return `<div class="career-row border-bottom py-2">
-        <div class="d-flex gap-2 mb-1">${f('periodFrom','開始', 'date')} ${f('periodTo','終了', 'date')} ${f('projectName','案件名')}</div>
-        <div class="d-flex gap-2 mb-1">${f('clientIndustry','業界')} ${f('role','役割')} <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light career-teamSize" style="width:90px" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="規模"></div>
-        ${f('techStack','技術')}
-        <textarea class="form-control form-control-sm bg-dark border-secondary text-light career-description mt-1" rows="2" placeholder="概要">${SES.escapeHtml(String(c.description ?? ''))}</textarea>
-        <button type="button" class="btn btn-sm btn-outline-danger mt-1 career-remove">- 削除</button>
+    return `<div class="career-row border-bottom border-secondary py-2">
+        <div class="d-flex gap-2 mb-1">${f('periodFrom', '開始', 'date')} ${f('periodTo', '終了', 'date')} ${f('projectName', '案件名')}</div>
+        <div class="d-flex gap-2 mb-1">${f('clientIndustry', '業界')} ${f('role', '役割')} <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light career-teamSize" style="width:90px" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.career.teamSizePlaceholder', '規模'))}"></div>
+        ${f('techStack', '使用技術')}
+        <textarea class="form-control form-control-sm bg-dark border-secondary text-light career-description mt-1" rows="2" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.description', '業務概要'))}">${SES.escapeHtml(String(c.description ?? ''))}</textarea>
+        <button type="button" class="btn btn-sm btn-outline-danger mt-1 career-remove">- ${SES.escapeHtml(SES.i18n.t('common.delete', '削除'))}</button>
     </div>`;
 }
 
 async function submitChangeRequest() {
     const type = document.getElementById('change-type').value;
+    const reason = document.getElementById('change-reason') ? document.getElementById('change-reason').value.trim() : null;
+    const attachmentDocIdRaw = document.getElementById('change-attachment-doc-id') ? document.getElementById('change-attachment-doc-id').value.trim() : null;
+    const attachmentDocumentId = attachmentDocIdRaw ? Number(attachmentDocIdRaw) : null;
+
     if (type === 'profile.change') {
         const payload = {};
         document.querySelectorAll('#change-form [data-field]').forEach(inp => {
@@ -172,15 +223,21 @@ async function submitChangeRequest() {
             payload[inp.dataset.field] = val;
         });
         delete emptyStrings(payload);
-        await doCreate(type, payload);
+        await doCreate(type, payload, reason, attachmentDocumentId);
     } else if (type === 'skill.change') {
         const skills = [];
         document.querySelectorAll('#change-form .skill-row').forEach(row => {
-            const skillId = row.querySelector('.skill-id').value;
+            const selectEl = row.querySelector('.skill-select');
+            const idInput = row.querySelector('.skill-id');
+            const skillId = selectEl ? (selectEl.value || idInput.value) : idInput.value;
             if (!skillId) return;
-            skills.push({ skillId: Number(skillId), proficiency: row.querySelector('.skill-proficiency').value, experienceYears: row.querySelector('.skill-years').value === '' ? null : Number(row.querySelector('.skill-years').value) });
+            skills.push({
+                skillId: Number(skillId),
+                proficiency: row.querySelector('.skill-proficiency').value,
+                experienceYears: row.querySelector('.skill-years').value === '' ? null : Number(row.querySelector('.skill-years').value)
+            });
         });
-        await doCreate(type, { skills });
+        await doCreate(type, { skills }, reason, attachmentDocumentId);
     } else {
         const careers = [];
         document.querySelectorAll('#change-form .career-row').forEach(row => {
@@ -197,7 +254,7 @@ async function submitChangeRequest() {
                 teamSize: row.querySelector('.career-teamSize').value === '' ? null : Number(row.querySelector('.career-teamSize').value)
             });
         });
-        await doCreate(type, { careers });
+        await doCreate(type, { careers }, reason, attachmentDocumentId);
     }
 }
 
@@ -206,12 +263,19 @@ function emptyStrings(obj) {
     return obj;
 }
 
-async function doCreate(type, payload) {
+async function doCreate(type, payload, reason, attachmentDocumentId) {
     try {
-        await SES.api.post('/api/my/change-requests', { requestType: type, payload });
+        await SES.api.post('/api/my/change-requests', {
+            requestType: type,
+            payload,
+            reason: reason || null,
+            attachmentDocumentId: attachmentDocumentId || null
+        });
         loadProfile();
+        loadRequests();
         const modal = bootstrap.Modal.getInstance(document.getElementById('changeModal'));
         if (modal) modal.hide();
+        Toast.success(SES.i18n.t('my.changeRequest.created', '変更申請の下書きを作成しました'));
     } catch (e) { /* SES.api toasts */ }
 }
 

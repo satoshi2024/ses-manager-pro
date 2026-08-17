@@ -1,8 +1,9 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
+import com.ses.test.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -18,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * T088 (F1)のMySQL smoke。V105（fresh full run）でengineer self-service portal V2の
  * DDL shapeと制約（UNIQUE冪等・CHECK・FK・seed）を実MySQLで検証する（design §6.3）。
  */
+@Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
 class FlywaySelfServiceSchemaSmokeTest {
 
@@ -54,6 +56,9 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
             // 列shape
+            assertColumnExists(statement, "t_engineer_change_request", "reason");
+            assertColumnExists(statement, "t_engineer_change_request", "attachment_document_id");
+            assertColumnExists(statement, "t_survey_campaign", "template_snapshot_json");
             assertColumnExists(statement, "t_expense_request", "accounting_job_id");
             assertColumnExists(statement, "t_expense_request", "paid_at");
             assertColumnExists(statement, "t_one_on_one_request", "private_note_ref");
@@ -250,11 +255,10 @@ class FlywaySelfServiceSchemaSmokeTest {
                             + "AND column_name='skill_sheet_confirmed_at'"));
         }
 
-        // ---- V105をlegacy DBへ順方向適用 ----
+        // ---- V105/V105_1をlegacy DBへ順方向適用 ----
         Flyway.configure()
                 .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("105")
                 .load()
                 .migrate();
 
@@ -269,11 +273,10 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM m_menu WHERE menu_key='myPayroll'"));
 
-            // fresh（V1統合baseline）とlegacy（V105順方向適用）でshapeが一致する
+            // fresh（V1統合baseline）とlegacy（V105/V105_1順方向適用）でshapeが一致する
             Flyway.configure()
                     .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                     .locations("classpath:db/migration")
-                    .target("105")
                     .load()
                     .migrate();
             String freshShape = selfServiceShape(MYSQL.createConnection(""));

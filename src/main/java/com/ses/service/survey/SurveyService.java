@@ -65,7 +65,15 @@ public interface SurveyService {
     }
 
     record AggregateResult(Long campaignId, String title, List<QuestionAggregate> questions,
-                           List<OrganizationSegment> segments, int minAnswers) {
+                           List<OrganizationSegment> segments, int minAnswers,
+                           RetentionRiskSummary retentionRisk) {
+    }
+
+    record RetentionRiskSummary(long totalEvaluatedEngineers, long atRiskCount, java.math.BigDecimal averageScore,
+                                List<RiskFactor> topRiskFactors, boolean hidden) {
+    }
+
+    record RiskFactor(String questionKey, String questionText, java.math.BigDecimal averageScore, String reason) {
     }
 
     record QuestionAggregate(String questionKey, String text, boolean confidential, boolean hidden,

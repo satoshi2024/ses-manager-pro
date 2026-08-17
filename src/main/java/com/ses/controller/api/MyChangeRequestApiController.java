@@ -55,7 +55,10 @@ public class MyChangeRequestApiController {
     public ApiResult<EngineerChangeRequestService.ChangeRequestDto> create(@RequestBody CreateRequest request) {
         String requestType = request == null ? null : request.getRequestType();
         Map<String, Object> payload = request == null ? null : request.getPayload();
-        return ApiResult.success(changeRequestService.createDraft(currentEngineerId(), requestType, payload));
+        String reason = request == null ? null : request.getReason();
+        Long attachmentDocumentId = request == null ? null : request.getAttachmentDocumentId();
+        return ApiResult.success(changeRequestService.createDraft(currentEngineerId(), requestType, payload,
+                reason, attachmentDocumentId));
     }
 
     @PostMapping("/{id}/submit")
@@ -76,6 +79,8 @@ public class MyChangeRequestApiController {
     public static class CreateRequest {
         private String requestType;
         private Map<String, Object> payload;
+        private String reason;
+        private Long attachmentDocumentId;
 
         public String getRequestType() {
             return requestType;
@@ -91,6 +96,22 @@ public class MyChangeRequestApiController {
 
         public void setPayload(Map<String, Object> payload) {
             this.payload = payload;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public void setReason(String reason) {
+            this.reason = reason;
+        }
+
+        public Long getAttachmentDocumentId() {
+            return attachmentDocumentId;
+        }
+
+        public void setAttachmentDocumentId(Long attachmentDocumentId) {
+            this.attachmentDocumentId = attachmentDocumentId;
         }
     }
 }

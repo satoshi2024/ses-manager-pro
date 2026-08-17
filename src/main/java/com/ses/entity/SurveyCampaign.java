@@ -29,6 +29,9 @@ public class SurveyCampaign extends BaseEntity {
     /** キャンペーン名 */
     private String title;
 
+    /** キャンペーン開始時の質問定義snapshot（JSON文字列） */
+    private String templateSnapshotJson;
+
     /** 回答期間開始 */
     private LocalDate periodFrom;
 

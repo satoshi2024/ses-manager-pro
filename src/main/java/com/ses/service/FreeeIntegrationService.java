@@ -31,6 +31,8 @@ public interface FreeeIntegrationService {
     void link(Long engineerId, String employeeId, Long userId);
     void unlink(Long engineerId);
     List<PayrollStatementDto> statements(int year, int month, String type);
+    /** 本人専用の給与明細取得。外部取得境界で当該engineerIdのみを取得・materializeする（R1-P1-04）。 */
+    PayrollStatementDto statementForEngineer(Long engineerId, int year, int month, String type);
     /**
      * 期限ベースのrefresh。row-lock後に再読込し、別threadが既に更新して有効期限に余裕がある場合は
      * 外部refreshせずreturnする（HFP-01-R03-3）。

@@ -566,6 +566,140 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                 : fetchBonusStatements(c.getCompanyId(), year, month);
     }
 
+    @Override
+    public PayrollStatementDto statementForEngineer(Long engineerId, int year, int month, String type) {
+        if (engineerId == null) {
+            throw BusinessException.of(400, "error.common.invalidParameter");
+        }
+        if (year < 2000 || month < 1 || month > 12) {
+            throw BusinessException.of("error.payroll.invalidPeriod");
+        }
+        if (!"salary".equals(type) && !"bonus".equals(type)) {
+            throw BusinessException.of(400, "error.payroll.invalidType");
+        }
+        FreeeConnection c = latestActiveRow();
+        if (c == null || c.getCompanyId() == null) {
+            throw BusinessException.of("error.payroll.notConnected");
+        }
+        FreeeEmployeeLink link = linkMapper.selectOne(new LambdaQueryWrapper<FreeeEmployeeLink>()
+                .eq(FreeeEmployeeLink::getEngineerId, engineerId));
+        if (link == null || link.getFreeeCompanyId() == null || !link.getFreeeCompanyId().equals(c.getCompanyId())) {
+            return null;
+        }
+        Engineer engineer = engineerMapper.selectById(engineerId);
+        if (engineer == null || (engineer.getDeletedFlag() != null && engineer.getDeletedFlag() != 0)
+                || "BP".equalsIgnoreCase(engineer.getEmploymentType())) {
+            return null;
+        }
+        return "salary".equals(type)
+                ? fetchSingleSalaryStatement(c.getCompanyId(), link.getFreeeEmployeeId(), engineer, year, month)
+                : fetchSingleBonusStatement(c.getCompanyId(), link.getFreeeEmployeeId(), engineer, year, month);
+    }
+
+    private PayrollStatementDto fetchSingleSalaryStatement(long companyId, String employeeId, Engineer engineer,
+                                                           int year, int month) {
+        for (int pageNo = 0; pageNo < maxPages; pageNo++) {
+            JsonNode rawJson = hrGet("/api/v1/salaries/employee_payroll_statements",
+                    statementQuery(companyId, year, month, pageNo * PAGE_SIZE));
+            FreeeStatementPage<FreeeSalaryStatement> page = hrAdapter.salaryPage(rawJson);
+            for (FreeeSalaryStatement s : page.getItems()) {
+                if (employeeId.equals(String.valueOf(s.getEmployeeId()))) {
+                    return mapSingleSalaryStatement(s, engineer, year, month);
+                }
+            }
+            if (page.getItems().size() < PAGE_SIZE) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    private PayrollStatementDto mapSingleSalaryStatement(FreeeSalaryStatement s, Engineer engineer,
+                                                         int year, int month) {
+        PayrollStatementDto d = new PayrollStatementDto();
+        d.setEngineerId(engineer.getId());
+        d.setEngineerName(engineer.getFullName());
+        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+        d.setEmployeeNumber(s.getEmployeeNum());
+        d.setYear(year);
+        d.setMonth(month);
+        d.setType("salary");
+        d.setPayDate(s.getPayDate());
+        d.setFixed(s.getFixed());
+        d.setCalculationStatus(s.getCalcStatus());
+        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+        d.setDeductionAmount(amountOrNull(s.getTotalDeductionAmount()));
+        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+        d.setEmployerShareAmount(amountOrNull(s.getTotalDeductionEmployerShare()));
+        List<PayrollItemDto> items = new ArrayList<>();
+        if (s.getPayments() != null) {
+            for (FreeePayrollItem p : s.getPayments()) {
+                items.add(item("PAYMENT", p));
+            }
+        }
+        if (s.getDeductions() != null) {
+            for (FreeePayrollItem p : s.getDeductions()) {
+                items.add(item("DEDUCTION", p));
+            }
+        }
+        if (s.getDeductionsEmployerShare() != null) {
+            for (FreeePayrollItem p : s.getDeductionsEmployerShare()) {
+                items.add(item("EMPLOYER_SHARE", p));
+            }
+        }
+        d.setItems(items);
+        return d;
+    }
+
+    private PayrollStatementDto fetchSingleBonusStatement(long companyId, String employeeId, Engineer engineer,
+                                                          int year, int month) {
+        for (int pageNo = 0; pageNo < maxPages; pageNo++) {
+            JsonNode rawJson = hrGet("/api/v1/bonuses/employee_payroll_statements",
+                    statementQuery(companyId, year, month, pageNo * PAGE_SIZE));
+            FreeeStatementPage<FreeeBonusStatement> page = hrAdapter.bonusPage(rawJson);
+            for (FreeeBonusStatement s : page.getItems()) {
+                if (employeeId.equals(String.valueOf(s.getEmployeeId()))) {
+                    return mapSingleBonusStatement(s, engineer, year, month);
+                }
+            }
+            if (page.getItems().size() < PAGE_SIZE) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    private PayrollStatementDto mapSingleBonusStatement(FreeeBonusStatement s, Engineer engineer,
+                                                        int year, int month) {
+        PayrollStatementDto d = new PayrollStatementDto();
+        d.setEngineerId(engineer.getId());
+        d.setEngineerName(engineer.getFullName());
+        d.setEmployeeId(String.valueOf(s.getEmployeeId()));
+        d.setEmployeeNumber(s.getEmployeeNum());
+        d.setYear(year);
+        d.setMonth(month);
+        d.setType("bonus");
+        d.setPayDate(s.getPayDate());
+        d.setFixed(s.getFixed());
+        d.setCalculationStatus(s.getCalcStatus());
+        d.setGrossAmount(amountOrNull(s.getGrossPaymentAmount()));
+        d.setDeductionAmount(amountOrNull(s.getTotalDeductionAmount()));
+        d.setNetAmount(amountOrNull(s.getNetPaymentAmount()));
+        List<PayrollItemDto> items = new ArrayList<>();
+        if (s.getAllowances() != null) {
+            for (FreeePayrollItem p : s.getAllowances()) {
+                items.add(item("ALLOWANCE", p));
+            }
+        }
+        if (s.getDeductions() != null) {
+            for (FreeePayrollItem p : s.getDeductions()) {
+                items.add(item("DEDUCTION", p));
+            }
+        }
+        d.setItems(items);
+        return d;
+    }
+
     /**
      * 給与一覧を公式root/field・total_count paginationで取得し（design §8.2）、
      * 現在companyの有効link＋非BP・未削除engineerでinner joinする（design §10.2）。

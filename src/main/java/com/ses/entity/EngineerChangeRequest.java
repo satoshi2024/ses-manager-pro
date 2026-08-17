@@ -37,6 +37,12 @@ public class EngineerChangeRequest extends BaseEntity {
     /** before/after diff（JSON文字列） */
     private String diffJson;
 
+    /** 申請理由 */
+    private String reason;
+
+    /** 添付書類ID（領収書/証明書等の文書台帳ID） */
+    private Long attachmentDocumentId;
+
     /** 下書き/申請中/承認済/反映済/取下げ */
     private String status;
 

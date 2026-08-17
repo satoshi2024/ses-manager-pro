@@ -18,6 +18,8 @@ CREATE TABLE t_engineer_change_request (
   request_type        VARCHAR(30) NOT NULL,
   payload_json        CLOB NOT NULL,
   diff_json           CLOB NOT NULL,
+  reason              VARCHAR(1000),
+  attachment_document_id BIGINT,
   status              VARCHAR(20) NOT NULL DEFAULT '下書き',
   approval_request_id BIGINT,
   applied_at          DATETIME,
@@ -114,6 +116,7 @@ CREATE TABLE t_survey_campaign (
   id           BIGINT AUTO_INCREMENT PRIMARY KEY,
   template_id  BIGINT NOT NULL,
   title        VARCHAR(200) NOT NULL,
+  template_snapshot_json CLOB,
   period_from  DATE,
   period_to    DATE,
   status       VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
@@ -188,39 +191,39 @@ SELECT 'surveyManagement', 'サーベイ管理', '/surveys', '/api/surveys', 102
 WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'surveyManagement');
 
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'myDashboard'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'myDashboard';
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT '要員') r
+CROSS JOIN m_menu m
+WHERE m.menu_key IN ('myDashboard', 'myProfile', 'myPayroll', 'myExpenses', 'myOneOnOnes', 'mySurveys')
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'myProfile'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'myProfile';
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'engineerChangeRequests'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'myPayroll'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'myPayroll';
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'マネージャー') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'expenseManagement'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'myExpenses'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'myExpenses';
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー' UNION ALL SELECT '営業') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'oneOnOneManagement'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'myOneOnOnes'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'myOneOnOnes';
-INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'mySurveys'
-UNION ALL SELECT '要員', id FROM m_menu WHERE menu_key = 'mySurveys';
-INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'engineerChangeRequests'
-UNION ALL SELECT 'HR', id FROM m_menu WHERE menu_key = 'engineerChangeRequests'
-UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'engineerChangeRequests';
-INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'expenseManagement'
-UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'expenseManagement';
-INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'oneOnOneManagement'
-UNION ALL SELECT 'HR', id FROM m_menu WHERE menu_key = 'oneOnOneManagement'
-UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'oneOnOneManagement'
-UNION ALL SELECT '営業', id FROM m_menu WHERE menu_key = 'oneOnOneManagement';
-INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu WHERE menu_key = 'surveyManagement'
-UNION ALL SELECT 'HR', id FROM m_menu WHERE menu_key = 'surveyManagement'
-UNION ALL SELECT 'マネージャー', id FROM m_menu WHERE menu_key = 'surveyManagement';
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'surveyManagement'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
 
 INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
 SELECT 'default', g.id, a.action_key, 0
@@ -230,7 +233,11 @@ CROSS JOIN (SELECT 'engineer-change-request.*' AS action_key UNION ALL
             SELECT 'one-on-one.*' UNION ALL
             SELECT 'survey.*') a
 WHERE g.tenant_id = 'default' AND g.enabled = 1
-  AND g.group_key IN ('role-hr', 'role-manager', 'role-sales');
+  AND g.group_key IN ('role-hr', 'role-manager', 'role-sales')
+  AND NOT EXISTS (
+    SELECT 1 FROM t_permission_group_action pga
+    WHERE pga.tenant_id = 'default' AND pga.group_id = g.id AND pga.action_key = a.action_key
+  );
 
 INSERT INTO m_system_config (config_key, config_value, description)
 SELECT 'survey.min-answers', '3', 'サーベイ集計の最低回答数（未満の組織/segmentは匿名性保護のため非表示。design §5）'

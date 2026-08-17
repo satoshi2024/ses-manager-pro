@@ -30,7 +30,13 @@ public interface EngineerChangeRequestService {
     ChangeRequestDto detailOwn(Long engineerId, Long id);
 
     /** 下書き作成。payloadはtype別allowlistを通過した値のみを保存する。 */
-    ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload);
+    ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload,
+                                 String reason, Long attachmentDocumentId);
+
+    /** 下書き作成（互換用オーバーロード）。 */
+    default ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload) {
+        return createDraft(engineerId, requestType, payload, null, null);
+    }
 
     /** 下書き→申請中。approval engineへ申請しapproval_request_idを記録（同一transaction）。 */
     ChangeRequestDto submit(Long engineerId, Long id);
@@ -60,6 +66,7 @@ public interface EngineerChangeRequestService {
     long pendingChangeRequestCount(Long engineerId);
 
     record ChangeRequestDto(Long id, String requestType, String status, String payloadJson, String diffJson,
+                            String reason, Long attachmentDocumentId,
                             Long approvalRequestId, String approvalStatus, java.time.LocalDateTime appliedAt,
                             boolean unappliedApproved, java.time.LocalDateTime createdAt, String engineerName) {
     }
@@ -77,6 +84,7 @@ public interface EngineerChangeRequestService {
                          String railwayCompany, String employmentType, String status,
                          java.math.BigDecimal expectedUnitPrice, java.time.LocalDate availableDate,
                          Integer experienceYears, String japaneseLevel, String resumeSummary,
+                         String email, String phone,
                          java.util.List<com.ses.dto.engineer.EngineerSkillDetailDto> skills,
                          java.util.List<com.ses.entity.EngineerCareer> careers,
                          String primarySalesUserName, Long primarySalesUserId,

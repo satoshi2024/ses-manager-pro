@@ -80,14 +80,14 @@ public class MyPayrollApiController {
             resp.put("statements", List.of());
             return noStore(ApiResult.success(resp));
         }
-        // freeeService.statements(year, month, type) から取得したリストに対し、
-        // コントローラ層で確実に本人の engineerId のみ抽出・二重防御する（他要員やnullのデータは一切漏洩しない）。
-        List<PayrollStatementDto> all = fetchStatements(engineerId, year, month, type);
+        // 外部取得境界で当該engineerIdのみを取得・materializeする（R1-P1-04）。
+        PayrollStatementDto mine = fetchStatement(engineerId, year, month, type);
         resp.put("linked", true);
-        resp.put("statements", all.stream()
-                .filter(s -> s != null && engineerId.equals(s.getEngineerId()))
-                .map(this::toSummary)
-                .toList());
+        if (mine != null) {
+            resp.put("statements", List.of(toSummary(mine)));
+        } else {
+            resp.put("statements", List.of());
+        }
         return noStore(ApiResult.success(resp));
     }
 
@@ -107,10 +107,10 @@ public class MyPayrollApiController {
         if (!hasFreeeLink(engineerId)) {
             throw BusinessException.of(404, "error.my.payroll.notFound");
         }
-        PayrollStatementDto mine = fetchStatements(engineerId, year, month, type).stream()
-                .filter(s -> s != null && engineerId.equals(s.getEngineerId()))
-                .findFirst()
-                .orElseThrow(() -> BusinessException.of(404, "error.my.payroll.notFound"));
+        PayrollStatementDto mine = fetchStatement(engineerId, year, month, type);
+        if (mine == null) {
+            throw BusinessException.of(404, "error.my.payroll.notFound");
+        }
         return noStore(ApiResult.success(mine));
     }
 
@@ -129,9 +129,9 @@ public class MyPayrollApiController {
     }
 
     /** provider障害・接続状態不良は503系（body code=503）へ変換し、画面を壊さない。 */
-    private List<PayrollStatementDto> fetchStatements(Long engineerId, int year, int month, String type) {
+    private PayrollStatementDto fetchStatement(Long engineerId, int year, int month, String type) {
         try {
-            return freeeService.statements(year, month, type);
+            return freeeService.statementForEngineer(engineerId, year, month, type);
         } catch (RuntimeException e) {
             log.warn("本人給与明細の取得に失敗しました: engineerId={}, year={}, month={}, type={}",
                     engineerId, year, month, type, e);

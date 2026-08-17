@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ExpenseRequestServiceImpl implements ExpenseRequestService {
 
-    private static final String LINK_MENU_KEY = "my-expenses";
+    private static final String LINK_MENU_KEY = "myExpenses";
     private static final String LINK_URL = "/my/expenses";
     private static final int MAX_DESCRIPTION_LENGTH = 1000;
 
@@ -390,9 +390,14 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     private ExpenseRequest requireOwned(Long engineerId, Long id) {
-        ExpenseRequest expense = require(id);
-        if (!Objects.equals(engineerId, expense.getEngineerId())) {
-            throw BusinessException.of(403, "error.my.notOwner");
+        if (id == null || engineerId == null) {
+            throw BusinessException.of(404, "error.expense.notFound");
+        }
+        ExpenseRequest expense = expenseRequestMapper.selectOne(new LambdaQueryWrapper<ExpenseRequest>()
+                .eq(ExpenseRequest::getId, id)
+                .eq(ExpenseRequest::getEngineerId, engineerId));
+        if (expense == null) {
+            throw BusinessException.of(404, "error.expense.notFound");
         }
         return expense;
     }
