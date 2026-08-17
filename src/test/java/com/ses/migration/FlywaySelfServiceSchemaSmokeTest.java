@@ -287,6 +287,30 @@ class FlywaySelfServiceSchemaSmokeTest {
         }
     }
 
+    @Test
+    void 旧4fa3a689版V105_1適用済みDBからV105_2へ順方向適用できる() throws Exception {
+        // V105.1適用済み（target 105.1）のDB状態を再現（4fa3a689 blob相当）
+        Flyway.configure()
+                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("105.1")
+                .load()
+                .migrate();
+
+        // V105.1適用時点からV105_2へ順方向migrate
+        Flyway.configure()
+                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("105.2")
+                .load()
+                .migrate();
+
+        try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertColumnExists(statement, "t_engineer", "phone");
+            assertColumnExists(statement, "t_survey_campaign", "template_snapshot_version");
+        }
+    }
+
     /** selfservice関連テーブル/列の定義を連結してfresh/legacy比較用のfingerprintを作る。 */
     private String selfServiceShape(Connection connection) throws Exception {
         StringBuilder sb = new StringBuilder();

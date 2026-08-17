@@ -818,7 +818,7 @@ async function runBatch02Suite() {
 
     // 1. Duplicates check
     const dupRes = await client.request('GET', '/api/customers/1/contacts/duplicates?email=test@example.com');
-    
+
     // 2. Recipients check
     const recRes = await client.request('GET', '/api/customers/1/contacts/recipients');
 
@@ -1609,7 +1609,7 @@ async function runBatch02Suite() {
   const passCount = suiteResults.filter(r => r.status === 'PASS').length;
   const failCount = suiteResults.filter(r => r.status === 'FAIL').length;
   const blockedCount = suiteResults.filter(r => r.status.startsWith('BLOCKED')).length;
-  
+
   const evaluatedCount = passCount + failCount;
   const passRate = evaluatedCount > 0 ? `${((passCount / evaluatedCount) * 100).toFixed(1)}%` : '0.0%';
   const totalMs = suiteResults.reduce((acc, r) => acc + r.duration_ms, 0);
