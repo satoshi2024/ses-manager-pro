@@ -1,5 +1,7 @@
 package com.ses.entity;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -21,6 +23,9 @@ import java.time.LocalDateTime;
 @EqualsAndHashCode
 @TableName("t_expense_accounting_job")
 public class ExpenseAccountingJob {
+
+    @TableId(type = IdType.AUTO)
+    private Long id;
 
     /** 経費申請ID（UNIQUE） */
     private Long expenseRequestId;

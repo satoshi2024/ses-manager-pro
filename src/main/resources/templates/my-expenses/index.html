@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.expense.title}">経費申請</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-receipt me-2 text-primary"></i><th:block th:text="#{my.expense.title}">経費申請</th:block></h2>
+        <button type="button" class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#expenseModal">
+            <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{my.expense.new}">経費を登録</th:block>
+        </button>
+    </div>
+
+    <!-- 検索フィルター -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label for="searchStatus" class="form-label text-muted small" th:text="#{common.status}">状態</label>
+                    <select class="form-select bg-dark border-secondary text-light" id="searchStatus">
+                        <option value="" th:text="#{common.all}">すべて</option>
+                        <option value="下書き" th:text="#{my.expense.status.draft}">下書き</option>
+                        <option value="申請中" th:text="#{my.expense.status.applied}">申請中</option>
+                        <option value="承認済" th:text="#{my.expense.status.approved}">承認済</option>
+                        <option value="会計連携済" th:text="#{my.expense.status.accountingSent}">会計連携済</option>
+                        <option value="支払済" th:text="#{my.expense.status.paid}">支払済</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-filter me-1"></i><th:block th:text="#{common.filter}">絞り込み</th:block>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 一覧 -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4" th:text="#{my.expense.no}">経費番号</th>
+                            <th scope="col" th:text="#{my.expense.date}">発生日</th>
+                            <th scope="col" th:text="#{my.expense.category}">科目</th>
+                            <th scope="col" class="text-end" th:text="#{my.expense.amount}">金額(円)</th>
+                            <th scope="col" th:text="#{my.expense.receipt}">領収書</th>
+                            <th scope="col" th:text="#{common.status}">状態</th>
+                            <th scope="col" class="text-end pe-4" th:text="#{common.actions}">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expense-table-body">
+                        <!-- JS will populate results here -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                <div class="text-muted small ps-2" id="expense-page-info">-</div>
+                <nav aria-label="Page navigation">
+                    <ul class="pagination pagination-sm mb-0 pe-2" id="expense-pagination"></ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- 経費登録/編集モーダル -->
+    <div class="modal fade" id="expenseModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold" id="expenseModalTitle"><i class="bi bi-receipt me-2 text-accent-blue"></i><th:block th:text="#{my.expense.new}">経費を登録</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="expense-form">
+                        <input type="hidden" id="expense-id">
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{my.expense.date}">経費発生日</label> <span class="text-danger">*</span>
+                            <input type="date" id="expense-date" class="form-control form-control-dark bg-secondary text-white border-dark" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{my.expense.category}">科目</label> <span class="text-danger">*</span>
+                            <select id="expense-category" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                <option value="" th:text="#{common.select}">選択してください</option>
+                                <option value="交通費" th:text="#{my.expense.category.transport}">交通費</option>
+                                <option value="立替経費" th:text="#{my.expense.category.reimbursement}">立替経費</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{my.expense.amount}">金額（円）</label> <span class="text-danger">*</span>
+                            <input type="number" id="expense-amount" class="form-control form-control-dark bg-secondary text-white border-dark" min="1" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-muted small" th:text="#{my.expense.description}">理由</label>
+                            <textarea id="expense-description" class="form-control form-control-dark bg-secondary text-white border-dark" rows="3" maxlength="1000"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" id="expense-save-btn" onclick="saveExpense()">
+                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.save}">保存</th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 領収書添付モーダル -->
+    <div class="modal fade" id="receiptModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-card border-dark shadow-lg">
+                <div class="modal-header border-dark bg-dark">
+                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-paperclip me-2 text-accent-blue"></i><th:block th:text="#{my.expense.receipt.attach}">領収書を添付</th:block></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="text-muted small mb-3" th:text="#{my.expense.receipt.help}">領収書はウイルススキャン後に登録されます。安全確認ができないファイルは登録できません。</p>
+                    <input type="file" id="receipt-file" class="form-control form-control-dark bg-secondary text-white border-dark" accept=".pdf,.png,.jpg,.jpeg">
+                    <div id="receipt-progress" class="d-none mt-3">
+                        <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                        <span class="text-muted small" th:text="#{my.expense.receipt.uploading}">アップロード中...</span>
+                    </div>
+                </div>
+                <div class="modal-footer border-dark bg-dark">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" id="receipt-upload-btn" onclick="uploadReceipt()">
+                        <i class="bi bi-upload me-1"></i><th:block th:text="#{common.upload}">アップロード</th:block>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/my-expenses.js"></script>
+</th:block>
+</body>
+</html>

@@ -11,7 +11,7 @@
 > **Migration**: 本specの予約番号は **V105**。external portal(V104)のsecurity chain merge後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] F1. change/expense/1on1/survey DDL
+- [x] F1. change/expense/1on1/survey DDL
   - **Objective**: 要員がプロフィール変更・経費・1on1候補日・survey回答を登録でき、
     本人Aが本人Bのデータを一切取得できない。任意のJSONからentityへ反映される経路が存在しない。
   - **実装ガイダンス**: **V105**/V1/H2(`sql/schema-engineer-selfservice-h2.sql`)/MySQL smoke、本人scope、field allowlist。

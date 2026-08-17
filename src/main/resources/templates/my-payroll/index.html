@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="#{my.payroll.title}">給与明細</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="card">
+        <div class="card-body">
+            <div class="row g-2 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label" th:text="#{common.month}">対象月</label>
+                    <input type="month" id="payrollMonth" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" th:text="#{my.payroll.type}">種別</label>
+                    <select id="payrollType" class="form-select">
+                        <option value="salary" th:text="#{my.payroll.type.salary}">給与</option>
+                        <option value="bonus" th:text="#{my.payroll.type.bonus}">賞与</option>
+                    </select>
+                </div>
+            </div>
+            <div id="payrollUnlinked" class="alert alert-warning d-none"></div>
+            <div id="payrollError" class="alert alert-danger d-none"></div>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered align-middle">
+                    <thead>
+                    <tr>
+                        <th th:text="#{my.payroll.list.type}">種別</th>
+                        <th th:text="#{my.payroll.list.month}">対象月</th>
+                        <th th:text="#{my.payroll.list.payDate}">支給日</th>
+                        <th th:text="#{my.payroll.list.status}">計算状態</th>
+                        <th></th>
+                    </tr>
+                    </thead>
+                    <tbody id="payrollRows"></tbody>
+                </table>
+            </div>
+            <div id="payrollEmpty" class="alert alert-secondary d-none" th:text="#{my.payroll.empty}">対象月の給与明細はありません</div>
+        </div>
+    </div>
+
+    <!-- 勤怠・休暇・作業報告への導線（R2.3） -->
+    <div class="card mt-3">
+        <div class="card-body">
+            <h6 class="mb-3" th:text="#{my.payroll.nav.title}">本人ポータル</h6>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-outline-info" href="/my/timesheet" th:text="#{my.payroll.nav.timesheet}">勤怠・作業報告</a>
+                <a class="btn btn-outline-info" href="/my/attendance" th:text="#{my.payroll.nav.attendance}">勤怠入力</a>
+                <a class="btn btn-outline-info" href="/my/leave" th:text="#{my.payroll.nav.leave}">休暇申請</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 再認証モーダル（R2.2: 詳細表示前にパスワード再入力） -->
+    <div class="modal fade" id="reauthModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{my.payroll.reauth.title}">再認証</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="text-muted small mb-2" th:text="#{my.payroll.reauth.guide}">給与明細の表示にはログインパスワードの再入力が必要です（10分間有効）。</div>
+                    <input type="password" id="reauthPassword" class="form-control" autocomplete="current-password"
+                           th:placeholder="#{my.payroll.reauth.password}">
+                    <div id="reauthError" class="text-danger small mt-1 d-none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="reauthSubmit" th:text="#{my.payroll.reauth.submit}">再認証</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 明細モーダル（再認証後のみ金額を表示） -->
+    <div class="modal fade" id="statementModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{my.payroll.detail.title}">給与明細</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3" id="statementSummary"></div>
+                    <table class="table table-sm table-bordered">
+                        <thead>
+                        <tr>
+                            <th th:text="#{my.payroll.detail.category}">区分</th>
+                            <th th:text="#{my.payroll.detail.name}">項目</th>
+                            <th class="text-end" th:text="#{my.payroll.detail.amount}">金額</th>
+                        </tr>
+                        </thead>
+                        <tbody id="statementItems"></tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{common.close}">閉じる</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/my-payroll.js"></script>
+</th:block>
+</body>
+</html>
