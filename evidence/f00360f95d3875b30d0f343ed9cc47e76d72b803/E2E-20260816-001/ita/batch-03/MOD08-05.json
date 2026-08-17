@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD08-05",
+  "dimension": "A,S",
+  "category": "MOD-08",
+  "name": "雇用勤怠管理を管理者/HR/マネージャーで操作し、営業/要員の管理API直送も試験",
+  "status": "PASS",
+  "duration_ms": 779,
+  "duration_h": 0.000216,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-05.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_access_status": 200,
+    "member_access_status": 403,
+    "role_enforcement_verified": true
+  }
+}

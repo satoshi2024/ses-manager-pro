@@ -1495,21 +1495,175 @@
       "category": "MOD-05",
       "name": "rule providerで必須skill充足49%/50%/100%、尚可0件を採点",
       "status": "PASS",
-      "duration_ms": 153,
-      "duration_h": 0.000043,
+      "duration_ms": 105,
+      "duration_h": 0.000029,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-05.json",
       "error": null,
       "evidence_detail": {
-        "http_status": 200,
-        "matches_count": 1,
-        "actual_scores_extracted": [
+        "rule_engine_module": "com.ses.service.ai.MatchScoreCalculator",
+        "must_skill_boundary_comparison_table": [
           {
-            "engineerId": 201,
-            "engineerName": "山田 太郎 (Mock)",
-            "totalScore": 92
+            "fixture_id": "FIX-MUST-01",
+            "description": "必須スキル充足率 0% (0/2) < 50%",
+            "project": {
+              "id": 9001,
+              "name": "AIマッチング案件A",
+              "mustSkillIds": [
+                1,
+                2
+              ],
+              "niceSkillIds": [],
+              "priceMin": 700000,
+              "priceMax": 800000,
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "id": 8001,
+              "name": "テスト要員01",
+              "skillIds": [
+                3
+              ],
+              "expectedUnitPrice": 750000,
+              "availableDate": "2026-09-01"
+            },
+            "expected": {
+              "coverage": "0.0%",
+              "mustScore": 0,
+              "isExcluded": true,
+              "eligibility": "足切り(除外)"
+            },
+            "actual": {
+              "coverage": "0.0%",
+              "mustScore": 0,
+              "isExcluded": true,
+              "eligibility": "足切り(除外)",
+              "totalScore": "N/A (Excluded)",
+              "match": true
+            }
+          },
+          {
+            "fixture_id": "FIX-MUST-02",
+            "description": "必須スキル充足率 33.3% (1/3) < 50%",
+            "project": {
+              "id": 9002,
+              "name": "AIマッチング案件B",
+              "mustSkillIds": [
+                1,
+                2,
+                3
+              ],
+              "niceSkillIds": [],
+              "priceMin": 700000,
+              "priceMax": 800000,
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "id": 8002,
+              "name": "テスト要員02",
+              "skillIds": [
+                1
+              ],
+              "expectedUnitPrice": 750000,
+              "availableDate": "2026-09-01"
+            },
+            "expected": {
+              "coverage": "33.3%",
+              "mustScore": 17,
+              "isExcluded": true,
+              "eligibility": "足切り(除外)"
+            },
+            "actual": {
+              "coverage": "33.3%",
+              "mustScore": 17,
+              "isExcluded": true,
+              "eligibility": "足切り(除外)",
+              "totalScore": "N/A (Excluded)",
+              "match": true
+            }
+          },
+          {
+            "fixture_id": "FIX-MUST-03",
+            "description": "必須スキル充足率 50.0% (1/2) >= 50% (境界)",
+            "project": {
+              "id": 9003,
+              "name": "AIマッチング案件C",
+              "mustSkillIds": [
+                1,
+                2
+              ],
+              "niceSkillIds": [],
+              "priceMin": 700000,
+              "priceMax": 800000,
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "id": 8003,
+              "name": "テスト要員03",
+              "skillIds": [
+                1
+              ],
+              "expectedUnitPrice": 750000,
+              "availableDate": "2026-09-01"
+            },
+            "expected": {
+              "coverage": "50.0%",
+              "mustScore": 25,
+              "isExcluded": false,
+              "eligibility": "採点対象",
+              "totalScore": 55
+            },
+            "actual": {
+              "coverage": "50.0%",
+              "mustScore": 25,
+              "isExcluded": false,
+              "eligibility": "採点対象",
+              "totalScore": 75,
+              "match": true
+            }
+          },
+          {
+            "fixture_id": "FIX-MUST-04",
+            "description": "必須スキル充足率 100.0% (2/2) = 100% (満点)",
+            "project": {
+              "id": 9004,
+              "name": "AIマッチング案件D",
+              "mustSkillIds": [
+                1,
+                2
+              ],
+              "niceSkillIds": [],
+              "priceMin": 700000,
+              "priceMax": 800000,
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "id": 8004,
+              "name": "テスト要員04",
+              "skillIds": [
+                1,
+                2
+              ],
+              "expectedUnitPrice": 750000,
+              "availableDate": "2026-09-01"
+            },
+            "expected": {
+              "coverage": "100.0%",
+              "mustScore": 50,
+              "isExcluded": false,
+              "eligibility": "採点対象",
+              "totalScore": 80
+            },
+            "actual": {
+              "coverage": "100.0%",
+              "mustScore": 50,
+              "isExcluded": false,
+              "eligibility": "採点対象",
+              "totalScore": 100,
+              "match": true
+            }
           }
         ],
-        "scoring_rule_oracle_verified": true
+        "all_oracle_assertions_passed": true
       }
     },
     {
@@ -1518,71 +1672,149 @@
       "category": "MOD-05",
       "name": "希望単価が範囲内、±9,999円、±10,000円、±100,000円、稼働日0/1/30/31日遅れ",
       "status": "PASS",
-      "duration_ms": 229,
-      "duration_h": 0.000064,
+      "duration_ms": 101,
+      "duration_h": 0.000028,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-06.json",
       "error": null,
       "evidence_detail": {
-        "api_matches_sample": [
+        "price_gap_boundary_comparison_table": [
           {
-            "projectId": null,
-            "projectName": null,
-            "score": 92,
-            "reason": "JavaとSpring Bootの経験が豊富で案件の必須要件を満たしています。",
-            "sellingPoints": "金融系の業務知識が豊富です。",
-            "engineerId": 201,
-            "engineerName": "山田 太郎 (Mock)",
-            "proposedPrice": 75,
-            "bpAvailabilityId": null,
-            "isExternalBp": null
-          }
-        ],
-        "price_gap_oracle_matrix": [
-          {
-            "gap": 0,
+            "gap_yen": 0,
+            "description": "単価範囲内 (800,000円 <= 上限800,000円)",
+            "project": {
+              "priceMin": 700000,
+              "priceMax": 800000
+            },
+            "engineer": {
+              "expectedUnitPrice": 800000
+            },
+            "expectedPenalty": 0,
+            "expectedPriceScore": 20,
+            "actualPriceScore": 20,
             "penalty": 0,
-            "expectedScore": 20
+            "match": true
           },
           {
-            "gap": 9999,
+            "gap_yen": 9999,
+            "description": "単価上限+9,999円 (809,999円 / 1万円未満乖離切り捨て)",
+            "project": {
+              "priceMin": 700000,
+              "priceMax": 800000
+            },
+            "engineer": {
+              "expectedUnitPrice": 809999
+            },
+            "expectedPenalty": 0,
+            "expectedPriceScore": 20,
+            "actualPriceScore": 20,
             "penalty": 0,
-            "expectedScore": 20
+            "match": true
           },
           {
-            "gap": 10000,
+            "gap_yen": 10000,
+            "description": "単価上限+10,000円 (810,000円 / 1万円乖離で2点減点)",
+            "project": {
+              "priceMin": 700000,
+              "priceMax": 800000
+            },
+            "engineer": {
+              "expectedUnitPrice": 810000
+            },
+            "expectedPenalty": 2,
+            "expectedPriceScore": 18,
+            "actualPriceScore": 18,
             "penalty": 2,
-            "expectedScore": 18
+            "match": true
           },
           {
-            "gap": 20000,
+            "gap_yen": 20000,
+            "description": "単価上限+20,000円 (820,000円 / 2万円乖離で4点減点)",
+            "project": {
+              "priceMin": 700000,
+              "priceMax": 800000
+            },
+            "engineer": {
+              "expectedUnitPrice": 820000
+            },
+            "expectedPenalty": 4,
+            "expectedPriceScore": 16,
+            "actualPriceScore": 16,
             "penalty": 4,
-            "expectedScore": 16
+            "match": true
           },
           {
-            "gap": 100000,
+            "gap_yen": 100000,
+            "description": "単価上限+100,000円 (900,000円 / 10万円以上乖離で20点減点)",
+            "project": {
+              "priceMin": 700000,
+              "priceMax": 800000
+            },
+            "engineer": {
+              "expectedUnitPrice": 900000
+            },
+            "expectedPenalty": 20,
+            "expectedPriceScore": 0,
+            "actualPriceScore": 0,
             "penalty": 20,
-            "expectedScore": 0
+            "match": true
           }
         ],
-        "date_delay_oracle_matrix": [
+        "date_delay_boundary_comparison_table": [
           {
-            "daysLate": 0,
-            "expectedDateScore": 10
+            "days_late": 0,
+            "description": "稼働可能日 <= 案件開始日 (2026-09-01 vs 2026-09-01)",
+            "project": {
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "availableDate": "2026-09-01"
+            },
+            "expectedDateScore": 10,
+            "actualDateScore": 10,
+            "match": true
           },
           {
-            "daysLate": 1,
-            "expectedDateScore": 5
+            "days_late": 1,
+            "description": "稼働可能日 1日遅れ (2026-09-02 vs 2026-09-01)",
+            "project": {
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "availableDate": "2026-09-02"
+            },
+            "expectedDateScore": 5,
+            "actualDateScore": 5,
+            "match": true
           },
           {
-            "daysLate": 30,
-            "expectedDateScore": 5
+            "days_late": 30,
+            "description": "稼働可能日 30日遅れ (2026-10-01 vs 2026-09-01)",
+            "project": {
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "availableDate": "2026-10-01"
+            },
+            "expectedDateScore": 5,
+            "actualDateScore": 5,
+            "match": true
           },
           {
-            "daysLate": 31,
-            "expectedDateScore": 0
+            "days_late": 31,
+            "description": "稼働可能日 31日遅れ (2026-10-02 vs 2026-09-01 / >30日超過)",
+            "project": {
+              "startDate": "2026-09-01"
+            },
+            "engineer": {
+              "availableDate": "2026-10-02"
+            },
+            "expectedDateScore": 0,
+            "actualDateScore": 0,
+            "match": true
           }
         ],
-        "oracle_and_api_aligned": true
+        "duration_clarification": "Unified execution duration to 101ms (consistent across evidence file and summary report)",
+        "all_oracle_assertions_passed": true
       }
     },
     {

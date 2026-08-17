@@ -1,0 +1,18 @@
+{
+  "case_id": "MOD08-19",
+  "dimension": "C,P,U",
+  "category": "MOD-08",
+  "name": "有効な要員254件（無効member200を除外）を段階並列で日次保存/提出し、管理grid・差異・警告を操作",
+  "status": "PASS",
+  "duration_ms": 1679,
+  "duration_h": 0.000466,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-19.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "total_active_members": 254,
+    "latency_ms": 661,
+    "deadlocks_detected": 0,
+    "n_plus_one_suppressed": true
+  }
+}

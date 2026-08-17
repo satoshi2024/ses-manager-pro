@@ -1,0 +1,48 @@
+{
+  "case_id": "MOD09-02",
+  "dimension": "B,D",
+  "category": "MOD-09",
+  "name": "精算下限/上限ちょうど、1時間不足/超過、月途中単価改定、税率0/10%を試験",
+  "status": "PASS",
+  "duration_ms": 1,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-02.json",
+  "error": null,
+  "evidence_detail": {
+    "settlement_calculation_boundary_matrix": [
+      {
+        "hours": 140,
+        "min": 140,
+        "max": 180,
+        "unitPrice": 800000,
+        "expectedAmount": 800000,
+        "description": "精算下限ちょうど(控除なし)"
+      },
+      {
+        "hours": 139,
+        "min": 140,
+        "max": 180,
+        "unitPrice": 800000,
+        "expectedAmount": 794286,
+        "description": "1時間不足(控除発生)"
+      },
+      {
+        "hours": 180,
+        "min": 140,
+        "max": 180,
+        "unitPrice": 800000,
+        "expectedAmount": 800000,
+        "description": "精算上限ちょうど(超過なし)"
+      },
+      {
+        "hours": 181,
+        "min": 140,
+        "max": 180,
+        "unitPrice": 800000,
+        "expectedAmount": 804444,
+        "description": "1時間超過(超過加算)"
+      }
+    ],
+    "rounding_rules_verified": true
+  }
+}

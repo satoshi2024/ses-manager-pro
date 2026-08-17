@@ -1,0 +1,40 @@
+{
+  "case_id": "MOD08-11",
+  "dimension": "B,D",
+  "category": "MOD-08",
+  "name": "特別条項ありで年間719:59/720:00/720:01、45時間超の月が6回/7回を計算し休日労働も組み込む",
+  "status": "PASS",
+  "duration_ms": 0,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-11.json",
+  "error": null,
+  "evidence_detail": {
+    "special_clause_matrix": [
+      {
+        "annualMinutes": 43199,
+        "formatted": "719:59",
+        "monthsOver45": 6,
+        "violation": false
+      },
+      {
+        "annualMinutes": 43200,
+        "formatted": "720:00",
+        "monthsOver45": 6,
+        "violation": false
+      },
+      {
+        "annualMinutes": 43201,
+        "formatted": "720:01",
+        "monthsOver45": 6,
+        "violation": true
+      },
+      {
+        "annualMinutes": 40000,
+        "formatted": "666:40",
+        "monthsOver45": 7,
+        "violation": true
+      }
+    ],
+    "max_720h_and_6months_enforced": true
+  }
+}

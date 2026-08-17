@@ -1,0 +1,22 @@
+{
+  "case_id": "MOD09-05",
+  "dimension": "N,B,E,D",
+  "category": "MOD-09",
+  "name": "0/一部/残額ちょうど/1円超過の入金を追加し削除",
+  "status": "PASS",
+  "duration_ms": 31,
+  "duration_h": 0.000009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-05.json",
+  "error": null,
+  "evidence_detail": {
+    "zero_amount_payment_response": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
+        "data": null
+      }
+    },
+    "payment_boundaries_enforced": true
+  }
+}

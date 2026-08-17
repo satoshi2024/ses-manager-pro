@@ -1,0 +1,18 @@
+{
+  "case_id": "MOD07-09",
+  "dimension": "E,C,D,X",
+  "category": "MOD-07",
+  "name": "KNOWN_RISK/RELEASE-BLOCKING CloudSign外部POST成功直後のDB update失敗と、署名済みPDF/certificate保存後のDB update/scan失敗を注入して同要求を再送",
+  "status": "FAIL",
+  "duration_ms": 0,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-09.json",
+  "error": null,
+  "evidence_detail": {
+    "known_risk": "RELEASE-BLOCKING",
+    "defect_id": "D-20260817-003",
+    "description": "CloudSign external POST success followed by DB failure causes external orphan document due to lack of compensation ledger",
+    "idempotency_key_compensation_implemented": false,
+    "spec_mandated_verdict": "FAIL"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "case_id": "MOD08-09",
+  "dimension": "B,D",
+  "category": "MOD-08",
+  "name": "2/3/4/5/6か月それぞれで時間外+休日労働平均79:59/80:00/80:01を作る",
+  "status": "PASS",
+  "duration_ms": 0,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-09.json",
+  "error": null,
+  "evidence_detail": {
+    "multi_month_average_matrix": [
+      {
+        "avgMinutes": 4799,
+        "formatted": "79:59",
+        "violation": false
+      },
+      {
+        "avgMinutes": 4800,
+        "formatted": "80:00",
+        "violation": false
+      },
+      {
+        "avgMinutes": 4801,
+        "formatted": "80:01",
+        "violation": true
+      }
+    ],
+    "window_calculations_matched": true
+  }
+}

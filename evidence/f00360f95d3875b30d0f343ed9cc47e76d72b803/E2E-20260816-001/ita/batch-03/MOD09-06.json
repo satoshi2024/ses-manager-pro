@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD09-06",
+  "dimension": "N,D",
+  "category": "MOD-09",
+  "name": "銀行入金fetch→候補score→手動apply",
+  "status": "PASS",
+  "duration_ms": 41,
+  "duration_h": 0.000011,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-06.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "pending_deposits_count": 0,
+    "candidate_matching_ready": true
+  }
+}

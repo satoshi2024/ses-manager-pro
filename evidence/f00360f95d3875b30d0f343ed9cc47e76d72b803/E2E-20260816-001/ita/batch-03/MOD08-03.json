@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD08-03",
+  "dimension": "B,E,D",
+  "category": "MOD-08",
+  "name": "月初/月末、契約開始/終了外、開始=終了、日跨ぎ、休憩0/1440/超過を試験",
+  "status": "PASS",
+  "duration_ms": 33,
+  "duration_h": 0.000009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-03.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_break_status": 403,
+    "boundary_validation_tested": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD07-19",
+  "dimension": "N,B,A,D",
+  "category": "MOD-07",
+  "name": "契約の options/check-active/renewal-calendar を取得し、generate-renewals（管理者）を二重実行、export CSV を scope 内/外で実行",
+  "status": "PASS",
+  "duration_ms": 96,
+  "duration_h": 0.000027,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-19.json",
+  "error": null,
+  "evidence_detail": {
+    "options_status": 200,
+    "check_active_status": 200,
+    "renewal_calendar_status": 200,
+    "calendar_events_count": 0
+  }
+}

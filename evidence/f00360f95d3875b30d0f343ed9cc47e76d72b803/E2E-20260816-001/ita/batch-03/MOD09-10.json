@@ -1,0 +1,18 @@
+{
+  "case_id": "MOD09-10",
+  "dimension": "P,U",
+  "category": "MOD-09",
+  "name": "300人データで月次invoice page、aging、PDF、消込候補を計測",
+  "status": "PASS",
+  "duration_ms": 84,
+  "duration_h": 0.000023,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-10.json",
+  "error": null,
+  "evidence_detail": {
+    "records_returned": 20,
+    "latency_p50_ms": 13,
+    "latency_p95_ms": 15,
+    "sql_query_count_per_request": 1,
+    "n_plus_one_suppressed": true
+  }
+}

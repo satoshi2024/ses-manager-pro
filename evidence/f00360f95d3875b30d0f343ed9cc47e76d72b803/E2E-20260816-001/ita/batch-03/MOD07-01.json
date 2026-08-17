@@ -1,0 +1,23 @@
+{
+  "case_id": "MOD07-01",
+  "dimension": "N,D,U",
+  "category": "MOD-07",
+  "name": "要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成",
+  "status": "FAIL",
+  "duration_ms": 1180,
+  "duration_h": 0.000328,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-01.json",
+  "error": null,
+  "evidence_detail": {
+    "http_create": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
+        "data": null
+      }
+    },
+    "gross_profit_yen": 200000,
+    "fields_matched": false
+  }
+}

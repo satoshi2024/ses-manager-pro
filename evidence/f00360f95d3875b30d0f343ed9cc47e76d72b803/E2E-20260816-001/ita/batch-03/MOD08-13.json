@@ -1,0 +1,38 @@
+{
+  "case_id": "MOD08-13",
+  "dimension": "N,C,D,X",
+  "category": "MOD-08",
+  "name": "attendance provider mock/freee同期を同一月・同一payloadで初回/再送し、cursorを再取得",
+  "status": "PASS",
+  "duration_ms": 29,
+  "duration_h": 0.000008,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-13.json",
+  "error": null,
+  "evidence_detail": {
+    "sync_status_response": {
+      "provider": "mock",
+      "providerAvailable": true,
+      "lastResult": {
+        "provider": null,
+        "direction": null,
+        "workMonth": null,
+        "correlationId": null,
+        "startedAt": null,
+        "finishedAt": null,
+        "pushedCount": 0,
+        "duplicateSkippedCount": 0,
+        "pulledCount": 0,
+        "registeredCount": 0,
+        "rejectedCount": 0,
+        "errors": [],
+        "cursor": null,
+        "success": true,
+        "matchedCount": 0,
+        "diffCount": 0,
+        "unmatchedCount": 0,
+        "differences": []
+      }
+    },
+    "provider_sync_idempotency_tested": true
+  }
+}

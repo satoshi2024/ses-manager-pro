@@ -38,6 +38,14 @@ class FlywaySelfServiceSchemaSmokeTest {
             .withUsername("root")
             .withPassword("ses");
 
+    /** 4fa3a689版V105_1（phone/template_snapshot_version未追加）環境からの移行検証用container */
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> HISTORICAL_V105_1_MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_selfservice_historical_v105_1")
+            .withUsername("root")
+            .withPassword("ses");
+
     @Test
     void V105のselfservice_shapeがfreshとlegacyで一致し制約がMySQLで成立する() throws Exception {
         Flyway.configure()
@@ -289,23 +297,82 @@ class FlywaySelfServiceSchemaSmokeTest {
 
     @Test
     void 旧4fa3a689版V105_1適用済みDBからV105_2へ順方向適用できる() throws Exception {
-        // V105.1適用済み（target 105.1）のDB状態を再現（4fa3a689 blob相当）
+        // 1. 隔離された専用containerでV104_4まで適用
         Flyway.configure()
-                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("104_4")
+                .load()
+                .migrate();
+
+        // 2. V1統合baselineのselfservice追加分を除去して「V104.4 legacy shape」を再現
+        try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DROP TABLE IF EXISTS t_expense_accounting_job");
+            statement.executeUpdate("DROP TABLE IF EXISTS t_expense_request");
+            statement.executeUpdate("DROP TABLE IF EXISTS t_one_on_one_request");
+            statement.executeUpdate("DROP TABLE IF EXISTS t_survey_response");
+            statement.executeUpdate("DROP TABLE IF EXISTS t_survey_campaign");
+            statement.executeUpdate("DROP TABLE IF EXISTS m_survey_template");
+            statement.executeUpdate("DROP TABLE IF EXISTS t_engineer_change_request");
+            if (queryInt(statement, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='t_engineer' AND column_name='phone'") > 0) {
+                statement.executeUpdate("ALTER TABLE t_engineer DROP COLUMN phone");
+            }
+            if (queryInt(statement, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='t_document_link' AND column_name='skill_sheet_confirmed_at'") > 0) {
+                statement.executeUpdate("ALTER TABLE t_document_link DROP COLUMN skill_sheet_confirmed_at");
+                statement.executeUpdate("ALTER TABLE t_document_link DROP COLUMN skill_sheet_confirmed_version");
+            }
+            statement.executeUpdate("DELETE FROM t_role_menu WHERE menu_id IN "
+                    + "(SELECT id FROM m_menu WHERE menu_key IN "
+                    + "('myDashboard','myProfile','myPayroll','myExpenses','myOneOnOnes','mySurveys',"
+                    + "'engineerChangeRequests','expenseManagement','oneOnOneManagement','surveyManagement'))");
+            statement.executeUpdate("DELETE FROM m_menu WHERE menu_key IN "
+                    + "('myDashboard','myProfile','myPayroll','myExpenses','myOneOnOnes','mySurveys',"
+                    + "'engineerChangeRequests','expenseManagement','oneOnOneManagement','surveyManagement')");
+        }
+
+        // 3. 4fa3a689版V105.1まで順方向適用（V105 + V105.1）
+        Flyway.configure()
+                .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .target("105.1")
                 .load()
                 .migrate();
 
-        // V105.1適用時点からV105_2へ順方向migrate
+        // 4. V105.1適用時点の状態を明示assert:
+        //    - flyway_schema_history の最新versionが '105.1'
+        //    - t_engineer.phone が存在しない
+        //    - t_survey_campaign.template_snapshot_version が存在しない
+        try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            String latestVersion = queryString(statement,
+                    "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1");
+            assertEquals("105.1", latestVersion, "V105.1適用時点の最新マイグレーションバージョンは105.1であること");
+
+            assertEquals(0, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='t_engineer' AND column_name='phone'"),
+                    "V105.1時点ではt_engineer.phone列が存在しないこと");
+
+            assertEquals(0, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='t_survey_campaign' AND column_name='template_snapshot_version'"),
+                    "V105.1時点ではt_survey_campaign.template_snapshot_version列が存在しないこと");
+        }
+
+        // 5. ここから V105.2 へ順方向適用
         Flyway.configure()
-                .dataSource(LEGACY_MYSQL.getJdbcUrl(), LEGACY_MYSQL.getUsername(), LEGACY_MYSQL.getPassword())
+                .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .target("105.2")
                 .load()
                 .migrate();
 
-        try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+        // 6. V105.2適用後の状態を明示assert:
+        //    - flyway_schema_history の最新versionが '105.2'
+        //    - t_engineer.phone が存在する
+        //    - t_survey_campaign.template_snapshot_version が存在する
+        try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            String latestVersion = queryString(statement,
+                    "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1");
+            assertEquals("105.2", latestVersion, "V105.2適用後の最新マイグレーションバージョンは105.2であること");
+
             assertColumnExists(statement, "t_engineer", "phone");
             assertColumnExists(statement, "t_survey_campaign", "template_snapshot_version");
         }
@@ -374,6 +441,13 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (ResultSet resultSet = statement.executeQuery(sql)) {
             assertTrue(resultSet.next());
             return resultSet.getLong(1);
+        }
+    }
+
+    private String queryString(Statement statement, String sql) throws Exception {
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            assertTrue(resultSet.next());
+            return resultSet.getString(1);
         }
     }
 }

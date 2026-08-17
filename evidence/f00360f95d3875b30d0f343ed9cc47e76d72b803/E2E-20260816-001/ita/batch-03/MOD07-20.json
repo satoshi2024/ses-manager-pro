@@ -1,0 +1,68 @@
+{
+  "case_id": "MOD07-20",
+  "dimension": "N,E,D",
+  "category": "MOD-07",
+  "name": "実装済み compliance 系の profile detail/save と compliance-findings の ack/in-progress/resolve/exception 遷移を実行（非 G2 範囲）",
+  "status": "PASS",
+  "duration_ms": 54,
+  "duration_h": 0.000015,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-20.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "findings_count": 31,
+    "sample_findings": [
+      {
+        "contractId": 7003,
+        "contractNo": "CT-2025-0003",
+        "engineerName": "池田 翔太",
+        "projectName": "データ分析基盤構築",
+        "contractType": "請負",
+        "findings": [
+          {
+            "code": "SETTLEMENT_MISMATCH",
+            "severity": "warning",
+            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+            "contractId": 7003,
+            "conditionFingerprint": "settlement-mismatch",
+            "dueDate": null
+          }
+        ]
+      },
+      {
+        "contractId": 7016,
+        "contractNo": "CT-2025-0016",
+        "engineerName": "竹内 真由",
+        "projectName": "社内RAGシステム構築",
+        "contractType": "請負",
+        "findings": [
+          {
+            "code": "SETTLEMENT_MISMATCH",
+            "severity": "warning",
+            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+            "contractId": 7016,
+            "conditionFingerprint": "settlement-mismatch",
+            "dueDate": null
+          }
+        ]
+      },
+      {
+        "contractId": 7019,
+        "contractNo": "CT-2025-0019",
+        "engineerName": "川口 香織",
+        "projectName": "学習管理システム開発（Phase1）",
+        "contractType": "請負",
+        "findings": [
+          {
+            "code": "SETTLEMENT_MISMATCH",
+            "severity": "warning",
+            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+            "contractId": 7019,
+            "conditionFingerprint": "settlement-mismatch",
+            "dueDate": null
+          }
+        ]
+      }
+    ]
+  }
+}

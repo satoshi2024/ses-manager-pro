@@ -1,0 +1,37 @@
+{
+  "case_id": "MOD09-01",
+  "dimension": "N,D,U",
+  "category": "MOD-09",
+  "name": "確定工数を持つ1顧客×1月で請求生成",
+  "status": "PASS",
+  "duration_ms": 49,
+  "duration_h": 0.000014,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-01.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "invoices_count": 10,
+    "sample_invoice": {
+      "id": 10066,
+      "invoiceNo": "INV-2026-07-0066",
+      "customerId": 2029,
+      "billingMonth": "2026-07",
+      "subtotal": 809000,
+      "tax": 80900,
+      "total": 889900,
+      "taxRate": 0.1,
+      "costCenterId": 4001,
+      "status": "送付済",
+      "issuedDate": "2026-07-28",
+      "paidDate": null,
+      "dueDate": "2026-08-30",
+      "remarks": null,
+      "createdBy": 1,
+      "createdAt": "2026-08-16T15:35:14",
+      "updatedAt": "2026-08-16T15:35:14",
+      "version": 0,
+      "deletedFlag": 0
+    },
+    "tax_calculation_matched": true
+  }
+}

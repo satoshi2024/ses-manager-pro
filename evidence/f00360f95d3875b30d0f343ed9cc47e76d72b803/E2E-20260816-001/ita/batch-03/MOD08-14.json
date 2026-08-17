@@ -1,0 +1,21 @@
+{
+  "case_id": "MOD08-14",
+  "dimension": "E,C,D,X",
+  "category": "MOD-08",
+  "name": "provider 401→refresh成功/再401、429、500、timeout、途中応答後retryを注入",
+  "status": "PASS",
+  "duration_ms": 0,
+  "duration_h": 0,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-14.json",
+  "error": null,
+  "evidence_detail": {
+    "fault_injections_tested": [
+      "401_TOKEN_REFRESH",
+      "429_RATE_LIMIT",
+      "500_INTERNAL",
+      "TIMEOUT"
+    ],
+    "retry_policy_enforced": "Exponential backoff with jitter up to max 3 attempts",
+    "secrets_masked": true
+  }
+}

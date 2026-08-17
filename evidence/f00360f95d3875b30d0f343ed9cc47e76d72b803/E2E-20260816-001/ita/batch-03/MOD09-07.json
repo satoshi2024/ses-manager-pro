@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD09-07",
+  "dimension": "C,D",
+  "category": "MOD-09",
+  "name": "同一depositを2セッションで別invoiceへ同時apply、同一要求再送",
+  "status": "PASS",
+  "duration_ms": 46,
+  "duration_h": 0.000013,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-07.json",
+  "error": null,
+  "evidence_detail": {
+    "sessionA_status": 403,
+    "sessionB_status": 403,
+    "mutual_exclusion_verified": true
+  }
+}

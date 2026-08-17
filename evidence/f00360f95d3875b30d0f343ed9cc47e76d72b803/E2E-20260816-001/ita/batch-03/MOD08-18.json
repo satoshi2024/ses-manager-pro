@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD08-18",
+  "dimension": "A,D",
+  "category": "MOD-08",
+  "name": "締め/reopen申請と最終承認を管理者・マネージャー、営業・HR・要員で直送",
+  "status": "PASS",
+  "duration_ms": 76,
+  "duration_h": 0.000021,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-18.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_summary_status": 200,
+    "sales_unauthorized_confirm_status": 403,
+    "role_authorization_matrix_enforced": true
+  }
+}

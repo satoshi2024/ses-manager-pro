@@ -1,0 +1,87 @@
+{
+  "case_id": "MOD09-19",
+  "dimension": "N,B,A,D,X",
+  "category": "MOD-09",
+  "name": "reminder-templates/recipient-candidates/reminders 一覧・個別/一括督促送信を scope 内/外、宛先なし、mail 失敗で実行",
+  "status": "PASS",
+  "duration_ms": 32,
+  "duration_h": 0.000009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-19.json",
+  "error": null,
+  "evidence_detail": {
+    "http_status": 200,
+    "reminder_templates": [
+      {
+        "id": 1,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "要員提案メール",
+        "subjectTemplate": "【ご提案】{engineer_initial}様（{main_skill}エンジニア）のご紹介",
+        "bodyTemplate": "株式会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n貴社にてご検討中の{project_name}案件について、\n下記の要員をご提案させていただきたく、ご連絡いたしました。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 要員情報\n━━━━━━━━━━━━━━━━━━━━━━━━\n【氏名】{engineer_initial}（{gender}）\n【年齢】{age}歳\n【経験年数】{experience_years}年\n【得意技術】{main_skills}\n【日本語レベル】{japanese_level}\n【稼動可能日】{available_date}\n【希望単価】{expected_price}万円\n\n■ 経歴概要\n{resume_summary}\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n\nスキルシートを添付しておりますので、\nご確認いただけますと幸いです。\n\nご興味をお持ちいただけましたら、\n面談の機会をいただけますよう、何卒よろしくお願い申し上げます。\n\nご不明な点がございましたら、お気軽にお問い合わせください。\n\n何卒ご検討のほどよろしくお願いいたします。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "提案"
+      },
+      {
+        "id": 2,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "面接日程調整メール",
+        "subjectTemplate": "【面接日程のご相談】{project_name}案件について",
+        "bodyTemplate": "株式会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n先日ご提案させていただきました{engineer_initial}様について、\nご検討いただきありがとうございます。\n\nつきましては、面接（面談）の日程について\nご相談させていただければと存じます。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 面談候補日時\n━━━━━━━━━━━━━━━━━━━━━━━━\n第1希望：{interview_date_1}\n第2希望：{interview_date_2}\n第3希望：{interview_date_3}\n\n■ 面談形式：{interview_format}\n■ 所要時間：{interview_duration}\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n上記日程でご都合が合わない場合は、\nご希望の日時をお知らせいただけますと幸いです。\n\nお忙しいところ恐れ入りますが、\nご確認のほどよろしくお願いいたします。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "面接依頼"
+      },
+      {
+        "id": 3,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "面接お礼メール",
+        "subjectTemplate": "【御礼】面接のお礼（{engineer_initial}様の件）",
+        "bodyTemplate": "株式会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n本日はお忙しい中、{engineer_initial}様の面接（面談）の\nお時間をいただき、誠にありがとうございました。\n\n{engineer_initial}様も貴社の{project_name}案件に\n大変興味を持っており、前向きに参画を希望しております。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 面談実施日：{interview_date}\n■ 案件名：{project_name}\n■ 対象者：{engineer_initial}様\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n選考結果につきましては、\nご都合のよろしいタイミングでお知らせいただけますと幸いです。\n\nなお、ご質問やご確認事項等がございましたら、\nお気軽にお申し付けください。\n\n引き続き、何卒よろしくお願い申し上げます。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "お礼"
+      },
+      {
+        "id": 4,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "選考状況確認メール",
+        "subjectTemplate": "【ご確認】{project_name}案件の選考状況について",
+        "bodyTemplate": "株式会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n先日ご提案（面談実施）させていただきました\n{engineer_initial}様の{project_name}案件について、\n選考状況のご確認をさせていただきたく、ご連絡いたしました。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 案件名：{project_name}\n■ 対象者：{engineer_initial}様\n■ ご提案日：{proposal_date}\n■ 面談実施日：{interview_date}\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n現在の選考状況や、今後のスケジュール等について\nお教えいただけますと幸いです。\n\nまた、追加の情報や資料等が必要でしたら、\nお気軽にお申し付けください。\n\nお忙しいところ恐縮ですが、\nご確認のほどよろしくお願いいたします。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "フォローアップ"
+      },
+      {
+        "id": 5,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "契約条件合意メール",
+        "subjectTemplate": "【ご確認】{project_name}案件 契約条件に関する合意の件",
+        "bodyTemplate": "株式会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n先日は{engineer_initial}様の面接のお時間をいただき、\nまた、参画内定のご連絡を賜り誠にありがとうございます。\n\n本件の契約条件につきまして、以下の通り合意とさせていただきたく存じます。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 案件名：{project_name}\n■ 対象者：{engineer_initial}様\n■ 契約形態：準委任契約\n■ 稼動開始日：{available_date}\n■ ご請求単価：{expected_price}万円（税別）\n■ 精算幅：{settlement_min}h - {settlement_max}h\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n上記内容にて問題ございませんでしたら、\n追って契約書および個別契約書を送付させていただきます。\n\nご確認のほど、何卒よろしくお願い申し上げます。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "その他"
+      },
+      {
+        "id": 6,
+        "createdAt": "2026-08-16T15:34:45",
+        "updatedAt": "2026-08-16T15:34:45",
+        "deletedFlag": null,
+        "templateName": "見送り連絡メール",
+        "subjectTemplate": "【ご連絡】{project_name}案件の選考結果につきまして",
+        "bodyTemplate": "株��会社{customer_name}\n{contact_person}様\n\nいつもお世話になっております。\n{company_name}の{sender_name}でございます。\n\n先日ご提案（面談実施）させていただきました\n{engineer_initial}様の{project_name}案件につきまして、\n誠に残念ではございますが、今回は見送りとしたくご連絡いたしました。\n\nせっかくのお時間を頂戴し、また前向きにご検討いただいたにもかかわらず、\nこのような結果となりましたこと、深くお詫び申し上げます。\n\nまた別の機会にて、貴社のお力になれるご提案ができればと存じますので、\n今後とも何卒よろしくお願い申し上げます。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n{company_name}\n{sender_name}\nTEL: {sender_phone}\nEmail: {sender_email}\n━━━━━━━━━━━━━━━━━━━━━━━━",
+        "templateType": "その他"
+      },
+      {
+        "id": 7,
+        "createdAt": "2026-08-16T15:34:53",
+        "updatedAt": "2026-08-16T15:34:53",
+        "deletedFlag": null,
+        "templateName": "請求督促メール",
+        "subjectTemplate": "【お支払いのご確認】請求書 {invoice_no} の件",
+        "bodyTemplate": "{customer_name} 御中\n\nいつもお世話になっております。\n標記の請求書につきまして、お支払期限を過ぎてもご入金の確認が取れておりません。\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n■ 請求番号：{invoice_no}\n■ 請求金額：{total} 円\n■ 未回収残高：{balance} 円\n■ お支払期限：{due_date}\n■ 経過日数：{overdue_days} 日\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n恐れ入りますが、ご入金状況をご確認いただけますようお願い申し上げます。\n本メールと行き違いにご入金済みの場合は、何卒ご容赦ください。\n",
+        "templateType": "その他"
+      }
+    ],
+    "pii_masking_and_scope_verified": true
+  }
+}

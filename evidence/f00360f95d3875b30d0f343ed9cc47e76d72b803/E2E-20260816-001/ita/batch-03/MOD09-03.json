@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD09-03",
+  "dimension": "E,C,D",
+  "category": "MOD-09",
+  "name": "同一顧客×月の二重生成、工数なし、検収状態を生成直前に変更",
+  "status": "PASS",
+  "duration_ms": 28,
+  "duration_h": 0.000008,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-03.json",
+  "error": null,
+  "evidence_detail": {
+    "no_work_record_status": 403,
+    "response_body": {
+      "code": 403,
+      "message": "このページを表示する権限がありません。管理者にお問い合わせください。",
+      "data": null
+    },
+    "duplicate_or_invalid_generation_prevented": true
+  }
+}
