@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "提案/見積/注文行から契約ドラフトを生成し主担当営業あり/無効/なしを比較",
   "status": "FAIL",
-  "duration_ms": 1648,
-  "duration_h": 0.000458,
+  "duration_ms": 1571,
+  "duration_h": 0.000436,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-05.json",
   "error": null,
   "evidence_detail": {

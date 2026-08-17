@@ -4,8 +4,8 @@
   "category": "MOD-09",
   "name": "同一顧客×月の二重生成、工数なし、検収状態を生成直前に変更",
   "status": "PASS",
-  "duration_ms": 17,
-  "duration_h": 0.000005,
+  "duration_ms": 26,
+  "duration_h": 0.000007,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-03.json",
   "error": null,
   "evidence_detail": {

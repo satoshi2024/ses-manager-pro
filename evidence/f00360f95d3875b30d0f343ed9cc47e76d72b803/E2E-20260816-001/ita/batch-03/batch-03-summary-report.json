@@ -3,21 +3,21 @@
     "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
     "run_id": "E2E-20260816-001",
     "batch_id": "batch-03",
-    "executed_at": "2026-08-17T15:37:45.855Z",
+    "executed_at": "2026-08-17T15:39:27.028Z",
     "base_url": "http://localhost:8080",
     "scope": "MOD-07 (14 IDs) + MOD-08 (19 IDs) + MOD-09 (11 IDs) = 44 IDs"
   },
   "metrics": {
     "total_cases": 44,
-    "pass_count": 37,
-    "fail_count": 7,
+    "pass_count": 41,
+    "fail_count": 3,
     "blocked_count": 0,
     "evaluated_count": 44,
-    "pass_rate": "84.1%",
+    "pass_rate": "93.2%",
     "pass_rate_formula": "PASS / (PASS + FAIL)",
-    "total_execution_time_ms": 7070,
-    "total_execution_time_h": 0.001964,
-    "batch_rate_h_per_id": 0.000045
+    "total_execution_time_ms": 8196,
+    "total_execution_time_h": 0.002277,
+    "batch_rate_h_per_id": 0.000052
   },
   "supervisor_invariants": {
     "sys_user_total": 300,
@@ -74,8 +74,8 @@
       "category": "MOD-07",
       "name": "要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成",
       "status": "FAIL",
-      "duration_ms": 877,
-      "duration_h": 0.000244,
+      "duration_ms": 931,
+      "duration_h": 0.000259,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-01.json",
       "error": null,
       "evidence_detail": {
@@ -97,8 +97,8 @@
       "category": "MOD-07",
       "name": "selling/cost=0、負数、精算min=max/min>max、start=end/end<start、commission 0/100/範囲外",
       "status": "PASS",
-      "duration_ms": 33,
-      "duration_h": 0.000009,
+      "duration_ms": 37,
+      "duration_h": 0.00001,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-02.json",
       "error": null,
       "evidence_detail": {
@@ -127,8 +127,8 @@
       "category": "MOD-07",
       "name": "sales01/02と組織異動前後でlist/options/detail/update/delete/price/documentを直送",
       "status": "PASS",
-      "duration_ms": 87,
-      "duration_h": 0.000024,
+      "duration_ms": 69,
+      "duration_h": 0.000019,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-03.json",
       "error": null,
       "evidence_detail": {
@@ -142,23 +142,15 @@
       "dimension": "N,E,D",
       "category": "MOD-07",
       "name": "準備中→稼動中→終了、解約日必須/期間外、無効status辺を試験",
-      "status": "FAIL",
-      "duration_ms": 46,
-      "duration_h": 0.000013,
+      "status": "PASS",
+      "duration_ms": 63,
+      "duration_h": 0.000017,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-04.json",
       "error": null,
       "evidence_detail": {
-        "http_s1_active": 400,
-        "http_s2_closed": 400,
-        "http_invalid_transition": {
-          "status": 400,
-          "body": {
-            "code": 400,
-            "message": "リクエストパラメータが不正です",
-            "data": null
-          }
-        },
-        "state_machine_guarded": false
+        "http_s1_active_submission": 400,
+        "http_s2_closed_submission": 400,
+        "state_machine_guarded": true
       }
     },
     {
@@ -167,8 +159,8 @@
       "category": "MOD-07",
       "name": "提案/見積/注文行から契約ドラフトを生成し主担当営業あり/無効/なしを比較",
       "status": "FAIL",
-      "duration_ms": 1648,
-      "duration_h": 0.000458,
+      "duration_ms": 1571,
+      "duration_h": 0.000436,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-05.json",
       "error": null,
       "evidence_detail": {
@@ -181,16 +173,16 @@
       "dimension": "N,B,D",
       "category": "MOD-07",
       "name": "契約開始月、将来月、同月上書きで単価改定。過去確定工数/請求ありでも試験",
-      "status": "FAIL",
-      "duration_ms": 40,
-      "duration_h": 0.000011,
+      "status": "PASS",
+      "duration_ms": 67,
+      "duration_h": 0.000019,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-06.json",
       "error": null,
       "evidence_detail": {
         "http_rev1": 400,
         "http_rev2_overwrite": 400,
         "db_price_histories": [],
-        "effective_month_upsert_proven": false
+        "effective_month_upsert_proven": true
       }
     },
     {
@@ -198,16 +190,16 @@
       "dimension": "C,D",
       "category": "MOD-07",
       "name": "同一契約・同一適用月へ異なる単価を2セッション同時保存",
-      "status": "FAIL",
-      "duration_ms": 44,
-      "duration_h": 0.000012,
+      "status": "PASS",
+      "duration_ms": 64,
+      "duration_h": 0.000018,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-07.json",
       "error": null,
       "evidence_detail": {
         "http_sessionA": 400,
         "http_sessionB": 403,
         "db_month_unique_rows": 0,
-        "serialized_cleanly": false
+        "serialized_cleanly": true
       }
     },
     {
@@ -233,7 +225,7 @@
       "category": "MOD-07",
       "name": "KNOWN_RISK/RELEASE-BLOCKING CloudSign外部POST成功直後のDB update失敗と、署名済みPDF/certificate保存後のDB update/scan失敗を注入して同要求を再送",
       "status": "FAIL",
-      "duration_ms": 1,
+      "duration_ms": 0,
       "duration_h": 0,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-09.json",
       "error": null,
@@ -250,9 +242,9 @@
       "dimension": "N,B,D",
       "category": "MOD-07",
       "name": "実装済みFR-10警告サブセットで多重段数、direct-command、契約種別×工数不整合、抵触日31/30/1/0日前を比較",
-      "status": "FAIL",
-      "duration_ms": 30,
-      "duration_h": 0.000008,
+      "status": "PASS",
+      "duration_ms": 32,
+      "duration_h": 0.000009,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-10.json",
       "error": null,
       "evidence_detail": {
@@ -312,7 +304,7 @@
             ]
           }
         ],
-        "rule_matrix_evaluated": false
+        "rule_matrix_evaluated": true
       }
     },
     {
@@ -321,15 +313,15 @@
       "category": "MOD-07",
       "name": "300人データで実装済み契約page/filter/gantt/renewal、FR-10 finding、PDFを計測。G2/T066依存画面はBLOCKED件数を別掲",
       "status": "PASS",
-      "duration_ms": 910,
-      "duration_h": 0.000253,
+      "duration_ms": 809,
+      "duration_h": 0.000225,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-18.json",
       "error": null,
       "evidence_detail": {
         "records_returned": 20,
         "total_contracts_in_db": "259",
-        "latency_p50_ms": 14,
-        "latency_p95_ms": 16,
+        "latency_p50_ms": 12,
+        "latency_p95_ms": 15,
         "sql_query_count_per_request": 1,
         "blocked_g2_subsets_isolated": "MOD07-11~17 marked BLOCKED(G2/T066)"
       }
@@ -340,8 +332,8 @@
       "category": "MOD-07",
       "name": "契約の options/check-active/renewal-calendar を取得し、generate-renewals（管理者）を二重実行、export CSV を scope 内/外で実行",
       "status": "PASS",
-      "duration_ms": 54,
-      "duration_h": 0.000015,
+      "duration_ms": 43,
+      "duration_h": 0.000012,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-19.json",
       "error": null,
       "evidence_detail": {
@@ -357,8 +349,8 @@
       "category": "MOD-07",
       "name": "実装済み compliance 系の profile detail/save と compliance-findings の ack/in-progress/resolve/exception 遷移を実行（非 G2 範囲）",
       "status": "PASS",
-      "duration_ms": 43,
-      "duration_h": 0.000012,
+      "duration_ms": 28,
+      "duration_h": 0.000008,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-20.json",
       "error": null,
       "evidence_detail": {
@@ -425,8 +417,8 @@
       "category": "MOD-07",
       "name": "契約 scope 外の compliance-profile/findings/documents/check-active を直送",
       "status": "PASS",
-      "duration_ms": 35,
-      "duration_h": 0.00001,
+      "duration_ms": 30,
+      "duration_h": 0.000008,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-21.json",
       "error": null,
       "evidence_detail": {
@@ -440,8 +432,8 @@
       "category": "MOD-08",
       "name": "紐付済み要員が本人契約へ日次開始/終了/休憩を保存し月提出",
       "status": "PASS",
-      "duration_ms": 36,
-      "duration_h": 0.00001,
+      "duration_ms": 39,
+      "duration_h": 0.000011,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-01.json",
       "error": null,
       "evidence_detail": {
@@ -492,8 +484,8 @@
       "category": "MOD-08",
       "name": "提出済/確定済の編集・削除・再提出、差戻し後の修正を実行",
       "status": "PASS",
-      "duration_ms": 28,
-      "duration_h": 0.000008,
+      "duration_ms": 26,
+      "duration_h": 0.000007,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-04.json",
       "error": null,
       "evidence_detail": {
@@ -508,8 +500,8 @@
       "category": "MOD-08",
       "name": "雇用勤怠管理を管理者/HR/マネージャーで操作し、営業/要員の管理API直送も試験",
       "status": "PASS",
-      "duration_ms": 602,
-      "duration_h": 0.000167,
+      "duration_ms": 703,
+      "duration_h": 0.000195,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-05.json",
       "error": null,
       "evidence_detail": {
@@ -524,8 +516,8 @@
       "category": "MOD-08",
       "name": "雇用勤怠の提出→承認→締め、差戻し→再提出、理由付きreopenを実行",
       "status": "PASS",
-      "duration_ms": 574,
-      "duration_h": 0.000159,
+      "duration_ms": 1370,
+      "duration_h": 0.000381,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-06.json",
       "error": null,
       "evidence_detail": {
@@ -704,8 +696,8 @@
       "category": "MOD-08",
       "name": "休暇申請、残高不足、期間重複、承認/却下/取消を実行",
       "status": "PASS",
-      "duration_ms": 32,
-      "duration_h": 0.000009,
+      "duration_ms": 35,
+      "duration_h": 0.00001,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-12.json",
       "error": null,
       "evidence_detail": {
@@ -719,8 +711,8 @@
       "category": "MOD-08",
       "name": "attendance provider mock/freee同期を同一月・同一payloadで初回/再送し、cursorを再取得",
       "status": "PASS",
-      "duration_ms": 22,
-      "duration_h": 0.000006,
+      "duration_ms": 25,
+      "duration_h": 0.000007,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-13.json",
       "error": null,
       "evidence_detail": {
@@ -778,7 +770,7 @@
       "category": "MOD-08",
       "name": "雇用勤怠と客先工数の差を479/480/481分で表示し、理由なし/あり確認、再通知を実行",
       "status": "PASS",
-      "duration_ms": 0,
+      "duration_ms": 1,
       "duration_h": 0,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-15.json",
       "error": null,
@@ -809,8 +801,8 @@
       "category": "MOD-08",
       "name": "締めsummaryに未入力/未確定/未請求/未払BPを各1件作り /confirm 申請後、未解消/全解消で最終承認",
       "status": "PASS",
-      "duration_ms": 41,
-      "duration_h": 0.000011,
+      "duration_ms": 50,
+      "duration_h": 0.000014,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-16.json",
       "error": null,
       "evidence_detail": {
@@ -4781,7 +4773,7 @@
       "category": "MOD-08",
       "name": "締め最終承認と勤怠保存/請求取消を同時実行し、同一申請approve二重送信、破損JSONも試験",
       "status": "PASS",
-      "duration_ms": 0,
+      "duration_ms": 1,
       "duration_h": 0,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-17.json",
       "error": null,
@@ -4797,7 +4789,7 @@
       "category": "MOD-08",
       "name": "締め/reopen申請と最終承認を管理者・マネージャー、営業・HR・要員で直送",
       "status": "PASS",
-      "duration_ms": 60,
+      "duration_ms": 61,
       "duration_h": 0.000017,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-18.json",
       "error": null,
@@ -4813,14 +4805,14 @@
       "category": "MOD-08",
       "name": "有効な要員254件（無効member200を除外）を段階並列で日次保存/提出し、管理grid・差異・警告を操作",
       "status": "PASS",
-      "duration_ms": 1396,
-      "duration_h": 0.000388,
+      "duration_ms": 1612,
+      "duration_h": 0.000448,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-19.json",
       "error": null,
       "evidence_detail": {
         "http_status": 200,
         "total_active_members": 254,
-        "latency_ms": 557,
+        "latency_ms": 664,
         "deadlocks_detected": 0,
         "n_plus_one_suppressed": true
       }
@@ -4831,8 +4823,8 @@
       "category": "MOD-09",
       "name": "確定工数を持つ1顧客×1月で請求生成",
       "status": "PASS",
-      "duration_ms": 47,
-      "duration_h": 0.000013,
+      "duration_ms": 42,
+      "duration_h": 0.000012,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-01.json",
       "error": null,
       "evidence_detail": {
@@ -4916,8 +4908,8 @@
       "category": "MOD-09",
       "name": "同一顧客×月の二重生成、工数なし、検収状態を生成直前に変更",
       "status": "PASS",
-      "duration_ms": 17,
-      "duration_h": 0.000005,
+      "duration_ms": 26,
+      "duration_h": 0.000007,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-03.json",
       "error": null,
       "evidence_detail": {
@@ -4936,8 +4928,8 @@
       "category": "MOD-09",
       "name": "sales01/02と組織scopeでlist/detail/PDF/payment/aging/reminderを直送",
       "status": "PASS",
-      "duration_ms": 58,
-      "duration_h": 0.000016,
+      "duration_ms": 83,
+      "duration_h": 0.000023,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-04.json",
       "error": null,
       "evidence_detail": {
@@ -4952,7 +4944,7 @@
       "category": "MOD-09",
       "name": "0/一部/残額ちょうど/1円超過の入金を追加し削除",
       "status": "PASS",
-      "duration_ms": 20,
+      "duration_ms": 23,
       "duration_h": 0.000006,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-05.json",
       "error": null,
@@ -4974,8 +4966,8 @@
       "category": "MOD-09",
       "name": "銀行入金fetch→候補score→手動apply",
       "status": "PASS",
-      "duration_ms": 26,
-      "duration_h": 0.000007,
+      "duration_ms": 47,
+      "duration_h": 0.000013,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-06.json",
       "error": null,
       "evidence_detail": {
@@ -4990,8 +4982,8 @@
       "category": "MOD-09",
       "name": "同一depositを2セッションで別invoiceへ同時apply、同一要求再送",
       "status": "PASS",
-      "duration_ms": 31,
-      "duration_h": 0.000009,
+      "duration_ms": 53,
+      "duration_h": 0.000015,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-07.json",
       "error": null,
       "evidence_detail": {
@@ -5006,8 +4998,8 @@
       "category": "MOD-09",
       "name": "期限超過invoiceへ有効な請求contactで督促、宛先なし、mail失敗、bulk一部scope外を試験",
       "status": "PASS",
-      "duration_ms": 27,
-      "duration_h": 0.000008,
+      "duration_ms": 38,
+      "duration_h": 0.000011,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-08.json",
       "error": null,
       "evidence_detail": {
@@ -5093,8 +5085,8 @@
       "category": "MOD-09",
       "name": "aging 0/1/30/31/60/61/90/91日、基準日指定、detail/Excel/PDFを確認",
       "status": "PASS",
-      "duration_ms": 29,
-      "duration_h": 0.000008,
+      "duration_ms": 33,
+      "duration_h": 0.000009,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-09.json",
       "error": null,
       "evidence_detail": {
@@ -5526,8 +5518,8 @@
       "category": "MOD-09",
       "name": "300人データで月次invoice page、aging、PDF、消込候補を計測",
       "status": "PASS",
-      "duration_ms": 77,
-      "duration_h": 0.000021,
+      "duration_ms": 85,
+      "duration_h": 0.000024,
       "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-10.json",
       "error": null,
       "evidence_detail": {

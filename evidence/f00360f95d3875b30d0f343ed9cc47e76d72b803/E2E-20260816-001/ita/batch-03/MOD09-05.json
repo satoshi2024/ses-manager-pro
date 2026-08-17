@@ -4,7 +4,7 @@
   "category": "MOD-09",
   "name": "0/一部/残額ちょうど/1円超過の入金を追加し削除",
   "status": "PASS",
-  "duration_ms": 20,
+  "duration_ms": 23,
   "duration_h": 0.000006,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-05.json",
   "error": null,

@@ -4,7 +4,7 @@
   "category": "MOD-08",
   "name": "雇用勤怠と客先工数の差を479/480/481分で表示し、理由なし/あり確認、再通知を実行",
   "status": "PASS",
-  "duration_ms": 0,
+  "duration_ms": 1,
   "duration_h": 0,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-15.json",
   "error": null,

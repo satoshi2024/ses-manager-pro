@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成",
   "status": "FAIL",
-  "duration_ms": 877,
-  "duration_h": 0.000244,
+  "duration_ms": 931,
+  "duration_h": 0.000259,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-01.json",
   "error": null,
   "evidence_detail": {
