@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "準備中→稼動中→終了、解約日必須/期間外、無効status辺を試験",
   "status": "FAIL",
-  "duration_ms": 96,
-  "duration_h": 0.000027,
+  "duration_ms": 46,
+  "duration_h": 0.000013,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-04.json",
   "error": null,
   "evidence_detail": {

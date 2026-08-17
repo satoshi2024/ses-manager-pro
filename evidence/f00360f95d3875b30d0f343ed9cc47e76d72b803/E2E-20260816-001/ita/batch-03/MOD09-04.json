@@ -4,8 +4,8 @@
   "category": "MOD-09",
   "name": "sales01/02と組織scopeでlist/detail/PDF/payment/aging/reminderを直送",
   "status": "PASS",
-  "duration_ms": 85,
-  "duration_h": 0.000024,
+  "duration_ms": 58,
+  "duration_h": 0.000016,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-04.json",
   "error": null,
   "evidence_detail": {

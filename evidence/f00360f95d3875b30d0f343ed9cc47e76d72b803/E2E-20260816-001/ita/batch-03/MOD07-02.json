@@ -3,9 +3,9 @@
   "dimension": "B,E,D",
   "category": "MOD-07",
   "name": "selling/cost=0、負数、精算min=max/min>max、start=end/end<start、commission 0/100/範囲外",
-  "status": "FAIL",
-  "duration_ms": 61,
-  "duration_h": 0.000017,
+  "status": "PASS",
+  "duration_ms": 33,
+  "duration_h": 0.000009,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-02.json",
   "error": null,
   "evidence_detail": {
@@ -25,6 +25,6 @@
         "data": null
       }
     },
-    "all_invalid_boundaries_blocked": false
+    "all_invalid_boundaries_blocked": true
   }
 }

@@ -4,7 +4,7 @@
   "category": "MOD-09",
   "name": "精算下限/上限ちょうど、1時間不足/超過、月途中単価改定、税率0/10%を試験",
   "status": "PASS",
-  "duration_ms": 1,
+  "duration_ms": 0,
   "duration_h": 0,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-02.json",
   "error": null,

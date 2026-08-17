@@ -4,8 +4,8 @@
   "category": "MOD-08",
   "name": "attendance provider mock/freee同期を同一月・同一payloadで初回/再送し、cursorを再取得",
   "status": "PASS",
-  "duration_ms": 29,
-  "duration_h": 0.000008,
+  "duration_ms": 22,
+  "duration_h": 0.000006,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-13.json",
   "error": null,
   "evidence_detail": {

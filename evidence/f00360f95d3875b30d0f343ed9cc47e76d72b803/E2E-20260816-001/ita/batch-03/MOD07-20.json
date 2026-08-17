@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "実装済み compliance 系の profile detail/save と compliance-findings の ack/in-progress/resolve/exception 遷移を実行（非 G2 範囲）",
   "status": "PASS",
-  "duration_ms": 54,
-  "duration_h": 0.000015,
+  "duration_ms": 43,
+  "duration_h": 0.000012,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-20.json",
   "error": null,
   "evidence_detail": {

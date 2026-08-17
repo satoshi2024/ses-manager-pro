@@ -4,7 +4,7 @@
   "category": "MOD-08",
   "name": "単月の時間外+休日労働を99:59/100:00にし、休日労働0/1分を差し替える",
   "status": "PASS",
-  "duration_ms": 1,
+  "duration_ms": 0,
   "duration_h": 0,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-08.json",
   "error": null,

@@ -4,8 +4,8 @@
   "category": "MOD-08",
   "name": "未紐付要員、他要員contractId/workRecordIdをAPIへ差し込む",
   "status": "PASS",
-  "duration_ms": 44,
-  "duration_h": 0.000012,
+  "duration_ms": 24,
+  "duration_h": 0.000007,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-02.json",
   "error": null,
   "evidence_detail": {

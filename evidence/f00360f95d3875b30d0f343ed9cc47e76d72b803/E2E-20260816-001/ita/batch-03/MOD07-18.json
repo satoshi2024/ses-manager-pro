@@ -4,15 +4,15 @@
   "category": "MOD-07",
   "name": "300人データで実装済み契約page/filter/gantt/renewal、FR-10 finding、PDFを計測。G2/T066依存画面はBLOCKED件数を別掲",
   "status": "PASS",
-  "duration_ms": 1180,
-  "duration_h": 0.000328,
+  "duration_ms": 910,
+  "duration_h": 0.000253,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-18.json",
   "error": null,
   "evidence_detail": {
     "records_returned": 20,
     "total_contracts_in_db": "259",
-    "latency_p50_ms": 21,
-    "latency_p95_ms": 24,
+    "latency_p50_ms": 14,
+    "latency_p95_ms": 16,
     "sql_query_count_per_request": 1,
     "blocked_g2_subsets_isolated": "MOD07-11~17 marked BLOCKED(G2/T066)"
   }

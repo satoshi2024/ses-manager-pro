@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "同一契約・同一適用月へ異なる単価を2セッション同時保存",
   "status": "FAIL",
-  "duration_ms": 104,
-  "duration_h": 0.000029,
+  "duration_ms": 44,
+  "duration_h": 0.000012,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-07.json",
   "error": null,
   "evidence_detail": {

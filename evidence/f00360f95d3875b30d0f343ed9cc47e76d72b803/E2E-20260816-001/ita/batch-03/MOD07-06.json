@@ -4,8 +4,8 @@
   "category": "MOD-07",
   "name": "契約開始月、将来月、同月上書きで単価改定。過去確定工数/請求ありでも試験",
   "status": "FAIL",
-  "duration_ms": 71,
-  "duration_h": 0.00002,
+  "duration_ms": 40,
+  "duration_h": 0.000011,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-06.json",
   "error": null,
   "evidence_detail": {

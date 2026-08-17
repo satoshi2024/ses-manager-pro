@@ -4,7 +4,7 @@
   "category": "MOD-07",
   "name": "KNOWN_RISK/RELEASE-BLOCKING CloudSign外部POST成功直後のDB update失敗と、署名済みPDF/certificate保存後のDB update/scan失敗を注入して同要求を再送",
   "status": "FAIL",
-  "duration_ms": 0,
+  "duration_ms": 1,
   "duration_h": 0,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-09.json",
   "error": null,

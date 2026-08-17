@@ -4,8 +4,8 @@
   "category": "MOD-09",
   "name": "aging 0/1/30/31/60/61/90/91日、基準日指定、detail/Excel/PDFを確認",
   "status": "PASS",
-  "duration_ms": 35,
-  "duration_h": 0.00001,
+  "duration_ms": 29,
+  "duration_h": 0.000008,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-09.json",
   "error": null,
   "evidence_detail": {
