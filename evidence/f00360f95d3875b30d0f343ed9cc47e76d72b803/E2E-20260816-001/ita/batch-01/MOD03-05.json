@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD03-05",
+  "dimension": "S,B",
+  "category": "MOD-03",
+  "name": "要員所属組織・担当営業の過去履歴及びasOf時点整合検証",
+  "status": "PASS",
+  "duration_ms": 1431,
+  "duration_h": 0.000398,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-05.json",
+  "error": null,
+  "evidence_detail": {
+    "api_reps_count": 1,
+    "db_reps_count": 2,
+    "reps_sample": {
+      "sales_user_id": "102",
+      "primary_flag": "1",
+      "released_at": "NULL"
+    }
+  }
+}

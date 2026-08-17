@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD03-13",
+  "dimension": "N,A,S,D",
+  "category": "MOD-03",
+  "name": "要員フォロー記録（Followup）CRUD・更新検証",
+  "status": "PASS",
+  "duration_ms": 3981,
+  "duration_h": 0.001106,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-13.json",
+  "error": null,
+  "evidence_detail": {
+    "create_status": 200,
+    "update_status": 200,
+    "followup_id": 19078,
+    "final_topic": "定期面談トピック-1786975245253-更新"
+  }
+}

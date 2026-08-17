@@ -1,0 +1,15 @@
+{
+  "case_id": "PILOT-03-ROLE-SCOPE-DENIAL",
+  "category": "権限/scope 拒否",
+  "name": "非許可Roleアクセス403及びDataScope拒否検証",
+  "status": "PASS",
+  "duration_ms": 360,
+  "duration_h": 0.0001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-03-ROLE-SCOPE-DENIAL.json",
+  "error": null,
+  "evidence_detail": {
+    "member_api_users_denied": true,
+    "member_page_user_list_denied": true,
+    "sales_api_audit_logs_denied": true
+  }
+}

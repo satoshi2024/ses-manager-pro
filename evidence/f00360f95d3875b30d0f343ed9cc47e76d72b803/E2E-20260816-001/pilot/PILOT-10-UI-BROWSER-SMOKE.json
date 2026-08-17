@@ -1,0 +1,27 @@
+{
+  "case_id": "PILOT-10-UI-BROWSER-SMOKE",
+  "category": "UI 実操作",
+  "name": "Playwright実ブラウザによる5大代表画面のレンダリング・Console監視",
+  "status": "PASS",
+  "duration_ms": 18013,
+  "duration_h": 0.005004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-10-UI-BROWSER-SMOKE.json",
+  "error": null,
+  "evidence_detail": {
+    "pages_rendered": [
+      "/dashboard",
+      "/engineer/list",
+      "/customer/list",
+      "/project/list",
+      "/proposal/kanban"
+    ],
+    "console_error_count": 0,
+    "screenshots": [
+      "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-01-dashboard.png",
+      "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-02-engineer-list.png",
+      "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-03-customer-list.png",
+      "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-04-project-list.png",
+      "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-05-proposal-kanban.png"
+    ]
+  }
+}

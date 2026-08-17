@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD03-17",
+  "dimension": "N,B,E,D,X",
+  "category": "MOD-03",
+  "name": "要員CSVエクスポート出力形式・ヘッダ検証",
+  "status": "PASS",
+  "duration_ms": 1255,
+  "duration_h": 0.000349,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-17.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 200,
+    "csv_length": 29281,
+    "has_header": true
+  }
+}

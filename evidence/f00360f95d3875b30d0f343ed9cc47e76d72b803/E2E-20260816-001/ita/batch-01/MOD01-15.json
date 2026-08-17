@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD01-15",
+  "dimension": "A,D,U",
+  "category": "MOD-01",
+  "name": "MFA設定状況ステータス取得とMfaEnforcementFilter検証",
+  "status": "PASS",
+  "duration_ms": 130,
+  "duration_h": 0.000036,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-15.json",
+  "error": null,
+  "evidence_detail": {
+    "status_code": 200,
+    "mfa_status_data": {
+      "required": false,
+      "configured": false,
+      "pending": false,
+      "verified": false
+    }
+  }
+}

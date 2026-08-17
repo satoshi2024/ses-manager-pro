@@ -16,19 +16,23 @@ class BpPaymentMapperTest extends BaseIntegrationTest {
     @Autowired
     private BpPaymentMapper bpPaymentMapper;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @Test
     void testLayerOrderAndUniqueConstraint() {
-        // t_work_record が必要かもしれないが、FKを無効化するか、あるいは事前にデータを入れるか。
-        // engineer-schema-h2.sql の定義では:
-        // CREATE TABLE t_bp_payment (
-        //   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        //   work_record_id BIGINT NOT NULL,
-        //   layer_order INT NOT NULL DEFAULT 1, ...
-        //   UNIQUE KEY uk_work_record_layer (work_record_id, layer_order)
-        // );
-        // H2の場合、fk_bp_payment_parent はあるが work_record_id のFKは H2スキーマ上は存在しない。(t_work_recordテーブル自体はある)
-
-        Long workRecordId = 9999L;
+        long suffix = System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "BP_Cust_" + suffix);
+        Long customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "BP_Cust_" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type) VALUES (?, '正社員')", "BP_Eng_" + suffix);
+        Long engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "BP_Eng_" + suffix);
+        jdbcTemplate.update("INSERT INTO t_project (customer_id, project_name, status) VALUES (?, ?, '募集中')", customerId, "BP_Proj_" + suffix);
+        Long projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "BP_Proj_" + suffix);
+        jdbcTemplate.update("INSERT INTO t_contract (contract_no, customer_id, project_id, engineer_id, contract_type, status, start_date, end_date, selling_price, cost_price) VALUES (?, ?, ?, ?, '準委任', '稼動中', '2026-08-01', '2026-08-31', 700000, 500000)",
+                "CN-BP-" + suffix, customerId, projectId, engineerId);
+        Long contractId = jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "CN-BP-" + suffix);
+        jdbcTemplate.update("INSERT INTO t_work_record (contract_id, work_month, actual_hours, status) VALUES (?, '2026-08', 160.0, '確定')", contractId);
+        Long workRecordId = jdbcTemplate.queryForObject("SELECT id FROM t_work_record WHERE contract_id = ?", Long.class, contractId);
 
         // Insert first layer
         BpPayment bp1 = new BpPayment();

@@ -164,7 +164,7 @@ public class QuotationServiceImpl extends ServiceImpl<QuotationMapper, Quotation
         // R4.1: 見積の公開（提出済）を顧客portal組織へ通知（失敗は業務を妨げない）
         if ("提出済".equals(newStatus) && q.getCustomerId() != null) {
             com.ses.service.portal.PortalNotificationService notification =
-                    portalNotificationServiceProvider.getIfAvailable();
+                    portalNotificationServiceProvider != null ? portalNotificationServiceProvider.getIfAvailable() : null;
             if (notification != null) {
                 try {
                     notification.notifyCustomerOrganization(q.getCustomerId(), "DOCUMENT_PUBLISHED_QUOTATION",

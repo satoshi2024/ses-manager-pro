@@ -1,0 +1,22 @@
+{
+  "case_id": "MOD01-05",
+  "dimension": "A,E,D",
+  "category": "MOD-01",
+  "name": "自分自身のロール変更・無効化・削除の自己ロックアウト防止検証",
+  "status": "PASS",
+  "duration_ms": 1790,
+  "duration_h": 0.000497,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-05.json",
+  "error": null,
+  "evidence_detail": {
+    "role_change_status": 400,
+    "disable_status": 400,
+    "delete_status": 400,
+    "db_admin_after": {
+      "id": "101",
+      "role": "管理者",
+      "status": "1"
+    },
+    "self_lockout_prevented": true
+  }
+}

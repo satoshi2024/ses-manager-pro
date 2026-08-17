@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD02-09",
+  "dimension": "A,S",
+  "category": "MOD-02",
+  "name": "候補者管理APIのロール別権限（Admin/HR/Sales許可、要員拒否403）検証",
+  "status": "PASS",
+  "duration_ms": 1237,
+  "duration_h": 0.000344,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-09.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_status": 200,
+    "hr_status": 200,
+    "member_status": 403,
+    "member_blocked": true
+  }
+}

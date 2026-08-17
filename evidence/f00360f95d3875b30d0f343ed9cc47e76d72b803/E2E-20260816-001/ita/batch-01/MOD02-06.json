@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD02-06",
+  "dimension": "B,N",
+  "category": "MOD-02",
+  "name": "次回アクション期限超過（overdue）候補者の抽出境界検証",
+  "status": "PASS",
+  "duration_ms": 1253,
+  "duration_h": 0.000348,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-06.json",
+  "error": null,
+  "evidence_detail": {
+    "api_overdue_count": 6,
+    "db_overdue_count": 6,
+    "boundary_proven": true
+  }
+}

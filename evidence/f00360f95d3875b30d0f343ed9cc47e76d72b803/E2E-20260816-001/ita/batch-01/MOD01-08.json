@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD01-08",
+  "dimension": "A,C,D,U",
+  "category": "MOD-01",
+  "name": "複数セッション管理・他セッション失効・失効後リクエスト拒否検証",
+  "status": "PASS",
+  "duration_ms": 2116,
+  "duration_h": 0.000588,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-08.json",
+  "error": null,
+  "evidence_detail": {
+    "sessions_count": 5,
+    "revoke_status": 200,
+    "client1_active": true,
+    "client2_blocked": true
+  }
+}

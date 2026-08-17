@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD01-17",
+  "dimension": "A,D",
+  "category": "MOD-01",
+  "name": "ApiAuditFilter による更新系APIの監査ログ自動記録検証",
+  "status": "PASS",
+  "duration_ms": 3891,
+  "duration_h": 0.001081,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-17.json",
+  "error": null,
+  "evidence_detail": {
+    "audit_log_id": "19837",
+    "operator": "s300.admin01",
+    "uri": "/api/users",
+    "audit_recorded": true
+  }
+}

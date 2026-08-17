@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD02-04",
+  "dimension": "E,D,U",
+  "category": "MOD-02",
+  "name": "候補者ステージ不正ステージ遷移の拒否検証",
+  "status": "PASS",
+  "duration_ms": 2947,
+  "duration_h": 0.000819,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-04.json",
+  "error": null,
+  "evidence_detail": {
+    "unknown_status": 400,
+    "unknown_blocked": true
+  }
+}

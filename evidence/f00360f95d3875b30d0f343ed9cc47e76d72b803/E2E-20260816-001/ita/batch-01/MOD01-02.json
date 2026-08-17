@@ -1,0 +1,21 @@
+{
+  "case_id": "MOD01-02",
+  "dimension": "B,E,D",
+  "category": "MOD-01",
+  "name": "同一有効ユーザーで失敗1〜4回、5回目ロック、期限前拒否・期限後成功で状態リセット検証",
+  "status": "PASS",
+  "duration_ms": 4641,
+  "duration_h": 0.001289,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-02.json",
+  "error": null,
+  "evidence_detail": {
+    "step1_failed_4_count": "4",
+    "step2_locked_until": "2026-08-17 23:28:53",
+    "step3_during_lock_login_rejected": true,
+    "step3_during_lock_location": "http://localhost:8080/login?locked",
+    "step4_clock_simulation_method": "DB locked_until updated to DATE_SUB(NOW(), INTERVAL 1 MINUTE) to simulate 30min expiration boundary",
+    "step4_post_expiration_login_success": true,
+    "step4_post_expiration_reset_count": "0",
+    "step4_post_expiration_reset_locked_until": "NULL"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "case_id": "PILOT-01-LIST-PAGING",
+  "category": "一覧/検索",
+  "name": "300人データ下の一覧・検索・ページング・速度検証",
+  "status": "PASS",
+  "duration_ms": 1809,
+  "duration_h": 0.000503,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-01-LIST-PAGING.json",
+  "error": null,
+  "evidence_detail": {
+    "db_total_count": 255,
+    "api_total_count": 255,
+    "db_active_count": 0,
+    "api_active_count": 0,
+    "page_size_returned": 20,
+    "response_time_ms": 134
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD03-02",
+  "dimension": "B,E,D",
+  "category": "MOD-03",
+  "name": "要員登録時の氏名欠落・不正パラメータ拒否検証",
+  "status": "PASS",
+  "duration_ms": 949,
+  "duration_h": 0.000264,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-02.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 400,
+    "blocked": true
+  }
+}

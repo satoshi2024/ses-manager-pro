@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD02-07",
+  "dimension": "N,E,D",
+  "category": "MOD-02",
+  "name": "入社ステージ候補者から要員（Engineer）への変換初期値取得とリンク検証",
+  "status": "PASS",
+  "duration_ms": 6151,
+  "duration_h": 0.001709,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-07.json",
+  "error": null,
+  "evidence_detail": {
+    "init_status": 200,
+    "link_status": 200,
+    "converted_engineer_id": "1281"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "case_id": "MOD03-18",
+  "dimension": "N,A,S,D",
+  "category": "MOD-03",
+  "name": "要員BP所属履歴（BP Affiliation）取得及び有効期間整合検証",
+  "status": "FAIL",
+  "duration_ms": 680,
+  "duration_h": 0.000189,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-18.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 403,
+    "response_data": {
+      "code": 403,
+      "message": "このactionへのアクセス権限がありません",
+      "data": null
+    },
+    "affiliations_count": 0,
+    "defect_ref": "D-20260817-003",
+    "security_behavior_note": "ActionPermissionResolver に bp-affiliations プレフィックス未定義のため MenuPermissionFilter により 403 遮断（Fail-Closed 挙動確認、安全側に倒す動作として正常、機能としては P2 不具合）"
+  }
+}

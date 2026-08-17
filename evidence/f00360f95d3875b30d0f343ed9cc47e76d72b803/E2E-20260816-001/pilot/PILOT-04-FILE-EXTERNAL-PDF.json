@@ -1,0 +1,16 @@
+{
+  "case_id": "PILOT-04-FILE-EXTERNAL-PDF",
+  "category": "file/external",
+  "name": "請求書/契約書PDF生成・バイナリ出力検証",
+  "status": "PASS",
+  "duration_ms": 222,
+  "duration_h": 0.000062,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-04-FILE-EXTERNAL-PDF.json",
+  "error": null,
+  "evidence_detail": {
+    "invoice_id": 10066,
+    "pdf_byte_size": 34037,
+    "pdf_header": "%PDF-1.5",
+    "saved_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-04-invoice-10066.pdf"
+  }
+}

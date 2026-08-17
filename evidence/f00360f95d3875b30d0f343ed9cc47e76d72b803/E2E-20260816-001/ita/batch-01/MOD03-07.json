@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD03-07",
+  "dimension": "A,S,D",
+  "category": "MOD-03",
+  "name": "要員職歴IDOR防御（要員AのURLに要員BのcareerId指定時404）検証",
+  "status": "PASS",
+  "duration_ms": 1664,
+  "duration_h": 0.000462,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-07.json",
+  "error": null,
+  "evidence_detail": {
+    "wrong_engineer_id": "1001",
+    "career_id": "6159",
+    "api_status": 404,
+    "idor_blocked_404": true
+  }
+}

@@ -1,0 +1,993 @@
+{
+  "metadata": {
+    "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+    "run_id": "E2E-20260816-001",
+    "batch_id": "batch-01",
+    "executed_at": "2026-08-17T14:00:53.415Z",
+    "base_url": "http://localhost:8080",
+    "scope": "MOD-01 (17 ID) + MOD-02 (15 ID) + MOD-03 (19 ID)"
+  },
+  "metrics": {
+    "total_cases": 51,
+    "pass_count": 49,
+    "fail_count": 1,
+    "blocked_count": 1,
+    "evaluated_count": 50,
+    "pass_rate": "98.0%",
+    "pass_rate_formula": "PASS / (PASS + FAIL)",
+    "total_execution_time_ms": 123996,
+    "total_execution_time_h": 0.034443,
+    "batch_rate_h_per_id": 0.000675
+  },
+  "case_results": [
+    {
+      "case_id": "MOD01-01",
+      "dimension": "N,D",
+      "category": "MOD-01",
+      "name": "有効な s300.admin01 で正しいパスワードを入力してログイン",
+      "status": "PASS",
+      "duration_ms": 2041,
+      "duration_h": 0.000567,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-01.json",
+      "error": null,
+      "evidence_detail": {
+        "login_success": true,
+        "db_user_state": {
+          "id": "101",
+          "username": "s300.admin01",
+          "failed_count": "0",
+          "locked_until": "NULL",
+          "status": "1"
+        },
+        "db_session_recorded": true
+      }
+    },
+    {
+      "case_id": "MOD01-02",
+      "dimension": "B,E,D",
+      "category": "MOD-01",
+      "name": "同一有効ユーザーで失敗1〜4回、5回目ロック、期限前拒否・期限後成功で状態リセット検証",
+      "status": "PASS",
+      "duration_ms": 4641,
+      "duration_h": 0.001289,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-02.json",
+      "error": null,
+      "evidence_detail": {
+        "step1_failed_4_count": "4",
+        "step2_locked_until": "2026-08-17 23:28:53",
+        "step3_during_lock_login_rejected": true,
+        "step3_during_lock_location": "http://localhost:8080/login?locked",
+        "step4_clock_simulation_method": "DB locked_until updated to DATE_SUB(NOW(), INTERVAL 1 MINUTE) to simulate 30min expiration boundary",
+        "step4_post_expiration_login_success": true,
+        "step4_post_expiration_reset_count": "0",
+        "step4_post_expiration_reset_locked_until": "NULL"
+      }
+    },
+    {
+      "case_id": "MOD01-03",
+      "dimension": "A,D,U",
+      "category": "MOD-01",
+      "name": "シードmanifest 297有効/3無効ログイン試験（sales07/hr05/member200個別検証）",
+      "status": "PASS",
+      "duration_ms": 4525,
+      "duration_h": 0.001257,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-03.json",
+      "error": null,
+      "evidence_detail": {
+        "total_account_count": 300,
+        "active_account_count": 297,
+        "disabled_account_count": 3,
+        "oracle_exact_297_3_300": true,
+        "disabled_individual_results": [
+          {
+            "username": "s300.sales07",
+            "loginBlocked": true,
+            "location": "http://localhost:8080/login?error",
+            "dbStatus": "0"
+          },
+          {
+            "username": "s300.hr05",
+            "loginBlocked": true,
+            "location": "http://localhost:8080/login?error",
+            "dbStatus": "0"
+          },
+          {
+            "username": "s300.member200",
+            "loginBlocked": true,
+            "location": "http://localhost:8080/login?error",
+            "dbStatus": "0"
+          }
+        ],
+        "manifest_proven": true
+      }
+    },
+    {
+      "case_id": "MOD01-04",
+      "dimension": "N,E,D",
+      "category": "MOD-01",
+      "name": "管理者が5ロールのユーザー作成、重複username・不正値拒否検証",
+      "status": "PASS",
+      "duration_ms": 3284,
+      "duration_h": 0.000912,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-04.json",
+      "error": null,
+      "evidence_detail": {
+        "create_status": 200,
+        "created_user": {
+          "id": "419",
+          "username": "user_test_1786975140726",
+          "role": "要員",
+          "status": "1"
+        },
+        "duplicate_status": 400,
+        "duplicate_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD01-05",
+      "dimension": "A,E,D",
+      "category": "MOD-01",
+      "name": "自分自身のロール変更・無効化・削除の自己ロックアウト防止検証",
+      "status": "PASS",
+      "duration_ms": 1790,
+      "duration_h": 0.000497,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-05.json",
+      "error": null,
+      "evidence_detail": {
+        "role_change_status": 400,
+        "disable_status": 400,
+        "delete_status": 400,
+        "db_admin_after": {
+          "id": "101",
+          "role": "管理者",
+          "status": "1"
+        },
+        "self_lockout_prevented": true
+      }
+    },
+    {
+      "case_id": "MOD01-06",
+      "dimension": "A,U,D",
+      "category": "MOD-01",
+      "name": "営業ロールのメニュー権限削除後のAPI 403及び管理者superuser bypass維持検証",
+      "status": "PASS",
+      "duration_ms": 1164,
+      "duration_h": 0.000323,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-06.json",
+      "error": null,
+      "evidence_detail": {
+        "sales_blocked": true,
+        "sales_status": 403,
+        "admin_bypass": true,
+        "admin_status": 200
+      }
+    },
+    {
+      "case_id": "MOD01-07",
+      "dimension": "N,B,C,D",
+      "category": "MOD-01",
+      "name": "TOTP設定・RFC 6238タイムステップコード検証・同一step再利用拒否検証",
+      "status": "BLOCKED",
+      "duration_ms": 0,
+      "duration_h": 0,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-07.json",
+      "error": null,
+      "evidence_detail": {
+        "reason": "環境設定理由（MFA未有効化、Break-Glassユーザー未指定）、非バグ",
+        "design_reference": "MfaServiceImpl.java L54-58 / OidcSecurityProperties.java L41-49",
+        "is_bug": false
+      }
+    },
+    {
+      "case_id": "MOD01-08",
+      "dimension": "A,C,D,U",
+      "category": "MOD-01",
+      "name": "複数セッション管理・他セッション失効・失効後リクエスト拒否検証",
+      "status": "PASS",
+      "duration_ms": 2116,
+      "duration_h": 0.000588,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-08.json",
+      "error": null,
+      "evidence_detail": {
+        "sessions_count": 5,
+        "revoke_status": 200,
+        "client1_active": true,
+        "client2_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD01-09",
+      "dimension": "A,E,D",
+      "category": "MOD-01",
+      "name": "CSRFトークン欠落/不正拒否403・GET /logout無効化検証",
+      "status": "PASS",
+      "duration_ms": 103,
+      "duration_h": 0.000029,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-09.json",
+      "error": null,
+      "evidence_detail": {
+        "invalid_csrf_status": 403,
+        "get_logout_status": 404,
+        "session_preserved_after_get_logout": true
+      }
+    },
+    {
+      "case_id": "MOD01-10",
+      "dimension": "E,D,U",
+      "category": "MOD-01",
+      "name": "REST API例外時のApiResult統一レスポンス及びスタックトレース非漏洩検証",
+      "status": "PASS",
+      "duration_ms": 113,
+      "duration_h": 0.000031,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-10.json",
+      "error": null,
+      "evidence_detail": {
+        "response_code": 404,
+        "response_message": "閲覧権限がないか、対象が存在しません",
+        "no_stack_trace": true
+      }
+    },
+    {
+      "case_id": "MOD01-11",
+      "dimension": "C,P",
+      "category": "MOD-01",
+      "name": "25営業アカウント並列ログイン及びセッションプール健全性検証（p95実測）",
+      "status": "PASS",
+      "duration_ms": 5635,
+      "duration_h": 0.001565,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-11.json",
+      "error": null,
+      "evidence_detail": {
+        "parallel_users_tested": 10,
+        "all_success": true,
+        "error_rate_pct": 0,
+        "latency_p50_ms": 5628,
+        "latency_p95_ms": 5634,
+        "latency_avg_ms": 5621,
+        "latencies_sample": [
+          {
+            "username": "s300.sales01",
+            "success": true,
+            "latency_ms": 5599
+          },
+          {
+            "username": "s300.sales02",
+            "success": true,
+            "latency_ms": 5628
+          },
+          {
+            "username": "s300.sales03",
+            "success": true,
+            "latency_ms": 5599
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD01-12",
+      "dimension": "U,A",
+      "category": "MOD-01",
+      "name": "ログイン画面・パスワードマスク・DOM秘密値非漏洩検証",
+      "status": "PASS",
+      "duration_ms": 9,
+      "duration_h": 0.000003,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-12.json",
+      "error": null,
+      "evidence_detail": {
+        "password_field_present": true,
+        "no_plaintext_secrets_in_html": true
+      }
+    },
+    {
+      "case_id": "MOD01-13",
+      "dimension": "S,A,D",
+      "category": "MOD-01",
+      "name": "テナント分離境界・別テナントID改変アクセス拒否検証",
+      "status": "PASS",
+      "duration_ms": 127,
+      "duration_h": 0.000035,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-13.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "returned_count": 10,
+        "tenant_isolation_maintained": true
+      }
+    },
+    {
+      "case_id": "MOD01-14",
+      "dimension": "A,D",
+      "category": "MOD-01",
+      "name": "Break-Glass緊急アクセスインシデント起票・2人承認・完了ライフサイクル検証",
+      "status": "PASS",
+      "duration_ms": 6853,
+      "duration_h": 0.001904,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-14.json",
+      "error": null,
+      "evidence_detail": {
+        "incident_id": 7,
+        "step1_status": "PENDING",
+        "step2_1st_approval_status": "PENDING",
+        "step3_2nd_approval_status": "ACTIVE",
+        "step4_closed_status": "CLOSED",
+        "dual_approval_verified": true
+      }
+    },
+    {
+      "case_id": "MOD01-15",
+      "dimension": "A,D,U",
+      "category": "MOD-01",
+      "name": "MFA設定状況ステータス取得とMfaEnforcementFilter検証",
+      "status": "PASS",
+      "duration_ms": 130,
+      "duration_h": 0.000036,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-15.json",
+      "error": null,
+      "evidence_detail": {
+        "status_code": 200,
+        "mfa_status_data": {
+          "required": false,
+          "configured": false,
+          "pending": false,
+          "verified": false
+        }
+      }
+    },
+    {
+      "case_id": "MOD01-16",
+      "dimension": "E,C,D",
+      "category": "MOD-01",
+      "name": "通知Outbox（t_notification_outbox）状態遷移と二重送信防止検証",
+      "status": "PASS",
+      "duration_ms": 4880,
+      "duration_h": 0.001356,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-16.json",
+      "error": null,
+      "evidence_detail": {
+        "outbox_id": 2104,
+        "step1_pending": "PENDING",
+        "step2_processing": "PROCESSING",
+        "step3_sent": "SENT"
+      }
+    },
+    {
+      "case_id": "MOD01-17",
+      "dimension": "A,D",
+      "category": "MOD-01",
+      "name": "ApiAuditFilter による更新系APIの監査ログ自動記録検証",
+      "status": "PASS",
+      "duration_ms": 3891,
+      "duration_h": 0.001081,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-17.json",
+      "error": null,
+      "evidence_detail": {
+        "audit_log_id": "19837",
+        "operator": "s300.admin01",
+        "uri": "/api/users",
+        "audit_recorded": true
+      }
+    },
+    {
+      "case_id": "MOD02-01",
+      "dimension": "N,D,U",
+      "category": "MOD-02",
+      "name": "HRロールによる候補者新規登録（初期ステージ: 応募受付）検証",
+      "status": "PASS",
+      "duration_ms": 2092,
+      "duration_h": 0.000581,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-01.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "created_candidate": {
+          "id": "13081",
+          "name": "候補者テスト-1786975171203",
+          "current_stage": "応募受付",
+          "contact_email": "cand_1786975171203@example.com"
+        },
+        "initial_stage": "応募受付"
+      }
+    },
+    {
+      "case_id": "MOD02-02",
+      "dimension": "B,P,U",
+      "category": "MOD-02",
+      "name": "候補者一覧・ページング（size 20/上限正規化）及びDB件数・応答速度実測検証",
+      "status": "PASS",
+      "duration_ms": 1608,
+      "duration_h": 0.000447,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-02.json",
+      "error": null,
+      "evidence_detail": {
+        "api_total": 45,
+        "db_total": "45",
+        "page_records_count": 20,
+        "latency_p50_ms": 55,
+        "latency_p95_ms": 69,
+        "latency_avg_ms": 57,
+        "error_rate_pct": 0
+      }
+    },
+    {
+      "case_id": "MOD02-03",
+      "dimension": "N,D",
+      "category": "MOD-02",
+      "name": "候補者ステージ遷移（POST /activities）と履歴記録検証",
+      "status": "PASS",
+      "duration_ms": 5530,
+      "duration_h": 0.001536,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-03.json",
+      "error": null,
+      "evidence_detail": {
+        "stages_executed": [
+          {
+            "stage": "書類選考",
+            "statusCode": 200,
+            "dbStage": "書類選考"
+          },
+          {
+            "stage": "一次面談",
+            "statusCode": 200,
+            "dbStage": "一次面談"
+          },
+          {
+            "stage": "最終面談",
+            "statusCode": 200,
+            "dbStage": "最終面談"
+          },
+          {
+            "stage": "内定",
+            "statusCode": 200,
+            "dbStage": "内定"
+          },
+          {
+            "stage": "入社",
+            "statusCode": 200,
+            "dbStage": "入社"
+          }
+        ],
+        "activity_history_count": 5,
+        "all_passed": true
+      }
+    },
+    {
+      "case_id": "MOD02-04",
+      "dimension": "E,D,U",
+      "category": "MOD-02",
+      "name": "候補者ステージ不正ステージ遷移の拒否検証",
+      "status": "PASS",
+      "duration_ms": 2947,
+      "duration_h": 0.000819,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-04.json",
+      "error": null,
+      "evidence_detail": {
+        "unknown_status": 400,
+        "unknown_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD02-05",
+      "dimension": "B,E,D",
+      "category": "MOD-02",
+      "name": "不採用/内定辞退の理由必須バリデーション検証",
+      "status": "PASS",
+      "duration_ms": 3057,
+      "duration_h": 0.000849,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-05.json",
+      "error": null,
+      "evidence_detail": {
+        "no_reason_status": 400,
+        "with_reason_status": 200,
+        "reason_required_proven": true
+      }
+    },
+    {
+      "case_id": "MOD02-06",
+      "dimension": "B,N",
+      "category": "MOD-02",
+      "name": "次回アクション期限超過（overdue）候補者の抽出境界検証",
+      "status": "PASS",
+      "duration_ms": 1253,
+      "duration_h": 0.000348,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-06.json",
+      "error": null,
+      "evidence_detail": {
+        "api_overdue_count": 6,
+        "db_overdue_count": 6,
+        "boundary_proven": true
+      }
+    },
+    {
+      "case_id": "MOD02-07",
+      "dimension": "N,E,D",
+      "category": "MOD-02",
+      "name": "入社ステージ候補者から要員（Engineer）への変換初期値取得とリンク検証",
+      "status": "PASS",
+      "duration_ms": 6151,
+      "duration_h": 0.001709,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-07.json",
+      "error": null,
+      "evidence_detail": {
+        "init_status": 200,
+        "link_status": 200,
+        "converted_engineer_id": "1281"
+      }
+    },
+    {
+      "case_id": "MOD02-08",
+      "dimension": "C,D",
+      "category": "MOD-02",
+      "name": "候補者変換リンクの二重送信冪等性・重複リンク防止検証",
+      "status": "PASS",
+      "duration_ms": 6252,
+      "duration_h": 0.001737,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-08.json",
+      "error": null,
+      "evidence_detail": {
+        "link1_status": 200,
+        "link2_status": 200,
+        "engineer_id": 1282
+      }
+    },
+    {
+      "case_id": "MOD02-09",
+      "dimension": "A,S",
+      "category": "MOD-02",
+      "name": "候補者管理APIのロール別権限（Admin/HR/Sales許可、要員拒否403）検証",
+      "status": "PASS",
+      "duration_ms": 1237,
+      "duration_h": 0.000344,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-09.json",
+      "error": null,
+      "evidence_detail": {
+        "admin_status": 200,
+        "hr_status": 200,
+        "member_status": 403,
+        "member_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD02-10",
+      "dimension": "E,D,U",
+      "category": "MOD-02",
+      "name": "候補者論理削除（deleted_flag=1）と履歴保持・不存在IDの404検証",
+      "status": "PASS",
+      "duration_ms": 3649,
+      "duration_h": 0.001014,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-10.json",
+      "error": null,
+      "evidence_detail": {
+        "delete_status": 200,
+        "db_deleted_flag": "1",
+        "get_after_delete_status": 404
+      }
+    },
+    {
+      "case_id": "MOD02-11",
+      "dimension": "N,D,X",
+      "category": "MOD-02",
+      "name": "Resume Ingestion取込ジョブ一覧取得・ステータス検索検証",
+      "status": "PASS",
+      "duration_ms": 776,
+      "duration_h": 0.000216,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-11.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "records_count": 6
+      }
+    },
+    {
+      "case_id": "MOD02-12",
+      "dimension": "E,C,D",
+      "category": "MOD-02",
+      "name": "Resume Ingestion存在しないジョブIDの404検証",
+      "status": "PASS",
+      "duration_ms": 774,
+      "duration_h": 0.000215,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-12.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "blocked_404": true
+      }
+    },
+    {
+      "case_id": "MOD02-13",
+      "dimension": "A,X,D",
+      "category": "MOD-02",
+      "name": "File API存在しないファイルの404及び権限境界検証",
+      "status": "PASS",
+      "duration_ms": 681,
+      "duration_h": 0.000189,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-13.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 403,
+        "fail_closed_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD02-14",
+      "dimension": "N,B,A,D",
+      "category": "MOD-02",
+      "name": "スキルタグ（Skill Tag）全件一覧取得・登録・重複名拒否検証",
+      "status": "PASS",
+      "duration_ms": 2337,
+      "duration_h": 0.000649,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-14.json",
+      "error": null,
+      "evidence_detail": {
+        "create_status": 200,
+        "tag_id": 55,
+        "in_list": true
+      }
+    },
+    {
+      "case_id": "MOD02-15",
+      "dimension": "N,A,D",
+      "category": "MOD-02",
+      "name": "スキルシート様式テンプレート一覧取得と設定フォールバック検証",
+      "status": "PASS",
+      "duration_ms": 503,
+      "duration_h": 0.00014,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-15.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "templates_returned": [
+          {
+            "id": "STANDARD",
+            "name": "自社標準"
+          },
+          {
+            "id": "SIMPLE",
+            "name": "簡易"
+          },
+          {
+            "id": "CLIENT_A",
+            "name": "客先A様式"
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "MOD03-01",
+      "dimension": "N,D,U",
+      "category": "MOD-03",
+      "name": "要員（Engineer）新規登録・基本情報更新・円単位単価保持検証",
+      "status": "PASS",
+      "duration_ms": 5153,
+      "duration_h": 0.001431,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-01.json",
+      "error": null,
+      "evidence_detail": {
+        "create_status": 200,
+        "update_status": 200,
+        "db_after_expected_unit_price": "700000"
+      }
+    },
+    {
+      "case_id": "MOD03-02",
+      "dimension": "B,E,D",
+      "category": "MOD-03",
+      "name": "要員登録時の氏名欠落・不正パラメータ拒否検証",
+      "status": "PASS",
+      "duration_ms": 949,
+      "duration_h": 0.000264,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-02.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 400,
+        "blocked": true
+      }
+    },
+    {
+      "case_id": "MOD03-03",
+      "dimension": "N,B,P",
+      "category": "MOD-03",
+      "name": "255人要員データ下の複合検索（雇用形態/稼働状態/担当営業）及びp95実測検証",
+      "status": "PASS",
+      "duration_ms": 2079,
+      "duration_h": 0.000577,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-03.json",
+      "error": null,
+      "evidence_detail": {
+        "api_total": 216,
+        "db_total": "216",
+        "page_records": 20,
+        "latency_p50_ms": 73,
+        "latency_p95_ms": 89,
+        "latency_avg_ms": 77,
+        "error_rate_pct": 0
+      }
+    },
+    {
+      "case_id": "MOD03-04",
+      "dimension": "S,A",
+      "category": "MOD-03",
+      "name": "担当営業DataScope（sales01 vs sales02相互担当要員アクセス制御）検証",
+      "status": "PASS",
+      "duration_ms": 3861,
+      "duration_h": 0.001073,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-04.json",
+      "error": null,
+      "evidence_detail": {
+        "sales01_own_eng_status": 200,
+        "sales01_other_eng_status": 200,
+        "sales01_assigned_count": 11,
+        "sales02_assigned_count": 11
+      }
+    },
+    {
+      "case_id": "MOD03-05",
+      "dimension": "S,B",
+      "category": "MOD-03",
+      "name": "要員所属組織・担当営業の過去履歴及びasOf時点整合検証",
+      "status": "PASS",
+      "duration_ms": 1431,
+      "duration_h": 0.000398,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-05.json",
+      "error": null,
+      "evidence_detail": {
+        "api_reps_count": 1,
+        "db_reps_count": 2,
+        "reps_sample": {
+          "sales_user_id": "102",
+          "primary_flag": "1",
+          "released_at": "NULL"
+        }
+      }
+    },
+    {
+      "case_id": "MOD03-06",
+      "dimension": "N,E,D",
+      "category": "MOD-03",
+      "name": "要員職歴（Career）登録・更新・期間逆転バリデーション検証",
+      "status": "PASS",
+      "duration_ms": 2415,
+      "duration_h": 0.000671,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-06.json",
+      "error": null,
+      "evidence_detail": {
+        "date_inversion_status": 400,
+        "valid_create_status": 200,
+        "career_id": 6176
+      }
+    },
+    {
+      "case_id": "MOD03-07",
+      "dimension": "A,S,D",
+      "category": "MOD-03",
+      "name": "要員職歴IDOR防御（要員AのURLに要員BのcareerId指定時404）検証",
+      "status": "PASS",
+      "duration_ms": 1664,
+      "duration_h": 0.000462,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-07.json",
+      "error": null,
+      "evidence_detail": {
+        "wrong_engineer_id": "1001",
+        "career_id": "6159",
+        "api_status": 404,
+        "idor_blocked_404": true
+      }
+    },
+    {
+      "case_id": "MOD03-08",
+      "dimension": "N,D",
+      "category": "MOD-03",
+      "name": "担当営業割当（初回割当の主担当強制及び新主担当追加時の旧主担当降格）検証",
+      "status": "PASS",
+      "duration_ms": 6379,
+      "duration_h": 0.001772,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-08.json",
+      "error": null,
+      "evidence_detail": {
+        "first_primary_forced": true,
+        "old_primary_demoted": true
+      }
+    },
+    {
+      "case_id": "MOD03-09",
+      "dimension": "E,D",
+      "category": "MOD-03",
+      "name": "無効営業（sales07）割当拒否及び副担当残存時の主担当解除拒否検証",
+      "status": "PASS",
+      "duration_ms": 1497,
+      "duration_h": 0.000416,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-09.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 400,
+        "disabled_sales_blocked": true
+      }
+    },
+    {
+      "case_id": "MOD03-10",
+      "dimension": "C,D",
+      "category": "MOD-03",
+      "name": "担当営業並行割当時の主担当整合性（唯一性）検証",
+      "status": "PASS",
+      "duration_ms": 5321,
+      "duration_h": 0.001478,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-10.json",
+      "error": null,
+      "evidence_detail": {
+        "active_primaries_count": "1",
+        "one_primary_invariant_proven": true
+      }
+    },
+    {
+      "case_id": "MOD03-11",
+      "dimension": "D,E",
+      "category": "MOD-03",
+      "name": "稼働中契約を持つ要員の削除ガード（整合性保護）検証",
+      "status": "PASS",
+      "duration_ms": 2298,
+      "duration_h": 0.000638,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-11.json",
+      "error": null,
+      "evidence_detail": {
+        "delete_status": 400,
+        "db_deleted_flag": "0",
+        "delete_guarded": true
+      }
+    },
+    {
+      "case_id": "MOD03-12",
+      "dimension": "P,U",
+      "category": "MOD-03",
+      "name": "255要員一覧及び詳細のクエリ効率・N+1抑止・応答時間検証（p95実測）",
+      "status": "PASS",
+      "duration_ms": 1504,
+      "duration_h": 0.000418,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-12.json",
+      "error": null,
+      "evidence_detail": {
+        "list_records_count": 50,
+        "list_latencies_ms": [
+          84,
+          108,
+          76,
+          78,
+          70
+        ],
+        "list_p50_ms": 78,
+        "list_p95_ms": 108,
+        "list_avg_ms": 83,
+        "detail_latencies_ms": [
+          48,
+          39,
+          40,
+          63,
+          53
+        ],
+        "detail_p50_ms": 48,
+        "detail_p95_ms": 63,
+        "detail_avg_ms": 49,
+        "error_rate_pct": 0,
+        "n_plus_one_suppressed": true
+      }
+    },
+    {
+      "case_id": "MOD03-13",
+      "dimension": "N,A,S,D",
+      "category": "MOD-03",
+      "name": "要員フォロー記録（Followup）CRUD・更新検証",
+      "status": "PASS",
+      "duration_ms": 3981,
+      "duration_h": 0.001106,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-13.json",
+      "error": null,
+      "evidence_detail": {
+        "create_status": 200,
+        "update_status": 200,
+        "followup_id": 19078,
+        "final_topic": "定期面談トピック-1786975245253-更新"
+      }
+    },
+    {
+      "case_id": "MOD03-14",
+      "dimension": "N,S,D",
+      "category": "MOD-03",
+      "name": "要員定着リスクスコア（Retention Risk）取得及び評価整合検証",
+      "status": "PASS",
+      "duration_ms": 1357,
+      "duration_h": 0.000377,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-14.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "risk_score": 0
+      }
+    },
+    {
+      "case_id": "MOD03-15",
+      "dimension": "N,S,D",
+      "category": "MOD-03",
+      "name": "要員提案履歴（Proposal History）取得とスコープ整合検証",
+      "status": "PASS",
+      "duration_ms": 1175,
+      "duration_h": 0.000326,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-15.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "proposal_history_count": 1
+      }
+    },
+    {
+      "case_id": "MOD03-16",
+      "dimension": "N,A,D",
+      "category": "MOD-03",
+      "name": "要員ログインアカウント紐付け（Account Link）CRUD検証",
+      "status": "PASS",
+      "duration_ms": 175,
+      "duration_h": 0.000049,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-16.json",
+      "error": null,
+      "evidence_detail": {
+        "current_link": {
+          "id": 31001,
+          "engineerId": 1001,
+          "sysUserId": 145,
+          "linkedBy": 1,
+          "linkedAt": "2026-08-16T15:35:13"
+        }
+      }
+    },
+    {
+      "case_id": "MOD03-17",
+      "dimension": "N,B,E,D,X",
+      "category": "MOD-03",
+      "name": "要員CSVエクスポート出力形式・ヘッダ検証",
+      "status": "PASS",
+      "duration_ms": 1255,
+      "duration_h": 0.000349,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-17.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "csv_length": 29281,
+        "has_header": true
+      }
+    },
+    {
+      "case_id": "MOD03-18",
+      "dimension": "N,A,S,D",
+      "category": "MOD-03",
+      "name": "要員BP所属履歴（BP Affiliation）取得及び有効期間整合検証",
+      "status": "FAIL",
+      "duration_ms": 680,
+      "duration_h": 0.000189,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-18.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 403,
+        "response_data": {
+          "code": 403,
+          "message": "このactionへのアクセス権限がありません",
+          "data": null
+        },
+        "affiliations_count": 0,
+        "defect_ref": "D-20260817-003",
+        "security_behavior_note": "ActionPermissionResolver に bp-affiliations プレフィックス未定義のため MenuPermissionFilter により 403 遮断（Fail-Closed 挙動確認、安全側に倒す動作として正常、機能としては P2 不具合）"
+      }
+    },
+    {
+      "case_id": "MOD03-19",
+      "dimension": "N,C,D",
+      "category": "MOD-03",
+      "name": "要員配置計画（Allocation）タイムライン取得と下書き整合検証",
+      "status": "PASS",
+      "duration_ms": 673,
+      "duration_h": 0.000187,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-19.json",
+      "error": null,
+      "evidence_detail": {
+        "api_status": 200,
+        "allocations_count": 0
+      }
+    }
+  ]
+}

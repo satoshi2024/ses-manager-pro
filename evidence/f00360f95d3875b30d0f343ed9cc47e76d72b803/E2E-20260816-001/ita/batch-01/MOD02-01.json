@@ -1,0 +1,21 @@
+{
+  "case_id": "MOD02-01",
+  "dimension": "N,D,U",
+  "category": "MOD-02",
+  "name": "HRロールによる候補者新規登録（初期ステージ: 応募受付）検証",
+  "status": "PASS",
+  "duration_ms": 2092,
+  "duration_h": 0.000581,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-01.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 200,
+    "created_candidate": {
+      "id": "13081",
+      "name": "候補者テスト-1786975171203",
+      "current_stage": "応募受付",
+      "contact_email": "cand_1786975171203@example.com"
+    },
+    "initial_stage": "応募受付"
+  }
+}

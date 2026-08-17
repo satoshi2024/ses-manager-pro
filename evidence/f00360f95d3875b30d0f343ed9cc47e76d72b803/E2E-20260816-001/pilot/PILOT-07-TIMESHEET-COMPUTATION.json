@@ -1,0 +1,22 @@
+{
+  "case_id": "PILOT-07-TIMESHEET-COMPUTATION",
+  "category": "勤怠/工数",
+  "name": "要員工数入力・残業自動集計・勤怠登録検証",
+  "status": "PASS",
+  "duration_ms": 2000,
+  "duration_h": 0.000556,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-07-TIMESHEET-COMPUTATION.json",
+  "error": null,
+  "evidence_detail": {
+    "contract_id": 7002,
+    "work_record_id": 8006,
+    "work_date": "2026-08-04",
+    "api_actual_hours": 43,
+    "db_work_record_hours": "43.00",
+    "db_work_record_status": "入力中",
+    "db_daily_start_time": "09:00:00",
+    "db_daily_end_time": "18:00:00",
+    "db_daily_worked_hours": "8.00",
+    "db_verification_proven": true
+  }
+}

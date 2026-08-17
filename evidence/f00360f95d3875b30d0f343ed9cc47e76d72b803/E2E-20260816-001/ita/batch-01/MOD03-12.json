@@ -1,0 +1,36 @@
+{
+  "case_id": "MOD03-12",
+  "dimension": "P,U",
+  "category": "MOD-03",
+  "name": "255要員一覧及び詳細のクエリ効率・N+1抑止・応答時間検証（p95実測）",
+  "status": "PASS",
+  "duration_ms": 1504,
+  "duration_h": 0.000418,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-12.json",
+  "error": null,
+  "evidence_detail": {
+    "list_records_count": 50,
+    "list_latencies_ms": [
+      84,
+      108,
+      76,
+      78,
+      70
+    ],
+    "list_p50_ms": 78,
+    "list_p95_ms": 108,
+    "list_avg_ms": 83,
+    "detail_latencies_ms": [
+      48,
+      39,
+      40,
+      63,
+      53
+    ],
+    "detail_p50_ms": 48,
+    "detail_p95_ms": 63,
+    "detail_avg_ms": 49,
+    "error_rate_pct": 0,
+    "n_plus_one_suppressed": true
+  }
+}

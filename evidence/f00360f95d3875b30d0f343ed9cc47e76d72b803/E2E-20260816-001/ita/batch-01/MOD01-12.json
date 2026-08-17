@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD01-12",
+  "dimension": "U,A",
+  "category": "MOD-01",
+  "name": "ログイン画面・パスワードマスク・DOM秘密値非漏洩検証",
+  "status": "PASS",
+  "duration_ms": 9,
+  "duration_h": 0.000003,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-12.json",
+  "error": null,
+  "evidence_detail": {
+    "password_field_present": true,
+    "no_plaintext_secrets_in_html": true
+  }
+}

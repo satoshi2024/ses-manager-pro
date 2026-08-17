@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD02-02",
+  "dimension": "B,P,U",
+  "category": "MOD-02",
+  "name": "候補者一覧・ページング（size 20/上限正規化）及びDB件数・応答速度実測検証",
+  "status": "PASS",
+  "duration_ms": 1608,
+  "duration_h": 0.000447,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-02.json",
+  "error": null,
+  "evidence_detail": {
+    "api_total": 45,
+    "db_total": "45",
+    "page_records_count": 20,
+    "latency_p50_ms": 55,
+    "latency_p95_ms": 69,
+    "latency_avg_ms": 57,
+    "error_rate_pct": 0
+  }
+}

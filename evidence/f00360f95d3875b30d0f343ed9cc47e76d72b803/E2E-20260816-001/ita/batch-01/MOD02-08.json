@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD02-08",
+  "dimension": "C,D",
+  "category": "MOD-02",
+  "name": "候補者変換リンクの二重送信冪等性・重複リンク防止検証",
+  "status": "PASS",
+  "duration_ms": 6252,
+  "duration_h": 0.001737,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-08.json",
+  "error": null,
+  "evidence_detail": {
+    "link1_status": 200,
+    "link2_status": 200,
+    "engineer_id": 1282
+  }
+}

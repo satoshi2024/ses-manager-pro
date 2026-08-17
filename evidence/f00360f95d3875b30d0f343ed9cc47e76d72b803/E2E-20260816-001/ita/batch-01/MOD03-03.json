@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD03-03",
+  "dimension": "N,B,P",
+  "category": "MOD-03",
+  "name": "255人要員データ下の複合検索（雇用形態/稼働状態/担当営業）及びp95実測検証",
+  "status": "PASS",
+  "duration_ms": 2079,
+  "duration_h": 0.000577,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-03.json",
+  "error": null,
+  "evidence_detail": {
+    "api_total": 216,
+    "db_total": "216",
+    "page_records": 20,
+    "latency_p50_ms": 73,
+    "latency_p95_ms": 89,
+    "latency_avg_ms": 77,
+    "error_rate_pct": 0
+  }
+}

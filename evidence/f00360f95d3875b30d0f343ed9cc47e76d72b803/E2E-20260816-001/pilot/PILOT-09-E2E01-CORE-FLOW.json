@@ -1,0 +1,29 @@
+{
+  "case_id": "PILOT-09-E2E01-CORE-FLOW",
+  "category": "E2E 業務貫通",
+  "name": "顧客登録→案件登録→提案作成→契約作成の業務貫通検証",
+  "status": "PASS",
+  "duration_ms": 4771,
+  "duration_h": 0.001325,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-09-E2E01-CORE-FLOW.json",
+  "error": null,
+  "evidence_detail": {
+    "customer_created": {
+      "id": "2050",
+      "company_name": "E2E01株式会社-1786967560027"
+    },
+    "project_created": {
+      "id": "5120",
+      "project_name": "E2E01案件-1786967560027",
+      "customer_id": "2050"
+    },
+    "proposal_created": {
+      "id": "6165",
+      "project_id": "5120",
+      "engineer_id": "1252",
+      "proposed_unit_price": "850000",
+      "status": "書類選考中"
+    },
+    "chain_verified": "m_customer -> t_project -> t_proposal"
+  }
+}

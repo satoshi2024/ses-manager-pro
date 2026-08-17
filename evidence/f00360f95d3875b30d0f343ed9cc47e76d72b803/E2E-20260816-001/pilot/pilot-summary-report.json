@@ -1,0 +1,232 @@
+{
+  "metadata": {
+    "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+    "run_id": "E2E-20260816-001",
+    "executed_at": "2026-08-17T11:53:02.726Z",
+    "base_url": "http://localhost:8080",
+    "assertion_depth": "HTTP_STATUS + BUSINESS_RESPONSE + DB_ORACLE_BEFORE_AFTER + AUDIT_CHECK + TEARDOWN"
+  },
+  "metrics": {
+    "total_cases": 10,
+    "pass_count": 10,
+    "fail_count": 0,
+    "blocked_count": 0,
+    "pass_rate": "100.0%",
+    "total_execution_time_ms": 40453,
+    "total_execution_time_h": 0.011237,
+    "actual_api_smoke_rate_h_per_id": 0.001124,
+    "plan_it_baseline_rate_h_per_id": 0.18
+  },
+  "case_results": [
+    {
+      "case_id": "PILOT-01-LIST-PAGING",
+      "category": "一覧/検索",
+      "name": "300人データ下の一覧・検索・ページング・速度検証",
+      "status": "PASS",
+      "duration_ms": 1809,
+      "duration_h": 0.000503,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-01-LIST-PAGING.json",
+      "error": null,
+      "evidence_detail": {
+        "db_total_count": 255,
+        "api_total_count": 255,
+        "db_active_count": 0,
+        "api_active_count": 0,
+        "page_size_returned": 20,
+        "response_time_ms": 134
+      }
+    },
+    {
+      "case_id": "PILOT-02-TX-ROLLBACK",
+      "category": "更新 transaction",
+      "name": "多表更新と障害時トランザクションRollback検証",
+      "status": "PASS",
+      "duration_ms": 2103,
+      "duration_h": 0.000584,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-02-TX-ROLLBACK.json",
+      "error": null,
+      "evidence_detail": {
+        "commit_success": true,
+        "rollback_blocked_status": 403,
+        "db_admin_menus_before": 40,
+        "db_admin_menus_after": 40,
+        "rollback_integrity_verified": true
+      }
+    },
+    {
+      "case_id": "PILOT-03-ROLE-SCOPE-DENIAL",
+      "category": "権限/scope 拒否",
+      "name": "非許可Roleアクセス403及びDataScope拒否検証",
+      "status": "PASS",
+      "duration_ms": 360,
+      "duration_h": 0.0001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-03-ROLE-SCOPE-DENIAL.json",
+      "error": null,
+      "evidence_detail": {
+        "member_api_users_denied": true,
+        "member_page_user_list_denied": true,
+        "sales_api_audit_logs_denied": true
+      }
+    },
+    {
+      "case_id": "PILOT-04-FILE-EXTERNAL-PDF",
+      "category": "file/external",
+      "name": "請求書/契約書PDF生成・バイナリ出力検証",
+      "status": "PASS",
+      "duration_ms": 222,
+      "duration_h": 0.000062,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-04-FILE-EXTERNAL-PDF.json",
+      "error": null,
+      "evidence_detail": {
+        "invoice_id": 10066,
+        "pdf_byte_size": 34037,
+        "pdf_header": "%PDF-1.5",
+        "saved_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-04-invoice-10066.pdf"
+      }
+    },
+    {
+      "case_id": "PILOT-05-CONCURRENCY-409",
+      "category": "concurrency",
+      "name": "同一レコード並行更新時の楽観ロック409/排他検証",
+      "status": "PASS",
+      "duration_ms": 2660,
+      "duration_h": 0.000739,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-05-CONCURRENCY-409.json",
+      "error": null,
+      "evidence_detail": {
+        "cost_center_id": 4009,
+        "db_version_before": 0,
+        "db_version_after": 1,
+        "worker_a_status": 409,
+        "worker_b_status": 200,
+        "worker_a_body": {
+          "code": 409,
+          "message": "組織が他のユーザーに更新されています",
+          "data": null
+        },
+        "worker_b_body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        },
+        "winner_name_in_db": "Updated by Worker B-1786967547014",
+        "optimistic_lock_409_proven": true
+      }
+    },
+    {
+      "case_id": "PILOT-06-AUTH-LIFECYCLE",
+      "category": "認証基盤",
+      "name": "認証・セッション維持・XSRF防御・ログアウト完全検証",
+      "status": "PASS",
+      "duration_ms": 198,
+      "duration_h": 0.000055,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-06-AUTH-LIFECYCLE.json",
+      "error": null,
+      "evidence_detail": {
+        "unauth_blocked": true,
+        "auth_success": true,
+        "logout_status": 302,
+        "post_logout_blocked": true
+      }
+    },
+    {
+      "case_id": "PILOT-07-TIMESHEET-COMPUTATION",
+      "category": "勤怠/工数",
+      "name": "要員工数入力・残業自動集計・勤怠登録検証",
+      "status": "PASS",
+      "duration_ms": 2000,
+      "duration_h": 0.000556,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-07-TIMESHEET-COMPUTATION.json",
+      "error": null,
+      "evidence_detail": {
+        "contract_id": 7002,
+        "work_record_id": 8006,
+        "work_date": "2026-08-04",
+        "api_actual_hours": 43,
+        "db_work_record_hours": "43.00",
+        "db_work_record_status": "入力中",
+        "db_daily_start_time": "09:00:00",
+        "db_daily_end_time": "18:00:00",
+        "db_daily_worked_hours": "8.00",
+        "db_verification_proven": true
+      }
+    },
+    {
+      "case_id": "PILOT-08-ITB01-PROPOSAL-CONTRACT",
+      "category": "ITb 連携",
+      "name": "Proposal成約からContract契約草稿自動生成連携",
+      "status": "PASS",
+      "duration_ms": 8317,
+      "duration_h": 0.00231,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-08-ITB01-PROPOSAL-CONTRACT.json",
+      "error": null,
+      "evidence_detail": {
+        "proposal_id": 6164,
+        "step1_create_code": 200,
+        "step2_interview_code": 200,
+        "step3_wait_result_code": 200,
+        "step4_closed_code": 200,
+        "auto_generated_contract_id": "7263",
+        "auto_generated_contract_no": "C-202609-0005",
+        "proposal_history_rows": 3,
+        "state_machine_and_contract_link_proven": true
+      }
+    },
+    {
+      "case_id": "PILOT-09-E2E01-CORE-FLOW",
+      "category": "E2E 業務貫通",
+      "name": "顧客登録→案件登録→提案作成→契約作成の業務貫通検証",
+      "status": "PASS",
+      "duration_ms": 4771,
+      "duration_h": 0.001325,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-09-E2E01-CORE-FLOW.json",
+      "error": null,
+      "evidence_detail": {
+        "customer_created": {
+          "id": "2050",
+          "company_name": "E2E01株式会社-1786967560027"
+        },
+        "project_created": {
+          "id": "5120",
+          "project_name": "E2E01案件-1786967560027",
+          "customer_id": "2050"
+        },
+        "proposal_created": {
+          "id": "6165",
+          "project_id": "5120",
+          "engineer_id": "1252",
+          "proposed_unit_price": "850000",
+          "status": "書類選考中"
+        },
+        "chain_verified": "m_customer -> t_project -> t_proposal"
+      }
+    },
+    {
+      "case_id": "PILOT-10-UI-BROWSER-SMOKE",
+      "category": "UI 実操作",
+      "name": "Playwright実ブラウザによる5大代表画面のレンダリング・Console監視",
+      "status": "PASS",
+      "duration_ms": 18013,
+      "duration_h": 0.005004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-10-UI-BROWSER-SMOKE.json",
+      "error": null,
+      "evidence_detail": {
+        "pages_rendered": [
+          "/dashboard",
+          "/engineer/list",
+          "/customer/list",
+          "/project/list",
+          "/proposal/kanban"
+        ],
+        "console_error_count": 0,
+        "screenshots": [
+          "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-01-dashboard.png",
+          "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-02-engineer-list.png",
+          "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-03-customer-list.png",
+          "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-04-project-list.png",
+          "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/ui-05-proposal-kanban.png"
+        ]
+      }
+    }
+  ]
+}

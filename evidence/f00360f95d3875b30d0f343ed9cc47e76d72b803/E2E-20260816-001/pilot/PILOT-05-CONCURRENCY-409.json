@@ -1,0 +1,29 @@
+{
+  "case_id": "PILOT-05-CONCURRENCY-409",
+  "category": "concurrency",
+  "name": "同一レコード並行更新時の楽観ロック409/排他検証",
+  "status": "PASS",
+  "duration_ms": 2660,
+  "duration_h": 0.000739,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-05-CONCURRENCY-409.json",
+  "error": null,
+  "evidence_detail": {
+    "cost_center_id": 4009,
+    "db_version_before": 0,
+    "db_version_after": 1,
+    "worker_a_status": 409,
+    "worker_b_status": 200,
+    "worker_a_body": {
+      "code": 409,
+      "message": "組織が他のユーザーに更新されています",
+      "data": null
+    },
+    "worker_b_body": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": true
+    },
+    "winner_name_in_db": "Updated by Worker B-1786967547014",
+    "optimistic_lock_409_proven": true
+  }
+}

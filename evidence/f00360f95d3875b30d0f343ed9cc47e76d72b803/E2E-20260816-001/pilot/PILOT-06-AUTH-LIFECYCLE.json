@@ -1,0 +1,16 @@
+{
+  "case_id": "PILOT-06-AUTH-LIFECYCLE",
+  "category": "認証基盤",
+  "name": "認証・セッション維持・XSRF防御・ログアウト完全検証",
+  "status": "PASS",
+  "duration_ms": 198,
+  "duration_h": 0.000055,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/pilot/PILOT-06-AUTH-LIFECYCLE.json",
+  "error": null,
+  "evidence_detail": {
+    "unauth_blocked": true,
+    "auth_success": true,
+    "logout_status": 302,
+    "post_logout_blocked": true
+  }
+}

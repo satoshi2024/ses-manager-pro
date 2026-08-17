@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD02-11",
+  "dimension": "N,D,X",
+  "category": "MOD-02",
+  "name": "Resume Ingestion取込ジョブ一覧取得・ステータス検索検証",
+  "status": "PASS",
+  "duration_ms": 776,
+  "duration_h": 0.000216,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-11.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 200,
+    "records_count": 6
+  }
+}

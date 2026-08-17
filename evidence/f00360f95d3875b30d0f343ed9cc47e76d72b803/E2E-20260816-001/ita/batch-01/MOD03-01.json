@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD03-01",
+  "dimension": "N,D,U",
+  "category": "MOD-03",
+  "name": "要員（Engineer）新規登録・基本情報更新・円単位単価保持検証",
+  "status": "PASS",
+  "duration_ms": 5153,
+  "duration_h": 0.001431,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD03-01.json",
+  "error": null,
+  "evidence_detail": {
+    "create_status": 200,
+    "update_status": 200,
+    "db_after_expected_unit_price": "700000"
+  }
+}

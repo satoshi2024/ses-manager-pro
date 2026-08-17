@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD02-13",
+  "dimension": "A,X,D",
+  "category": "MOD-02",
+  "name": "File API存在しないファイルの404及び権限境界検証",
+  "status": "PASS",
+  "duration_ms": 681,
+  "duration_h": 0.000189,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD02-13.json",
+  "error": null,
+  "evidence_detail": {
+    "api_status": 403,
+    "fail_closed_guarded": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD01-10",
+  "dimension": "E,D,U",
+  "category": "MOD-01",
+  "name": "REST API例外時のApiResult統一レスポンス及びスタックトレース非漏洩検証",
+  "status": "PASS",
+  "duration_ms": 113,
+  "duration_h": 0.000031,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-10.json",
+  "error": null,
+  "evidence_detail": {
+    "response_code": 404,
+    "response_message": "閲覧権限がないか、対象が存在しません",
+    "no_stack_trace": true
+  }
+}

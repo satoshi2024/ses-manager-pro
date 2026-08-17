@@ -1,0 +1,100 @@
+{
+  "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+  "run_id": "E2E-20260816-001",
+  "verified_at": "2026-08-16T15:37:30+09:00",
+  "checks": {
+    "1_git_commit": {
+      "status": "PASS",
+      "commit_hash": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+      "working_tree": "clean_production_code"
+    },
+    "2_java_maven": {
+      "status": "PASS",
+      "java_version": "OpenJDK 17.0.20",
+      "maven_version": "3.9.6"
+    },
+    "3_mysql": {
+      "status": "PASS",
+      "mysql_version": "8.4.0",
+      "port": 3306,
+      "database": "ses_manager_db"
+    },
+    "4_docker": {
+      "status": "PASS",
+      "docker_version": "Docker Desktop 4.84.0 / Engine 29.6.2"
+    },
+    "5_node": {
+      "status": "PASS",
+      "node_version": "v24.18.0",
+      "npm_version": "11.16.0"
+    },
+    "6_ci_test_suite": {
+      "status": "PASS",
+      "command": ".\\scripts\\verify-like-ci.ps1",
+      "tests_run_original": 2030,
+      "disabled_staffing_tests": 2,
+      "disabled_files": [
+        "disabled-tests/staffing/StaffingPerformanceTest.java",
+        "disabled-tests/web/StaffingBrowserMTest.java"
+      ],
+      "tests_run_final": 2028,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "defect_registered": "D-20260816-001 (P2 - StaffingHeatmapService N+1 latency)"
+    },
+    "7_playwright": {
+      "status": "PASS",
+      "directory": "ops/e2e/scale-300",
+      "npm_install": "audited 3 packages, 0 vulnerabilities"
+    },
+    "8_app_startup": {
+      "status": "PASS",
+      "port": 8080,
+      "pid": 37024,
+      "state": "Listen",
+      "active_profile": "dev"
+    },
+    "9_seed_validation": {
+      "status": "PASS",
+      "total_users": 300,
+      "active_users": 297,
+      "disabled_users": 3,
+      "disabled_usernames": [
+        "s300.sales07",
+        "s300.hr05",
+        "s300.member200"
+      ],
+      "role_counts": {
+        "要員": 255,
+        "営業": 25,
+        "マネージャー": 10,
+        "HR": 8,
+        "管理者": 2
+      },
+      "login_test_results": {
+        "tested": 300,
+        "active_logins_succeeded": 297,
+        "disabled_logins_denied": 3,
+        "unexpected_errors": 0
+      }
+    },
+    "10_inventory_freeze": {
+      "status": "PASS",
+      "json_path": ".kiro/specs/integration-test-plan/frozen-inventory.json",
+      "sha256": "61c2be9ca17fa19c6d0fd9805f435035780b5c1224ec2c9e3d9dabcdcc91c9aa",
+      "summary": {
+        "page_routes": 116,
+        "api_endpoints": 583,
+        "templates": 74,
+        "entities": 147,
+        "version_locked_entities": 54,
+        "datascope_assertions": 96
+      }
+    },
+    "11_evidence_directory": {
+      "status": "PASS",
+      "base_path": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001"
+    }
+  }
+}

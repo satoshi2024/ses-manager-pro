@@ -1,0 +1,38 @@
+{
+  "case_id": "MOD01-03",
+  "dimension": "A,D,U",
+  "category": "MOD-01",
+  "name": "シードmanifest 297有効/3無効ログイン試験（sales07/hr05/member200個別検証）",
+  "status": "PASS",
+  "duration_ms": 4525,
+  "duration_h": 0.001257,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-01/MOD01-03.json",
+  "error": null,
+  "evidence_detail": {
+    "total_account_count": 300,
+    "active_account_count": 297,
+    "disabled_account_count": 3,
+    "oracle_exact_297_3_300": true,
+    "disabled_individual_results": [
+      {
+        "username": "s300.sales07",
+        "loginBlocked": true,
+        "location": "http://localhost:8080/login?error",
+        "dbStatus": "0"
+      },
+      {
+        "username": "s300.hr05",
+        "loginBlocked": true,
+        "location": "http://localhost:8080/login?error",
+        "dbStatus": "0"
+      },
+      {
+        "username": "s300.member200",
+        "loginBlocked": true,
+        "location": "http://localhost:8080/login?error",
+        "dbStatus": "0"
+      }
+    ],
+    "manifest_proven": true
+  }
+}
