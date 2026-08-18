@@ -125,3 +125,41 @@
 - 決定者: 発注者（Round 3 独立 Review 判定の明示決定）
 - 根拠/理由: UI コンポーネント依存と複数画面への影響を分離し、API 基盤およびコア機能のセキュリティ・整合性を最優先で確立するため。
 - 影響するspecへ反映したファイル: `.kiro/specs/productivity-search-saved-view/requirements.md` (R3.1, R4.1, R4.2, §9)、`design.md` (§4, §5, §9)、`tasks.md` (B1, B2)。
+
+## accounting-payment-integration (S15) G4/G9 決定記録
+
+- ID: S15-G4-MAPPING-01
+- 決定: freee 外部マスタの正規識別子を一意に確定する。
+  1. `CUSTOMER_PARTNER`: `partner.id` (Numeric ID string)
+  2. `BP_PARTNER`: `partner.id` (Numeric ID string)
+  3. `ACCOUNT_SALES`: `account_item.id` (Numeric ID string)
+  4. `ACCOUNT_PURCHASE`: `account_item.id` (Numeric ID string)
+  5. `ACCOUNT_EXPENSE`: `account_item.id` (Numeric ID string)
+  6. `TAX_SALES_10`: `tax_code` (String, e.g. `tax_10`)
+  7. `TAX_PURCHASE_10`: `tax_code` (String, e.g. `tax_10`)
+  8. `TAX_EXPENSE_10`: `tax_code` (String, e.g. `tax_10`)
+  9. `SECTION`: `section.id` (Numeric ID string)
+  10. `COST_CENTER`: G4 方針に基づき freee `SECTION` (`section.id`) へ写像する。
+  未許可の object_type は fail-closed (`return false`) とする。マッピング検証時は allow-list された canonical snapshot のみを保存する。
+- 決定日: 2026-08-18
+- 決定者: 発注者委任に基づく S15 設計
+- 根拠: freee 公式 API 仕様（税区分は `tax_code`、取引先/勘定科目/部門は `id`）に完全準拠し、未定義識別子の曖昧さを排除するため。
+- 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `canonical-mapping.md`, `requirements.md`, `tasks.md`
+
+- ID: S15-G4-STATE-LEASE-01
+- 決定: ジョブ状態機械・リース・取消補償を確定する。
+  1. `claimJob` は `status IN ('PENDING', 'RETRYABLE') AND (next_retry_at IS NULL OR next_retry_at <= NOW()) AND (lease_expires_at IS NULL OR lease_expires_at <= NOW())` を条件とし、`lease_token` (UUID) と `lease_expires_at = NOW() + 15m` を設定する。
+  2. `cancelJob` は `RUNNING` からの取消を許可し、実遷移元 (`from_status`) を `t_integration_job_event` に同一トランザクションで記録する。
+  3. HTTP 送信中に取消され外部取引が作成された場合、完了 CAS は失敗し、Worker は `CANCELLED_EXTERNALLY_CREATED` イベントを記録して即座に補償ジョブ (`SALES_INVOICE_CANCEL`) を enqueue する。他種別 (`BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `SALES_INVOICE_CANCEL`) の in-flight 取消は補償不能のため拒否する。
+  4. stale 回収は個別 CAS (`WHERE id=? AND status='RUNNING' AND lease_token=?`) で `RETRYABLE` に戻し、`t_integration_job_event` を同一トランザクションで記録する。再送前には外部取引照合を行い、二重登録を防止する。
+- 決定日: 2026-08-18
+- 決定者: 発注者委任に基づく S15 設計
+- 根拠: R3 指摘 P1-02 の完全解消。
+- 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `tasks.md`
+
+- ID: S15-G4-MULTINODE-01
+- 決定: `m_integration_connection` に `token_version INT NOT NULL DEFAULT 1` を保持し、`forceRefreshToken` に観測バージョン `observedTokenVersion` を渡す。行ロック取得後、`current.token_version > observedTokenVersion` であれば他ノードのリフレッシュ結果を再利用し、重複リフレッシュを防止する。
+- 決定日: 2026-08-18
+- 決定者: 発注者委任に基づく S15 設計
+- 根拠: R3 指摘 P1-03 の完全解消。
+- 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `tasks.md`

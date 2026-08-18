@@ -90,6 +90,9 @@
   import/exportへfallbackし、画面scrapingを禁止する。
 - 外部送信はoutbox/jobでtransaction外に実行し、idempotency key、request ID、payload hash、external ID、
   retry/backoff、rate limit、取消/訂正、月次reconciliationを保持する。
+- 外部マスタの正規識別子は、取引先/勘定科目/部門=`id` (Numeric)、税区分=`tax_code` (String)、COST_CENTER=`SECTION` (`id`) へ写像する。未定義object_typeはfail-closed (`return false`) とする。
+- multi-node環境における401トークンリフレッシュは、`token_version` と行ロックにより同一versionに対する単一ノードのリフレッシュに直列化し、他ノードは新トークンを再利用する。
+- ジョブ取消は `RUNNING` からの取消を許可し、HTTP実行中の取消で外部取引が作成された場合は補償取消ジョブ (`SALES_INVOICE_CANCEL`) を自動enqueueする。
 - 実契約plan、対象company ID、production credential、勘定科目/税/部門mappingはT094で確認する。未入手でも
   official contract fixtureとWireMockでF1/F2を進められるが、B1/B2/B3およびMの本番受入前には実環境確認を必須とする。
 
