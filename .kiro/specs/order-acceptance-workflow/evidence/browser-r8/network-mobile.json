@@ -6,16 +6,16 @@
       "version" : "captured"
     },
     "pages" : [ {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "id" : "page_1",
       "title" : "月次検収 - SES Manager Pro"
     } ],
     "entries" : [ {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/login",
+        "url" : "http://localhost:59805/login",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -70,11 +70,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap/bootstrap.min.css",
+        "url" : "http://localhost:59805/lib/bootstrap-icons/bootstrap-icons.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -135,11 +135,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "url" : "http://localhost:59805/lib/bootstrap/bootstrap.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -200,11 +200,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/css/common.css",
+        "url" : "http://localhost:59805/css/common.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -265,11 +265,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/js/i18n.js?lang=ja",
+        "url" : "http://localhost:59805/js/i18n.js?lang=ja",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -315,11 +315,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "url" : "http://localhost:59805/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -380,11 +380,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/favicon.svg",
+        "url" : "http://localhost:59805/favicon.svg",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -445,11 +445,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "POST",
-        "url" : "http://localhost:51254/login",
+        "url" : "http://localhost:59805/login",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -504,11 +504,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap/bootstrap.min.css",
+        "url" : "http://localhost:59805/lib/bootstrap/bootstrap.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -569,11 +569,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/css/common.css",
+        "url" : "http://localhost:59805/lib/bootstrap-icons/bootstrap-icons.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -634,11 +634,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "url" : "http://localhost:59805/css/common.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -699,11 +699,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/sweetalert2/sweetalert2.min.css",
+        "url" : "http://localhost:59805/lib/sweetalert2/sweetalert2.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -764,11 +764,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/jquery/jquery.min.js",
+        "url" : "http://localhost:59805/lib/jquery/jquery.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -829,11 +829,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap/bootstrap.bundle.min.js",
+        "url" : "http://localhost:59805/lib/bootstrap/bootstrap.bundle.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -894,167 +894,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "OK",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "image/svg+xml"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/js/profile.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/js/modules/dashboard.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/js/i18n.js?lang=ja&v=1786980248092",
+        "url" : "http://localhost:59805/js/i18n.js?lang=ja&v=1787023835216",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1100,11 +944,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/js/common.js",
+        "url" : "http://localhost:59805/js/profile.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1165,11 +1009,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.426716200",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/sweetalert2/sweetalert2.all.min.js",
+        "url" : "http://localhost:59805/js/common.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1230,11 +1074,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/chartjs/chart.umd.min.js",
+        "url" : "http://localhost:59805/js/modules/dashboard.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1295,11 +1139,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "url" : "http://localhost:59805/lib/sweetalert2/sweetalert2.all.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1308,7 +1152,7 @@
         "httpVersion" : "HTTP/1.1",
         "content" : {
           "size" : 0,
-          "mimeType" : "font/woff2"
+          "mimeType" : "text/javascript"
         },
         "headers" : [ {
           "name" : "",
@@ -1360,11 +1204,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/acceptance?workMonth=2026-07&acceptanceId=1",
+        "url" : "http://localhost:59805/acceptance?workMonth=2026-07&acceptanceId=1",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1419,11 +1263,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/sweetalert2/sweetalert2.min.css",
+        "url" : "http://localhost:59805/lib/bootstrap-icons/bootstrap-icons.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1484,11 +1328,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap/bootstrap.min.css",
+        "url" : "http://localhost:59805/lib/bootstrap/bootstrap.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1549,11 +1393,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/css/common.css",
+        "url" : "http://localhost:59805/css/common.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1614,11 +1458,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/bootstrap-icons.min.css",
+        "url" : "http://localhost:59805/lib/sweetalert2/sweetalert2.min.css",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1679,11 +1523,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/jquery/jquery.min.js",
+        "url" : "http://localhost:59805/lib/jquery/jquery.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1744,11 +1588,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap/bootstrap.bundle.min.js",
+        "url" : "http://localhost:59805/lib/bootstrap/bootstrap.bundle.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1809,11 +1653,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/js/profile.js",
+        "url" : "http://localhost:59805/js/profile.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1874,11 +1718,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/sweetalert2/sweetalert2.all.min.js",
+        "url" : "http://localhost:59805/js/modules/acceptance.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -1939,11 +1783,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/js/common.js",
+        "url" : "http://localhost:59805/js/common.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2004,11 +1848,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/lib/chartjs/chart.umd.min.js",
+        "url" : "http://localhost:59805/lib/sweetalert2/sweetalert2.all.min.js",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2069,76 +1913,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/js/modules/acceptance.js",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "text/javascript"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/js/i18n.js?lang=ja&v=1786980248226",
+        "url" : "http://localhost:59805/js/i18n.js?lang=ja&v=1787023835247",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2184,7 +1963,72 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:59805/lib/chartjs/chart.umd.min.js",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "text/javascript"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
@@ -2210,7 +2054,7 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
@@ -2236,179 +2080,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/api/notifications",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "application/json"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/api/customers/options",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "application/json"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/api/engineers/options",
-        "httpVersion" : "HTTP/1.1"
-      },
-      "response" : {
-        "status" : 200,
-        "statusText" : "",
-        "httpVersion" : "HTTP/1.1",
-        "content" : {
-          "size" : 0,
-          "mimeType" : "application/json"
-        },
-        "headers" : [ {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        }, {
-          "name" : "",
-          "value" : ""
-        } ]
-      },
-      "timings" : {
-        "send" : 0,
-        "wait" : 0,
-        "receive" : 0
-      }
-    }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
-      "time" : 0,
-      "request" : {
-        "method" : "GET",
-        "url" : "http://localhost:51254/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
+        "url" : "http://localhost:59805/lib/bootstrap-icons/fonts/bootstrap-icons.woff2?dd67030699838ea613ee6dbda90effa6",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2469,11 +2145,11 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=1",
+        "url" : "http://localhost:59805/api/notifications",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {
@@ -2525,11 +2201,179 @@
         "receive" : 0
       }
     }, {
-      "startedDateTime" : "2026-08-18T00:24:09.427714600",
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
       "time" : 0,
       "request" : {
         "method" : "GET",
-        "url" : "http://localhost:51254/api/notifications/unread-count",
+        "url" : "http://localhost:59805/api/customers/options",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "application/json"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:59805/api/engineers/options",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "application/json"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:59805/api/acceptances?current=1&size=1000&workMonth=2026-07&acceptanceId=1",
+        "httpVersion" : "HTTP/1.1"
+      },
+      "response" : {
+        "status" : 200,
+        "statusText" : "",
+        "httpVersion" : "HTTP/1.1",
+        "content" : {
+          "size" : 0,
+          "mimeType" : "application/json"
+        },
+        "headers" : [ {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        }, {
+          "name" : "",
+          "value" : ""
+        } ]
+      },
+      "timings" : {
+        "send" : 0,
+        "wait" : 0,
+        "receive" : 0
+      }
+    }, {
+      "startedDateTime" : "2026-08-18T12:30:36.448259800",
+      "time" : 0,
+      "request" : {
+        "method" : "GET",
+        "url" : "http://localhost:59805/api/notifications/unread-count",
         "httpVersion" : "HTTP/1.1"
       },
       "response" : {

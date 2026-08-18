@@ -11,6 +11,8 @@
 | D-20260816-001 | P2 | MOD-10 S12 / StaffingHeatmapService | `StaffingPerformanceTest` | OPEN | 開発（S12） | 代表データ量（200要員×50position×24月）需給集計時のN+1多表クエリによるp95遅延超過（実測402s > 10s閾値） |
 | D-20260817-002 | P2 | MOD-07 / ContractApiController | `E2E-07-R / MOD07-07 / PILOT-05` | OPEN | 開発（契約管理） | `ContractSaveDto` に `version` 属性が欠落しており、更新APIでMyBatis-Plus楽観ロックがバイパスされる。行ロック（`selectByIdForUpdate`）により直列化されるが、409競合検知が行われず後勝ち上書きとなる。 |
 | D-20260817-003 | P2 | MOD-03 / ActionPermissionResolver | `MOD03-18` | OPEN | 開発（セキュリティ・認証） | `ActionPermissionResolver` に `bp-affiliations` のルートマッピングが欠落しており、`MenuPermissionFilter` により全ロール（管理者含む）で `/api/bp-affiliations/**` が 403 拒否される。 |
+| D-20260818-004 | P1 | MOD-07 / CloudSignDispatchService | `MOD07-09` | OPEN | 開発（電子契約・外部連携） | CloudSign外部POST（`createDocument`）成功直後にDB更新が失敗（障害注入）した場合、外部docIdが未永続化のまま残り、再送時に外部重複/孤児ドキュメントが生成される（冪等補償欠落）。 |
+| D-20260818-005 | P2 | MOD-03 / ActionPermissionResolver | `MOD03-19 / BpMigrationApiController` | OPEN | 開発（セキュリティ・認証） | `ActionPermissionResolver` に `bp-migrations` のルートマッピングが欠落しており、`MenuPermissionFilter` により全ロール（管理者含む）で `/api/bp-migrations/**` が 403 拒否される。 |
 
 ---
 
@@ -98,3 +100,49 @@
 - **対応方針 / 回帰条件**:
   - `ActionPermissionResolver` に `Map.entry("bp-affiliations", "engineer")` または専用アクションを登録し、`MOD03-18` が PASS することを確認する。
 
+---
+
+### D-20260818-004: CloudSign外部POST成功後のDB障害注入時における冪等性欠落・重複孤児ドキュメント発生
+
+- **欠陥ID**: `D-20260818-004`
+- **Severity**: `P1`（RELEASE-BLOCKING / 外部SaaS状態とDB状態の不可逆的不整合）
+- **対象モジュール**: `MOD-07 / CloudSignDispatchService`
+- **関連用例ID**: `MOD07-09`（KNOWN_RISK / RELEASE-BLOCKING）
+- **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
+- **RUN_ID**: `E2E-20260816-001`
+- **状態**: `OPEN`
+- **担当Owner**: 開発（電子契約・外部連携）
+- **再現手順**:
+  1. 契約書ドキュメントを `QUEUED` 状態で作成。
+  2. `CloudSignDispatchService.doCreate` 実行時、外部 API `createDocument`（POST）が成功し外部 `documentId`（例: `CS-MOCK-1786981...`）が返却された直後に、DB `checkpoint` 更新を障害注入（トランザクション異常終了/DB切断）により失敗させる。
+  3. 次回リトライ時、DB は `CREATING`（または `QUEUED`）のまま `cloudsign_document_id` が未記録であるため、再度 `createDocument` を呼び出す。
+- **期待結果（理想動作）**:
+  - `operation_id`（例: `op:uuid`）による外部側での冪等キー検証、または再試行前の外部ドキュメント突合・クリーンアップ（補償トランザクション）により、外部ドキュメントが重複作成されないこと。
+- **実際の結果**:
+  - 外部 CloudSign 側に 1 回目の `documentId` が孤児（Orphan）として残り、2 回目の呼び出しで 2 件目の `documentId` が作成される（外部重複 2 件、DB は 2 件目のみ追跡）。
+- **対応方針 / 回帰条件**:
+  - 外部呼び出し前に `operationId` を含む事前突合メカニズム、または失敗時のクリーンアップ補償フローを導入し、`MOD07-09` の障害注入テストで外部重複が 0 件となることを確認する。
+
+---
+
+### D-20260818-005: ActionPermissionResolver に bp-migrations のルートマッピング欠落による 403 拒否
+
+- **欠陥ID**: `D-20260818-005`
+- **Severity**: `P2`
+- **対象モジュール**: `MOD-03 / ActionPermissionResolver`
+- **関連用例ID**: `MOD03-19 / BpMigrationApiController`
+- **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
+- **RUN_ID**: `E2E-20260816-001`
+- **状態**: `OPEN`
+- **担当Owner**: 開発（セキュリティ・認証）
+- **再現手順**:
+  1. `管理者` ロールでログイン。
+  2. `GET /api/bp-migrations` を実行。
+- **期待結果**:
+  - HTTP 200 で BP 移行リストが返却される。
+- **実際の結果**:
+  - `ActionPermissionResolver.resolve()` が `null` を返し、`MenuPermissionFilter` により HTTP 403 `{"code":403,"message":"このactionへのアクセス権限がありません"}` で遮断される。
+- **Root Cause**:
+  - `ActionPermissionResolver.java` の `RESOURCE_NAMES` に `bp-migrations` のルートプレフィックス定義が存在しない。
+- **対応方針 / 回帰条件**:
+  - `ActionPermissionResolver` に `Map.entry("bp-migrations", "bp-migration")` を登録し、`MOD03-19` が PASS することを確認する。

@@ -1,21 +1,21 @@
 {
-  "runId" : "browser-r8-20260818002405",
+  "runId" : "browser-r8-20260818123032",
   "acceptanceId" : 1,
   "desktop" : {
     "viewport" : "desktop",
-    "finalUrl" : "http://localhost:51254/acceptance?workMonth=2026-07&acceptanceId=1",
-    "afterLoginUrl" : "http://localhost:51254/dashboard",
+    "finalUrl" : "http://localhost:59805/acceptance?workMonth=2026-07&acceptanceId=1",
+    "afterLoginUrl" : "http://localhost:59805/dashboard",
     "targetRowTableWarning" : true,
     "targetRowVisibleInViewport" : true,
     "scrollY" : 0.0,
     "screenshotFile" : "desktop-1920x1080.png",
-    "screenshotSha256" : "5880602254840773ea3fca3eaa0e691280210becccacd5f58aa16903527446f2",
+    "screenshotSha256" : "94be08bb2977b2ec5aad1e7585c31940841aa8f4eae624b6d599a941e99e0df3",
     "consoleErrorCount" : 0
   },
   "mobile" : {
     "viewport" : "mobile",
-    "finalUrl" : "http://localhost:51254/acceptance?workMonth=2026-07&acceptanceId=1",
-    "afterLoginUrl" : "http://localhost:51254/dashboard",
+    "finalUrl" : "http://localhost:59805/acceptance?workMonth=2026-07&acceptanceId=1",
+    "afterLoginUrl" : "http://localhost:59805/dashboard",
     "targetRowTableWarning" : true,
     "targetRowVisibleInViewport" : true,
     "scrollY" : 0.0,
