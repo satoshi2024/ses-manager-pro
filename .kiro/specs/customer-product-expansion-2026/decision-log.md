@@ -116,6 +116,7 @@
 - 決定者:
 - 根拠/契約プラン/法務確認資料:
 - 影響するspecへ反映したファイル:
+```
 
 ## productivity-search-saved-view (S05) スコープ調整決定記録
 
@@ -130,27 +131,32 @@
 
 - ID: S15-G4-MAPPING-01
 - 決定: freee 外部マスタの正規識別子を一意に確定する。
-  1. `CUSTOMER_PARTNER`: `partner.id` (Numeric ID string)
-  2. `BP_PARTNER`: `partner.id` (Numeric ID string)
-  3. `ACCOUNT_SALES`: `account_item.id` (Numeric ID string)
-  4. `ACCOUNT_PURCHASE`: `account_item.id` (Numeric ID string)
-  5. `ACCOUNT_EXPENSE`: `account_item.id` (Numeric ID string)
-  6. `TAX_SALES_10`: `tax_code` (String, e.g. `tax_10`)
-  7. `TAX_PURCHASE_10`: `tax_code` (String, e.g. `tax_10`)
-  8. `TAX_EXPENSE_10`: `tax_code` (String, e.g. `tax_10`)
-  9. `SECTION`: `section.id` (Numeric ID string)
+  1. `CUSTOMER_PARTNER`: `partner.id` (Numeric ID string, JSON送信時 数値 `partner_id`)
+  2. `BP_PARTNER`: `partner.id` (Numeric ID string, JSON送信時 数値 `partner_id`)
+  3. `ACCOUNT_SALES`: `account_item.id` (Numeric ID string, JSON送信時 数値 `account_item_id`)
+  4. `ACCOUNT_PURCHASE`: `account_item.id` (Numeric ID string, JSON送信時 数値 `account_item_id`)
+  5. `ACCOUNT_EXPENSE`: `account_item.id` (Numeric ID string, JSON送信時 数値 `account_item_id`)
+  6. `TAX_SALES_10`: `tax_code` (Numeric Integer, 例: `34` 課税売上10%, JSON送信時 数値 `tax_code: 34`)
+  7. `TAX_PURCHASE_10`: `tax_code` (Numeric Integer, 例: `21` 課対仕入10%, JSON送信時 数値 `tax_code: 21`)
+  8. `TAX_EXPENSE_10`: `tax_code` (Numeric Integer, 例: `21` 課対仕入10%, JSON送信時 数値 `tax_code: 21`)
+  9. `SECTION`: `section.id` (Numeric ID string, JSON送信時 数値 `section_id`)
   10. `COST_CENTER`: G4 方針に基づき freee `SECTION` (`section.id`) へ写像する。
   未許可の object_type は fail-closed (`return false`) とする。マッピング検証時は allow-list された canonical snapshot のみを保存する。
 - 決定日: 2026-08-18
 - 決定者: 発注者委任に基づく S15 設計
-- 根拠: freee 公式 API 仕様（税区分は `tax_code`、取引先/勘定科目/部門は `id`）に完全準拠し、未定義識別子の曖昧さを排除するため。
+- 根拠: freee 公式 API 仕様（税区分は数値 `tax_code: 34`/`21`、取引先/勘定科目/部門は数値 `id`）に完全準拠し、未定義識別子の曖昧さを排除するため。
 - 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `canonical-mapping.md`, `requirements.md`, `tasks.md`
 
 - ID: S15-G4-STATE-LEASE-01
 - 決定: ジョブ状態機械・リース・取消補償を確定する。
   1. `claimJob` は `status IN ('PENDING', 'RETRYABLE') AND (next_retry_at IS NULL OR next_retry_at <= NOW()) AND (lease_expires_at IS NULL OR lease_expires_at <= NOW())` を条件とし、`lease_token` (UUID) と `lease_expires_at = NOW() + 15m` を設定する。
-  2. `cancelJob` は `RUNNING` からの取消を許可し、実遷移元 (`from_status`) を `t_integration_job_event` に同一トランザクションで記録する。
-  3. HTTP 送信中に取消され外部取引が作成された場合、完了 CAS は失敗し、Worker は `CANCELLED_EXTERNALLY_CREATED` イベントを記録して即座に補償ジョブ (`SALES_INVOICE_CANCEL`) を enqueue する。他種別 (`BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `SALES_INVOICE_CANCEL`) の in-flight 取消は補償不能のため拒否する。
+  2. 取消権限の種別分離:
+     - `SALES_INVOICE_SYNC`: `PENDING`, `RETRYABLE`, `RUNNING` からの取消を許可。
+     - `BP_PURCHASE_SYNC`: `PENDING`, `RETRYABLE` のみ許可（`RUNNING` 取消は 400 で拒否）。
+     - `EXPENSE_DEAL_SYNC`: `PENDING`, `RETRYABLE` のみ許可（`RUNNING` 取消は 400 で拒否）。
+     - `SALES_INVOICE_CANCEL`: 取消不可（終端）。
+     - `PAYMENT_SYNC`: `PENDING`, `RETRYABLE`, `RUNNING` からの取消許可（副作用なし）。
+  3. `SALES_INVOICE_SYNC` の HTTP 送信中に取消され外部取引が作成された場合、完了 CAS は失敗し、Worker は同一トランザクション内で `t_integration_job_event`（`to_status='CANCELLED'`, `safe_detail="CANCELLED_EXTERNALLY_CREATED (externalDealId=...)"`）を記録し、補償ジョブ (`SALES_INVOICE_CANCEL`) を自動 enqueue する。
   4. stale 回収は個別 CAS (`WHERE id=? AND status='RUNNING' AND lease_token=?`) で `RETRYABLE` に戻し、`t_integration_job_event` を同一トランザクションで記録する。再送前には外部取引照合を行い、二重登録を防止する。
 - 決定日: 2026-08-18
 - 決定者: 発注者委任に基づく S15 設計
@@ -158,8 +164,12 @@
 - 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `tasks.md`
 
 - ID: S15-G4-MULTINODE-01
-- 決定: `m_integration_connection` に `token_version INT NOT NULL DEFAULT 1` を保持し、`forceRefreshToken` に観測バージョン `observedTokenVersion` を渡す。行ロック取得後、`current.token_version > observedTokenVersion` であれば他ノードのリフレッシュ結果を再利用し、重複リフレッシュを防止する。
+- 決定: multi-node 環境における 401 トークンリフレッシュは、**DB トランザクション外で HTTP を実行する 3段階リース・CAS 状態機械** により直列化する。
+  - Step 1 (短期 DB Tx): `token_version = observedTokenVersion` かつ `(refresh_lease_expires_at IS NULL OR refresh_lease_expires_at <= NOW())` を条件に `refresh_lease_token` (UUID) と `refresh_lease_expires_at = NOW() + 30s` を更新してコミット。更新成功した 1 ノードのみが外部呼出権を獲得。0 件更新の他ノードはコミット済み現在行を再読込し、`token_version > observedTokenVersion` なら新トークンを即時再利用、他ノードが lease 保有中なら短期バックオフ (500ms x 3) 後に再読込。
+  - Step 2 (DB Tx 外): リース保有ノードが freee OAuth トークン更新エンドポイントを呼出。
+  - Step 3 (短期 DB Tx): CAS `WHERE id = ? AND refresh_lease_token = #{uuid}` により新トークン暗号文、`token_version = token_version + 1`, `last_refreshed_at = NOW()`, `refresh_lease_token = NULL`, `refresh_lease_expires_at = NULL` を更新してコミット。
+  - ノードクラッシュ時は 30 秒で lease が失効し、後続リクエストが安全に自己修復する。
 - 決定日: 2026-08-18
 - 決定者: 発注者委任に基づく S15 設計
-- 根拠: R3 指摘 P1-03 の完全解消。
+- 根拠: R3 指摘 P1-03、および「DB transaction内でHTTPを呼ばない」原則（platform-invariants §3.3）の完全遵守。
 - 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `tasks.md`

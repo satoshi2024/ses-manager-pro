@@ -11,8 +11,8 @@
 
 1. THE システム SHALL tenant/legal entity/provider/product別connectionを管理し、`legal_entity_key` と `active_slot` により NULL 一意性および soft-delete 後の安全な再作成を保証する。
 2. THE システム SHALL 顧客/BP/勘定科目(売上/仕入/経費)/税区分(売上/仕入/経費)/部門/cost center の外部ID mappingを持つ。
-3. THE 外部マスタ検証 SHALL 全10種別の正規識別子 (`id` / `tax_code`) を実在照合し、未知種別は fail-closed (`return false`) で拒否し、検証時の canonical snapshot を保存する。
-4. THE 401トークンリフレッシュ SHALL multi-node 環境において `token_version` と行ロックにより同一versionに対する単一ノードのリフレッシュに直列化し、他ノードは新トークンを再利用する。
+3. THE 外部マスタ検証 SHALL 全10種別の正規識別子 (`id` / 数値 `tax_code`) を実在照合し、未知種別は fail-closed (`return false`) で拒否し、検証時の canonical snapshot を保存する。
+4. THE 401トークンリフレッシュ SHALL multi-node 環境において DB トランザクション外で HTTP を呼ぶ 3段階リース・CAS により直列化し、他ノードは新トークンを再利用する。
 
 ## R2. 売上連携・取消
 
@@ -32,14 +32,14 @@
 
 1. THE 外部連携 SHALL outbox/jobで非同期実行し、DB transaction内でHTTPを呼ばない。
 2. THE job SHALL `lease_token` (UUID) と `lease_expires_at` を持ち、claim 時点および完了 CAS で lease を検証する。
-3. THE job取消 SHALL `RUNNING` 状態からの取消を許可し、実遷移元を job event に記録する。HTTP 実行中に取消され外部取引が作成された場合は `CANCELLED_EXTERNALLY_CREATED` イベントを記録して補償取消ジョブを自動 enqueue する。
+3. THE job取消 SHALL `SALES_INVOICE_SYNC` のみ `RUNNING` 状態からの取消を許可し、HTTP 実行中に取消され外部取引が作成された場合は `CANCELLED_EXTERNALLY_CREATED` イベントを同一トランザクションで記録して補償取消ジョブ (`SALES_INVOICE_CANCEL`) を自動 enqueue する。BP仕入・経費の `RUNNING` 取消は 400 で拒否する。
 4. THE stale回収 SHALL 個別 CAS (`WHERE id=? AND status='RUNNING' AND lease_token=?`) で `RETRYABLE` に戻し、event を同一トランザクションで記録する。再送前には外部取引照合を行い二重登録を防止する。
 5. THE エラー情報 SHALL 生の外部レスポンスや例外メッセージを保存・ログ出力せず、定型エラーコードと局所化テンプレートキーのみを保存する。
 
 ## R5. 月次照合・スコープ
 
-1. THE システム SHALL 内部売上/仕入/入金/経費の4母集団と外部取引を月次照合し、未送信/不一致/外部のみを表示する。
-2. THE 月次照合 SHALL 外部取引を pagination (全ページ走査) で取得し、接続なし・トークンなし・API障害・上限到達時は `externalFetchFailed=true`, `readyForClosing=false` (fail-closed) とする。
+1. THE システム SHALL 内部売上/仕入/入金/経費の4母集団（売上 `t_invoice`, 仕入 `t_bp_payment`, 入金 `t_invoice_payment`, 経費 `t_expense_request`）と外部取引・決済データを月次照合し、未送信/不一致/外部のみを表示する。
+2. THE 月次照合 SHALL 外部取引を pagination (全ページ走査) で取得し、接続なし・トークンなし・API障害・50 ページ上限到達時は `externalFetchFailed=true`, `readyForClosing=false` (fail-closed) とする。
 3. THE 月次照合 SHALL SUCCEEDED ジョブに対しても外部実金額を突合し、外部側での直接変更を `AMOUNT_MISMATCH` として検知する。
 4. THE データスコープ SHALL マネージャーロールの参照範囲を自組織に紐づく Job / 照合アイテムに SQL 境界で厳格に限定し、許可組織が空集合の場合は DB レベルで 0 件を返却する。
 
