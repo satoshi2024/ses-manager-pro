@@ -130,7 +130,7 @@
 ## accounting-payment-integration (S15) G4/G9 決定記録
 
 - ID: S15-G4-MAPPING-01
-- 決定: freee 外部マスタの正規識別子を一意に確定する。
+- 決定: freee 外部マスタの正規識別子を一意に確定する（開発・テストは公式準拠の `PROVISIONAL`、実本番マスタIDは本番Release Gateとして分離管理）。
   1. `CUSTOMER_PARTNER`: `partner.id` (Numeric ID string, JSON送信時 数値 `partner_id`)
   2. `BP_PARTNER`: `partner.id` (Numeric ID string, JSON送信時 数値 `partner_id`)
   3. `ACCOUNT_SALES`: `account_item.id` (Numeric ID string, JSON送信時 数値 `account_item_id`)
@@ -148,7 +148,7 @@
 - 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `canonical-mapping.md`, `requirements.md`, `tasks.md`
 
 - ID: S15-G4-STATE-LEASE-01
-- 決定: ジョブ状態機械・リース・取消補償を確定する。
+- 決定: ジョブ状態機械・リース・取消補償を確定する（platform-invariants §8 表3 準拠）。
   1. `claimJob` は `status IN ('PENDING', 'RETRYABLE') AND (next_retry_at IS NULL OR next_retry_at <= NOW()) AND (lease_expires_at IS NULL OR lease_expires_at <= NOW())` を条件とし、`lease_token` (UUID) と `lease_expires_at = NOW() + 15m` を設定する。
   2. 取消権限の種別分離:
      - `SALES_INVOICE_SYNC`: `PENDING`, `RETRYABLE`, `RUNNING` からの取消を許可。
@@ -156,7 +156,7 @@
      - `EXPENSE_DEAL_SYNC`: `PENDING`, `RETRYABLE` のみ許可（`RUNNING` 取消は 400 で拒否）。
      - `SALES_INVOICE_CANCEL`: 取消不可（終端）。
      - `PAYMENT_SYNC`: `PENDING`, `RETRYABLE`, `RUNNING` からの取消許可（副作用なし）。
-  3. `SALES_INVOICE_SYNC` の HTTP 送信中に取消され外部取引が作成された場合、完了 CAS は失敗し、Worker は同一トランザクション内で `t_integration_job_event`（`to_status='CANCELLED'`, `safe_detail="CANCELLED_EXTERNALLY_CREATED (externalDealId=...)"`）を記録し、補償ジョブ (`SALES_INVOICE_CANCEL`) を自動 enqueue する。
+  3. `SALES_INVOICE_SYNC` の HTTP 送信中に取消され外部取引が作成された場合、完了 CAS は失敗し、同一トランザクション内で `t_integration_job_event`（`to_status='CANCELLED'`, `safe_detail="CANCELLED_EXTERNALLY_CREATED (externalDealId=...)"`）を記録し、補償ジョブ (`SALES_INVOICE_CANCEL`) を自動 enqueue する（Tx 失敗時は全 rollback）。
   4. stale 回収は個別 CAS (`WHERE id=? AND status='RUNNING' AND lease_token=?`) で `RETRYABLE` に戻し、`t_integration_job_event` を同一トランザクションで記録する。再送前には外部取引照合を行い、二重登録を防止する。
 - 決定日: 2026-08-18
 - 決定者: 発注者委任に基づく S15 設計
@@ -164,11 +164,11 @@
 - 影響するspecへ反映したファイル: `.kiro/specs/accounting-payment-integration/design.md`, `tasks.md`
 
 - ID: S15-G4-MULTINODE-01
-- 決定: multi-node 環境における 401 トークンリフレッシュは、**DB トランザクション外で HTTP を実行する 3段階リース・CAS 状態機械** により直列化する。
-  - Step 1 (短期 DB Tx): `token_version = observedTokenVersion` かつ `(refresh_lease_expires_at IS NULL OR refresh_lease_expires_at <= NOW())` を条件に `refresh_lease_token` (UUID) と `refresh_lease_expires_at = NOW() + 30s` を更新してコミット。更新成功した 1 ノードのみが外部呼出権を獲得。0 件更新の他ノードはコミット済み現在行を再読込し、`token_version > observedTokenVersion` なら新トークンを即時再利用、他ノードが lease 保有中なら短期バックオフ (500ms x 3) 後に再読込。
-  - Step 2 (DB Tx 外): リース保有ノードが freee OAuth トークン更新エンドポイントを呼出。
-  - Step 3 (短期 DB Tx): CAS `WHERE id = ? AND refresh_lease_token = #{uuid}` により新トークン暗号文、`token_version = token_version + 1`, `last_refreshed_at = NOW()`, `refresh_lease_token = NULL`, `refresh_lease_expires_at = NULL` を更新してコミット。
-  - ノードクラッシュ時は 30 秒で lease が失効し、後続リクエストが安全に自己修復する。
+- 決定: multi-node 環境における 401 トークンリフレッシュは、**DB トランザクション外で HTTP を実行する 3段階リース・Fencing・CAS 状態機械** により直列化する。
+  - Step 1 (短期 DB Tx): `token_version = observedTokenVersion` かつ `(refresh_lease_expires_at IS NULL OR refresh_lease_expires_at <= NOW())` を条件に `refresh_lease_token` (UUID) と `refresh_lease_expires_at = NOW() + INTERVAL 45 SECOND` を更新してコミット。更新成功した 1 ノードのみが外部呼出権を獲得。0 件更新の他ノードはコミット済み現在行を再読込し、`token_version > observedTokenVersion` なら新トークンを即時再利用、他ノードが lease 保有中ならバックオフ (500ms, 1000ms, 2000ms 最大5回) 後に再読込。
+  - Step 2 (DB Tx 外): リース保有ノードが freee OAuth トークン更新エンドポイントを呼出（Connect 5s, Read 10s, 最大 15s タイムアウト設定）。
+  - Step 3 (短期 DB Tx): Fencing CAS `WHERE id = ? AND token_version = #{observedTokenVersion} AND refresh_lease_token = #{uuid}` により新トークン暗号文、`token_version = token_version + 1`, `last_refreshed_at = NOW()`, `refresh_lease_token = NULL`, `refresh_lease_expires_at = NULL` を更新してコミット。CAS 失敗（遅延でリース奪取等）時は新トークンを破棄して再読込。
+  - OAuth エラー `invalid_grant` 時は `status = 'ERROR'`, `error_code = 'REAUTH_REQUIRED'` を設定し再認証を要求。
 - 決定日: 2026-08-18
 - 決定者: 発注者委任に基づく S15 設計
 - 根拠: R3 指摘 P1-03、および「DB transaction内でHTTPを呼ばない」原則（platform-invariants §3.3）の完全遵守。

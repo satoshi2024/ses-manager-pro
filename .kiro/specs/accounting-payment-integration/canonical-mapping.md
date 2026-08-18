@@ -10,28 +10,26 @@
    - freee Public API (OAuth 2.0 Authorization Code Flow)
    - API未対応・プラン制限時は CSV エクスポート/インポートへのフォールバック
    - DB transaction 外で非同期 Job (Outbox パターン) による送信
-3. **未確認項目 (本番 Release Gate)**:
-   - 実 freee 契約プラン (Standard / Professional / Enterprise)
-   - 本番 `company_id`
-   - 本番 Client ID / Client Secret / 接続先 URL
-   - 本番環境での勘定科目/税区分/部門/取引先の実 ID マッピング
+3. **PROVISIONAL 仕様と本番 Release Gate**:
+   - 開発・単体/統合テスト・MySQL回帰は、freee公式API仕様に完全準拠した PROVISIONAL 定義および WireMock fixture に基づき実行する。
+   - 実契約プラン (Standard / Professional / Enterprise)、実本番 `company_id`、本番 Client ID / Client Secret、実本番マスタIDは本番Release Gateとして分離管理する。
 
 ---
 
 ## 2. 外部マスタ 10種別 正規識別子 & 検証エンドポイント仕様
 
-| No | マッピング種別 (`object_type`) | 正規識別子型 | freee API エンドポイント / ソース | 存在検証・照合ルール | freee 送信時ペイロード適用先 (JSON型) | 確認状態 (Release Gate) |
+| No | マッピング種別 (`object_type`) | 正規識別子型 | freee API エンドポイント / 一次資料 | 存在検証・照合ルール | freee 送信時ペイロード適用先 (JSON型) | 確認状態 |
 |---|---|---|---|---|---|---|
-| 1 | `CUSTOMER_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | **未確認 (Release Gate)** |
-| 2 | `BP_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | **未確認 (Release Gate)** |
-| 3 | `ACCOUNT_SALES` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | **未確認 (Release Gate)** |
-| 4 | `ACCOUNT_PURCHASE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | **未確認 (Release Gate)** |
-| 5 | `ACCOUNT_EXPENSE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | **未確認 (Release Gate)** |
-| 6 | `TAX_SALES_10` | `tax_code` (Numeric Integer, 例: `34`) | `GET /api/1/taxes/companies/{company_id}` | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 34` (Number) | **未確認 (Release Gate)** |
-| 7 | `TAX_PURCHASE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | **未確認 (Release Gate)** |
-| 8 | `TAX_EXPENSE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | **未確認 (Release Gate)** |
-| 9 | `SECTION` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` | 一覧走査で `section.id == external_id` | deal details `section_id` (Number) | **未確認 (Release Gate)** |
-| 10 | `COST_CENTER` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` | G4 決定: SECTION へ写像して照合 | deal details `section_id` (Number) | **未確認 (Release Gate)** |
+| 1 | `CUSTOMER_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (freee API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
+| 2 | `BP_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (freee API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
+| 3 | `ACCOUNT_SALES` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 4 | `ACCOUNT_PURCHASE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 5 | `ACCOUNT_EXPENSE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 6 | `TAX_SALES_10` | `tax_code` (Numeric Integer, 例: `34`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 34` (Number) | `PROVISIONAL` / Release Gate |
+| 7 | `TAX_PURCHASE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
+| 8 | `TAX_EXPENSE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
+| 9 | `SECTION` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (freee API v1) | 一覧走査で `section.id == external_id` | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
+| 10 | `COST_CENTER` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (freee API v1) | G4 決定: SECTION へ写像して照合 | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
 
 - **フェイルクローズ**: 上記10種別以外の未知の `object_type` は `return false`（検証失敗）。一覧取得が 200 OK であっても該当 ID / code が存在しない場合は `false`。
 - **Canonical Snapshot 仕様**:
