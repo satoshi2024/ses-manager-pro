@@ -117,7 +117,7 @@ public class SurveyServiceImpl implements SurveyService {
                 .set("description", description == null ? null : description.trim())
                 .set("questions_json", writeJson(questions))
                 .set("version", version + 1)
-                .set("updated_at", java.time.LocalDateTime.now()));
+                .set("updated_at", java.time.LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }

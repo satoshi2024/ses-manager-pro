@@ -55,6 +55,11 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            // ---- 最新version=105.3（repeatable migration（version=NULL）を除く） ----
+            String latestVersion = queryString(statement,
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
+            assertEquals("105.3", latestVersion, "最新のマイグレーションバージョンは105.3であること");
+
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
                     "t_one_on_one_request", "m_survey_template", "t_survey_campaign", "t_survey_response"}) {
@@ -90,8 +95,12 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertForeignKeyExists(statement, "t_survey_response", "fk_survey_response_campaign");
 
             // ---- seeds ----
-            assertEquals(3, queryInt(statement,
-                    "SELECT COUNT(*) FROM m_document_type WHERE code IN ('SKILL_SHEET','RECEIPT','PRIVATE_NOTE')"));
+            assertEquals(4, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_document_type WHERE code IN "
+                            + "('SKILL_SHEET','RECEIPT','PRIVATE_NOTE','CHANGE_REQUEST_ATTACHMENT')"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_document_type WHERE code='CHANGE_REQUEST_ATTACHMENT'"),
+                    "CHANGE_REQUEST_ATTACHMENT文書種別seed（R2-P1-01）");
             for (String menuKey : new String[]{
                     "myDashboard", "myProfile", "myPayroll", "myExpenses", "myOneOnOnes", "mySurveys",
                     "engineerChangeRequests", "expenseManagement", "oneOnOneManagement", "surveyManagement"}) {
@@ -273,6 +282,10 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            String latestVersion = queryString(statement,
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
+            assertEquals("105.3", latestVersion, "legacy DBの最新マイグレーションバージョンは105.3であること");
+
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
                     "t_one_on_one_request", "m_survey_template", "t_survey_campaign", "t_survey_response"}) {
@@ -282,6 +295,9 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM m_menu WHERE menu_key='myPayroll'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_document_type WHERE code='CHANGE_REQUEST_ATTACHMENT'"),
+                    "legacy DBへV105.3のCHANGE_REQUEST_ATTACHMENT seedが適用されること（R2-P1-01）");
 
             // fresh（V1統合baseline）とlegacy（V105/V105_1順方向適用）でshapeが一致する
             Flyway.configure()
@@ -344,7 +360,7 @@ class FlywaySelfServiceSchemaSmokeTest {
         //    - t_survey_campaign.template_snapshot_version が存在しない
         try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
-                    "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1");
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
             assertEquals("105.1", latestVersion, "V105.1適用時点の最新マイグレーションバージョンは105.1であること");
 
             assertEquals(0, queryInt(statement,
@@ -370,11 +386,32 @@ class FlywaySelfServiceSchemaSmokeTest {
         //    - t_survey_campaign.template_snapshot_version が存在する
         try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
-                    "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 1");
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
             assertEquals("105.2", latestVersion, "V105.2適用後の最新マイグレーションバージョンは105.2であること");
 
             assertColumnExists(statement, "t_engineer", "phone");
             assertColumnExists(statement, "t_survey_campaign", "template_snapshot_version");
+        }
+
+        // 7. ここから V105.3 へ順方向適用
+        Flyway.configure()
+                .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .target("105.3")
+                .load()
+                .migrate();
+
+        // 8. V105.3適用後の状態を明示assert:
+        //    - flyway_schema_history の最新versionが '105.3'
+        //    - CHANGE_REQUEST_ATTACHMENT seedが存在する（R2-P1-01）
+        try (Connection connection = HISTORICAL_V105_1_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            String latestVersion = queryString(statement,
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
+            assertEquals("105.3", latestVersion, "V105.3適用後の最新マイグレーションバージョンは105.3であること");
+
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_document_type WHERE code='CHANGE_REQUEST_ATTACHMENT'"),
+                    "historical DBへV105.3のCHANGE_REQUEST_ATTACHMENT seedが適用されること（R2-P1-01）");
         }
     }
 

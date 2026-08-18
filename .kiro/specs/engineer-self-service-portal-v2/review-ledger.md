@@ -3,9 +3,20 @@
 ## 現行判定
 
 - 状態: `READY_FOR_REVIEW`
-- 実装AI: S14主実装（Round 4 Review Packet再構成・実MySQL/Performance/実在Class.method Test Matrix完備）
-- 独立Review: Round 4 提出（全P1 12件・P2 2件を `FIXED_BY_IMPLEMENTER` として記録・独立検証待ち）
+- 実装AI: S14主実装（Round 4 独立再Review指摘の修正完了。V105.3・申請ID境界download・通知outbox・PRIVATE_NOTE ACL・固定Clock境界・browser gate）
+- 独立Review: Round 4.2 提出（R2-P1-01, R1-P1-05, R1-P1-07, R1-P1-09, R1-P1-12, R1-P2-03 を `FIXED_BY_IMPLEMENTER` として記録・独立検証待ち）
 - OPEN issue: なし（全件 `FIXED_BY_IMPLEMENTER`）
+
+## Round 4 独立再Review指摘への対応記録（R4.2）
+
+| 指摘ID | 重要度 | 指摘内容 | 対応 | 検証テスト |
+|---|---|---|---|---|
+| R2-P1-01 | P1 | 変更申請添付: seedなし・本人download経路なし・FileScope専用分岐なし | 新規migration `V105_3` で `CHANGE_REQUEST_ATTACHMENT` seed追加（H2同期済）。本人 `/api/my/change-requests/{id}/attachment` と管理側 `/api/engineer-change-requests/{id}/attachment` を**申請ID境界**で追加。他要員は404、未scanは403。FileScopeValidationServiceに専用分岐（本人/HR/管理者/マネージャーscope∩DataScope、営業不可）。監査ログ（ApiAuditFilter）記録。管理JSのdownload URLを実在endpointへ修正 | `EngineerChangeRequestAttachmentApiTest`（upload→関連付け→CLEAN→download→監査ログ一気通貫。他要員404・未scan403・営業403・管理者200）、`FlywaySelfServiceSchemaSmokeTest`（fresh/legacy/historical→V105.3+seed） |
+| R1-P1-05 | P1 | 通知失敗で外部会計送信が再実行される | markSent tx内で通知行+通知outbox eventを原子的永続化（既存実装を維持）。配信は`NotificationOutboxService`の別dispatcherがbackoff再送。外部senderは`job.payload_hash`由来の決定的冪等キー（S15 provider契約をdesign.mdに明記）。通知配信失敗はjob SUCCEEDEDを巻き戻さない | `ExpenseRequestFlowIntegrationTest.会計送信成功後の通知配信失敗でもjobはSUCCEEDEDのままoutboxが再送し通知は1件だけ`（sender 1回・job SUCCEEDED・outbox RETRY・復旧後SENT・通知1件） |
+| R1-P1-07 | P1 | PRIVATE_NOTE downloadが一般管理者に開く | `FileScopeValidationService`を`ObjectProvider<AuthorizationService>`で`one-on-one.confidential`判定へ統一（bean不在・例外はfail-closed）。`DocumentServiceImpl`のlist（`applyDataScopeFilter`）・detail（`assertDocumentAccessAllowed`）もSQL母集団でPRIVATE_NOTEを除外/拒否。指定管理者のpositive testは実permission group/action/assignment登録で検証 | `PrivateNoteDocumentAclTest`（HR/指定管理者/一般管理者/営業/マネージャー/本人のdetail+downloadを同表で検証。一覧母集団も検証） |
+| R1-P1-09 | P1 | 1on1候補日: 当日許可は決定表と不一致 | `create`の候補日検証を `d.isBefore(today.plusDays(1))`（当日拒否・翌日以降のみ）へ修正 | `OneOnOneSurveyBoundaryClockTest`（固定Clockで1on1前日/当日400・翌日200、survey開始前/終了日翌日400・開始日/終了日200） |
+| R1-P1-12 | P1 | T093 BrowserDemo: ロール・payroll欠落・DOM/操作assertなし・evidenceがworktree変更 | `@Tag("browser")`+専用profile（`browser-tests`）+CI gate（`browser-test` job・artifact保存）。要員ロール（既存ユーザー分岐含む）・7画面（payroll追加）・実在selectorのDOM待ち・エラーページ0・console error 0・network 4xx/5xx 0・実操作6種・本人BのPII非漏洩。証跡は`target/browser-m-evidence/`（`.gitignore`対象） | `EngineerSelfServiceBrowserMTest`（desktop/390px両方で実測） |
+| R1-P2-03 | P2 | TenantClock未注入が15箇所残留 | S14対象sourceのparameterless `now()`/`currentTimeMillis()` 15 call sitesを全て `Clock` 注入へ置換（ExpenseRequestServiceImpl 7・ApprovalAdapter 2・NotificationServiceImpl 3・SurveyServiceImpl 1・FileScopeValidationService 1・OneOnOneRequestServiceImpl 1（`currentTimeMillis`→`clock.millis()`）） | S14対象source grep 0件。既存テスト（NotificationOutbox系・Expense/OneOnOne/Survey/Portal回帰）で回帰なし |
 
 ## G9 決定記録
 
@@ -25,6 +36,7 @@
 |---|---|---|
 | **S14 DB Migration** | `src/main/resources/db/migration/V105_1__engineer_self_service_v2_forward_repair.sql` | `4fa3a689` 元blobへ完全復元（チェックサム一致） |
 | **S14 DB Migration** | `src/main/resources/db/migration/V105_2__engineer_self_service_v2_phone_and_snapshot_version.sql` | `phone` および `template_snapshot_version` 新設移行 |
+| **S14 DB Migration** | `src/main/resources/db/migration/V105_3__change_request_attachment_doc_type.sql` | `CHANGE_REQUEST_ATTACHMENT` 文書種別seed（R2-P1-01。V105/V105.1/V105.2は変更禁止） |
 | **S14 Core Service** | `src/main/java/com/ses/service/changerequest/impl/EngineerChangeRequestServiceImpl.java` | myProfile phone取得、validateAttachmentリンク厳格化、Clock注入 |
 | **S14 Core Service** | `src/main/java/com/ses/service/impl/EngineerChangeRequestApprovalAdapter.java` | SysUser.email連携fingerprint競合検出 |
 | **S14 Core Service** | `src/main/java/com/ses/service/expense/ExpenseAccountingJobScheduler.java` | markSentトランザクション内での通知永続化 |
@@ -43,7 +55,10 @@
 | **S14 Tests** | `src/test/java/com/ses/oneonone/OneOnOneSurveyFlowIntegrationTest.java` | inactive相手方400、confidential閲覧境界、snapshot version保持、匿名閾値 |
 | **S14 Tests** | `src/test/java/com/ses/service/impl/FreeeHrContractTest.java` | 複数従業員フィクスチャからの要員抽出と混入防止 |
 | **S14 Tests** | `src/test/java/com/ses/web/EngineerSelfServicePortalMRegressionTest.java` | canonical menuKey通知一覧・未読集計一気通貫検証 |
-| **S14 Tests** | `src/test/java/com/ses/migration/FlywaySelfServiceSchemaSmokeTest.java` | 隔離MySQL container（HISTORICAL_V105_1_MYSQL）による旧V105.1→V105.2順方向適用・pre/post明示assert |
+| **S14 Tests** | `src/test/java/com/ses/migration/FlywaySelfServiceSchemaSmokeTest.java` | 隔離MySQL container（HISTORICAL_V105_1_MYSQL）による旧V105.1→V105.2→V105.3順方向適用・pre/post明示assert |
+| **S14 Tests** | `src/test/java/com/ses/changerequest/EngineerChangeRequestAttachmentApiTest.java` | 添付upload→申請関連付け→CLEAN→download→監査ログ一気通貫・IDOR 404・未scan 403・営業403・管理者200 |
+| **S14 Tests** | `src/test/java/com/ses/oneonone/OneOnOneSurveyBoundaryClockTest.java` | 固定Clockによる1on1候補日・survey期間の境界値（前日/当日/翌日・開始前/開始日/終了日/終了日翌日） |
+| **S14 Tests** | `src/test/java/com/ses/oneonone/PrivateNoteDocumentAclTest.java` | PRIVATE_NOTEのdetail/download ACLをHR/指定管理者/一般管理者/営業/マネージャー/本人で同表検証・一覧母集団除外 |
 | **中央台帳** | `.kiro/specs/customer-product-expansion-2026/spec-execution-ledger.md` | S14進捗行同期（Base/Headコミットハッシュ明記） |
 | **範囲外（他spec証跡）** | `.kiro/specs/attendance-leave-overtime-compliance/evidence/...` | S11 browser-m 証跡ファイル（既存） |
 | **範囲外（他spec証跡）** | `.kiro/specs/dispatch-outsourcing-compliance-ledger/evidence/...` | S10 browser-g2 証跡ファイル（既存） |
@@ -91,27 +106,29 @@
 | **R4.3** | confidential相談閲覧制限 | `OneOnOneRequestServiceImpl.detailManagement` / `AuthorizationServiceImpl` | `OneOnOneSurveyFlowIntegrationTest.confidential秘密メモはHRのみまたは指定管理者のみ閲覧可能` | `OneOnOneSurveyFlowIntegrationTest.oneOnOneフローが申請から日程確定実施済まで進みconfidentialは営業から見えない` | `EngineerSelfServicePortalMRegressionTest.pageNavigationAndRoleBoundaries` |
 | **R4.4** | サーベイ離職リスク・匿名性閾値 | `SurveyServiceImpl.aggregate` / `computeRetentionRisk` | `OneOnOneSurveyFlowIntegrationTest.surveyは未回答を母数に含めず匿名閾値未満を非表示にする` | `OneOnOneSurveyFlowIntegrationTest.匿名性閾値未満の質問別リスク分析は集計から除外される` | `OneOnOneSurveyFlowIntegrationTest.匿名性閾値未満の質問別リスク分析は集計から除外される` |
 | **R5** | 本人A/B完全分離・master不変 | 各MyApiController / ApprovalAdapter | `EngineerSelfServicePortalMRegressionTest.fullLifecycleSynergyIntegration` | `EngineerSelfServicePortalMRegressionTest.piiLeakScanAndIdorProtection` | `EngineerChangeRequestFlowIntegrationTest.email変更申請後に管理者がSysUserのemailを直接変更すると承認時conflictになる` |
-| **T093** | 実ブラウザ desktop/390px 一気通貫実測・DOM/console/screenshot検証 | `EngineerSelfServiceBrowserMTest.captureEngineerPortalScreensWithRealBrowser` | `EngineerSelfServiceBrowserMTest.captureEngineerPortalScreensWithRealBrowser` | `EngineerSelfServicePortalMRegressionTest.pageNavigationAndRoleBoundaries` | `EngineerSelfServicePortalMRegressionTest.piiLeakScanAndIdorProtection` |
+| **T093** | 実ブラウザ desktop/390px 一気通貫実測・DOM/console/network/PII検証 | `EngineerSelfServiceBrowserMTest.captureEngineerPortalScreensWithRealBrowser`（`@Tag("browser")`・`-Pbrowser-tests`） | `EngineerSelfServicePortalMRegressionTest.pageNavigationAndRoleBoundaries` | `EngineerSelfServicePortalMRegressionTest.piiLeakScanAndIdorProtection` |
 
 ## Migration Fixture 実証記録（MySQL 8.0 Testcontainers 3環境）
 
 | 検証シナリオ | 対象環境 (MySQL Container) | 検証内容・事前事後アサーション | 実測結果 |
 |---|---|---|---|
-| **Fresh DB** | `ses_manager_selfservice_v105` | V1統合baseline → V105.2順方向適用。テーブル・列・制約・seed検証 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.V105のselfservice_shapeがfreshとlegacyで一致し制約がMySQLで成立する`) |
-| **Legacy DB (V104.4)** | `ses_manager_selfservice_legacy` | V104.4適用済みDB → selfserviceテーブル除去 → V105〜V105.2順方向適用。freshとshape完全一致 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.V104_4適用済みlegacyDBへV105を順方向適用できshapeがfreshと一致する`) |
-| **Historical V105.1 DB (4fa3a689)** | `ses_manager_selfservice_historical_v105_1` (隔離container) | V104.4→V105.1順方向適用。<br>【V105.1時点明示assert】version=105.1, phone不存在(count=0), snapshot_version不存在(count=0)。<br>【V105.2順方向適用後assert】version=105.2, phone存在, snapshot_version存在 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.旧4fa3a689版V105_1適用済みDBからV105_2へ順方向適用できる`) |
+| **Fresh DB** | `ses_manager_selfservice_v105` | V1統合baseline → V105.3順方向適用。最新version=105.3。テーブル・列・制約・seed（`CHANGE_REQUEST_ATTACHMENT`含む）検証 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.V105のselfservice_shapeがfreshとlegacyで一致し制約がMySQLで成立する`) |
+| **Legacy DB (V104.4)** | `ses_manager_selfservice_legacy` | V104.4適用済みDB → selfserviceテーブル除去 → V105〜V105.3順方向適用。最新version=105.3・seed検証。freshとshape完全一致 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.V104_4適用済みlegacyDBへV105を順方向適用できshapeがfreshと一致する`) |
+| **Historical V105.1 DB (4fa3a689)** | `ses_manager_selfservice_historical_v105_1` (隔離container) | V104.4→V105.1順方向適用。<br>【V105.1時点明示assert】version=105.1, phone不存在(count=0), snapshot_version不存在(count=0)。<br>【V105.2順方向適用後assert】version=105.2, phone存在, snapshot_version存在。<br>【V105.3順方向適用後assert】version=105.3, `CHANGE_REQUEST_ATTACHMENT` seed存在 | **PASS** (`FlywaySelfServiceSchemaSmokeTest.旧4fa3a689版V105_1適用済みDBからV105_2へ順方向適用できる`) |
 
 ## 検証コマンドおよび実測結果証跡
 
 ### 1. Targeted Integration Suite (L1〜L3)
-- **コマンド**: `.\apache-maven-3.9.6\bin\mvn test "-Dtest=EngineerChangeRequestFlowIntegrationTest,OneOnOneSurveyFlowIntegrationTest,EngineerSelfServicePortalMRegressionTest,FreeeHrContractTest,JsSyntaxCheckTest"`
+- **コマンド**: `.\apache-maven-3.9.6\bin\mvn test "-Dtest=EngineerChangeRequestFlowIntegrationTest,ExpenseRequestFlowIntegrationTest,OneOnOneSurveyFlowIntegrationTest,EngineerChangeRequestAttachmentApiTest,OneOnOneSurveyBoundaryClockTest,PrivateNoteDocumentAclTest,EngineerSelfServicePortalMRegressionTest"`
 - **Active Profile**: `test`
-- **実測結果**: **Tests run: 52, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
+- **実測結果**: **Tests run: 38, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
+  - 内訳: `EngineerChangeRequestFlowIntegrationTest` 10 / `ExpenseRequestFlowIntegrationTest` 7（R1-P1-05 outbox回帰含む）/ `OneOnOneSurveyFlowIntegrationTest` 7 / `EngineerChangeRequestAttachmentApiTest` 4（R2-P1-01）/ `OneOnOneSurveyBoundaryClockTest` 2（R1-P1-09）/ `PrivateNoteDocumentAclTest` 2（R1-P1-07）/ `EngineerSelfServicePortalMRegressionTest` 6
+  - 併せて `FreeeHrContractTest` / `JsSyntaxCheckTest` / `MessageBundleConsistencyTest` も単独で PASS
 
 ### 2. Full Fast Test Suite (L4)
 - **コマンド**: `.\apache-maven-3.9.6\bin\mvn test`
 - **Active Profile**: `test` (H2 MySQL mode, schedulers disabled, Asia/Tokyo)
-- **実測結果**: **Tests run: 2318, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
+- **実測結果**: **Tests run: 2327, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
 
 ### 3. MySQL Test Suite (`-Pmysql-tests`)
 - **コマンド**: `.\apache-maven-3.9.6\bin\mvn test -Pmysql-tests -Dtest=FlywaySelfServiceSchemaSmokeTest`
@@ -127,26 +144,13 @@
 - **実測結果**: **Tests run: 1, Failures: 0, Errors: 0, Skipped: 0** (BUILD SUCCESS, exit code 0)
 
 ### 6. Desktop & Mobile 390px 実ブラウザ（Chrome CDP Headless）Demo 証跡
-- **対象**: `EngineerSelfServiceBrowserMTest`（実Chrome CDP・headless 1920x1080 & 390x844、実ログインから `/my/dashboard`, `/my/profile`, `/my/expenses`, `/my/one-on-ones`, `/my/surveys`, `/my/timesheet` 一気通貫実測）
-- **保存先**: `.kiro/specs/engineer-self-service-portal-v2/evidence/browser-m/`
-- **runId**: `browser-m-20260818004534`
-- **実測結果**: **Tests run: 1, Failures: 0, Errors: 0, Skipped: 0** (Time elapsed: 26.23 s, BUILD SUCCESS, exit code 0)
-- **証跡成果物**:
-  - `desktop-my-dashboard.png` (SHA-256: `92ecb82e...`)
-  - `desktop-my-profile.png` (SHA-256: `b636c9ac...`)
-  - `desktop-my-expenses.png` (SHA-256: `b59e87e9...`)
-  - `desktop-my-one-on-ones.png` (SHA-256: `b59e87e9...`)
-  - `desktop-my-surveys.png` (SHA-256: `b636c9ac...`)
-  - `desktop-my-timesheet.png` (SHA-256: `b59e87e9...`)
-  - `mobile390-my-dashboard.png` (SHA-256: `4296fc1b...`)
-  - `mobile390-my-profile.png` (SHA-256: `37dcba6f...`)
-  - `mobile390-my-expenses.png` (SHA-256: `dbcaac12...`)
-  - `mobile390-my-one-on-ones.png` (SHA-256: `37dcba6f...`)
-  - `mobile390-my-surveys.png` (SHA-256: `dbcaac12...`)
-  - `mobile390-my-timesheet.png` (SHA-256: `dbcaac12...`)
-  - `desktop-console.txt` (console count: 6)
-  - `mobile390-console.txt` (console count: 6)
-  - `summary.json`, `run-id.txt`
+- **対象**: `EngineerSelfServiceBrowserMTest`（`@Tag("browser")`。実Chrome CDP・headless 1920x1080 & 390x844、実ログインから `/my/dashboard`, `/my/profile`, `/my/payroll`, `/my/expenses`, `/my/one-on-ones`, `/my/surveys`, `/my/timesheet` 7画面一気通貫実測）
+- **保存先**: `target/browser-m-evidence/`（`.gitignore`対象。tracked worktreeを汚さない）
+- **実行方法**: `.\apache-maven-3.9.6\bin\mvn test -Pbrowser-tests`（専用profile。default fast suiteへは無条件追加しない。CIは `browser-test` jobで実行し、`upload-artifact` によりexact commitの証跡を保存）
+- **runId**: `browser-m-<yyyyMMddHHmmss>`（summary.json / run-id.txt に記録）
+- **検証内容（desktop/390px共通）**: 7画面のページ固有DOM表示待ち（`#my-name` / `#profile-body` / `#payrollRows` / `#expense-table-body` / `#oneonone-body` / `#campaign-list` / `#myTimesheetSummary`）、エラーページ（`.error-card`）0、console error 0件、network response 4xx/5xx 0件、本人BのPII非漏洩（DOM・API双方）
+- **実操作（desktopのみ）**: プロフィール変更申請・給与再認証/明細一覧（金額非露出）・経費作成/領収書添付・1on1申請・survey回答・my timesheet既存導線
+- **証跡成果物**: `desktop|mobile390-my-{dashboard,profile,payroll,expenses,one-on-ones,surveys,timesheet}.png`（SHA-256をsummary.jsonへ記録）、`desktop|mobile390-console.txt`、`summary.json`、`run-id.txt`
 
 ### 7. MVC / セキュリティ回帰
 - **対象**: `EngineerSelfServicePortalMRegressionTest` (MockMvc + セッション認証 + 各種ロール境界)

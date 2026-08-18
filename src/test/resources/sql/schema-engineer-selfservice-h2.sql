@@ -159,6 +159,9 @@ WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'RECEIPT');
 INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
 SELECT 'PRIVATE_NOTE', '1on1相談メモ', 'INTERNAL', 3, 'TRANSACTION_DATE', 1
 WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'PRIVATE_NOTE');
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'CHANGE_REQUEST_ATTACHMENT', '変更申請添付', 'INCOMING', 7, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'CHANGE_REQUEST_ATTACHMENT');
 
 INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
 SELECT 'myDashboard', 'マイダッシュボード', '/my/dashboard', '/api/my/dashboard', 93

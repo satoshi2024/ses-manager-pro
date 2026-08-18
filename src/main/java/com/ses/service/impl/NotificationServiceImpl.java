@@ -38,6 +38,7 @@ public class NotificationServiceImpl implements NotificationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private NotificationOutboxService notificationOutboxService;
     private final UserOrganizationMapper userOrganizationMapper;
+    private final java.time.Clock clock;
 
     @Override
     public List<NotificationDto> getRecentNotifications(Long userId) {
@@ -106,7 +107,7 @@ public class NotificationServiceImpl implements NotificationService {
             NotificationRead read = new NotificationRead();
             read.setNotificationId(notificationId);
             read.setUserId(userId);
-            read.setReadAt(LocalDateTime.now());
+            read.setReadAt(LocalDateTime.now(clock));
             notificationReadMapper.insert(read);
         } catch (DuplicateKeyException e) {
             // insert ignore equivalent
@@ -205,7 +206,7 @@ public class NotificationServiceImpl implements NotificationService {
             // dedupe_key はグローバル一意のため、宛先ユーザーごとに個別発行するイベントでは受信者を含める。
             // これがないと同一eventの2人目以降がユニーク制約で破棄される（R3R-33）。
             notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);
-            notification.setCreatedAt(LocalDateTime.now());
+            notification.setCreatedAt(LocalDateTime.now(clock));
             notificationMapper.insert(notification);
 
             if (notificationOutboxService != null) {
@@ -252,6 +253,6 @@ public class NotificationServiceImpl implements NotificationService {
         if (userId == null || userOrganizationMapper == null) {
             return null;
         }
-        return userOrganizationMapper.selectPrimaryOrganizationId(userId, LocalDate.now());
+        return userOrganizationMapper.selectPrimaryOrganizationId(userId, LocalDate.now(clock));
     }
 }

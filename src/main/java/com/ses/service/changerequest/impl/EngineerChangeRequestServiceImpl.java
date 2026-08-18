@@ -297,6 +297,50 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         return toDto(request, approvalOf(request), engineerNameOf(engineerId));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public AttachmentDownload downloadAttachment(Long engineerId, Long requestId) {
+        EngineerChangeRequest request = requireOwned(engineerId, requestId);
+        return resolveAttachment(request.getAttachmentDocumentId(), request.getEngineerId());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AttachmentDownload downloadAttachmentManagement(Long requestId) {
+        // scope検証（HR/管理者=全件、マネージャー=組織scope配下。営業はcontrollerの@PreAuthorizeで403）
+        detailManagement(requestId);
+        EngineerChangeRequest request = require(requestId);
+        return resolveAttachment(request.getAttachmentDocumentId(), request.getEngineerId());
+    }
+
+    /** 添付文書を本人のENGINEERリンク・CLEAN scanの確認後に開く（IDOR防止。design §6.2/§6.3）。 */
+    private AttachmentDownload resolveAttachment(Long attachmentDocumentId, Long engineerId) {
+        if (attachmentDocumentId == null) {
+            throw BusinessException.of(404, "error.changeRequest.attachmentNotFound");
+        }
+        List<DocumentLink> links = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, attachmentDocumentId)
+                .eq(DocumentLink::getTargetType, "ENGINEER")
+                .eq(DocumentLink::getTargetId, engineerId)
+                .last("LIMIT 1"));
+        if (links.isEmpty()) {
+            throw BusinessException.of(404, "error.changeRequest.attachmentNotFound");
+        }
+        List<com.ses.entity.DocumentVersion> versions = documentVersionMapper.selectList(
+                new LambdaQueryWrapper<com.ses.entity.DocumentVersion>()
+                        .eq(com.ses.entity.DocumentVersion::getDocumentId, attachmentDocumentId)
+                        .orderByDesc(com.ses.entity.DocumentVersion::getVersionNo)
+                        .last("LIMIT 1"));
+        com.ses.entity.DocumentVersion latest = versions.isEmpty() ? null : versions.get(0);
+        if (latest == null || latest.getScanStatus() == null || !"CLEAN".equals(latest.getScanStatus())) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        java.io.InputStream stream = documentService.download(attachmentDocumentId, null);
+        return new AttachmentDownload(stream,
+                latest.getContentType() == null ? "application/octet-stream" : latest.getContentType(),
+                latest.getOriginalName() == null ? "attachment" : latest.getOriginalName());
+    }
+
     // ----------------------------------------------------------------
     // my profile / skill sheet
     // ----------------------------------------------------------------

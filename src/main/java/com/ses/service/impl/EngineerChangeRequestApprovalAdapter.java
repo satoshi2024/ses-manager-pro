@@ -60,6 +60,7 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
     private final NotificationService notificationService;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final java.time.Clock clock;
 
     @Override
     public String requestType() {
@@ -129,9 +130,9 @@ public class EngineerChangeRequestApprovalAdapter implements ApprovalTargetAdapt
                 .eq("status", EngineerChangeRequestService.STATUS_APPLIED)
                 .eq("version", version)
                 .set("status", EngineerChangeRequestService.STATUS_REFLECTED)
-                .set("applied_at", java.time.LocalDateTime.now())
+                .set("applied_at", java.time.LocalDateTime.now(clock))
                 .set("version", version + 1)
-                .set("updated_at", java.time.LocalDateTime.now()));
+                .set("updated_at", java.time.LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.attendance.concurrent");
         }

@@ -34,10 +34,22 @@ else
   node_ok=0
   echo "Node   : なし  -> CI fast suiteは実行できません"
 fi
+
+chrome_ok=0
+for chrome_candidate in "$CHROME_BIN" /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser /snap/bin/chromium; do
+  if [ -n "$chrome_candidate" ] && [ -x "$chrome_candidate" ]; then
+    chrome_ok=1
+    echo "Chrome : $chrome_candidate  -> browser demo (T093) gateが実行できます"
+    break
+  fi
+done
+if [ "$chrome_ok" -ne 1 ]; then
+  echo "Chrome : なし  -> browser demo (T093) gateは実行できません"
+fi
 echo
 
-if [ "$docker_ok" -ne 1 ] || [ "$node_ok" -ne 1 ]; then
-  echo "DockerとNode.jsを準備してから再実行してください。" >&2
+if [ "$docker_ok" -ne 1 ] || [ "$node_ok" -ne 1 ] || [ "$chrome_ok" -ne 1 ]; then
+  echo "Docker・Node.js・Chromeを準備してから再実行してください。" >&2
   exit 1
 fi
 
@@ -68,6 +80,7 @@ run_suite() {
 run_suite "fast tests (H2 / unit / MVC)" "" "$@"
 run_suite "MySQL integration / Flyway" "mysql-tests" "$@"
 run_suite "performance regression" "performance-tests" "$@"
+run_suite "browser demo (real Chrome, T093)" "browser-tests" "$@"
 
 echo
 echo "=== HFP-03-011: backup integration suite（実 MySQL PITR） ==="

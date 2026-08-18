@@ -81,6 +81,11 @@
   1on1相手方ユーザーは `status == 1`（有効）かつ同一組織/管轄マネージャーまたは担当営業に制限する。
 - **変更申請添付の文書台帳権限**（R2-P1-01）:
   アップロード時に `targetType="ENGINEER"`, `targetId=engineerId`, `documentType="CHANGE_REQUEST_ATTACHMENT"` を指定して文書台帳内で原子的にリンクする。`createdBy` 単独でのバイパスは廃止し、`ENGINEER=engineerId` の所有リンクおよび `SCAN_CLEAN` 状態を強制する。
+  添付のdownloadは documentId ではなく **申請IDを境界** にする: 本人は `/api/my/change-requests/{requestId}/attachment`、管理側は `/api/engineer-change-requests/{requestId}/attachment`。
+  許可母集団（決定表固定）: **本人=自分の申請のみ / HR・管理者=全件 / マネージャー=組織scope∩DataScopeの配下 / 営業=不可**。
+  他要員のIDOR試行は403でなく **404**（既存IDOR規約: `error.changeRequest.notFound` / `error.changeRequest.attachmentNotFound`）。
+  未scan（CLEAN以外）は fail-closed で403（`error.file.scanNotReady`）。downloadは `ApiAuditFilter` により監査ログへ記録される。
+  文書種別seed（`CHANGE_REQUEST_ATTACHMENT`）は V105/V105.1/V105.2 を変更せず **新規順方向 migration `V105_3`** で追加する（H2側 `schema-engineer-selfservice-h2.sql` と同期）。
 - **survey集計の匿名性保護**（R1-P1-10）:
   `minAnswers`（既定3）未満の組織セグメントおよび設問別集計は `hidden == true` とし、平均値・離職リスクファクターを非表示とする。
 
@@ -104,7 +109,12 @@
 - **field allowlist必須**（design §2）: `payload_json`から任意のentity fieldへ反映する経路を作らない。
   `request_type`ごとにDTOを持ち、許可fieldだけをmapする。allowlist外のkeyが来たら**リクエストを400拒否**する。
 - 経費の会計連携は`accounting_job_id`のUNIQUEで冪等（R5）。
-  同一経費から2件のjobを作らず、`markSent` トランザクション内で通知を原子的発行する（R1-P1-05）。
+  同一経費から2件のjobを作らず、`markSent` トランザクション内で**通知行と通知outbox eventを原子的に永続化**する（R1-P1-05）。
+  通知の外部配信は `NotificationOutboxService`（別dispatcher・指数backoff・max 5回）が担い、
+  markSent commit後に独立して再送される。通知配信失敗は会計jobのSUCCEEDEDを巻き戻さない。
+  **S15 provider契約**: 外部会計senderは `job.payload_hash`（job作成時に固定）由来の決定的冪等キーを受領し、
+  「外部成功後にlocal commitが失敗して同一payloadを再送された場合」でも、重複登録せず既存の
+  correlation_idを返して安全に収束させること（mock senderはこの契約を実装済み）。
 - 領収書は archive のscanを通す。**未scan/感染時は本人にも表示しない**（R5、fail-closed）。
 - 1on1の本人による取消（`cancelOwn`）は「申請中」段階のみ可能。日程確定（`STATUS_SCHEDULED`）以降の取消は相手方（営業/上長/HR）との日程調整を伴うため管理側取消（`cancel`）にて対応する。
 

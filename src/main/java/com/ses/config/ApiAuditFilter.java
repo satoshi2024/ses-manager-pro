@@ -91,7 +91,9 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 || uri.matches("/api/contract-documents/\\d+/artifacts/\\w+")
                 || uri.matches("/api/sales-orders/\\d+/documents/\\d+/download")
                 || uri.matches("/api/sales-orders/\\d+/acknowledgement-pdf/download")
-                || uri.matches("/api/acceptances/\\d+/document/download");
+                || uri.matches("/api/acceptances/\\d+/document/download")
+                || uri.matches("/api/my/change-requests/\\d+/attachment")
+                || uri.matches("/api/engineer-change-requests/\\d+/attachment");
     }
 
     /**

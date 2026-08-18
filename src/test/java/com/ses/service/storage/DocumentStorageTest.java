@@ -63,7 +63,9 @@ class DocumentStorageTest {
                 mock(ObjectProvider.class),
                 mock(ObjectProvider.class),
                 mock(com.ses.service.security.DataScopeService.class),
-                mock(ObjectProvider.class)
+                mock(ObjectProvider.class),
+                mock(ObjectProvider.class),
+                java.time.Clock.systemDefaultZone()
         );
     }
 

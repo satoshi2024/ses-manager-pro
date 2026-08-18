@@ -49,6 +49,9 @@ class NotificationServiceImplTest {
     void injectOptionalOutboxDependency() {
         org.springframework.test.util.ReflectionTestUtils.setField(
                 notificationService, "notificationOutboxService", notificationOutboxService);
+        // R1-P2-03: 注入Clock（単体テストはシステム時計で動作させる）
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                notificationService, "clock", java.time.Clock.systemDefaultZone());
     }
 
     @Test

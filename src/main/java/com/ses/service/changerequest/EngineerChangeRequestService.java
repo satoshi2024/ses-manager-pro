@@ -53,6 +53,12 @@ public interface EngineerChangeRequestService {
 
     ChangeRequestDto detailManagement(Long id);
 
+    /** 本人の添付ダウンロード。申請が本人のものであることと、添付が本人へENGINEERリンク済み・CLEANであること（design §6.2/§6.3）。 */
+    AttachmentDownload downloadAttachment(Long engineerId, Long requestId);
+
+    /** 管理側の添付ダウンロード（HR/管理者=全件、マネージャー=組織scope配下。営業はcontrollerで403）。 */
+    AttachmentDownload downloadAttachmentManagement(Long requestId);
+
     /** 本人レスポンス（自分のプロフィール・skills・careers・担当営業・現在契約の公開条件）。 */
     MyProfileView myProfile(Long engineerId);
 
@@ -117,5 +123,8 @@ public interface EngineerChangeRequestService {
     }
 
     record SkillSheetConfirmResult(String fingerprint, java.time.LocalDateTime confirmedAt) {
+    }
+
+    record AttachmentDownload(java.io.InputStream stream, String contentType, String originalName) {
     }
 }

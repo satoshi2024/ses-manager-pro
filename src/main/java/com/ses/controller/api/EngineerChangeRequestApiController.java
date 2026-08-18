@@ -38,4 +38,26 @@ public class EngineerChangeRequestApiController {
     public ApiResult<EngineerChangeRequestService.ChangeRequestDto> detail(@PathVariable Long id) {
         return ApiResult.success(changeRequestService.detailManagement(id));
     }
+
+    /** 添付ダウンロード（requestId境界。scopeはservice層で検証、営業は@PreAuthorizeで403）。 */
+    @GetMapping("/{id}/attachment")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.InputStreamResource> downloadAttachment(@PathVariable Long id) {
+        EngineerChangeRequestService.AttachmentDownload download =
+                changeRequestService.downloadAttachmentManagement(id);
+        String encodedName = java.net.URLEncoder.encode(download.originalName(), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return org.springframework.http.ResponseEntity.ok()
+                .contentType(parseMediaType(download.contentType()))
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodedName)
+                .body(new org.springframework.core.io.InputStreamResource(download.stream()));
+    }
+
+    private org.springframework.http.MediaType parseMediaType(String contentType) {
+        try {
+            return org.springframework.http.MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return org.springframework.http.MediaType.APPLICATION_OCTET_STREAM;
+        }
+    }
 }

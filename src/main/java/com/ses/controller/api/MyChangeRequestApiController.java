@@ -7,6 +7,7 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -107,6 +108,27 @@ public class MyChangeRequestApiController {
     @PostMapping("/{id}/resubmit")
     public ApiResult<EngineerChangeRequestService.ChangeRequestDto> resubmit(@PathVariable Long id) {
         return ApiResult.success(changeRequestService.resubmit(currentEngineerId(), id));
+    }
+
+    @GetMapping("/{id}/attachment")
+    public ResponseEntity<org.springframework.core.io.InputStreamResource> downloadAttachment(@PathVariable Long id) {
+        EngineerChangeRequestService.AttachmentDownload download =
+                changeRequestService.downloadAttachment(currentEngineerId(), id);
+        String encodedName = java.net.URLEncoder.encode(download.originalName(), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(parseMediaType(download.contentType()))
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename*=UTF-8''" + encodedName)
+                .body(new org.springframework.core.io.InputStreamResource(download.stream()));
+    }
+
+    private org.springframework.http.MediaType parseMediaType(String contentType) {
+        try {
+            return org.springframework.http.MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return org.springframework.http.MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 
     public static class CreateRequest {

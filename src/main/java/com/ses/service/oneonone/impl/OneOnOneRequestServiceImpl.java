@@ -112,7 +112,9 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
         }
         List<LocalDate> normalized = candidateDates.stream().sorted().distinct().toList();
         LocalDate today = LocalDate.now(clock);
-        if (normalized.size() != candidateDates.size() || normalized.stream().anyMatch(d -> d.isBefore(today))) {
+        // decision table §6.1: 候補日は翌日以降（todayを含む当日は拒否）。
+        if (normalized.size() != candidateDates.size()
+                || normalized.stream().anyMatch(d -> d.isBefore(today.plusDays(1)))) {
             throw BusinessException.of(400, "error.oneOnOne.invalidDates");
         }
         OneOnOneRequest request = OneOnOneRequest.builder()
@@ -320,7 +322,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
                             .counterpartyType("INTERNAL")
                             .transactionDate(LocalDate.now(clock))
                             .businessKey(businessKey)
-                            .versionDiscriminator("v" + (System.currentTimeMillis() % 1_000_000))
+                            .versionDiscriminator("v" + (clock.millis() % 1_000_000))
                             .originalName("private-note-" + id + ".txt")
                             .contentType("text/plain;charset=UTF-8")
                             .changeReason("1on1相談メモ更新")

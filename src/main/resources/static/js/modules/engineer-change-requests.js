@@ -57,7 +57,7 @@ function loadDetail(id) {
                 <dt class="col-3">${SES.escapeHtml(SES.i18n.t('changeRequest.approvalStatus','承認状態'))}</dt><dd class="col-9">${SES.escapeHtml(r.approvalStatus || '—')}</dd>
                 <dt class="col-3">${SES.escapeHtml(SES.i18n.t('changeRequest.reflect','反映'))}</dt><dd class="col-9">${r.unappliedApproved ? '<span class="badge bg-warning text-dark">' + SES.escapeHtml(SES.i18n.t('changeRequest.unapplied','未反映（監視対象）')) + '</span>' : (r.appliedAt || '—')}</dd>
                 ${r.reason ? `<dt class="col-3">${SES.escapeHtml(SES.i18n.t('changeRequest.reason','申請理由'))}</dt><dd class="col-9">${SES.escapeHtml(r.reason)}</dd>` : ''}
-                ${r.attachmentDocumentId ? `<dt class="col-3">${SES.escapeHtml(SES.i18n.t('changeRequest.attachment','添付書類'))}</dt><dd class="col-9"><a href="/api/documents/${r.attachmentDocumentId}/download" class="btn btn-sm btn-outline-info" target="_blank"><i class="bi bi-paperclip"></i> ${SES.escapeHtml(SES.i18n.t('changeRequest.downloadAttachment','添付ダウンロード'))} (#${r.attachmentDocumentId})</a></dd>` : ''}
+                ${r.attachmentDocumentId ? `<dt class="col-3">${SES.escapeHtml(SES.i18n.t('changeRequest.attachment','添付書類'))}</dt><dd class="col-9"><a href="/api/engineer-change-requests/${r.id}/attachment" class="btn btn-sm btn-outline-info" target="_blank"><i class="bi bi-paperclip"></i> ${SES.escapeHtml(SES.i18n.t('changeRequest.downloadAttachment','添付ダウンロード'))} (#${r.attachmentDocumentId})</a></dd>` : ''}
             </dl>`;
             html += `<hr><h6>${SES.escapeHtml(SES.i18n.t('changeRequest.payload','申請内容'))}</h6><pre class="bg-black text-light p-2 rounded small">${SES.escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
             if (Object.keys(diff).length) {

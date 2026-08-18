@@ -11,6 +11,7 @@ import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.ExpenseAccountingJob;
 import com.ses.entity.ExpenseRequest;
 import com.ses.entity.Notification;
+import com.ses.entity.NotificationOutbox;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.ApprovalRequestMapper;
@@ -21,13 +22,16 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ExpenseAccountingJobMapper;
 import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.NotificationMapper;
+import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.expense.ExpenseAccountingJobScheduler;
 import com.ses.service.expense.ExpenseAccountingSender;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.expense.impl.MockExpenseAccountingSender;
+import com.ses.service.notification.NotificationOutboxService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -96,6 +100,12 @@ class ExpenseRequestFlowIntegrationTest {
     private UserOrganizationMapper userOrganizationMapper;
     @Autowired
     private NotificationMapper notificationMapper;
+    @Autowired
+    private NotificationOutboxMapper outboxMapper;
+    @Autowired
+    private NotificationOutboxService outboxService;
+    @Autowired
+    private SystemConfigService systemConfigService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -190,6 +200,75 @@ class ExpenseRequestFlowIntegrationTest {
         assertEquals("支払済", paid.status());
         assertNotNull(paid.paidAt());
         assertEquals(1, countNotification(applicant, "EXPENSE_PAID", "expense-paid:" + draft.id()));
+    }
+
+    @Test
+    void 会計送信成功後の通知配信失敗でもjobはSUCCEEDEDのままoutboxが再送し通知は1件だけ() {
+        // 通知配信（Webhook）を初回失敗させる設定（R1-P1-05）
+        systemConfigService.put("notification.webhook-url", "http://127.0.0.1:1/notify", "テスト用");
+        systemConfigService.put("notification.webhook-types", "EXPENSE_ACCOUNTING_SENT", "テスト用");
+        try {
+            long applicant = insertUser("管理者");
+            long approver = insertUser("管理者");
+            long engineerId = createEngineer(null);
+            link(engineerId, applicant);
+            insertRoute(List.of(List.of(approver)));
+            authenticate(applicant, "要員");
+
+            ExpenseRequestService.ExpenseRequestDto draft = expenseRequestService.createDraft(engineerId,
+                    cmd(LocalDate.of(2026, 8, 15), "交通費", new BigDecimal("1100")));
+            expenseRequestService.attachReceipt(engineerId, draft.id(), "receipt.pdf", "application/pdf",
+                    new java.io.ByteArrayInputStream("%PDF-1.4 ok".getBytes(StandardCharsets.UTF_8)));
+            ExpenseRequestService.ExpenseRequestDto applied = expenseRequestService.submit(engineerId, draft.id());
+            authenticate(approver, "管理者");
+            approvalEngineService.approve(applied.approvalRequestId(), approver, "承認します");
+
+            // scheduler 1回目: 外部senderは1回だけ呼ばれ、jobはSUCCEEDED。
+            // 通知はexpense/jobと同じtransactionで永続化され、outbox配信だけが失敗してRETRYになる。
+            scheduler.processDue(100);
+            List<ExpenseAccountingJob> jobs = jobMapper.selectList(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getExpenseRequestId, draft.id()));
+            assertEquals(1, jobs.size());
+            assertEquals("SUCCEEDED", jobs.get(0).getStatus(), "通知配信失敗が会計jobのSUCCEEDEDを巻き戻さない（R1-P1-05）");
+            assertNotNull(jobs.get(0).getCorrelationId());
+            assertEquals("会計連携済", expenseRequestMapper.selectById(draft.id()).getStatus());
+
+            // 外部sender呼出しはpayload_hash由来の冪等キーで1回だけ（design §6.3）
+            assertEquals(1, mockSender.sentPayloadHashes().values().stream()
+                    .filter(jobs.get(0).getCorrelationId()::equals).count(),
+                    "外部sender呼出しは1回であるべき");
+
+            // 通知は1件だけ永続化され、outboxはRETRY（retry対象）
+            assertEquals(1, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT",
+                    "expense-accounting-sent:" + draft.id()));
+            List<NotificationOutbox> outboxes = outboxMapper.selectList(new LambdaQueryWrapper<NotificationOutbox>()
+                    .eq(NotificationOutbox::getType, "EXPENSE_ACCOUNTING_SENT")
+                    .eq(NotificationOutbox::getDedupeKey, "expense-accounting-sent:" + draft.id() + "#u" + applicant));
+            assertEquals(1, outboxes.size());
+            assertEquals("RETRY", outboxes.get(0).getStatus(), "通知配信失敗はoutbox RETRYで再送対象になる");
+
+            // scheduler 2回目: 外部senderは再呼び出しされずjobはSUCCEEDEDのまま
+            scheduler.processDue(100);
+            assertEquals(1, mockSender.sentPayloadHashes().values().stream()
+                    .filter(jobs.get(0).getCorrelationId()::equals).count(),
+                    "scheduler再実行で外部senderが再呼び出しされない");
+            assertEquals("SUCCEEDED", jobMapper.selectById(jobs.get(0).getId()).getStatus());
+
+            // 配信障害復旧後: outboxを再送するとSENTになり、通知は1件のまま（重複作成なし）
+            outboxMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NotificationOutbox>()
+                    .eq("id", outboxes.get(0).getId())
+                    .set("next_attempt_at", java.time.LocalDateTime.now().minusMinutes(5)));
+            systemConfigService.put("notification.webhook-url", "", "テスト用");
+            outboxService.dispatchDue(100);
+            NotificationOutbox after = outboxMapper.selectById(outboxes.get(0).getId());
+            assertEquals("SENT", after.getStatus(), "復旧後のoutbox再送でSENTになる");
+            assertEquals(1, countNotification(applicant, "EXPENSE_ACCOUNTING_SENT",
+                            "expense-accounting-sent:" + draft.id()),
+                    "後続retryでも通知は1件だけ作成される（重複なし）");
+        } finally {
+            systemConfigService.put("notification.webhook-url", "", "テスト用");
+            systemConfigService.put("notification.webhook-types", "", "テスト用");
+        }
     }
 
     @Test

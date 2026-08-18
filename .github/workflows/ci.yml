@@ -134,6 +134,52 @@ jobs:
           path: target/surefire-reports/
           retention-days: 7
 
+  # T093（M）: 実Chrome（CDP・headless）のbrowser Demo gate。
+  # 専用profile（-Pbrowser-tests）でのみ実行し、default fast suiteへ無条件追加しない。
+  browser-test:
+    name: browser demo (real Chrome, T093)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # ubuntu-latestにはChromeがプリインストールされている（CdpBrowserが/usr/bin/google-chromeを探索）。
+      - name: Verify Chrome is available
+        run: |
+          if ! command -v google-chrome > /dev/null 2>&1; then
+            echo "Error: google-chrome is not available. Browser demo would fail."
+            exit 1
+          fi
+          google-chrome --version
+
+      - name: Run browser demo tests
+        run: mvn -B clean test -Pbrowser-tests
+
+      - name: Ensure no tests were skipped
+        run: |
+          skipped_files=$(grep -l 'skipped="[1-9]' target/surefire-reports/*.xml || true)
+          if [ -n "$skipped_files" ]; then
+            echo "Error: Browser tests were skipped."
+            echo "$skipped_files"
+            exit 1
+          fi
+
+      # 証跡はtarget/browser-m-evidence/（.gitignore対象）をexact commitのartifactとして保存する。
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-m-evidence
+          path: target/browser-m-evidence/
+          retention-days: 30
+
   # HFP-03-011: 実 MySQL（source/target 別コンテナ）での PITR integration suite。
   # Docker が無ければ失敗する（skip/BLOCKED は認めない契約）。
   backup-integration:

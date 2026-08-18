@@ -64,6 +64,27 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 } else {
     Write-Host 'Node   : なし  -> CI fast suiteは実行できません'
 }
+$chromeOk = $false
+$chromeCandidates = @(
+    $env:CHROME_BIN,
+    'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium'
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+foreach ($candidate in $chromeCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        $chromeOk = $true
+        Write-Host ('Chrome : ' + $candidate + '  -> browser demo (T093) gateが実行できます')
+        break
+    }
+}
+if (-not $chromeOk) {
+    Write-Host 'Chrome : なし  -> browser demo (T093) gateは実行できません'
+}
 if (-not [string]::IsNullOrWhiteSpace($bashExecutable)) {
     Write-Host ('Bash   : ' + $bashExecutable + '  -> backup integration suiteを実行できます')
 } else {
@@ -84,6 +105,10 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     Write-Error 'CI fast suiteにはNode.jsが必須です。Node.jsをPATHへ追加して再実行してください。'
     exit 1
 }
+if (-not $chromeOk) {
+    Write-Error 'CI browser demo gateにはChromeが必須です。CHROME_BIN環境変数で実行ファイルを指定してください。'
+    exit 1
+}
 if ([string]::IsNullOrWhiteSpace($bashExecutable)) {
     Write-Error 'CI backup integration gateにはBash（Git Bash可）が必須です。'
     exit 1
@@ -92,7 +117,8 @@ if ([string]::IsNullOrWhiteSpace($bashExecutable)) {
 $suites = @(
     @{ Name = 'fast tests (H2 / unit / MVC)'; Profile = '' },
     @{ Name = 'MySQL integration / Flyway'; Profile = 'mysql-tests' },
-    @{ Name = 'performance regression'; Profile = 'performance-tests' }
+    @{ Name = 'performance regression'; Profile = 'performance-tests' },
+    @{ Name = 'browser demo (real Chrome, T093)'; Profile = 'browser-tests' }
 )
 
 foreach ($suite in $suites) {

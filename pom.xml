@@ -24,9 +24,9 @@
         <caffeine.version>3.1.8</caffeine.version>
         <testcontainers.version>1.20.6</testcontainers.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- 既定のmvn testは高速feedback用。実MySQL/performanceは明示profileで実行する。 -->
+        <!-- 既定のmvn testは高速feedback用。実MySQL/performance/実Chrome(browser)は明示profileで実行する。 -->
         <test.groups></test.groups>
-        <test.excluded-groups>mysql | performance</test.excluded-groups>
+        <test.excluded-groups>mysql | performance | browser</test.excluded-groups>
         <junit.parallel.enabled>false</junit.parallel.enabled>
         <junit.parallel.mode.default>same_thread</junit.parallel.mode.default>
         <junit.parallel.mode.classes>same_thread</junit.parallel.mode.classes>
@@ -330,6 +330,16 @@
             <properties>
                 <test.groups></test.groups>
                 <test.excluded-groups>__none__</test.excluded-groups>
+            </properties>
+        </profile>
+
+        <!-- 実Chrome（CDP・headless）必須のbrowser Demo。default fast suiteへは無条件追加しない。 -->
+        <profile>
+            <id>browser-tests</id>
+            <properties>
+                <test.groups>browser</test.groups>
+                <test.excluded-groups>__none__</test.excluded-groups>
+                <jacoco.skip>true</jacoco.skip>
             </properties>
         </profile>
     </profiles>

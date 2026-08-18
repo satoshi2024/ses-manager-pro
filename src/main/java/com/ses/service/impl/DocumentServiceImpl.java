@@ -64,9 +64,10 @@ public class DocumentServiceImpl implements DocumentService {
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final DocumentStorage documentStorage;
     private final ObjectProvider<FileScanner> fileScannerProvider;
-    private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
+private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
+    private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
 
     private static final String DEFAULT_TENANT_ID = "default";
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
@@ -870,6 +871,15 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     public void assertDocumentAccessAllowed(Document doc) {
+        // R1-P1-07: PRIVATE_NOTE（1on1 confidential相談）はHR/明示権限割当管理者のみ。
+        // 一般管理者を含むその他はタイトル・version・storage metadataへ到達させない（fail-closed）。
+        // リンク非依存の文書（1on1相談メモ）のため、許可者はここで即時returnする。
+        if (doc != null && "PRIVATE_NOTE".equals(doc.getDocumentType())) {
+            if (!canAccessPrivateNote()) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            return;
+        }
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (isAdmin) {
@@ -968,6 +978,11 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     public void applyDataScopeFilter(LambdaQueryWrapper<Document> wrapper) {
+        // R1-P1-07: PRIVATE_NOTEはHR/明示権限割当管理者以外へSQL母集団で非表示にする
+        // （一般管理者を含む。decision table §6.2「管理者=ただしconfidential相談は明示権限割当者のみ」）。
+        if (!canAccessPrivateNote()) {
+            wrapper.ne(Document::getDocumentType, "PRIVATE_NOTE");
+        }
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (isAdmin) {
@@ -1087,5 +1102,20 @@ public class DocumentServiceImpl implements DocumentService {
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256算出失敗", e);
         }
+    }
+
+    /** PRIVATE_NOTE（1on1 confidential相談）の閲覧可否。HRは全件、管理者はone-on-one.confidential権限割当のみ（fail-closed）。 */
+    private boolean canAccessPrivateNote() {
+        String role = SecurityUtils.currentRole();
+        if ("HR".equals(role)) {
+            return true;
+        }
+        com.ses.service.security.AuthorizationService authorizationService = authorizationServiceProvider.getIfAvailable();
+        if (authorizationService == null) {
+            return false; // bean不在はfail-closed
+        }
+        org.springframework.security.core.Authentication auth =
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        return authorizationService.isAllowed(auth, "one-on-one.confidential");
     }
 }

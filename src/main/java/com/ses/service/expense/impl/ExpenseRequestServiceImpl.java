@@ -68,6 +68,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final NotificationService notificationService;
     private final OrganizationScopeService organizationScopeService;
+    private final java.time.Clock clock;
 
     // ----------------------------------------------------------------
     // 本人
@@ -125,7 +126,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .set("project_id", command.projectId())
                 .set("description", trimToNull(command.description()))
                 .set("version", version + 1)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -162,7 +163,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .eq("version", version)
                 .set("status", STATUS_APPLIED)
                 .set("approval_request_id", approval.getId())
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -174,7 +175,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 int numbered = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
                         .eq("id", id)
                         .set("expense_no", "EX-" + id)
-                        .set("updated_at", LocalDateTime.now()));
+                        .set("updated_at", LocalDateTime.now(clock)));
                 if (numbered != 1) {
                     throw BusinessException.of(409, "error.common.optimisticLock");
                 }
@@ -245,7 +246,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .eq("version", version)
                 .set("receipt_document_id", document.getId())
                 .set("version", version + 1)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -353,9 +354,9 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .eq("status", STATUS_ACCOUNTING_SENT)
                 .eq("version", version)
                 .set("status", STATUS_PAID)
-                .set("paid_at", LocalDateTime.now())
+                .set("paid_at", LocalDateTime.now(clock))
                 .set("version", version + 1)
-                .set("updated_at", LocalDateTime.now()));
+                .set("updated_at", LocalDateTime.now(clock)));
         if (updated != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
@@ -420,7 +421,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if ("管理者".equals(role) || organizationScopeService.hasFullAccess()) {
             return null;
         }
-        Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now());
+        Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now(clock));
         return allowed == null ? Set.of() : new HashSet<>(allowed);
     }
 

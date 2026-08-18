@@ -44,6 +44,8 @@ public class FileScopeValidationService {
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     private final DataScopeService dataScopeService;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
+    private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    private final java.time.Clock clock;
 
     /** 注文文書（SALES_ORDER link）のscope解決用。テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -103,15 +105,25 @@ public class FileScopeValidationService {
             }
 
             // S14 (engineer-self-service-portal-v2): 文書種別ごとの専用規則（decision table §6.2）。
-            // PRIVATE_NOTE（1on1 confidential相談）はHR/管理者のみ。RECEIPT（経費領収書）は
+            // PRIVATE_NOTE（1on1 confidential相談）はHR/明示権限割当管理者のみ。RECEIPT（経費領収書）は
             // 本人/管理者/マネージャー（配下）のみで、営業・HRは不可視（給与・経費は営業不可視）。
+            // CHANGE_REQUEST_ATTACHMENT（変更申請添付）は本人/HR/管理者/マネージャー（組織scope∩DataScope）のみ。
             String documentType = documentTypeOf(documentVersion.getDocumentId());
             if ("PRIVATE_NOTE".equals(documentType)) {
                 String role = SecurityUtils.currentRole();
-                if (!"HR".equals(role) && !"管理者".equals(role)) {
-                    throw BusinessException.of(403, "error.forbidden");
+                if ("HR".equals(role)) {
+                    return; // HR は全件可視
                 }
-                return;
+                // 管理者でも one-on-one.confidential 権限グループ未割当は拒否（R1-P1-07）。
+                // bean不在・判定例外は AuthorizationService.isAllowed が fail-closed で false を返す。
+                com.ses.service.security.AuthorizationService authorizationService =
+                        authorizationServiceProvider.getIfAvailable();
+                org.springframework.security.core.Authentication auth =
+                        org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                if (authorizationService != null && authorizationService.isAllowed(auth, "one-on-one.confidential")) {
+                    return;
+                }
+                throw BusinessException.of(403, "error.forbidden");
             }
             if ("RECEIPT".equals(documentType)) {
                 Long engineerId = linkedEngineerId(documentVersion.getDocumentId());
@@ -119,6 +131,30 @@ public class FileScopeValidationService {
                     throw BusinessException.of(403, "error.forbidden");
                 }
                 return;
+            }
+            if ("CHANGE_REQUEST_ATTACHMENT".equals(documentType)) {
+                String role = SecurityUtils.currentRole();
+                if ("HR".equals(role) || "管理者".equals(role)) {
+                    return; // HR/管理者は全件可視（decision table §6.2）
+                }
+                Long fileEngineerId = linkedEngineerId(documentVersion.getDocumentId());
+                if ("マネージャー".equals(role)) {
+                    if (fileEngineerId != null && isEngineerInManagerScope(fileEngineerId)) {
+                        return;
+                    }
+                    throw BusinessException.of(403, "error.forbidden");
+                }
+                if ("要員".equals(role)) {
+                    com.ses.service.EngineerAccountLinkService linkService =
+                            engineerAccountLinkServiceProvider.getIfAvailable();
+                    Long ownEngineerId = linkService == null
+                            ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+                    if (fileEngineerId != null && fileEngineerId.equals(ownEngineerId)) {
+                        return;
+                    }
+                }
+                // 営業・その他・本人以外は不可視
+                throw BusinessException.of(403, "error.forbidden");
             }
 
             // P1-03: メニュー権限判定
@@ -231,17 +267,22 @@ public class FileScopeValidationService {
             return engineerId.equals(ownEngineerId);
         }
         if ("マネージャー".equals(role)) {
-            com.ses.service.security.OrganizationScopeService scopeService = organizationScopeServiceProvider.getIfAvailable();
-            if (scopeService == null) {
-                return false;
-            }
-            if (scopeService.hasFullAccess()) {
-                return true;
-            }
-            java.util.Set<Long> allowed = scopeService.allowedEngineerIds(java.time.LocalDate.now());
-            return allowed != null && allowed.contains(engineerId);
+            return isEngineerInManagerScope(engineerId);
         }
         // 営業・HR・その他はdecision table §6.2により不可視（給与・経費は営業不可視）
         return false;
+    }
+
+    /** マネージャー（組織scope ∩ DataScope）の配下か判定する。 */
+    private boolean isEngineerInManagerScope(Long engineerId) {
+        com.ses.service.security.OrganizationScopeService scopeService = organizationScopeServiceProvider.getIfAvailable();
+        if (scopeService == null) {
+            return false;
+        }
+        if (scopeService.hasFullAccess()) {
+            return true;
+        }
+        java.util.Set<Long> allowed = scopeService.allowedEngineerIds(java.time.LocalDate.now(clock));
+        return allowed != null && allowed.contains(engineerId);
     }
 }
