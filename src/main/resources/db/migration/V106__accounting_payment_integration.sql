@@ -101,7 +101,12 @@ SELECT
     c.connected_by,
     c.created_at
 FROM t_freee_connection c
-WHERE c.deleted_flag = 0
+WHERE c.id = (
+    SELECT id FROM t_freee_connection
+    WHERE deleted_flag = 0
+    ORDER BY updated_at DESC, id DESC
+    LIMIT 1
+)
   AND NOT EXISTS (
       SELECT 1 FROM m_integration_connection ic
       WHERE ic.provider = 'freee' AND ic.product = 'payroll' AND ic.deleted_flag = 0
