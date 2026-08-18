@@ -6,6 +6,9 @@
 - 実装AI: S14主実装（Round 4 独立再Review指摘の修正完了。V105.3・申請ID境界download・通知outbox・PRIVATE_NOTE ACL・固定Clock境界・browser gate）
 - 独立Review: Round 4.2 提出（R2-P1-01, R1-P1-05, R1-P1-07, R1-P1-09, R1-P1-12, R1-P2-03 を `FIXED_BY_IMPLEMENTER` として記録・独立検証待ち）
 - OPEN issue: なし（全件 `FIXED_BY_IMPLEMENTER`）
+- **FixHead**: Base `213658df` → FixHead `32acbd02`（S14修正のみcommit済み。外部ITA/他specのdirty差分はFixHeadに含めない）
+- **実測証跡**: Targeted **38/38**・Fast **2327/2327**・MySQL **3/3**・Browser **1/1**・**0 skip**・`git diff --check` PASS
+- **Browser証跡**: ローカル実測 `target/browser-m-evidence/`（runId=`browser-m-20260818100027`、summary.json SHA-256=`0f04c5e12d3411aa5cdc7fa2ea7f15796fd431d388dd583d395ea6f39f5918ff`）。CIは `browser-test` job が push 時に `upload-artifact` でexact commit証跡を保存（artifact SHA-256はCI run後にledgerへ追記）
 
 ## Round 4 独立再Review指摘への対応記録（R4.2）
 
