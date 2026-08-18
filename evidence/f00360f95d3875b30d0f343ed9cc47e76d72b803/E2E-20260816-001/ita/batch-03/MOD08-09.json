@@ -4,28 +4,363 @@
   "category": "MOD-08",
   "name": "2/3/4/5/6か月それぞれで時間外+休日労働平均79:59/80:00/80:01を作る",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 2302,
+  "duration_h": 0.000639,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-09.json",
   "error": null,
   "evidence_detail": {
-    "multi_month_average_matrix": [
+    "calculation_service": "OvertimeComplianceCalculator.evaluate(Rule 5 Multi Month Average n=2..6)",
+    "boundary_comparison_table": [
       {
-        "avgMinutes": 4799,
-        "formatted": "79:59",
-        "violation": false
+        "window_n": 2,
+        "limit_sum_minutes": 9600,
+        "formatted_time": "79:59",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 9598,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4799
       },
       {
-        "avgMinutes": 4800,
-        "formatted": "80:00",
-        "violation": false
+        "window_n": 2,
+        "limit_sum_minutes": 9600,
+        "formatted_time": "80:00",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 9600,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4800
       },
       {
-        "avgMinutes": 4801,
-        "formatted": "80:01",
-        "violation": true
+        "window_n": 2,
+        "limit_sum_minutes": 9600,
+        "formatted_time": "80:01",
+        "limit_minutes": 4800,
+        "expected_violation": true,
+        "sum_minutes": 9602,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 9602,
+            "limitMinutes": 9600,
+            "windowMonths": 2
+          }
+        ],
+        "input_average_minutes": 4801
+      },
+      {
+        "window_n": 3,
+        "limit_sum_minutes": 14400,
+        "formatted_time": "79:59",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 14397,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4799
+      },
+      {
+        "window_n": 3,
+        "limit_sum_minutes": 14400,
+        "formatted_time": "80:00",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 14400,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4800
+      },
+      {
+        "window_n": 3,
+        "limit_sum_minutes": 14400,
+        "formatted_time": "80:01",
+        "limit_minutes": 4800,
+        "expected_violation": true,
+        "sum_minutes": 14403,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 9602,
+            "limitMinutes": 9600,
+            "windowMonths": 2
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 14403,
+            "limitMinutes": 14400,
+            "windowMonths": 3
+          }
+        ],
+        "input_average_minutes": 4801
+      },
+      {
+        "window_n": 4,
+        "limit_sum_minutes": 19200,
+        "formatted_time": "79:59",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 19196,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4799
+      },
+      {
+        "window_n": 4,
+        "limit_sum_minutes": 19200,
+        "formatted_time": "80:00",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 19200,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4800
+      },
+      {
+        "window_n": 4,
+        "limit_sum_minutes": 19200,
+        "formatted_time": "80:01",
+        "limit_minutes": 4800,
+        "expected_violation": true,
+        "sum_minutes": 19204,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 9602,
+            "limitMinutes": 9600,
+            "windowMonths": 2
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 14403,
+            "limitMinutes": 14400,
+            "windowMonths": 3
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 19204,
+            "limitMinutes": 19200,
+            "windowMonths": 4
+          }
+        ],
+        "input_average_minutes": 4801
+      },
+      {
+        "window_n": 5,
+        "limit_sum_minutes": 24000,
+        "formatted_time": "79:59",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 23995,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4799
+      },
+      {
+        "window_n": 5,
+        "limit_sum_minutes": 24000,
+        "formatted_time": "80:00",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 24000,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4800
+      },
+      {
+        "window_n": 5,
+        "limit_sum_minutes": 24000,
+        "formatted_time": "80:01",
+        "limit_minutes": 4800,
+        "expected_violation": true,
+        "sum_minutes": 24005,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 9602,
+            "limitMinutes": 9600,
+            "windowMonths": 2
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 14403,
+            "limitMinutes": 14400,
+            "windowMonths": 3
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 19204,
+            "limitMinutes": 19200,
+            "windowMonths": 4
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 24005,
+            "limitMinutes": 24000,
+            "windowMonths": 5
+          }
+        ],
+        "input_average_minutes": 4801
+      },
+      {
+        "window_n": 6,
+        "limit_sum_minutes": 28800,
+        "formatted_time": "79:59",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 28794,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4799
+      },
+      {
+        "window_n": 6,
+        "limit_sum_minutes": 28800,
+        "formatted_time": "80:00",
+        "limit_minutes": 4800,
+        "expected_violation": false,
+        "sum_minutes": 28800,
+        "actual_violation": false,
+        "findings": [],
+        "input_average_minutes": 4800
+      },
+      {
+        "window_n": 6,
+        "limit_sum_minutes": 28800,
+        "formatted_time": "80:01",
+        "limit_minutes": 4800,
+        "expected_violation": true,
+        "sum_minutes": 28806,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 9602,
+            "limitMinutes": 9600,
+            "windowMonths": 2
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 14403,
+            "limitMinutes": 14400,
+            "windowMonths": 3
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 19204,
+            "limitMinutes": 19200,
+            "windowMonths": 4
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 24005,
+            "limitMinutes": 24000,
+            "windowMonths": 5
+          },
+          {
+            "rule": "RULE5_MULTI_MONTH_AVERAGE",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 28806,
+            "limitMinutes": 28800,
+            "windowMonths": 6
+          }
+        ],
+        "input_average_minutes": 4801
       }
-    ],
-    "window_calculations_matched": true
+    ]
   }
 }

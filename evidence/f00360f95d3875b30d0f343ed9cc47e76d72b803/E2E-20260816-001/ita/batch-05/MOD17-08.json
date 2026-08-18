@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD17-08",
+  "dimension": "N,A,D",
+  "category": "MOD-17",
+  "name": "permission-groups の一覧・ユーザー割当・replace を管理者で実行し、非管理者と action 権限連動を確認",
+  "status": "PASS",
+  "duration_ms": 16,
+  "duration_h": 0.000004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-08.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_list_status": 200,
+    "admin_groups_count": 5,
+    "member_forbidden_status": 403
+  }
+}

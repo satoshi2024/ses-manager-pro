@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD11-04",
+  "dimension": "A,S",
+  "category": "MOD-11",
+  "name": "管理者/会計担当permission groupと非許可主体で一覧、作成、layer変更、支払済更新を直送",
+  "status": "PASS",
+  "duration_ms": 17,
+  "duration_h": 0.000005,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-04.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_status": 200,
+    "member_forbidden_status": 401
+  }
+}

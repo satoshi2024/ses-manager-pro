@@ -4,25 +4,66 @@
   "category": "MOD-08",
   "name": "単月の時間外+休日労働を99:59/100:00にし、休日労働0/1分を差し替える",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 2320,
+  "duration_h": 0.000644,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-08.json",
   "error": null,
   "evidence_detail": {
-    "single_month_cap_matrix": [
+    "calculation_service": "OvertimeComplianceCalculator.evaluate(Rule 4 Month Total >= 100h)",
+    "boundary_comparison_table": [
       {
-        "totalMinutes": 5999,
-        "formatted": "99:59",
-        "violation": false,
-        "description": "月100時間未満上限内"
+        "expected_violation": false,
+        "actual_violation": false,
+        "formatted_time": "99:59",
+        "findings": [],
+        "limit_minutes": 6000,
+        "findings_count": 0,
+        "input_total_minutes": 5999
       },
       {
-        "totalMinutes": 6000,
-        "formatted": "100:00",
-        "violation": true,
-        "description": "月100時間以上違反"
+        "expected_violation": true,
+        "actual_violation": true,
+        "formatted_time": "100:00",
+        "findings": [
+          {
+            "rule": "RULE4_MONTH_TOTAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 6000,
+            "limitMinutes": 6000,
+            "windowMonths": null
+          }
+        ],
+        "limit_minutes": 6000,
+        "findings_count": 1,
+        "input_total_minutes": 6000
+      },
+      {
+        "expected_violation": true,
+        "actual_violation": true,
+        "formatted_time": "100:01",
+        "findings": [
+          {
+            "rule": "RULE4_MONTH_TOTAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 6001,
+            "limitMinutes": 6000,
+            "windowMonths": null
+          }
+        ],
+        "limit_minutes": 6000,
+        "findings_count": 1,
+        "input_total_minutes": 6001
       }
-    ],
-    "legal_boundary_exact": true
+    ]
   }
 }

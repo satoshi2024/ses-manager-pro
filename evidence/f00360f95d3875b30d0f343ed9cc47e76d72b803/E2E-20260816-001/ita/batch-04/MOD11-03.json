@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD11-03",
+  "dimension": "N,D",
+  "category": "MOD-11",
+  "name": "親子layerを追加/更新/削除し、親合計・cost center・snapshotの不変/更新規則を確認",
+  "status": "PASS",
+  "duration_ms": 99,
+  "duration_h": 0.000028,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-03.json",
+  "error": null,
+  "evidence_detail": {
+    "create_status": 200,
+    "update_status": 200,
+    "delete_status": 200
+  }
+}

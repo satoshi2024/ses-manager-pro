@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD14-06",
+  "dimension": "E,A,D",
+  "category": "MOD-14",
+  "name": "commission rate -0.01/100.01、unknown key、営業からsystem config更新を送信",
+  "status": "PASS",
+  "duration_ms": 22,
+  "duration_h": 0.000006,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-06.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_rate_status": 400,
+    "sales_forbidden_status": 403
+  }
+}

@@ -1,16 +1,38 @@
 {
   "case_id": "MOD07-03",
-  "dimension": "A,S",
+  "dimension": "A,S,D",
   "category": "MOD-07",
-  "name": "sales01/02と組織異動前後でlist/options/detail/update/delete/price/documentを直送",
+  "name": "sales01/02と組織scopeでlist/detail/create/update/deleteを直送",
   "status": "PASS",
-  "duration_ms": 309,
-  "duration_h": 0.000086,
+  "duration_ms": 412,
+  "duration_h": 0.000114,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-03.json",
   "error": null,
   "evidence_detail": {
-    "sales01_contracts_count": 10,
-    "sales02_contracts_count": 10,
-    "scope_enforced_strictly": true
+    "scope_config_applied": "scope.sales-own-data-only=true",
+    "sales01_own_contract_request": {
+      "method": "GET",
+      "path": "/api/contracts/7002"
+    },
+    "sales01_response": {
+      "status": 200,
+      "contract_id": 7002,
+      "sales_user_id": 102
+    },
+    "sales02_cross_access_request": {
+      "method": "GET",
+      "path": "/api/contracts/7002"
+    },
+    "sales02_response": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "閲覧権限がないか、対象が存在しません",
+        "data": null
+      }
+    },
+    "teardown": {
+      "scope_config_restored": "scope.sales-own-data-only=false"
+    }
   }
 }

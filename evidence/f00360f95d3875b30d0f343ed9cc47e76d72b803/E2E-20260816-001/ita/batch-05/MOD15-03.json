@@ -1,0 +1,47 @@
+{
+  "case_id": "MOD15-03",
+  "dimension": "N,E,D",
+  "category": "MOD-15",
+  "name": "下書き→提出済→受注/失注、終端編集/削除、受注から契約ドラフト生成",
+  "status": "PASS",
+  "duration_ms": 205,
+  "duration_h": 0.000057,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-03.json",
+  "error": null,
+  "evidence_detail": {
+    "quotation_id": 15069,
+    "submit_status": 200,
+    "accept_status": 200,
+    "contract_draft_status": 200,
+    "submit_data": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": {
+        "id": 43,
+        "createdAt": "2026-08-18T10:48:04.4460729",
+        "updatedAt": "2026-08-18T10:48:04.4460729",
+        "deletedFlag": 0,
+        "requestNo": "AR-43",
+        "requestType": "quotation.submit",
+        "targetType": "QUOTATION",
+        "targetId": 15069,
+        "targetVersion": 0,
+        "applicantId": 101,
+        "organizationId": null,
+        "amountSnapshot": 800000,
+        "payloadJson": "{\"operation\":\"status\",\"status\":\"提出済\",\"createDraft\":false}",
+        "diffJson": "{\"status\":{\"before\":\"下書き\",\"after\":\"提出済\",\"label\":\"見積ステータス\"}}",
+        "routeSnapshotJson": "{\"routeId\":104,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[1],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[1],\"requiredCount\":1}]}]}",
+        "status": "in_review",
+        "currentStep": 1,
+        "roundNo": 1,
+        "currentStepStartedAt": "2026-08-18T10:48:04.4460729",
+        "requestedAt": "2026-08-18T10:48:04.4460729",
+        "finalizedAt": null,
+        "idempotencyKey": "approval-346e5546697cb97700b1b17f89a844b6364c436df319a571ef4266551e319ab4",
+        "version": 1,
+        "createdBy": 101
+      }
+    }
+  }
+}

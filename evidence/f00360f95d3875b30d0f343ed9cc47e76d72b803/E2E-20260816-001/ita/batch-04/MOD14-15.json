@@ -1,0 +1,92 @@
+{
+  "case_id": "MOD14-15",
+  "dimension": "N,A,B,D",
+  "category": "MOD-14",
+  "name": "cashflow forecast/export を管理者/マネージャーで実行し、営業/要員と月境界を確認",
+  "status": "PASS",
+  "duration_ms": 41,
+  "duration_h": 0.000011,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-15.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_forecast_status": 200,
+    "member_forecast_status": 401,
+    "forecast_data": {
+      "months": [
+        {
+          "month": "2026-08",
+          "inflow": 159418600,
+          "outflow": 500000,
+          "net": 158918600,
+          "balance": 158918600,
+          "unpaidInvoiceTotal": 159418600,
+          "bpPaymentTotal": 500000,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        },
+        {
+          "month": "2026-09",
+          "inflow": 0,
+          "outflow": 1272666,
+          "net": -1272666,
+          "balance": 157645934,
+          "unpaidInvoiceTotal": 0,
+          "bpPaymentTotal": 1272666,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        },
+        {
+          "month": "2026-10",
+          "inflow": 0,
+          "outflow": 0,
+          "net": 0,
+          "balance": 157645934,
+          "unpaidInvoiceTotal": 0,
+          "bpPaymentTotal": 0,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        },
+        {
+          "month": "2026-11",
+          "inflow": 0,
+          "outflow": 0,
+          "net": 0,
+          "balance": 157645934,
+          "unpaidInvoiceTotal": 0,
+          "bpPaymentTotal": 0,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        },
+        {
+          "month": "2026-12",
+          "inflow": 0,
+          "outflow": 0,
+          "net": 0,
+          "balance": 157645934,
+          "unpaidInvoiceTotal": 0,
+          "bpPaymentTotal": 0,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        },
+        {
+          "month": "2027-01",
+          "inflow": 0,
+          "outflow": 0,
+          "net": 0,
+          "balance": 157645934,
+          "unpaidInvoiceTotal": 0,
+          "bpPaymentTotal": 0,
+          "payrollTotal": 0,
+          "fixedCost": 0
+        }
+      ],
+      "alertThreshold": 0,
+      "reconciliation": {
+        "month": "2026-08",
+        "kpiSales": 82259000,
+        "invoicedSubtotal": 0,
+        "difference": -82259000
+      }
+    }
+  }
+}

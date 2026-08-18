@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD16-02",
+  "dimension": "E,D",
+  "category": "MOD-16",
+  "name": "未設定/revoked の connection で employees/statements を取得し、401→refresh→再401 を注入",
+  "status": "PASS",
+  "duration_ms": 7,
+  "duration_h": 0.000002,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-02.json",
+  "error": null,
+  "evidence_detail": {
+    "unconfigured_employees_status": 400,
+    "response": {
+      "code": 400,
+      "message": "freee連携が未接続です",
+      "data": null
+    }
+  }
+}

@@ -4,26 +4,45 @@
   "category": "MOD-07",
   "name": "要員/案件/顧客、売上単価、原価、精算幅、期間、担当営業で契約作成",
   "status": "PASS",
-  "duration_ms": 2701,
-  "duration_h": 0.00075,
+  "duration_ms": 4514,
+  "duration_h": 0.001254,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-01.json",
   "error": null,
   "evidence_detail": {
-    "http_create": {
+    "http_request": {
+      "method": "POST",
+      "path": "/api/contracts",
+      "body": {
+        "contractNo": "CNT-1787014284134",
+        "engineerId": 1001,
+        "projectId": 1,
+        "customerId": 1,
+        "salesUserId": 102,
+        "contractType": "準委任",
+        "startDate": "2026-09-01",
+        "endDate": "2027-02-28",
+        "sellingPrice": 850000,
+        "costPrice": 650000,
+        "settlementHoursMin": 140,
+        "settlementHoursMax": 180,
+        "remarks": "テスト契約-1787014284134"
+      }
+    },
+    "http_response": {
       "status": 200,
       "body": {
         "code": 200,
         "message": "処理が成功しました",
         "data": {
-          "id": 7296,
+          "id": 7319,
           "negativeProfit": false,
           "complianceFindings": []
         }
       }
     },
     "db_created_contract": {
-      "id": "7296",
-      "contract_no": "CNT-1786981594856",
+      "id": "7319",
+      "contract_no": "CNT-1787014284134",
       "engineer_id": "1001",
       "project_id": "1",
       "customer_id": "1",
@@ -33,6 +52,9 @@
       "is_draft": "1"
     },
     "gross_profit_yen": 200000,
-    "fields_matched": true
+    "teardown": {
+      "deleted_contract_id": 7319,
+      "remaining_count": 0
+    }
   }
 }

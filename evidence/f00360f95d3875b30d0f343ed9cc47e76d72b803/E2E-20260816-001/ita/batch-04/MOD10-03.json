@@ -1,0 +1,24 @@
+{
+  "case_id": "MOD10-03",
+  "dimension": "A,D",
+  "category": "MOD-10",
+  "name": "銀行口座を登録し承認前後、権限なしpermission groupでも表示/更新",
+  "status": "PASS",
+  "duration_ms": 160,
+  "duration_h": 0.000044,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-03.json",
+  "error": null,
+  "evidence_detail": {
+    "registered_account_id": 11423,
+    "db_raw_row": {
+      "id": "11423",
+      "bp_company_id": "11032",
+      "bank_name": "����ס���y��",
+      "encrypted_account_number": "XgPxTizztFwWhRGVaw4gyVM+Jt/WL2RbjMnTOAespKCDqpo=",
+      "approval_status": "PENDING"
+    },
+    "is_encrypted_in_db": true,
+    "api_masked_label": "****4567",
+    "approve_status": 200
+  }
+}

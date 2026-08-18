@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD17-11",
+  "dimension": "C,D,X",
+  "category": "MOD-17",
+  "name": "notification outbox の claim→PROCESSING→SENT/RETRY/FAILED を2 worker・failpoint で実行",
+  "status": "PASS",
+  "duration_ms": 43,
+  "duration_h": 0.000012,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-11.json",
+  "error": null,
+  "evidence_detail": {
+    "outbox_pending_count": 2276,
+    "claim_double_processing_prevented": true
+  }
+}

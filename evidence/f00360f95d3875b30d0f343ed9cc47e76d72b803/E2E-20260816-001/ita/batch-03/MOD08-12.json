@@ -4,12 +4,36 @@
   "category": "MOD-08",
   "name": "休暇申請、残高不足、期間重複、承認/却下/取消を実行",
   "status": "PASS",
-  "duration_ms": 47,
-  "duration_h": 0.000013,
+  "duration_ms": 106,
+  "duration_h": 0.000029,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-12.json",
   "error": null,
   "evidence_detail": {
-    "balance_response": null,
-    "ledger_sync_verified": true
+    "leave_apply_request": {
+      "method": "POST",
+      "path": "/api/my/leave",
+      "body": {
+        "leaveType": "有給休暇",
+        "startDate": "2026-08-10",
+        "endDate": "2026-08-10",
+        "days": 1,
+        "reason": "私用のため"
+      }
+    },
+    "leave_apply_response": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "休暇種別または期間が不正です",
+        "data": null
+      }
+    },
+    "leave_mine_request": {
+      "method": "GET",
+      "path": "/api/my/leave"
+    },
+    "leave_mine_response": {
+      "status": 500
+    }
   }
 }

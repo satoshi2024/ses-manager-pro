@@ -1,0 +1,32 @@
+{
+  "case_id": "MOD14-07",
+  "dimension": "N,B,D",
+  "category": "MOD-14",
+  "name": "組織作成、親子付替、user所属のvalid_from/to境界、merge/status変更を実行",
+  "status": "PASS",
+  "duration_ms": 61,
+  "duration_h": 0.000017,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-07.json",
+  "error": null,
+  "evidence_detail": {
+    "created_org_id": 3012,
+    "status": 200,
+    "created_org": {
+      "id": 3012,
+      "createdAt": "2026-08-18T10:11:12.5464478",
+      "updatedAt": "2026-08-18T10:11:12.5464478",
+      "deletedFlag": null,
+      "tenantId": null,
+      "legalEntityId": null,
+      "code": "TEST_ORG_1787015472542",
+      "name": "テスト組織MOD14_07",
+      "type": "DEPARTMENT",
+      "parentId": null,
+      "validFrom": "2026-08-01",
+      "validTo": null,
+      "status": "有効",
+      "mergedInto": null,
+      "version": 0
+    }
+  }
+}

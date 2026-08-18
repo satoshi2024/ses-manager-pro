@@ -1,0 +1,62 @@
+{
+  "case_id": "MOD15-06",
+  "dimension": "C,D",
+  "category": "MOD-15",
+  "name": "同一stepを2承認者/2tabで同時approve、approveとrejectを競合",
+  "status": "PASS",
+  "duration_ms": 216,
+  "duration_h": 0.00006,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-06.json",
+  "error": null,
+  "evidence_detail": {
+    "approval_request_id": 53,
+    "target_contract_id": 1,
+    "target_version": 0,
+    "before_request_db": {
+      "id": "53",
+      "request_no": "AR-53",
+      "request_type": "contract.activate",
+      "target_type": "CONTRACT",
+      "target_id": "1",
+      "status": "in_review",
+      "current_step": "1",
+      "version": "1"
+    },
+    "concurrent_calls": {
+      "session1_approve_status": 400,
+      "session1_approve_code": 400,
+      "session1_message": "この承認申請は現在の状態では操作できません。",
+      "session2_reject_status": 200,
+      "session2_reject_code": 200,
+      "session2_message": "処理が成功しました"
+    },
+    "after_request_db": {
+      "before_version": "1",
+      "after_version": "2",
+      "final_status": "rejected",
+      "version_cas_increment_verified": true
+    },
+    "approval_action_db": [
+      {
+        "id": "25",
+        "request_id": "53",
+        "round_no": "1",
+        "step_no": "1",
+        "slot_index": "0",
+        "approver_user_id": "1",
+        "action": "REJECT",
+        "comment": "同時却下テスト2",
+        "acted_at": "2026-08-18 11:49:01"
+      }
+    ],
+    "action_records_count": 1,
+    "action_single_winner_enforced": true,
+    "duplicate_notifications_count": 0,
+    "target_contract_applied_count": 1,
+    "teardown": {
+      "t_approval_action_residue": 0,
+      "t_approval_participant_residue": 0,
+      "t_approval_request_residue": 0
+    }
+  }
+}

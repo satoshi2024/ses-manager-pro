@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD16-03",
+  "dimension": "N,B,D",
+  "category": "MOD-16",
+  "name": "/api/payroll/employees と /api/payroll/statements を取得し、link/unlink を実行",
+  "status": "PASS",
+  "duration_ms": 4,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-03.json",
+  "error": null,
+  "evidence_detail": {
+    "payroll_status": {
+      "status": "MISCONFIGURED",
+      "connected": false,
+      "companyName": null,
+      "action": "freee連携の設定を確認してください"
+    }
+  }
+}

@@ -72,6 +72,10 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    /** 会計月次照合サービス（R3.3/B3）。既存テストslice互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.accounting.AccountingReconciliationService accountingReconciliationService;
+
     /** compliance メニューを閲覧できるロールか（管理者は常に可。MenuPermissionFilter と同じ判定）。 */
     private boolean canViewCompliance() {
         org.springframework.security.core.Authentication auth =
@@ -203,6 +207,19 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
                 ? laborComplianceService.findCurrentRisks()
                 : java.util.List.of());
 
+        // (h) 会計連携の未解消差異件数（R3.3/B3）
+        if (accountingReconciliationService != null) {
+            try {
+                var recon = accountingReconciliationService.reconcileMonth(month);
+                dto.setAccountingDiscrepancyCount(recon.getAmountMismatchCount() + recon.getInternalOnlyCount());
+            } catch (Exception e) {
+                log.warn("Failed to check accounting reconciliation for month={}", month, e);
+                dto.setAccountingDiscrepancyCount(0);
+            }
+        } else {
+            dto.setAccountingDiscrepancyCount(0);
+        }
+
         dto.setUnenteredCount(dto.getUnenteredWork().size());
         dto.setUnconfirmedCount(dto.getUnconfirmedRecords().size());
         dto.setUnbilledCount(items.size());
@@ -249,6 +266,9 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         MonthlyClosingSummaryDto s = summary(month);
         if (!s.isReadyToClose()) {
             throw BusinessException.of(400, "error.closing.notReady");
+        }
+        if (accountingReconciliationService != null) {
+            accountingReconciliationService.assertReconciledForClosing(month);
         }
         if (monthlyAccountingSnapshotService != null) {
             monthlyAccountingSnapshotService.snapshotMonth(month);

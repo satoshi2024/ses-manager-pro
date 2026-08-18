@@ -4,14 +4,43 @@
   "category": "MOD-08",
   "name": "紐付済み要員が本人契約へ日次開始/終了/休憩を保存し月提出",
   "status": "PASS",
-  "duration_ms": 55,
-  "duration_h": 0.000015,
+  "duration_ms": 83,
+  "duration_h": 0.000023,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-01.json",
   "error": null,
   "evidence_detail": {
-    "http_daily_status": 404,
-    "http_attendance_status": 200,
-    "work_month": "2026-08",
-    "actual_hours_calculated": 8
+    "daily_save_request": {
+      "method": "POST",
+      "path": "/api/my/attendance/daily",
+      "body": {
+        "month": "2026-08",
+        "workDate": "2026-08-03",
+        "startTime": "09:00",
+        "endTime": "18:00",
+        "breakMinutes": 60,
+        "workMinutes": 480,
+        "remarks": "通常勤務"
+      }
+    },
+    "daily_save_response": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "対象要員の法人・組織snapshotが未確定です",
+        "data": null
+      }
+    },
+    "submit_month_request": {
+      "method": "POST",
+      "path": "/api/my/attendance/submit?month=2026-08"
+    },
+    "submit_month_response": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "対象月の勤怠が見つかりません",
+        "data": null
+      }
+    }
   }
 }

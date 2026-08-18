@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD17-10",
+  "dimension": "N,B,C,D",
+  "category": "MOD-17",
+  "name": "break-glass の作成→承認→ACTIVE→close/expire を、期間境界（1/120/121分）、二重承認、同時 close で実行",
+  "status": "PASS",
+  "duration_ms": 105,
+  "duration_h": 0.000029,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-10.json",
+  "error": null,
+  "evidence_detail": {
+    "break_glass_id": 10,
+    "create_status": 200,
+    "approve_status": 409,
+    "close_status": 200
+  }
+}

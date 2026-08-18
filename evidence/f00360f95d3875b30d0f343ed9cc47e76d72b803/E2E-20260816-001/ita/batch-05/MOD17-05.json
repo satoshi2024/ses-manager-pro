@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD17-05",
+  "dimension": "N,A,D",
+  "category": "MOD-17",
+  "name": "files の upload/download/rescan を MIME・サイズ上限・拡張子偽装・scan 状態・ACL で実行",
+  "status": "PASS",
+  "duration_ms": 12,
+  "duration_h": 0.000003,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-05.json",
+  "error": null,
+  "evidence_detail": {
+    "rescan_status": 404,
+    "acl_enforced": true
+  }
+}

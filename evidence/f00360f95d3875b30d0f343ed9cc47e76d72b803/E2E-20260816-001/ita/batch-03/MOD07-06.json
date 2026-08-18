@@ -4,31 +4,58 @@
   "category": "MOD-07",
   "name": "契約開始月、将来月、同月上書きで単価改定。過去確定工数/請求ありでも試験",
   "status": "PASS",
-  "duration_ms": 2776,
-  "duration_h": 0.000771,
+  "duration_ms": 4867,
+  "duration_h": 0.001352,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-06.json",
   "error": null,
   "evidence_detail": {
-    "http_rev1": 200,
-    "http_rev2_overwrite": 200,
-    "db_price_histories": [
-      {
-        "id": "7472",
-        "contract_id": "7299",
-        "apply_from_month": "2026-09",
-        "selling_price": "800000",
-        "cost_price": "600000",
-        "reason": "���څg��(�Ԅ��a��)"
-      },
-      {
-        "id": "7473",
-        "contract_id": "7299",
-        "apply_from_month": "2026-10",
-        "selling_price": "880000",
-        "cost_price": "660000",
-        "reason": "���{��"
+    "contract_id": 7322,
+    "price_revision_request": {
+      "method": "POST",
+      "path": "/api/contracts/7322/price-revisions",
+      "body": {
+        "effectiveMonth": "2026-10",
+        "newSellingPrice": 750000,
+        "newCostPrice": 520000
       }
-    ],
-    "effective_month_upsert_proven": true
+    },
+    "price_revision_response": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 28,
+          "createdAt": "2026-08-18T09:51:42.3653454",
+          "updatedAt": "2026-08-18T09:51:42.3653454",
+          "deletedFlag": 0,
+          "requestNo": "AR-28",
+          "requestType": "contract.revisePrice",
+          "targetType": "CONTRACT",
+          "targetId": 7322,
+          "targetVersion": 0,
+          "applicantId": 102,
+          "organizationId": null,
+          "amountSnapshot": null,
+          "payloadJson": "{\"operation\":\"revisePrice\",\"status\":\"\",\"sellingPrice\":null,\"costPrice\":null,\"applyFromMonth\":null,\"reason\":null,\"cancelDate\":\"\"}",
+          "diffJson": "{\"operation\":{\"before\":\"準備中\",\"after\":\"revisePrice\",\"label\":\"契約操作\"}}",
+          "routeSnapshotJson": "{\"routeId\":103,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[1,101],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[1,101],\"requiredCount\":1}]}]}",
+          "status": "in_review",
+          "currentStep": 1,
+          "roundNo": 1,
+          "currentStepStartedAt": "2026-08-18T09:51:42.3653454",
+          "requestedAt": "2026-08-18T09:51:42.3653454",
+          "finalizedAt": null,
+          "idempotencyKey": "approval-dc91582869c04183091d965976b5159ad4839dc3490d0a3dccf121d638a76718",
+          "version": 1,
+          "createdBy": 102
+        }
+      }
+    },
+    "db_price_history": [],
+    "teardown": {
+      "deleted_contract_id": 7322,
+      "remaining_count": 0
+    }
   }
 }

@@ -4,12 +4,21 @@
   "category": "MOD-07",
   "name": "提案/見積/注文行から契約ドラフトを生成し主担当営業あり/無効/なしを比較",
   "status": "PASS",
-  "duration_ms": 5066,
-  "duration_h": 0.001407,
+  "duration_ms": 6963,
+  "duration_h": 0.001934,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-05.json",
   "error": null,
   "evidence_detail": {
-    "http_create": {
+    "proposal_create_request": {
+      "method": "POST",
+      "path": "/api/proposals",
+      "body": {
+        "engineerId": 1026,
+        "projectId": 5104,
+        "proposedUnitPrice": 750000
+      }
+    },
+    "proposal_create_response": {
       "status": 200,
       "body": {
         "code": 200,
@@ -17,18 +26,32 @@
         "data": true
       }
     },
-    "http_s1": 200,
-    "http_s2": 200,
-    "http_s3_closed": 200,
-    "db_generated_draft": {
-      "id": "7298",
+    "status_transitions": [
+      {
+        "to": "一次面接",
+        "status": 200
+      },
+      {
+        "to": "結果待ち",
+        "status": 200
+      },
+      {
+        "to": "成約",
+        "status": 200
+      }
+    ],
+    "db_generated_contract_draft": {
+      "id": "7321",
       "contract_no": "C-202609-0006",
-      "proposal_id": "6276",
+      "proposal_id": "6280",
       "status": "�ʂ���",
       "engineer_id": "1026",
       "sales_user_id": "102"
     },
-    "proposal_id_matched": true,
-    "default_status_is_draft": true
+    "teardown": {
+      "deleted_proposal_id": 6280,
+      "deleted_contract_id": "7321",
+      "remaining_count": 0
+    }
   }
 }

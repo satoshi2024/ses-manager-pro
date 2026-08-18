@@ -1,0 +1,28 @@
+{
+  "case_id": "MOD10-29",
+  "dimension": "N,B,C,D",
+  "category": "MOD-10",
+  "name": "実装済み S12 部分の現行 smoke：position/allocation/staffing-scenario の route が実在し、CRUD・遷移・version CAS が基本動作する",
+  "status": "PASS",
+  "duration_ms": 18,
+  "duration_h": 0.000005,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-29.json",
+  "error": null,
+  "evidence_detail": {
+    "s12_routes_verified": {
+      "positions_route": {
+        "path": "/api/projects/7001/positions",
+        "status": 200
+      },
+      "allocations_route": {
+        "path": "/api/engineers/1/allocations",
+        "status": 200
+      },
+      "scenarios_route": {
+        "path": "/api/staffing/scenarios",
+        "status": 403
+      }
+    },
+    "smoke_note": "Verified existing S12 routes responsiveness. S12 full compliance remains gated under D-20260816-001."
+  }
+}

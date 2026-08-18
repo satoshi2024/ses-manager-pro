@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD15-08",
+  "dimension": "N,D",
+  "category": "MOD-15",
+  "name": "受注済見積から注文を作成し複数line、原本document、注文請PDFを登録",
+  "status": "PASS",
+  "duration_ms": 208,
+  "duration_h": 0.000058,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-08.json",
+  "error": null,
+  "evidence_detail": {
+    "sales_order_id": 26066,
+    "create_status": 200,
+    "ack_pdf_status": 200,
+    "content_type": "application/pdf;charset=UTF-8"
+  }
+}

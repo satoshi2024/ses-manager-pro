@@ -4,37 +4,117 @@
   "category": "MOD-08",
   "name": "特別条項ありで年間719:59/720:00/720:01、45時間超の月が6回/7回を計算し休日労働も組み込む",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 2353,
+  "duration_h": 0.000654,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-11.json",
   "error": null,
   "evidence_detail": {
-    "special_clause_matrix": [
+    "calculation_service": "OvertimeComplianceCalculator.evaluate(Rule 3 Year Special & Rule 6 Exceed Count)",
+    "rule3_annual_720h_boundary_table": [
       {
-        "annualMinutes": 43199,
-        "formatted": "719:59",
-        "monthsOver45": 6,
-        "violation": false
+        "limit_minutes": 43200,
+        "input_year_special_minutes": 43199,
+        "formatted_time": "719:59",
+        "expected_violation": false,
+        "actual_violation": false,
+        "findings": [
+          {
+            "rule": "RULE2_YEAR_NORMAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 43199,
+            "limitMinutes": 21600,
+            "windowMonths": null
+          }
+        ]
       },
       {
-        "annualMinutes": 43200,
-        "formatted": "720:00",
-        "monthsOver45": 6,
-        "violation": false
+        "limit_minutes": 43200,
+        "input_year_special_minutes": 43200,
+        "formatted_time": "720:00",
+        "expected_violation": false,
+        "actual_violation": false,
+        "findings": [
+          {
+            "rule": "RULE2_YEAR_NORMAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 43200,
+            "limitMinutes": 21600,
+            "windowMonths": null
+          }
+        ]
       },
       {
-        "annualMinutes": 43201,
-        "formatted": "720:01",
-        "monthsOver45": 6,
-        "violation": true
-      },
-      {
-        "annualMinutes": 40000,
-        "formatted": "666:40",
-        "monthsOver45": 7,
-        "violation": true
+        "limit_minutes": 43200,
+        "input_year_special_minutes": 43201,
+        "formatted_time": "720:01",
+        "expected_violation": true,
+        "actual_violation": true,
+        "findings": [
+          {
+            "rule": "RULE2_YEAR_NORMAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 43201,
+            "limitMinutes": 21600,
+            "windowMonths": null
+          },
+          {
+            "rule": "RULE3_YEAR_SPECIAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 43201,
+            "limitMinutes": 43200,
+            "windowMonths": null
+          }
+        ]
       }
     ],
-    "max_720h_and_6months_enforced": true
+    "rule6_exceed_month_count_table": [
+      {
+        "findings": [],
+        "exceed_month_count": 6,
+        "actual_violation": false,
+        "expected_violation": false,
+        "limit_count": 6
+      },
+      {
+        "findings": [
+          {
+            "rule": "RULE6_EXCEED_MONTH_COUNT",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 7,
+            "limitMinutes": 6,
+            "windowMonths": null
+          }
+        ],
+        "exceed_month_count": 7,
+        "actual_violation": true,
+        "expected_violation": true,
+        "limit_count": 6
+      }
+    ]
   }
 }

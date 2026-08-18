@@ -4,17 +4,22 @@
   "category": "MOD-08",
   "name": "未紐付要員、他要員contractId/workRecordIdをAPIへ差し込む",
   "status": "PASS",
-  "duration_ms": 37,
-  "duration_h": 0.00001,
+  "duration_ms": 70,
+  "duration_h": 0.000019,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-02.json",
   "error": null,
   "evidence_detail": {
-    "http_status": 403,
-    "response_body": {
-      "code": 403,
-      "message": "このactionへのアクセス権限がありません",
-      "data": null
+    "cross_engineer_approve_request": {
+      "method": "POST",
+      "path": "/api/work-records/attendance/1002/approve?month=2026-08"
     },
-    "data_isolation_enforced": true
+    "cross_engineer_response": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このactionへのアクセス権限がありません",
+        "data": null
+      }
+    }
   }
 }

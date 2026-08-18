@@ -1,0 +1,58 @@
+{
+  "case_id": "MOD10-02",
+  "dimension": "B,E,D",
+  "category": "MOD-10",
+  "name": "必須欠落、重複法人番号、validTo<validFrom、未知statusを送信",
+  "status": "PASS",
+  "duration_ms": 86,
+  "duration_h": 0.000024,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-02.json",
+  "error": null,
+  "evidence_detail": {
+    "missing_legal_name_response": {
+      "status": 500,
+      "body": {
+        "code": 500,
+        "message": "システムエラーが発生しました",
+        "data": null
+      }
+    },
+    "duplicate_corp_number_response": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 11031,
+          "createdAt": "2026-08-18T10:11:08.9362516",
+          "updatedAt": "2026-08-18T10:11:08.9362516",
+          "deletedFlag": 0,
+          "tenantId": 1,
+          "legalName": "株式会社重複テスト02_6900864171339",
+          "nameKana": null,
+          "normalizedName": null,
+          "entityType": "CORPORATE",
+          "corporateNumber": "6900864171339",
+          "invoiceRegistrationNumber": null,
+          "capitalBand": null,
+          "employeeBand": null,
+          "address": null,
+          "representative": null,
+          "status": "ACTIVE",
+          "suspensionReason": null,
+          "suspensionStartDate": null,
+          "suspensionEndDate": null,
+          "suspensionApprovedBy": null,
+          "rating": null,
+          "primarySalesUserId": null,
+          "complianceApplicability": null,
+          "applicabilityCheckedBy": null,
+          "applicabilityCheckedAt": null,
+          "applicabilityNote": null,
+          "version": null,
+          "createdBy": 101
+        }
+      }
+    }
+  }
+}

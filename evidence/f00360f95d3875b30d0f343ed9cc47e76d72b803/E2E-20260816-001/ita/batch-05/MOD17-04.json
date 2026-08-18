@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD17-04",
+  "dimension": "N,A,S,D",
+  "category": "MOD-17",
+  "name": "autocomplete 全 endpoint（engineers/customers/projects/options/organizations/cost-centers/users 等）を scope 内/外・非許可で実行",
+  "status": "PASS",
+  "duration_ms": 20,
+  "duration_h": 0.000006,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-04.json",
+  "error": null,
+  "evidence_detail": {
+    "engineers_count": 262,
+    "customers_count": 48,
+    "projects_count": 75
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD14-09",
+  "dimension": "N,S,D",
+  "category": "MOD-14",
+  "name": "月次管理会計summary/drilldown/exportを全社/組織/cost center/customer/project/salesで絞込",
+  "status": "PASS",
+  "duration_ms": 771,
+  "duration_h": 0.000214,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-09.json",
+  "error": null,
+  "evidence_detail": {
+    "summary_rows_count": 8,
+    "drilldown_rows_count": 8,
+    "export_csv_length_bytes": 8818,
+    "population_consistent": true
+  }
+}

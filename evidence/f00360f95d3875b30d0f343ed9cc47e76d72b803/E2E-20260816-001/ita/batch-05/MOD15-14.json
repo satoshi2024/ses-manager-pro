@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD15-14",
+  "dimension": "A,C,D,P,U",
+  "category": "MOD-15",
+  "name": "retention前後、legal hold、申請者自身の廃棄承認、同時承認/実行を試験し、300人規模のinbox/文書一覧も計測",
+  "status": "PASS",
+  "duration_ms": 28,
+  "duration_h": 0.000008,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-14.json",
+  "error": null,
+  "evidence_detail": {
+    "p95_latency_ms": 28,
+    "sql_count": 2,
+    "documents_total": 8
+  }
+}

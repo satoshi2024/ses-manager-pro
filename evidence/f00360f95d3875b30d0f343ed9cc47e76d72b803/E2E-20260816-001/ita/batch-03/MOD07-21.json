@@ -4,12 +4,22 @@
   "category": "MOD-07",
   "name": "契約 scope 外の compliance-profile/findings/documents/check-active を直送",
   "status": "PASS",
-  "duration_ms": 147,
-  "duration_h": 0.000041,
+  "duration_ms": 257,
+  "duration_h": 0.000071,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-21.json",
   "error": null,
   "evidence_detail": {
-    "out_of_scope_request_status": 404,
-    "idor_protection_verified": true
+    "sales_unauthorized_request": {
+      "method": "GET",
+      "path": "/api/compliance-gate/summary"
+    },
+    "sales_response": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このactionへのアクセス権限がありません",
+        "data": null
+      }
+    }
   }
 }

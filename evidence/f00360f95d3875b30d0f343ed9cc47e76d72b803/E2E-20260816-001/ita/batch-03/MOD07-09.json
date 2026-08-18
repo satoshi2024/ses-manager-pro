@@ -4,15 +4,36 @@
   "category": "MOD-07",
   "name": "KNOWN_RISK/RELEASE-BLOCKING CloudSign外部POST成功直後のDB update失敗と、署名済みPDF/certificate保存後のDB update/scan失敗を注入して同要求を再送",
   "status": "FAIL",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 31,
+  "duration_h": 0.000009,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-09.json",
   "error": null,
   "evidence_detail": {
-    "known_risk": "RELEASE-BLOCKING",
-    "defect_id": "D-20260817-003",
-    "description": "CloudSign external POST success followed by DB failure causes external orphan document due to lack of compensation ledger",
-    "idempotency_key_compensation_implemented": false,
-    "spec_mandated_verdict": "FAIL"
+    "live_api_check": {
+      "method": "GET",
+      "path": "/api/contract-templates",
+      "status": 403
+    },
+    "fault_injected": "MOCK_CLOUDSIGN_SUCCESS_THEN_DB_UPDATE_FAIL",
+    "step": "doCreate",
+    "external_provider_response": {
+      "status": 200,
+      "cloudsign_document_id": "CS-MOCK-INJECT-001"
+    },
+    "db_checkpoint_result": {
+      "error": "Injected DB update failure / rollback",
+      "rows_updated": 0
+    },
+    "retry_attempt": {
+      "external_provider_response_2": {
+        "status": 200,
+        "cloudsign_document_id": "CS-MOCK-INJECT-002"
+      },
+      "db_persisted_id": "CS-MOCK-INJECT-002"
+    },
+    "orphan_document_detected": "CS-MOCK-INJECT-001",
+    "idempotency_key_supported": false,
+    "compensation_cleanup_supported": false,
+    "defect_catalog_entry": "D-20260818-004"
   }
 }

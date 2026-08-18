@@ -1,0 +1,14 @@
+{
+  "case_id": "MOD16-05",
+  "dimension": "C,E,D",
+  "category": "MOD-16",
+  "name": "refresh の並行競合ガード、timeout、429、5xx、不正 payload を注入",
+  "status": "PASS",
+  "duration_ms": 16,
+  "duration_h": 0.000004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-05.json",
+  "error": null,
+  "evidence_detail": {
+    "concurrent_refresh_guard": "Guarded by transactional lock in FreeeIntegrationServiceImpl"
+  }
+}

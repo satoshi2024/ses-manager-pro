@@ -1,0 +1,25 @@
+{
+  "case_id": "MOD17-03",
+  "dimension": "N,S,D,U",
+  "category": "MOD-17",
+  "name": "/api/search を keyword・0件・特殊文字・scope 内/外で実行し、300人データで計測",
+  "status": "PASS",
+  "duration_ms": 26,
+  "duration_h": 0.000007,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-03.json",
+  "error": null,
+  "evidence_detail": {
+    "p95_latency_ms": 25,
+    "sql_count": 8,
+    "result_types": [
+      "BP_COMPANY",
+      "CONTRACT",
+      "CUSTOMER",
+      "ENGINEER",
+      "INVOICE",
+      "PROJECT",
+      "PROPOSAL",
+      "QUOTATION"
+    ]
+  }
+}

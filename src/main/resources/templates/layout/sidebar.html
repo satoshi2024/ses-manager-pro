@@ -321,6 +321,12 @@
                         <span th:text="#{menu.management.accounting}">管理会計</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('accounting')}">
+                    <a th:href="@{/accounting/integration}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/accounting') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-cloud-arrow-up me-2"></i>
+                        <span th:text="#{menu.accounting}">会計・支払連携</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
                     <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/user') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-gear me-2"></i>

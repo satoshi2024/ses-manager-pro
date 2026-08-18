@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD17-02",
+  "dimension": "N,A,D",
+  "category": "MOD-17",
+  "name": "notifications の page/unread-count/read/read-all を要員を含む全ロールで実行し、generate（管理者限定）を二重実行",
+  "status": "PASS",
+  "duration_ms": 38,
+  "duration_h": 0.000011,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-02.json",
+  "error": null,
+  "evidence_detail": {
+    "member_page_status": 200,
+    "member_unread_count": 0,
+    "read_all_status": 200
+  }
+}

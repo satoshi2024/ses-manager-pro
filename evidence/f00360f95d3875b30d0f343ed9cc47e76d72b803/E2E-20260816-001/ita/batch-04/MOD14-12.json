@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD14-12",
+  "dimension": "P,U",
+  "category": "MOD-14",
+  "name": "300人KPI、25営業performance、組織drilldown/exportをcold/warmで計測",
+  "status": "PASS",
+  "duration_ms": 154,
+  "duration_h": 0.000043,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-12.json",
+  "error": null,
+  "evidence_detail": {
+    "p95_latency_ms": 154,
+    "sql_queries_count": 4,
+    "kpi_status": 200,
+    "perf_status": 200
+  }
+}

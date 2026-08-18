@@ -1,0 +1,32 @@
+{
+  "case_id": "MOD11-01",
+  "dimension": "N,D,U",
+  "category": "MOD-11",
+  "name": "確定工数からBP支払を作成し親/子layer、支払先、条件snapshotを保存",
+  "status": "PASS",
+  "duration_ms": 111,
+  "duration_h": 0.000031,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-01.json",
+  "error": null,
+  "evidence_detail": {
+    "work_record_id": 8003,
+    "created_payment_id": 12044,
+    "create_status": 200,
+    "tree_status": 200,
+    "tree_data": [
+      {
+        "id": 12044,
+        "workRecordId": 8003,
+        "layerOrder": 1,
+        "payeeCompanyName": null,
+        "parentPaymentId": null,
+        "amount": 650000,
+        "status": "未払",
+        "paidDate": null,
+        "remarks": "MOD11-01 Layer 1",
+        "margin": 650000,
+        "children": []
+      }
+    ]
+  }
+}

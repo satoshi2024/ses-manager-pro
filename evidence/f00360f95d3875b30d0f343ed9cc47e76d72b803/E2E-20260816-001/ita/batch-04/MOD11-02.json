@@ -1,0 +1,48 @@
+{
+  "case_id": "MOD11-02",
+  "dimension": "B,E,D",
+  "category": "MOD-11",
+  "name": "amount=0/1/上限/負数、同一layer order、存在しないworkRecord/BP会社を送信",
+  "status": "PASS",
+  "duration_ms": 34,
+  "duration_h": 0.000009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-02.json",
+  "error": null,
+  "evidence_detail": {
+    "negative_amount_response": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 12045,
+          "workRecordId": 8003,
+          "layerOrder": 1,
+          "payeeCompanyName": null,
+          "bpCompanyId": 11001,
+          "bpCompanyNameSnapshot": "合同会社テックパートナー",
+          "termsSnapshotJson": null,
+          "parentPaymentId": null,
+          "amount": -5000,
+          "costCenterId": null,
+          "status": "未払",
+          "paidDate": null,
+          "receivedConfirmedAt": null,
+          "remarks": null,
+          "deletedFlag": null,
+          "createdAt": null,
+          "updatedAt": null,
+          "version": null
+        }
+      }
+    },
+    "invalid_work_record_response": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "勤怠実績が見つかりません",
+        "data": null
+      }
+    }
+  }
+}

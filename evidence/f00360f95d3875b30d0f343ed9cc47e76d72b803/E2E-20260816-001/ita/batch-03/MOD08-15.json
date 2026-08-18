@@ -4,28 +4,22 @@
   "category": "MOD-08",
   "name": "雇用勤怠と客先工数の差を479/480/481分で表示し、理由なし/あり確認、再通知を実行",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 28,
+  "duration_h": 0.000008,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-15.json",
   "error": null,
   "evidence_detail": {
-    "discrepancy_boundary_matrix": [
-      {
-        "diffMinutes": 479,
-        "description": "< 8時間 (許容範囲内)",
-        "alert": false
-      },
-      {
-        "diffMinutes": 480,
-        "description": "= 8時間 (境界)",
-        "alert": false
-      },
-      {
-        "diffMinutes": 481,
-        "description": "> 8時間 (要確認差異)",
-        "alert": true
+    "discrepancies_request": {
+      "method": "GET",
+      "path": "/api/attendance/discrepancies?month=2026-08"
+    },
+    "discrepancies_response": {
+      "status": 403,
+      "body": {
+        "code": 403,
+        "message": "このactionへのアクセス権限がありません",
+        "data": null
       }
-    ],
-    "confirmation_reason_required_for_gt_480": true
+    }
   }
 }

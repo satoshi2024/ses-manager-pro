@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD15-17",
+  "dimension": "N,A,D",
+  "category": "MOD-15",
+  "name": "/api/my/acceptances を要員本人で取得し、非要員と他要員 ID を直送",
+  "status": "PASS",
+  "duration_ms": 35,
+  "duration_h": 0.00001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-17.json",
+  "error": null,
+  "evidence_detail": {
+    "member_my_acceptances_status": 200,
+    "admin_unlinked_status": 403
+  }
+}

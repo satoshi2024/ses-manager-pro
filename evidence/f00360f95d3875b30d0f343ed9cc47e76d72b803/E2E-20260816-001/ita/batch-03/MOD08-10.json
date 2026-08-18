@@ -4,28 +4,50 @@
   "category": "MOD-08",
   "name": "年間時間外359:59/360:00/360:01を特別条項なしで計算",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 2396,
+  "duration_h": 0.000666,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-10.json",
   "error": null,
   "evidence_detail": {
-    "annual_standard_matrix": [
+    "calculation_service": "OvertimeComplianceCalculator.evaluate(Rule 2 Year Normal > 360h)",
+    "boundary_comparison_table": [
       {
-        "annualMinutes": 21599,
-        "formatted": "359:59",
-        "violation": false
+        "findings": [],
+        "expected_violation": false,
+        "actual_violation": false,
+        "formatted_time": "359:59",
+        "limit_minutes": 21600,
+        "input_year_minutes": 21599
       },
       {
-        "annualMinutes": 21600,
-        "formatted": "360:00",
-        "violation": false
+        "findings": [],
+        "expected_violation": false,
+        "actual_violation": false,
+        "formatted_time": "360:00",
+        "limit_minutes": 21600,
+        "input_year_minutes": 21600
       },
       {
-        "annualMinutes": 21601,
-        "formatted": "360:01",
-        "violation": true
+        "findings": [
+          {
+            "rule": "RULE2_YEAR_NORMAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 21601,
+            "limitMinutes": 21600,
+            "windowMonths": null
+          }
+        ],
+        "expected_violation": true,
+        "actual_violation": true,
+        "formatted_time": "360:01",
+        "limit_minutes": 21600,
+        "input_year_minutes": 21601
       }
-    ],
-    "limit_360h_enforced": true
+    ]
   }
 }

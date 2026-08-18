@@ -1,151 +1,302 @@
 {
   "case_id": "MOD05-06",
-  "dimension": "B",
+  "dimension": "N,B",
   "category": "MOD-05",
-  "name": "希望単価が範囲内、±9,999円、±10,000円、±100,000円、稼働日0/1/30/31日遅れ",
+  "name": "単価乖離0/1万/2万/10万(20点満点)と稼動遅延0/1/30/31日(10点満点)の採点",
   "status": "PASS",
-  "duration_ms": 101,
-  "duration_h": 0.000028,
+  "duration_ms": 3717,
+  "duration_h": 0.001032,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02/MOD05-06.json",
   "error": null,
   "evidence_detail": {
-    "price_gap_boundary_comparison_table": [
+    "rule_engine": "com.ses.service.ai.MatchScoreCalculator (L33-87)",
+    "api_endpoint": "POST /api/ai/match/engineer-to-projects",
+    "scoring_oracle_breakdown_table": [
       {
-        "gap_yen": 0,
-        "description": "単価範囲内 (800,000円 <= 上限800,000円)",
-        "project": {
-          "priceMin": 700000,
-          "priceMax": 800000
+        "fixtureId": "GAP-0",
+        "description": "Gap = 0 (priceMax=800,000, expected=800,000) -> priceScore=20",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 800000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
         },
-        "engineer": {
-          "expectedUnitPrice": 800000
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 10,
+          "totalScore": 100,
+          "isExcluded": false
         },
-        "expectedPenalty": 0,
-        "expectedPriceScore": 20,
-        "actualPriceScore": 20,
-        "penalty": 0,
-        "match": true
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 100
+        },
+        "verdict": "PASS"
       },
       {
-        "gap_yen": 9999,
-        "description": "単価上限+9,999円 (809,999円 / 1万円未満乖離切り捨て)",
-        "project": {
-          "priceMin": 700000,
-          "priceMax": 800000
+        "fixtureId": "GAP-9999",
+        "description": "Gap = 9,999 (priceMax=800,000, expected=809,999) -> priceScore=20",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 809999,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
         },
-        "engineer": {
-          "expectedUnitPrice": 809999
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 10,
+          "totalScore": 100,
+          "isExcluded": false
         },
-        "expectedPenalty": 0,
-        "expectedPriceScore": 20,
-        "actualPriceScore": 20,
-        "penalty": 0,
-        "match": true
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 100
+        },
+        "verdict": "PASS"
       },
       {
-        "gap_yen": 10000,
-        "description": "単価上限+10,000円 (810,000円 / 1万円乖離で2点減点)",
-        "project": {
-          "priceMin": 700000,
-          "priceMax": 800000
+        "fixtureId": "GAP-10000",
+        "description": "Gap = 10,000 (priceMax=800,000, expected=810,000) -> priceScore=18",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 810000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
         },
-        "engineer": {
-          "expectedUnitPrice": 810000
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 18,
+          "dateScore": 10,
+          "totalScore": 98,
+          "isExcluded": false
         },
-        "expectedPenalty": 2,
-        "expectedPriceScore": 18,
-        "actualPriceScore": 18,
-        "penalty": 2,
-        "match": true
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 98
+        },
+        "verdict": "PASS"
       },
       {
-        "gap_yen": 20000,
-        "description": "単価上限+20,000円 (820,000円 / 2万円乖離で4点減点)",
-        "project": {
-          "priceMin": 700000,
-          "priceMax": 800000
+        "fixtureId": "GAP-20000",
+        "description": "Gap = 20,000 (priceMax=800,000, expected=820,000) -> priceScore=16",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 820000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
         },
-        "engineer": {
-          "expectedUnitPrice": 820000
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 16,
+          "dateScore": 10,
+          "totalScore": 96,
+          "isExcluded": false
         },
-        "expectedPenalty": 4,
-        "expectedPriceScore": 16,
-        "actualPriceScore": 16,
-        "penalty": 4,
-        "match": true
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 96
+        },
+        "verdict": "PASS"
       },
       {
-        "gap_yen": 100000,
-        "description": "単価上限+100,000円 (900,000円 / 10万円以上乖離で20点減点)",
-        "project": {
-          "priceMin": 700000,
-          "priceMax": 800000
+        "fixtureId": "GAP-100000",
+        "description": "Gap = 100,000 (priceMax=800,000, expected=900,000) -> priceScore=0",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 900000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
         },
-        "engineer": {
-          "expectedUnitPrice": 900000
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 0,
+          "dateScore": 10,
+          "totalScore": 80,
+          "isExcluded": false
         },
-        "expectedPenalty": 20,
-        "expectedPriceScore": 0,
-        "actualPriceScore": 0,
-        "penalty": 20,
-        "match": true
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 80
+        },
+        "verdict": "PASS"
+      },
+      {
+        "fixtureId": "DATE-0",
+        "description": "0 days late (projectStart=2026-09-01, availDate=2026-09-01) -> dateScore=10",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 800000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-01"
+        },
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 10,
+          "totalScore": 100,
+          "isExcluded": false
+        },
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 100
+        },
+        "verdict": "PASS"
+      },
+      {
+        "fixtureId": "DATE-1",
+        "description": "1 day late (projectStart=2026-09-01, availDate=2026-09-02) -> dateScore=5",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 800000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-09-02"
+        },
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 5,
+          "totalScore": 95,
+          "isExcluded": false
+        },
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 95
+        },
+        "verdict": "PASS"
+      },
+      {
+        "fixtureId": "DATE-30",
+        "description": "30 days late (projectStart=2026-09-01, availDate=2026-10-01) -> dateScore=5",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 800000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-10-01"
+        },
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 5,
+          "totalScore": 95,
+          "isExcluded": false
+        },
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 95
+        },
+        "verdict": "PASS"
+      },
+      {
+        "fixtureId": "DATE-31",
+        "description": "31 days late (projectStart=2026-09-01, availDate=2026-10-02) -> dateScore=0",
+        "input": {
+          "mustSkills": [
+            1
+          ],
+          "niceSkills": [],
+          "engSkills": [
+            1
+          ],
+          "priceMax": 800000,
+          "expectedPrice": 800000,
+          "startDate": "2026-09-01",
+          "availDate": "2026-10-02"
+        },
+        "oracle": {
+          "mustScore": 50,
+          "niceScore": 20,
+          "priceScore": 20,
+          "dateScore": 0,
+          "totalScore": 90,
+          "isExcluded": false
+        },
+        "api": {
+          "httpStatus": 200,
+          "returnedMatched": true,
+          "returnedScore": 90
+        },
+        "verdict": "PASS"
       }
     ],
-    "date_delay_boundary_comparison_table": [
-      {
-        "days_late": 0,
-        "description": "稼働可能日 <= 案件開始日 (2026-09-01 vs 2026-09-01)",
-        "project": {
-          "startDate": "2026-09-01"
-        },
-        "engineer": {
-          "availableDate": "2026-09-01"
-        },
-        "expectedDateScore": 10,
-        "actualDateScore": 10,
-        "match": true
-      },
-      {
-        "days_late": 1,
-        "description": "稼働可能日 1日遅れ (2026-09-02 vs 2026-09-01)",
-        "project": {
-          "startDate": "2026-09-01"
-        },
-        "engineer": {
-          "availableDate": "2026-09-02"
-        },
-        "expectedDateScore": 5,
-        "actualDateScore": 5,
-        "match": true
-      },
-      {
-        "days_late": 30,
-        "description": "稼働可能日 30日遅れ (2026-10-01 vs 2026-09-01)",
-        "project": {
-          "startDate": "2026-09-01"
-        },
-        "engineer": {
-          "availableDate": "2026-10-01"
-        },
-        "expectedDateScore": 5,
-        "actualDateScore": 5,
-        "match": true
-      },
-      {
-        "days_late": 31,
-        "description": "稼働可能日 31日遅れ (2026-10-02 vs 2026-09-01 / >30日超過)",
-        "project": {
-          "startDate": "2026-09-01"
-        },
-        "engineer": {
-          "availableDate": "2026-10-02"
-        },
-        "expectedDateScore": 0,
-        "actualDateScore": 0,
-        "match": true
-      }
-    ],
-    "duration_clarification": "Unified execution duration to 101ms (consistent across evidence file and summary report)",
-    "all_oracle_assertions_passed": true
+    "teardown": {
+      "t_project_residue": 0,
+      "t_engineer_residue": 0,
+      "t_project_skill_residue": 0,
+      "t_engineer_skill_residue": 0
+    }
   }
 }

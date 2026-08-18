@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD16-04",
+  "dimension": "A,S,D",
+  "category": "MOD-16",
+  "name": "給与 API を営業/マネージャー/要員で直送し、link 中の engineer が scope 外の場合を試験",
+  "status": "PASS",
+  "duration_ms": 25,
+  "duration_h": 0.000007,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-04.json",
+  "error": null,
+  "evidence_detail": {
+    "sales_forbidden": 403,
+    "member_forbidden": 403,
+    "hr_allowed": 200
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD17-06",
+  "dimension": "N,A,D",
+  "category": "MOD-17",
+  "name": "saved-views の CRUD をユーザー別・ロール別で実行し、他ユーザーの view ID を直送",
+  "status": "PASS",
+  "duration_ms": 57,
+  "duration_h": 0.000016,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-06.json",
+  "error": null,
+  "evidence_detail": {
+    "view_id": 3,
+    "create_status": 200,
+    "list_status": 200
+  }
+}

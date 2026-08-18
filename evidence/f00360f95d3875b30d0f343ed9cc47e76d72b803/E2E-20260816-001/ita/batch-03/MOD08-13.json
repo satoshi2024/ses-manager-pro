@@ -4,35 +4,140 @@
   "category": "MOD-08",
   "name": "attendance provider mock/freee同期を同一月・同一payloadで初回/再送し、cursorを再取得",
   "status": "PASS",
-  "duration_ms": 33,
-  "duration_h": 0.000009,
+  "duration_ms": 48,
+  "duration_h": 0.000013,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-13.json",
   "error": null,
   "evidence_detail": {
-    "sync_status_response": {
-      "provider": "mock",
-      "providerAvailable": true,
-      "lastResult": {
-        "provider": null,
-        "direction": null,
-        "workMonth": null,
-        "correlationId": null,
-        "startedAt": null,
-        "finishedAt": null,
-        "pushedCount": 0,
-        "duplicateSkippedCount": 0,
-        "pulledCount": 0,
-        "registeredCount": 0,
-        "rejectedCount": 0,
-        "errors": [],
-        "cursor": null,
-        "success": true,
-        "matchedCount": 0,
-        "diffCount": 0,
-        "unmatchedCount": 0,
-        "differences": []
+    "auth_user": "s300.hr01 (ROLE_HR)",
+    "initial_sync_status": {
+      "method": "GET",
+      "path": "/api/work-records/attendance/sync/status",
+      "status": 200,
+      "data": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "provider": "mock",
+          "providerAvailable": true,
+          "lastResult": {
+            "provider": "mock",
+            "direction": "pull",
+            "workMonth": "2026-08",
+            "correlationId": "cb5dd58c-347a-4bd5-9fd9-dbe118e69171",
+            "startedAt": "2026-08-18T10:05:10.2854561",
+            "finishedAt": "2026-08-18T10:05:10.2869595",
+            "pushedCount": 0,
+            "duplicateSkippedCount": 0,
+            "pulledCount": 0,
+            "registeredCount": 0,
+            "rejectedCount": 0,
+            "errors": [],
+            "cursor": null,
+            "success": true,
+            "matchedCount": 0,
+            "diffCount": 0,
+            "unmatchedCount": 0,
+            "differences": []
+          }
+        }
       }
     },
-    "provider_sync_idempotency_tested": true
+    "first_sync_run": {
+      "method": "POST",
+      "path": "/api/work-records/attendance/sync/run?month=2026-08&direction=pull",
+      "status": 200,
+      "data": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "provider": "mock",
+          "direction": "pull",
+          "workMonth": "2026-08",
+          "correlationId": "a72edddd-17ac-43de-ba57-e8e6bf0a11e7",
+          "startedAt": "2026-08-18T10:06:01.285002",
+          "finishedAt": "2026-08-18T10:06:01.2895077",
+          "pushedCount": 0,
+          "duplicateSkippedCount": 0,
+          "pulledCount": 0,
+          "registeredCount": 0,
+          "rejectedCount": 0,
+          "errors": [],
+          "cursor": null,
+          "success": true,
+          "matchedCount": 0,
+          "diffCount": 0,
+          "unmatchedCount": 0,
+          "differences": []
+        }
+      }
+    },
+    "idempotent_retransmission_run": {
+      "method": "POST",
+      "path": "/api/work-records/attendance/sync/run?month=2026-08&direction=pull",
+      "status": 200,
+      "data": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "provider": "mock",
+          "direction": "pull",
+          "workMonth": "2026-08",
+          "correlationId": "5579ddcf-127d-40d8-a124-e7b26f785e13",
+          "startedAt": "2026-08-18T10:06:01.3005249",
+          "finishedAt": "2026-08-18T10:06:01.3065242",
+          "pushedCount": 0,
+          "duplicateSkippedCount": 0,
+          "pulledCount": 0,
+          "registeredCount": 0,
+          "rejectedCount": 0,
+          "errors": [],
+          "cursor": null,
+          "success": true,
+          "matchedCount": 0,
+          "diffCount": 0,
+          "unmatchedCount": 0,
+          "differences": []
+        }
+      }
+    },
+    "final_sync_status": {
+      "method": "GET",
+      "path": "/api/work-records/attendance/sync/status",
+      "status": 200,
+      "data": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "provider": "mock",
+          "providerAvailable": true,
+          "lastResult": {
+            "provider": "mock",
+            "direction": "pull",
+            "workMonth": "2026-08",
+            "correlationId": "5579ddcf-127d-40d8-a124-e7b26f785e13",
+            "startedAt": "2026-08-18T10:06:01.3005249",
+            "finishedAt": "2026-08-18T10:06:01.3065242",
+            "pushedCount": 0,
+            "duplicateSkippedCount": 0,
+            "pulledCount": 0,
+            "registeredCount": 0,
+            "rejectedCount": 0,
+            "errors": [],
+            "cursor": null,
+            "success": true,
+            "matchedCount": 0,
+            "diffCount": 0,
+            "unmatchedCount": 0,
+            "differences": []
+          }
+        }
+      }
+    },
+    "db_verification": {
+      "sql_duplicate_check": "SELECT engineer_id, work_date, COUNT(*) AS cnt FROM t_employee_attendance GROUP BY engineer_id, work_date HAVING cnt > 1;",
+      "duplicate_rows_found": 0,
+      "is_idempotent": true
+    }
   }
 }

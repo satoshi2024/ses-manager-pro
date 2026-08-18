@@ -1,0 +1,198 @@
+package com.ses.integration;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.dto.accounting.IntegrationTokensDto;
+import com.ses.entity.*;
+import com.ses.service.CustomerService;
+import com.ses.service.InvoiceService;
+import com.ses.service.integration.ExternalMappingService;
+import com.ses.service.integration.IntegrationConnectionService;
+import com.ses.service.integration.IntegrationJobService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class AccountingIntegrationApiAndPageTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private IntegrationConnectionService connectionService;
+
+    @Autowired
+    private ExternalMappingService mappingService;
+
+    @Autowired
+    private IntegrationJobService jobService;
+
+    @Autowired
+    private CustomerService customerService;
+
+    @Autowired
+    private InvoiceService invoiceService;
+
+    private IntegrationConnection connection;
+
+    @BeforeEach
+    void setUp() {
+        connection = connectionService.getOrCreateConnection("default", 1L, "freee", "accounting");
+        IntegrationTokensDto tokens = IntegrationTokensDto.builder()
+                .accessToken("test-secret-access-token-999")
+                .refreshToken("test-secret-refresh-token-888")
+                .tokenType("Bearer")
+                .expiresIn(3600L)
+                .build();
+        connectionService.saveTokens(connection.getId(), tokens, 10001L, "テスト株式会社", 1L);
+    }
+
+    @Test
+    @DisplayName("権限制御: 管理者・マネージャーは画面およびAPIにアクセス可能 (200)")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void adminCanAccessPageAndApi() throws Exception {
+        mockMvc.perform(get("/accounting/integration"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("accounting/integration"));
+
+        mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(greaterThanOrEqualTo(1))));
+    }
+
+    @Test
+    @DisplayName("権限制御: 営業・HR・要員ロールは403 Forbiddenで遮断される")
+    @WithMockUser(username = "sales_user", roles = {"営業"})
+    void salesUserForbidden() throws Exception {
+        mockMvc.perform(get("/accounting/integration"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("秘密情報保護: APIレスポンスにencryptedTokensやトークン文字列が含まれない (design §6.2)")
+    @WithMockUser(username = "manager_user", roles = {"マネージャー"})
+    void secretTokensNotExposedInApiResponse() throws Exception {
+        String responseContent = mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(responseContent).doesNotContain("test-secret-access-token-999");
+        assertThat(responseContent).doesNotContain("test-secret-refresh-token-888");
+        assertThat(responseContent).doesNotContain("encryptedTokens\":{");
+    }
+
+    @Test
+    @DisplayName("送信前プレビュー: マッピング未登録・未検証時にreadyToSend=falseと警告が返る (A1/design §6.1)")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void previewValidation_unverifiedMappingBlocksReady() throws Exception {
+        // 請求書テストデータ作成
+        Customer customer = new Customer();
+        customer.setCompanyName("APIテスト顧客");
+        customerService.save(customer);
+
+        Invoice invoice = new Invoice();
+        invoice.setInvoiceNo("INV-TEST-001");
+        invoice.setCustomerId(customer.getId());
+        invoice.setBillingMonth("2026-08");
+        invoice.setIssuedDate(LocalDate.now());
+        invoice.setDueDate(LocalDate.now().plusMonths(1));
+        invoice.setSubtotal(new BigDecimal("1000000"));
+        invoice.setTax(new BigDecimal("100000"));
+        invoice.setTotal(new BigDecimal("1100000"));
+        invoice.setTaxRate(new BigDecimal("0.100"));
+        invoiceService.save(invoice);
+
+        // マッピング未登録状態でプレビュー実行
+        mockMvc.perform(get("/api/accounting/preview/sales/" + invoice.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.readyToSend").value(false))
+                .andExpect(jsonPath("$.data.validationErrors", hasSize(greaterThanOrEqualTo(1))))
+                .andExpect(jsonPath("$.data.canonicalInvoice.invoiceNo").value("INV-TEST-001"));
+    }
+
+    @Test
+    @DisplayName("マッピング登録と検証実行: verify APIでverifiedAtが更新される")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void mappingCrudAndVerify() throws Exception {
+        ExternalMapping mapping = new ExternalMapping();
+        mapping.setConnectionId(connection.getId());
+        mapping.setObjectType("CUSTOMER_PARTNER");
+        mapping.setInternalCode("CUST-TEST-VERIFY");
+        mapping.setExternalId("998877");
+        mapping.setExternalCode("テスト取引先");
+
+        // 登録
+        mockMvc.perform(post("/api/accounting/mappings")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(mapping)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        ExternalMapping saved = mappingService.getMapping(connection.getId(), "CUSTOMER_PARTNER", "CUST-TEST-VERIFY");
+        assertThat(saved).isNotNull();
+        assertThat(saved.getVerifiedAt()).isNull();
+
+        // 検証実行
+        mockMvc.perform(post("/api/accounting/mappings/" + saved.getId() + "/verify")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"verified\": true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        ExternalMapping verified = mappingService.getById(saved.getId());
+        assertThat(verified.getVerifiedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("ジョブ手動リトライとキャンセル")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void jobRetryAndCancel() throws Exception {
+        IntegrationJob job = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 888L, "idemp-test-888", "hash888");
+
+        // 手動リトライ (PENDING -> RETRYABLE -> PENDING)
+        mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/retry")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        // キャンセル
+        mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/cancel?reason=テストキャンセル")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        IntegrationJob cancelled = jobService.getById(job.getId());
+        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+    }
+}

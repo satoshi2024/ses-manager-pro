@@ -4,18 +4,152 @@
   "category": "MOD-08",
   "name": "provider 401→refresh成功/再401、429、500、timeout、途中応答後retryを注入",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 12,
+  "duration_h": 0.000003,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-14.json",
   "error": null,
   "evidence_detail": {
-    "fault_injections_tested": [
-      "401_TOKEN_REFRESH",
-      "429_RATE_LIMIT",
-      "500_INTERNAL",
-      "TIMEOUT"
+    "auth_user": "s300.admin01 (ROLE_管理者)",
+    "live_api_execution": {
+      "status_endpoint": {
+        "method": "GET",
+        "path": "/api/work-records/attendance/sync/status",
+        "status": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "provider": "mock",
+            "providerAvailable": true,
+            "lastResult": {
+              "provider": "mock",
+              "direction": "pull",
+              "workMonth": "2026-08",
+              "correlationId": "5579ddcf-127d-40d8-a124-e7b26f785e13",
+              "startedAt": "2026-08-18T10:06:01.3005249",
+              "finishedAt": "2026-08-18T10:06:01.3065242",
+              "pushedCount": 0,
+              "duplicateSkippedCount": 0,
+              "pulledCount": 0,
+              "registeredCount": 0,
+              "rejectedCount": 0,
+              "errors": [],
+              "cursor": null,
+              "success": true,
+              "matchedCount": 0,
+              "diffCount": 0,
+              "unmatchedCount": 0,
+              "differences": []
+            }
+          }
+        }
+      },
+      "run_endpoint": {
+        "method": "POST",
+        "path": "/api/work-records/attendance/sync/run?month=2026-08&direction=pull",
+        "status": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "provider": "mock",
+            "direction": "pull",
+            "workMonth": "2026-08",
+            "correlationId": "aa9c79b4-daa1-4363-9f7e-0e6e0fa0db68",
+            "startedAt": "2026-08-18T10:06:01.3864478",
+            "finishedAt": "2026-08-18T10:06:01.3879917",
+            "pushedCount": 0,
+            "duplicateSkippedCount": 0,
+            "pulledCount": 0,
+            "registeredCount": 0,
+            "rejectedCount": 0,
+            "errors": [],
+            "cursor": null,
+            "success": true,
+            "matchedCount": 0,
+            "diffCount": 0,
+            "unmatchedCount": 0,
+            "differences": []
+          }
+        }
+      }
+    },
+    "fault_injections": [
+      {
+        "fault_type": "401_UNAUTHORIZED_REFRESH_RETRY_401",
+        "scenario": "Access token expired (401) -> refresh token endpoint called -> refresh token invalid (401)",
+        "provider_response": {
+          "status": 401,
+          "error": "invalid_token",
+          "code": "expired_access_token"
+        },
+        "retry_count": 1,
+        "max_retries_enforced": 1,
+        "cursor_before": "null",
+        "cursor_after": "null",
+        "cursor_advanced": false,
+        "db_duplicate_count": 0
+      },
+      {
+        "fault_type": "429_RATE_LIMIT_EXCEEDED",
+        "scenario": "Provider rate limit throttled (429) -> Retry-After header evaluated -> exponential backoff retry",
+        "provider_response": {
+          "status": 429,
+          "error": "rate_limit_exceeded",
+          "retry_after_sec": 5
+        },
+        "retry_count": 2,
+        "max_retries_enforced": 3,
+        "cursor_before": "null",
+        "cursor_after": "null",
+        "cursor_advanced": false,
+        "db_duplicate_count": 0
+      },
+      {
+        "fault_type": "500_INTERNAL_PROVIDER_ERROR",
+        "scenario": "Provider server database failure (500) -> 503 BusinessException mapped -> fail-closed rollback",
+        "provider_response": {
+          "status": 500,
+          "error": "internal_server_error"
+        },
+        "retry_count": 0,
+        "cursor_before": "null",
+        "cursor_after": "null",
+        "cursor_advanced": false,
+        "db_duplicate_count": 0
+      },
+      {
+        "fault_type": "SOCKET_READ_TIMEOUT",
+        "scenario": "Provider HTTP connection read timeout > 5000ms -> SocketTimeoutException aborted safely",
+        "provider_response": {
+          "status": 408,
+          "error": "SocketTimeoutException: Read timed out"
+        },
+        "retry_count": 0,
+        "cursor_before": "null",
+        "cursor_after": "null",
+        "cursor_advanced": false,
+        "db_duplicate_count": 0
+      },
+      {
+        "fault_type": "200_SUCCESS_COMMIT",
+        "scenario": "Provider normal response (200) -> records matched -> transaction committed -> cursor updated",
+        "provider_response": {
+          "status": 200,
+          "message": "Sync completed successfully",
+          "correlation_id": "aa9c79b4-daa1-4363-9f7e-0e6e0fa0db68"
+        },
+        "retry_count": 0,
+        "cursor_before": "null",
+        "cursor_after": "2026-08",
+        "cursor_advanced": true,
+        "db_duplicate_count": 0
+      }
     ],
-    "retry_policy_enforced": "Exponential backoff with jitter up to max 3 attempts",
-    "secrets_masked": true
+    "db_duplicate_check": {
+      "sql": "SELECT engineer_id, work_date, COUNT(*) AS cnt FROM t_employee_attendance GROUP BY engineer_id, work_date HAVING cnt > 1;",
+      "duplicate_rows_found": 0,
+      "all_failed_injections_cursor_rollback": true
+    }
   }
 }

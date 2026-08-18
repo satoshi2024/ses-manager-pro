@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD17-09",
+  "dimension": "N,E,A,D",
+  "category": "MOD-17",
+  "name": "identity-providers の external identity provision を、重複・未設定 provider・非許可で実行",
+  "status": "PASS",
+  "duration_ms": 3,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-09.json",
+  "error": null,
+  "evidence_detail": {
+    "idp_response_status": 405,
+    "response_data": {
+      "code": 405,
+      "message": "予期しないエラーが発生しました。",
+      "data": null
+    }
+  }
+}

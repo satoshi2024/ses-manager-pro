@@ -1,0 +1,100 @@
+{
+  "case_id": "MOD17-12",
+  "dimension": "C,D",
+  "category": "MOD-17",
+  "name": "ShedLock 対象 scheduler（10種）の単一実行・重複起動・例外時を確認し、スケジュールと ShedLock の一致を検証",
+  "status": "PASS",
+  "duration_ms": 43,
+  "duration_h": 0.000012,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-12.json",
+  "error": null,
+  "evidence_detail": {
+    "shedlock_active_rows": [
+      {
+        "name": "approvalSlaEscalation",
+        "lock_until": "2026-08-18 01:46:00.026",
+        "locked_at": "2026-08-18 01:45:00.026",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "cloudsignArtifact",
+        "lock_until": "2026-08-18 01:49:00.021",
+        "locked_at": "2026-08-18 01:48:00.021",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "cloudsignDispatch",
+        "lock_until": "2026-08-18 01:48:05.016",
+        "locked_at": "2026-08-18 01:48:00.016",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "cloudsignPoll",
+        "lock_until": "2026-08-18 01:49:00.026",
+        "locked_at": "2026-08-18 01:48:00.026",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "complianceDeadlineNotification",
+        "lock_until": "2026-08-16 21:31:01.071",
+        "locked_at": "2026-08-16 21:30:01.071",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "contractPriceSyncDaily",
+        "lock_until": "2026-08-17 15:01:00.890",
+        "locked_at": "2026-08-17 15:00:00.890",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "contractRenewalDraftDaily",
+        "lock_until": "2026-08-16 22:31:01.178",
+        "locked_at": "2026-08-16 22:30:01.178",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "DocumentArchiveFileCleanupScheduler_cleanupOrphanStorageFiles",
+        "lock_until": "2026-08-17 17:01:01.804",
+        "locked_at": "2026-08-17 17:00:01.804",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "DocumentRetentionJob_processExpiredDocuments",
+        "lock_until": "2026-08-16 17:31:00.807",
+        "locked_at": "2026-08-16 17:30:00.807",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "expenseAccountingDispatch",
+        "lock_until": "2026-08-18 01:48:10.005",
+        "locked_at": "2026-08-18 01:48:00.005",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "notificationGenerateDaily",
+        "lock_until": "2026-08-16 23:01:01.211",
+        "locked_at": "2026-08-16 23:00:01.211",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "notificationOutboxDispatch",
+        "lock_until": "2026-08-18 01:48:10.030",
+        "locked_at": "2026-08-18 01:48:00.030",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "renewalEscalationDaily",
+        "lock_until": "2026-08-16 23:16:01.237",
+        "locked_at": "2026-08-16 23:15:01.237",
+        "locked_by": "DESKTOP-S83BJF5"
+      },
+      {
+        "name": "resumeRetentionCleanupDaily",
+        "lock_until": "2026-08-17 17:01:01.812",
+        "locked_at": "2026-08-17 17:00:01.812",
+        "locked_by": "DESKTOP-S83BJF5"
+      }
+    ],
+    "schedulers_guarded": 10
+  }
+}

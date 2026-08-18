@@ -1,0 +1,42 @@
+{
+  "case_id": "MOD15-04",
+  "dimension": "N,D",
+  "category": "MOD-15",
+  "name": "2段階routeで申請→第1承認→最終承認",
+  "status": "PASS",
+  "duration_ms": 239,
+  "duration_h": 0.000066,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-04.json",
+  "error": null,
+  "evidence_detail": {
+    "approval_request_id": 46,
+    "create_status": 200,
+    "approve_status": 200,
+    "request_detail": {
+      "id": 46,
+      "createdAt": "2026-08-18T10:48:04.629057",
+      "updatedAt": "2026-08-18T10:48:04.629057",
+      "deletedFlag": 0,
+      "requestNo": "AR-46",
+      "requestType": "contract.activate",
+      "targetType": "CONTRACT",
+      "targetId": 1,
+      "targetVersion": 1,
+      "applicantId": 101,
+      "organizationId": null,
+      "amountSnapshot": 800000,
+      "payloadJson": "{}",
+      "diffJson": null,
+      "routeSnapshotJson": "{\"routeId\":101,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[1],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[1],\"requiredCount\":1}]}]}",
+      "status": "in_review",
+      "currentStep": 1,
+      "roundNo": 1,
+      "currentStepStartedAt": "2026-08-18T10:48:04.629057",
+      "requestedAt": "2026-08-18T10:48:04.629057",
+      "finalizedAt": null,
+      "idempotencyKey": null,
+      "version": 1,
+      "createdBy": 101
+    }
+  }
+}

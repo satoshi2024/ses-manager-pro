@@ -1,0 +1,142 @@
+{
+  "case_id": "MOD14-02",
+  "dimension": "N,D",
+  "category": "MOD-14",
+  "name": "稼働/Bench/退場予定、確定工数あり/なしのfixtureでKPIを表示",
+  "status": "PASS",
+  "duration_ms": 4,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-02.json",
+  "error": null,
+  "evidence_detail": {
+    "summary_kpi": {
+      "kpi": {
+        "utilization": 51.7,
+        "utilizationTrend": null,
+        "benchCount": 42,
+        "revenue": 82259000,
+        "revenueTrend": "-26.4%",
+        "profitMargin": 33.5,
+        "profitTrend": "-27.7%",
+        "scopeType": "COMPANY",
+        "scopeDisplayName": "全社",
+        "unacceptedSales": 0,
+        "avgAcceptanceDays": 10.9
+      },
+      "charts": {
+        "revenue": {
+          "labels": [
+            "3月",
+            "4月",
+            "5月",
+            "6月",
+            "7月",
+            "8月"
+          ],
+          "sales": [
+            96893000,
+            96320000,
+            90895500,
+            113102000,
+            111828000,
+            82259000
+          ],
+          "profit": [
+            32670000,
+            32436000,
+            30662700,
+            38547000,
+            38121000,
+            27571600
+          ],
+          "isActual": [
+            false,
+            false,
+            false,
+            true,
+            true,
+            false
+          ],
+          "forecast": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "forecastPipelineCount": 110,
+          "forecastPipelineAmount": 33226000
+        },
+        "status": {
+          "labels": [
+            "稼動中",
+            "Bench",
+            "退場予定",
+            "提案中"
+          ],
+          "data": [
+            172,
+            42,
+            5,
+            30
+          ]
+        }
+      },
+      "retiring": [
+        {
+          "id": 1092,
+          "name": "石川 玲奈",
+          "initial": "石.玲.",
+          "skill": "Laravel",
+          "project": "ECサイトリニューアル",
+          "date": "2026/08/28",
+          "daysLeft": 10,
+          "proposals": 1
+        },
+        {
+          "id": 1100,
+          "name": "伊藤 敬太",
+          "initial": "伊.敬.",
+          "skill": "Scala",
+          "project": "検索基盤構築",
+          "date": "2026/08/28",
+          "daysLeft": 10,
+          "proposals": 1
+        },
+        {
+          "id": 1106,
+          "name": "矢野 晃",
+          "initial": "矢.晃.",
+          "skill": "PHP",
+          "project": "工場ライン監視システム開発（Phase2）",
+          "date": "2026/08/28",
+          "daysLeft": 10,
+          "proposals": 1
+        },
+        {
+          "id": 1240,
+          "name": "山内 直樹",
+          "initial": "山.直.",
+          "skill": "C++",
+          "project": "学習管理システム開発（Phase3）",
+          "date": "2026/08/28",
+          "daysLeft": 10,
+          "proposals": 0
+        },
+        {
+          "id": 1,
+          "name": "田中 太郎",
+          "initial": "T.T",
+          "skill": "AWS",
+          "project": "AI自動応答チャットボット開発",
+          "date": "2026/08/31",
+          "daysLeft": 13,
+          "proposals": 1
+        }
+      ]
+    },
+    "currency_unit": "JPY (円)",
+    "target_month": "2026-08"
+  }
+}

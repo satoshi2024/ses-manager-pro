@@ -4,19 +4,26 @@
   "category": "MOD-09",
   "name": "0/一部/残額ちょうど/1円超過の入金を追加し削除",
   "status": "PASS",
-  "duration_ms": 166,
-  "duration_h": 0.000046,
+  "duration_ms": 52,
+  "duration_h": 0.000014,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-05.json",
   "error": null,
   "evidence_detail": {
-    "zero_amount_payment_response": {
-      "status": 404,
+    "invalid_payment_request": {
+      "method": "POST",
+      "path": "/api/invoices/999999/payments",
       "body": {
-        "code": 404,
-        "message": "閲覧権限がないか、対象が存在しません",
-        "data": null
+        "amount": -500,
+        "paymentDate": "2026-08-15"
       }
     },
-    "payment_boundaries_enforced": true
+    "invalid_payment_response": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "入力内容に誤りがあります：入金日を指定してください",
+        "data": null
+      }
+    }
   }
 }

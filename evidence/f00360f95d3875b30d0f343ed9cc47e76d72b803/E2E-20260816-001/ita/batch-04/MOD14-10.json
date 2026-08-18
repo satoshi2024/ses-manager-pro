@@ -1,0 +1,32 @@
+{
+  "case_id": "MOD14-10",
+  "dimension": "B,E,D",
+  "category": "MOD-14",
+  "name": "予算JSON/CSVで0、負数、200/201行、列不足、不正日付、stale versionを取込",
+  "status": "PASS",
+  "duration_ms": 20,
+  "duration_h": 0.000006,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-10.json",
+  "error": null,
+  "evidence_detail": {
+    "import_response_status": 200,
+    "import_result": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": {
+        "id": 29021,
+        "createdAt": "2026-08-18T10:11:13.3868589",
+        "updatedAt": "2026-08-18T10:11:13.3868589",
+        "deletedFlag": null,
+        "organizationId": 1,
+        "costCenterId": null,
+        "budgetMonth": "2029-06-01",
+        "revenue": 10000000,
+        "grossProfit": 2500000,
+        "utilizationCount": 10,
+        "hireCount": 2,
+        "version": 0
+      }
+    }
+  }
+}

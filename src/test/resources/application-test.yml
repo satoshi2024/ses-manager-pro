@@ -49,6 +49,7 @@ spring:
         - classpath:sql/schema-staffing-h2.sql
         - classpath:sql/schema-portal-h2.sql
         - classpath:sql/schema-engineer-selfservice-h2.sql
+        - classpath:sql/schema-accounting-integration-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

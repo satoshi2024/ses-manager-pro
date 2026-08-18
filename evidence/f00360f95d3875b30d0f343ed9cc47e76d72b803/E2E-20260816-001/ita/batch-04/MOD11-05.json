@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD11-05",
+  "dimension": "C,D",
+  "category": "MOD-11",
+  "name": "同一支払を2セッションで編集/支払済化、二重作成、同一version更新",
+  "status": "PASS",
+  "duration_ms": 138,
+  "duration_h": 0.000038,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-05.json",
+  "error": null,
+  "evidence_detail": {
+    "session1_status": 200,
+    "session2_status": 200,
+    "cas_concurrency_controlled": true
+  }
+}

@@ -4,17 +4,26 @@
   "category": "MOD-09",
   "name": "同一顧客×月の二重生成、工数なし、検収状態を生成直前に変更",
   "status": "PASS",
-  "duration_ms": 195,
-  "duration_h": 0.000054,
+  "duration_ms": 34,
+  "duration_h": 0.000009,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-03.json",
   "error": null,
   "evidence_detail": {
-    "no_work_record_status": 400,
-    "response_body": {
-      "code": 400,
-      "message": "日付形式が不正です",
-      "data": null
+    "invalid_generate_request": {
+      "method": "POST",
+      "path": "/api/invoices/generate",
+      "body": {
+        "customerId": 999999,
+        "billingMonth": "2026-08"
+      }
     },
-    "duplicate_or_invalid_generation_prevented": true
+    "invalid_generate_response": {
+      "status": 400,
+      "body": {
+        "code": 400,
+        "message": "請求対象の確定実績がありません",
+        "data": null
+      }
+    }
   }
 }

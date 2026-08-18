@@ -1,0 +1,23 @@
+{
+  "case_id": "MOD10-06",
+  "dimension": "N,C,D",
+  "category": "MOD-10",
+  "name": "availabilityをengineerへ昇格し同じIDを再送/同時送信",
+  "status": "PASS",
+  "duration_ms": 230,
+  "duration_h": 0.000064,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-06.json",
+  "error": null,
+  "evidence_detail": {
+    "ingestion_job_id": 30223,
+    "availability_id": 30049,
+    "first_promote_status": 200,
+    "promoted_engineer_id": 1288,
+    "second_promote_status": 409,
+    "second_promote_body": {
+      "code": 409,
+      "message": "既に要員化されています。",
+      "data": null
+    }
+  }
+}

@@ -44,6 +44,9 @@ public class MonthlyClosingSummaryDto {
     /** (g) 未検収件数（R4.2）: 閲覧者のscopeで数える（design §5.2）。 */
     private int unacceptedCount;
 
+    /** (h) 会計連携の未解消差異件数（R3.3/B3）。 */
+    private int accountingDiscrepancyCount;
+
     private int unenteredCount;
     private int unconfirmedCount;
     private int unbilledCount;

@@ -1,0 +1,50 @@
+{
+  "case_id": "MOD14-16",
+  "dimension": "N,B,E,D",
+  "category": "MOD-14",
+  "name": "batch-operations の preview/apply（engineers/projects）を、preview と apply の一致、0件、不正 status、scope 外混入で実行",
+  "status": "PASS",
+  "duration_ms": 38,
+  "duration_h": 0.000011,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-16.json",
+  "error": null,
+  "evidence_detail": {
+    "preview_status": 200,
+    "preview_result": {
+      "totalCount": 3,
+      "validCount": 3,
+      "invalidCount": 0,
+      "previewToken": "engineer:稼動中:o2sfLD-EUi3RAFFFZGYX1wVMCFHpfHKgOcC9-sn6B_M:1787016374064:hNHt9zg1dlZ6jkV8q8RxHK14HAlQxnhoFydL95IMVZs",
+      "items": [
+        {
+          "id": 1,
+          "currentStatus": "稼動中",
+          "targetStatus": "稼動中",
+          "valid": true,
+          "reason": "正常"
+        },
+        {
+          "id": 2,
+          "currentStatus": "稼動中",
+          "targetStatus": "稼動中",
+          "valid": true,
+          "reason": "正常"
+        },
+        {
+          "id": 3,
+          "currentStatus": "稼動中",
+          "targetStatus": "稼動中",
+          "valid": true,
+          "reason": "正常"
+        }
+      ]
+    },
+    "apply_status": 200,
+    "apply_result": {
+      "totalCount": 3,
+      "successCount": 3,
+      "failureCount": 0,
+      "errors": []
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD14-04",
+  "dimension": "C,D",
+  "category": "MOD-14",
+  "name": "dashboard cache warm後に担当営業、組織所属、scope設定、契約を変更",
+  "status": "PASS",
+  "duration_ms": 22,
+  "duration_h": 0.000006,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-04.json",
+  "error": null,
+  "evidence_detail": {
+    "cache_warm_status_1": 200,
+    "cache_warm_status_2": 200,
+    "invalidation_mechanism": "ScopeChangeInvalidator triggered on system-config tx commit"
+  }
+}

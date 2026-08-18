@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD15-12",
+  "dimension": "E,C,D",
+  "category": "MOD-15",
+  "name": "未確定工数、理由なし差戻し、請求済検収取消、同時検収を実行",
+  "status": "PASS",
+  "duration_ms": 14,
+  "duration_h": 0.000004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-12.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_submit_status": 404,
+    "response": {
+      "code": 404,
+      "message": "閲覧権限がないか、対象が存在しません",
+      "data": null
+    }
+  }
+}

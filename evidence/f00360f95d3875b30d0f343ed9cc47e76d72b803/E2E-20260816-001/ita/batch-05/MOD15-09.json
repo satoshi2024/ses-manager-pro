@@ -1,0 +1,21 @@
+{
+  "case_id": "MOD15-09",
+  "dimension": "E,C,D",
+  "category": "MOD-15",
+  "name": "同一原本hash二重upload、上限超過/scan拒否、注文作成二重送信",
+  "status": "PASS",
+  "duration_ms": 5,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-09.json",
+  "error": null,
+  "evidence_detail": {
+    "po_duplicate_check_status": 200,
+    "po_duplicate_result": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": {
+        "duplicate": false
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD14-01",
+  "dimension": "N,A,U",
+  "category": "MOD-14",
+  "name": "管理者/営業/HR/managerで/、要員で/へアクセス",
+  "status": "PASS",
+  "duration_ms": 15,
+  "duration_h": 0.000004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-01.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_redirect_target": "http://localhost:8080/dashboard",
+    "member_redirect_target": null,
+    "admin_status": 302,
+    "member_status": 401
+  }
+}

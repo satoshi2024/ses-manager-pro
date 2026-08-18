@@ -1,0 +1,35 @@
+{
+  "case_id": "MOD10-07",
+  "dimension": "A,S",
+  "category": "MOD-10",
+  "name": "BP会社画面（管理者/営業/manager、HR/要員）とavailability画面（menu定義全ロール）を直URL/APIで比較",
+  "status": "PASS",
+  "duration_ms": 973,
+  "duration_h": 0.00027,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-07.json",
+  "error": null,
+  "evidence_detail": {
+    "role_access_matrix": {
+      "管理者": {
+        "bp_companies_status": 200,
+        "bp_availabilities_status": 200
+      },
+      "営業": {
+        "bp_companies_status": 200,
+        "bp_availabilities_status": 200
+      },
+      "マネージャー": {
+        "bp_companies_status": 200,
+        "bp_availabilities_status": 200
+      },
+      "HR": {
+        "bp_companies_status": 403,
+        "bp_availabilities_status": 200
+      },
+      "要員": {
+        "bp_companies_status": 401,
+        "bp_availabilities_status": 401
+      }
+    }
+  }
+}

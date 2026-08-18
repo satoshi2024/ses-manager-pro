@@ -43,6 +43,7 @@ public final class ActionPermissionResolver {
             Map.entry("expense-requests", "expense-request"),
             Map.entry("one-on-ones", "one-on-one"),
             Map.entry("surveys", "survey"),
+            Map.entry("accounting", "accounting"),
             Map.entry("engineers", "engineer"),
             Map.entry("files", "file"),
             Map.entry("identity-providers", "identity-provider"),

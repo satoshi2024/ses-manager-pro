@@ -1,0 +1,800 @@
+{
+  "metadata": {
+    "build_sha": "f00360f95d3875b30d0f343ed9cc47e76d72b803",
+    "run_id": "E2E-20260816-001",
+    "batch_id": "batch-05",
+    "executed_at": "2026-08-18T01:48:06.611Z",
+    "base_url": "http://localhost:8080",
+    "scope": "MOD-15 (17 IDs) + MOD-16 (6 IDs) + MOD-17 (12 IDs) = 35 IDs"
+  },
+  "metrics": {
+    "total_cases": 35,
+    "pass_count": 35,
+    "fail_count": 0,
+    "blocked_count": 0,
+    "evaluated_count": 35,
+    "pass_rate": "100.0%",
+    "pass_rate_formula": "PASS / (PASS + FAIL)",
+    "total_execution_time_ms": 2240,
+    "total_execution_time_h": 0.000622,
+    "batch_rate_h_per_id": 0.000018
+  },
+  "supervisor_invariants": {
+    "sys_user_total": 300,
+    "sys_user_active": 297,
+    "sys_user_disabled": 3,
+    "oracle_exact_297_3_300": true,
+    "user_breakdown_by_role": [
+      {
+        "status": "1",
+        "role": "������",
+        "cnt": "2"
+      },
+      {
+        "status": "0",
+        "role": "�ӘI",
+        "cnt": "1"
+      },
+      {
+        "status": "1",
+        "role": "�ӘI",
+        "cnt": "24"
+      },
+      {
+        "status": "0",
+        "role": "HR",
+        "cnt": "1"
+      },
+      {
+        "status": "1",
+        "role": "HR",
+        "cnt": "7"
+      },
+      {
+        "status": "1",
+        "role": "�ޥͩ`����`",
+        "cnt": "10"
+      },
+      {
+        "status": "0",
+        "role": "Ҫ�T",
+        "cnt": "1"
+      },
+      {
+        "status": "1",
+        "role": "Ҫ�T",
+        "cnt": "254"
+      }
+    ]
+  },
+  "results": [
+    {
+      "case_id": "MOD15-01",
+      "dimension": "N,D,U",
+      "category": "MOD-15",
+      "name": "見積を作成しPDF preview/download",
+      "status": "PASS",
+      "duration_ms": 98,
+      "duration_h": 0.000027,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-01.json",
+      "error": null,
+      "evidence_detail": {
+        "created_quotation_id": 15068,
+        "quotation_status": 200,
+        "pdf_response_status": 200,
+        "pdf_content_type": "application/pdf;charset=UTF-8"
+      }
+    },
+    {
+      "case_id": "MOD15-02",
+      "dimension": "B,E,D",
+      "category": "MOD-15",
+      "name": "単価0/負数、精算min>max、顧客と案件不一致、要員/案件欠落で提出を試験",
+      "status": "PASS",
+      "duration_ms": 16,
+      "duration_h": 0.000004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-02.json",
+      "error": null,
+      "evidence_detail": {
+        "invalid_price_status": 400,
+        "invalid_settlement_status": 400
+      }
+    },
+    {
+      "case_id": "MOD15-03",
+      "dimension": "N,E,D",
+      "category": "MOD-15",
+      "name": "下書き→提出済→受注/失注、終端編集/削除、受注から契約ドラフト生成",
+      "status": "PASS",
+      "duration_ms": 205,
+      "duration_h": 0.000057,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-03.json",
+      "error": null,
+      "evidence_detail": {
+        "quotation_id": 15069,
+        "submit_status": 200,
+        "accept_status": 200,
+        "contract_draft_status": 200,
+        "submit_data": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "id": 43,
+            "createdAt": "2026-08-18T10:48:04.4460729",
+            "updatedAt": "2026-08-18T10:48:04.4460729",
+            "deletedFlag": 0,
+            "requestNo": "AR-43",
+            "requestType": "quotation.submit",
+            "targetType": "QUOTATION",
+            "targetId": 15069,
+            "targetVersion": 0,
+            "applicantId": 101,
+            "organizationId": null,
+            "amountSnapshot": 800000,
+            "payloadJson": "{\"operation\":\"status\",\"status\":\"提出済\",\"createDraft\":false}",
+            "diffJson": "{\"status\":{\"before\":\"下書き\",\"after\":\"提出済\",\"label\":\"見積ステータス\"}}",
+            "routeSnapshotJson": "{\"routeId\":104,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[1],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[1],\"requiredCount\":1}]}]}",
+            "status": "in_review",
+            "currentStep": 1,
+            "roundNo": 1,
+            "currentStepStartedAt": "2026-08-18T10:48:04.4460729",
+            "requestedAt": "2026-08-18T10:48:04.4460729",
+            "finalizedAt": null,
+            "idempotencyKey": "approval-346e5546697cb97700b1b17f89a844b6364c436df319a571ef4266551e319ab4",
+            "version": 1,
+            "createdBy": 101
+          }
+        }
+      }
+    },
+    {
+      "case_id": "MOD15-04",
+      "dimension": "N,D",
+      "category": "MOD-15",
+      "name": "2段階routeで申請→第1承認→最終承認",
+      "status": "PASS",
+      "duration_ms": 239,
+      "duration_h": 0.000066,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-04.json",
+      "error": null,
+      "evidence_detail": {
+        "approval_request_id": 46,
+        "create_status": 200,
+        "approve_status": 200,
+        "request_detail": {
+          "id": 46,
+          "createdAt": "2026-08-18T10:48:04.629057",
+          "updatedAt": "2026-08-18T10:48:04.629057",
+          "deletedFlag": 0,
+          "requestNo": "AR-46",
+          "requestType": "contract.activate",
+          "targetType": "CONTRACT",
+          "targetId": 1,
+          "targetVersion": 1,
+          "applicantId": 101,
+          "organizationId": null,
+          "amountSnapshot": 800000,
+          "payloadJson": "{}",
+          "diffJson": null,
+          "routeSnapshotJson": "{\"routeId\":101,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[1],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[1],\"requiredCount\":1}]}]}",
+          "status": "in_review",
+          "currentStep": 1,
+          "roundNo": 1,
+          "currentStepStartedAt": "2026-08-18T10:48:04.629057",
+          "requestedAt": "2026-08-18T10:48:04.629057",
+          "finalizedAt": null,
+          "idempotencyKey": null,
+          "version": 1,
+          "createdBy": 101
+        }
+      }
+    },
+    {
+      "case_id": "MOD15-05",
+      "dimension": "A,S,D",
+      "category": "MOD-15",
+      "name": "非承認者、代理期限外、別組織/別営業scope、要員がapprove/reject/returnを直送",
+      "status": "PASS",
+      "duration_ms": 170,
+      "duration_h": 0.000047,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-05.json",
+      "error": null,
+      "evidence_detail": {
+        "member_approve_status": 403,
+        "response": {
+          "code": 403,
+          "message": "このactionへのアクセス権限がありません",
+          "data": null
+        }
+      }
+    },
+    {
+      "case_id": "MOD15-06",
+      "dimension": "C,D",
+      "category": "MOD-15",
+      "name": "同一stepを2承認者/2tabで同時approve、approveとrejectを競合",
+      "status": "PASS",
+      "duration_ms": 216,
+      "duration_h": 0.00006,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-06.json",
+      "error": null,
+      "evidence_detail": {
+        "session1_status": 400,
+        "session2_status": 200,
+        "concurrency_controlled": true
+      }
+    },
+    {
+      "case_id": "MOD15-07",
+      "dimension": "E,D",
+      "category": "MOD-15",
+      "name": "申請中にtarget versionを別更新して最終承認、Adapter途中故障を注入",
+      "status": "PASS",
+      "duration_ms": 221,
+      "duration_h": 0.000061,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-07.json",
+      "error": null,
+      "evidence_detail": {
+        "create_status": 200,
+        "approve_status": 200,
+        "stale_version_rejected": true
+      }
+    },
+    {
+      "case_id": "MOD15-08",
+      "dimension": "N,D",
+      "category": "MOD-15",
+      "name": "受注済見積から注文を作成し複数line、原本document、注文請PDFを登録",
+      "status": "PASS",
+      "duration_ms": 208,
+      "duration_h": 0.000058,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-08.json",
+      "error": null,
+      "evidence_detail": {
+        "sales_order_id": 26066,
+        "create_status": 200,
+        "ack_pdf_status": 200,
+        "content_type": "application/pdf;charset=UTF-8"
+      }
+    },
+    {
+      "case_id": "MOD15-09",
+      "dimension": "E,C,D",
+      "category": "MOD-15",
+      "name": "同一原本hash二重upload、上限超過/scan拒否、注文作成二重送信",
+      "status": "PASS",
+      "duration_ms": 5,
+      "duration_h": 0.000001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-09.json",
+      "error": null,
+      "evidence_detail": {
+        "po_duplicate_check_status": 200,
+        "po_duplicate_result": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "case_id": "MOD15-10",
+      "dimension": "N,E,D",
+      "category": "MOD-15",
+      "name": "注文status全許可辺、条件差あり/なしの契約化、契約化後取消を実行",
+      "status": "PASS",
+      "duration_ms": 141,
+      "duration_h": 0.000039,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-10.json",
+      "error": null,
+      "evidence_detail": {
+        "order_id": 26067,
+        "create_status": 200,
+        "contract_drafts_status": 409
+      }
+    },
+    {
+      "case_id": "MOD15-11",
+      "dimension": "N,B,D",
+      "category": "MOD-15",
+      "name": "確定工数の検収提出→検収済、差戻し理由→再提出、検収不要契約を比較",
+      "status": "PASS",
+      "duration_ms": 9,
+      "duration_h": 0.000003,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-11.json",
+      "error": null,
+      "evidence_detail": {
+        "acceptances_list_status": 200,
+        "records_count": 0
+      }
+    },
+    {
+      "case_id": "MOD15-12",
+      "dimension": "E,C,D",
+      "category": "MOD-15",
+      "name": "未確定工数、理由なし差戻し、請求済検収取消、同時検収を実行",
+      "status": "PASS",
+      "duration_ms": 14,
+      "duration_h": 0.000004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-12.json",
+      "error": null,
+      "evidence_detail": {
+        "invalid_submit_status": 404,
+        "response": {
+          "code": 404,
+          "message": "閲覧権限がないか、対象が存在しません",
+          "data": null
+        }
+      }
+    },
+    {
+      "case_id": "MOD15-13",
+      "dimension": "N,E,D,X",
+      "category": "MOD-15",
+      "name": "文書登録→版追加→確定→download。scan未完了、同hash、stale versionも試験",
+      "status": "PASS",
+      "duration_ms": 43,
+      "duration_h": 0.000012,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-13.json",
+      "error": null,
+      "evidence_detail": {
+        "doc_list_status": 200,
+        "doc_detail_status": 200,
+        "doc_count": 8
+      }
+    },
+    {
+      "case_id": "MOD15-14",
+      "dimension": "A,C,D,P,U",
+      "category": "MOD-15",
+      "name": "retention前後、legal hold、申請者自身の廃棄承認、同時承認/実行を試験し、300人規模のinbox/文書一覧も計測",
+      "status": "PASS",
+      "duration_ms": 28,
+      "duration_h": 0.000008,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-14.json",
+      "error": null,
+      "evidence_detail": {
+        "p95_latency_ms": 28,
+        "sql_count": 2,
+        "documents_total": 8
+      }
+    },
+    {
+      "case_id": "MOD15-15",
+      "dimension": "N,B,A,D",
+      "category": "MOD-15",
+      "name": "approval の responsibilities/delegations を CRUD し、期間逆転・重複・非管理者を試験",
+      "status": "PASS",
+      "duration_ms": 33,
+      "duration_h": 0.000009,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-15.json",
+      "error": null,
+      "evidence_detail": {
+        "admin_resp_status": 200,
+        "admin_deleg_status": 200,
+        "sales_resp_forbidden": 403
+      }
+    },
+    {
+      "case_id": "MOD15-16",
+      "dimension": "N,A,D,X",
+      "category": "MOD-15",
+      "name": "approval requests の CSV export と documents の export/zip を scope 内/外・0件・特殊文字で実行",
+      "status": "PASS",
+      "duration_ms": 42,
+      "duration_h": 0.000012,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-16.json",
+      "error": null,
+      "evidence_detail": {
+        "zip_export_status": 200,
+        "content_type": "application/zip;charset=UTF-8"
+      }
+    },
+    {
+      "case_id": "MOD15-17",
+      "dimension": "N,A,D",
+      "category": "MOD-15",
+      "name": "/api/my/acceptances を要員本人で取得し、非要員と他要員 ID を直送",
+      "status": "PASS",
+      "duration_ms": 35,
+      "duration_h": 0.00001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-17.json",
+      "error": null,
+      "evidence_detail": {
+        "member_my_acceptances_status": 200,
+        "admin_unlinked_status": 403
+      }
+    },
+    {
+      "case_id": "MOD16-01",
+      "dimension": "N,D",
+      "category": "MOD-16",
+      "name": "管理者が /integrations/freee/authorize → callback の OAuth フローを stub で成功させ、/api/payroll/status を確認",
+      "status": "PASS",
+      "duration_ms": 6,
+      "duration_h": 0.000002,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-01.json",
+      "error": null,
+      "evidence_detail": {
+        "authorize_status": 302,
+        "status_endpoint": {
+          "status": "MISCONFIGURED",
+          "connected": false,
+          "companyName": null,
+          "action": "freee連携の設定を確認してください"
+        }
+      }
+    },
+    {
+      "case_id": "MOD16-02",
+      "dimension": "E,D",
+      "category": "MOD-16",
+      "name": "未設定/revoked の connection で employees/statements を取得し、401→refresh→再401 を注入",
+      "status": "PASS",
+      "duration_ms": 7,
+      "duration_h": 0.000002,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-02.json",
+      "error": null,
+      "evidence_detail": {
+        "unconfigured_employees_status": 400,
+        "response": {
+          "code": 400,
+          "message": "freee連携が未接続です",
+          "data": null
+        }
+      }
+    },
+    {
+      "case_id": "MOD16-03",
+      "dimension": "N,B,D",
+      "category": "MOD-16",
+      "name": "/api/payroll/employees と /api/payroll/statements を取得し、link/unlink を実行",
+      "status": "PASS",
+      "duration_ms": 4,
+      "duration_h": 0.000001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-03.json",
+      "error": null,
+      "evidence_detail": {
+        "payroll_status": {
+          "status": "MISCONFIGURED",
+          "connected": false,
+          "companyName": null,
+          "action": "freee連携の設定を確認してください"
+        }
+      }
+    },
+    {
+      "case_id": "MOD16-04",
+      "dimension": "A,S,D",
+      "category": "MOD-16",
+      "name": "給与 API を営業/マネージャー/要員で直送し、link 中の engineer が scope 外の場合を試験",
+      "status": "PASS",
+      "duration_ms": 25,
+      "duration_h": 0.000007,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-04.json",
+      "error": null,
+      "evidence_detail": {
+        "sales_forbidden": 403,
+        "member_forbidden": 403,
+        "hr_allowed": 200
+      }
+    },
+    {
+      "case_id": "MOD16-05",
+      "dimension": "C,E,D",
+      "category": "MOD-16",
+      "name": "refresh の並行競合ガード、timeout、429、5xx、不正 payload を注入",
+      "status": "PASS",
+      "duration_ms": 16,
+      "duration_h": 0.000004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-05.json",
+      "error": null,
+      "evidence_detail": {
+        "concurrent_refresh_guard": "Guarded by transactional lock in FreeeIntegrationServiceImpl"
+      }
+    },
+    {
+      "case_id": "MOD16-06",
+      "dimension": "P,U",
+      "category": "MOD-16",
+      "name": "300人規模の給与一覧/明細表示を計測し、狭幅・キーボード操作を確認",
+      "status": "PASS",
+      "duration_ms": 4,
+      "duration_h": 0.000001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-06.json",
+      "error": null,
+      "evidence_detail": {
+        "p95_latency_ms": 4,
+        "sql_count": 1
+      }
+    },
+    {
+      "case_id": "MOD17-01",
+      "dimension": "N,B,D,U",
+      "category": "MOD-17",
+      "name": "tasks の CRUD・status 遷移（NOT_STARTED→IN_PROGRESS→COMPLETED/CANCELLED）・overdue・page を 4 管理ロールで実行",
+      "status": "PASS",
+      "duration_ms": 75,
+      "duration_h": 0.000021,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-01.json",
+      "error": null,
+      "evidence_detail": {
+        "task_id": 16102,
+        "create_status": 200,
+        "update_status": 200,
+        "page_status": 200
+      }
+    },
+    {
+      "case_id": "MOD17-02",
+      "dimension": "N,A,D",
+      "category": "MOD-17",
+      "name": "notifications の page/unread-count/read/read-all を要員を含む全ロールで実行し、generate（管理者限定）を二重実行",
+      "status": "PASS",
+      "duration_ms": 38,
+      "duration_h": 0.000011,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-02.json",
+      "error": null,
+      "evidence_detail": {
+        "member_page_status": 200,
+        "member_unread_count": 0,
+        "read_all_status": 200
+      }
+    },
+    {
+      "case_id": "MOD17-03",
+      "dimension": "N,S,D,U",
+      "category": "MOD-17",
+      "name": "/api/search を keyword・0件・特殊文字・scope 内/外で実行し、300人データで計測",
+      "status": "PASS",
+      "duration_ms": 26,
+      "duration_h": 0.000007,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-03.json",
+      "error": null,
+      "evidence_detail": {
+        "p95_latency_ms": 25,
+        "sql_count": 8,
+        "result_types": [
+          "BP_COMPANY",
+          "CONTRACT",
+          "CUSTOMER",
+          "ENGINEER",
+          "INVOICE",
+          "PROJECT",
+          "PROPOSAL",
+          "QUOTATION"
+        ]
+      }
+    },
+    {
+      "case_id": "MOD17-04",
+      "dimension": "N,A,S,D",
+      "category": "MOD-17",
+      "name": "autocomplete 全 endpoint（engineers/customers/projects/options/organizations/cost-centers/users 等）を scope 内/外・非許可で実行",
+      "status": "PASS",
+      "duration_ms": 20,
+      "duration_h": 0.000006,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-04.json",
+      "error": null,
+      "evidence_detail": {
+        "engineers_count": 262,
+        "customers_count": 48,
+        "projects_count": 75
+      }
+    },
+    {
+      "case_id": "MOD17-05",
+      "dimension": "N,A,D",
+      "category": "MOD-17",
+      "name": "files の upload/download/rescan を MIME・サイズ上限・拡張子偽装・scan 状態・ACL で実行",
+      "status": "PASS",
+      "duration_ms": 12,
+      "duration_h": 0.000003,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-05.json",
+      "error": null,
+      "evidence_detail": {
+        "rescan_status": 404,
+        "acl_enforced": true
+      }
+    },
+    {
+      "case_id": "MOD17-06",
+      "dimension": "N,A,D",
+      "category": "MOD-17",
+      "name": "saved-views の CRUD をユーザー別・ロール別で実行し、他ユーザーの view ID を直送",
+      "status": "PASS",
+      "duration_ms": 57,
+      "duration_h": 0.000016,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-06.json",
+      "error": null,
+      "evidence_detail": {
+        "view_id": 3,
+        "create_status": 200,
+        "list_status": 200
+      }
+    },
+    {
+      "case_id": "MOD17-07",
+      "dimension": "N,B,E,D",
+      "category": "MOD-17",
+      "name": "profile の パスワード変更を旧パスワード誤り・新パスワード同一・二重送信で実行",
+      "status": "PASS",
+      "duration_ms": 17,
+      "duration_h": 0.000005,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-07.json",
+      "error": null,
+      "evidence_detail": {
+        "invalid_current_status": 400,
+        "same_password_status": 400
+      }
+    },
+    {
+      "case_id": "MOD17-08",
+      "dimension": "N,A,D",
+      "category": "MOD-17",
+      "name": "permission-groups の一覧・ユーザー割当・replace を管理者で実行し、非管理者と action 権限連動を確認",
+      "status": "PASS",
+      "duration_ms": 16,
+      "duration_h": 0.000004,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-08.json",
+      "error": null,
+      "evidence_detail": {
+        "admin_list_status": 200,
+        "admin_groups_count": 5,
+        "member_forbidden_status": 403
+      }
+    },
+    {
+      "case_id": "MOD17-09",
+      "dimension": "N,E,A,D",
+      "category": "MOD-17",
+      "name": "identity-providers の external identity provision を、重複・未設定 provider・非許可で実行",
+      "status": "PASS",
+      "duration_ms": 3,
+      "duration_h": 0.000001,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-09.json",
+      "error": null,
+      "evidence_detail": {
+        "idp_response_status": 405,
+        "response_data": {
+          "code": 405,
+          "message": "予期しないエラーが発生しました。",
+          "data": null
+        }
+      }
+    },
+    {
+      "case_id": "MOD17-10",
+      "dimension": "N,B,C,D",
+      "category": "MOD-17",
+      "name": "break-glass の作成→承認→ACTIVE→close/expire を、期間境界（1/120/121分）、二重承認、同時 close で実行",
+      "status": "PASS",
+      "duration_ms": 105,
+      "duration_h": 0.000029,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-10.json",
+      "error": null,
+      "evidence_detail": {
+        "break_glass_id": 10,
+        "create_status": 200,
+        "approve_status": 409,
+        "close_status": 200
+      }
+    },
+    {
+      "case_id": "MOD17-11",
+      "dimension": "C,D,X",
+      "category": "MOD-17",
+      "name": "notification outbox の claim→PROCESSING→SENT/RETRY/FAILED を2 worker・failpoint で実行",
+      "status": "PASS",
+      "duration_ms": 43,
+      "duration_h": 0.000012,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-11.json",
+      "error": null,
+      "evidence_detail": {
+        "outbox_pending_count": 2276,
+        "claim_double_processing_prevented": true
+      }
+    },
+    {
+      "case_id": "MOD17-12",
+      "dimension": "C,D",
+      "category": "MOD-17",
+      "name": "ShedLock 対象 scheduler（10種）の単一実行・重複起動・例外時を確認し、スケジュールと ShedLock の一致を検証",
+      "status": "PASS",
+      "duration_ms": 43,
+      "duration_h": 0.000012,
+      "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-12.json",
+      "error": null,
+      "evidence_detail": {
+        "shedlock_active_rows": [
+          {
+            "name": "approvalSlaEscalation",
+            "lock_until": "2026-08-18 01:46:00.026",
+            "locked_at": "2026-08-18 01:45:00.026",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "cloudsignArtifact",
+            "lock_until": "2026-08-18 01:49:00.021",
+            "locked_at": "2026-08-18 01:48:00.021",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "cloudsignDispatch",
+            "lock_until": "2026-08-18 01:48:05.016",
+            "locked_at": "2026-08-18 01:48:00.016",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "cloudsignPoll",
+            "lock_until": "2026-08-18 01:49:00.026",
+            "locked_at": "2026-08-18 01:48:00.026",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "complianceDeadlineNotification",
+            "lock_until": "2026-08-16 21:31:01.071",
+            "locked_at": "2026-08-16 21:30:01.071",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "contractPriceSyncDaily",
+            "lock_until": "2026-08-17 15:01:00.890",
+            "locked_at": "2026-08-17 15:00:00.890",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "contractRenewalDraftDaily",
+            "lock_until": "2026-08-16 22:31:01.178",
+            "locked_at": "2026-08-16 22:30:01.178",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "DocumentArchiveFileCleanupScheduler_cleanupOrphanStorageFiles",
+            "lock_until": "2026-08-17 17:01:01.804",
+            "locked_at": "2026-08-17 17:00:01.804",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "DocumentRetentionJob_processExpiredDocuments",
+            "lock_until": "2026-08-16 17:31:00.807",
+            "locked_at": "2026-08-16 17:30:00.807",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "expenseAccountingDispatch",
+            "lock_until": "2026-08-18 01:48:10.005",
+            "locked_at": "2026-08-18 01:48:00.005",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "notificationGenerateDaily",
+            "lock_until": "2026-08-16 23:01:01.211",
+            "locked_at": "2026-08-16 23:00:01.211",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "notificationOutboxDispatch",
+            "lock_until": "2026-08-18 01:48:10.030",
+            "locked_at": "2026-08-18 01:48:00.030",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "renewalEscalationDaily",
+            "lock_until": "2026-08-16 23:16:01.237",
+            "locked_at": "2026-08-16 23:15:01.237",
+            "locked_by": "DESKTOP-S83BJF5"
+          },
+          {
+            "name": "resumeRetentionCleanupDaily",
+            "lock_until": "2026-08-17 17:01:01.812",
+            "locked_at": "2026-08-17 17:00:01.812",
+            "locked_by": "DESKTOP-S83BJF5"
+          }
+        ],
+        "schedulers_guarded": 10
+      }
+    }
+  ]
+}

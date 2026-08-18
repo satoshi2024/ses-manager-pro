@@ -1,0 +1,18 @@
+{
+  "case_id": "MOD10-04",
+  "dimension": "N,D",
+  "category": "MOD-10",
+  "name": "メール本文paste/許可file upload→parse→review補正→confirm",
+  "status": "PASS",
+  "duration_ms": 124,
+  "duration_h": 0.000034,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-04.json",
+  "error": null,
+  "evidence_detail": {
+    "ingestion_job_id": 30220,
+    "parse_status": 200,
+    "review_status": 400,
+    "confirm_status": 200,
+    "created_availability_id": 30047
+  }
+}

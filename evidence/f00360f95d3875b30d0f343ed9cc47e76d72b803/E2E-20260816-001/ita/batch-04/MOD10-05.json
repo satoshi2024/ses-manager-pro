@@ -1,0 +1,21 @@
+{
+  "case_id": "MOD10-05",
+  "dimension": "E,C,D",
+  "category": "MOD-10",
+  "name": "parse失敗、必須initial/company欠落、confirm二重送信、reparse中confirmを実行",
+  "status": "PASS",
+  "duration_ms": 139,
+  "duration_h": 0.000039,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-05.json",
+  "error": null,
+  "evidence_detail": {
+    "empty_parse_status": 200,
+    "first_confirm_status": 200,
+    "second_confirm_status": 409,
+    "second_confirm_response": {
+      "code": 409,
+      "message": "すでに確定済みです。",
+      "data": null
+    }
+  }
+}

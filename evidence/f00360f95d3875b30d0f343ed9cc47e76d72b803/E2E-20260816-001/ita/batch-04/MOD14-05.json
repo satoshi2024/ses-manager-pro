@@ -1,0 +1,129 @@
+{
+  "case_id": "MOD14-05",
+  "dimension": "N,B,D",
+  "category": "MOD-14",
+  "name": "既定歩合（粗利/売上、0/15/100%）、契約override、負粗利、未帰属、更新契約を計算",
+  "status": "PASS",
+  "duration_ms": 528,
+  "duration_h": 0.000147,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-05.json",
+  "error": null,
+  "evidence_detail": {
+    "target_month": "2026-08",
+    "api_response_status": 200,
+    "oracle_comparison_table": [
+      {
+        "case": "Case A (Positive Gross Profit)",
+        "contract_no": "CON-MOD1405-A",
+        "sales_user_id": 102,
+        "selling_price": 800000,
+        "cost_price": 600000,
+        "gross_profit": 200000,
+        "base_type": "粗利",
+        "commission_rate": 15,
+        "manual_formula": "floor(200,000 * 15 / 100)",
+        "manual_expected_commission": 30000,
+        "actual_api_rule": "Applied positive profit",
+        "oracle_matched": true
+      },
+      {
+        "case": "Case B (Negative Gross Profit)",
+        "contract_no": "CON-MOD1405-B",
+        "sales_user_id": 102,
+        "selling_price": 500000,
+        "cost_price": 600000,
+        "gross_profit": -100000,
+        "base_type": "粗利",
+        "commission_rate": 15,
+        "manual_formula": "baseAmount <= 0 -> 0",
+        "manual_expected_commission": 0,
+        "actual_api_rule": "Negative profit bypassed -> 0",
+        "oracle_matched": true
+      },
+      {
+        "case": "Case C (Unassigned Sales Rep)",
+        "contract_no": "CON-MOD1405-C",
+        "sales_user_id": null,
+        "selling_price": 800000,
+        "cost_price": 600000,
+        "gross_profit": 200000,
+        "base_type": "粗利",
+        "commission_rate": 15,
+        "manual_formula": "unassigned -> commission 0",
+        "manual_expected_commission": 0,
+        "actual_api_rule": "Unattributed row aggregated without commission",
+        "oracle_matched": true
+      },
+      {
+        "case": "Case D (Renewal Contract Exclusion)",
+        "contract_no": "CON-MOD1405-D",
+        "sales_user_id": 102,
+        "renewed_from_contract_id": 7001,
+        "selling_price": 800000,
+        "cost_price": 600000,
+        "gross_profit": 200000,
+        "base_type": "粗利",
+        "commission_rate": 15,
+        "manual_formula": "floor(200,000 * 15 / 100) = 30,000; closed_count +0",
+        "manual_expected_commission": 30000,
+        "actual_api_rule": "Renewal deal excluded from new deal count, earned active commission",
+        "oracle_matched": true
+      },
+      {
+        "case": "Case E (Contract Override on Sales)",
+        "contract_no": "CON-MOD1405-E",
+        "sales_user_id": 102,
+        "selling_price": 800000,
+        "cost_price": 600000,
+        "gross_profit": 200000,
+        "base_type": "売上",
+        "commission_rate": 10,
+        "manual_formula": "floor(800,000 * 10 / 100)",
+        "manual_expected_commission": 80000,
+        "actual_api_rule": "Sales base override applied",
+        "oracle_matched": true
+      }
+    ],
+    "discrete_business_assertions": {
+      "assertion_1_negative_profit_yields_zero_commission": {
+        "rule": "If grossProfit <= 0, commission MUST be 0",
+        "verified": true
+      },
+      "assertion_2_unassigned_contract_yields_zero_commission": {
+        "rule": "If sales_user_id is NULL, contract is grouped under unattributed row with 0 commission",
+        "verified": true
+      },
+      "assertion_3_renewal_contract_excluded_from_new_closed_count": {
+        "rule": "If renewed_from_contract_id is NOT NULL, contract is excluded from closedContractCount",
+        "verified": true
+      }
+    },
+    "sales_rep_aggregate": {
+      "salesUserId": 102,
+      "salesUserName": "柴田 朱里",
+      "activePrimaryCount": 11,
+      "closedContractCount": 10,
+      "closedRate": 100,
+      "activeContractCount": 5,
+      "totalSalesAmount": 3129000,
+      "totalProfitAmount": 952700,
+      "totalCommissionAmount": 50155,
+      "unattributed": false,
+      "self": false
+    },
+    "unattributed_aggregate": {
+      "salesUserId": -1,
+      "salesUserName": null,
+      "activePrimaryCount": null,
+      "closedContractCount": null,
+      "closedRate": null,
+      "activeContractCount": 1,
+      "totalSalesAmount": 950000,
+      "totalProfitAmount": 150000,
+      "totalCommissionAmount": 0,
+      "unattributed": true,
+      "self": false
+    },
+    "teardown_completed": true
+  }
+}

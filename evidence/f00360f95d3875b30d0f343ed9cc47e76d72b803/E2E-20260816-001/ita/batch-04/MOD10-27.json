@@ -1,0 +1,19 @@
+{
+  "case_id": "MOD10-27",
+  "dimension": "N,E,C,D",
+  "category": "MOD-10",
+  "name": "bp-migrations の run/exceptions/resolve（管理者）を単一実行・重複実行で試験",
+  "status": "BLOCKED",
+  "blocked_reason": "BLOCKED(D-20260818-005)",
+  "duration_ms": 5,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-27.json",
+  "error": "Defect D-20260818-005: bp-migrations prefix missing in ActionPermissionResolver",
+  "evidence_detail": {
+    "endpoint": "/api/bp-migrations",
+    "http_status": 403,
+    "defect_reference": "D-20260818-005",
+    "defect_summary": "MenuPermissionFilter / ActionPermissionResolver denies access even to admin due to unregistered prefix",
+    "resolution_plan": "Tracked under D-20260818-005 prefix registration defect."
+  }
+}

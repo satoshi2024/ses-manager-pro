@@ -1,0 +1,34 @@
+{
+  "case_id": "MOD10-25",
+  "dimension": "N,B,D",
+  "category": "MOD-10",
+  "name": "BP price-negotiations を REQUESTED→RESPONDED→AGREED/REJECTED へ遷移させ、境界を実行",
+  "status": "PASS",
+  "duration_ms": 101,
+  "duration_h": 0.000028,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-25.json",
+  "error": null,
+  "evidence_detail": {
+    "bp_company_id": 11033,
+    "negotiation_id": 11958,
+    "request_status": 200,
+    "list_status": 200,
+    "negotiations": [
+      {
+        "id": 11958,
+        "createdAt": "2026-08-18T10:11:11",
+        "updatedAt": "2026-08-18T10:11:11",
+        "deletedFlag": 0,
+        "tenantId": 1,
+        "bpCompanyId": 11033,
+        "requestedAt": "2026-08-18",
+        "respondedAt": null,
+        "status": "REQUESTED",
+        "requestedAmount": 800000,
+        "agreedAmount": null,
+        "summary": "スキル向上に伴う単価改定要請",
+        "documentId": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "case_id": "MOD10-26",
+  "dimension": "N,A,D",
+  "category": "MOD-10",
+  "name": "risk-summary と generate-risk-notifications（管理者）を実行し、通知生成の冪等と scope を確認",
+  "status": "PASS",
+  "duration_ms": 429,
+  "duration_h": 0.000119,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-26.json",
+  "error": null,
+  "evidence_detail": {
+    "summary_status": 200,
+    "summary_data": {
+      "uncheckedComplianceCount": 2,
+      "paymentRiskCount": 0,
+      "lowRatingCount": 8,
+      "suspendedCount": 3
+    },
+    "admin_generate_status": 200,
+    "retransmission_idempotent_status": 200,
+    "sales_notif_status": 200
+  }
+}

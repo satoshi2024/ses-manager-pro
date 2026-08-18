@@ -4,14 +4,56 @@
   "category": "MOD-07",
   "name": "同一契約・同一適用月へ異なる単価を2セッション同時保存",
   "status": "PASS",
-  "duration_ms": 2861,
-  "duration_h": 0.000795,
+  "duration_ms": 3521,
+  "duration_h": 0.000978,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-07.json",
   "error": null,
   "evidence_detail": {
-    "http_sessionA": 200,
-    "http_sessionB": 200,
-    "db_month_unique_rows": 1,
-    "serialized_cleanly": true
+    "contract_id": 7323,
+    "session1_response": {
+      "status": 500,
+      "body": {
+        "code": 500,
+        "message": "システムエラーが発生しました",
+        "data": null
+      }
+    },
+    "session2_response": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 29,
+          "createdAt": "2026-08-18T09:51:47.0265922",
+          "updatedAt": "2026-08-18T09:51:47.0265922",
+          "deletedFlag": 0,
+          "requestNo": "AR-29",
+          "requestType": "contract.revisePrice",
+          "targetType": "CONTRACT",
+          "targetId": 7323,
+          "targetVersion": 0,
+          "applicantId": 1,
+          "organizationId": null,
+          "amountSnapshot": null,
+          "payloadJson": "{\"operation\":\"revisePrice\",\"status\":\"\",\"sellingPrice\":null,\"costPrice\":null,\"applyFromMonth\":null,\"reason\":null,\"cancelDate\":\"\"}",
+          "diffJson": "{\"operation\":{\"before\":\"準備中\",\"after\":\"revisePrice\",\"label\":\"契約操作\"}}",
+          "routeSnapshotJson": "{\"routeId\":103,\"versionNo\":1,\"organizationId\":null,\"steps\":[{\"stepNo\":1,\"slaHours\":24,\"approverUserIds\":[101],\"slots\":[{\"slotIndex\":0,\"approverType\":\"ROLE\",\"candidateUserIds\":[101],\"requiredCount\":1}]}]}",
+          "status": "in_review",
+          "currentStep": 1,
+          "roundNo": 1,
+          "currentStepStartedAt": "2026-08-18T09:51:47.0265922",
+          "requestedAt": "2026-08-18T09:51:47.0265922",
+          "finalizedAt": null,
+          "idempotencyKey": "approval-b237be2c7a4f3265fe27f7083ec8196ab794a81945ad040040a0398aee9c6870",
+          "version": 1,
+          "createdBy": 1
+        }
+      }
+    },
+    "teardown": {
+      "deleted_contract_id": 7323,
+      "remaining_count": 0
+    }
   }
 }

@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD15-01",
+  "dimension": "N,D,U",
+  "category": "MOD-15",
+  "name": "見積を作成しPDF preview/download",
+  "status": "PASS",
+  "duration_ms": 98,
+  "duration_h": 0.000027,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-01.json",
+  "error": null,
+  "evidence_detail": {
+    "created_quotation_id": 15068,
+    "quotation_status": 200,
+    "pdf_response_status": 200,
+    "pdf_content_type": "application/pdf;charset=UTF-8"
+  }
+}

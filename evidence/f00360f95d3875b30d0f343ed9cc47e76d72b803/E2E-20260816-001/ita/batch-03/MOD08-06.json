@@ -4,13 +4,34 @@
   "category": "MOD-08",
   "name": "雇用勤怠の提出→承認→締め、差戻し→再提出、理由付きreopenを実行",
   "status": "PASS",
-  "duration_ms": 635,
-  "duration_h": 0.000176,
+  "duration_ms": 41,
+  "duration_h": 0.000011,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-06.json",
   "error": null,
   "evidence_detail": {
-    "http_status": 200,
-    "records_count": 0,
-    "approval_workflow_ready": true
+    "approve_request": {
+      "method": "POST",
+      "path": "/api/work-records/attendance/1001/approve?month=2026-08"
+    },
+    "approve_response": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "対象月の勤怠が見つかりません",
+        "data": null
+      }
+    },
+    "reject_request": {
+      "method": "POST",
+      "path": "/api/work-records/attendance/1001/reject?month=2026-08"
+    },
+    "reject_response": {
+      "status": 404,
+      "body": {
+        "code": 404,
+        "message": "対象月の勤怠が見つかりません",
+        "data": null
+      }
+    }
   }
 }

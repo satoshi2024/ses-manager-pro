@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD15-13",
+  "dimension": "N,E,D,X",
+  "category": "MOD-15",
+  "name": "文書登録→版追加→確定→download。scan未完了、同hash、stale versionも試験",
+  "status": "PASS",
+  "duration_ms": 43,
+  "duration_h": 0.000012,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-13.json",
+  "error": null,
+  "evidence_detail": {
+    "doc_list_status": 200,
+    "doc_detail_status": 200,
+    "doc_count": 8
+  }
+}

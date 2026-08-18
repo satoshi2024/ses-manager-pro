@@ -1,0 +1,16 @@
+{
+  "case_id": "MOD15-15",
+  "dimension": "N,B,A,D",
+  "category": "MOD-15",
+  "name": "approval の responsibilities/delegations を CRUD し、期間逆転・重複・非管理者を試験",
+  "status": "PASS",
+  "duration_ms": 33,
+  "duration_h": 0.000009,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-15.json",
+  "error": null,
+  "evidence_detail": {
+    "admin_resp_status": 200,
+    "admin_deleg_status": 200,
+    "sales_resp_forbidden": 403
+  }
+}

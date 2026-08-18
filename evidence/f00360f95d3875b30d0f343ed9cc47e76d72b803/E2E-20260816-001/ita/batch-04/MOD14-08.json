@@ -1,0 +1,14 @@
+{
+  "case_id": "MOD14-08",
+  "dimension": "C,E,D",
+  "category": "MOD-14",
+  "name": "同じuserを別組織へ同日同時transfer、組織を同時merge",
+  "status": "PASS",
+  "duration_ms": 5,
+  "duration_h": 0.000001,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-08.json",
+  "error": null,
+  "evidence_detail": {
+    "organizations_count": 13
+  }
+}

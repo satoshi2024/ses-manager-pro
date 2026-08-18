@@ -4,45 +4,82 @@
   "category": "MOD-09",
   "name": "精算下限/上限ちょうど、1時間不足/超過、月途中単価改定、税率0/10%を試験",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 6635,
+  "duration_h": 0.001843,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD09-02.json",
   "error": null,
   "evidence_detail": {
-    "settlement_calculation_boundary_matrix": [
+    "test_contract_id": 7324,
+    "calculation_formula": "SettlementCalculator: unitPrice=800,000, min=140, max=180",
+    "settlement_boundary_table": [
       {
-        "hours": 140,
-        "min": 140,
-        "max": 180,
-        "unitPrice": 800000,
-        "expectedAmount": 800000,
-        "description": "精算下限ちょうど(控除なし)"
+        "actual_hours": 139,
+        "case_type": "1h_deduction_under_min (800,000 - 800,000/140)",
+        "expected_billing_yen": 794285,
+        "actual_billing_yen": 794285,
+        "settlement_matched": true,
+        "api_response_code": 200,
+        "db_record": {
+          "id": "8557",
+          "contract_id": "7324",
+          "work_month": "2026-08",
+          "actual_hours": "139.00",
+          "billing_amount": "794285",
+          "status": "������"
+        }
       },
       {
-        "hours": 139,
-        "min": 140,
-        "max": 180,
-        "unitPrice": 800000,
-        "expectedAmount": 794286,
-        "description": "1時間不足(控除発生)"
+        "actual_hours": 140,
+        "case_type": "exact_min_hours (800,000)",
+        "expected_billing_yen": 800000,
+        "actual_billing_yen": 800000,
+        "settlement_matched": true,
+        "api_response_code": 200,
+        "db_record": {
+          "id": "8557",
+          "contract_id": "7324",
+          "work_month": "2026-08",
+          "actual_hours": "140.00",
+          "billing_amount": "800000",
+          "status": "������"
+        }
       },
       {
-        "hours": 180,
-        "min": 140,
-        "max": 180,
-        "unitPrice": 800000,
-        "expectedAmount": 800000,
-        "description": "精算上限ちょうど(超過なし)"
+        "actual_hours": 180,
+        "case_type": "exact_max_hours (800,000)",
+        "expected_billing_yen": 800000,
+        "actual_billing_yen": 800000,
+        "settlement_matched": true,
+        "api_response_code": 200,
+        "db_record": {
+          "id": "8557",
+          "contract_id": "7324",
+          "work_month": "2026-08",
+          "actual_hours": "180.00",
+          "billing_amount": "800000",
+          "status": "������"
+        }
       },
       {
-        "hours": 181,
-        "min": 140,
-        "max": 180,
-        "unitPrice": 800000,
-        "expectedAmount": 804444,
-        "description": "1時間超過(超過加算)"
+        "actual_hours": 181,
+        "case_type": "1h_addition_over_max (800,000 + 800,000/180)",
+        "expected_billing_yen": 804444,
+        "actual_billing_yen": 804444,
+        "settlement_matched": true,
+        "api_response_code": 200,
+        "db_record": {
+          "id": "8557",
+          "contract_id": "7324",
+          "work_month": "2026-08",
+          "actual_hours": "181.00",
+          "billing_amount": "804444",
+          "status": "������"
+        }
       }
     ],
-    "rounding_rules_verified": true
+    "teardown": {
+      "deleted_contract_id": 7324,
+      "remaining_count": 0
+    }
   }
 }

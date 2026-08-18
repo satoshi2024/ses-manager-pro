@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD15-16",
+  "dimension": "N,A,D,X",
+  "category": "MOD-15",
+  "name": "approval requests の CSV export と documents の export/zip を scope 内/外・0件・特殊文字で実行",
+  "status": "PASS",
+  "duration_ms": 42,
+  "duration_h": 0.000012,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-16.json",
+  "error": null,
+  "evidence_detail": {
+    "zip_export_status": 200,
+    "content_type": "application/zip;charset=UTF-8"
+  }
+}

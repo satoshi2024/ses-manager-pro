@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{accounting.integration.title}">会計・支払連携</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1 fw-bold" th:text="#{accounting.integration.title}">会計・支払連携</h4>
+            <div class="text-muted small" th:text="#{accounting.integration.desc}">freee会計・CSV連携の設定、マッピング検証、非同期ジョブの管理を行います</div>
+        </div>
+    </div>
+
+    <!-- タブメニュー -->
+    <ul class="nav nav-tabs mb-3" id="accountingTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="jobs-tab" data-bs-toggle="tab" data-bs-target="#jobs-panel" type="button" role="tab">
+                <i class="bi bi-clock-history me-1"></i><span th:text="#{accounting.tab.jobs}">連携ジョブ</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="mappings-tab" data-bs-toggle="tab" data-bs-target="#mappings-panel" type="button" role="tab">
+                <i class="bi bi-diagram-3 me-1"></i><span th:text="#{accounting.tab.mappings}">マッピング設定</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="connections-tab" data-bs-toggle="tab" data-bs-target="#connections-panel" type="button" role="tab">
+                <i class="bi bi-link-45deg me-1"></i><span th:text="#{accounting.tab.connections}">接続設定</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="preview-tab" data-bs-toggle="tab" data-bs-target="#preview-panel" type="button" role="tab">
+                <i class="bi bi-eye me-1"></i><span th:text="#{accounting.tab.preview}">送信プレビュー</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="reconciliation-tab" data-bs-toggle="tab" data-bs-target="#reconciliation-panel" type="button" role="tab">
+                <i class="bi bi-file-earmark-check me-1"></i><span>月次照合</span>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="accountingTabsContent">
+        <!-- 1. ジョブ一覧パネル -->
+        <div class="tab-pane fade show active" id="jobs-panel" role="tabpanel">
+            <div class="card mb-3 shadow-sm border-0">
+                <div class="card-body">
+                    <form id="searchForm" class="row g-2 align-items-center">
+                        <div class="col-auto">
+                            <select id="jobStatusFilter" class="form-select form-select-sm">
+                                <option value="">全ステータス</option>
+                                <option value="PENDING">PENDING (待機中)</option>
+                                <option value="RUNNING">RUNNING (処理中)</option>
+                                <option value="SUCCEEDED">SUCCEEDED (成功)</option>
+                                <option value="RETRYABLE">RETRYABLE (再試行待ち)</option>
+                                <option value="FAILED">FAILED (失敗)</option>
+                                <option value="CANCELLED">CANCELLED (取消)</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <select id="jobTypeFilter" class="form-select form-select-sm">
+                                <option value="">全ジョブ種別</option>
+                                <option value="SALES_INVOICE_SYNC">売上請求連携</option>
+                                <option value="SALES_INVOICE_CANCEL">売上取消連携</option>
+                                <option value="PURCHASE_DEAL_SYNC">BP仕入連携</option>
+                                <option value="EXPENSE_DEAL_SYNC">要員経費連携</option>
+                                <option value="PAYMENT_SYNC">支払実績同期</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <button type="button" id="btnRefreshJobs" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-arrow-clockwise me-1"></i>更新
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="jobsTable">
+                        <thead class="table-light">
+                        <tr>
+                            <th>ID</th>
+                            <th>ジョブ種別</th>
+                            <th>対象</th>
+                            <th>状態</th>
+                            <th>試行</th>
+                            <th>外部ID</th>
+                            <th>作成日時 / 送信日時</th>
+                            <th>操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="jobsTbody">
+                        <tr><td colspan="8" class="text-center text-muted py-4">読み込み中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer d-flex justify-content-between align-items-center bg-white" id="jobsPagination">
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. マッピング設定パネル -->
+        <div class="tab-pane fade" id="mappings-panel" role="tabpanel">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex gap-2 align-items-center">
+                    <select id="mappingConnSelect" class="form-select form-select-sm" style="width: 250px;"></select>
+                    <select id="mappingTypeFilter" class="form-select form-select-sm" style="width: 200px;">
+                        <option value="">全オブジェクト種別</option>
+                        <option value="CUSTOMER_PARTNER">顧客取引先 (CUSTOMER_PARTNER)</option>
+                        <option value="BP_PARTNER">BP取引先 (BP_PARTNER)</option>
+                        <option value="ACCOUNT_SALES">売上勘定科目 (ACCOUNT_SALES)</option>
+                        <option value="ACCOUNT_OUTSOURCING">外注費勘定科目 (ACCOUNT_OUTSOURCING)</option>
+                        <option value="TAX_SALES_10">売上税区分10% (TAX_SALES_10)</option>
+                        <option value="SECTION">部門 (SECTION)</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" id="btnNewMapping">
+                    <i class="bi bi-plus-lg me-1"></i>新規マッピング登録
+                </button>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="mappingsTable">
+                        <thead class="table-light">
+                        <tr>
+                            <th>種別</th>
+                            <th>内部キー / コード</th>
+                            <th>外部システムID</th>
+                            <th>外部コード / 名称</th>
+                            <th>検証状態</th>
+                            <th>操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="mappingsTbody">
+                        <tr><td colspan="6" class="text-center text-muted py-4">接続を選択してください</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 接続設定パネル -->
+        <div class="tab-pane fade" id="connections-panel" role="tabpanel">
+            <div class="row g-3" id="connectionsContainer">
+                <div class="col-12 text-center text-muted py-4">接続情報を読み込み中...</div>
+            </div>
+        </div>
+
+        <!-- 4. 送信プレビューパネル -->
+        <div class="tab-pane fade" id="preview-panel" role="tabpanel">
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-body">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-auto">
+                            <label class="form-label mb-0 small fw-bold">請求書ID:</label>
+                        </div>
+                        <div class="col-auto">
+                            <input type="number" id="previewInvoiceId" class="form-control form-control-sm" placeholder="例: 1" style="width: 150px;">
+                        </div>
+                        <div class="col-auto">
+                            <button type="button" id="btnRunPreview" class="btn btn-sm btn-primary">
+                                <i class="bi bi-search me-1"></i>検証 & プレビュー表示
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="previewResultContainer" style="display: none;">
+                <!-- プレビュー結果がJSで描画される -->
+            </div>
+        </div>
+
+        <!-- 5. 月次照合パネル -->
+        <div class="tab-pane fade" id="reconciliation-panel" role="tabpanel">
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-body">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-auto">
+                            <label class="form-label mb-0 small fw-bold">対象年月:</label>
+                        </div>
+                        <div class="col-auto">
+                            <input type="month" id="reconciliationMonth" class="form-control form-control-sm" style="width: 170px;">
+                        </div>
+                        <div class="col-auto">
+                            <button type="button" id="btnRunReconciliation" class="btn btn-sm btn-primary">
+                                <i class="bi bi-search me-1"></i>月次照合を実行
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- サマリーカード -->
+            <div class="row g-3 mb-3" id="reconcileSummaryCards" style="display: none;">
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">完全一致</div>
+                        <div class="fs-4 fw-bold text-success" id="summaryMatchedCount">0</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">内部のみ (未連携)</div>
+                        <div class="fs-4 fw-bold text-warning" id="summaryInternalOnlyCount">0</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">外部のみ</div>
+                        <div class="fs-4 fw-bold text-secondary" id="summaryExternalOnlyCount">0</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">金額不一致</div>
+                        <div class="fs-4 fw-bold text-danger" id="summaryMismatchCount">0</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">除外・無視済</div>
+                        <div class="fs-4 fw-bold text-muted" id="summaryIgnoredCount">0</div>
+                    </div>
+                </div>
+                <div class="col-md-2 col-6">
+                    <div class="card border-0 bg-light text-center py-2">
+                        <div class="text-muted small">月次締め判定</div>
+                        <div class="mt-1" id="summaryClosingBadge">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 明細テーブル -->
+            <div class="card shadow-sm border-0" id="reconcileTableCard" style="display: none;">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0" id="reconcileTable">
+                        <thead class="table-light">
+                        <tr>
+                            <th>種別</th>
+                            <th>内部番号 / 取引先</th>
+                            <th>内部金額</th>
+                            <th>外部取引ID / 参照</th>
+                            <th>外部金額</th>
+                            <th>状態</th>
+                            <th>差異理由 / メモ</th>
+                            <th>操作</th>
+                        </tr>
+                        </thead>
+                        <tbody id="reconcileTbody">
+                        <tr><td colspan="8" class="text-center text-muted py-4">対象年月を選択して照合を実行してください</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 差異除外モーダル -->
+    <div class="modal fade" id="ignoreModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">照合差異の除外設定</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="ignoreForm">
+                        <input type="hidden" id="ignoreMonth">
+                        <input type="hidden" id="ignoreCategory">
+                        <input type="hidden" id="ignoreExternalDealId">
+                        <input type="hidden" id="ignoreInternalId">
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">対象項目</label>
+                            <input type="text" id="ignoreTargetLabel" class="form-control form-control-sm" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">除外・承認理由 (必須)</label>
+                            <textarea id="ignoreReasonInput" class="form-control form-control-sm" rows="3" placeholder="例: 翌月合算請求のため当月連携対象外" required></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveIgnore">除外を保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ジョブ詳細モーダル -->
+    <div class="modal fade" id="jobDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">ジョブ詳細</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="jobDetailInfo"></div>
+                    <h6 class="fw-bold mt-4 mb-2">状態遷移イベント履歴</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                            <tr>
+                                <th>日時</th>
+                                <th>遷移</th>
+                                <th>詳細</th>
+                            </tr>
+                            </thead>
+                            <tbody id="jobEventsTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="btnModalRetry" class="btn btn-warning btn-sm" style="display:none;">再試行</button>
+                    <button type="button" id="btnModalCancel" class="btn btn-danger btn-sm" style="display:none;">キャンセル</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">閉じる</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- マッピング編集モーダル -->
+    <div class="modal fade" id="mappingModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="mappingModalTitle">マッピング設定</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="mappingForm">
+                        <input type="hidden" id="modalConnId">
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">オブジェクト種別</label>
+                            <select id="modalObjectType" class="form-select form-select-sm" required>
+                                <option value="CUSTOMER_PARTNER">顧客取引先 (CUSTOMER_PARTNER)</option>
+                                <option value="BP_PARTNER">BP取引先 (BP_PARTNER)</option>
+                                <option value="ACCOUNT_SALES">売上勘定科目 (ACCOUNT_SALES)</option>
+                                <option value="ACCOUNT_OUTSOURCING">外注費勘定科目 (ACCOUNT_OUTSOURCING)</option>
+                                <option value="TAX_SALES_10">売上税区分10% (TAX_SALES_10)</option>
+                                <option value="SECTION">部門 (SECTION)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">内部キー / コード</label>
+                            <input type="text" id="modalInternalCode" class="form-control form-control-sm" placeholder="例: CUST-001 / SALES_DEFAULT" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">外部システムID</label>
+                            <input type="text" id="modalExternalId" class="form-control form-control-sm" placeholder="freee側のID (例: 1001)" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">外部システムコード / 名称</label>
+                            <input type="text" id="modalExternalCode" class="form-control form-control-sm" placeholder="例: 売上高 / 課税売上10%">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveMapping">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/accounting-integration.js}"></script>
+</th:block>
+</body>
+</html>

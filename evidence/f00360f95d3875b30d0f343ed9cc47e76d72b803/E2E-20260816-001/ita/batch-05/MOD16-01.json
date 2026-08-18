@@ -1,0 +1,85 @@
+{
+  "case_id": "MOD16-01",
+  "dimension": "N,D",
+  "category": "MOD-16",
+  "name": "管理者が /integrations/freee/authorize → callback の OAuth フローを stub で成功させ、/api/payroll/status を確認",
+  "status": "PASS",
+  "duration_ms": 182,
+  "duration_h": 0.000051,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD16-01.json",
+  "error": null,
+  "evidence_detail": {
+    "step1_authorize": {
+      "request": {
+        "method": "GET",
+        "url": "/integrations/freee/authorize"
+      },
+      "response": {
+        "statusCode": 302,
+        "location": "http://localhost:8089/public_api/authorize?response_type=code&client_id=mock-client-id&redirect_uri=http://localhost:8080/integrations/freee/callback&state=wvW3sDVtmyIEq_aLzwPfzaZxsf3VF9D1&prompt=select_company",
+        "state_param": "wvW3sDVtmyIEq_aLzwPfzaZxsf3VF9D1"
+      }
+    },
+    "step2_callback": {
+      "request": {
+        "method": "GET",
+        "url": "/integrations/freee/callback?code=mock_freee_auth_code_999&state=wvW3sDVtmyIEq_aLzwPfzaZxsf3VF9D1"
+      },
+      "response": {
+        "statusCode": 302,
+        "location": "http://localhost:8080/payroll?connected=1"
+      }
+    },
+    "step3_payroll_status": {
+      "request": {
+        "method": "GET",
+        "url": "/api/payroll/status"
+      },
+      "response": {
+        "statusCode": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": {
+            "status": "CONNECTED",
+            "connected": true,
+            "companyName": "株式会社テスト（freee連携）",
+            "action": "給与・賞与を参照できます"
+          }
+        }
+      }
+    },
+    "step4_db_storage": {
+      "table": "t_freee_connection",
+      "row": {
+        "id": 2,
+        "company_id": 12345,
+        "company_name": "株式会社テスト（freee連携）",
+        "connection_status": "CONNECTED",
+        "access_token_encrypted": "6jQq1oP+cUrKPMjs:XdfQua6/lSza+LgufMyTGxARg5fcXZ3BSMe6+wUa8Xsbjbtp44f9LOlaTNvq8fM=",
+        "refresh_token_encrypted": "7DGkZnAwoUtRb0m+:ri7XpPpUTc//syzzR/bZoVPgWv71KK0CcT9+3tEfsXx3F9q+7aTvkAaZj8rFTaJ8",
+        "token_expires_at": "2026-08-19 11:48:06",
+        "connected_by": 101
+      },
+      "encryption_algorithm": "AES-256-GCM with 12-byte IV + 128-bit authentication tag"
+    },
+    "step5_audit_log": {
+      "table": "t_audit_log",
+      "records": [
+        {
+          "id": 22256,
+          "username": "s300.admin01",
+          "method": "GET",
+          "uri": "/integrations/freee",
+          "status": 302,
+          "application_code": "FREEE_CONNECT",
+          "success_flag": true,
+          "created_at": "2026-08-18 11:48:06"
+        }
+      ]
+    },
+    "sub_scenario_unconfigured": {
+      "note": "未設定/未接続時の拒否・誘導（DISCONNECTED/MISCONFIGURED）は MOD16-02 の未設定系シナリオとして管理"
+    }
+  }
+}

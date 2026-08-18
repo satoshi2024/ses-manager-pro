@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD17-07",
+  "dimension": "N,B,E,D",
+  "category": "MOD-17",
+  "name": "profile の パスワード変更を旧パスワード誤り・新パスワード同一・二重送信で実行",
+  "status": "PASS",
+  "duration_ms": 17,
+  "duration_h": 0.000005,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-07.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_current_status": 400,
+    "same_password_status": 400
+  }
+}

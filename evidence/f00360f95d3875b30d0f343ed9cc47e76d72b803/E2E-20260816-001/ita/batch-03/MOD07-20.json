@@ -4,65 +4,550 @@
   "category": "MOD-07",
   "name": "実装済み compliance 系の profile detail/save と compliance-findings の ack/in-progress/resolve/exception 遷移を実行（非 G2 範囲）",
   "status": "PASS",
-  "duration_ms": 31,
-  "duration_h": 0.000009,
+  "duration_ms": 39,
+  "duration_h": 0.000011,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD07-20.json",
   "error": null,
   "evidence_detail": {
-    "http_status": 200,
-    "findings_count": 31,
-    "sample_findings": [
-      {
-        "contractId": 7003,
-        "contractNo": "CT-2025-0003",
-        "engineerName": "池田 翔太",
-        "projectName": "データ分析基盤構築",
-        "contractType": "請負",
-        "findings": [
+    "compliance_findings_request": {
+      "method": "GET",
+      "path": "/api/compliance/findings?current=1&size=10"
+    },
+    "compliance_findings_response": {
+      "status": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": [
           {
-            "code": "SETTLEMENT_MISMATCH",
-            "severity": "warning",
-            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
             "contractId": 7003,
-            "conditionFingerprint": "settlement-mismatch",
-            "dueDate": null
-          }
-        ]
-      },
-      {
-        "contractId": 7016,
-        "contractNo": "CT-2025-0016",
-        "engineerName": "竹内 真由",
-        "projectName": "社内RAGシステム構築",
-        "contractType": "請負",
-        "findings": [
+            "contractNo": "CT-2025-0003",
+            "engineerName": "池田 翔太",
+            "projectName": "データ分析基盤構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7003,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
           {
-            "code": "SETTLEMENT_MISMATCH",
-            "severity": "warning",
-            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
             "contractId": 7016,
-            "conditionFingerprint": "settlement-mismatch",
-            "dueDate": null
-          }
-        ]
-      },
-      {
-        "contractId": 7019,
-        "contractNo": "CT-2025-0019",
-        "engineerName": "川口 香織",
-        "projectName": "学習管理システム開発（Phase1）",
-        "contractType": "請負",
-        "findings": [
+            "contractNo": "CT-2025-0016",
+            "engineerName": "竹内 真由",
+            "projectName": "社内RAGシステム構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7016,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
           {
-            "code": "SETTLEMENT_MISMATCH",
-            "severity": "warning",
-            "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
             "contractId": 7019,
-            "conditionFingerprint": "settlement-mismatch",
-            "dueDate": null
+            "contractNo": "CT-2025-0019",
+            "engineerName": "川口 香織",
+            "projectName": "学習管理システム開発（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7019,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7023,
+            "contractNo": "CT-2025-0023",
+            "engineerName": "中川 直樹",
+            "projectName": "マーケティングオートメーション導入",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7023,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7024,
+            "contractNo": "CT-2025-0024",
+            "engineerName": "村上 恵美",
+            "projectName": "勤怠申請フロー再構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7024,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7041,
+            "contractNo": "CT-2025-0041",
+            "engineerName": "野村 修",
+            "projectName": "病院向け予約システム開発（Phase3）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7041,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7043,
+            "contractNo": "CT-2025-0043",
+            "engineerName": "前田 直美",
+            "projectName": "AIチャットボット構築（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7043,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7055,
+            "contractNo": "CT-2025-0055",
+            "engineerName": "新井 淳",
+            "projectName": "基幹系システム刷新支援（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7055,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7065,
+            "contractNo": "CT-2025-0065",
+            "engineerName": "井上 彩花",
+            "projectName": "組込みソフトウェア開発（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7065,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7080,
+            "contractNo": "CT-2025-0080",
+            "engineerName": "岡田 一郎",
+            "projectName": "データ分析基盤構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7080,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7086,
+            "contractNo": "CT-2025-0086",
+            "engineerName": "宮崎 洋介",
+            "projectName": "社内ポータル構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7086,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7088,
+            "contractNo": "CT-2025-0088",
+            "engineerName": "川上 美帆",
+            "projectName": "モバイルアプリ開発",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7088,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7090,
+            "contractNo": "CT-2025-0090",
+            "engineerName": "高田 さくら",
+            "projectName": "社内ポータル構築（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7090,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7091,
+            "contractNo": "CT-2025-0091",
+            "engineerName": "杉山 信一",
+            "projectName": "検索基盤構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7091,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7103,
+            "contractNo": "CT-2025-0103",
+            "engineerName": "松岡 雅人",
+            "projectName": "工場ライン監視システム開発（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7103,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7104,
+            "contractNo": "CT-2025-0104",
+            "engineerName": "菊池 若菜",
+            "projectName": "チャットシステム構築（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7104,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7106,
+            "contractNo": "CT-2025-0106",
+            "engineerName": "永井 真司",
+            "projectName": "工場ライン監視システム開発（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7106,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7107,
+            "contractNo": "CT-2025-0107",
+            "engineerName": "矢野 晃",
+            "projectName": "工場ライン監視システム開発（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7107,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7108,
+            "contractNo": "CT-2025-0108",
+            "engineerName": "後藤 海斗",
+            "projectName": "勤怠申請フロー再構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7108,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7113,
+            "contractNo": "CT-2025-0113",
+            "engineerName": "小野 亮",
+            "projectName": "AIチャットボット構築（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7113,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7119,
+            "contractNo": "CT-2025-0119",
+            "engineerName": "宮崎 貴之",
+            "projectName": "在庫予測モデル構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7119,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7143,
+            "contractNo": "CT-2025-0143",
+            "engineerName": "星野 湊",
+            "projectName": "社内RAGシステム構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7143,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7153,
+            "contractNo": "CT-2025-0153",
+            "engineerName": "岡本 恵美",
+            "projectName": "データ分析基盤構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7153,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7155,
+            "contractNo": "CT-2025-0155",
+            "engineerName": "佐々木 晴臣",
+            "projectName": "金融系Webサービス開発（Phase1）",
+            "contractType": "派遣",
+            "findings": [
+              {
+                "code": "DOUBLE_DISPATCH",
+                "severity": "warning",
+                "message": "派遣契約で階層が2段になっています（二重派遣の兆候）",
+                "contractId": 7155,
+                "conditionFingerprint": "double-dispatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7164,
+            "contractNo": "CT-2025-0164",
+            "engineerName": "森田 浩二",
+            "projectName": "社内RAGシステム構築",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7164,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7172,
+            "contractNo": "CT-2025-0172",
+            "engineerName": "久保 拓海",
+            "projectName": "請求書発行システム開発",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7172,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7183,
+            "contractNo": "CT-2025-0183",
+            "engineerName": "阿部 晃",
+            "projectName": "病院向け予約システム開発",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7183,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7235,
+            "contractNo": "CT-2026-0235",
+            "engineerName": "前田 直美",
+            "projectName": "AIチャットボット構築（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7235,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7244,
+            "contractNo": "CT-2026-0244",
+            "engineerName": "永井 真司",
+            "projectName": "工場ライン監視システム開発（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7244,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7245,
+            "contractNo": "CT-2026-0245",
+            "engineerName": "小野 亮",
+            "projectName": "AIチャットボット構築（Phase1）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7245,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
+          },
+          {
+            "contractId": 7253,
+            "contractNo": "C-202608-0002",
+            "engineerName": "矢野 晃",
+            "projectName": "工場ライン監視システム開発（Phase2）",
+            "contractType": "請負",
+            "findings": [
+              {
+                "code": "SETTLEMENT_MISMATCH",
+                "severity": "warning",
+                "message": "請負契約ですが時間精算（精算基準時間）が設定されています（実態不整合の兆候）",
+                "contractId": 7253,
+                "conditionFingerprint": "settlement-mismatch",
+                "dueDate": null
+              }
+            ]
           }
         ]
       }
-    ]
+    }
   }
 }

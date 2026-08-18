@@ -1,0 +1,17 @@
+{
+  "case_id": "MOD17-01",
+  "dimension": "N,B,D,U",
+  "category": "MOD-17",
+  "name": "tasks の CRUD・status 遷移（NOT_STARTED→IN_PROGRESS→COMPLETED/CANCELLED）・overdue・page を 4 管理ロールで実行",
+  "status": "PASS",
+  "duration_ms": 75,
+  "duration_h": 0.000021,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD17-01.json",
+  "error": null,
+  "evidence_detail": {
+    "task_id": 16102,
+    "create_status": 200,
+    "update_status": 200,
+    "page_status": 200
+  }
+}

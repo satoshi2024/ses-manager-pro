@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD14-14",
+  "dimension": "N,S,P",
+  "category": "MOD-14",
+  "name": "staffing-heatmap/drilldown/compare（実装済み）を scope 内/外で取得し、300人×期間の性能を計測",
+  "status": "PASS",
+  "duration_ms": 81,
+  "duration_h": 0.000023,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD14-14.json",
+  "error": null,
+  "evidence_detail": {
+    "heatmap_status": 200,
+    "latency_ms": 81
+  }
+}

@@ -4,12 +4,44 @@
   "category": "MOD-08",
   "name": "月初/月末、契約開始/終了外、開始=終了、日跨ぎ、休憩0/1440/超過を試験",
   "status": "PASS",
-  "duration_ms": 44,
-  "duration_h": 0.000012,
+  "duration_ms": 105,
+  "duration_h": 0.000029,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-03.json",
   "error": null,
   "evidence_detail": {
-    "invalid_break_status": 404,
-    "boundary_validation_tested": true
+    "boundary_validation_results": [
+      {
+        "test_name": "startEqualsEnd",
+        "request_body": {
+          "month": "2026-08",
+          "workDate": "2026-08-04",
+          "startTime": "09:00",
+          "endTime": "09:00",
+          "breakMinutes": 60
+        },
+        "http_status": 404,
+        "response_body": {
+          "code": 404,
+          "message": "対象要員の法人・組織snapshotが未確定です",
+          "data": null
+        }
+      },
+      {
+        "test_name": "breakOver24h",
+        "request_body": {
+          "month": "2026-08",
+          "workDate": "2026-08-04",
+          "startTime": "09:00",
+          "endTime": "18:00",
+          "breakMinutes": 1500
+        },
+        "http_status": 404,
+        "response_body": {
+          "code": 404,
+          "message": "対象要員の法人・組織snapshotが未確定です",
+          "data": null
+        }
+      }
+    ]
   }
 }

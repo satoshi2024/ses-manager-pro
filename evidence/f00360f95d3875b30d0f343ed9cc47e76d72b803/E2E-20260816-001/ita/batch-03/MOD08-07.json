@@ -4,31 +4,53 @@
   "category": "MOD-08",
   "name": "月の法定時間外を44:59/45:00/45:01に固定し、予兆/超過通知を計算",
   "status": "PASS",
-  "duration_ms": 0,
-  "duration_h": 0,
+  "duration_ms": 2353,
+  "duration_h": 0.000654,
   "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-03/MOD08-07.json",
   "error": null,
   "evidence_detail": {
-    "overtime_36_boundary_matrix": [
+    "calculation_service": "OvertimeComplianceCalculator.evaluate(Rule 1 Month Normal)",
+    "boundary_comparison_table": [
       {
-        "overtimeMinutes": 2699,
-        "formatted": "44:59",
-        "alertExpected": false,
-        "level": "NORMAL"
+        "expected_violation": false,
+        "input_minutes": 2699,
+        "findings_count": 0,
+        "limit_minutes": 2700,
+        "findings": [],
+        "formatted_time": "44:59",
+        "actual_violation": false
       },
       {
-        "overtimeMinutes": 2700,
-        "formatted": "45:00",
-        "alertExpected": false,
-        "level": "THRESHOLD_EXACT"
+        "expected_violation": false,
+        "input_minutes": 2700,
+        "findings_count": 0,
+        "limit_minutes": 2700,
+        "findings": [],
+        "formatted_time": "45:00",
+        "actual_violation": false
       },
       {
-        "overtimeMinutes": 2701,
-        "formatted": "45:01",
-        "alertExpected": true,
-        "level": "WARNING"
+        "expected_violation": true,
+        "input_minutes": 2701,
+        "findings_count": 1,
+        "limit_minutes": 2700,
+        "findings": [
+          {
+            "rule": "RULE1_MONTH_NORMAL",
+            "severity": "VIOLATION",
+            "legalEntityId": 1,
+            "targetMonth": [
+              2026,
+              8
+            ],
+            "actualMinutes": 2701,
+            "limitMinutes": 2700,
+            "windowMonths": null
+          }
+        ],
+        "formatted_time": "45:01",
+        "actual_violation": true
       }
-    ],
-    "alert_logic_verified": true
+    ]
   }
 }

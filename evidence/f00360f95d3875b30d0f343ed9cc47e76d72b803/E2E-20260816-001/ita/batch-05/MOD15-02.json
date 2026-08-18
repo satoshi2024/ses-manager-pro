@@ -1,0 +1,15 @@
+{
+  "case_id": "MOD15-02",
+  "dimension": "B,E,D",
+  "category": "MOD-15",
+  "name": "単価0/負数、精算min>max、顧客と案件不一致、要員/案件欠落で提出を試験",
+  "status": "PASS",
+  "duration_ms": 16,
+  "duration_h": 0.000004,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-05/MOD15-02.json",
+  "error": null,
+  "evidence_detail": {
+    "invalid_price_status": 400,
+    "invalid_settlement_status": 400
+  }
+}

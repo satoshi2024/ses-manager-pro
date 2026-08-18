@@ -1,0 +1,36 @@
+{
+  "case_id": "MOD10-28",
+  "dimension": "N,E,A,D",
+  "category": "MOD-10",
+  "name": "BP 会社の compliance-check を、必須文書あり/なし、期限切れ、非許可で実行",
+  "status": "PASS",
+  "duration_ms": 6,
+  "duration_h": 0.000002,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD10-28.json",
+  "error": null,
+  "evidence_detail": {
+    "compliance_check_target": "BP Company ID: 11001",
+    "bank_accounts_status": 200,
+    "data": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": [
+        {
+          "id": 11401,
+          "bpCompanyId": 11001,
+          "bankName": "りそな銀行",
+          "branchName": "東京支店",
+          "accountType": "ORDINARY",
+          "accountHolder": "合同会社テックパートナー",
+          "maskedLabel": "****0001",
+          "validFrom": "2024-04-01",
+          "validTo": null,
+          "approvalStatus": "APPROVED",
+          "approvedBy": 101,
+          "approvedAt": "2024-04-10T10:00:00",
+          "createdAt": null
+        }
+      ]
+    }
+  }
+}

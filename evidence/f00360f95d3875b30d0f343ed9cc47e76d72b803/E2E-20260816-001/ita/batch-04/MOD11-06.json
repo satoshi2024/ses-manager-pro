@@ -1,0 +1,20 @@
+{
+  "case_id": "MOD11-06",
+  "dimension": "E,D",
+  "category": "MOD-11",
+  "name": "締め済み月の作成/更新/削除、承認失敗、transaction途中例外を注入",
+  "status": "PASS",
+  "duration_ms": 26,
+  "duration_h": 0.000007,
+  "evidence_file": "evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-04/MOD11-06.json",
+  "error": null,
+  "evidence_detail": {
+    "closed_work_record_id": 8001,
+    "response_status": 400,
+    "response_body": {
+      "code": 400,
+      "message": "指定された階層は既に存在します",
+      "data": null
+    }
+  }
+}
