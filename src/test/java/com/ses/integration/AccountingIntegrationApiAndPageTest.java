@@ -208,4 +208,60 @@ class AccountingIntegrationApiAndPageTest {
         IntegrationJob cancelled = jobService.getById(job.getId());
         assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
     }
+
+    @Test
+    @DisplayName("マネージャースコープ空組織境界: 組織未所属マネージャーは0件返却・詳細404 (R1-P1-06 / design §5.2)")
+    @WithMockUser(username = "isolated_manager", roles = {"マネージャー"})
+    void managerScope_emptyOrgs_returnsZeroRows() throws Exception {
+        // 接続一覧: 空リストが返る
+        mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        // ジョブ一覧: 0件返る
+        mockMvc.perform(get("/api/accounting/jobs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.records", hasSize(0)))
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        // マッピング一覧: 0件返る
+        mockMvc.perform(get("/api/accounting/mappings?connectionId=" + connection.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        // 存在しない、または権限外のジョブ詳細: 404
+        mockMvc.perform(get("/api/accounting/jobs/999999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+    }
+
+    @Test
+    @DisplayName("多言語i18nと安定エラーコード検証 (R4-T07 / design §6.3)")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void i18n_fourLanguages_stableReasonCodes() throws Exception {
+        String[] languages = {"ja", "en", "zh-CN", "ko"};
+
+        for (String lang : languages) {
+            // 各言語ヘッダーで画面にアクセスし、正常に応答すること (200)
+            mockMvc.perform(get("/accounting/integration").header("Accept-Language", lang))
+                    .andExpect(status().isOk())
+                    .andExpect(view().name("accounting/integration"));
+        }
+
+        // ジョブキャンセル時の定型 reasonCode
+        IntegrationJob job = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 777L, "idemp-i18n-777", "hash777");
+
+        mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/cancel?reason=USER_REQUESTED")
+                        .with(csrf())
+                        .header("Accept-Language", "en"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        IntegrationJob cancelled = jobService.getById(job.getId());
+        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+    }
 }

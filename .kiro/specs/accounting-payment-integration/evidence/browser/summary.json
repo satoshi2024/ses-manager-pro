@@ -1,0 +1,20 @@
+{
+  "runId" : "browser-demo-20260818223429",
+  "baseUrl" : "http://localhost:58344",
+  "connectionId" : 2,
+  "jobId" : 1,
+  "desktop" : {
+    "jobsScreenshot" : "desktop-01-jobs.png",
+    "mappingsScreenshot" : "desktop-02-mappings.png",
+    "connectionsScreenshot" : "desktop-03-connections.png",
+    "previewScreenshot" : "desktop-04-preview.png",
+    "reconciliationScreenshot" : "desktop-05-reconciliation.png"
+  },
+  "mobile390" : {
+    "jobsScreenshot" : "mobile390-01-jobs.png",
+    "mappingsScreenshot" : "mobile390-02-mappings.png",
+    "connectionsScreenshot" : "mobile390-03-connections.png",
+    "previewScreenshot" : "mobile390-04-preview.png",
+    "reconciliationScreenshot" : "mobile390-05-reconciliation.png"
+  }
+}

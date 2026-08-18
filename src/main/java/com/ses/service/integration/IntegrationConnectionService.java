@@ -40,6 +40,11 @@ public interface IntegrationConnectionService extends IService<IntegrationConnec
     IntegrationTokensDto forceRefreshToken(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn);
 
     /**
+     * トークン強制更新 (401 障害復旧・世代番号照合付き)。observedTokenVersion より DB 現在版が新しければ OAuth をスキップして最新トークンを返す。
+     */
+    IntegrationTokensDto forceRefreshToken(Long connectionId, Integer observedTokenVersion, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn);
+
+    /**
      * 接続状態を更新する。
      */
     void updateStatus(Long connectionId, String status);

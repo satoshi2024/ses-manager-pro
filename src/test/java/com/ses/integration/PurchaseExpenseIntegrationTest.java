@@ -420,4 +420,56 @@ class PurchaseExpenseIntegrationTest {
         assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(closedPayment.getId(), 1L))
                 .isInstanceOf(BusinessException.class);
     }
+
+    @Test
+    @DisplayName("BP仕入決定論的日付と経費CAS検証 (R1-P1-08 / design §2.2, §3.2)")
+    void bpPurchase_deterministicBusinessDate_and_expenseCas() {
+        // 1. BP仕入の決定論的日付: 対象月 (2026-08) の末日 (2026-08-31) に固定されること
+        IntegrationJob bpJob = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        assertThat(bpJob.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
+
+        // 2. 経費申請の CAS 検証
+        ExpenseRequest expense = new ExpenseRequest();
+        expense.setExpenseNo("EX-CAS-001");
+        expense.setEngineerId(1L);
+        expense.setCategory("交通費");
+        expense.setAmount(new BigDecimal("15000"));
+        expense.setExpenseDate(LocalDate.of(2026, 8, 10));
+        expense.setDescription("出張旅費");
+        expense.setStatus("承認済");
+        expenseRequestMapper.insert(expense);
+
+        // マッピング登録
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2003");
+        expAccount.setExternalCode("旅費交通費");
+        mappingService.saveOrUpdateMapping(expAccount);
+        ExternalMapping savedExpAccount = mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
+        mappingService.verifyMapping(savedExpAccount.getId(), "{\"verified\":true}");
+
+        IntegrationJob expJob = purchaseIntegrationService.triggerExpenseSync(expense.getId(), 1L);
+
+        // 外部 API 成功をモック
+        String responseJson = "{\"deal\": {\"id\": 889900, \"company_id\": 99001, \"amount\": 15000, \"status\": \"unsettled\"}}";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Freee-Request-ID", "req-exp-cas-001");
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON).headers(headers));
+
+        // シミュレーション: Worker 実行直前に経費ステータスが "下書き" へ変更された (CAS 不一致)
+        expense.setStatus("下書き");
+        expenseRequestMapper.updateById(expense);
+
+        // Worker 実行
+        purchaseIntegrationService.processExpenseJob(expJob.getId());
+
+        // CAS 失敗検知 (EXPENSE_STATUS_MUTATED)
+        IntegrationJob failedJob = jobService.getById(expJob.getId());
+        assertThat(failedJob.getStatus()).isEqualTo("FAILED");
+        assertThat(failedJob.getErrorCode()).isEqualTo("EXPENSE_STATUS_MUTATED");
+    }
 }

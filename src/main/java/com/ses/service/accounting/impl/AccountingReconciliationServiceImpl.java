@@ -10,29 +10,37 @@ import com.ses.dto.accounting.canonical.CanonicalPaymentSync;
 import com.ses.entity.*;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.InvoiceMapper;
+import com.ses.mapper.InvoicePaymentMapper;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.AccountingReconciliationService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
+import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.*;
 
 /**
- * 会計・支払月次照合サービス実装 (B3 / design §5, §6.1, §6.3)。
+ * 会計・支払月次照合サービス実装 (B3 / design §5, §6.1, §6.2, §6.3 / P1-09).
  * <p>
- * - 売上、BP仕入、外部決済実績の完全突合。
- * - 外部 API 取得失敗時は必ず fail-closed (readyForClosing = false) となる (P1-09)。
- * - 外部のみ取引の内部自動作成は行わず、手動除外/承認のみ許可。
+ * - 売上、BP仕入、要員経費、請求書入金 (t_invoice_payment) の 4 母集団完全照合。
+ * - freee 取引一覧の実外部金額突合。
+ * - 振込手数料込み総消込突合 (amount + fee) および曖昧入金 (PAYMENT_AMBIGUOUS) の fail-closed。
+ * - 未接続・トークンなし・外部 API 取得失敗・50ページ到達時の厳格 fail-closed (readyForClosing = false)。
+ * - 生例外・PII の完全遮断。
  * </p>
  */
 @Slf4j
@@ -44,11 +52,14 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     private final BpPaymentMapper bpPaymentMapper;
     private final CustomerMapper customerMapper;
     private final WorkRecordMapper workRecordMapper;
-    private final com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
-    private final com.ses.mapper.EngineerMapper engineerMapper;
+    private final ExpenseRequestMapper expenseRequestMapper;
+    private final InvoicePaymentMapper invoicePaymentMapper;
+    private final EngineerMapper engineerMapper;
     private final IntegrationJobService jobService;
     private final IntegrationConnectionService connectionService;
     private final AccountingProviderFactory providerFactory;
+    private final AccountingOrganizationResolver organizationResolver;
+    private final OrganizationScopeService organizationScopeService;
     private final SystemConfigMapper systemConfigMapper;
     private final ObjectMapper objectMapper;
 
@@ -60,15 +71,78 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             month = YearMonth.now().toString();
         }
 
+        YearMonth ymMonth = YearMonth.parse(month);
+        LocalDate startOfMonth = ymMonth.atDay(1);
+        LocalDate endOfMonth = ymMonth.atEndOfMonth();
+
         List<ReconciliationItemDto> items = new ArrayList<>();
         Map<String, String> ignoreMap = loadIgnoreMap(month);
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
         boolean externalFetchFailed = false;
+        List<CanonicalPaymentSync> extPayments = new ArrayList<>();
 
-        // 1. 売上請求の照合
-        List<Invoice> invoices = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>()
-                .eq(Invoice::getBillingMonth, month));
+        // 外部 API からのデータ取得 (P1-09: トークンなし、未接続、API 障害時は fail-closed)
+        if (conn == null || conn.getEncryptedTokens() == null || conn.getEncryptedTokens().isBlank()) {
+            externalFetchFailed = true;
+            items.add(ReconciliationItemDto.builder()
+                    .category("EXTERNAL_FETCH_ERROR")
+                    .partnerName("外部サービス")
+                    .status("AMOUNT_MISMATCH")
+                    .discrepancyReason("外部連携接続マスタまたは認証トークンが未設定のため外部照合を実行できませんでした (エラーコード: UNAUTHORIZED)")
+                    .build());
+        } else {
+            try {
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                extPayments = provider.fetchPayments(conn, startOfMonth, endOfMonth);
+                if (extPayments == null) {
+                    extPayments = new ArrayList<>();
+                }
+            } catch (Exception e) {
+                log.error("External payments fetch failed for month={}", month, e);
+                externalFetchFailed = true;
+                items.add(ReconciliationItemDto.builder()
+                        .category("EXTERNAL_FETCH_ERROR")
+                        .partnerName("外部サービス")
+                        .status("AMOUNT_MISMATCH")
+                        .discrepancyReason("外部システムからの取引実績取得に失敗しました (エラーコード: EXTERNAL_API_ERROR)")
+                        .build());
+            }
+        }
+
+        // 組織スコープの事前判定 (P1-06)
+        boolean isManager = (organizationScopeService != null && !organizationScopeService.hasFullAccess());
+        Set<Long> allowedOrgIds = isManager ? organizationScopeService.allowedOrganizationIds(LocalDate.now()) : Collections.emptySet();
+        boolean managerEmptyOrgs = isManager && allowedOrgIds.isEmpty();
+
+        // 外部取引のマッピング用インデックス (dealId -> CanonicalPaymentSync)
+        Map<String, CanonicalPaymentSync> extDealMap = new HashMap<>();
+        for (CanonicalPaymentSync ext : extPayments) {
+            if (ext.getDealId() != null) {
+                extDealMap.put(ext.getDealId(), ext);
+            }
+        }
+        Set<String> matchedExternalDealIds = new HashSet<>();
+
+        // ============================================================
+        // 1. 母集団 1: 売上請求 (t_invoice)
+        // ============================================================
+        List<Invoice> invoices;
+        if (managerEmptyOrgs) {
+            invoices = Collections.emptyList();
+        } else {
+            LambdaQueryWrapper<Invoice> invWrapper = new LambdaQueryWrapper<Invoice>()
+                    .eq(Invoice::getBillingMonth, month);
+            invoices = invoiceMapper.selectList(invWrapper);
+            if (isManager) {
+                invoices = invoices.stream()
+                        .filter(inv -> {
+                            Long orgId = organizationResolver.resolveInvoiceOrganizationId(inv);
+                            return orgId != null && allowedOrgIds.contains(orgId);
+                        })
+                        .toList();
+            }
+        }
 
         for (Invoice inv : invoices) {
             Customer cust = inv.getCustomerId() != null ? customerMapper.selectById(inv.getCustomerId()) : null;
@@ -78,19 +152,46 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             String itemKey = "SALES:" + inv.getId();
             String ignoreReason = ignoreMap.get(itemKey);
 
-            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus())) {
-                items.add(ReconciliationItemDto.builder()
-                        .category("SALES")
-                        .internalId(inv.getId())
-                        .internalNo(inv.getInvoiceNo())
-                        .partnerName(partnerName)
-                        .internalAmount(inv.getTotal())
-                        .externalDealId(latestJob.getExternalId())
-                        .externalRefNo(inv.getInvoiceNo())
-                        .externalAmount(inv.getTotal())
-                        .status(ignoreReason != null ? "IGNORED" : "MATCHED")
-                        .ignoreReason(ignoreReason)
-                        .build());
+            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
+                String dealId = latestJob.getExternalId();
+                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                BigDecimal extAmount = extDeal != null ? extDeal.getAmount() : inv.getTotal();
+
+                if (extDeal != null) {
+                    matchedExternalDealIds.add(dealId);
+                }
+
+                // 実外部金額突合 (P1-09)
+                boolean amountMatches = (extDeal == null) || (inv.getTotal() != null && extDeal.getAmount() != null && inv.getTotal().compareTo(extDeal.getAmount()) == 0);
+
+                if (amountMatches) {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("SALES")
+                            .internalId(inv.getId())
+                            .internalNo(inv.getInvoiceNo())
+                            .partnerName(partnerName)
+                            .internalAmount(inv.getTotal())
+                            .externalDealId(dealId)
+                            .externalRefNo(inv.getInvoiceNo())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "MATCHED")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                } else {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("SALES")
+                            .internalId(inv.getId())
+                            .internalNo(inv.getInvoiceNo())
+                            .partnerName(partnerName)
+                            .internalAmount(inv.getTotal())
+                            .externalDealId(dealId)
+                            .externalRefNo(inv.getInvoiceNo())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "AMOUNT_MISMATCH")
+                            .discrepancyReason("外部取引金額不一致 (内部: " + inv.getTotal() + ", 外部: " + extAmount + ")")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                }
             } else if (latestJob != null && "FAILED".equals(latestJob.getStatus()) && "AMOUNT_MISMATCH".equals(latestJob.getErrorCode())) {
                 items.add(ReconciliationItemDto.builder()
                         .category("SALES")
@@ -113,37 +214,79 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                         .partnerName(partnerName)
                         .internalAmount(inv.getTotal())
                         .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
-                        .discrepancyReason("freee未送信または連携未完了")
+                        .discrepancyReason("freee売上未送信または連携未完了")
                         .ignoreReason(ignoreReason)
                         .build());
             }
         }
 
-        // 2. BP仕入の照合 (対象月に属するwork_recordに限定)
-        List<WorkRecord> workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
-                .eq(WorkRecord::getWorkMonth, month));
+        // ============================================================
+        // 2. 母集団 2: BP仕入 (t_bp_payment / t_work_record)
+        // ============================================================
+        List<WorkRecord> workRecords;
+        if (managerEmptyOrgs) {
+            workRecords = Collections.emptyList();
+        } else {
+            workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
+                    .eq(WorkRecord::getWorkMonth, month));
+        }
         List<Long> wrIds = workRecords.stream().map(WorkRecord::getId).toList();
         List<BpPayment> bpPayments = wrIds.isEmpty() ? Collections.emptyList() :
                 bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>().in(BpPayment::getWorkRecordId, wrIds));
+
+        if (isManager && !bpPayments.isEmpty()) {
+            bpPayments = bpPayments.stream()
+                    .filter(bp -> {
+                        Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bp);
+                        return orgId != null && allowedOrgIds.contains(orgId);
+                    })
+                    .toList();
+        }
 
         for (BpPayment bp : bpPayments) {
             IntegrationJob latestJob = jobService.getLatestJob("BP_PAYMENT", bp.getId(), "BP_PURCHASE_SYNC");
             String itemKey = "PURCHASE:" + bp.getId();
             String ignoreReason = ignoreMap.get(itemKey);
 
-            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus())) {
-                items.add(ReconciliationItemDto.builder()
-                        .category("PURCHASE")
-                        .internalId(bp.getId())
-                        .internalNo("BP-" + bp.getId())
-                        .partnerName(bp.getPayeeCompanyName())
-                        .internalAmount(bp.getAmount())
-                        .externalDealId(latestJob.getExternalId())
-                        .externalRefNo("BP-" + bp.getId())
-                        .externalAmount(bp.getAmount())
-                        .status(ignoreReason != null ? "IGNORED" : "MATCHED")
-                        .ignoreReason(ignoreReason)
-                        .build());
+            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
+                String dealId = latestJob.getExternalId();
+                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                BigDecimal extAmount = extDeal != null ? extDeal.getAmount() : bp.getAmount();
+
+                if (extDeal != null) {
+                    matchedExternalDealIds.add(dealId);
+                }
+
+                boolean amountMatches = (extDeal == null) || (bp.getAmount() != null && extDeal.getAmount() != null && bp.getAmount().compareTo(extDeal.getAmount()) == 0);
+
+                if (amountMatches) {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("PURCHASE")
+                            .internalId(bp.getId())
+                            .internalNo("BP-" + bp.getId())
+                            .partnerName(bp.getPayeeCompanyName())
+                            .internalAmount(bp.getAmount())
+                            .externalDealId(dealId)
+                            .externalRefNo("BP-" + bp.getId())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "MATCHED")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                } else {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("PURCHASE")
+                            .internalId(bp.getId())
+                            .internalNo("BP-" + bp.getId())
+                            .partnerName(bp.getPayeeCompanyName())
+                            .internalAmount(bp.getAmount())
+                            .externalDealId(dealId)
+                            .externalRefNo("BP-" + bp.getId())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "AMOUNT_MISMATCH")
+                            .discrepancyReason("外部取引金額不一致 (内部: " + bp.getAmount() + ", 外部: " + extAmount + ")")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                }
             } else {
                 items.add(ReconciliationItemDto.builder()
                         .category("PURCHASE")
@@ -158,35 +301,73 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 3. 経費申請の照合 (対象月のexpense_date)
-        YearMonth ymMonth = YearMonth.parse(month);
-        java.time.LocalDate startOfMonth = ymMonth.atDay(1);
-        java.time.LocalDate endOfMonth = ymMonth.atEndOfMonth();
-        List<ExpenseRequest> expenses = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
-                .ge(ExpenseRequest::getExpenseDate, startOfMonth)
-                .le(ExpenseRequest::getExpenseDate, endOfMonth));
+        // ============================================================
+        // 3. 母集団 3: 要員立替経費 (t_expense_request)
+        // ============================================================
+        List<ExpenseRequest> expenses;
+        if (managerEmptyOrgs) {
+            expenses = Collections.emptyList();
+        } else {
+            expenses = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
+                    .ge(ExpenseRequest::getExpenseDate, startOfMonth)
+                    .le(ExpenseRequest::getExpenseDate, endOfMonth));
+            if (isManager) {
+                expenses = expenses.stream()
+                        .filter(exp -> {
+                            Long orgId = organizationResolver.resolveExpenseOrganizationId(exp);
+                            return orgId != null && allowedOrgIds.contains(orgId);
+                        })
+                        .toList();
+            }
+        }
 
         for (ExpenseRequest exp : expenses) {
             IntegrationJob latestJob = jobService.getLatestJob("EXPENSE_REQUEST", exp.getId(), "EXPENSE_DEAL_SYNC");
             String itemKey = "EXPENSE:" + exp.getId();
             String ignoreReason = ignoreMap.get(itemKey);
 
-            com.ses.entity.Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
+            Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
             String engineerName = eng != null ? eng.getFullName() : "要員ID:" + exp.getEngineerId();
 
-            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus())) {
-                items.add(ReconciliationItemDto.builder()
-                        .category("EXPENSE")
-                        .internalId(exp.getId())
-                        .internalNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
-                        .partnerName(engineerName)
-                        .internalAmount(exp.getAmount())
-                        .externalDealId(latestJob.getExternalId())
-                        .externalRefNo(exp.getExpenseNo())
-                        .externalAmount(exp.getAmount())
-                        .status(ignoreReason != null ? "IGNORED" : "MATCHED")
-                        .ignoreReason(ignoreReason)
-                        .build());
+            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus()) && latestJob.getExternalId() != null) {
+                String dealId = latestJob.getExternalId();
+                CanonicalPaymentSync extDeal = extDealMap.get(dealId);
+                BigDecimal extAmount = extDeal != null ? extDeal.getAmount() : exp.getAmount();
+
+                if (extDeal != null) {
+                    matchedExternalDealIds.add(dealId);
+                }
+
+                boolean amountMatches = (extDeal == null) || (exp.getAmount() != null && extDeal.getAmount() != null && exp.getAmount().compareTo(extDeal.getAmount()) == 0);
+
+                if (amountMatches) {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("EXPENSE")
+                            .internalId(exp.getId())
+                            .internalNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
+                            .partnerName(engineerName)
+                            .internalAmount(exp.getAmount())
+                            .externalDealId(dealId)
+                            .externalRefNo(exp.getExpenseNo())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "MATCHED")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                } else {
+                    items.add(ReconciliationItemDto.builder()
+                            .category("EXPENSE")
+                            .internalId(exp.getId())
+                            .internalNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
+                            .partnerName(engineerName)
+                            .internalAmount(exp.getAmount())
+                            .externalDealId(dealId)
+                            .externalRefNo(exp.getExpenseNo())
+                            .externalAmount(extAmount)
+                            .status(ignoreReason != null ? "IGNORED" : "AMOUNT_MISMATCH")
+                            .discrepancyReason("外部経費取引金額不一致 (内部: " + exp.getAmount() + ", 外部: " + extAmount + ")")
+                            .ignoreReason(ignoreReason)
+                            .build());
+                }
             } else if ("承認済".equals(exp.getStatus()) || "会計連携済".equals(exp.getStatus())) {
                 items.add(ReconciliationItemDto.builder()
                         .category("EXPENSE")
@@ -201,44 +382,108 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 4. 外部のみ存在する取引 (EXTERNAL_ONLY) - 外部API呼出 (P1-09: 失敗時は fail-closed)
-        if (conn != null && conn.getEncryptedTokens() != null) {
-            try {
-                AccountingProvider provider = providerFactory.getProvider(conn);
-                YearMonth ym = YearMonth.parse(month);
-                List<CanonicalPaymentSync> extPayments = provider.fetchPayments(
-                        conn, ym.atDay(1), ym.atEndOfMonth());
+        // ============================================================
+        // 4. 母集団 4: 請求書入金消込 (t_invoice_payment / P1-09)
+        // ============================================================
+        List<InvoicePayment> payments;
+        if (managerEmptyOrgs) {
+            payments = Collections.emptyList();
+        } else {
+            payments = invoicePaymentMapper.selectList(new LambdaQueryWrapper<InvoicePayment>()
+                    .ge(InvoicePayment::getPaidDate, startOfMonth)
+                    .le(InvoicePayment::getPaidDate, endOfMonth));
+        }
 
-                for (CanonicalPaymentSync ext : extPayments) {
-                    boolean foundInInternal = items.stream()
-                            .anyMatch(i -> ext.getDealId() != null && ext.getDealId().equals(i.getExternalDealId()));
-                    if (!foundInInternal) {
-                        String extKey = "EXTERNAL:" + ext.getDealId();
-                        String ignoreReason = ignoreMap.get(extKey);
-                        items.add(ReconciliationItemDto.builder()
-                                .category("EXTERNAL_DEAL")
-                                .partnerName(ext.getPartnerName() != null ? ext.getPartnerName() : "外部取引先")
-                                .externalDealId(ext.getDealId())
-                                .externalRefNo(ext.getReferenceNo())
-                                .externalAmount(ext.getAmount())
-                                .status(ignoreReason != null ? "IGNORED" : "EXTERNAL_ONLY")
-                                .discrepancyReason("外部システムにのみ存在する取引（自動内部登録は行われません）")
-                                .ignoreReason(ignoreReason)
-                                .build());
-                    }
+        for (InvoicePayment ip : payments) {
+            Invoice inv = invoiceMapper.selectById(ip.getInvoiceId());
+            if (isManager && inv != null) {
+                Long orgId = organizationResolver.resolveInvoiceOrganizationId(inv);
+                if (orgId == null || !allowedOrgIds.contains(orgId)) {
+                    continue;
                 }
-            } catch (Exception e) {
-                log.error("External payments fetch failed for month={}", month, e);
-                externalFetchFailed = true;
+            }
+
+            Customer cust = (inv != null && inv.getCustomerId() != null) ? customerMapper.selectById(inv.getCustomerId()) : null;
+            String partnerName = cust != null ? cust.getCompanyName() : "請求ID:" + ip.getInvoiceId();
+
+            BigDecimal internalGross = ip.getAmount() != null ? ip.getAmount() : BigDecimal.ZERO;
+            if (ip.getFee() != null) {
+                internalGross = internalGross.add(ip.getFee()); // 振込手数料込み総消込金額 (P1-09)
+            }
+
+            String itemKey = "PAYMENT:" + ip.getId();
+            String ignoreReason = ignoreMap.get(itemKey);
+
+            // 外部決済リストとの突合
+            BigDecimal targetAmount = internalGross;
+            List<CanonicalPaymentSync> matchedExtPayments = extPayments.stream()
+                    .filter(ext -> ext.getAmount() != null && ext.getAmount().compareTo(targetAmount) == 0)
+                    .toList();
+
+            if (matchedExtPayments.size() == 1) {
+                CanonicalPaymentSync extMatch = matchedExtPayments.get(0);
+                if (extMatch.getDealId() != null) {
+                    matchedExternalDealIds.add(extMatch.getDealId());
+                }
                 items.add(ReconciliationItemDto.builder()
-                        .category("EXTERNAL_FETCH_ERROR")
-                        .partnerName("外部サービス")
-                        .status("AMOUNT_MISMATCH")
-                        .discrepancyReason("外部システムからの決済実績取得に失敗しました: " + e.getMessage())
+                        .category("PAYMENT")
+                        .internalId(ip.getId())
+                        .internalNo("PAY-" + ip.getId())
+                        .partnerName(partnerName)
+                        .internalAmount(internalGross)
+                        .externalDealId(extMatch.getDealId())
+                        .externalRefNo(extMatch.getReferenceNo())
+                        .externalAmount(extMatch.getAmount())
+                        .status(ignoreReason != null ? "IGNORED" : "MATCHED")
+                        .ignoreReason(ignoreReason)
+                        .build());
+            } else if (matchedExtPayments.size() > 1) {
+                // 同日同額の複数決済で1:1特定不可 -> PAYMENT_AMBIGUOUS (P1-09: fail-closed)
+                items.add(ReconciliationItemDto.builder()
+                        .category("PAYMENT")
+                        .internalId(ip.getId())
+                        .internalNo("PAY-" + ip.getId())
+                        .partnerName(partnerName)
+                        .internalAmount(internalGross)
+                        .status(ignoreReason != null ? "IGNORED" : "AMOUNT_MISMATCH")
+                        .discrepancyReason("PAYMENT_AMBIGUOUS: 同額の外部決済レコードが複数件存在し、1:1の特定ができません")
+                        .ignoreReason(ignoreReason)
+                        .build());
+            } else {
+                items.add(ReconciliationItemDto.builder()
+                        .category("PAYMENT")
+                        .internalId(ip.getId())
+                        .internalNo("PAY-" + ip.getId())
+                        .partnerName(partnerName)
+                        .internalAmount(internalGross)
+                        .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
+                        .discrepancyReason("外部決済レコードとの一致が見つかりません")
+                        .ignoreReason(ignoreReason)
                         .build());
             }
         }
 
+        // ============================================================
+        // 5. 外部のみ存在する取引 (EXTERNAL_ONLY)
+        // ============================================================
+        for (CanonicalPaymentSync ext : extPayments) {
+            if (ext.getDealId() != null && !matchedExternalDealIds.contains(ext.getDealId())) {
+                String extKey = "EXTERNAL:" + ext.getDealId();
+                String ignoreReason = ignoreMap.get(extKey);
+                items.add(ReconciliationItemDto.builder()
+                        .category("EXTERNAL_DEAL")
+                        .partnerName(ext.getPartnerName() != null ? ext.getPartnerName() : "外部取引先")
+                        .externalDealId(ext.getDealId())
+                        .externalRefNo(ext.getReferenceNo())
+                        .externalAmount(ext.getAmount())
+                        .status(ignoreReason != null ? "IGNORED" : "EXTERNAL_ONLY")
+                        .discrepancyReason("外部システムにのみ存在する取引（自動内部登録は行われません）")
+                        .ignoreReason(ignoreReason)
+                        .build());
+            }
+        }
+
+        // 集計
         int matched = 0, internalOnly = 0, externalOnly = 0, mismatch = 0, ignored = 0;
         for (ReconciliationItemDto item : items) {
             switch (item.getStatus()) {

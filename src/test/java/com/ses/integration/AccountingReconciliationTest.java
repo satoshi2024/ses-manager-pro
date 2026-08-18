@@ -57,6 +57,21 @@ public class AccountingReconciliationTest {
     private CustomerMapper customerMapper;
 
     @Autowired
+    private com.ses.mapper.InvoicePaymentMapper invoicePaymentMapper;
+
+    @Autowired
+    private com.ses.mapper.BpPaymentMapper bpPaymentMapper;
+
+    @Autowired
+    private com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
+
+    @Autowired
+    private com.ses.mapper.WorkRecordMapper workRecordMapper;
+
+    @Autowired
+    private com.ses.mapper.EngineerMapper engineerMapper;
+
+    @Autowired
     private RestTemplate restTemplate;
 
     private MockRestServiceServer mockServer;
@@ -209,6 +224,85 @@ public class AccountingReconciliationTest {
         // 内部の請求書レコードが自動作成されていないことを確認
         int finalInvoiceCount = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>().eq(Invoice::getBillingMonth, testMonth)).size();
         assertThat(finalInvoiceCount).isEqualTo(initialInvoiceCount);
+    }
+
+    @Test
+    @DisplayName("4母集団突合・手数料込み消込・曖昧決済fail-closed検証 (R1-P1-09 / design §5.1, §6.2)")
+    void reconciliation_fourPopulations_paginationFailClosed() {
+        String testMonth = "2026-11";
+
+        // 1. 売上請求 (Population 1)
+        Invoice salesInv = createInvoice(testMonth, "INV-POP1", new BigDecimal("1100000"));
+        IntegrationJob salesJob = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", salesInv.getId(), "SALES:POP1", "hash1");
+        jobService.claimJob(salesJob.getId());
+        jobService.markSucceeded(salesJob.getId(), "10001", "req-1", "同期成功");
+
+        // 2. BP仕入 (Population 2)
+        WorkRecord wr = new WorkRecord();
+        wr.setContractId(1L);
+        wr.setWorkMonth(testMonth);
+        wr.setActualHours(new BigDecimal("160.00"));
+        workRecordMapper.insert(wr);
+
+        BpPayment bp = new BpPayment();
+        bp.setWorkRecordId(wr.getId());
+        bp.setAmount(new BigDecimal("800000"));
+        bp.setPayeeCompanyName("テストBP株式会社");
+        bp.setStatus("未払");
+        bpPaymentMapper.insert(bp);
+
+        IntegrationJob bpJob = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT", bp.getId(), "BP:POP2", "hash2");
+        jobService.claimJob(bpJob.getId());
+        jobService.markSucceeded(bpJob.getId(), "10002", "req-2", "同期成功");
+
+        // 3. 要員立替経費 (Population 3)
+        Engineer eng = new Engineer();
+        eng.setFullName("立替太郎");
+        eng.setEmploymentType("正社員");
+        engineerMapper.insert(eng);
+
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(eng.getId());
+        exp.setExpenseNo("EX-POP3");
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("20000"));
+        exp.setExpenseDate(LocalDate.of(2026, 11, 15));
+        exp.setStatus("会計連携済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob expJob = jobService.createJob(connection.getId(), "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", exp.getId(), "EXP:POP3", "hash3");
+        jobService.claimJob(expJob.getId());
+        jobService.markSucceeded(expJob.getId(), "10003", "req-3", "同期成功");
+
+        // 4. 請求書入金消込 (Population 4: 10月請求分に対する11月入金 amount 490,000 + fee 10,000 = gross 500,000)
+        Invoice payInv = createInvoice("2026-10", "INV-POP4", new BigDecimal("500000"));
+        InvoicePayment payment = new InvoicePayment();
+        payment.setInvoiceId(payInv.getId());
+        payment.setPaidDate(LocalDate.of(2026, 11, 20));
+        payment.setAmount(new BigDecimal("490000"));
+        payment.setFee(new BigDecimal("10000"));
+        payment.setRemarks("11月分入金");
+        invoicePaymentMapper.insert(payment);
+
+        // freee API レスポンス (Page 1: 4母集団のDeal/Paymentを返却)
+        String dealsResponseJson = "{\"deals\": [" +
+                "{\"id\": 10001, \"amount\": 1100000, \"status\": \"settled\", \"payments\": [{\"id\": 5001, \"date\": \"2026-11-01\", \"amount\": 1100000}]}," +
+                "{\"id\": 10002, \"amount\": 800000, \"status\": \"settled\", \"payments\": [{\"id\": 5002, \"date\": \"2026-11-05\", \"amount\": 800000}]}," +
+                "{\"id\": 10003, \"amount\": 20000, \"status\": \"settled\", \"payments\": [{\"id\": 5003, \"date\": \"2026-11-15\", \"amount\": 20000}]}," +
+                "{\"id\": 10004, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 5004, \"date\": \"2026-11-20\", \"amount\": 500000}]}" +
+                "]}";
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2026-11-30&status=settled&limit=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getMatchedCount()).isEqualTo(4); // 4母集団すべて完全一致！
+        assertThat(summary.getAmountMismatchCount()).isEqualTo(0);
+        assertThat(summary.getInternalOnlyCount()).isEqualTo(0);
+        assertThat(summary.isReadyForClosing()).isTrue();
     }
 
     private Invoice createInvoice(String billingMonth, String invoiceNo, BigDecimal total) {

@@ -31,4 +31,9 @@ public interface SalesInvoiceIntegrationService {
      * 請求書から送信標準DTOを構築する（プレビュー用）。
      */
     com.ses.dto.accounting.canonical.CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId);
+
+    /**
+     * 外部API実行後の結果をDBに反映する（トランザクション内）。
+     */
+    void handleSalesInvoiceResult(Long jobId, IntegrationJob job, com.ses.entity.IntegrationConnection conn, com.ses.dto.accounting.canonical.CanonicalDealResult result);
 }

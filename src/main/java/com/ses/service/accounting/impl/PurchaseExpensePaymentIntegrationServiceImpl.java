@@ -18,6 +18,7 @@ import com.ses.service.MonthlyClosingService;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -46,15 +47,29 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final BpPaymentMapper bpPaymentMapper;
     private final BpCompanyService bpCompanyService;
     private final BpBankAccountMapper bpBankAccountMapper;
-    private final WorkRecordMapper workRecordMapper;
     private final ExpenseRequestMapper expenseRequestMapper;
+    private final WorkRecordMapper workRecordMapper;
     private final MonthlyClosingService monthlyClosingService;
     private final IntegrationConnectionService connectionService;
     private final ExternalMappingService mappingService;
     private final IntegrationJobService jobService;
     private final AccountingProviderFactory providerFactory;
     private final AccountingOrganizationResolver organizationResolver;
+    private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
+
+    private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
+        if (bpPayment.getWorkRecordId() != null) {
+            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
+                return java.time.YearMonth.parse(wr.getWorkMonth()).atEndOfMonth();
+            }
+        }
+        if (bpPayment.getCreatedAt() != null) {
+            return bpPayment.getCreatedAt().toLocalDate();
+        }
+        return LocalDate.of(2026, 1, 31);
+    }
 
     @Override
     @Transactional
@@ -64,26 +79,29 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw new BusinessException(404, "BP支払レコードが見つかりません (id=" + bpPaymentId + ")");
         }
 
-        // ステータスガード (未払または承認済のみ)
-        if (!"未払".equals(bpPayment.getStatus()) && !"承認済".equals(bpPayment.getStatus())) {
-            throw new BusinessException(400, "未払または承認済のBP支払レコードのみ連携可能です (現在: " + bpPayment.getStatus() + ")");
+        // ステータス適格性チェック
+        if (bpPayment.getStatus() != null &&
+                !"未払".equals(bpPayment.getStatus()) && !"承認済".equals(bpPayment.getStatus()) &&
+                !"CONFIRMED".equalsIgnoreCase(bpPayment.getStatus()) && !"APPROVED".equalsIgnoreCase(bpPayment.getStatus())) {
+            throw new BusinessException(400, "未払または承認済のBP支払レコードのみ連携可能です (status=" + bpPayment.getStatus() + ")");
         }
 
-        // 月次締めチェック
-        if (bpPayment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
-            if (wr != null && wr.getWorkMonth() != null) {
-                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
+        // 口座変更未承認ガード
+        if (bpPayment.getBpCompanyId() != null) {
+            Long pendingAccounts = bpBankAccountMapper.selectCount(
+                    new LambdaQueryWrapper<com.ses.entity.BpBankAccount>()
+                            .eq(com.ses.entity.BpBankAccount::getBpCompanyId, bpPayment.getBpCompanyId())
+                            .eq(com.ses.entity.BpBankAccount::getApprovalStatus, "PENDING"));
+            if (pendingAccounts != null && pendingAccounts > 0) {
+                throw new BusinessException(400, "銀行口座変更が承認待ちのためBP支払連携を実行できません (bpCompanyId=" + bpPayment.getBpCompanyId() + ")");
             }
         }
 
-        // 口座変更未承認ガード (R3.4)
-        if (bpPayment.getBpCompanyId() != null) {
-            List<BpBankAccount> pendingAccounts = bpBankAccountMapper.selectList(new LambdaQueryWrapper<BpBankAccount>()
-                    .eq(BpBankAccount::getBpCompanyId, bpPayment.getBpCompanyId())
-                    .eq(BpBankAccount::getApprovalStatus, "PENDING"));
-            if (!pendingAccounts.isEmpty()) {
-                throw new BusinessException(400, "BP会社の銀行口座変更が承認待ちのため、支払連携を実行できません。口座承認を完了させてください。");
+        // 月次締めチェック (締め済み月への更新拒否)
+        if (bpPayment.getWorkRecordId() != null) {
+            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
+                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
             }
         }
 
@@ -95,11 +113,11 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
         mappingService.assertMappingVerified(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
 
-        ExternalMapping bpPartnerMapping = mappingService.getMapping(conn.getId(), "BP_PARTNER", bpCompanyCode);
         ExternalMapping purchaseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
         ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
 
-        LocalDate issueDate = LocalDate.now();
+        // P1-08: 業務日付 (issueDate) を対象月 (work_month) 末日に固定 (翌日再試行でもハッシュ不変)
+        LocalDate issueDate = resolveBpIssueDate(bpPayment);
         LocalDate dueDate = issueDate.plusMonths(1);
 
         CanonicalPurchaseDeal canonical = CanonicalPurchaseDeal.builder()
@@ -216,40 +234,41 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         IntegrationConnection conn = connectionService.getById(job.getConnectionId());
-        BpPayment bpPayment = bpPaymentMapper.selectById(job.getTargetId());
-        if (bpPayment == null) {
-            jobService.markFailed(jobId, "BP_PAYMENT_NOT_FOUND", "BP支払レコードが見つかりません");
+        if (conn == null) {
+            jobService.markFailed(jobId, "CONNECTION_NOT_FOUND", "外部連携接続情報が見つかりません");
             return;
         }
 
         try {
-            String bpCompanyCode = bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
-            ExternalMapping bpPartnerMapping = mappingService.getMapping(conn.getId(), "BP_PARTNER", bpCompanyCode);
-            ExternalMapping purchaseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
-            ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+            CanonicalPurchaseDeal canonical;
+            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
+                // P1-07: Worker は保存済み payload_snapshot を直接デシリアライズして送信
+                canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalPurchaseDeal.class);
+            } else {
+                BpPayment bpPayment = bpPaymentMapper.selectById(job.getTargetId());
+                if (bpPayment == null) {
+                    jobService.markFailed(jobId, "BP_PAYMENT_NOT_FOUND", "BP支払レコードが見つかりません");
+                    return;
+                }
+                String bpCompanyCode = bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
+                ExternalMapping purchaseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
+                ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
 
-            LocalDate issueDate = LocalDate.now();
-            LocalDate dueDate = issueDate.plusMonths(1);
+                LocalDate issueDate = resolveBpIssueDate(bpPayment);
+                LocalDate dueDate = issueDate.plusMonths(1);
 
-            CanonicalPurchaseDeal canonical = CanonicalPurchaseDeal.builder()
-                    .bpPaymentId(bpPayment.getId())
-                    .bpCompanyId(bpPayment.getBpCompanyId())
-                    .bpCompanyCode(bpCompanyCode)
-                    .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
-                    .issueDate(issueDate)
-                    .dueDate(dueDate)
-                    .amount(bpPayment.getAmount() != null ? bpPayment.getAmount() : BigDecimal.ZERO)
-                    .accountItemCode(purchaseAccount != null ? purchaseAccount.getExternalId() : null)
-                    .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                    .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
-                    .build();
-
-            // ペイロードハッシュ確認 (P1-08)
-            String payloadJson = objectMapper.writeValueAsString(canonical);
-            String currentHash = calculateSha256(payloadJson);
-            if (job.getPayloadHash() != null && !job.getPayloadHash().equals(currentHash)) {
-                jobService.markFailed(jobId, "PAYLOAD_MUTATED", "ジョブ登録後にBP支払データが変更されています");
-                return;
+                canonical = CanonicalPurchaseDeal.builder()
+                        .bpPaymentId(bpPayment.getId())
+                        .bpCompanyId(bpPayment.getBpCompanyId())
+                        .bpCompanyCode(bpCompanyCode)
+                        .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
+                        .issueDate(issueDate)
+                        .dueDate(dueDate)
+                        .amount(bpPayment.getAmount() != null ? bpPayment.getAmount() : BigDecimal.ZERO)
+                        .accountItemCode(purchaseAccount != null ? purchaseAccount.getExternalId() : null)
+                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
+                        .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
+                        .build();
             }
 
             AccountingProvider provider = providerFactory.getProvider(conn);
@@ -271,7 +290,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing BP purchase job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", e.getMessage(), 60);
+            jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "BP仕入取引作成中にシステムエラーが発生しました", 60);
         }
     }
 
@@ -300,29 +319,35 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             CanonicalPaymentSync syncResult = provider.fetchDealPayment(conn, latestPurchase.getExternalId());
 
             if (syncResult == null || !syncResult.isSettled()) {
-                jobService.markRetryable(jobId, "PAYMENT_NOT_SETTLED", "外部取引の決済がまだ完了していません", 300);
+                jobService.markRetryable(jobId, "PAYMENT_NOT_SETTLED", "外部取引的の決済がまだ完了していません", 300);
                 return;
             }
 
             // dealId 一致確認 (P1-08)
             if (!latestPurchase.getExternalId().equals(syncResult.getDealId())) {
                 jobService.markFailed(jobId, "DEAL_ID_MISMATCH",
-                        "外部取引IDが一致しません (期待: " + latestPurchase.getExternalId() + ", 実際: " + syncResult.getDealId() + ")");
+                        "外部取引IDが一致しません");
                 return;
             }
 
-            // 金額一致確認 (P1-08)
-            if (bpPayment.getAmount() != null && syncResult.getAmount() != null
-                    && bpPayment.getAmount().compareTo(syncResult.getAmount()) != 0) {
+            // 金額一致確認 (P1-08: NULL厳格チェック)
+            if (bpPayment.getAmount() == null || syncResult.getAmount() == null
+                    || bpPayment.getAmount().compareTo(syncResult.getAmount()) != 0) {
                 jobService.markFailed(jobId, "AMOUNT_MISMATCH",
-                        "決済金額が内部BP支払金額と一致しません (内部: " + bpPayment.getAmount() + ", 外部: " + syncResult.getAmount() + ")");
+                        "決済金額が内部BP支払金額と一致しません");
+                return;
+            }
+
+            // 支払日確認 (P1-08: NULL厳格チェック)
+            if (syncResult.getPaymentDate() == null) {
+                jobService.markFailed(jobId, "PAYMENT_DATE_MISSING", "外部決済日が取得できませんでした");
                 return;
             }
 
             // BP支払ステータス更新 (CAS 条件付き)
             int updated = bpPaymentMapper.update(null, new LambdaUpdateWrapper<BpPayment>()
                     .set(BpPayment::getStatus, "支払済")
-                    .set(BpPayment::getPaidDate, syncResult.getPaymentDate() != null ? syncResult.getPaymentDate() : LocalDate.now())
+                    .set(BpPayment::getPaidDate, syncResult.getPaymentDate())
                     .eq(BpPayment::getId, bpPayment.getId())
                     .eq(BpPayment::getStatus, "未払"));
 
@@ -339,7 +364,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing payment sync job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", e.getMessage(), 60);
+            jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", "支払実績同期処理中にシステムエラーが発生しました", 60);
         }
     }
 
@@ -358,32 +383,44 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         try {
-            String engineerCode = "ENG-" + expense.getEngineerId();
-            ExternalMapping expenseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
-            ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
+            CanonicalExpenseDeal canonical;
+            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
+                // P1-07: Worker は保存済み payload_snapshot を直接デシリアライズして送信
+                canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalExpenseDeal.class);
+            } else {
+                String engineerCode = "ENG-" + expense.getEngineerId();
+                ExternalMapping expenseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
+                ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
 
-            CanonicalExpenseDeal canonical = CanonicalExpenseDeal.builder()
-                    .expenseId(expense.getId())
-                    .expenseNo(expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId())
-                    .engineerId(expense.getEngineerId())
-                    .engineerCode(engineerCode)
-                    .category(expense.getCategory())
-                    .amount(expense.getAmount())
-                    .expenseDate(expense.getExpenseDate() != null ? expense.getExpenseDate() : LocalDate.now())
-                    .accountItemCode(expenseAccount != null ? expenseAccount.getExternalId() : null)
-                    .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                    .description(expense.getDescription())
-                    .build();
+                canonical = CanonicalExpenseDeal.builder()
+                        .expenseId(expense.getId())
+                        .expenseNo(expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId())
+                        .engineerId(expense.getEngineerId())
+                        .engineerCode(engineerCode)
+                        .category(expense.getCategory())
+                        .amount(expense.getAmount())
+                        .expenseDate(expense.getExpenseDate() != null ? expense.getExpenseDate() : LocalDate.now())
+                        .accountItemCode(expenseAccount != null ? expenseAccount.getExternalId() : null)
+                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
+                        .description(expense.getDescription())
+                        .build();
+            }
 
             AccountingProvider provider = providerFactory.getProvider(conn);
             CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
 
             if (result.isSuccess()) {
-                // 経費ステータス更新 (CAS: 承認済 -> 会計連携済)
-                expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
+                // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
+                int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
                         .set(ExpenseRequest::getStatus, "会計連携済")
                         .eq(ExpenseRequest::getId, expense.getId())
                         .eq(ExpenseRequest::getStatus, "承認済"));
+
+                if (updated != 1) {
+                    jobService.markFailed(jobId, "EXPENSE_STATUS_MUTATED",
+                            "経費申請ステータスのCAS更新に失敗しました (承認済ではありません)");
+                    return;
+                }
 
                 jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
                         "freee経費取引作成成功: dealId=" + result.getExternalId());

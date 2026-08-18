@@ -285,8 +285,8 @@ class SalesInvoiceIntegrationTest {
     }
 
     @Test
-    @DisplayName("ペイロード不変性: ジョブ登録後に請求書金額が改ざんされた場合、Worker実行時にPAYLOAD_MUTATEDで失敗すること")
-    void processSalesInvoiceJob_mutatedPayload_marksFailed() {
+    @DisplayName("Snapshot 整合性: Enqueue後に請求書が変更されてもWorkerは保存済みSnapshot (100万円) を送信すること (R1-P1-07)")
+    void processSalesInvoiceJob_mutatedPayload_usesSnapshot() {
         Invoice inv = new Invoice();
         inv.setInvoiceNo("INV-MUTATE-" + UUID.randomUUID().toString().substring(0, 8));
         inv.setCustomerId(customer.getId());
@@ -298,18 +298,87 @@ class SalesInvoiceIntegrationTest {
         inv.setStatus("送付済");
         invoiceService.save(inv);
 
-        // ジョブ登録 (この時点のハッシュが記録される)
+        // ジョブ登録 (この時点の100万円Snapshotが記録される)
         IntegrationJob job = salesIntegrationService.triggerSalesSync(inv.getId(), 1L);
 
-        // ジョブ登録後に請求書金額を変更
+        // ジョブ登録後に請求書金額を120万円に変更
         inv.setTotal(new BigDecimal("1200000"));
         invoiceService.updateById(inv);
+
+        // freeeモック: Snapshot の 100万円 で送信されること
+        String responseJson = "{\"deal\": {\"id\": 778899, \"company_id\": 99001, \"amount\": 1000000, \"status\": \"unsettled\"}}";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Freee-Request-ID", "req-snap-001");
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON).headers(headers));
 
         // Worker による処理実行
         salesIntegrationService.processSalesInvoiceJob(job.getId());
 
-        IntegrationJob failedJob = jobService.getById(job.getId());
-        assertThat(failedJob.getStatus()).isEqualTo("FAILED");
-        assertThat(failedJob.getErrorCode()).isEqualTo("PAYLOAD_MUTATED");
+        mockServer.verify();
+        IntegrationJob succeededJob = jobService.getById(job.getId());
+        assertThat(succeededJob.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(succeededJob.getExternalId()).isEqualTo("778899");
+    }
+
+    @Test
+    @DisplayName("In-Flight 取消時原子補償: RUNNING 中キャンセル時の CANCELLED_EXTERNALLY_CREATED 検知と補償 SALES_INVOICE_CANCEL エンキュー (R1-P1-02)")
+    void cancelJob_inFlightAtomicCompensation() {
+        // 1. 売上同期ジョブを登録し RUNNING へ
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        job = jobService.claimJob(job.getId());
+
+        // 2. HTTP 呼出中 (Worker 送信中) にユーザーがジョブをキャンセル
+        jobService.cancelJob(job.getId(), "ユーザーによるキャンセル");
+        assertThat(jobService.getById(job.getId()).getStatus()).isEqualTo("CANCELLED");
+
+        // 3. 外部で取引が作成された結果が Worker に返却されたシミュレーション
+        com.ses.dto.accounting.canonical.CanonicalDealResult externalResult =
+                com.ses.dto.accounting.canonical.CanonicalDealResult.builder()
+                        .success(true)
+                        .externalId("667788")
+                        .providerRequestId("req-inflight-001")
+                        .build();
+
+        // 4. Worker の結果処理を実行 -> CANCELLED_EXTERNALLY_CREATED を検知し、同一Txで補償ジョブが生成されること
+        salesIntegrationService.handleSalesInvoiceResult(job.getId(), job, connection, externalResult);
+
+        // 5. 補償ジョブ (SALES_INVOICE_CANCEL) の存在確認
+        IntegrationJob compensationJob = jobService.getLatestJob("INVOICE", invoice.getId(), "SALES_INVOICE_CANCEL");
+        assertThat(compensationJob).isNotNull();
+        assertThat(compensationJob.getStatus()).isEqualTo("PENDING");
+        assertThat(compensationJob.getPayloadSnapshot()).contains("667788");
+
+        // イベントログの確認
+        List<IntegrationJobEvent> events = jobService.listEvents(job.getId());
+        assertThat(events).anyMatch(e -> "CANCELLED_EXTERNALLY_CREATED".equals(e.getEventType()));
+    }
+
+    @Test
+    @DisplayName("Snapshot 厳格実行: 取消 Worker が変更可能テーブルを再読込せず snapshot から dealId と理由を取り出して送信すること (R1-P1-07)")
+    void cancelJob_executesStrictlyFromSnapshot() {
+        // 1. SALES_INVOICE_CANCEL ジョブを snapshot 付きで登録
+        String payloadJson = "{\"invoiceId\":" + invoice.getId() + ",\"externalDealId\":\"998877\",\"reason\":\"snapshotに保存された理由\"}";
+        IntegrationJob cancelJob = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(),
+                "CANCEL-INV-SNAPSHOT-001", "hash-snap", payloadJson,
+                connection.getTenantId(), connection.getLegalEntityId(), 1L);
+
+        // 2. freee への 取消 DELETE をモック (snapshot の dealId 998877 に対して)
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/998877?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 998877}}", MediaType.APPLICATION_JSON));
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/998877?company_id=99001"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        // 3. Worker 実行
+        salesIntegrationService.processSalesCancelJob(cancelJob.getId());
+
+        mockServer.verify();
+        IntegrationJob updated = jobService.getById(cancelJob.getId());
+        assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
     }
 }

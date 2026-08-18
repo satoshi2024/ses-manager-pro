@@ -190,12 +190,24 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         if (job == null) {
             throw new BusinessException(404, "ジョブが見つかりません (id=" + jobId + ")");
         }
+        // 1. SALES_INVOICE_CANCEL は全状態で取消不可 (400)
         if ("SALES_INVOICE_CANCEL".equals(job.getJobType())) {
-            throw new BusinessException(400, "取消連携ジョブ(SALES_INVOICE_CANCEL)はキャンセルできません");
+            throw new BusinessException(400, "CANNOT_CANCEL_CANCELLATION_JOB: 取消連携ジョブ(SALES_INVOICE_CANCEL)はキャンセルできません");
         }
-        if ("SUCCEEDED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus()) || "RUNNING".equals(job.getStatus())) {
-            throw new BusinessException(400,
-                    "処理中または完了済みのジョブはキャンセルできません (status=" + job.getStatus() + ")");
+        // 2. 終端状態 (SUCCEEDED, CANCELLED) は取消不可 (400)
+        if ("SUCCEEDED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus())) {
+            throw new BusinessException(400, "CANNOT_CANCEL_TERMINAL_JOB: 完了済みのジョブはキャンセルできません (status=" + job.getStatus() + ")");
+        }
+        // 3. RUNNING 状態の取消マトリクス:
+        //    - BP仕入/支払/経費 (PURCHASE_PAYMENT_SYNC, EXPENSE_PAYMENT_SYNC, BP_PURCHASE_SYNC) は RUNNING 取消拒否 (400)
+        //    - 売上/入金 (SALES_INVOICE_SYNC, INVOICE_PAYMENT_SYNC) は RUNNING 取消許可 -> CANCELLED 遷移
+        if ("RUNNING".equals(job.getStatus())) {
+            if ("PURCHASE_PAYMENT_SYNC".equals(job.getJobType())
+                    || "EXPENSE_PAYMENT_SYNC".equals(job.getJobType())
+                    || "BP_PURCHASE_SYNC".equals(job.getJobType())
+                    || "EXPENSE_DEAL_SYNC".equals(job.getJobType())) {
+                throw new BusinessException(400, "CANNOT_CANCEL_RUNNING_JOB: 仕入・経費ジョブの実行中キャンセルは許可されていません");
+            }
         }
 
         String fromStatus = job.getStatus();
@@ -262,6 +274,12 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     public int recoverStaleRunningJobs(int leaseMinutes) {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(Math.max(1, leaseMinutes));
         return baseMapper.recoverStaleRunning(threshold);
+    }
+
+    @Override
+    public void recordJobEvent(Long jobId, String eventType, String detail, String reasonCode) {
+        String msg = (reasonCode != null && !reasonCode.isBlank()) ? "[" + reasonCode + "] " + detail : detail;
+        recordEvent(jobId, null, eventType, msg);
     }
 
     private void recordEvent(Long jobId, String fromStatus, String toStatus, String safeDetail) {

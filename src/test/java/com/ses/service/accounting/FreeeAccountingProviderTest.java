@@ -541,4 +541,90 @@ class FreeeAccountingProviderTest {
         assertThat(freeeProvider.verifyMaster(testConnection, "SECTION", "999999", "NOT_EXIST")).isFalse();
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("マルチノード3段階リース＆外部HTTPトランザクション外実行検証 (R1-P1-03 / design §1.3)")
+    void forceRefreshToken_multiNode_3StepLease_httpOutsideTx() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-refresh-test", null, "freee", "accounting");
+        IntegrationTokensDto initialTokens = IntegrationTokensDto.builder()
+                .accessToken("access-v1")
+                .refreshToken("refresh-v1")
+                .tokenType("Bearer")
+                .expiresIn(3600L)
+                .build();
+        connectionService.saveTokens(conn.getId(), initialTokens, 88888L, "テスト事業所", 1L);
+
+        java.util.concurrent.atomic.AtomicInteger oauthCallCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        // Node A: observedTokenVersion = 1 でリフレッシュ実行
+        IntegrationTokensDto tokensA = connectionService.forceRefreshToken(conn.getId(), 1, current -> {
+            oauthCallCount.incrementAndGet();
+            return IntegrationTokensDto.builder()
+                    .accessToken("access-v2")
+                    .refreshToken("refresh-v2")
+                    .tokenType("Bearer")
+                    .expiresIn(3600L)
+                    .build();
+        });
+
+        assertThat(tokensA.getAccessToken()).isEqualTo("access-v2");
+        assertThat(oauthCallCount.get()).isEqualTo(1);
+
+        // Node B: 同時401発生時の observedTokenVersion = 1 を渡して forceRefreshToken を呼ぶ
+        // DB側は既に token_version = 2 に進んでいるため、OAuthリフレッシュ関数は実行されず、DBの最新トークンが返る
+        IntegrationTokensDto tokensB = connectionService.forceRefreshToken(conn.getId(), 1, current -> {
+            oauthCallCount.incrementAndGet();
+            return IntegrationTokensDto.builder()
+                    .accessToken("access-v3-unexpected")
+                    .refreshToken("refresh-v3-unexpected")
+                    .tokenType("Bearer")
+                    .expiresIn(3600L)
+                    .build();
+        });
+
+        assertThat(tokensB.getAccessToken()).isEqualTo("access-v2");
+        assertThat(oauthCallCount.get()).isEqualTo(1); // OAuth API呼出は1回のみ！
+    }
+
+    @Test
+    @DisplayName("エラーハンドリングと定型エラーコード写像・PII遮断検証 (R1-P1-10 / design §6.3)")
+    void errorHandling_sanitizedCodesAndNoPii() {
+        Logger logger = (Logger) LoggerFactory.getLogger(FreeeAccountingProvider.class);
+        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+        listAppender.start();
+        logger.addAppender(listAppender);
+
+        try {
+            CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                    .invoiceId(999L)
+                    .invoiceNo("INV-ERR-TEST")
+                    .total(new BigDecimal("1000000"))
+                    .build();
+
+            // 500 エラーに合成機密情報（トークンやメールアドレス）が含まれるレスポンスをモック
+            String rawErrorJson = "{\"errors\": [{\"type\": \"system\", \"messages\": [\"Internal DB Crash with token: Bearer secret-token-abcdef123456 and email: admin@confidential.co.jp\"]}]}";
+            mockServer.reset();
+            mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                    .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(rawErrorJson)
+                            .contentType(MediaType.APPLICATION_JSON));
+
+            CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+            // 1. 結果のエラーコードは定型化されていること
+            assertThat(result.isSuccess()).isFalse();
+            assertThat(result.getErrorCode()).isEqualTo("SERVER_ERROR");
+            assertThat(result.getErrorMessageSafe()).doesNotContain("secret-token-abcdef123456");
+            assertThat(result.getErrorMessageSafe()).doesNotContain("admin@confidential.co.jp");
+
+            // 2. ログ出力にも機密情報・生メッセージが含まれないこと
+            for (ILoggingEvent event : listAppender.list) {
+                String formattedMessage = event.getFormattedMessage();
+                assertThat(formattedMessage).doesNotContain("secret-token-abcdef123456");
+                assertThat(formattedMessage).doesNotContain("admin@confidential.co.jp");
+            }
+        } finally {
+            logger.detachAppender(listAppender);
+        }
+    }
 }

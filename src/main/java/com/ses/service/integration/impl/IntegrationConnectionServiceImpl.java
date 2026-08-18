@@ -192,15 +192,21 @@ public class IntegrationConnectionServiceImpl
 
     @Override
     public IntegrationTokensDto rotateTokens(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
-        return doRotateTokens(connectionId, refreshFn, false);
+        return doRotateTokens(connectionId, null, refreshFn, false);
     }
 
     @Override
     public IntegrationTokensDto forceRefreshToken(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
-        return doRotateTokens(connectionId, refreshFn, true);
+        return doRotateTokens(connectionId, null, refreshFn, true);
+    }
+
+    @Override
+    public IntegrationTokensDto forceRefreshToken(Long connectionId, Integer observedTokenVersion, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
+        return doRotateTokens(connectionId, observedTokenVersion, refreshFn, true);
     }
 
     private IntegrationTokensDto doRotateTokens(Long connectionId,
+                                                Integer observedTokenVersionArg,
                                                 Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn,
                                                 boolean force) {
         ReentrantLock lock = connectionLocks.computeIfAbsent(connectionId, k -> new ReentrantLock());
@@ -212,13 +218,23 @@ public class IntegrationConnectionServiceImpl
                 throw new BusinessException(400, "接続情報が存在しません (id=" + connectionId + ")");
             }
 
+            int currentDbVersion = conn.getTokenVersion() != null ? conn.getTokenVersion() : 1;
+
+            // observedTokenVersionArg が指定されており、DB 現在版がそれより新しい場合、
+            // 既に他ノード/スレッドによってトークンが更新完了しているため OAuth 呼び出しをスキップして最新トークンを即返却 (P1-03)
+            if (observedTokenVersionArg != null && currentDbVersion > observedTokenVersionArg) {
+                log.info("Token for connectionId={} was already refreshed by another node (observedVersion={}, currentDbVersion={}), reusing updated tokens",
+                        connectionId, observedTokenVersionArg, currentDbVersion);
+                return getDecryptedTokens(connectionId);
+            }
+
             // force == false の場合、既に他ノード/スレッドによって更新済みなら再リフレッシュをスキップ
             if (!force && conn.getExpiresAt() != null && conn.getExpiresAt().isAfter(LocalDateTime.now().plusSeconds(30))) {
                 log.info("Token for connectionId={} was already refreshed, skipping refreshFn", connectionId);
                 return getDecryptedTokens(connectionId);
             }
 
-            int observedTokenVersion = conn.getTokenVersion() != null ? conn.getTokenVersion() : 1;
+            int observedTokenVersion = currentDbVersion;
             String workerUuid = java.util.UUID.randomUUID().toString();
             LocalDateTime now = LocalDateTime.now();
             LocalDateTime leaseExpiresAt = now.plusSeconds(45);

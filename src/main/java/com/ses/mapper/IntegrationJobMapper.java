@@ -69,12 +69,12 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
                            @Param("safeMessage") String safeMessage);
 
     /**
-     * PENDING または RETRYABLE から CANCELLED へのバージョン CAS 遷移。
+     * PENDING, RETRYABLE, または RUNNING から CANCELLED へのバージョン CAS 遷移。
      */
     @Update("UPDATE t_integration_job " +
             "SET status = 'CANCELLED', error_code = 'USER_CANCELLED', error_message_safe = #{reason}, " +
             "    version = version + 1, updated_at = NOW() " +
-            "WHERE id = #{id} AND version = #{version} AND status IN ('PENDING', 'RETRYABLE') AND deleted_flag = 0")
+            "WHERE id = #{id} AND version = #{version} AND status IN ('PENDING', 'RETRYABLE', 'RUNNING') AND deleted_flag = 0")
     int transitionToCancelled(@Param("id") Long id,
                               @Param("version") int version,
                               @Param("reason") String reason);

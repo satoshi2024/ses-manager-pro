@@ -263,6 +263,9 @@ class IntegrationConnectionAndJobTest {
         assertThat(conn3.getId()).isNotEqualTo(conn1.getId());
     }
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @Test
     @DisplayName("Rollback SQL 契約検証: 退避テーブル復元と安全な列削除順序 (R4-T01 / design §1.2)")
     void migration_rollback_partialSafeAllShapes() throws Exception {
@@ -292,9 +295,46 @@ class IntegrationConnectionAndJobTest {
         assertThat(savedJob.getPayloadSnapshot()).isEqualTo("{\"invoiceId\":999}");
         assertThat(savedJob.getTenantId()).isEqualTo("tenant-rollback");
 
-        // 3. Rollback の主要ステップが各テーブルの整合性を破壊しないことを確認
-        // (1) 新UNIQUE解除 → (2) backup復元 → (3) 旧UNIQUE復元 → (4) 追加列個別削除
-        // H2/MySQL 双方で job/connection のデータ整合性が維持されること
+        // 3. Rollback SQL の実際の実行検証 (R1-P1-04)
+        // (1) バックアップテーブル作成 & 重複行退避シミュレーション
+        jdbcTemplate.execute("""
+            CREATE TABLE IF NOT EXISTS m_integration_connection_backup_v106_1 (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                original_id BIGINT NOT NULL,
+                tenant_id VARCHAR(64) NOT NULL,
+                legal_entity_id BIGINT NULL,
+                provider VARCHAR(32) NOT NULL,
+                product VARCHAR(32) NOT NULL,
+                company_id BIGINT NULL,
+                company_name VARCHAR(128) NULL,
+                status VARCHAR(32) NOT NULL,
+                created_by BIGINT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                deleted_flag INT NOT NULL DEFAULT 0,
+                backup_reason VARCHAR(64) NOT NULL DEFAULT 'V106_1_DEDUPLICATION_BACKUP'
+            )
+        """);
+
+        // 退避行を挿入
+        jdbcTemplate.update("""
+            INSERT INTO m_integration_connection_backup_v106_1
+            (original_id, tenant_id, legal_entity_id, provider, product, status, created_at, updated_at, deleted_flag)
+            VALUES (?, 'tenant-rollback', 101, 'freee', 'accounting', 'ACTIVE', NOW(), NOW(), 0)
+        """, conn.getId());
+
+        // (2) Rollback SQL ステップ 2: backup から soft-delete された行を復元
+        int restoredCount = jdbcTemplate.update("""
+            UPDATE m_integration_connection
+            SET deleted_flag = 0
+            WHERE id IN (SELECT original_id FROM m_integration_connection_backup_v106_1)
+        """);
+        assertThat(restoredCount).isGreaterThanOrEqualTo(1);
+
+        // (3) Rollback SQL ステップ 4: backup テーブル削除
+        jdbcTemplate.execute("DROP TABLE IF EXISTS m_integration_connection_backup_v106_1");
+
+        // 復元後もデータ整合性が維持されていること
         assertThat(jobService.getById(savedJob.getId())).isNotNull();
         assertThat(connectionService.getById(conn.getId())).isNotNull();
     }

@@ -477,15 +477,17 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private <T> ResponseEntity<T> executeWith401Recovery(IntegrationConnection connection,
                                                          RestExecution<T> execution) {
         HttpHeaders headers = buildAuthHeaders(connection);
+        Integer observedVersion = connection != null ? connection.getTokenVersion() : null;
         try {
             return execution.execute(headers);
         } catch (HttpClientErrorException httpEx) {
             if (httpEx.getStatusCode().value() == 401) {
-                log.warn("Received 401 from freee API, attempting forced token refresh and single replay");
+                log.warn("Received 401 from freee API, attempting forced token refresh with observedVersion={} and single replay", observedVersion);
                 try {
                     // トークン強制リフレッシュ (P1-03)
                     IntegrationTokensDto refreshed = connectionService.forceRefreshToken(
                             connection.getId(),
+                            observedVersion,
                             this::refreshFreeeTokens);
                     if (refreshed != null && refreshed.getAccessToken() != null) {
                         HttpHeaders newHeaders = new HttpHeaders();
@@ -495,7 +497,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         return execution.execute(newHeaders);
                     }
                 } catch (Exception refreshEx) {
-                    log.error("Token refresh or replay failed on 401: {}", refreshEx.getMessage());
+                    log.error("Token refresh or replay failed on 401: error_code=UNAUTHORIZED");
                     throw httpEx;
                 }
             }

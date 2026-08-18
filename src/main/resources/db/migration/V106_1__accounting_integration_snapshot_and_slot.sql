@@ -53,9 +53,7 @@ SELECT
     c.id, c.tenant_id, c.legal_entity_id, c.provider, c.product,
     c.external_company_id, c.company_name, c.encrypted_tokens, c.expires_at, c.status,
     c.connected_by, c.connected_at, c.last_refreshed_at,
-    COALESCE((SELECT token_version FROM information_schema.columns
-               WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection'
-                 AND column_name = 'token_version' LIMIT 1), 1) AS token_version,
+    1 AS token_version,
     c.deleted_flag, c.version
 FROM m_integration_connection c
 WHERE c.deleted_flag = 0

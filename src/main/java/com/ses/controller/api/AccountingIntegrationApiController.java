@@ -6,8 +6,13 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.accounting.canonical.CanonicalExpenseDeal;
+import com.ses.dto.accounting.canonical.CanonicalPurchaseDeal;
 import com.ses.dto.accounting.canonical.CanonicalSalesInvoice;
+import com.ses.entity.BpPayment;
 import com.ses.entity.Customer;
+import com.ses.entity.Engineer;
+import com.ses.entity.ExpenseRequest;
 import com.ses.entity.ExternalMapping;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
@@ -56,6 +61,9 @@ public class AccountingIntegrationApiController {
     private final AccountingReconciliationService reconciliationService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.accounting.AccountingOrganizationResolver organizationResolver;
+    private final com.ses.mapper.BpPaymentMapper bpPaymentMapper;
+    private final com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
+    private final com.ses.mapper.EngineerMapper engineerMapper;
 
     /** SecurityContext からユーザーIDを取得する (fail-closed)。 */
     private Long resolveActorId() {
@@ -71,6 +79,12 @@ public class AccountingIntegrationApiController {
     @GetMapping("/connections")
     public ApiResult<List<IntegrationConnection>> listConnections(
             @RequestParam(value = "tenantId", defaultValue = "default") String tenantId) {
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (allowedOrgIds.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+        }
         List<IntegrationConnection> list = connectionService.listConnections(tenantId);
         for (IntegrationConnection c : list) {
             c.setEncryptedTokens(null); // セキュリティのため確実にマスク
@@ -80,6 +94,12 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/connections/{id}/health")
     public ApiResult<Boolean> checkHealth(@PathVariable("id") Long connectionId) {
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (allowedOrgIds.isEmpty()) {
+                return ApiResult.error(404, "接続マスタが見つかりません");
+            }
+        }
         IntegrationConnection conn = connectionService.getById(connectionId);
         if (conn == null) {
             return ApiResult.error(404, "接続マスタが見つかりません");
@@ -89,7 +109,7 @@ public class AccountingIntegrationApiController {
             boolean valid = provider.validateConnection(conn);
             return ApiResult.success(valid);
         } catch (Exception e) {
-            log.warn("Health check failed for connectionId={}", connectionId, e);
+            log.warn("Health check failed for connectionId={}", connectionId);
             return ApiResult.success(false);
         }
     }
@@ -108,6 +128,12 @@ public class AccountingIntegrationApiController {
     public ApiResult<List<ExternalMapping>> listMappings(
             @RequestParam("connectionId") Long connectionId,
             @RequestParam(value = "objectType", required = false) String objectType) {
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (allowedOrgIds.isEmpty()) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
+        }
         List<ExternalMapping> list = mappingService.listByConnection(connectionId, objectType);
         return ApiResult.success(list);
     }
@@ -165,15 +191,19 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/jobs/{id}")
     public ApiResult<IntegrationJobDetailDto> getJobDetail(@PathVariable("id") Long jobId) {
-        IntegrationJob job = jobService.getById(jobId);
-        if (job == null) {
-            return ApiResult.error(404, "ジョブが見つかりません");
-        }
+        LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getId, jobId);
         if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
             java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (job.getOrganizationId() == null || !allowedOrgIds.contains(job.getOrganizationId())) {
-                return ApiResult.error(404, "ジョブが見つかりません");
+            if (allowedOrgIds.isEmpty()) {
+                query.apply("1 = 0");
+            } else {
+                query.in(IntegrationJob::getOrganizationId, allowedOrgIds);
             }
+        }
+        IntegrationJob job = jobService.getOne(query);
+        if (job == null) {
+            return ApiResult.error(404, "ジョブが見つかりません");
         }
         List<IntegrationJobEvent> events = jobService.listEvents(jobId);
         return ApiResult.success(new IntegrationJobDetailDto(job, events));
@@ -236,6 +266,63 @@ public class AccountingIntegrationApiController {
                         .build()))
                 .build();
 
+        return ApiResult.success(preview);
+    }
+
+    @GetMapping("/preview/bp-purchase/{bpPaymentId}")
+    public ApiResult<CanonicalPurchaseDeal> previewBpPurchase(@PathVariable("bpPaymentId") Long bpPaymentId) {
+        BpPayment bp = bpPaymentMapper.selectById(bpPaymentId);
+        if (bp == null) {
+            return ApiResult.error(404, "BP支払レコードが見つかりません");
+        }
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bp);
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (orgId == null || !allowedOrgIds.contains(orgId)) {
+                return ApiResult.error(404, "BP支払レコードが見つかりません");
+            }
+        }
+        CanonicalPurchaseDeal preview = CanonicalPurchaseDeal.builder()
+                .bpPaymentId(bp.getId())
+                .bpCompanyId(bp.getBpCompanyId())
+                .bpCompanyCode(bp.getBpCompanyId() != null ? "BP-" + bp.getBpCompanyId() : "BP-UNKNOWN")
+                .bpCompanyName(bp.getPayeeCompanyName() != null ? bp.getPayeeCompanyName() : "BP会社ID:" + bp.getBpCompanyId())
+                .issueDate(java.time.LocalDate.now())
+                .dueDate(java.time.LocalDate.now().plusMonths(1))
+                .amount(bp.getAmount() != null ? bp.getAmount() : java.math.BigDecimal.ZERO)
+                .accountItemCode("5101")
+                .taxCode("34")
+                .remarks(bp.getRemarks() != null ? bp.getRemarks() : "BP外注費: " + bp.getId())
+                .build();
+        return ApiResult.success(preview);
+    }
+
+    @GetMapping("/preview/expense/{expenseRequestId}")
+    public ApiResult<CanonicalExpenseDeal> previewExpense(@PathVariable("expenseRequestId") Long expenseRequestId) {
+        ExpenseRequest exp = expenseRequestMapper.selectById(expenseRequestId);
+        if (exp == null) {
+            return ApiResult.error(404, "経費申請レコードが見つかりません");
+        }
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            Long orgId = organizationResolver.resolveExpenseOrganizationId(exp);
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (orgId == null || !allowedOrgIds.contains(orgId)) {
+                return ApiResult.error(404, "経費申請レコードが見つかりません");
+            }
+        }
+        Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
+        CanonicalExpenseDeal preview = CanonicalExpenseDeal.builder()
+                .expenseId(exp.getId())
+                .expenseNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
+                .engineerId(exp.getEngineerId())
+                .engineerCode("ENG-" + exp.getEngineerId())
+                .category(exp.getCategory())
+                .amount(exp.getAmount())
+                .expenseDate(exp.getExpenseDate() != null ? exp.getExpenseDate() : java.time.LocalDate.now())
+                .accountItemCode("6101")
+                .taxCode("34")
+                .description(exp.getDescription())
+                .build();
         return ApiResult.success(preview);
     }
 

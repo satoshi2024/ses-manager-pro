@@ -37,4 +37,8 @@ public class IntegrationJobEvent {
 
     /** 安全な詳細情報 (PII/Secret除外) */
     private String safeDetail;
+
+    public String getEventType() {
+        return toStatus != null ? toStatus : fromStatus;
+    }
 }

@@ -63,6 +63,11 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
     List<IntegrationJobEvent> listEvents(Long jobId);
 
     /**
+     * 状態遷移イベントを記録する。
+     */
+    void recordJobEvent(Long jobId, String eventType, String detail, String reasonCode);
+
+    /**
      * 対象エンティティに紐づく最新ジョブを取得する。
      */
     IntegrationJob getLatestJob(String targetType, Long targetId, String jobType);
