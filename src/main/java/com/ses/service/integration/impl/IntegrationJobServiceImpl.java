@@ -52,7 +52,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
                 .jobType(jobType)
                 .targetType(targetType)
                 .targetId(targetId)
-                .tenantId(tenantId)
+                .tenantId((tenantId != null && !tenantId.isBlank()) ? tenantId : "default")
                 .legalEntityId(legalEntityId)
                 .organizationId(organizationId)
                 .payloadSnapshot(payloadSnapshot)

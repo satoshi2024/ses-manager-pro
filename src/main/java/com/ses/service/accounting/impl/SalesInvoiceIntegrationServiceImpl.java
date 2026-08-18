@@ -15,6 +15,8 @@ import com.ses.service.MonthlyClosingService;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -46,6 +48,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final IntegrationJobService jobService;
     private final AccountingProviderFactory providerFactory;
     private final AccountingOrganizationResolver organizationResolver;
+    private final AccountingTimezoneResolver timezoneResolver;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -137,7 +140,8 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             throw new BusinessException(400, "連携済みの外部取引が存在しないため、取消処理を実行できません");
         }
 
-        String reason = (cancelReason != null && !cancelReason.isBlank()) ? cancelReason : "請求書取消";
+        // P1-11: 取消理由は機械可読コード (design §8.3) を保存・送信する。未知の入力は REASON_OTHER へ正規化
+        String reason = normalizeCancelReason(cancelReason);
         String idempotencyKey = "SALES_CANCEL:" + invoice.getId() + ":" + latestSync.getExternalId();
         String payload = "{\"invoiceId\":" + invoiceId + ",\"externalDealId\":\"" + latestSync.getExternalId() + "\",\"reason\":\"" + reason + "\"}";
         String payloadHash = calculateSha256(payload);
@@ -148,6 +152,8 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
                 payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
+
+    private final SalesInvoiceTransactionCoordinator transactionCoordinator;
 
     @Override
     public void processSalesInvoiceJob(Long jobId) {
@@ -162,92 +168,41 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             return;
         }
 
-        try {
-            CanonicalSalesInvoice canonical;
-            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
-                // P1-07: Worker は保存済み payload_snapshot を直接デシリアライズして送信
-                canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalSalesInvoice.class);
-            } else {
-                Invoice invoice = invoiceService.getById(job.getTargetId());
-                if (invoice == null) {
-                    jobService.markFailed(jobId, "INVOICE_NOT_FOUND", "請求書レコードが見つかりません");
-                    return;
-                }
-                Customer customer = customerService.getById(invoice.getCustomerId());
-                String customerCode = "CUST-" + invoice.getCustomerId();
-                String customerName = customer != null ? customer.getCompanyName() : "顧客ID:" + invoice.getCustomerId();
-
-                ExternalMapping salesAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_SALES", "SALES_DEFAULT");
-                ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_SALES_10", "TAX_10");
-
-                canonical = CanonicalSalesInvoice.builder()
-                        .invoiceId(invoice.getId())
-                        .invoiceNo(invoice.getInvoiceNo())
-                        .customerId(invoice.getCustomerId())
-                        .customerCode(customerCode)
-                        .customerName(customerName)
-                        .issueDate(invoice.getIssuedDate())
-                        .dueDate(invoice.getDueDate())
-                        .subtotal(invoice.getSubtotal())
-                        .tax(invoice.getTax())
-                        .total(invoice.getTotal())
-                        .taxRate(invoice.getTaxRate())
-                        .remarks(invoice.getRemarks())
-                        .details(List.of(CanonicalSalesInvoice.Detail.builder()
-                                .description(invoice.getRemarks() != null ? invoice.getRemarks() : "SES請求: " + invoice.getInvoiceNo())
-                                .amount(invoice.getTotal())
-                                .accountItemCode(salesAccount != null ? salesAccount.getExternalId() : null)
-                                .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                                .build()))
-                        .build();
-            }
-
-            AccountingProvider provider = providerFactory.getProvider(conn);
-            CanonicalDealResult result = provider.upsertSalesInvoice(conn, canonical);
-
-            handleSalesInvoiceResult(jobId, job, conn, result);
-
-        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-            log.warn("Token refresh in progress during sales invoice job {}: rescheduling retry in 5s", jobId);
-            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
-        } catch (Exception e) {
-            log.error("Error executing sales invoice job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上連携処理中にシステムエラーが発生しました", 60);
+        // P1-07: Snapshot 必須・SHA-256 ハッシュ検証・業務テーブル再読込全廃
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
         }
+
+        String calculatedHash = calculateSha256(job.getPayloadSnapshot());
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculatedHash)) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                CanonicalSalesInvoice canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalSalesInvoice.class);
+
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalDealResult result = provider.upsertSalesInvoice(conn, canonical);
+
+                // P1-02: トランザクションコーディネーター (Spring プロキシ経由) で原子反映
+                transactionCoordinator.handleSalesInvoiceResult(jobId, job, conn, result);
+
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during sales invoice job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing sales invoice job: jobId={}", jobId, e);
+                jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上連携処理中にシステムエラーが発生しました", 60);
+            }
+        });
     }
 
-    @Transactional
+    @Override
     public void handleSalesInvoiceResult(Long jobId, IntegrationJob job, IntegrationConnection conn, CanonicalDealResult result) {
-        IntegrationJob currentJob = jobService.getById(jobId);
-        if (currentJob == null) return;
-
-        if (result.isSuccess()) {
-            if ("CANCELLED".equals(currentJob.getStatus())) {
-                // P1-02: HTTP in-flight 中に取消された場合の検知 (CANCELLED_EXTERNALLY_CREATED) と原子補償ジョブ enqueue
-                log.warn("Sales invoice job {} was cancelled in-flight but deal {} was created externally. Enqueueing compensation cancel job.",
-                        jobId, result.getExternalId());
-                jobService.recordJobEvent(jobId, "CANCELLED_EXTERNALLY_CREATED",
-                        "外部取引(dealId=" + result.getExternalId() + ")が作成されましたがジョブは通信中にキャンセルされました", "CANCELLED_EXTERNALLY_CREATED");
-
-                String compIdempotencyKey = "COMPENSATE_CANCEL:" + job.getTargetId() + ":" + result.getExternalId();
-                String compPayload = "{\"invoiceId\":" + job.getTargetId() + ",\"externalDealId\":\"" + result.getExternalId() + "\",\"reason\":\"IN_FLIGHT_CANCEL_COMPENSATION\"}";
-                String compHash = calculateSha256(compPayload);
-
-                jobService.createJob(
-                        conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", job.getTargetId(), compIdempotencyKey, compHash,
-                        compPayload, conn.getTenantId(), conn.getLegalEntityId(), job.getOrganizationId());
-            } else {
-                jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
-                        "freee取引登録成功: dealId=" + result.getExternalId());
-            }
-        } else {
-            if (result.isRetryable()) {
-                jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
-                        result.getRetryAfterSeconds());
-            } else {
-                jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
-            }
-        }
+        transactionCoordinator.handleSalesInvoiceResult(jobId, job, conn, result);
     }
 
     @Override
@@ -263,54 +218,51 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
             return;
         }
 
-        try {
-            String externalDealId = null;
-            String reason = "請求取消";
-
-            // P1-07: 取消 Worker は snapshot から externalDealId と reason を直接読み込み（最新sync job検索の廃止）
-            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
-                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(job.getPayloadSnapshot());
-                if (node.has("externalDealId") && !node.get("externalDealId").isNull()) {
-                    externalDealId = node.get("externalDealId").asText();
-                }
-                if (node.has("reason") && !node.get("reason").isNull()) {
-                    reason = node.get("reason").asText();
-                }
-            }
-
-            if (externalDealId == null || externalDealId.isBlank()) {
-                IntegrationJob latestSync = jobService.getLatestJob("INVOICE", job.getTargetId(), "SALES_INVOICE_SYNC");
-                if (latestSync != null && latestSync.getExternalId() != null) {
-                    externalDealId = latestSync.getExternalId();
-                }
-            }
-
-            if (externalDealId == null || externalDealId.isBlank()) {
-                jobService.markFailed(jobId, "SYNC_JOB_MISSING", "取消対象の外部取引IDが見つかりません");
-                return;
-            }
-
-            AccountingProvider provider = providerFactory.getProvider(conn);
-            CanonicalDealResult result = provider.cancelSalesInvoice(conn, externalDealId, reason);
-
-            if (result.isSuccess()) {
-                jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
-                        "freee取引取消完了: dealId=" + result.getExternalId());
-            } else {
-                if (result.isRetryable()) {
-                    jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
-                            result.getRetryAfterSeconds());
-                } else {
-                    jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
-                }
-            }
-        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-            log.warn("Token refresh in progress during sales cancel job {}: rescheduling retry in 5s", jobId);
-            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
-        } catch (Exception e) {
-            log.error("Error executing sales cancel job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上取引取消処理中にシステムエラーが発生しました", 60);
+        // P1-07: 取消 Worker も Snapshot 必須・SHA-256 検証・最新sync job再検索全廃
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
         }
+
+        String calculatedHash = calculateSha256(job.getPayloadSnapshot());
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculatedHash)) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(job.getPayloadSnapshot());
+                String externalDealId = node.has("externalDealId") && !node.get("externalDealId").isNull() ? node.get("externalDealId").asText() : null;
+                String reason = node.has("reason") && !node.get("reason").isNull() ? node.get("reason").asText() : "REASON_CLIENT_CANCEL";
+
+                if (externalDealId == null || externalDealId.isBlank()) {
+                    jobService.markFailed(jobId, "DEAL_ID_MISSING_IN_SNAPSHOT", "Snapshotに対象の外部取引IDが含まれていません");
+                    return;
+                }
+
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalDealResult result = provider.cancelSalesInvoice(conn, externalDealId, reason);
+
+                if (result.isSuccess()) {
+                    jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
+                            "freee取引取消完了: dealId=" + result.getExternalId());
+                } else {
+                    if (result.isRetryable()) {
+                        jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
+                                result.getRetryAfterSeconds());
+                    } else {
+                        jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
+                    }
+                }
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during sales cancel job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing sales cancel job: jobId={}", jobId, e);
+                jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上取引取消処理中にシステムエラーが発生しました", 60);
+            }
+        });
     }
 
     @Override
@@ -345,6 +297,18 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
 
     private IntegrationConnection resolveConnection(String tenantId, Long legalEntityId, String provider, String product) {
         return connectionService.getOrCreateConnection(tenantId, legalEntityId, provider, product);
+    }
+
+    /** 取消理由の機械可読コードへの正規化 (design §8.3)。未知・空・日本語入力は既定/OTHER へ写像する。 */
+    static String normalizeCancelReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "REASON_CLIENT_CANCEL";
+        }
+        String trimmed = reason.trim();
+        if (trimmed.startsWith("REASON_")) {
+            return trimmed;
+        }
+        return "REASON_OTHER";
     }
 
     private String calculateSha256(String input) {

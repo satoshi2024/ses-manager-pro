@@ -39,8 +39,9 @@ public interface AccountingProvider {
 
     /**
      * 外部システムの支払・決済実績を取得する。
+     * 50ページ上限到達・重複ID・取得途中障害は結果オブジェクトで fail-closed 通知する (P1-09)。
      */
-    List<CanonicalPaymentSync> fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate);
+    com.ses.dto.accounting.PaymentFetchResult fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate);
 
     /**
      * 特定の取引IDの決済実績を取得する。

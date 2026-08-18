@@ -11,6 +11,7 @@ import com.ses.dto.accounting.canonical.CanonicalPurchaseDeal;
 import com.ses.entity.*;
 import com.ses.mapper.BpBankAccountMapper;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpCompanyService;
@@ -18,6 +19,7 @@ import com.ses.service.MonthlyClosingService;
 import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
@@ -33,6 +35,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -47,6 +52,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final BpPaymentMapper bpPaymentMapper;
     private final BpCompanyService bpCompanyService;
     private final BpBankAccountMapper bpBankAccountMapper;
+    private final EngineerMapper engineerMapper;
     private final ExpenseRequestMapper expenseRequestMapper;
     private final WorkRecordMapper workRecordMapper;
     private final MonthlyClosingService monthlyClosingService;
@@ -62,13 +68,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         if (bpPayment.getWorkRecordId() != null) {
             WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
-                return java.time.YearMonth.parse(wr.getWorkMonth()).atEndOfMonth();
+                return java.time.YearMonth.parse(wr.getWorkMonth().trim()).atEndOfMonth();
             }
         }
-        if (bpPayment.getCreatedAt() != null) {
-            return bpPayment.getCreatedAt().toLocalDate();
-        }
-        return LocalDate.of(2026, 1, 31);
+        throw new BusinessException(400, "BP支払レコードの対象月(workMonth)が未設定です (id=" + bpPayment.getId() + ")");
     }
 
     @Override
@@ -77,6 +80,11 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
         if (bpPayment == null) {
             throw new BusinessException(404, "BP支払レコードが見つかりません (id=" + bpPaymentId + ")");
+        }
+
+        // P1-08: 金額 NULL 厳格チェック
+        if (bpPayment.getAmount() == null || bpPayment.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(400, "BP支払金額は必須かつ正数である必要があります (id=" + bpPaymentId + ")");
         }
 
         // ステータス適格性チェック
@@ -101,7 +109,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         if (bpPayment.getWorkRecordId() != null) {
             WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
-                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth());
+                monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth().trim());
             }
         }
 
@@ -127,7 +135,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
                 .issueDate(issueDate)
                 .dueDate(dueDate)
-                .amount(bpPayment.getAmount() != null ? bpPayment.getAmount() : BigDecimal.ZERO)
+                .amount(bpPayment.getAmount())
                 .accountItemCode(purchaseAccount.getExternalId())
                 .taxCode(taxMapping.getExternalId())
                 .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
@@ -165,7 +173,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         String idempotencyKey = "PAYMENT_SYNC:" + bpPayment.getId() + ":" + latestPurchase.getExternalId();
-        String payload = "{\"bpPaymentId\":" + bpPaymentId + ",\"externalDealId\":\"" + latestPurchase.getExternalId() + "\"}";
+        String payload = "{\"bpPaymentId\":" + bpPaymentId + ",\"externalDealId\":\"" + latestPurchase.getExternalId() + "\",\"expectedAmount\":" + bpPayment.getAmount() + "}";
         String payloadHash = calculateSha256(payload);
         Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bpPayment);
 
@@ -181,6 +189,14 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
         if (expense == null) {
             throw new BusinessException(404, "経費申請レコードが見つかりません (id=" + expenseRequestId + ")");
+        }
+
+        // P1-08: 金額・日付 NULL 厳格チェック
+        if (expense.getAmount() == null || expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(400, "経費金額は必須かつ正数である必要があります (id=" + expenseRequestId + ")");
+        }
+        if (expense.getExpenseDate() == null) {
+            throw new BusinessException(400, "経費発生日は必須です (id=" + expenseRequestId + ")");
         }
 
         if (!"承認済".equals(expense.getStatus())) {
@@ -203,7 +219,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 .engineerCode(engineerCode)
                 .category(expense.getCategory())
                 .amount(expense.getAmount())
-                .expenseDate(expense.getExpenseDate() != null ? expense.getExpenseDate() : LocalDate.now())
+                .expenseDate(expense.getExpenseDate())
                 .accountItemCode(expenseAccount.getExternalId())
                 .taxCode(taxMapping.getExternalId())
                 .description(expense.getDescription())
@@ -239,59 +255,44 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             return;
         }
 
-        try {
-            CanonicalPurchaseDeal canonical;
-            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
-                // P1-07: Worker は保存済み payload_snapshot を直接デシリアライズして送信
-                canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalPurchaseDeal.class);
-            } else {
-                BpPayment bpPayment = bpPaymentMapper.selectById(job.getTargetId());
-                if (bpPayment == null) {
-                    jobService.markFailed(jobId, "BP_PAYMENT_NOT_FOUND", "BP支払レコードが見つかりません");
-                    return;
-                }
-                String bpCompanyCode = bpPayment.getBpCompanyId() != null ? "BP-" + bpPayment.getBpCompanyId() : "BP-UNKNOWN";
-                ExternalMapping purchaseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_PURCHASE", "PURCHASE_DEFAULT");
-                ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
-
-                LocalDate issueDate = resolveBpIssueDate(bpPayment);
-                LocalDate dueDate = issueDate.plusMonths(1);
-
-                canonical = CanonicalPurchaseDeal.builder()
-                        .bpPaymentId(bpPayment.getId())
-                        .bpCompanyId(bpPayment.getBpCompanyId())
-                        .bpCompanyCode(bpCompanyCode)
-                        .bpCompanyName(bpPayment.getPayeeCompanyName() != null ? bpPayment.getPayeeCompanyName() : "BP会社ID:" + bpPayment.getBpCompanyId())
-                        .issueDate(issueDate)
-                        .dueDate(dueDate)
-                        .amount(bpPayment.getAmount() != null ? bpPayment.getAmount() : BigDecimal.ZERO)
-                        .accountItemCode(purchaseAccount != null ? purchaseAccount.getExternalId() : null)
-                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                        .remarks(bpPayment.getRemarks() != null ? bpPayment.getRemarks() : "BP外注費: " + bpPayment.getId())
-                        .build();
-            }
-
-            AccountingProvider provider = providerFactory.getProvider(conn);
-            CanonicalDealResult result = provider.upsertPurchaseDeal(conn, canonical);
-
-            if (result.isSuccess()) {
-                jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
-                        "freee仕入取引作成成功: dealId=" + result.getExternalId());
-            } else {
-                if (result.isRetryable()) {
-                    jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
-                            result.getRetryAfterSeconds());
-                } else {
-                    jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
-                }
-            }
-        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-            log.warn("Token refresh in progress during BP purchase job {}: rescheduling retry in 5s", jobId);
-            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
-        } catch (Exception e) {
-            log.error("Error executing BP purchase job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "BP仕入取引作成中にシステムエラーが発生しました", 60);
+        // P1-07: Snapshot 必須・SHA-256 検証
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
         }
+
+        String calculatedHash = calculateSha256(job.getPayloadSnapshot());
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculatedHash)) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                CanonicalPurchaseDeal canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalPurchaseDeal.class);
+
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalDealResult result = provider.upsertPurchaseDeal(conn, canonical);
+
+                if (result.isSuccess()) {
+                    jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
+                            "freee仕入取引作成成功: dealId=" + result.getExternalId());
+                } else {
+                    if (result.isRetryable()) {
+                        jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
+                                result.getRetryAfterSeconds());
+                    } else {
+                        jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
+                    }
+                }
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during BP purchase job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing BP purchase job: jobId={}", jobId, e);
+                jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "BP仕入取引作成中にシステムエラーが発生しました", 60);
+            }
+        });
     }
 
     @Override
@@ -302,70 +303,87 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         IntegrationConnection conn = connectionService.getById(job.getConnectionId());
-        BpPayment bpPayment = bpPaymentMapper.selectById(job.getTargetId());
-        if (bpPayment == null) {
-            jobService.markFailed(jobId, "BP_PAYMENT_NOT_FOUND", "BP支払レコードが見つかりません");
+        if (conn == null) {
+            jobService.markFailed(jobId, "CONNECTION_NOT_FOUND", "外部連携接続情報が見つかりません");
             return;
         }
 
-        try {
-            IntegrationJob latestPurchase = jobService.getLatestJob("BP_PAYMENT", bpPayment.getId(), "BP_PURCHASE_SYNC");
-            if (latestPurchase == null || latestPurchase.getExternalId() == null) {
-                jobService.markFailed(jobId, "PURCHASE_JOB_MISSING", "先行するBP仕入連携ジョブが見つかりません");
-                return;
-            }
-
-            AccountingProvider provider = providerFactory.getProvider(conn);
-            CanonicalPaymentSync syncResult = provider.fetchDealPayment(conn, latestPurchase.getExternalId());
-
-            if (syncResult == null || !syncResult.isSettled()) {
-                jobService.markRetryable(jobId, "PAYMENT_NOT_SETTLED", "外部取引的の決済がまだ完了していません", 300);
-                return;
-            }
-
-            // dealId 一致確認 (P1-08)
-            if (!latestPurchase.getExternalId().equals(syncResult.getDealId())) {
-                jobService.markFailed(jobId, "DEAL_ID_MISMATCH",
-                        "外部取引IDが一致しません");
-                return;
-            }
-
-            // 金額一致確認 (P1-08: NULL厳格チェック)
-            if (bpPayment.getAmount() == null || syncResult.getAmount() == null
-                    || bpPayment.getAmount().compareTo(syncResult.getAmount()) != 0) {
-                jobService.markFailed(jobId, "AMOUNT_MISMATCH",
-                        "決済金額が内部BP支払金額と一致しません");
-                return;
-            }
-
-            // 支払日確認 (P1-08: NULL厳格チェック)
-            if (syncResult.getPaymentDate() == null) {
-                jobService.markFailed(jobId, "PAYMENT_DATE_MISSING", "外部決済日が取得できませんでした");
-                return;
-            }
-
-            // BP支払ステータス更新 (CAS 条件付き)
-            int updated = bpPaymentMapper.update(null, new LambdaUpdateWrapper<BpPayment>()
-                    .set(BpPayment::getStatus, "支払済")
-                    .set(BpPayment::getPaidDate, syncResult.getPaymentDate())
-                    .eq(BpPayment::getId, bpPayment.getId())
-                    .eq(BpPayment::getStatus, "未払"));
-
-            if (updated == 0 && !"支払済".equals(bpPayment.getStatus())) {
-                jobService.markFailed(jobId, "CAS_CONFLICT", "BP支払ステータスの更新競合が発生しました");
-                return;
-            }
-
-            jobService.markSucceeded(jobId, syncResult.getDealId(), null,
-                    "決済同期完了: dealId=" + syncResult.getDealId() + ", paymentDate=" + syncResult.getPaymentDate());
-
-        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-            log.warn("Token refresh in progress during payment sync job {}: rescheduling retry in 5s", jobId);
-            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
-        } catch (Exception e) {
-            log.error("Error executing payment sync job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", "支払実績同期処理中にシステムエラーが発生しました", 60);
+        // P1-07: Snapshot 必須・SHA-256 検証
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
         }
+
+        String calculatedHash = calculateSha256(job.getPayloadSnapshot());
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculatedHash)) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(job.getPayloadSnapshot());
+                String externalDealId = node.has("externalDealId") ? node.get("externalDealId").asText() : null;
+                BigDecimal expectedAmount = node.has("expectedAmount") ? new BigDecimal(node.get("expectedAmount").asText()) : null;
+
+                if (externalDealId == null || externalDealId.isBlank()) {
+                    jobService.markFailed(jobId, "DEAL_ID_MISSING_IN_SNAPSHOT", "Snapshotに外部取引IDが含まれていません");
+                    return;
+                }
+
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalPaymentSync syncResult = provider.fetchDealPayment(conn, externalDealId);
+
+                if (syncResult == null || !syncResult.isSettled()) {
+                    jobService.markRetryable(jobId, "PAYMENT_NOT_SETTLED", "外部取引的の決済がまだ完了していません", 300);
+                    return;
+                }
+
+                // dealId 一致確認 (P1-08)
+                if (!externalDealId.equals(syncResult.getDealId())) {
+                    jobService.markFailed(jobId, "DEAL_ID_MISMATCH", "外部取引IDが一致しません");
+                    return;
+                }
+
+                // 金額一致確認 (P1-08: NULL厳格チェック)
+                if (expectedAmount == null || syncResult.getAmount() == null
+                        || expectedAmount.compareTo(syncResult.getAmount()) != 0) {
+                    jobService.markFailed(jobId, "AMOUNT_MISMATCH", "決済金額が内部BP支払金額と一致しません");
+                    return;
+                }
+
+                // 支払日確認 (P1-08: NULL厳格チェック)
+                if (syncResult.getPaymentDate() == null) {
+                    jobService.markFailed(jobId, "PAYMENT_DATE_MISSING", "外部決済日が取得できませんでした");
+                    return;
+                }
+
+                // BP支払ステータス更新 (CAS 条件付き)
+                int updated = bpPaymentMapper.update(null, new LambdaUpdateWrapper<BpPayment>()
+                        .set(BpPayment::getStatus, "支払済")
+                        .set(BpPayment::getPaidDate, syncResult.getPaymentDate())
+                        .eq(BpPayment::getId, job.getTargetId())
+                        .eq(BpPayment::getStatus, "未払"));
+
+                if (updated == 0) {
+                    BpPayment current = bpPaymentMapper.selectById(job.getTargetId());
+                    if (current != null && !"支払済".equals(current.getStatus())) {
+                        jobService.markFailed(jobId, "CAS_CONFLICT", "BP支払ステータスの更新競合が発生しました");
+                        return;
+                    }
+                }
+
+                jobService.markSucceeded(jobId, syncResult.getDealId(), null,
+                        "決済同期完了: dealId=" + syncResult.getDealId() + ", paymentDate=" + syncResult.getPaymentDate());
+
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during payment sync job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing payment sync job: jobId={}", jobId, e);
+                jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", "支払実績同期処理中にシステムエラーが発生しました", 60);
+            }
+        });
     }
 
     @Override
@@ -376,69 +394,61 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         }
 
         IntegrationConnection conn = connectionService.getById(job.getConnectionId());
-        ExpenseRequest expense = expenseRequestMapper.selectById(job.getTargetId());
-        if (expense == null) {
-            jobService.markFailed(jobId, "EXPENSE_NOT_FOUND", "経費申請レコードが見つかりません");
+        if (conn == null) {
+            jobService.markFailed(jobId, "CONNECTION_NOT_FOUND", "外部連携接続情報が見つかりません");
             return;
         }
 
-        try {
-            CanonicalExpenseDeal canonical;
-            if (job.getPayloadSnapshot() != null && !job.getPayloadSnapshot().isBlank()) {
-                // P1-07: Worker は保存済み payload_snapshot を直接デシリアライズして送信
-                canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalExpenseDeal.class);
-            } else {
-                String engineerCode = "ENG-" + expense.getEngineerId();
-                ExternalMapping expenseAccount = mappingService.getMapping(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");
-                ExternalMapping taxMapping = mappingService.getMapping(conn.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
-
-                canonical = CanonicalExpenseDeal.builder()
-                        .expenseId(expense.getId())
-                        .expenseNo(expense.getExpenseNo() != null ? expense.getExpenseNo() : "EX-" + expense.getId())
-                        .engineerId(expense.getEngineerId())
-                        .engineerCode(engineerCode)
-                        .category(expense.getCategory())
-                        .amount(expense.getAmount())
-                        .expenseDate(expense.getExpenseDate() != null ? expense.getExpenseDate() : LocalDate.now())
-                        .accountItemCode(expenseAccount != null ? expenseAccount.getExternalId() : null)
-                        .taxCode(taxMapping != null ? taxMapping.getExternalId() : null)
-                        .description(expense.getDescription())
-                        .build();
-            }
-
-            AccountingProvider provider = providerFactory.getProvider(conn);
-            CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
-
-            if (result.isSuccess()) {
-                // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
-                int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
-                        .set(ExpenseRequest::getStatus, "会計連携済")
-                        .eq(ExpenseRequest::getId, expense.getId())
-                        .eq(ExpenseRequest::getStatus, "承認済"));
-
-                if (updated != 1) {
-                    jobService.markFailed(jobId, "EXPENSE_STATUS_MUTATED",
-                            "経費申請ステータスのCAS更新に失敗しました (承認済ではありません)");
-                    return;
-                }
-
-                jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
-                        "freee経費取引作成成功: dealId=" + result.getExternalId());
-            } else {
-                if (result.isRetryable()) {
-                    jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
-                            result.getRetryAfterSeconds());
-                } else {
-                    jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
-                }
-            }
-        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
-            log.warn("Token refresh in progress during expense job {}: rescheduling retry in 5s", jobId);
-            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
-        } catch (Exception e) {
-            log.error("Error executing expense job: jobId={}", jobId, e);
-            jobService.markRetryable(jobId, "EXPENSE_JOB_EXCEPTION", e.getMessage(), 60);
+        // P1-07: Snapshot 必須・SHA-256 検証
+        if (job.getPayloadSnapshot() == null || job.getPayloadSnapshot().isBlank()) {
+            jobService.markFailed(jobId, "LEGACY_SNAPSHOT_MISSING", "Snapshotが存在しないジョブは実行できません");
+            return;
         }
+
+        String calculatedHash = calculateSha256(job.getPayloadSnapshot());
+        if (job.getPayloadHash() != null && !job.getPayloadHash().equals(calculatedHash)) {
+            jobService.markFailed(jobId, "PAYLOAD_HASH_MISMATCH", "SnapshotのSHA-256ハッシュが一致しません");
+            return;
+        }
+
+        AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
+            try {
+                CanonicalExpenseDeal canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalExpenseDeal.class);
+
+                AccountingProvider provider = providerFactory.getProvider(conn);
+                CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
+
+                if (result.isSuccess()) {
+                    // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
+                    int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
+                            .set(ExpenseRequest::getStatus, "会計連携済")
+                            .eq(ExpenseRequest::getId, job.getTargetId())
+                            .eq(ExpenseRequest::getStatus, "承認済"));
+
+                    if (updated != 1) {
+                        jobService.markFailed(jobId, "CAS_CONFLICT",
+                                "経費申請ステータスのCAS更新に失敗しました (承認済ではありません)");
+                        return;
+                    }
+
+                    jobService.markSucceeded(jobId, result.getExternalId(), result.getProviderRequestId(),
+                            "freee経費取引作成成功: dealId=" + result.getExternalId());
+                } else {
+                    if (result.isRetryable()) {
+                        jobService.markRetryable(jobId, result.getErrorCode(), result.getErrorMessageSafe(),
+                                result.getRetryAfterSeconds());
+                    } else {
+                        jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
+                    }
+                }
+            } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+                log.warn("Token refresh in progress during expense job {}: rescheduling retry in 5s", jobId);
+                jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
+            } catch (Exception e) {
+                log.error("Error executing expense job: jobId={}", jobId, e);
+                jobService.markRetryable(jobId, "EXPENSE_JOB_EXCEPTION", "経費取引連携処理中にエラーが発生しました", 60);
+            }
+        });
     }
 
     private IntegrationConnection resolveConnection(String tenantId, Long legalEntityId, String provider, String product) {

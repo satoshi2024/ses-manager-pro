@@ -74,8 +74,10 @@ public class CsvAccountingExportProvider implements AccountingProvider {
     }
 
     @Override
-    public List<CanonicalPaymentSync> fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate) {
-        return Collections.emptyList();
+    public com.ses.dto.accounting.PaymentFetchResult fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate) {
+        return com.ses.dto.accounting.PaymentFetchResult.builder()
+                .payments(Collections.emptyList())
+                .build();
     }
 
     @Override

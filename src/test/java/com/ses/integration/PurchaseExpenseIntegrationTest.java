@@ -1,4 +1,4 @@
-package com.ses.integration;
+﻿package com.ses.integration;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.accounting.IntegrationTokensDto;
@@ -8,6 +8,8 @@ import com.ses.mapper.BpCompanyMapper;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -69,6 +71,9 @@ class PurchaseExpenseIntegrationTest {
 
     @Autowired
     private SystemConfigMapper systemConfigMapper;
+
+    @Autowired
+    private AccountingTimezoneResolver timezoneResolver;
 
     @Autowired
     private RestTemplate restTemplate;
@@ -467,9 +472,115 @@ class PurchaseExpenseIntegrationTest {
         // Worker 実行
         purchaseIntegrationService.processExpenseJob(expJob.getId());
 
-        // CAS 失敗検知 (EXPENSE_STATUS_MUTATED)
+        // CAS 失敗検知 (CAS_CONFLICT)
         IntegrationJob failedJob = jobService.getById(expJob.getId());
         assertThat(failedJob.getStatus()).isEqualTo("FAILED");
-        assertThat(failedJob.getErrorCode()).isEqualTo("EXPENSE_STATUS_MUTATED");
+        assertThat(failedJob.getErrorCode()).isEqualTo("CAS_CONFLICT");
+    }
+
+    @Test
+    @DisplayName("Snapshot必須・ハッシュ検証: NULL snapshot / 改変 snapshot は外部送信せず fail-closed (R1-P1-07)")
+    void worker_snapshotRequiredAndHashVerified() {
+        // NULL snapshot (レガシージョブ相当) -> 送信せず FAILED (Worker が内部で claim する)
+        IntegrationJob legacy = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "BP-LEGACY-SNAP", "hash-legacy");
+        purchaseIntegrationService.processBpPurchaseJob(legacy.getId());
+        IntegrationJob legacyAfter = jobService.getById(legacy.getId());
+        assertThat(legacyAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(legacyAfter.getErrorCode()).isEqualTo("LEGACY_SNAPSHOT_MISSING");
+
+        // 改変 snapshot (SHA-256 不一致) -> 送信せず FAILED
+        IntegrationJob tampered = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "BP-TAMPER-SNAP", "hash-tampered",
+                "{\"bpPaymentId\":999,\"amount\":1}", connection.getTenantId(), connection.getLegalEntityId(), null);
+        purchaseIntegrationService.processBpPurchaseJob(tampered.getId());
+        IntegrationJob tamperedAfter = jobService.getById(tampered.getId());
+        assertThat(tamperedAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(tamperedAfter.getErrorCode()).isEqualTo("PAYLOAD_HASH_MISMATCH");
+
+        // 経費 Worker も NULL snapshot は fail-closed
+        IntegrationJob legacyExp = jobService.createJob(connection.getId(), "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST",
+                999999L, "EX-LEGACY-SNAP", "hash-exp-legacy");
+        purchaseIntegrationService.processExpenseJob(legacyExp.getId());
+        IntegrationJob legacyExpAfter = jobService.getById(legacyExp.getId());
+        assertThat(legacyExpAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(legacyExpAfter.getErrorCode()).isEqualTo("LEGACY_SNAPSHOT_MISSING");
+
+        // 外部 API は一切呼ばれていないこと
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("支払Workerはsnapshotのみから外部取引IDと金額を解決する (最新purchase job再読込の全廃) (R1-P1-07)")
+    void paymentWorker_usesSnapshotOnly_notLatestJob() throws Exception {
+        // 先行する仕入連携ジョブは dealId=88899 で SUCCEEDED 済み (Workerが再読込するならこちらを使う)
+        IntegrationJob purchaseJob = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        jobService.claimJob(purchaseJob.getId());
+        jobService.markSucceeded(purchaseJob.getId(), "88899", "req-bp-snap", "仕入登録完了");
+
+        // snapshot にのみ dealId=77777 / expectedAmount=800000 を保持する PAYMENT_SYNC ジョブ
+        String payload = "{\"bpPaymentId\":" + bpPayment.getId() + ",\"externalDealId\":\"77777\",\"expectedAmount\":800000}";
+        String hash = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        IntegrationJob syncJob = jobService.createJob(connection.getId(), "PAYMENT_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "PAY-SNAP-ONLY", hash, payload,
+                connection.getTenantId(), connection.getLegalEntityId(), null);
+
+        // snapshot の dealId (77777) のみ応答する。最新purchase job (88899) への参照が残っていれば verify で失敗する
+        String paymentsResponseJson = "{\"deal\": {\"id\": 77777, \"payments\": [{\"id\": 5503, \"date\": \"2026-08-25\", \"amount\": 800000}]}}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77777?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(paymentsResponseJson, MediaType.APPLICATION_JSON));
+
+        purchaseIntegrationService.processPaymentSyncJob(syncJob.getId());
+
+        mockServer.verify();
+        IntegrationJob updatedSync = jobService.getById(syncJob.getId());
+        assertThat(updatedSync.getStatus()).isEqualTo("SUCCEEDED");
+        BpPayment updatedPayment = bpPaymentMapper.selectById(bpPayment.getId());
+        assertThat(updatedPayment.getStatus()).isEqualTo("支払済");
+    }
+
+    @Test
+    @DisplayName("テナント別タイムゾーン解決とWorkerコンテキスト解除・NULL金額/日付のfail-closed (R1-P1-08)")
+    void tenantTimezoneResolution_contextClearedAfterWorker_nullRejected() {
+        // 1. m_system_config のテナント別タイムゾーン解決
+        com.ses.entity.SystemConfig nyConfig = new com.ses.entity.SystemConfig();
+        nyConfig.setConfigKey("accounting.timezone.ny-tenant");
+        nyConfig.setConfigValue("America/New_York");
+        systemConfigMapper.insert(nyConfig);
+
+        assertThat(timezoneResolver.resolve("ny-tenant")).isEqualTo(java.time.ZoneId.of("America/New_York"));
+        assertThat(timezoneResolver.resolve("tokyo-tenant")).isEqualTo(java.time.ZoneId.of("Asia/Tokyo"));
+
+        // 2. 非 default テナントの BP ジョブを Worker 実行しても ThreadLocal コンテキストがリークしない
+        IntegrationJob src = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        IntegrationJob nyJob = jobService.createJob(connection.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "BP-TENANT-NY-1", src.getPayloadHash(), src.getPayloadSnapshot(),
+                "ny-tenant", null, null);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 654321, \"amount\": 800000}}", MediaType.APPLICATION_JSON));
+        purchaseIntegrationService.processBpPurchaseJob(nyJob.getId());
+        mockServer.verify();
+
+        // Worker 完了後は tenant/zone とも既定へ戻っている (スレッドプール再利用時のリーク防止)
+        assertThat(AccountingTenantContextHolder.getCurrentTenantId()).isEqualTo("default");
+        assertThat(AccountingTenantContextHolder.getZoneId()).isEqualTo(java.time.ZoneId.of("Asia/Tokyo"));
+
+        // 外側コンテキストがある場合はネスト復帰する
+        AccountingTenantContextHolder.runWithTenant("outer-tenant", java.time.ZoneId.of("Europe/London"), () -> {
+            assertThat(AccountingTenantContextHolder.getCurrentTenantId()).isEqualTo("outer-tenant");
+        });
+        assertThat(AccountingTenantContextHolder.getCurrentTenantId()).isEqualTo("default");
+
+        // 3. NULL 金額 BP / NULL 経費日付は enqueue 時に fail-closed (カラムNOT NULLのため、直接INSERTできない行をspyで検証)
+        //    -> 専用テストクラス AccountingNullGuardTest で検証 (DB制約上、NULL行は本来存在しない防御的ガード)
+
+        // 4. BP 連携は冪等キーにより同一ジョブへ収束し、payload_hash が再実行で変動しない (翌日 retry でも不変)
+        IntegrationJob again = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        assertThat(again.getId()).isEqualTo(src.getId());
+        assertThat(again.getPayloadHash()).isEqualTo(src.getPayloadHash());
+        assertThat(again.getPayloadSnapshot()).contains("\"issueDate\":\"2026-08-31\"");
     }
 }

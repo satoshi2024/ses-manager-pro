@@ -128,6 +128,23 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
         return list(wrapper.orderByAsc(ExternalMapping::getObjectType).orderByAsc(ExternalMapping::getInternalCode));
     }
 
+    @Override
+    public List<ExternalMapping> listByConnectionsScoped(Long connectionId, String objectType, java.util.Set<Long> allowedConnectionIds) {
+        if (allowedConnectionIds == null) {
+            return listByConnection(connectionId, objectType);
+        }
+        if (allowedConnectionIds.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        LambdaQueryWrapper<ExternalMapping> wrapper = new LambdaQueryWrapper<ExternalMapping>()
+                .eq(ExternalMapping::getConnectionId, connectionId)
+                .in(ExternalMapping::getConnectionId, allowedConnectionIds);
+        if (objectType != null && !objectType.isBlank()) {
+            wrapper.eq(ExternalMapping::getObjectType, objectType);
+        }
+        return list(wrapper.orderByAsc(ExternalMapping::getObjectType).orderByAsc(ExternalMapping::getInternalCode));
+    }
+
     private AccountingProvider resolveProvider(String providerName) {
         Map<String, AccountingProvider> providers = applicationContext.getBeansOfType(AccountingProvider.class);
         for (AccountingProvider p : providers.values()) {

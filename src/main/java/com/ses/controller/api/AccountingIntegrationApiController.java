@@ -23,6 +23,7 @@ import com.ses.service.InvoiceService;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.AccountingReconciliationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.ExternalMappingService;
@@ -64,6 +65,8 @@ public class AccountingIntegrationApiController {
     private final com.ses.mapper.BpPaymentMapper bpPaymentMapper;
     private final com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
     private final com.ses.mapper.EngineerMapper engineerMapper;
+    private final com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
+    private final com.ses.mapper.InvoiceMapper invoiceMapper;
 
     /** SecurityContext からユーザーIDを取得する (fail-closed)。 */
     private Long resolveActorId() {
@@ -74,18 +77,48 @@ public class AccountingIntegrationApiController {
         return userId;
     }
 
+    /** マネージャーの許可組織ID集合。フルアクセス時は null。 */
+    private java.util.Set<Long> allowedOrgIdsOrNull() {
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return null;
+        }
+        return organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+    }
+
+    /** 許可組織に紐づく法人ID集合 (design §5.2: 接続一覧の legal_entity スコープ)。 */
+    private java.util.Set<Long> allowedLegalEntityIds(java.util.Set<Long> allowedOrgIds) {
+        if (allowedOrgIds == null) {
+            return null;
+        }
+        if (allowedOrgIds.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return organizationUnitMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.OrganizationUnit>()
+                        .in(com.ses.entity.OrganizationUnit::getId, allowedOrgIds))
+                .stream()
+                .map(com.ses.entity.OrganizationUnit::getLegalEntityId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
     // === 1. 接続マスタ (Connection) API ===
 
     @GetMapping("/connections")
     public ApiResult<List<IntegrationConnection>> listConnections(
             @RequestParam(value = "tenantId", defaultValue = "default") String tenantId) {
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (allowedOrgIds.isEmpty()) {
+        // R1-P1-06: マネージャーは許可法人の接続のみ (SQL境界)。空集合は0件。
+        java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
+        java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
+
+        List<IntegrationConnection> list;
+        if (allowedLegalEntities != null) {
+            if (allowedLegalEntities.isEmpty()) {
                 return ApiResult.success(java.util.Collections.emptyList());
             }
+            list = connectionService.listConnectionsByLegalEntities(tenantId, allowedLegalEntities);
+        } else {
+            list = connectionService.listConnections(tenantId);
         }
-        List<IntegrationConnection> list = connectionService.listConnections(tenantId);
         for (IntegrationConnection c : list) {
             c.setEncryptedTokens(null); // セキュリティのため確実にマスク
         }
@@ -94,13 +127,17 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/connections/{id}/health")
     public ApiResult<Boolean> checkHealth(@PathVariable("id") Long connectionId) {
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (allowedOrgIds.isEmpty()) {
+        // R1-P1-06: 権限外接続は存在しないものとして 404
+        IntegrationConnection conn = null;
+        java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIdsOrNull());
+        if (allowedLegalEntities != null) {
+            if (allowedLegalEntities.isEmpty()) {
                 return ApiResult.error(404, "接続マスタが見つかりません");
             }
+            conn = connectionService.getByIdScoped(connectionId, allowedLegalEntities);
+        } else {
+            conn = connectionService.getById(connectionId);
         }
-        IntegrationConnection conn = connectionService.getById(connectionId);
         if (conn == null) {
             return ApiResult.error(404, "接続マスタが見つかりません");
         }
@@ -128,13 +165,18 @@ public class AccountingIntegrationApiController {
     public ApiResult<List<ExternalMapping>> listMappings(
             @RequestParam("connectionId") Long connectionId,
             @RequestParam(value = "objectType", required = false) String objectType) {
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (allowedOrgIds.isEmpty()) {
+        // R1-P1-06: マネージャーは許可接続 (許可法人) のマッピングのみ (SQL境界)
+        java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
+        java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
+        java.util.Set<Long> allowedConnectionIds = null;
+        if (allowedLegalEntities != null) {
+            if (allowedLegalEntities.isEmpty()) {
                 return ApiResult.success(java.util.Collections.emptyList());
             }
+            allowedConnectionIds = connectionService.listConnectionsByLegalEntities("default", allowedLegalEntities)
+                    .stream().map(IntegrationConnection::getId).collect(java.util.stream.Collectors.toSet());
         }
-        List<ExternalMapping> list = mappingService.listByConnection(connectionId, objectType);
+        List<ExternalMapping> list = mappingService.listByConnectionsScoped(connectionId, objectType, allowedConnectionIds);
         return ApiResult.success(list);
     }
 
@@ -166,6 +208,11 @@ public class AccountingIntegrationApiController {
         LambdaQueryWrapper<IntegrationJob> wrapper = new LambdaQueryWrapper<IntegrationJob>()
                 .orderByDesc(IntegrationJob::getId);
 
+        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        if (currentTenantId != null && !currentTenantId.isBlank()) {
+            wrapper.eq(IntegrationJob::getTenantId, currentTenantId);
+        }
+
         if (status != null && !status.isBlank()) {
             wrapper.eq(IntegrationJob::getStatus, status);
         }
@@ -176,7 +223,7 @@ public class AccountingIntegrationApiController {
             wrapper.eq(IntegrationJob::getTargetType, targetType);
         }
 
-        // マネージャーの組織スコープ境界適用 (design §5.2)
+        // マネージャーの組織スコープ境界適用 (design §5.2, R1-P1-06)
         if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
             java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
             if (allowedOrgIds.isEmpty()) {
@@ -193,6 +240,12 @@ public class AccountingIntegrationApiController {
     public ApiResult<IntegrationJobDetailDto> getJobDetail(@PathVariable("id") Long jobId) {
         LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
                 .eq(IntegrationJob::getId, jobId);
+
+        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        if (currentTenantId != null && !currentTenantId.isBlank()) {
+            query.eq(IntegrationJob::getTenantId, currentTenantId);
+        }
+
         if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
             java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
             if (allowedOrgIds.isEmpty()) {
@@ -212,6 +265,17 @@ public class AccountingIntegrationApiController {
     @PostMapping("/jobs/{id}/retry")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> retryJob(@PathVariable("id") Long jobId) {
+        LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getId, jobId);
+        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        if (currentTenantId != null && !currentTenantId.isBlank()) {
+            query.eq(IntegrationJob::getTenantId, currentTenantId);
+        }
+        IntegrationJob job = jobService.getOne(query);
+        if (job == null) {
+            return ApiResult.error(404, "ジョブが見つかりません");
+        }
+
         jobService.resetForManualRetry(jobId);
         return ApiResult.success(null);
     }
@@ -219,26 +283,46 @@ public class AccountingIntegrationApiController {
     @PostMapping("/jobs/{id}/cancel")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> cancelJob(@PathVariable("id") Long jobId,
-                                     @RequestParam(value = "reason", defaultValue = "手動キャンセル") String reason) {
-        jobService.cancelJob(jobId, reason);
+                                     @RequestParam(value = "reason", defaultValue = "REASON_CLIENT_CANCEL") String reason) {
+        LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getId, jobId);
+        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        if (currentTenantId != null && !currentTenantId.isBlank()) {
+            query.eq(IntegrationJob::getTenantId, currentTenantId);
+        }
+        IntegrationJob job = jobService.getOne(query);
+        if (job == null) {
+            return ApiResult.error(404, "ジョブが見つかりません");
+        }
+
+        // P1-11: 取消理由は機械可読コード (design §8.3)。未知・日本語入力は REASON_OTHER へ正規化
+        jobService.cancelJob(jobId, normalizeCancelReason(reason));
         return ApiResult.success(null);
+    }
+
+    /** 取消理由コードのホワイトリスト正規化 (design §8.3)。 */
+    private static String normalizeCancelReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "REASON_CLIENT_CANCEL";
+        }
+        String trimmed = reason.trim();
+        if (trimmed.startsWith("REASON_")) {
+            return trimmed;
+        }
+        return "REASON_OTHER";
     }
 
     // === 4. 送信プレビュー API ===
 
     @GetMapping("/preview/sales-invoice/{invoiceId}")
     public ApiResult<CanonicalSalesInvoice> previewSalesInvoice(@PathVariable("invoiceId") Long invoiceId) {
-        Invoice invoice = invoiceService.getById(invoiceId);
+        // R1-P1-06: 組織条件を最初のSQLへ適用 (権限外IDは 404)
+        java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
+        Invoice invoice = allowedOrgIds != null
+                ? invoiceMapper.selectForPreviewScoped(invoiceId, new java.util.ArrayList<>(allowedOrgIds))
+                : invoiceService.getById(invoiceId);
         if (invoice == null) {
             return ApiResult.error(404, "請求書が見つかりません");
-        }
-
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (orgId == null || !allowedOrgIds.contains(orgId)) {
-                return ApiResult.error(404, "請求書が見つかりません");
-            }
         }
 
         Customer customer = customerService.getById(invoice.getCustomerId());
@@ -271,16 +355,13 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/preview/bp-purchase/{bpPaymentId}")
     public ApiResult<CanonicalPurchaseDeal> previewBpPurchase(@PathVariable("bpPaymentId") Long bpPaymentId) {
-        BpPayment bp = bpPaymentMapper.selectById(bpPaymentId);
+        // R1-P1-06: 組織条件を最初のSQLへ適用 (権限外IDは 404)
+        java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
+        BpPayment bp = allowedOrgIds != null
+                ? bpPaymentMapper.selectForPreviewScoped(bpPaymentId, new java.util.ArrayList<>(allowedOrgIds))
+                : bpPaymentMapper.selectById(bpPaymentId);
         if (bp == null) {
             return ApiResult.error(404, "BP支払レコードが見つかりません");
-        }
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bp);
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (orgId == null || !allowedOrgIds.contains(orgId)) {
-                return ApiResult.error(404, "BP支払レコードが見つかりません");
-            }
         }
         CanonicalPurchaseDeal preview = CanonicalPurchaseDeal.builder()
                 .bpPaymentId(bp.getId())
@@ -299,16 +380,13 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/preview/expense/{expenseRequestId}")
     public ApiResult<CanonicalExpenseDeal> previewExpense(@PathVariable("expenseRequestId") Long expenseRequestId) {
-        ExpenseRequest exp = expenseRequestMapper.selectById(expenseRequestId);
+        // R1-P1-06: 組織条件を最初のSQLへ適用 (UNKNOWN履歴はfail-closed、権限外IDは 404)
+        java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
+        ExpenseRequest exp = allowedOrgIds != null
+                ? expenseRequestMapper.selectForPreviewScoped(expenseRequestId, new java.util.ArrayList<>(allowedOrgIds))
+                : expenseRequestMapper.selectById(expenseRequestId);
         if (exp == null) {
             return ApiResult.error(404, "経費申請レコードが見つかりません");
-        }
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
-            Long orgId = organizationResolver.resolveExpenseOrganizationId(exp);
-            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
-            if (orgId == null || !allowedOrgIds.contains(orgId)) {
-                return ApiResult.error(404, "経費申請レコードが見つかりません");
-            }
         }
         Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
         CanonicalExpenseDeal preview = CanonicalExpenseDeal.builder()

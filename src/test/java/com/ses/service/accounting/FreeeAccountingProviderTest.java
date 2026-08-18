@@ -416,7 +416,8 @@ class FreeeAccountingProviderTest {
         StringBuilder page0Deals = new StringBuilder("{\"deals\": [");
         for (int i = 0; i < 100; i++) {
             if (i > 0) page0Deals.append(",");
-            page0Deals.append("{\"id\": ").append(1000 + i).append(", \"ref_number\": \"OTHER-").append(i).append("\", \"amount\": 10000}");
+            page0Deals.append("{\"id\": ").append(1000 + i).append(", \"ref_number\": \"OTHER-").append(i)
+                    .append("\", \"amount\": 10000, \"company_id\": 99999}");
         }
         page0Deals.append("]}");
 
@@ -425,7 +426,7 @@ class FreeeAccountingProviderTest {
                 .andRespond(withSuccess(page0Deals.toString(), MediaType.APPLICATION_JSON));
 
         // 3. verifyDealCreatedByRefNumber: Page 1 (offset=100, limit=100) -> 対象 refNumber 発見！
-        String page1Deals = "{\"deals\": [{\"id\": 998877, \"ref_number\": \"INV-PAGINATION-TEST\", \"amount\": 500000}]}";
+        String page1Deals = "{\"deals\": [{\"id\": 998877, \"ref_number\": \"INV-PAGINATION-TEST\", \"amount\": 500000, \"company_id\": 99999}]}";
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page1Deals, MediaType.APPLICATION_JSON));
@@ -543,6 +544,49 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
+    @DisplayName("タイムアウト未知結果照合: ref_number一致でも金額・company_id不一致時はfail-closed (R1-P1-03)")
+    void unknownOutcome_strictMatch_failClosedOnAmountOrCompanyMismatch() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(889L)
+                .invoiceNo("INV-STRICT-TEST")
+                .total(new BigDecimal("500000"))
+                .build();
+
+        // 1. POST がタイムアウト
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+
+        // 2. 照合ページ0: ref_number は一致するが amount が不一致
+        String page0Deals = "{\"deals\": [{\"id\": 555111, \"ref_number\": \"INV-STRICT-TEST\", \"amount\": 499999, \"company_id\": 99999}]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0Deals, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult amountMismatch = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+        assertThat(amountMismatch.isSuccess()).isFalse();
+        assertThat(amountMismatch.isRetryable()).isTrue();
+
+        // 3. company_id 不一致 (別事業所の取引) も fail-closed
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+        String page0OtherCompany = "{\"deals\": [{\"id\": 555222, \"ref_number\": \"INV-STRICT-TEST\", \"amount\": 500000, \"company_id\": 88888}]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0OtherCompany, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult companyMismatch = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+        assertThat(companyMismatch.isSuccess()).isFalse();
+        assertThat(companyMismatch.isRetryable()).isTrue();
+    }
+
+    @Test
     @DisplayName("マルチノード3段階リース＆外部HTTPトランザクション外実行検証 (R1-P1-03 / design §1.3)")
     void forceRefreshToken_multiNode_3StepLease_httpOutsideTx() {
         IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-refresh-test", null, "freee", "accounting");
@@ -584,6 +628,57 @@ class FreeeAccountingProviderTest {
 
         assertThat(tokensB.getAccessToken()).isEqualTo("access-v2");
         assertThat(oauthCallCount.get()).isEqualTo(1); // OAuth API呼出は1回のみ！
+    }
+
+    @Test
+    @DisplayName("401復旧時のobserved versionはDB snapshotから取得され、stale connection objectを誤用しない (R1-P1-03)")
+    void unauthorized401_usesSnapshotVersion_notStaleObjectVersion() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-stale-test", null, "freee", "accounting");
+        connectionService.saveTokens(conn.getId(), IntegrationTokensDto.builder()
+                .accessToken("access-s1")
+                .refreshToken("refresh-s1")
+                .tokenType("Bearer")
+                .expiresIn(3600L)
+                .build(), 77777L, "テスト事業所", 1L);
+
+        // 他ノード相当: DBを token_version=2 まで進める
+        connectionService.forceRefreshToken(conn.getId(), current -> IntegrationTokensDto.builder()
+                .accessToken("access-s2")
+                .refreshToken("refresh-s2")
+                .tokenType("Bearer")
+                .expiresIn(3600L)
+                .build());
+
+        // stale connection object: メモリ上は古い tokenVersion=1 のまま
+        IntegrationConnection stale = connectionService.getById(conn.getId());
+        stale.setTokenVersion(1);
+        stale.setEncryptedTokens(null); // ヘッダー取得はDB snapshot経由であるべき
+
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(790L)
+                .invoiceNo("INV-STALE-TEST")
+                .total(new BigDecimal("100000"))
+                .build();
+
+        // DB上の現行トークン(access-s2)に対して 401 -> observed version(2)でリフレッシュされ、リプレイ成功
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer access-s2"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED).body("{\"message\": \"Invalid token\"}").contentType(MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://accounts.secure.freee.co.jp/public_api/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"access_token\": \"access-s3\", \"refresh_token\": \"refresh-s3\", \"expires_in\": 3600}", MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer access-s3"))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 666001, \"amount\": 100000}}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(stale, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("666001");
     }
 
     @Test

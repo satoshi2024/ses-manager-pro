@@ -165,9 +165,85 @@ public interface BpPaymentMapper extends BaseMapper<BpPayment> {
     @Select("<script>SELECT * FROM t_bp_payment WHERE work_record_id IN <foreach collection='workRecordIds' item='id' open='(' separator=',' close=')'>#{id}</foreach> AND deleted_flag = 0 ORDER BY work_record_id, layer_order</script>")
     List<BpPayment> selectByWorkRecordIds(@Param("workRecordIds") List<Long> workRecordIds);
 
+    /** 会計連携プレビュー用の組織スコープ付き取得 (R1-P1-06 / design §5.1, §5.2)。権限外は null。 */
+    @Select("""
+        <script>
+        SELECT bp.* FROM t_bp_payment bp
+        LEFT JOIN t_work_record wr ON wr.id = bp.work_record_id
+        WHERE bp.id = #{id} AND bp.deleted_flag = 0
+          AND (
+            <if test="orgIds.size() == 0">1 = 0</if>
+            <if test="orgIds.size() > 0">
+              EXISTS (
+                SELECT 1 FROM m_cost_center cc
+                WHERE cc.id = bp.cost_center_id AND cc.organization_id IS NOT NULL
+                  AND cc.organization_id IN <foreach collection="orgIds" item="oid" open="(" separator="," close=")">#{oid}</foreach>
+              )
+              OR (
+                NOT EXISTS (
+                  SELECT 1 FROM m_cost_center cc WHERE cc.id = bp.cost_center_id AND cc.organization_id IS NOT NULL
+                )
+                AND EXISTS (
+                  SELECT 1 FROM t_contract c0
+                  JOIN t_user_organization uo0 ON uo0.user_id = c0.sales_user_id
+                       AND uo0.primary_flag = 1 AND uo0.deleted_flag = 0
+                       AND uo0.valid_from &lt;= CASE WHEN wr.work_month IS NULL OR wr.work_month = '' THEN CURRENT_DATE
+                                                    ELSE CAST(CONCAT(TRIM(wr.work_month), '-01') AS DATE) + INTERVAL '1' MONTH - INTERVAL '1' DAY
+                                               END
+                       AND (uo0.valid_to IS NULL OR uo0.valid_to &gt;= CASE WHEN wr.work_month IS NULL OR wr.work_month = '' THEN CURRENT_DATE
+                                                                           ELSE CAST(CONCAT(TRIM(wr.work_month), '-01') AS DATE) + INTERVAL '1' MONTH - INTERVAL '1' DAY
+                                                                      END)
+                  WHERE c0.id = wr.contract_id AND c0.deleted_flag = 0
+                    AND uo0.organization_id IN <foreach collection="orgIds" item="oid" open="(" separator="," close=")">#{oid}</foreach>
+                )
+              )
+            </if>
+          )
+        </script>
+        """)
+    BpPayment selectForPreviewScoped(@Param("id") Long id, @Param("orgIds") java.util.List<Long> orgIds);
+
+    /** 月次照合 (仕入母集団) の組織スコープ付き一覧 (R1-P1-06 / design §5.1)。 */
+    @Select("""
+        <script>
+        SELECT bp.* FROM t_bp_payment bp
+        INNER JOIN t_work_record wr ON wr.id = bp.work_record_id
+        WHERE wr.work_month = #{month} AND bp.deleted_flag = 0
+          AND (
+            <if test="orgIds.size() == 0">1 = 0</if>
+            <if test="orgIds.size() > 0">
+              EXISTS (
+                SELECT 1 FROM m_cost_center cc
+                WHERE cc.id = bp.cost_center_id AND cc.organization_id IS NOT NULL
+                  AND cc.organization_id IN <foreach collection="orgIds" item="oid" open="(" separator="," close=")">#{oid}</foreach>
+              )
+              OR (
+                NOT EXISTS (
+                  SELECT 1 FROM m_cost_center cc WHERE cc.id = bp.cost_center_id AND cc.organization_id IS NOT NULL
+                )
+                AND EXISTS (
+                  SELECT 1 FROM t_contract c0
+                  JOIN t_user_organization uo0 ON uo0.user_id = c0.sales_user_id
+                       AND uo0.primary_flag = 1 AND uo0.deleted_flag = 0
+                       AND uo0.valid_from &lt;= CASE WHEN wr.work_month IS NULL OR wr.work_month = '' THEN CURRENT_DATE
+                                                    ELSE CAST(CONCAT(TRIM(wr.work_month), '-01') AS DATE) + INTERVAL '1' MONTH - INTERVAL '1' DAY
+                                               END
+                       AND (uo0.valid_to IS NULL OR uo0.valid_to &gt;= CASE WHEN wr.work_month IS NULL OR wr.work_month = '' THEN CURRENT_DATE
+                                                                           ELSE CAST(CONCAT(TRIM(wr.work_month), '-01') AS DATE) + INTERVAL '1' MONTH - INTERVAL '1' DAY
+                                                                      END)
+                  WHERE c0.id = wr.contract_id AND c0.deleted_flag = 0
+                    AND uo0.organization_id IN <foreach collection="orgIds" item="oid" open="(" separator="," close=")">#{oid}</foreach>
+                )
+              )
+            </if>
+          )
+        </script>
+        """)
+    List<BpPayment> selectForReconciliationScoped(@Param("month") String month, @Param("orgIds") java.util.List<Long> orgIds);
+
     /**
-     * 契約に紐づく実績(work_record)配下のBP階層のうち最大階層番号を返す(該当なしは0)。
-     * 多重下請け段数超過・二重派遣兆候の判定(labor-compliance-check / FR-10)に使用。
+     * 契約に紐づく実績(work_record)配下のBP階層の最大階層番号を返す(該当なしは0)。
+     * 多重下請けが禁止項目超過・二重派遣回避等の判定(labor-compliance-check / FR-10)に使用。
      */
     @Select("""
         SELECT COALESCE(MAX(b.layer_order), 0)

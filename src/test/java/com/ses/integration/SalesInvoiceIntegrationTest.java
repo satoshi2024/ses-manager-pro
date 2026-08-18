@@ -357,12 +357,15 @@ class SalesInvoiceIntegrationTest {
 
     @Test
     @DisplayName("Snapshot 厳格実行: 取消 Worker が変更可能テーブルを再読込せず snapshot から dealId と理由を取り出して送信すること (R1-P1-07)")
-    void cancelJob_executesStrictlyFromSnapshot() {
-        // 1. SALES_INVOICE_CANCEL ジョブを snapshot 付きで登録
+    void cancelJob_executesStrictlyFromSnapshot() throws Exception {
+        // 1. SALES_INVOICE_CANCEL ジョブを snapshot 付きで登録 (SHA-256 ハッシュを計算)
         String payloadJson = "{\"invoiceId\":" + invoice.getId() + ",\"externalDealId\":\"998877\",\"reason\":\"snapshotに保存された理由\"}";
+        String hash = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(payloadJson.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
         IntegrationJob cancelJob = jobService.createJob(
                 connection.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(),
-                "CANCEL-INV-SNAPSHOT-001", "hash-snap", payloadJson,
+                "CANCEL-INV-SNAPSHOT-001", hash, payloadJson,
                 connection.getTenantId(), connection.getLegalEntityId(), 1L);
 
         // 2. freee への 取消 DELETE をモック (snapshot の dealId 998877 に対して)
@@ -380,5 +383,84 @@ class SalesInvoiceIntegrationTest {
         mockServer.verify();
         IntegrationJob updated = jobService.getById(cancelJob.getId());
         assertThat(updated.getStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    @DisplayName("In-Flight 取消時補償トランザクション原子性: 補償INSERT失敗時にCANCELLED_EXTERNALLY_CREATEDイベントもロールバックされること (R1-P1-02)")
+    void inFlightCancel_compensationJobFailure_rollsBackTransaction() {
+        // 1. ジョブを RUNNING -> CANCELLED に
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoice.getId(), 1L);
+        job = jobService.claimJob(job.getId());
+        jobService.cancelJob(job.getId(), "ユーザーによるキャンセル");
+
+        int initialEventCount = jobService.listEvents(job.getId()).size();
+
+        // 2. 意図的に同等の補償ジョブを先に作成しておき、createJob が DUPLICATE_ACTIVE_JOB 例外をスローするように仕込む
+        String dealId = "667799";
+        String compIdempotencyKey = "COMPENSATE_CANCEL:" + invoice.getId() + ":" + dealId;
+        jobService.createJob(connection.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), compIdempotencyKey, "hash_dummy");
+
+        com.ses.dto.accounting.canonical.CanonicalDealResult externalResult =
+                com.ses.dto.accounting.canonical.CanonicalDealResult.builder()
+                        .success(true)
+                        .externalId(dealId)
+                        .providerRequestId("req-inflight-002")
+                        .build();
+
+        // 3. TransactionCoordinator のトランザクション実行 (補償作成で重複例外発生)
+        final IntegrationJob targetJob = job;
+        org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> {
+            salesIntegrationService.handleSalesInvoiceResult(targetJob.getId(), targetJob, connection, externalResult);
+        });
+
+        // 4. トランザクションがロールバックされ、CANCELLED_EXTERNALLY_CREATED イベントが残っていないことを検証
+        List<IntegrationJobEvent> events = jobService.listEvents(job.getId());
+        assertThat(events.size()).isEqualTo(initialEventCount);
+        assertThat(events).noneMatch(e -> "CANCELLED_EXTERNALLY_CREATED".equals(e.getEventType()));
+    }
+
+    @Test
+    @DisplayName("Snapshot必須・ハッシュ検証: 売上/取消WorkerはNULL snapshot・改変snapshotを外部送信せずfail-closed (R1-P1-07)")
+    void workers_snapshotRequiredAndHashVerified() throws Exception {
+        // 1. 売上 sync Worker: NULL snapshot -> 送信せず FAILED (LEGACY_SNAPSHOT_MISSING)
+        IntegrationJob legacySync = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE",
+                invoice.getId(), "SALES-LEGACY-SNAP", "hash-legacy");
+        // Worker が内部で claim するため、テスト側で先行 claim しない
+        salesIntegrationService.processSalesInvoiceJob(legacySync.getId());
+        IntegrationJob legacySyncAfter = jobService.getById(legacySync.getId());
+        assertThat(legacySyncAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(legacySyncAfter.getErrorCode()).isEqualTo("LEGACY_SNAPSHOT_MISSING");
+
+        // 2. 売上 sync Worker: 改変 snapshot (SHA-256 不一致) -> 送信せず FAILED (PAYLOAD_HASH_MISMATCH)
+        IntegrationJob tamperedSync = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE",
+                invoice.getId(), "SALES-TAMPER-SNAP", "hash-tampered",
+                "{\"invoiceId\":999,\"total\":1}", connection.getTenantId(), connection.getLegalEntityId(), null);
+        // Worker が内部で claim するため、テスト側で先行 claim しない
+        salesIntegrationService.processSalesInvoiceJob(tamperedSync.getId());
+        IntegrationJob tamperedSyncAfter = jobService.getById(tamperedSync.getId());
+        assertThat(tamperedSyncAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(tamperedSyncAfter.getErrorCode()).isEqualTo("PAYLOAD_HASH_MISMATCH");
+
+        // 3. 取消 Worker: NULL snapshot -> 送信せず FAILED
+        IntegrationJob legacyCancel = jobService.createJob(connection.getId(), "SALES_INVOICE_CANCEL", "INVOICE",
+                invoice.getId(), "CANCEL-LEGACY-SNAP", "hash-cancel-legacy");
+        // Worker が内部で claim するため、テスト側で先行 claim しない
+        salesIntegrationService.processSalesCancelJob(legacyCancel.getId());
+        IntegrationJob legacyCancelAfter = jobService.getById(legacyCancel.getId());
+        assertThat(legacyCancelAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(legacyCancelAfter.getErrorCode()).isEqualTo("LEGACY_SNAPSHOT_MISSING");
+
+        // 4. 取消 Worker: 改変 snapshot -> 送信せず FAILED
+        IntegrationJob tamperedCancel = jobService.createJob(connection.getId(), "SALES_INVOICE_CANCEL", "INVOICE",
+                invoice.getId(), "CANCEL-TAMPER-SNAP", "hash-cancel-tampered",
+                "{\"invoiceId\":999,\"externalDealId\":\"998877\"}", connection.getTenantId(), connection.getLegalEntityId(), null);
+        // Worker が内部で claim するため、テスト側で先行 claim しない
+        salesIntegrationService.processSalesCancelJob(tamperedCancel.getId());
+        IntegrationJob tamperedCancelAfter = jobService.getById(tamperedCancel.getId());
+        assertThat(tamperedCancelAfter.getStatus()).isEqualTo("FAILED");
+        assertThat(tamperedCancelAfter.getErrorCode()).isEqualTo("PAYLOAD_HASH_MISMATCH");
+
+        // 5. 外部 API は一切呼ばれていないこと
+        mockServer.verify();
     }
 }

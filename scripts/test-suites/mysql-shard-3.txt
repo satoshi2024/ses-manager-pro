@@ -7,6 +7,7 @@ FlywayG2ForwardRepairSmokeTest
 FlywayG2GateSchemaSmokeTest
 FlywayLegacyV71MigrationSmokeTest
 FlywayMigrationSmokeTest
+FlywayV106_1RollbackAndRepairSmokeTest
 FlywayV81RepairSmokeTest
 FlywayV84LegacySchemaSmokeTest
 FlywayV84PartialSchemaSmokeTest

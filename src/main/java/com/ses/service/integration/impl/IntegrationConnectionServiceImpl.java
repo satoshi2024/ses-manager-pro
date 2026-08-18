@@ -119,6 +119,14 @@ public class IntegrationConnectionServiceImpl
         if (conn == null || conn.getEncryptedTokens() == null || conn.getEncryptedTokens().isBlank()) {
             return null;
         }
+        return decryptTokens(conn);
+    }
+
+    /**
+     * 同一読取結果(1回のSELECT)から暗号文と token_version を復号・解決する。
+     * 401時の観測バージョンとヘッダートークンの不一致窓を排除する (R1-P1-03)。
+     */
+    private IntegrationTokensDto decryptTokens(IntegrationConnection conn) {
         String encrypted = conn.getEncryptedTokens().trim();
 
         // 1. JSON形式の互換判定（V106で移行された旧フォーマット: {"accessToken": "iv:cipher", ...} または平文JSON）
@@ -129,16 +137,16 @@ public class IntegrationConnectionServiceImpl
                 String accessEnc = map.get("accessToken") != null ? map.get("accessToken").toString() : null;
                 String refreshEnc = map.get("refreshToken") != null ? map.get("refreshToken").toString() : null;
 
-                String accessToken = decryptLegacyOrPlain(connectionId, accessEnc);
-                String refreshToken = decryptLegacyOrPlain(connectionId, refreshEnc);
+                String accessToken = decryptLegacyOrPlain(conn.getId(), accessEnc);
+                String refreshToken = decryptLegacyOrPlain(conn.getId(), refreshEnc);
 
                 return IntegrationTokensDto.builder()
                         .accessToken(accessToken)
                         .refreshToken(refreshToken)
                         .build();
             } catch (Exception e) {
-                log.warn("Failed to parse/decrypt legacy JSON tokens for connectionId={}: {}", connectionId, e.getMessage());
-                markReauthRequired(connectionId);
+                log.warn("Failed to parse/decrypt legacy JSON tokens for connectionId={}: {}", conn.getId(), e.getMessage());
+                markReauthRequired(conn.getId());
                 throw new BusinessException(401, "認証情報の復号に失敗しました。再接続を行ってください。");
             }
         }
@@ -148,10 +156,29 @@ public class IntegrationConnectionServiceImpl
             String decryptedJson = decrypt(encrypted);
             return objectMapper.readValue(decryptedJson, IntegrationTokensDto.class);
         } catch (Exception e) {
-            log.error("Failed to decrypt new-format tokens for connectionId={}", connectionId, e);
-            markReauthRequired(connectionId);
+            log.error("Failed to decrypt new-format tokens for connectionId={}", conn.getId(), e);
+            markReauthRequired(conn.getId());
             throw new BusinessException(401, "認証情報の復号に失敗しました。再接続を行ってください。");
         }
+    }
+
+    @Override
+    public com.ses.dto.accounting.TokenSnapshot getTokenSnapshot(Long connectionId) {
+        IntegrationConnection conn = getById(connectionId);
+        if (conn == null || conn.getEncryptedTokens() == null || conn.getEncryptedTokens().isBlank()) {
+            return null;
+        }
+        // 同一読取結果から復号する (2回読取による version/token 不整合窓の排除: R1-P1-03)
+        IntegrationTokensDto tokens = decryptTokens(conn);
+        if (tokens == null) {
+            return null;
+        }
+        return com.ses.dto.accounting.TokenSnapshot.builder()
+                .connectionId(conn.getId())
+                .accessToken(tokens.getAccessToken())
+                .refreshToken(tokens.getRefreshToken())
+                .tokenVersion(conn.getTokenVersion() != null ? conn.getTokenVersion() : 1)
+                .build();
     }
 
     private String decryptLegacyOrPlain(Long connectionId, String cipherOrPlain) {
@@ -287,13 +314,13 @@ public class IntegrationConnectionServiceImpl
             try {
                 refreshed = refreshFn.apply(current);
             } catch (Exception e) {
-                log.error("Token refresh HTTP call failed for connectionId={}: {}", connectionId, e.getMessage());
-                if (e.getMessage() != null && e.getMessage().contains("invalid_grant")) {
+                log.error("Token refresh HTTP call failed for connectionId={}: error_type={}", connectionId, e.getClass().getSimpleName());
+                String msg = e.getMessage();
+                if (msg != null && msg.contains("invalid_grant")) {
                     baseMapper.markReauthRequired(connectionId, LocalDateTime.now());
                 }
-                throw e;
+                throw new BusinessException(401, "外部連携のトークン更新に失敗しました");
             }
-
             if (refreshed == null) {
                 return current;
             }
@@ -348,6 +375,32 @@ public class IntegrationConnectionServiceImpl
             c.setEncryptedTokens(null); // セキュリティのためマスク
         }
         return list;
+    }
+
+    @Override
+    public List<IntegrationConnection> listConnectionsByLegalEntities(String tenantId, java.util.Set<Long> allowedLegalEntityIds) {
+        List<IntegrationConnection> list = list(new LambdaQueryWrapper<IntegrationConnection>()
+                .eq(IntegrationConnection::getTenantId, tenantId != null ? tenantId : "default")
+                .and(w -> w.isNull(IntegrationConnection::getLegalEntityId)
+                        .or().in(IntegrationConnection::getLegalEntityId, allowedLegalEntityIds))
+                .orderByAsc(IntegrationConnection::getId));
+
+        for (IntegrationConnection c : list) {
+            c.setEncryptedTokens(null); // セキュリティのためマスク
+        }
+        return list;
+    }
+
+    @Override
+    public IntegrationConnection getByIdScoped(Long connectionId, java.util.Set<Long> allowedLegalEntityIds) {
+        IntegrationConnection conn = getById(connectionId);
+        if (conn == null || allowedLegalEntityIds == null) {
+            return conn;
+        }
+        if (conn.getLegalEntityId() == null) {
+            return conn;
+        }
+        return allowedLegalEntityIds.contains(conn.getLegalEntityId()) ? conn : null;
     }
 
     // === AES-256 GCM 暗号化 / 復号 ===

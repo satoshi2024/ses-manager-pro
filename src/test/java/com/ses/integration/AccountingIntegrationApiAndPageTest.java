@@ -59,6 +59,18 @@ class AccountingIntegrationApiAndPageTest {
     @Autowired
     private org.springframework.web.client.RestTemplate restTemplate;
 
+    @Autowired
+    private com.ses.mapper.OrganizationUnitMapper organizationUnitMapper;
+
+    @Autowired
+    private com.ses.mapper.CostCenterMapper costCenterMapper;
+
+    @Autowired
+    private com.ses.mapper.SysUserMapper sysUserMapper;
+
+    @Autowired
+    private com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+
     private IntegrationConnection connection;
 
     @BeforeEach
@@ -207,6 +219,19 @@ class AccountingIntegrationApiAndPageTest {
 
         IntegrationJob cancelled = jobService.getById(job.getId());
         assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+
+        // 他テナントのジョブに対する retry/cancel は SQL 境界で 404 (R1-P1-06)
+        IntegrationJob otherTenantJob = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 8889L, "idemp-other-tenant-8889", "hash8889",
+                null, "other-tenant", null, null);
+        jobService.claimJob(otherTenantJob.getId());
+        jobService.markRetryable(otherTenantJob.getId(), "TIMEOUT", "一時的タイムアウト", 300);
+        mockMvc.perform(post("/api/accounting/jobs/" + otherTenantJob.getId() + "/retry").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(post("/api/accounting/jobs/" + otherTenantJob.getId() + "/cancel?reason=REASON_CLIENT_CANCEL").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
     }
 
     @Test
@@ -243,19 +268,26 @@ class AccountingIntegrationApiAndPageTest {
     @WithMockUser(username = "admin_user", roles = {"管理者"})
     void i18n_fourLanguages_stableReasonCodes() throws Exception {
         String[] languages = {"ja", "en", "zh-CN", "ko"};
+        String[] expectedLabels = {"マッピング設定", "Mapping Settings", "映射配置", "매핑 설정"};
+        String[] expectedCustomerCodeAttrs = {"顧客コード", "Customer Code", "客户代码", "고객 코드"};
 
-        for (String lang : languages) {
-            // 各言語ヘッダーで画面にアクセスし、正常に応答すること (200)
-            mockMvc.perform(get("/accounting/integration").header("Accept-Language", lang))
+        for (int i = 0; i < languages.length; i++) {
+            // CookieLocaleResolver 経由で locale を切り替え、サーバー解決済みの可視文言がローカライズされること (R1-P1-11)
+            String content = mockMvc.perform(get("/accounting/integration")
+                            .cookie(new jakarta.servlet.http.Cookie("SES_LOCALE", languages[i])))
                     .andExpect(status().isOk())
-                    .andExpect(view().name("accounting/integration"));
+                    .andExpect(view().name("accounting/integration"))
+                    .andReturn().getResponse().getContentAsString();
+            assertThat(content).contains(expectedLabels[i]);
+            // i18n 単一翻訳源データコンテナ: 動的表示用キーが data 属性として各言語へ解決されていること
+            assertThat(content).contains("id=\"i18n-data\"");
+            assertThat(content).contains("data-customer-code=\"" + expectedCustomerCodeAttrs[i] + "\"");
         }
 
-        // ジョブキャンセル時の定型 reasonCode
+        // ジョブキャンセル時の定型 reasonCode (design §8.3)
         IntegrationJob job = jobService.createJob(
                 connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 777L, "idemp-i18n-777", "hash777");
-
-        mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/cancel?reason=USER_REQUESTED")
+        mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/cancel?reason=REASON_AMOUNT_CORRECTION")
                         .with(csrf())
                         .header("Accept-Language", "en"))
                 .andExpect(status().isOk())
@@ -263,5 +295,177 @@ class AccountingIntegrationApiAndPageTest {
 
         IntegrationJob cancelled = jobService.getById(job.getId());
         assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+        String eventDetail = jobService.listEvents(job.getId()).stream()
+                .map(e -> e.getSafeDetail() != null ? e.getSafeDetail() : "")
+                .reduce("", (a, b) -> a + b);
+        assertThat(eventDetail).contains("REASON_AMOUNT_CORRECTION");
+
+        // 日本語・未知の取消理由は REASON_OTHER へ正規化され、表示言語に依存しないコードで保存されること
+        IntegrationJob job2 = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 778L, "idemp-i18n-778", "hash778");
+        mockMvc.perform(post("/api/accounting/jobs/" + job2.getId() + "/cancel?reason=手動キャンセル")
+                        .with(csrf())
+                        .header("Accept-Language", "ko"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        String eventDetail2 = jobService.listEvents(job2.getId()).stream()
+                .map(e -> e.getSafeDetail() != null ? e.getSafeDetail() : "")
+                .reduce("", (a, b) -> a + b);
+        assertThat(eventDetail2).contains("REASON_OTHER");
+        assertThat(eventDetail2).doesNotContain("手動キャンセル");
+    }
+
+    @Test
+    @DisplayName("マネージャースコープ非空集合: 他組織・他テナントのジョブ/接続/マッピング/プレビュー/照合がSQL境界で遮断される (R1-P1-06)")
+    void managerScope_nonEmptyAllowed_otherOrgAndCrossTenantHidden() throws Exception {
+        // --- 組織・マネージャー seeding ---
+        Long orgXId = insertOrg("SCOPE-ORG-X", "スコープ組織X", 1L);
+        Long orgYId = insertOrg("SCOPE-ORG-Y", "スコープ組織Y", 2L);
+        Long managerUserId = insertManagerUser(orgXId);
+
+        // --- ジョブ seeding (自組織 / 他組織 / 他テナント) ---
+        IntegrationJob jobA = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 3101L,
+                "SCOPE-JOB-A", "hash-a", "{\"a\":1}", "default", null, orgXId);
+        IntegrationJob jobB = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 3102L,
+                "SCOPE-JOB-B", "hash-b", "{\"b\":1}", "default", null, orgYId);
+        IntegrationJob jobC = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 3103L,
+                "SCOPE-JOB-C", "hash-c", "{\"c\":1}", "other-tenant", null, orgXId);
+
+        // マネージャー (username = ローカルID) として認証
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        String.valueOf(managerUserId), null,
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_マネージャー"))));
+
+        // --- ジョブ一覧: 自組織 (orgX, tenant=default) のみ ---
+        mockMvc.perform(get("/api/accounting/jobs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].id").value(jobA.getId().intValue()));
+
+        // --- ジョブ詳細: 自組織OK / 他組織404 / 他テナント404 ---
+        mockMvc.perform(get("/api/accounting/jobs/" + jobA.getId()))
+                .andExpect(jsonPath("$.code").value(200));
+        mockMvc.perform(get("/api/accounting/jobs/" + jobB.getId()))
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(get("/api/accounting/jobs/" + jobC.getId()))
+                .andExpect(jsonPath("$.code").value(404));
+
+        // --- 接続一覧: 許可法人 (1L) と NULL のみ可視、法人2L は不可視 ---
+        IntegrationConnection otherLegalConn = connectionService.getOrCreateConnection("default", 2L, "freee", "accounting");
+        mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data[?(@.id == " + connection.getId() + ")]").exists())
+                .andExpect(jsonPath("$.data[?(@.id == " + otherLegalConn.getId() + ")]").doesNotExist());
+
+        // --- マッピング: 許可接続のマッピングのみ ---
+        ExternalMapping otherMapping = new ExternalMapping();
+        otherMapping.setConnectionId(otherLegalConn.getId());
+        otherMapping.setObjectType("CUSTOMER_PARTNER");
+        otherMapping.setInternalCode("SCOPE-MAP-OTHER");
+        otherMapping.setExternalId("9901");
+        mappingService.saveOrUpdateMapping(otherMapping);
+        mockMvc.perform(get("/api/accounting/mappings?connectionId=" + otherLegalConn.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+        mockMvc.perform(get("/api/accounting/mappings?connectionId=" + connection.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        // --- プレビュー: 組織Xの請求書は200 / 組織Yは404 (SQL境界) ---
+        Long ccXId = insertCostCenter("SCOPE-CC-X", "スコープCCX", orgXId);
+        Long ccYId = insertCostCenter("SCOPE-CC-Y", "スコープCCY", orgYId);
+
+        Customer cust = new Customer();
+        cust.setCompanyName("スコープ顧客");
+        customerService.save(cust);
+
+        Invoice invoiceX = new Invoice();
+        invoiceX.setInvoiceNo("INV-SCOPE-X"); invoiceX.setCustomerId(cust.getId());
+        invoiceX.setBillingMonth("2026-08"); invoiceX.setIssuedDate(java.time.LocalDate.of(2026, 8, 15));
+        invoiceX.setDueDate(java.time.LocalDate.of(2026, 9, 15));
+        invoiceX.setSubtotal(new BigDecimal("100000")); invoiceX.setTax(new BigDecimal("10000"));
+        invoiceX.setTotal(new BigDecimal("110000")); invoiceX.setTaxRate(new BigDecimal("0.100"));
+        invoiceX.setCostCenterId(ccXId);
+        invoiceService.save(invoiceX);
+
+        Invoice invoiceY = new Invoice();
+        invoiceY.setInvoiceNo("INV-SCOPE-Y"); invoiceY.setCustomerId(cust.getId());
+        invoiceY.setBillingMonth("2026-08"); invoiceY.setIssuedDate(java.time.LocalDate.of(2026, 8, 15));
+        invoiceY.setDueDate(java.time.LocalDate.of(2026, 9, 15));
+        invoiceY.setSubtotal(new BigDecimal("200000")); invoiceY.setTax(new BigDecimal("20000"));
+        invoiceY.setTotal(new BigDecimal("220000")); invoiceY.setTaxRate(new BigDecimal("0.100"));
+        invoiceY.setCostCenterId(ccYId);
+        invoiceService.save(invoiceY);
+
+        mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoiceX.getId()))
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.invoiceNo").value("INV-SCOPE-X"));
+        mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoiceY.getId()))
+                .andExpect(jsonPath("$.code").value(404));
+
+        // --- 照合: 組織Xの請求のみ内部母集団へ含まれ、組織Yは除外される ---
+        // 照合は全社共通接続 (legal_entity_id NULL) を使用するためトークンを設定
+        IntegrationConnection commonConn = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
+        IntegrationTokensDto commonTokens = IntegrationTokensDto.builder()
+                .accessToken("scope-common-token")
+                .refreshToken("scope-common-refresh")
+                .tokenType("Bearer")
+                .expiresIn(3600L)
+                .build();
+        connectionService.saveTokens(commonConn.getId(), commonTokens, 10001L, "スコープ共通事業所", 1L);
+
+        org.springframework.test.web.client.MockRestServiceServer reconMock =
+                org.springframework.test.web.client.MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        reconMock.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(
+                        org.hamcrest.Matchers.containsString("/api/1/deals")))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
+        mockMvc.perform(get("/api/accounting/reconciliation?month=2026-08"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.items[?(@.category == 'SALES' && @.internalId == " + invoiceX.getId() + ")]").exists())
+                .andExpect(jsonPath("$.data.items[?(@.category == 'SALES' && @.internalId == " + invoiceY.getId() + ")]").doesNotExist());
+        reconMock.verify();
+
+        // --- 管理者の retry/cancel: 他テナントジョブは SQL 境界で 404 ---
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        "admin_user", null,
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者"))));
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    private Long insertOrg(String code, String name, Long legalEntityId) {
+        com.ses.entity.OrganizationUnit org = new com.ses.entity.OrganizationUnit();
+        org.setTenantId(1L); org.setLegalEntityId(legalEntityId); org.setCode(code); org.setName(name);
+        org.setType("部門"); org.setValidFrom(java.time.LocalDate.of(2026, 1, 1)); org.setStatus("有効"); org.setVersion(0);
+        organizationUnitMapper.insert(org);
+        return org.getId();
+    }
+
+    private Long insertCostCenter(String code, String name, Long organizationId) {
+        com.ses.entity.CostCenter cc = new com.ses.entity.CostCenter();
+        cc.setCode(code); cc.setName(name); cc.setOrganizationId(organizationId);
+        cc.setValidFrom(java.time.LocalDate.of(2026, 1, 1)); cc.setStatus("有効"); cc.setVersion(0);
+        costCenterMapper.insert(cc);
+        return cc.getId();
+    }
+
+    private Long insertManagerUser(Long orgId) {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setUsername("scope-manager-" + System.nanoTime());
+        user.setPassword("pass");
+        user.setRealName("スコープマネージャー");
+        user.setRole("マネージャー");
+        user.setStatus(1);
+        sysUserMapper.insert(user);
+        userOrganizationMapper.insert(com.ses.entity.UserOrganization.builder()
+                .userId(user.getId()).organizationId(orgId).primaryFlag(1)
+                .validFrom(java.time.LocalDate.of(2026, 1, 1)).build());
+        return user.getId();
     }
 }

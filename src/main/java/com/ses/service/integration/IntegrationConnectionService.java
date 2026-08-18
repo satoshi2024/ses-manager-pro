@@ -50,7 +50,23 @@ public interface IntegrationConnectionService extends IService<IntegrationConnec
     void updateStatus(Long connectionId, String status);
 
     /**
+     * トークン情報とバージョン番号を原子的に取得する。
+     */
+    com.ses.dto.accounting.TokenSnapshot getTokenSnapshot(Long connectionId);
+
+    /**
      * テナント配下の接続一覧を取得する（秘密情報はマスク）。
      */
     List<IntegrationConnection> listConnections(String tenantId);
+
+    /**
+     * 許可法人集合に限定した接続一覧を取得する (R1-P1-06 / design §5.2)。
+     * legal_entity_id IS NULL (全社共通) は常に含む。秘密情報はマスク。
+     */
+    List<IntegrationConnection> listConnectionsByLegalEntities(String tenantId, java.util.Set<Long> allowedLegalEntityIds);
+
+    /**
+     * 許可法人集合に限定して接続を1件取得する (R1-P1-06)。権限外・不存在は null。
+     */
+    IntegrationConnection getByIdScoped(Long connectionId, java.util.Set<Long> allowedLegalEntityIds);
 }

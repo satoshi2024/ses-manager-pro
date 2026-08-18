@@ -104,31 +104,32 @@ class IntegrationJobStateMachineTest {
     @Test
     @DisplayName("状態ガード: RUNNING や SUCCEEDED に対する手動リトライやキャンセルは例外をスロー")
     void stateMachine_illegalTransitionsRejected() {
-        IntegrationJob job = jobService.createJob(connId, "SALES_INVOICE_SYNC", "INVOICE", 3L, "IDEM-3", "hash3");
-        IntegrationJob claimed = jobService.claimJob(job.getId());
+        // 仕入ジョブ (BP_PURCHASE_SYNC) は RUNNING 中のキャンセル拒否
+        IntegrationJob bpJob = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 3L, "IDEM-3", "hash3");
+        IntegrationJob bpClaimed = jobService.claimJob(bpJob.getId());
 
         // RUNNING 中のキャンセル拒否
-        assertThatThrownBy(() -> jobService.cancelJob(job.getId(), "キャンセル理由"))
+        assertThatThrownBy(() -> jobService.cancelJob(bpJob.getId(), "キャンセル理由"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("処理中または完了済み");
+                .hasMessageContaining("CANNOT_CANCEL_RUNNING_JOB");
 
         // RUNNING 中の手動リトライ拒否
-        assertThatThrownBy(() -> jobService.resetForManualRetry(job.getId()))
+        assertThatThrownBy(() -> jobService.resetForManualRetry(bpJob.getId()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("再試行可能なステータス");
 
-        // FAILED に遷移後はキャンセル不可、手動リトライは可能
-        jobService.markFailed(job.getId(), "FATAL_ERROR", "致命的エラー");
-        IntegrationJob failed = jobService.getById(job.getId());
+        // FAILED に遷移後は手動リトライ可能
+        jobService.markFailed(bpJob.getId(), "FATAL_ERROR", "致命的エラー");
+        IntegrationJob failed = jobService.getById(bpJob.getId());
         assertThat(failed.getStatus()).isEqualTo("FAILED");
 
-        jobService.resetForManualRetry(job.getId());
-        IntegrationJob reset = jobService.getById(job.getId());
+        jobService.resetForManualRetry(bpJob.getId());
+        IntegrationJob reset = jobService.getById(bpJob.getId());
         assertThat(reset.getStatus()).isEqualTo("PENDING");
 
         // PENDING 中のキャンセルは成功
-        jobService.cancelJob(job.getId(), "利用中止");
-        IntegrationJob cancelled = jobService.getById(job.getId());
+        jobService.cancelJob(bpJob.getId(), "利用中止");
+        IntegrationJob cancelled = jobService.getById(bpJob.getId());
         assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
     }
 }

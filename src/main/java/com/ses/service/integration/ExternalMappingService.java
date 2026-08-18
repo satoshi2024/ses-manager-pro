@@ -37,4 +37,10 @@ public interface ExternalMappingService extends IService<ExternalMapping> {
      * 接続ID別のマッピング一覧を取得する。
      */
     List<ExternalMapping> listByConnection(Long connectionId, String objectType);
+
+    /**
+     * 許可接続集合に限定したマッピング一覧を取得する (R1-P1-06 / design §5.2)。
+     * allowedConnectionIds が空の場合は 0 件を返す (SQL境界)。
+     */
+    List<ExternalMapping> listByConnectionsScoped(Long connectionId, String objectType, java.util.Set<Long> allowedConnectionIds);
 }
