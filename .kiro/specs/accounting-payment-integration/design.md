@@ -119,9 +119,17 @@
      - 重複レコードは `m_integration_connection_backup_v106_1` へ全列退避後、非残存行を `deleted_flag = 1` に論理削除。
      - `t_integration_job`: 既存完了・失敗ジョブの `payload_snapshot IS NULL` はレガシー記録（読み取り専用）として保持。
   5. **Repair**: `V106_1` を再実行した場合、差分なしで正常終了。
-- **Information Schema ガード付き 完全 Rollback SQL**:
+- **Information Schema ガード付き 完全 Rollback SQL (順序厳格定義)**:
   ```sql
-  -- 1. バックアップが存在する場合のみ UPDATE で復元（PK衝突回避）
+  -- 1. 新 UNIQUE インデックスの削除 (新制約を先に解除し、後続の復元時Duplicate Entryを防止)
+  SET @drop_new_uk = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND index_name = 'uk_int_conn') > 0,
+    'ALTER TABLE m_integration_connection DROP INDEX uk_int_conn',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @drop_new_uk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+  -- 2. バックアップテーブルが存在する場合のみ UPDATE で退避行を復元 (PK衝突回避)
   SET @restore_sql = (SELECT IF(
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection_backup_v106_1') > 0,
     'UPDATE m_integration_connection c JOIN m_integration_connection_backup_v106_1 b ON c.id = b.original_id SET c.deleted_flag = 0, c.version = c.version + 1',
@@ -129,15 +137,7 @@
   ));
   PREPARE stmt FROM @restore_sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 2. 新 UNIQUE インデックスの削除（存在時のみ）
-  SET @drop_uk = (SELECT IF(
-    (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND index_name = 'uk_int_conn') > 0,
-    'ALTER TABLE m_integration_connection DROP INDEX uk_int_conn',
-    'SELECT 1'
-  ));
-  PREPARE stmt FROM @drop_uk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-  -- 3. 旧 UNIQUE インデックスの復元（未存在時のみ）
+  -- 3. 旧 UNIQUE インデックスの復元 (未存在時のみ)
   SET @create_old_uk = (SELECT IF(
     (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND index_name = 'uk_int_conn') = 0,
     'ALTER TABLE m_integration_connection ADD UNIQUE KEY uk_int_conn (tenant_id, legal_entity_id, provider, product, deleted_flag)',
@@ -145,23 +145,44 @@
   ));
   PREPARE stmt FROM @create_old_uk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 4. m_integration_connection の追加列・生成列削除（存在時のみ）
-  SET @drop_conn_cols = (SELECT IF(
-    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'active_slot') > 0,
-    'ALTER TABLE m_integration_connection DROP COLUMN active_slot, DROP COLUMN legal_entity_key, DROP COLUMN refresh_lease_expires_at, DROP COLUMN refresh_lease_token, DROP COLUMN token_version',
-    'SELECT 1'
-  ));
-  PREPARE stmt FROM @drop_conn_cols; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4. m_integration_connection の追加列・生成列を各列独立して存在判定し DROP
+  -- 4a. active_slot
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'active_slot') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN active_slot', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4b. legal_entity_key
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'legal_entity_key') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN legal_entity_key', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4c. refresh_lease_expires_at
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'refresh_lease_expires_at') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN refresh_lease_expires_at', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4d. refresh_lease_token
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'refresh_lease_token') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN refresh_lease_token', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4e. token_version
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'token_version') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN token_version', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 5. t_integration_job の追加列削除（存在時のみ）
-  SET @drop_job_cols = (SELECT IF(
-    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'payload_snapshot') > 0,
-    'ALTER TABLE t_integration_job DROP COLUMN organization_id, DROP COLUMN legal_entity_id, DROP COLUMN tenant_id, DROP COLUMN lease_expires_at, DROP COLUMN lease_token, DROP COLUMN payload_snapshot',
-    'SELECT 1'
-  ));
-  PREPARE stmt FROM @drop_job_cols; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5. t_integration_job の追加列を各列独立して存在判定し DROP
+  -- 5a. organization_id
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'organization_id') > 0, 'ALTER TABLE t_integration_job DROP COLUMN organization_id', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5b. legal_entity_id
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'legal_entity_id') > 0, 'ALTER TABLE t_integration_job DROP COLUMN legal_entity_id', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5c. tenant_id
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'tenant_id') > 0, 'ALTER TABLE t_integration_job DROP COLUMN tenant_id', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5d. lease_expires_at
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'lease_expires_at') > 0, 'ALTER TABLE t_integration_job DROP COLUMN lease_expires_at', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5e. lease_token
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'lease_token') > 0, 'ALTER TABLE t_integration_job DROP COLUMN lease_token', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 5f. payload_snapshot
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'payload_snapshot') > 0, 'ALTER TABLE t_integration_job DROP COLUMN payload_snapshot', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 6. バックアップテーブルの削除
+  -- 6. バックアップテーブルの削除 (全復元・検証完了後)
   DROP TABLE IF EXISTS m_integration_connection_backup_v106_1;
 
   -- 7. Flyway 失敗履歴の削除

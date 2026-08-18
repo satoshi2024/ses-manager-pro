@@ -27,12 +27,12 @@
 
 ## 2. R4 是正タスク（Stage B 実装・検証対象）
 
-- [ ] R4-T01. V106.1 Migration 5形状契約、Backup DDL、Partial-Safe Rollback & Flyway Repair
-  - **Objective**: S16予約衝突を回避した `V106.1` forward migration。`legal_entity_key` と `active_slot` による NULL 一意性および soft-delete 後の再作成保証。`m_integration_connection_backup_v106_1` テーブルの作成と重複 connection の事前退避・UPDATE 復元。`information_schema` ガード付きの完全 Rollback SQL（全追加列・インデックス削除）および `flyway repair` 手順の確立。
+- [ ] R4-T01. V106.1 Migration 5形状契約、Backup DDL、Partial-Safe Rollback (厳格順序) & Flyway Repair
+  - **Objective**: S16予約衝突を回避した `V106.1` forward migration。`legal_entity_key` と `active_slot` による NULL 一意性および soft-delete 後の再作成保証。`m_integration_connection_backup_v106_1` テーブルの作成と重複 connection の事前退避・UPDATE 復元。新UNIQUE解除を先に行う厳格な順序（新UNIQUE削除 → 退避行UPDATE復元 → 旧UNIQUE復元 → 各追加列独立DROP → バックアップ削除）に基づく `information_schema` ガード付き完全 Rollback SQL および `flyway repair` 手順の確立。
   - **実装ガイダンス**: `V106_1__accounting_integration_snapshot_and_slot.sql`, `V1__create_tables.sql`, `engineer-schema-h2.sql`, `schema-accounting-integration-h2.sql`。
     5形状（fresh V1, legacy V106→V106.1, partial, backfill, repair）および完全ロールバック手順の検証。
-  - **テスト要件**: L1〜L3。connection unique (NULL 重複拒否, soft-delete 再作成), 既存 connection 移行後の回帰, 重複 connection 退避とロールバック復元検証, 任意中断点からの partial recovery 検証。
-  - **Demo**: (1) NULL法人接続の重複登録が拒否されること、(2) 論理削除後に同一キーで新規登録が成功すること、(3) 重複データを含むDBでV106.1適用時に有効レコードが正しく選定され退避テーブルに保存されること、(4) 途中失敗DBに対してロールバックSQLとFlyway repairを実行して再適用が成功することをMySQL上で実演確認。
+  - **テスト要件**: L1〜L3。connection unique (NULL 重複拒否, soft-delete 再作成), 既存 connection 移行後の回帰, activeなNULL法人重複2件の apply → rollback → 全行復元検証, 任意列のみが存在する partial 形状での rollback 成功検証, rollback後のV106期待形状完全一致検証。
+  - **Demo**: (1) NULL法人接続の重複登録が拒否されること、(2) 論理削除後に同一キーで新規登録が成功すること、(3) activeなNULL法人重複2件を含むDBでV106.1適用時に有効レコードが選定され退避テーブルに保存されること、(4) ロールバックSQLにより新UNIQUE解除後に重複2件が安全に復元され全追加列が削除されてV106初期状態へ完全復旧すること、(5) 途中失敗DBに対してFlyway repairを実行して再適用が成功することをMySQL上で実演確認。
 
 - [ ] R4-T02. Multi-node 3段階リース・Fencing Token CAS、敗者ノード復旧 & タイムアウト未知結果 Pagination
   - **Objective**: DB トランザクション外で HTTP を呼ぶ 3段階リース・CAS 状態機械による 401 トークンリフレッシュ直列化。45秒リースと10秒HTTPタイムアウトによるフェンシング。3回バックオフ待機後の敗者ノードにおける `TOKEN_REFRESH_IN_PROGRESS` 例外送出と Job の `RETRYABLE(5s)` 遷移。Deal 作成タイムアウト未知結果の全件 pagination (最大50ページ / `verifyDealCreatedByRefNumber`) 照合。
