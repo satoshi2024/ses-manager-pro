@@ -2643,3 +2643,84 @@ CREATE TABLE t_portal_access_log (
 CREATE INDEX idx_portal_access_log_org ON t_portal_access_log(portal_org_id, created_at);
 CREATE INDEX idx_portal_access_log_user ON t_portal_access_log(portal_user_id, created_at);
 CREATE INDEX idx_portal_access_log_action ON t_portal_access_log(action, created_at);
+
+-- S15: 会計・支払連携テーブル (m_integration_connection, m_external_mapping, t_integration_job, t_integration_job_event)
+DROP TABLE IF EXISTS t_integration_job_event CASCADE;
+DROP TABLE IF EXISTS t_integration_job CASCADE;
+DROP TABLE IF EXISTS m_external_mapping CASCADE;
+DROP TABLE IF EXISTS m_integration_connection CASCADE;
+
+CREATE TABLE m_integration_connection (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+    legal_entity_id BIGINT,
+    provider VARCHAR(32) NOT NULL,
+    product VARCHAR(32) NOT NULL,
+    external_company_id BIGINT,
+    company_name VARCHAR(255),
+    encrypted_tokens TEXT,
+    expires_at DATETIME,
+    status VARCHAR(32) NOT NULL DEFAULT 'CONNECTED',
+    connected_by BIGINT,
+    connected_at TIMESTAMP,
+    last_refreshed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_int_conn ON m_integration_connection (tenant_id, legal_entity_id, provider, product, deleted_flag);
+
+CREATE TABLE m_external_mapping (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    connection_id BIGINT NOT NULL,
+    object_type VARCHAR(64) NOT NULL,
+    internal_id BIGINT,
+    internal_code VARCHAR(64) NOT NULL,
+    external_id VARCHAR(64) NOT NULL,
+    external_code VARCHAR(64),
+    payload_snapshot TEXT,
+    verified_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_ext_mapping ON m_external_mapping (connection_id, object_type, internal_code, deleted_flag);
+CREATE INDEX idx_ext_mapping_conn ON m_external_mapping (connection_id, object_type);
+
+CREATE TABLE t_integration_job (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    connection_id BIGINT NOT NULL,
+    job_type VARCHAR(64) NOT NULL,
+    target_type VARCHAR(64) NOT NULL,
+    target_id BIGINT NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    payload_hash VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 5,
+    next_retry_at DATETIME,
+    external_id VARCHAR(128),
+    provider_request_id VARCHAR(128),
+    error_code VARCHAR(64),
+    error_message_safe VARCHAR(500),
+    sent_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_int_job_idempotency ON t_integration_job (idempotency_key, deleted_flag);
+CREATE INDEX idx_int_job_status ON t_integration_job (status, next_retry_at);
+CREATE INDEX idx_int_job_target ON t_integration_job (target_type, target_id);
+
+CREATE TABLE t_integration_job_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    job_id BIGINT NOT NULL,
+    from_status VARCHAR(32),
+    to_status VARCHAR(32) NOT NULL,
+    occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    safe_detail VARCHAR(1000)
+);
+CREATE INDEX idx_job_event_job_id ON t_integration_job_event (job_id);

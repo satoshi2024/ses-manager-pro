@@ -23,5 +23,7 @@ public class CanonicalPaymentSync {
     private LocalDate paymentDate;
     private BigDecimal amount;
     private String status;
+    private boolean settled;
     private String referenceNo;
+    private String refNumber;
 }

@@ -23,6 +23,11 @@ public interface ExternalMappingService extends IService<ExternalMapping> {
     void verifyMapping(Long mappingId, String payloadSnapshot);
 
     /**
+     * 外部プロバイダ API を直接照会してマスタ存在を検証し、検証済みにする (P1-05)。
+     */
+    boolean verifyAndSnapshotMapping(Long mappingId);
+
+    /**
      * 必要なマッピングがすべて登録・検証済みであることを確認する (R1.3)。
      * 欠落または verified_at IS NULL があれば BusinessException をスローする。
      */

@@ -60,6 +60,11 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
     IntegrationJob getLatestJob(String targetType, Long targetId, String jobType);
 
     /**
+     * idempotencyKey でジョブを取得する。
+     */
+    IntegrationJob getByIdempotencyKey(String idempotencyKey);
+
+    /**
      * due な PENDING/RETRYABLE job を最大 limit 件取得する (ワーカー用)。
      * next_retry_at が null または <= now のものを対象とする。
      */

@@ -59,6 +59,9 @@ public class IntegrationConnection {
     /** 接続日時 */
     private LocalDateTime connectedAt;
 
+    /** トークン最終リフレッシュ日時 */
+    private LocalDateTime lastRefreshedAt;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

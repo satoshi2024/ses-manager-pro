@@ -35,6 +35,11 @@ public interface IntegrationConnectionService extends IService<IntegrationConnec
     IntegrationTokensDto rotateTokens(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn);
 
     /**
+     * トークン強制更新 (401 障害復旧用)。有効期限に関わらず必ず最新トークンを取得・保存する。
+     */
+    IntegrationTokensDto forceRefreshToken(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn);
+
+    /**
      * 接続状態を更新する。
      */
     void updateStatus(Long connectionId, String status);

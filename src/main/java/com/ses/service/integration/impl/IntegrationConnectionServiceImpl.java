@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -30,27 +31,29 @@ import java.util.function.Function;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationConnectionMapper, IntegrationConnection>
+public class IntegrationConnectionServiceImpl
+        extends ServiceImpl<IntegrationConnectionMapper, IntegrationConnection>
         implements IntegrationConnectionService {
 
     private final ObjectMapper objectMapper;
-    private final ConcurrentHashMap<Long, ReentrantLock> connectionLocks = new ConcurrentHashMap<>();
+    private final Map<Long, ReentrantLock> connectionLocks = new ConcurrentHashMap<>();
 
-    @Value("${freee.token-encryption-key:change-me-change-me-change-me-1234}")
+    @Value("${freee.token.encryption-key:ses-manager-pro-default-32byte-key!!}")
     private String encryptionKey;
 
     @Override
     public IntegrationConnection getConnection(String tenantId, Long legalEntityId, String provider, String product) {
-        String effectiveTenant = (tenantId == null || tenantId.isBlank()) ? "default" : tenantId;
         LambdaQueryWrapper<IntegrationConnection> wrapper = new LambdaQueryWrapper<IntegrationConnection>()
-                .eq(IntegrationConnection::getTenantId, effectiveTenant)
+                .eq(IntegrationConnection::getTenantId, tenantId != null ? tenantId : "default")
                 .eq(IntegrationConnection::getProvider, provider)
                 .eq(IntegrationConnection::getProduct, product);
+
         if (legalEntityId != null) {
             wrapper.eq(IntegrationConnection::getLegalEntityId, legalEntityId);
         } else {
             wrapper.isNull(IntegrationConnection::getLegalEntityId);
         }
+
         return getOne(wrapper);
     }
 
@@ -61,17 +64,17 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
         if (existing != null) {
             return existing;
         }
-        String effectiveTenant = (tenantId == null || tenantId.isBlank()) ? "default" : tenantId;
-        IntegrationConnection newConn = IntegrationConnection.builder()
-                .tenantId(effectiveTenant)
+
+        IntegrationConnection conn = IntegrationConnection.builder()
+                .tenantId(tenantId != null ? tenantId : "default")
                 .legalEntityId(legalEntityId)
                 .provider(provider)
                 .product(product)
                 .status("DISCONNECTED")
                 .version(0)
                 .build();
-        save(newConn);
-        return newConn;
+        save(conn);
+        return conn;
     }
 
     @Override
@@ -79,22 +82,25 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
     public void saveTokens(Long connectionId, IntegrationTokensDto tokens, Long companyId, String companyName, Long connectedBy) {
         IntegrationConnection conn = getById(connectionId);
         if (conn == null) {
-            throw new BusinessException(404, "接続マスタが見つかりません (id=" + connectionId + ")");
+            throw new BusinessException(400, "接続情報が存在しません (id=" + connectionId + ")");
         }
-        String json;
+
+        String encrypted;
         try {
-            json = objectMapper.writeValueAsString(tokens);
+            String json = objectMapper.writeValueAsString(tokens);
+            encrypted = encrypt(json);
         } catch (Exception e) {
-            throw new BusinessException(500, "トークン情報のシリアライズに失敗しました");
+            throw new RuntimeException("Tokens JSON serialization / encryption failed", e);
         }
-        String encrypted = encrypt(json);
+
         LocalDateTime expiresAt = null;
-        if (tokens.getExpiresIn() != null && tokens.getExpiresIn() > 0) {
+        if (tokens.getExpiresIn() != null) {
             expiresAt = LocalDateTime.now().plusSeconds(tokens.getExpiresIn());
         }
 
         conn.setEncryptedTokens(encrypted);
         conn.setExpiresAt(expiresAt);
+        conn.setLastRefreshedAt(LocalDateTime.now());
         if (companyId != null) {
             conn.setExternalCompanyId(companyId);
         }
@@ -119,12 +125,12 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
         if (encrypted.startsWith("{") && encrypted.endsWith("}")) {
             try {
                 @SuppressWarnings("unchecked")
-                java.util.Map<String, Object> map = objectMapper.readValue(encrypted, java.util.Map.class);
+                Map<String, Object> map = objectMapper.readValue(encrypted, Map.class);
                 String accessEnc = map.get("accessToken") != null ? map.get("accessToken").toString() : null;
                 String refreshEnc = map.get("refreshToken") != null ? map.get("refreshToken").toString() : null;
 
-                String accessToken = decryptLegacyOrPlain(accessEnc);
-                String refreshToken = decryptLegacyOrPlain(refreshEnc);
+                String accessToken = decryptLegacyOrPlain(connectionId, accessEnc);
+                String refreshToken = decryptLegacyOrPlain(connectionId, refreshEnc);
 
                 return IntegrationTokensDto.builder()
                         .accessToken(accessToken)
@@ -132,6 +138,8 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
                         .build();
             } catch (Exception e) {
                 log.warn("Failed to parse/decrypt legacy JSON tokens for connectionId={}: {}", connectionId, e.getMessage());
+                markReauthRequired(connectionId);
+                throw new BusinessException(401, "認証情報の復号に失敗しました。再接続を行ってください。");
             }
         }
 
@@ -141,14 +149,15 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
             return objectMapper.readValue(decryptedJson, IntegrationTokensDto.class);
         } catch (Exception e) {
             log.error("Failed to decrypt new-format tokens for connectionId={}", connectionId, e);
-            throw new BusinessException(500, "トークン情報の復号・デシリアライズに失敗しました");
+            markReauthRequired(connectionId);
+            throw new BusinessException(401, "認証情報の復号に失敗しました。再接続を行ってください。");
         }
     }
 
-    private String decryptLegacyOrPlain(String cipherOrPlain) {
+    private String decryptLegacyOrPlain(Long connectionId, String cipherOrPlain) {
         if (cipherOrPlain == null || cipherOrPlain.isBlank()) return null;
         if (!cipherOrPlain.contains(":")) {
-            return cipherOrPlain; // plain text or already decrypted
+            return cipherOrPlain; // plain text
         }
         try {
             String[] p = cipherOrPlain.split(":");
@@ -163,25 +172,51 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
                 return new String(plain, StandardCharsets.UTF_8);
             }
         } catch (Exception e) {
-            log.warn("Legacy decryption failed, returning raw string: {}", e.getMessage());
+            log.error("Legacy decryption failed for connectionId={}: {}", connectionId, e.getMessage());
+            markReauthRequired(connectionId);
+            throw new BusinessException(401, "旧トークンの復号に失敗しました。再接続が必要です。");
         }
-        return cipherOrPlain;
+        throw new BusinessException(401, "不正なトークン形式です。再接続を行ってください。");
+    }
+
+    private void markReauthRequired(Long connectionId) {
+        try {
+            IntegrationConnection conn = getById(connectionId);
+            if (conn != null && !"REAUTH_REQUIRED".equals(conn.getStatus())) {
+                conn.setStatus("REAUTH_REQUIRED");
+                updateById(conn);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
+    @Transactional
     public IntegrationTokensDto rotateTokens(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
+        return doRotateTokens(connectionId, refreshFn, false);
+    }
+
+    @Override
+    @Transactional
+    public IntegrationTokensDto forceRefreshToken(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
+        return doRotateTokens(connectionId, refreshFn, true);
+    }
+
+    private IntegrationTokensDto doRotateTokens(Long connectionId,
+                                                Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn,
+                                                boolean force) {
         ReentrantLock lock = connectionLocks.computeIfAbsent(connectionId, k -> new ReentrantLock());
         lock.lock();
         try {
-            // ロック取得後に最新の接続情報をDBから再読込 (P1-03: race condition防止)
-            IntegrationConnection conn = getById(connectionId);
+            // DB 行ロック (SELECT FOR UPDATE) を取得して他ノードとの競合を防止
+            IntegrationConnection conn = baseMapper.selectForUpdate(connectionId);
             if (conn == null) {
                 throw new BusinessException(400, "接続情報が存在しません (id=" + connectionId + ")");
             }
 
-            // 待機中に別スレッドがリフレッシュ成功していた場合 (expiresAtが現在+30秒より未来) は再リフレッシュをスキップ
-            if (conn.getExpiresAt() != null && conn.getExpiresAt().isAfter(LocalDateTime.now().plusSeconds(30))) {
-                log.info("Token for connectionId={} was already refreshed by another thread, skipping refreshFn", connectionId);
+            // force == false の場合、既に他ノード/スレッドによって更新済みなら再リフレッシュをスキップ
+            if (!force && conn.getExpiresAt() != null && conn.getExpiresAt().isAfter(LocalDateTime.now().plusSeconds(30))) {
+                log.info("Token for connectionId={} was already refreshed, skipping refreshFn", connectionId);
                 return getDecryptedTokens(connectionId);
             }
 
@@ -214,53 +249,52 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
 
     @Override
     public List<IntegrationConnection> listConnections(String tenantId) {
-        String effectiveTenant = (tenantId == null || tenantId.isBlank()) ? "default" : tenantId;
         List<IntegrationConnection> list = list(new LambdaQueryWrapper<IntegrationConnection>()
-                .eq(IntegrationConnection::getTenantId, effectiveTenant)
-                .orderByAsc(IntegrationConnection::getProvider)
-                .orderByAsc(IntegrationConnection::getProduct));
-        // 秘密情報を安全にマスク
+                .eq(IntegrationConnection::getTenantId, tenantId != null ? tenantId : "default")
+                .orderByAsc(IntegrationConnection::getId));
+
         for (IntegrationConnection c : list) {
-            c.setEncryptedTokens(null);
+            c.setEncryptedTokens(null); // セキュリティのためマスク
         }
         return list;
     }
 
-    // === 暗号化 / 復号 内部メソッド (AES-GCM) ===
+    // === AES-256 GCM 暗号化 / 復号 ===
 
-    private String encrypt(String plainText) {
-        if (plainText == null) return null;
-        try {
-            byte[] keyBytes = Arrays.copyOf(encryptionKey.getBytes(StandardCharsets.UTF_8), 32);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            byte[] iv = new byte[12];
-            new SecureRandom().nextBytes(iv);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, new GCMParameterSpec(128, iv));
-            byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
-            byte[] combined = new byte[iv.length + cipherText.length];
-            System.arraycopy(iv, 0, combined, 0, iv.length);
-            System.arraycopy(cipherText, 0, combined, iv.length, cipherText.length);
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(combined);
-        } catch (Exception e) {
-            throw new RuntimeException("Encryption failed", e);
-        }
+    private String encrypt(String plainText) throws Exception {
+        byte[] keyBytes = Arrays.copyOf(encryptionKey.getBytes(StandardCharsets.UTF_8), 32);
+        SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
+
+        byte[] iv = new byte[12];
+        new SecureRandom().nextBytes(iv);
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, new GCMParameterSpec(128, iv));
+        byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+
+        byte[] combined = new byte[iv.length + cipherText.length];
+        System.arraycopy(iv, 0, combined, 0, iv.length);
+        System.arraycopy(cipherText, 0, combined, iv.length, cipherText.length);
+
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(combined);
     }
 
-    private String decrypt(String cipherTextBase64) {
-        if (cipherTextBase64 == null) return null;
-        try {
-            byte[] combined = Base64.getUrlDecoder().decode(cipherTextBase64);
-            byte[] iv = Arrays.copyOfRange(combined, 0, 12);
-            byte[] cipherText = Arrays.copyOfRange(combined, 12, combined.length);
-            byte[] keyBytes = Arrays.copyOf(encryptionKey.getBytes(StandardCharsets.UTF_8), 32);
-            SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(128, iv));
-            byte[] plainBytes = cipher.doFinal(cipherText);
-            return new String(plainBytes, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            throw new RuntimeException("Decryption failed", e);
+    private String decrypt(String cipherTextBase64) throws Exception {
+        byte[] combined = Base64.getUrlDecoder().decode(cipherTextBase64);
+        if (combined.length < 12) {
+            throw new IllegalArgumentException("Invalid ciphertext length");
         }
+
+        byte[] iv = Arrays.copyOfRange(combined, 0, 12);
+        byte[] cipherText = Arrays.copyOfRange(combined, 12, combined.length);
+
+        byte[] keyBytes = Arrays.copyOf(encryptionKey.getBytes(StandardCharsets.UTF_8), 32);
+        SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
+
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(128, iv));
+        byte[] plain = cipher.doFinal(cipherText);
+
+        return new String(plain, StandardCharsets.UTF_8);
     }
 }

@@ -17,6 +17,7 @@ import java.time.LocalDate;
 @AllArgsConstructor
 public class CanonicalExpenseDeal {
     private Long expenseRequestId;
+    private Long expenseId;
     private String expenseNo;
     private Long engineerId;
     private String engineerCode;

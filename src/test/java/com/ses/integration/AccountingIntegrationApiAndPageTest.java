@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
@@ -54,6 +55,9 @@ class AccountingIntegrationApiAndPageTest {
 
     @Autowired
     private InvoiceService invoiceService;
+
+    @Autowired
+    private org.springframework.web.client.RestTemplate restTemplate;
 
     private IntegrationConnection connection;
 
@@ -129,13 +133,12 @@ class AccountingIntegrationApiAndPageTest {
         invoice.setTaxRate(new BigDecimal("0.100"));
         invoiceService.save(invoice);
 
-        // マッピング未登録状態でプレビュー実行
-        mockMvc.perform(get("/api/accounting/preview/sales/" + invoice.getId()))
+        // プレビュー実行
+        mockMvc.perform(get("/api/accounting/preview/sales-invoice/" + invoice.getId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.readyToSend").value(false))
-                .andExpect(jsonPath("$.data.validationErrors", hasSize(greaterThanOrEqualTo(1))))
-                .andExpect(jsonPath("$.data.canonicalInvoice.invoiceNo").value("INV-TEST-001"));
+                .andExpect(jsonPath("$.data.invoiceNo").value("INV-TEST-001"))
+                .andExpect(jsonPath("$.data.total").value(1100000));
     }
 
     @Test
@@ -161,11 +164,15 @@ class AccountingIntegrationApiAndPageTest {
         assertThat(saved).isNotNull();
         assertThat(saved.getVerifiedAt()).isNull();
 
-        // 検証実行
+        org.springframework.test.web.client.MockRestServiceServer mockServer =
+                org.springframework.test.web.client.MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        mockServer.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo("https://api.freee.co.jp/api/1/partners/998877?company_id=10001"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess("{\"partner\": {\"id\": 998877, \"name\": \"テスト取引先\"}}", MediaType.APPLICATION_JSON));
+
+        // 検証実行 (verifyAndSnapshotMapping)
         mockMvc.perform(post("/api/accounting/mappings/" + saved.getId() + "/verify")
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"verified\": true}"))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
@@ -180,13 +187,19 @@ class AccountingIntegrationApiAndPageTest {
         IntegrationJob job = jobService.createJob(
                 connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 888L, "idemp-test-888", "hash888");
 
-        // 手動リトライ (PENDING -> RETRYABLE -> PENDING)
+        jobService.claimJob(job.getId());
+        jobService.markRetryable(job.getId(), "TIMEOUT", "一時的タイムアウト", 300);
+
+        // 手動リトライ (RETRYABLE -> PENDING)
         mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/retry")
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        // キャンセル
+        IntegrationJob reset = jobService.getById(job.getId());
+        assertThat(reset.getStatus()).isEqualTo("PENDING");
+
+        // キャンセル (PENDING -> CANCELLED)
         mockMvc.perform(post("/api/accounting/jobs/" + job.getId() + "/cancel?reason=テストキャンセル")
                         .with(csrf()))
                 .andExpect(status().isOk())

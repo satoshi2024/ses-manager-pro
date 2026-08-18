@@ -20,6 +20,7 @@ CREATE TABLE m_integration_connection (
     status VARCHAR(32) NOT NULL DEFAULT 'CONNECTED',
     connected_by BIGINT,
     connected_at DATETIME,
+    last_refreshed_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0,

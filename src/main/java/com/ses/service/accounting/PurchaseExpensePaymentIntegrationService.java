@@ -18,6 +18,11 @@ public interface PurchaseExpensePaymentIntegrationService {
     IntegrationJob triggerPaymentSync(Long bpPaymentId, Long triggeredByUserId);
 
     /**
+     * 要員経費申請の連携ジョブを生成・キューイングする。
+     */
+    IntegrationJob triggerExpenseSync(Long expenseRequestId, Long triggeredByUserId);
+
+    /**
      * BP仕入連携ジョブを1件同期処理する（Worker実行用 / DBトランザクション外）。
      */
     void processBpPurchaseJob(Long jobId);
@@ -26,4 +31,9 @@ public interface PurchaseExpensePaymentIntegrationService {
      * 支払実績同期ジョブを1件同期処理する（外部決済情報の照合と内部paid更新）。
      */
     void processPaymentSyncJob(Long jobId);
+
+    /**
+     * 要員経費連携ジョブを1件同期処理する。
+     */
+    void processExpenseJob(Long jobId);
 }

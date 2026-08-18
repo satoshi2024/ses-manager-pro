@@ -98,6 +98,7 @@ class SalesInvoiceIntegrationTest {
         invoice.setTax(new BigDecimal("100000"));
         invoice.setTotal(new BigDecimal("1100000"));
         invoice.setTaxRate(new BigDecimal("0.100"));
+        invoice.setStatus("送付済");
         invoiceService.save(invoice);
 
         // マッピング登録・検証
@@ -220,6 +221,10 @@ class SalesInvoiceIntegrationTest {
         assertThat(cancelJob.getJobType()).isEqualTo("SALES_INVOICE_CANCEL");
 
         mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77799?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 77799}}", MediaType.APPLICATION_JSON));
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/77799?company_id=99001"))
                 .andExpect(method(HttpMethod.DELETE))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
@@ -258,5 +263,53 @@ class SalesInvoiceIntegrationTest {
 
         assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(closedInvoice.getId(), 1L))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("適格性ガード: 未送付・下書きステータスの請求書は会計連携が拒否される")
+    void triggerSalesSync_draftStatus_rejected() {
+        Invoice draftInvoice = new Invoice();
+        draftInvoice.setInvoiceNo("INV-DRAFT-" + UUID.randomUUID().toString().substring(0, 8));
+        draftInvoice.setCustomerId(customer.getId());
+        draftInvoice.setBillingMonth("2026-08");
+        draftInvoice.setIssuedDate(LocalDate.of(2026, 8, 1));
+        draftInvoice.setSubtotal(new BigDecimal("272727"));
+        draftInvoice.setTax(new BigDecimal("27273"));
+        draftInvoice.setTotal(new BigDecimal("300000"));
+        draftInvoice.setStatus("未送付"); // 送付前
+        invoiceService.save(draftInvoice);
+
+        assertThatThrownBy(() -> salesIntegrationService.triggerSalesSync(draftInvoice.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("送付済または入金済の請求書のみ会計連携可能");
+    }
+
+    @Test
+    @DisplayName("ペイロード不変性: ジョブ登録後に請求書金額が改ざんされた場合、Worker実行時にPAYLOAD_MUTATEDで失敗すること")
+    void processSalesInvoiceJob_mutatedPayload_marksFailed() {
+        Invoice inv = new Invoice();
+        inv.setInvoiceNo("INV-MUTATE-" + UUID.randomUUID().toString().substring(0, 8));
+        inv.setCustomerId(customer.getId());
+        inv.setBillingMonth("2026-08");
+        inv.setIssuedDate(LocalDate.of(2026, 8, 1));
+        inv.setSubtotal(new BigDecimal("909091"));
+        inv.setTax(new BigDecimal("90909"));
+        inv.setTotal(new BigDecimal("1000000"));
+        inv.setStatus("送付済");
+        invoiceService.save(inv);
+
+        // ジョブ登録 (この時点のハッシュが記録される)
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(inv.getId(), 1L);
+
+        // ジョブ登録後に請求書金額を変更
+        inv.setTotal(new BigDecimal("1200000"));
+        invoiceService.updateById(inv);
+
+        // Worker による処理実行
+        salesIntegrationService.processSalesInvoiceJob(job.getId());
+
+        IntegrationJob failedJob = jobService.getById(job.getId());
+        assertThat(failedJob.getStatus()).isEqualTo("FAILED");
+        assertThat(failedJob.getErrorCode()).isEqualTo("PAYLOAD_MUTATED");
     }
 }

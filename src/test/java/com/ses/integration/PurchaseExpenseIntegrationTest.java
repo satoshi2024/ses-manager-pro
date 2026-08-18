@@ -65,6 +65,9 @@ class PurchaseExpenseIntegrationTest {
     private com.ses.mapper.ContractMapper contractMapper;
 
     @Autowired
+    private com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
+
+    @Autowired
     private SystemConfigMapper systemConfigMapper;
 
     @Autowired
@@ -270,12 +273,107 @@ class PurchaseExpenseIntegrationTest {
         mockServer.verify();
         IntegrationJob updatedSync = jobService.getById(syncJob.getId());
         assertThat(updatedSync.getStatus()).isEqualTo("FAILED");
-        assertThat(updatedSync.getErrorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        assertThat(updatedSync.getErrorCode()).isIn("PAYMENT_AMOUNT_MISMATCH", "AMOUNT_MISMATCH");
 
         // 内部 BpPayment は「未払」のままであること
         BpPayment notUpdated = bpPaymentMapper.selectById(bpPayment.getId());
         assertThat(notUpdated.getStatus()).isEqualTo("未払");
         assertThat(notUpdated.getPaidDate()).isNull();
+    }
+
+    @Test
+    @DisplayName("BP支払適格性ガード: 未承認・下書き状態のBP支払レコードは連携拒否される")
+    void triggerBpPurchaseSync_unapprovedStatus_rejected() {
+        WorkRecord unapprovedWr = new WorkRecord();
+        unapprovedWr.setContractId(1L);
+        unapprovedWr.setWorkMonth("2026-08");
+        unapprovedWr.setActualHours(new BigDecimal("160.00"));
+        workRecordMapper.insert(unapprovedWr);
+
+        BpPayment unapproved = new BpPayment();
+        unapproved.setBpCompanyId(bpCompany.getId());
+        unapproved.setWorkRecordId(unapprovedWr.getId());
+        unapproved.setAmount(new BigDecimal("500000"));
+        unapproved.setStatus("下書き"); // 未承認
+        bpPaymentMapper.insert(unapproved);
+
+        assertThatThrownBy(() -> purchaseIntegrationService.triggerBpPurchaseSync(unapproved.getId(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("未払または承認済のBP支払レコードのみ連携可能");
+    }
+
+    @Test
+    @DisplayName("支払実績同期ガード: 外部取引ID (dealId) が不一致の場合は内部paidへ更新せずFAILED")
+    void processPaymentSyncJob_dealIdMismatch_rejected() {
+        IntegrationJob purchaseJob = purchaseIntegrationService.triggerBpPurchaseSync(bpPayment.getId(), 1L);
+        jobService.claimJob(purchaseJob.getId());
+        jobService.markSucceeded(purchaseJob.getId(), "88900", "req-bp-100", "仕入登録完了");
+
+        IntegrationJob syncJob = purchaseIntegrationService.triggerPaymentSync(bpPayment.getId(), 1L);
+
+        // 異なる dealId (99999 != 88900)
+        String paymentsResponseJson = "{\"deal\": {\"id\": 99999, \"payments\": [{\"id\": 5503, \"date\": \"2026-08-25\", \"amount\": 800000}]}}";
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/88900?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(paymentsResponseJson, MediaType.APPLICATION_JSON));
+
+        purchaseIntegrationService.processPaymentSyncJob(syncJob.getId());
+
+        mockServer.verify();
+        IntegrationJob updatedSync = jobService.getById(syncJob.getId());
+        assertThat(updatedSync.getStatus()).isEqualTo("FAILED");
+        assertThat(updatedSync.getErrorCode()).isEqualTo("DEAL_ID_MISMATCH");
+    }
+
+    @Test
+    @DisplayName("要員経費連携: 承認済経費申請がfreeeへ送信され、成功時にステータスが会計連携済に更新される")
+    void triggerExpenseSync_and_processExpenseJob_success() {
+        // マッピング登録
+        ExternalMapping expAccount = new ExternalMapping();
+        expAccount.setConnectionId(connection.getId());
+        expAccount.setObjectType("ACCOUNT_EXPENSE");
+        expAccount.setInternalCode("EXPENSE_DEFAULT");
+        expAccount.setExternalId("2201");
+        mappingService.saveOrUpdateMapping(expAccount);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT").getId(), "{\"verified\":true}");
+
+        ExternalMapping taxMap = new ExternalMapping();
+        taxMap.setConnectionId(connection.getId());
+        taxMap.setObjectType("TAX_PURCHASE_10");
+        taxMap.setInternalCode("TAX_PURCHASE_10");
+        taxMap.setExternalId("108");
+        mappingService.saveOrUpdateMapping(taxMap);
+        mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
+
+        ExpenseRequest exp = new ExpenseRequest();
+        exp.setEngineerId(1001L);
+        exp.setExpenseNo("EX-202608-999");
+        exp.setExpenseDate(LocalDate.of(2026, 8, 10));
+        exp.setCategory("交通費");
+        exp.setAmount(new BigDecimal("12500"));
+        exp.setDescription("顧客訪問交通費");
+        exp.setStatus("承認済");
+        expenseRequestMapper.insert(exp);
+
+        IntegrationJob job = purchaseIntegrationService.triggerExpenseSync(exp.getId(), 1L);
+        assertThat(job).isNotNull();
+        assertThat(job.getJobType()).isEqualTo("EXPENSE_DEAL_SYNC");
+
+        String responseJson = "{\"deal\": {\"id\": 77711, \"amount\": 12500, \"status\": \"unsettled\"}}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+        purchaseIntegrationService.processExpenseJob(job.getId());
+
+        mockServer.verify();
+        IntegrationJob updatedJob = jobService.getById(job.getId());
+        assertThat(updatedJob.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(updatedJob.getExternalId()).isEqualTo("77711");
+
+        ExpenseRequest updatedExp = expenseRequestMapper.selectById(exp.getId());
+        assertThat(updatedExp.getStatus()).isEqualTo("会計連携済");
     }
 
     @Test

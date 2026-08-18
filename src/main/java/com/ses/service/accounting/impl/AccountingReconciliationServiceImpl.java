@@ -12,6 +12,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.SystemConfigMapper;
+import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.AccountingReconciliationService;
@@ -23,12 +24,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.*;
 
 /**
  * 会計・支払月次照合サービス実装 (B3 / design §5, §6.1, §6.3)。
+ * <p>
+ * - 売上、BP仕入、外部決済実績の完全突合。
+ * - 外部 API 取得失敗時は必ず fail-closed (readyForClosing = false) となる (P1-09)。
+ * - 外部のみ取引の内部自動作成は行わず、手動除外/承認のみ許可。
+ * </p>
  */
 @Slf4j
 @Service
@@ -38,7 +43,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     private final InvoiceMapper invoiceMapper;
     private final BpPaymentMapper bpPaymentMapper;
     private final CustomerMapper customerMapper;
-    private final com.ses.mapper.WorkRecordMapper workRecordMapper;
+    private final WorkRecordMapper workRecordMapper;
     private final IntegrationJobService jobService;
     private final IntegrationConnectionService connectionService;
     private final AccountingProviderFactory providerFactory;
@@ -57,6 +62,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         Map<String, String> ignoreMap = loadIgnoreMap(month);
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        boolean externalFetchFailed = false;
 
         // 1. 売上請求の照合
         List<Invoice> invoices = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>()
@@ -79,7 +85,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                         .internalAmount(inv.getTotal())
                         .externalDealId(latestJob.getExternalId())
                         .externalRefNo(inv.getInvoiceNo())
-                        .externalAmount(inv.getTotal()) // 成功時は一致確認済み
+                        .externalAmount(inv.getTotal())
                         .status(ignoreReason != null ? "IGNORED" : "MATCHED")
                         .ignoreReason(ignoreReason)
                         .build());
@@ -111,7 +117,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 2. BP仕入の照合 (P1-09: 対象月に属するwork_recordに限定)
+        // 2. BP仕入の照合 (対象月に属するwork_recordに限定)
         List<WorkRecord> workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
                 .eq(WorkRecord::getWorkMonth, month));
         List<Long> wrIds = workRecords.stream().map(WorkRecord::getId).toList();
@@ -150,7 +156,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 3. 外部のみ存在する取引 (EXTERNAL_ONLY) - 外部API呼出
+        // 3. 外部のみ存在する取引 (EXTERNAL_ONLY) - 外部API呼出 (P1-09: 失敗時は fail-closed)
         if (conn != null && conn.getEncryptedTokens() != null) {
             try {
                 AccountingProvider provider = providerFactory.getProvider(conn);
@@ -159,7 +165,6 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                         conn, ym.atDay(1), ym.atEndOfMonth());
 
                 for (CanonicalPaymentSync ext : extPayments) {
-                    // 内部に紐付かない外部決済を検出
                     boolean foundInInternal = items.stream()
                             .anyMatch(i -> ext.getDealId() != null && ext.getDealId().equals(i.getExternalDealId()));
                     if (!foundInInternal) {
@@ -178,7 +183,14 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                     }
                 }
             } catch (Exception e) {
-                log.warn("External payments fetch skipped or failed for month={}", month, e);
+                log.error("External payments fetch failed for month={}", month, e);
+                externalFetchFailed = true;
+                items.add(ReconciliationItemDto.builder()
+                        .category("EXTERNAL_FETCH_ERROR")
+                        .partnerName("外部サービス")
+                        .status("AMOUNT_MISMATCH")
+                        .discrepancyReason("外部システムからの決済実績取得に失敗しました: " + e.getMessage())
+                        .build());
             }
         }
 
@@ -193,8 +205,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 重大不一致（未解決の金額不一致、未送信売上/仕入、外部のみ取引）が0件であれば月次締め可能 (P1-09)
-        boolean readyForClosing = (mismatch == 0 && internalOnly == 0 && externalOnly == 0);
+        // 重大不一致が0件かつ外部取得失敗がない場合にのみ月次締め可能 (P1-09: fail-closed)
+        boolean readyForClosing = !externalFetchFailed && (mismatch == 0 && internalOnly == 0 && externalOnly == 0);
 
         return AccountingReconciliationSummaryDto.builder()
                 .month(month)
@@ -204,6 +216,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                 .amountMismatchCount(mismatch)
                 .ignoredCount(ignored)
                 .readyForClosing(readyForClosing)
+                .externalFetchFailed(externalFetchFailed)
                 .items(items)
                 .build();
     }
@@ -228,57 +241,54 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         AccountingReconciliationSummaryDto summary = reconcileMonth(month);
         if (!summary.isReadyForClosing()) {
             throw new BusinessException(400, String.format(
-                    "月次締めエラー: %s に会計連携の未解消差異が存在します (金額不一致: %d件, 未送信: %d件)。照合画面で確認・解消してください。",
-                    month, summary.getAmountMismatchCount(), summary.getInternalOnlyCount()));
+                    "対象月 [%s] の会計・支払照合に未解決の差異があるか、外部APIの取得に失敗しているため、月次締めを実行できません " +
+                            "(完全一致: %d, 内部のみ: %d, 外部のみ: %d, 不一致: %d, 外部取得失敗: %b)。" +
+                            "照合画面から差異を確認し、連携または理由付き除外設定を行ってください。",
+                    month, summary.getMatchedCount(), summary.getInternalOnlyCount(),
+                    summary.getExternalOnlyCount(), summary.getAmountMismatchCount(),
+                    summary.isExternalFetchFailed()));
         }
+    }
+
+    private IntegrationConnection resolveConnection(String tenantId, Long legalEntityId, String provider, String product) {
+        return connectionService.getOrCreateConnection(tenantId, legalEntityId, provider, product);
     }
 
     private Map<String, String> loadIgnoreMap(String month) {
         String key = IGNORE_CONFIG_PREFIX + month;
-        SystemConfig config = systemConfigMapper.selectById(key);
+        SystemConfig config = systemConfigMapper.selectOne(new LambdaQueryWrapper<SystemConfig>()
+                .eq(SystemConfig::getConfigKey, key));
         if (config == null || config.getConfigValue() == null || config.getConfigValue().isBlank()) {
             return new HashMap<>();
         }
         try {
             return objectMapper.readValue(config.getConfigValue(), new TypeReference<Map<String, String>>() {});
         } catch (Exception e) {
-            log.warn("Failed to parse ignore map for month={}", month, e);
+            log.warn("Failed to parse ignore map for month={}: {}", month, e.getMessage());
             return new HashMap<>();
         }
     }
 
     private void saveIgnoreMap(String month, Map<String, String> map) {
         String key = IGNORE_CONFIG_PREFIX + month;
+        String json;
         try {
-            String json = objectMapper.writeValueAsString(map);
-            SystemConfig config = systemConfigMapper.selectById(key);
-            if (config == null) {
-                config = new SystemConfig();
-                config.setConfigKey(key);
-                config.setConfigValue(json);
-                config.setDescription("月次照合除外設定 (" + month + ")");
-                systemConfigMapper.insert(config);
-            } else {
-                config.setConfigValue(json);
-                systemConfigMapper.updateById(config);
-            }
+            json = objectMapper.writeValueAsString(map);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to save ignore map", e);
+            throw new RuntimeException("Failed to serialize ignore map", e);
         }
-    }
 
-    private IntegrationConnection resolveConnection(String tenantId, Long corporateEntityId, String provider, String product) {
-        IntegrationConnection direct = connectionService.getConnection(tenantId, corporateEntityId, provider, product);
-        if (direct != null && direct.getEncryptedTokens() != null) {
-            return direct;
+        SystemConfig existing = systemConfigMapper.selectOne(new LambdaQueryWrapper<SystemConfig>()
+                .eq(SystemConfig::getConfigKey, key));
+        if (existing != null) {
+            existing.setConfigValue(json);
+            systemConfigMapper.updateById(existing);
+        } else {
+            SystemConfig config = new SystemConfig();
+            config.setConfigKey(key);
+            config.setConfigValue(json);
+            config.setDescription("月次照合差異除外リスト: " + month);
+            systemConfigMapper.insert(config);
         }
-        List<IntegrationConnection> list = connectionService.listConnections(tenantId);
-        for (IntegrationConnection c : list) {
-            if (provider.equalsIgnoreCase(c.getProvider()) && product.equalsIgnoreCase(c.getProduct())
-                    && c.getEncryptedTokens() != null) {
-                return c;
-            }
-        }
-        return direct != null ? direct : connectionService.getOrCreateConnection(tenantId, corporateEntityId, provider, product);
     }
 }

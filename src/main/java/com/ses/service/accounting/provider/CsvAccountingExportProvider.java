@@ -88,6 +88,11 @@ public class CsvAccountingExportProvider implements AccountingProvider {
         return true;
     }
 
+    @Override
+    public boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode) {
+        return externalId != null && !externalId.isBlank();
+    }
+
     /**
      * 売上請求書一覧から freee 取引インポート形式の CSV 文字列を生成する。
      */

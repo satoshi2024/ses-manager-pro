@@ -103,7 +103,7 @@ public class AccountingReconciliationTest {
 
         // 4. EXTERNAL_ONLY: 外部にのみ存在する取引 (freee API から返される)
         String dealsResponseJson = "{\"deals\": [{\"id\": 99901, \"issue_date\": \"2026-09-15\", \"amount\": 220000, \"ref_number\": \"EXT-ONLY-999\", \"partner_id\": 3001, \"status\": \"settled\", \"payments\": [{\"id\": 7701, \"date\": \"2026-09-15\", \"amount\": 220000}]}]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
 
@@ -128,10 +128,10 @@ public class AccountingReconciliationTest {
         Invoice inv = createInvoice(testMonth, "INV-RECON-IGN-001", new BigDecimal("500000"));
 
         // freee API からは空リスト
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
@@ -162,13 +162,32 @@ public class AccountingReconciliationTest {
         String testMonth = "2026-11";
         createInvoice(testMonth, "INV-RECON-ERR-001", new BigDecimal("800000"));
 
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2026-11-30&status=settled"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2026-11-30&status=settled&limit=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> reconciliationService.assertReconciledForClosing(testMonth))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("未解消差異が存在します");
+                .hasMessageContaining("会計・支払照合に未解決の差異があるか");
+    }
+
+    @Test
+    @DisplayName("外部API障害時のFail-Closed: 外部APIがタイムアウトした場合、readyForClosing=falseとなること (P1-09)")
+    void reconcileMonth_externalApiTimeout_failsClosed() {
+        String testMonth = "2026-10";
+        Invoice inv = createInvoice(testMonth, "INV-TIMEOUT-001", new BigDecimal("1000000"));
+        IntegrationJob job = jobService.createJob(connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", inv.getId(), "SALES:TIMEOUT:1", "hashT");
+        jobService.claimJob(job.getId());
+        jobService.markSucceeded(job.getId(), "EXT-TIMEOUT-001", "req-T", "同期成功");
+
+        // 外部 API が 500 / タイムアウトエラーを返す
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError());
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        assertThat(summary.isExternalFetchFailed()).isTrue();
+        assertThat(summary.isReadyForClosing()).isFalse();
     }
 
     @Test
@@ -178,7 +197,7 @@ public class AccountingReconciliationTest {
         int initialInvoiceCount = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>().eq(Invoice::getBillingMonth, testMonth)).size();
 
         String dealsResponseJson = "{\"deals\": [{\"id\": 88801, \"issue_date\": \"2026-12-10\", \"amount\": 990000, \"ref_number\": \"UNLINKED-DEAL-01\", \"status\": \"settled\", \"payments\": [{\"id\": 7702, \"date\": \"2026-12-10\", \"amount\": 990000}]}]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-12-01&end_issue_date=2026-12-31&status=settled"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-12-01&end_issue_date=2026-12-31&status=settled&limit=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
 

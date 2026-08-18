@@ -24,7 +24,6 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "app.scheduling.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class AccountingIntegrationWorker {
 
@@ -66,18 +65,24 @@ public class AccountingIntegrationWorker {
         }
     }
 
-    /** ジョブ種別ごとに適切な process メソッドへ dispatch する。 */
-    private void dispatchJob(IntegrationJob job) {
+    /** ジョブ種別ごとに適切な process メソッドへ dispatch する (P1-01)。 */
+    public void dispatchJob(IntegrationJob job) {
+        if (job == null || job.getJobType() == null) return;
+
         switch (job.getJobType()) {
             case "SALES_INVOICE_SYNC"   -> salesInvoiceIntegrationService.processSalesInvoiceJob(job.getId());
             case "SALES_INVOICE_CANCEL" -> salesInvoiceIntegrationService.processSalesCancelJob(job.getId());
-            case "PURCHASE_DEAL_SYNC",
-                 "EXPENSE_DEAL_SYNC"    -> purchaseIntegrationService.processBpPurchaseJob(job.getId());
+            case "BP_PURCHASE_SYNC",
+                 "PURCHASE_DEAL_SYNC"   -> purchaseIntegrationService.processBpPurchaseJob(job.getId());
+            case "EXPENSE_DEAL_SYNC"    -> purchaseIntegrationService.processExpenseJob(job.getId());
             case "PAYMENT_SYNC"         -> purchaseIntegrationService.processPaymentSyncJob(job.getId());
             default -> {
                 log.warn("Unknown job type: {}, marking FAILED (jobId={})", job.getJobType(), job.getId());
-                jobService.markFailed(job.getId(), "UNKNOWN_JOB_TYPE",
-                        "未知のジョブ種別: " + job.getJobType());
+                IntegrationJob claimed = jobService.claimJob(job.getId());
+                if (claimed != null) {
+                    jobService.markFailed(job.getId(), "UNKNOWN_JOB_TYPE",
+                            "未知のジョブ種別: " + job.getJobType());
+                }
             }
         }
     }

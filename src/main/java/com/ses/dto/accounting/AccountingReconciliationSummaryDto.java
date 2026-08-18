@@ -23,6 +23,7 @@ public class AccountingReconciliationSummaryDto {
     private int amountMismatchCount;
     private int ignoredCount;
     private boolean readyForClosing;
+    private boolean externalFetchFailed;
     private List<ReconciliationItemDto> items;
 
     @Data

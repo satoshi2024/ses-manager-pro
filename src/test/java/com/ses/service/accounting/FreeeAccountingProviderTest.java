@@ -124,7 +124,7 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("AMOUNT_MISMATCH");
         assertThat(result.isRetryable()).isFalse();
-        assertThat(result.getErrorMessageSafe()).contains("一致しません");
+        assertThat(result.getErrorMessageSafe()).contains("不一致");
     }
 
     @Test
@@ -155,7 +155,7 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
-    @DisplayName("401 Unauthorized: リトライ可能(1回Token更新用)として分類されること")
+    @DisplayName("401 Unauthorized: リフレッシュ失敗時に UNAUTHORIZED / retryable=false として分類されること")
     void unauthorized401_retryable() {
         CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
                 .invoiceId(104L)
@@ -168,11 +168,16 @@ class FreeeAccountingProviderTest {
                         .body("{\"message\": \"OAuth token is expired\"}")
                         .contentType(MediaType.APPLICATION_JSON));
 
+        mockServer.expect(requestTo("https://accounts.secure.freee.co.jp/public_api/token"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"error\": \"invalid_grant\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
         CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
 
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorCode()).isEqualTo("UNAUTHORIZED");
-        assertThat(result.isRetryable()).isTrue();
+        assertThat(result.isRetryable()).isFalse();
     }
 
     @Test
@@ -323,5 +328,71 @@ class FreeeAccountingProviderTest {
         assertThat(csv).contains("\t@CUST-EVIL");
         assertThat(csv).contains("\t+悪意のある社名");
         assertThat(csv).contains("\t-DANGEROUS");
+    }
+
+    @Test
+    @DisplayName("401 Unauthorized: トークン強制リフレッシュ後に1回だけ自動リプレイされ成功すること")
+    void unauthorized401_refreshAndReplaySuccess() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(777L)
+                .invoiceNo("INV-401-TEST")
+                .total(new BigDecimal("200000"))
+                .build();
+
+        // 1回目のリクエストは 401 を返す
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED).body("{\"message\": \"Invalid token\"}").contentType(MediaType.APPLICATION_JSON));
+
+        // トークンリフレッシュリクエスト
+        mockServer.expect(requestTo("https://accounts.secure.freee.co.jp/public_api/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"access_token\": \"new-access-token-999\", \"refresh_token\": \"new-refresh-999\", \"expires_in\": 3600}", MediaType.APPLICATION_JSON));
+
+        // 2回目のリプレイリクエストは新トークンで 200 OK
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer new-access-token-999"))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 88888, \"amount\": 200000}}", MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("88888");
+    }
+
+    @Test
+    @DisplayName("PII / 機密情報サニタイズ: 400/422 エラー本文のメール、Bearerトークン、電話番号が除外されること")
+    void sanitizeErrorResponse_redactsSensitiveData() {
+        String rawBody = "{\"errors\": [{\"messages\": [\"Bearer secret_token_xyz123 は無効です。担当者 user@example.com (03-1234-5678) へご連絡ください\"]}]}";
+        String sanitized = freeeProvider.sanitizeErrorResponse(rawBody);
+
+        assertThat(sanitized).doesNotContain("secret_token_xyz123");
+        assertThat(sanitized).doesNotContain("user@example.com");
+        assertThat(sanitized).doesNotContain("03-1234-5678");
+        assertThat(sanitized).contains("[REDACTED]");
+    }
+
+    @Test
+    @DisplayName("verifyMaster: 外部マスタの存在確認 (200 OK -> true, 404 -> false)")
+    void verifyMaster_masterExistenceCheck() {
+        // 存在する取引先 (200 OK)
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/partners/101?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"partner\": {\"id\": 101, \"name\": \"取引先A\"}}", MediaType.APPLICATION_JSON));
+
+        // 存在しない取引先 (404 Not Found)
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/partners/999?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        boolean exists = freeeProvider.verifyMaster(testConnection, "CUSTOMER_PARTNER", "101", "CUST-001");
+        assertThat(exists).isTrue();
+
+        boolean notExists = freeeProvider.verifyMaster(testConnection, "CUSTOMER_PARTNER", "999", "CUST-999");
+        assertThat(notExists).isFalse();
+
+        mockServer.verify();
     }
 }

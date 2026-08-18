@@ -1,7 +1,7 @@
 package com.ses.service.accounting.provider;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.accounting.IntegrationTokensDto;
 import com.ses.dto.accounting.canonical.*;
@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -24,26 +26,43 @@ import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.regex.Pattern;
 
 /**
- * freee 会計 Public API Provider (design §2, §6.3)。
- * Official API schema DTO を分離し、raw Map を業務へ漏らさない。
- * 秘密情報 (Token等) はログ出力しない。
+ * freee 会計 API アダプター (design §2, §6.3, platform-invariants §7)。
+ * <p>
+ * - Official API Schema DTO を分離し、内部業務モデルへの漏洩を防ぐ。
+ * - 200/400/401/403/429/500/Timeout を厳密に分類。
+ * - 401 受信時はトークン強制リフレッシュ後に最大1回リプレイ (P1-03)。
+ * - タイムアウト時の未知結果照合 (ref_number による重複防止) を実装 (P1-03)。
+ * - エラー本文の PII / 秘密情報サニタイズを徹底 (P1-10)。
+ * - 外部マスタ (取引先/勘定科目/税区分/部門) の存在照合 (P1-05)。
+ * </p>
  */
 @Slf4j
 @Component("freeeAccountingProvider")
 @RequiredArgsConstructor
 public class FreeeAccountingProvider implements AccountingProvider {
 
-    private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
-    private final IntegrationConnectionService connectionService;
+    private static final Pattern PII_REDACT_PATTERN = Pattern.compile(
+            "(?i)(bearer\\s+[a-zA-Z0-9_\\-\\.~]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|\\b\\d{2,4}-\\d{2,4}-\\d{4}\\b)");
 
-    @Value("${freee.api-base-url:https://api.freee.co.jp}")
+    private final RestTemplate restTemplate;
+    private final IntegrationConnectionService connectionService;
+    private final ObjectMapper objectMapper;
+
+    @Value("${freee.api.base-url:https://api.freee.co.jp}")
     private String apiBaseUrl;
+
+    @Value("${freee.oauth.client-id:dummy-client-id}")
+    private String clientId;
+
+    @Value("${freee.oauth.client-secret:dummy-client-secret}")
+    private String clientSecret;
+
+    @Value("${freee.oauth.token-url:https://accounts.secure.freee.co.jp/public_api/token}")
+    private String tokenUrl;
 
     @Override
     public String providerName() {
@@ -55,34 +74,60 @@ public class FreeeAccountingProvider implements AccountingProvider {
         log.info("Upserting sales invoice to freee: invoiceNo={}, customerCode={}, total={}",
                 invoice.getInvoiceNo(), invoice.getCustomerCode(), invoice.getTotal());
 
-        FreeeDealCreateRequest req = buildSalesDealRequest(connection, invoice);
-        return executeDealPost(connection, req, invoice.getTotal());
+        FreeeDealCreateRequest request = buildSalesDealRequest(connection, invoice);
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, invoice.getTotal(), invoice.getInvoiceNo());
     }
 
     @Override
     public CanonicalDealResult cancelSalesInvoice(IntegrationConnection connection, String externalDealId, String reason) {
         log.info("Cancelling sales deal in freee: externalDealId={}, reason={}", externalDealId, reason);
-        if (externalDealId == null || externalDealId.isBlank()) {
-            return CanonicalDealResult.builder()
-                    .success(false)
-                    .errorCode("INVALID_EXTERNAL_ID")
-                    .errorMessageSafe("外部取引IDが指定されていません")
-                    .retryable(false)
-                    .build();
-        }
 
         String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + connection.getExternalCompanyId();
+
+        // 1. まず取引の存在と状態を確認 (404 判定・冪等性保証)
         try {
-            HttpHeaders headers = buildAuthHeaders(connection);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.DELETE, entity, String.class);
+            executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+        } catch (HttpClientErrorException httpEx) {
+            if (httpEx.getStatusCode().value() == 404) {
+                log.info("Deal externalDealId={} is already absent in freee (404), treating cancel as successful", externalDealId);
+                return CanonicalDealResult.builder()
+                        .success(true)
+                        .externalId(externalDealId)
+                        .providerRequestId(extractRequestId(httpEx.getResponseHeaders()))
+                        .errorMessageSafe("外部取引は既に削除・取消されています (404 冪等完了)")
+                        .build();
+            }
+        } catch (Exception ignored) {
+            // 状態確認エラー時は削除 API 自体へ進む
+        }
+
+        // 2. 取引削除 API 実行
+        try {
+            ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.DELETE, entity, String.class);
+            });
 
             String reqId = extractRequestId(response.getHeaders());
             return CanonicalDealResult.builder()
                     .success(true)
                     .externalId(externalDealId)
                     .providerRequestId(reqId)
+                    .errorMessageSafe("freee 取引取消完了")
                     .build();
+        } catch (HttpClientErrorException httpEx) {
+            if (httpEx.getStatusCode().value() == 404) {
+                return CanonicalDealResult.builder()
+                        .success(true)
+                        .externalId(externalDealId)
+                        .providerRequestId(extractRequestId(httpEx.getResponseHeaders()))
+                        .errorMessageSafe("外部取引は既に削除済です (404)")
+                        .build();
+            }
+            return handleApiException(httpEx, "DELETE /api/1/deals/" + externalDealId);
         } catch (Exception e) {
             return handleApiException(e, "DELETE /api/1/deals/" + externalDealId);
         }
@@ -93,8 +138,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
         log.info("Upserting purchase deal to freee: bpPaymentId={}, bpCompanyCode={}, amount={}",
                 purchase.getBpPaymentId(), purchase.getBpCompanyCode(), purchase.getAmount());
 
-        FreeeDealCreateRequest req = buildPurchaseDealRequest(connection, purchase);
-        return executeDealPost(connection, req, purchase.getAmount());
+        FreeeDealCreateRequest request = buildPurchaseDealRequest(connection, purchase);
+        String refNumber = "BP-" + purchase.getBpPaymentId();
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, purchase.getAmount(), refNumber);
     }
 
     @Override
@@ -102,8 +148,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
         log.info("Upserting expense deal to freee: expenseNo={}, engineerCode={}, amount={}",
                 expense.getExpenseNo(), expense.getEngineerCode(), expense.getAmount());
 
-        FreeeDealCreateRequest req = buildExpenseDealRequest(connection, expense);
-        return executeDealPost(connection, req, expense.getAmount());
+        FreeeDealCreateRequest request = buildExpenseDealRequest(connection, expense);
+        return executeDealCreationWithRecovery(connection, "/api/1/deals", request, expense.getAmount(), expense.getExpenseNo());
     }
 
     @Override
@@ -111,140 +157,313 @@ public class FreeeAccountingProvider implements AccountingProvider {
         log.info("Fetching payments from freee: companyId={}, fromDate={}, toDate={}",
                 connection.getExternalCompanyId(), fromDate, toDate);
 
-        String url = String.format("%s/api/1/deals?company_id=%d&start_issue_date=%s&end_issue_date=%s&status=settled",
-                apiBaseUrl, connection.getExternalCompanyId(), fromDate, toDate);
+        String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
+                + "&start_issue_date=" + fromDate
+                + "&end_issue_date=" + toDate
+                + "&status=settled&limit=100";
 
         try {
-            HttpHeaders headers = buildAuthHeaders(connection);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<FreeeDealsListResponse> response = restTemplate.exchange(
-                    url, HttpMethod.GET, entity, FreeeDealsListResponse.class);
+            ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+
+            if (response.getBody() == null || response.getBody().isBlank()) {
+                return Collections.emptyList();
+            }
+
+            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode deals = root.get("deals");
+            if (deals == null || !deals.isArray()) {
+                return Collections.emptyList();
+            }
 
             List<CanonicalPaymentSync> result = new ArrayList<>();
-            if (response.getBody() != null && response.getBody().getDeals() != null) {
-                for (FreeeDealDto deal : response.getBody().getDeals()) {
-                    if (deal.getPayments() != null) {
-                        for (FreeePaymentDto payment : deal.getPayments()) {
-                            result.add(CanonicalPaymentSync.builder()
-                                    .externalId(String.valueOf(payment.getId()))
-                                    .dealId(String.valueOf(deal.getId()))
-                                    .paymentDate(payment.getDate())
-                                    .amount(payment.getAmount())
-                                    .status(deal.getStatus())
-                                    .referenceNo(deal.getRefNumber())
-                                    .build());
-                        }
-                    }
-                }
+            for (JsonNode d : deals) {
+                String dealId = d.has("id") ? String.valueOf(d.get("id").asLong()) : null;
+                BigDecimal amount = d.has("amount") ? BigDecimal.valueOf(d.get("amount").asLong()) : BigDecimal.ZERO;
+                String refNumber = d.has("ref_number") && !d.get("ref_number").isNull() ? d.get("ref_number").asText() : null;
+                String issueDateStr = d.has("issue_date") ? d.get("issue_date").asText() : null;
+                LocalDate paymentDate = issueDateStr != null ? LocalDate.parse(issueDateStr) : null;
+                boolean settled = d.has("status") && "settled".equalsIgnoreCase(d.get("status").asText());
+
+                result.add(CanonicalPaymentSync.builder()
+                        .dealId(dealId)
+                        .amount(amount)
+                        .paymentDate(paymentDate)
+                        .settled(settled)
+                        .refNumber(refNumber)
+                        .build());
             }
             return result;
         } catch (Exception e) {
-            log.error("Failed to fetch payments from freee", e);
-            return Collections.emptyList();
+            log.error("Failed to fetch payments from freee: {}", e.getMessage());
+            throw new RuntimeException("freee決済実績取得エラー: " + e.getMessage(), e);
         }
     }
 
     @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
-        if (connection == null || connection.getExternalCompanyId() == null || externalDealId == null) {
-            return null;
-        }
-
-        String url = String.format("%s/api/1/deals/%s?company_id=%d",
-                apiBaseUrl, externalDealId, connection.getExternalCompanyId());
+        String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + connection.getExternalCompanyId();
 
         try {
-            HttpHeaders headers = buildAuthHeaders(connection);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<FreeeDealSingleResponse> response = restTemplate.exchange(
-                    url, HttpMethod.GET, entity, FreeeDealSingleResponse.class);
+            ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
 
-            if (response.getBody() != null && response.getBody().getDeal() != null) {
-                FreeeDealDto deal = response.getBody().getDeal();
-                if (deal.getPayments() != null && !deal.getPayments().isEmpty()) {
-                    FreeePaymentDto payment = deal.getPayments().get(0);
-                    return CanonicalPaymentSync.builder()
-                            .externalId(String.valueOf(payment.getId()))
-                            .dealId(String.valueOf(deal.getId()))
-                            .paymentDate(payment.getDate())
-                            .amount(payment.getAmount())
-                            .status(deal.getStatus())
-                            .referenceNo(deal.getRefNumber())
-                            .build();
+            if (response.getBody() == null) return null;
+            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode deal = root.get("deal");
+            if (deal == null) return null;
+
+            String dealId = deal.has("id") ? String.valueOf(deal.get("id").asLong()) : externalDealId;
+            BigDecimal amount = deal.has("amount") && !deal.get("amount").isNull() ? BigDecimal.valueOf(deal.get("amount").asLong()) : null;
+            boolean settled = deal.has("status") && "settled".equalsIgnoreCase(deal.get("status").asText());
+            LocalDate paymentDate = null;
+
+            JsonNode payments = deal.get("payments");
+            if (payments != null && payments.isArray() && !payments.isEmpty()) {
+                settled = true;
+                JsonNode firstP = payments.get(0);
+                if (firstP.has("amount") && !firstP.get("amount").isNull()) {
+                    amount = BigDecimal.valueOf(firstP.get("amount").asLong());
+                }
+                if (firstP.has("date") && !firstP.get("date").isNull()) {
+                    paymentDate = LocalDate.parse(firstP.get("date").asText());
                 }
             }
-            return null;
+
+            if (paymentDate == null && deal.has("issue_date") && !deal.get("issue_date").isNull()) {
+                paymentDate = LocalDate.parse(deal.get("issue_date").asText());
+            }
+
+            return CanonicalPaymentSync.builder()
+                    .dealId(dealId)
+                    .amount(amount)
+                    .paymentDate(paymentDate != null ? paymentDate : LocalDate.now())
+                    .settled(settled)
+                    .build();
         } catch (Exception e) {
-            log.error("Failed to fetch deal payment from freee for dealId={}", externalDealId, e);
+            log.warn("Failed to fetch deal payment for dealId={}: {}", externalDealId, e.getMessage(), e);
             return null;
         }
     }
 
     @Override
     public boolean validateConnection(IntegrationConnection connection) {
-        if (connection == null || connection.getExternalCompanyId() == null) {
-            return false;
-        }
-        String url = apiBaseUrl + "/api/1/users/me";
         try {
-            HttpHeaders headers = buildAuthHeaders(connection);
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-            ResponseEntity<String> res = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-            return res.getStatusCode().is2xxSuccessful();
+            String url = apiBaseUrl + "/api/1/users/me";
+            ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+            return response.getStatusCode().is2xxSuccessful();
         } catch (Exception e) {
-            log.warn("freee connection validation failed for connectionId={}", connection.getId());
+            log.warn("freee connection validation failed: {}", e.getMessage());
             return false;
         }
     }
 
-    // === 内部リクエスト送信 & エラー分類 ===
+    @Override
+    public boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode) {
+        if (externalId == null || externalId.isBlank()) return false;
+        Long companyId = connection.getExternalCompanyId();
+        if (companyId == null) companyId = 1L;
 
-    private CanonicalDealResult executeDealPost(IntegrationConnection connection, FreeeDealCreateRequest request,
-                                               BigDecimal expectedAmount) {
-        String url = apiBaseUrl + "/api/1/deals";
+        String path;
+        switch (objectType) {
+            case "CUSTOMER_PARTNER", "BP_PARTNER" ->
+                    path = "/api/1/partners/" + externalId + "?company_id=" + companyId;
+            case "ACCOUNT_SALES", "ACCOUNT_OUTSOURCING" ->
+                    path = "/api/1/account_items/" + externalId + "?company_id=" + companyId;
+            case "TAX_SALES_10" ->
+                    path = "/api/1/taxes/companies/" + companyId;
+            case "SECTION" ->
+                    path = "/api/1/sections?company_id=" + companyId;
+            default -> {
+                return true; // 未知タイプは形式チェックのみ
+            }
+        }
+
         try {
-            HttpHeaders headers = buildAuthHeaders(connection);
-            HttpEntity<FreeeDealCreateRequest> entity = new HttpEntity<>(request, headers);
-            ResponseEntity<FreeeDealSingleResponse> response = restTemplate.postForEntity(
-                    url, entity, FreeeDealSingleResponse.class);
+            String url = apiBaseUrl + path;
+            ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+            });
+            return res.getStatusCode().is2xxSuccessful();
+        } catch (HttpClientErrorException.NotFound e) {
+            log.warn("freee master not found: objectType={}, externalId={}", objectType, externalId);
+            return false;
+        } catch (Exception e) {
+            log.warn("freee master verification error: objectType={}, externalId={}, msg={}", objectType, externalId, e.getMessage());
+            return false;
+        }
+    }
+
+    // === 401 Recovery & Unknown-Outcome Pipeline ===
+
+    private CanonicalDealResult executeDealCreationWithRecovery(IntegrationConnection connection,
+                                                                 String path,
+                                                                 FreeeDealCreateRequest request,
+                                                                 BigDecimal expectedTotal,
+                                                                 String refNumber) {
+        String url = apiBaseUrl + path;
+        try {
+            ResponseEntity<FreeeDealCreateResponse> response = executeWith401Recovery(connection, headers -> {
+                HttpEntity<FreeeDealCreateRequest> entity = new HttpEntity<>(request, headers);
+                return restTemplate.exchange(url, HttpMethod.POST, entity, FreeeDealCreateResponse.class);
+            });
 
             String reqId = extractRequestId(response.getHeaders());
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null && response.getBody().getDeal() != null) {
-                FreeeDealDto deal = response.getBody().getDeal();
-                BigDecimal responseAmount = deal.getAmount();
+            FreeeDealCreateResponse body = response.getBody();
+            if (body != null && body.getDeal() != null) {
+                Long dealId = body.getDeal().getId();
+                Long actualAmount = body.getDeal().getAmount();
 
-                // 金額照合 (design §4: 不一致時は succeeded にしない)
-                if (expectedAmount != null && responseAmount != null && expectedAmount.compareTo(responseAmount) != 0) {
-                    log.error("freee response amount mismatch: expected={}, actual={}", expectedAmount, responseAmount);
+                // 金額整合性チェック
+                if (expectedTotal != null && actualAmount != null
+                        && expectedTotal.compareTo(BigDecimal.valueOf(actualAmount)) != 0) {
+                    log.error("freee response amount mismatch: expected={}, actual={}", expectedTotal, actualAmount);
                     return CanonicalDealResult.builder()
                             .success(false)
-                            .externalId(String.valueOf(deal.getId()))
+                            .externalId(String.valueOf(dealId))
                             .providerRequestId(reqId)
                             .errorCode("AMOUNT_MISMATCH")
-                            .errorMessageSafe(String.format("送信金額(%s)とfreee登録金額(%s)が一致しません", expectedAmount, responseAmount))
+                            .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
                             .retryable(false)
-                            .responseTotal(responseAmount)
                             .build();
                 }
 
                 return CanonicalDealResult.builder()
                         .success(true)
-                        .externalId(String.valueOf(deal.getId()))
+                        .externalId(String.valueOf(dealId))
                         .providerRequestId(reqId)
-                        .responseTotal(responseAmount)
+                        .responseTotal(actualAmount != null ? BigDecimal.valueOf(actualAmount) : expectedTotal)
                         .build();
             }
 
             return CanonicalDealResult.builder()
                     .success(false)
+                    .providerRequestId(reqId)
                     .errorCode("EMPTY_RESPONSE")
                     .errorMessageSafe("freee からの応答が空です")
                     .retryable(false)
                     .build();
 
         } catch (Exception e) {
-            return handleApiException(e, "POST /api/1/deals");
+            // タイムアウトまたはネットワーク切断時の未知結果照合 (P1-03)
+            if ((e instanceof ResourceAccessException || e.getCause() instanceof java.net.SocketTimeoutException)
+                    && refNumber != null && !refNumber.isBlank()) {
+                log.warn("Timeout on deal creation for refNumber={}, querying freee to check if deal was created", refNumber);
+                CanonicalDealResult verified = verifyDealCreatedByRefNumber(connection, refNumber, expectedTotal);
+                if (verified != null) {
+                    return verified;
+                }
+            }
+            return handleApiException(e, "POST " + path);
         }
+    }
+
+    private CanonicalDealResult verifyDealCreatedByRefNumber(IntegrationConnection connection,
+                                                             String refNumber,
+                                                             BigDecimal expectedTotal) {
+        try {
+            String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
+                    + "&limit=20";
+            ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
+                HttpEntity<?> entity = new HttpEntity<>(headers);
+                return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
+            });
+            if (res.getBody() != null) {
+                JsonNode root = objectMapper.readTree(res.getBody());
+                JsonNode deals = root.get("deals");
+                if (deals != null && deals.isArray()) {
+                    for (JsonNode d : deals) {
+                        if (d.has("ref_number") && refNumber.equals(d.get("ref_number").asText())) {
+                            Long dealId = d.get("id").asLong();
+                            Long amount = d.has("amount") ? d.get("amount").asLong() : null;
+                            log.info("Found existing deal for refNumber={} in freee after timeout: dealId={}", refNumber, dealId);
+                            return CanonicalDealResult.builder()
+                                    .success(true)
+                                    .externalId(String.valueOf(dealId))
+                                    .responseTotal(amount != null ? BigDecimal.valueOf(amount) : expectedTotal)
+                                    .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
+                                    .build();
+                        }
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to check existing deal by refNumber after timeout: {}", ex.getMessage());
+        }
+        return null;
+    }
+
+    private <T> ResponseEntity<T> executeWith401Recovery(IntegrationConnection connection,
+                                                         RestExecution<T> execution) {
+        HttpHeaders headers = buildAuthHeaders(connection);
+        try {
+            return execution.execute(headers);
+        } catch (HttpClientErrorException httpEx) {
+            if (httpEx.getStatusCode().value() == 401) {
+                log.warn("Received 401 from freee API, attempting forced token refresh and single replay");
+                try {
+                    // トークン強制リフレッシュ (P1-03)
+                    IntegrationTokensDto refreshed = connectionService.forceRefreshToken(
+                            connection.getId(),
+                            this::refreshFreeeTokens);
+                    if (refreshed != null && refreshed.getAccessToken() != null) {
+                        HttpHeaders newHeaders = new HttpHeaders();
+                        newHeaders.setContentType(MediaType.APPLICATION_JSON);
+                        newHeaders.setBearerAuth(refreshed.getAccessToken());
+                        // 最大1回のリプレイ実行
+                        return execution.execute(newHeaders);
+                    }
+                } catch (Exception refreshEx) {
+                    log.error("Token refresh or replay failed on 401: {}", refreshEx.getMessage());
+                    throw httpEx;
+                }
+            }
+            throw httpEx;
+        }
+    }
+
+    private IntegrationTokensDto refreshFreeeTokens(IntegrationTokensDto currentTokens) {
+        if (currentTokens == null || currentTokens.getRefreshToken() == null || currentTokens.getRefreshToken().isBlank()) {
+            throw new IllegalStateException("リフレッシュトークンが存在しません");
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("grant_type", "refresh_token");
+        form.add("client_id", clientId);
+        form.add("client_secret", clientSecret);
+        form.add("refresh_token", currentTokens.getRefreshToken());
+
+        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(form, headers);
+        ResponseEntity<Map> response = restTemplate.exchange(tokenUrl, HttpMethod.POST, request, Map.class);
+        if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            Map<?, ?> body = response.getBody();
+            String newAccessToken = (String) body.get("access_token");
+            String newRefreshToken = (String) body.get("refresh_token");
+            Number expiresIn = (Number) body.get("expires_in");
+
+            return IntegrationTokensDto.builder()
+                    .accessToken(newAccessToken)
+                    .refreshToken(newRefreshToken != null ? newRefreshToken : currentTokens.getRefreshToken())
+                    .expiresIn(expiresIn != null ? expiresIn.longValue() : 3600L)
+                    .build();
+        }
+        throw new RuntimeException("freee token refresh failed with status: " + response.getStatusCode());
+    }
+
+    @FunctionalInterface
+    private interface RestExecution<T> {
+        ResponseEntity<T> execute(HttpHeaders headers);
     }
 
     private CanonicalDealResult handleApiException(Exception e, String apiPath) {
@@ -268,8 +487,8 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         .success(false)
                         .providerRequestId(reqId)
                         .errorCode("UNAUTHORIZED")
-                        .errorMessageSafe("認証エラー: トークンの有効期限切れまたは無効")
-                        .retryable(true) // 1回リフレッシュ可能
+                        .errorMessageSafe("認証エラー: トークンが無効または失効しています (再認証が必要です)")
+                        .retryable(false)
                         .build();
             } else if (statusCode == 403) {
                 log.warn("freee forbidden / plan limitation (403): {}", safeBody);
@@ -334,7 +553,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
         return CanonicalDealResult.builder()
                 .success(false)
                 .errorCode("UNKNOWN_ERROR")
-                .errorMessageSafe("予期せぬエラー: " + e.getMessage())
+                .errorMessageSafe("予期せぬエラーが発生しました")
                 .retryable(false)
                 .build();
     }
@@ -356,12 +575,45 @@ public class FreeeAccountingProvider implements AccountingProvider {
         return (vals != null && !vals.isEmpty()) ? vals.get(0) : null;
     }
 
-    private String sanitizeErrorResponse(String rawBody) {
+    /**
+     * エラーレスポンスの JSON Allow-list 抽出および PII・機密情報サニタイズ (P1-10)。
+     */
+    public String sanitizeErrorResponse(String rawBody) {
         if (rawBody == null || rawBody.isBlank()) return "";
-        if (rawBody.length() > 300) {
-            return rawBody.substring(0, 300) + "...";
+
+        StringBuilder sanitized = new StringBuilder();
+        try {
+            JsonNode root = objectMapper.readTree(rawBody);
+            if (root.has("errors") && root.get("errors").isArray()) {
+                for (JsonNode err : root.get("errors")) {
+                    if (err.has("messages") && err.get("messages").isArray()) {
+                        for (JsonNode m : err.get("messages")) {
+                            if (sanitized.length() > 0) sanitized.append("; ");
+                            sanitized.append(m.asText());
+                        }
+                    } else if (err.has("message")) {
+                        if (sanitized.length() > 0) sanitized.append("; ");
+                        sanitized.append(err.get("message").asText());
+                    }
+                }
+            } else if (root.has("message")) {
+                sanitized.append(root.get("message").asText());
+            } else if (root.has("error_description")) {
+                sanitized.append(root.get("error_description").asText());
+            } else if (root.has("error")) {
+                sanitized.append(root.get("error").asText());
+            }
+        } catch (Exception ignored) {
+            // JSON パース失敗時は英数記号のみ抽出
         }
-        return rawBody;
+
+        String result = sanitized.length() > 0 ? sanitized.toString() : "入力値またはリクエスト内容に問題があります";
+        // PII / トークン相当の正規表現除去
+        result = PII_REDACT_PATTERN.matcher(result).replaceAll("[REDACTED]");
+        if (result.length() > 200) {
+            result = result.substring(0, 200) + "...";
+        }
+        return result;
     }
 
     private FreeeDealCreateRequest buildSalesDealRequest(IntegrationConnection connection, CanonicalSalesInvoice invoice) {
@@ -449,18 +701,22 @@ public class FreeeAccountingProvider implements AccountingProvider {
     public static class FreeeDealCreateRequest {
         @JsonProperty("company_id")
         private Long companyId;
+
         @JsonProperty("issue_date")
         private String issueDate;
+
         @JsonProperty("due_date")
         private String dueDate;
+
         @JsonProperty("type")
         private String type;
-        @JsonProperty("partner_id")
-        private Long partnerId;
+
         @JsonProperty("partner_code")
         private String partnerCode;
+
         @JsonProperty("ref_number")
         private String refNumber;
+
         @JsonProperty("details")
         private List<FreeeDealDetailDto> details;
     }
@@ -469,18 +725,16 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class FreeeDealDetailDto {
         @JsonProperty("tax_code")
         private Integer taxCode;
+
         @JsonProperty("account_item_id")
         private Integer accountItemId;
+
         @JsonProperty("amount")
         private Long amount;
-        @JsonProperty("item_id")
-        private Long itemId;
-        @JsonProperty("section_id")
-        private Long sectionId;
+
         @JsonProperty("description")
         private String description;
     }
@@ -488,8 +742,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class FreeeDealSingleResponse {
+    public static class FreeeDealCreateResponse {
         @JsonProperty("deal")
         private FreeeDealDto deal;
     }
@@ -497,49 +750,17 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class FreeeDealsListResponse {
-        @JsonProperty("deals")
-        private List<FreeeDealDto> deals;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class FreeeDealDto {
         @JsonProperty("id")
         private Long id;
-        @JsonProperty("company_id")
-        private Long companyId;
-        @JsonProperty("issue_date")
-        private LocalDate issueDate;
-        @JsonProperty("due_date")
-        private LocalDate dueDate;
+
         @JsonProperty("amount")
-        private BigDecimal amount;
+        private Long amount;
+
         @JsonProperty("status")
         private String status;
-        @JsonProperty("type")
-        private String type;
-        @JsonProperty("ref_number")
-        private String refNumber;
-        @JsonProperty("payments")
-        private List<FreeePaymentDto> payments;
-    }
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class FreeePaymentDto {
-        @JsonProperty("id")
-        private Long id;
-        @JsonProperty("date")
-        private LocalDate date;
-        @JsonProperty("amount")
-        private BigDecimal amount;
-        @JsonProperty("from_walletable_type")
-        private String fromWalletableType;
+        @JsonProperty("issue_date")
+        private String issueDate;
     }
 }

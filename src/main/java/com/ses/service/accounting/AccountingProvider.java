@@ -51,4 +51,9 @@ public interface AccountingProvider {
      * 接続が有効か検証する。
      */
     boolean validateConnection(IntegrationConnection connection);
+
+    /**
+     * 外部マスタ (取引先、勘定科目、税区分、部門) の存在・整合性を検証する (P1-05)。
+     */
+    boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode);
 }
