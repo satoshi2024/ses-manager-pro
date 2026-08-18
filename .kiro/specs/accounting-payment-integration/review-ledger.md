@@ -6,7 +6,7 @@
 - **Wave**: Wave 3
 - **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）および `V106.1`（`V106_1__accounting_integration_snapshot_and_slot.sql` による forward repair）
   - ※ `V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **Stage A SpecHead 承認申請中 (Stage B 未着手・未解放)**
+- **現行総合判定**: **Stage A SpecHead Revision 4 承認申請中 (P0: 0, P1: 7 OPEN (Stage A 是正済・Stage B 未着手), P2: 0)**
 - **SpecHead Base**: `f8b81e77`
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08
 
@@ -28,12 +28,12 @@
 ---
 
 ## 3. Decision Gate 記録
-- **G4 (freee会計)**: 会計確定・総勘定元帳の SoR は freee、SES 業務明細の SoR は本システム。OAuth 2.0 API ＋ CSV フォールバック。開発時は公式仕様準拠の `PROVISIONAL`、実契約プラン・実マスタIDは本番 Release Gate。
+- **G4 (freee会計)**: 会計確定・総勘定元帳の SoR は freee、SES 業務明細の SoR は本システム。OAuth 2.0 API ＋ CSV フォールバック。開発時は公式仕様準拠の `PROVISIONAL`、実契約プラン・実マスタIDは本番 Release Gate (`GATE-S15-FREEE-PROD`)。
 - **G9 (経費精算)**: 本システムで申請・承認、freee で会計確定（S14 で推奨既定確定済み）。
 
 ---
 
-## 4. 指摘項目追跡表 (SpecHead Revision 3 / Base `f8b81e77`)
+## 4. 指摘項目追跡表 (SpecHead Revision 4 / Base `f8b81e77`)
 
 ### 4.1 指摘項目一覧と是正状況
 
@@ -41,14 +41,14 @@
 |---|---|---|---|---|---|---|
 | `accounting-payment-integration-R1-P1-01` | P1 | **VERIFIED_CLOSED** | R3.1, R4.1, R6 | design §3 | Worker の全5ジョブ種別ディスパッチ、未知種別ハンドリング、stale 回収 | `AccountingIntegrationWorkerTest` |
 | `accounting-payment-integration-R4-P2-01` | P2 | **VERIFIED_CLOSED** | shared-standards | decision-log, canonical-mapping | `decision-log.md` のテンプレート code fence 閉鎖、用語統一 | `decision-log.md`, `canonical-mapping.md` |
-| `accounting-payment-integration-R1-P1-02` | P1 | **Stage A 解決済 (Stage B OPEN)** | R4.2, R4.3 | design §3.1, §3.2 | `requirements.md` と `design.md` の取消権限完全同期（売上・入金のみ RUNNING 取消許可、BP・経費は 400 拒否）。in-flight 取消時の `CANCELLED_EXTERNALLY_CREATED` event 記録 + 補償 `SALES_INVOICE_CANCEL` enqueue の同一 Tx 原子実行。Table 3 形式準拠 | `R4-T05` (`SalesInvoiceIntegrationTest#cancelJob_inFlightAtomicCompensation`) |
-| `accounting-payment-integration-R1-P1-03` | P1 | **Stage A 解決済 (Stage B OPEN)** | R1.4, R4.1, R4.3 | design §4 | DB トランザクション外で HTTP を呼ぶ 3段階リース・CAS 状態機械（10s HTTP timeout, 45s lease with 30s safety margin, Step 3 `token_version` CAS）。タイムアウト未知結果の全件 pagination (最大50ページ) 照合 | `R4-T02` (`FreeeAccountingProviderTest#forceRefreshToken_multiNode_3StepLease_httpOutsideTx`) |
-| `accounting-payment-integration-R1-P1-04` | P1 | **Stage A 解決済 (Stage B OPEN)** | R1.1 | design §1.1, §1.2 | S16予約衝突を回避した `V106.1` forward migration。5形状契約（fresh/legacy/partial/backfill/repair）、`legal_entity_key` + `active_slot` による soft-delete 一意性保証、重複レコード退避 (`m_integration_connection_backup_v106_1`) とロールバック手順 | `R4-T01` (`IntegrationConnectionAndJobTest#uniqueConstraint_allowsSoftDeleteRecreation`) |
-| `accounting-payment-integration-R1-P1-05` | P1 | **Stage A 解決済 (Stage B OPEN)** | R1.2, R1.3 | design §2, canonical-mapping §2 | 全10種別の正規識別子実在照合（税区分は数値 `tax_code: 34`/`21`、取引先/勘定科目/部門は数値 `id`）、`PROVISIONAL` 運用契約と Release Gate 分離、未知種別 fail-closed、allow-list snapshot 保存、deal `partner_id` 反映 | `R4-T03` (`FreeeAccountingProviderTest#verifyAllTenObjectTypes_failClosedOnUnknown`) |
-| `accounting-payment-integration-R1-P1-06` | P1 | **Stage A 解決済 (Stage B OPEN)** | R5.4 | design §5 | 実在エンティティ（原価部門 `m_cost_center.organization_id` または契約/要員所属 `t_user_organization`）に基づく組織導出。Consumer Inventory 全機能に SQL スコープ適用。マネージャー空集合 DB 0 件、通知スコープ、Scheduler context | `R4-T04` (`AccountingIntegrationApiAndPageTest#managerScope_emptyOrgs_returnsZeroRows`) |
-| `accounting-payment-integration-R1-P1-07` | P1 | **Stage A 解決済 (Stage B OPEN)** | R2.2, R2.3 | design §1.1, §3.2 | `t_integration_job.payload_snapshot` 列追加。取消 enqueue 時点で `externalDealId`, `cancelReasonCode` を snapshot に固定し Worker は snapshot のみを取消 | `R4-T05` (`SalesInvoiceIntegrationTest#cancelJob_executesStrictlyFromSnapshot`) |
-| `accounting-payment-integration-R1-P1-08` | P1 | **Stage A 解決済 (Stage B OPEN)** | R3.2, R3.3, R3.4 | design §6.1 | 時間・asOf 決定表（§6.1）に基づくテナントタイムゾーン（`TenantContext.getTimezone()`）解決、BP Canonical の `work_month` 末日業務日付固定、支払同期の金額・日付双方非 NULL 厳格一致、経費 snapshot ハッシュ検証と `ExpenseRequest` CAS 更新 | `R4-T06` (`PurchaseExpenseIntegrationTest#bpPurchase_deterministicBusinessDate_and_expenseCas`) |
-| `accounting-payment-integration-R1-P1-09` | P1 | **Stage A 解決済 (Stage B OPEN)** | R5.1, R5.2, R5.3 | design §6.2 | 売上・仕入・入金・経費の 4 母集団完全照合。入金は `{externalDealId}:{paymentId}` および `amount + fee` 振込手数料込み総消込突合。freee 取引一覧全件 pagination 取得。未接続・トークンなし・API 障害・50 ページ上限到達時の fail-closed (`readyForClosing=false`)。SUCCEEDED ジョブの実金額突合 | `R4-T07` (`AccountingReconciliationTest#reconciliation_fourPopulations_paginationFailClosed`) |
-| `accounting-payment-integration-R1-P1-10` | P1 | **Stage A 解決済 (Stage B OPEN)** | R4.5 | design §7 | 生レスポンス・生例外の完全遮断。定型エラーコード (`VALIDATION_ERROR`, `UNAUTHORIZED`, `PLAN_LIMITATION`, `RATE_LIMITED`, `SERVER_ERROR`) と局所化キーのみ保存・ログ出力 | `R4-T03` (`FreeeAccountingProviderTest#errorHandling_sanitizedCodesAndNoPii`) |
-| `accounting-payment-integration-R1-P1-11` | P1 | **Stage A 解決済 (Stage B OPEN)** | R6 | design §8 | `messages*.properties` (ja/en/zh/ko) を単一翻訳源とし、HTML / JS の全可視文言を `t(key)` 化。取消理由を機械可読コードで送信・保存 | `R4-T04` (`AccountingIntegrationApiAndPageTest#i18n_fourLanguages_stableReasonCodes`) |
-| `accounting-payment-integration-R4-P1-01` | P1 | **Stage A 解決済 (Stage B OPEN)** | handbook §8, §12 | tasks §1, §2 | 歴史的タスク（T094〜T101, `[x]`）と未実装の Stage B 是正タスク（R4-T01〜R4-T08, 全て `[ ]` かつ詳細 Demo 定義付き）を明確に分離し、タスク台帳の不整合を解消 | `tasks.md`, `review-ledger.md`, `spec-execution-ledger.md` |
+| `accounting-payment-integration-R1-P1-09` | P1 | **VERIFIED_SPEC_RESOLVED** (Stage B OPEN) | R5.1, R5.2, R5.3 | design §6.2 | 売上・仕入・入金・経費の 4 母集団完全照合。入金は `{externalDealId}:{paymentId}` および `amount + fee` 振込手数料込み総消込突合。同日同額曖昧時は `PAYMENT_AMBIGUOUS` で fail-closed。50 ページ上限到達時 `readyForClosing=false` | `R4-T07` (`AccountingReconciliationTest#reconciliation_fourPopulations_paginationFailClosed`) |
+| `accounting-payment-integration-R1-P1-02` | P1 | **Stage A 是正済** (Stage B OPEN) | R4.2, R4.3 | design §3.1, §3.2 | Table 3 に種別×状態完全マトリクスを統合。`SALES_INVOICE_CANCEL` は全状態で取消拒否 (400 `CANNOT_CANCEL_CANCELLATION_JOB`)。BP・経費の RUNNING 取消は 400 拒否。売上・入金の RUNNING 取消許可。in-flight 補償ジョブ enqueue 失敗時は同一 Tx で全 rollback | `R4-T05` (`SalesInvoiceIntegrationTest#cancelJob_inFlightAtomicCompensation`) |
+| `accounting-payment-integration-R1-P1-03` | P1 | **Stage A 是正済** (Stage B OPEN) | R1.4, R4.1, R4.3 | design §4 | `m_integration_connection.status = 'REAUTH_REQUIRED'` に状態語彙を統一。3段階リース（45s lease, 10s HTTP timeout, 30s safety margin, Step 3 Fencing CAS）。待機回数を3回（500ms->1000ms->2000ms）で統一。deal 作成タイムアウト時の 50 ページ pagination 走査 (`verifyDealCreatedByRefNumber`) を明記 | `R4-T02` (`FreeeAccountingProviderTest#forceRefreshToken_multiNode_3StepLease_httpOutsideTx`) |
+| `accounting-payment-integration-R1-P1-04` | P1 | **Stage A 是正済** (Stage B OPEN) | R1.1 | design §1.1, §1.2 | S16予約衝突を回避した `V106.1` forward migration。5形状契約、重複 connection の UPDATE 復元（PK 衝突回避）、`t_integration_job` を含む全追加列 DROP の完全 Rollback SQL、`flyway repair` を用いた途中失敗復旧手順を明記 | `R4-T01` (`IntegrationConnectionAndJobTest#uniqueConstraint_allowsSoftDeleteRecreation`) |
+| `accounting-payment-integration-R1-P1-05` | P1 | **Stage A 是正済** (Stage B OPEN) | R1.2, R1.3 | design §2, canonical-mapping §2 | freee API v1 公式一次資料 URL・版・確認日、および `src/test/resources/fixtures/accounting/freee/` の contract fixture パスを明記。CI 上での完了判定を **`CONDITIONAL PASS`** とし、実 freee 環境への接続を本番 Release Gate (`GATE-S15-FREEE-PROD`) として分離管理 | `R4-T03` (`FreeeAccountingProviderTest#verifyAllTenObjectTypes_failClosedOnUnknown`) |
+| `accounting-payment-integration-R1-P1-06` | P1 | **Stage A 是正済** (Stage B OPEN) | R5.4 | design §5 | 実在エンティティに基づく組織導出: 売上（`invoice.cost_center_id` -> `m_cost_center.organization_id`、主明細契約 `t_contract.sales_user_id` -> `t_user_organization (primary_flag=1, valid_from <= asOf AND (valid_to IS NULL OR valid_to >= asOf))` where `asOf = issued_date / billing_month 末日`）、BP（`work_month` 末日）、経費（`t_engineer.organization_id` / `t_engineer_account_link`）。全 Consumer SQL scope 適用 | `R4-T04` (`AccountingIntegrationApiAndPageTest#managerScope_emptyOrgs_returnsZeroRows`) |
+| `accounting-payment-integration-R1-P1-07` | P1 | **Stage A 是正済** (Stage B OPEN) | R2.2, R2.3 | design §1.1, §3.2 | `t_integration_job.payload_snapshot` 列追加。取消 enqueue 時点で `externalDealId`, `cancelReasonCode` を snapshot に固定し Worker は snapshot のみを取消 | `R4-T05` (`SalesInvoiceIntegrationTest#cancelJob_executesStrictlyFromSnapshot`) |
+| `accounting-payment-integration-R1-P1-08` | P1 | **Stage A 是正済** (Stage B OPEN) | R3.2, R3.3, R3.4 | design §6.1 | `m_system_config` キー `accounting.timezone`（既定 `Asia/Tokyo`）を解決する `AccountingTimezoneResolver` の明記、BP Canonical の `work_month` 末日業務日付固定、経費 CAS 更新 | `R4-T06` (`PurchaseExpenseIntegrationTest#bpPurchase_deterministicBusinessDate_and_expenseCas`) |
+| `accounting-payment-integration-R1-P1-10` | P1 | **Stage A 是正済** (Stage B OPEN) | R4.5 | design §7 | 生レスポンス・生例外の完全遮断。定型エラーコード (`VALIDATION_ERROR`, `UNAUTHORIZED`, `PLAN_LIMITATION`, `RATE_LIMITED`, `SERVER_ERROR`) と局所化キーのみ保存・ログ出力 | `R4-T03` (`FreeeAccountingProviderTest#errorHandling_sanitizedCodesAndNoPii`) |
+| `accounting-payment-integration-R1-P1-11` | P1 | **Stage A 是正済** (Stage B OPEN) | R6 | design §8 | `messages*.properties` (ja/en/zh/ko) を単一翻訳源とし、HTML / JS の全可視文言を `t(key)` 化。取消理由を機械可読コードで送信・保存 | `R4-T04` (`AccountingIntegrationApiAndPageTest#i18n_fourLanguages_stableReasonCodes`) |
+| `accounting-payment-integration-R4-P1-01` | P1 | **Stage A 是正済** (Stage B OPEN) | handbook §8, §12 | tasks §1, §2 | 歴史的タスク（T094〜T101, `[x]`）と Stage B 是正タスク（R4-T01〜R4-T08, 全て `[ ]` かつ詳細 Demo / CONDITIONAL PASS 条件定義付き）を明確に分離し、台帳整合を完了 | `tasks.md`, `review-ledger.md`, `spec-execution-ledger.md` |
