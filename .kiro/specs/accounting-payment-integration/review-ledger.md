@@ -6,7 +6,8 @@
 - **Wave**: Wave 3
 - **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）および `V106.1`（`V106_1__accounting_integration_snapshot_and_slot.sql` による forward repair）
   - ※ `V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **Stage A SpecHead Revision 6 承認申請中 (P0: 0, P1: 1 OPEN (Stage A 是正済・Stage B 未着手), P2: 0)**
+- **現行総合判定**: **Stage A SpecHead Revision 6 PASS（P0: 0, P1: 0, P2: 0）→ Stage B（R4-T01〜R4-T08）実装・検証中**
+- **Stage A SpecHead Review Head**: `e0d8a96f`
 - **SpecHead Base**: `f8b81e77`
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08
 
@@ -48,7 +49,7 @@
 | `accounting-payment-integration-R1-P1-08` | P1 | **VERIFIED_SPEC_RESOLVED** (Stage B OPEN) | R3.2, R3.3, R3.4 | design §6.1 | `m_system_config` のキー `accounting.timezone.{tenantId}`（未設定時は `accounting.timezone`、不正時は `Asia/Tokyo` フォールバック）を解決する `AccountingTimezoneResolver.resolve(tenantId)` の明記、`AccountingTenantContextHolder` による try-finally コンテキスト管理 | `R4-T06` (`PurchaseExpenseIntegrationTest#bpPurchase_deterministicBusinessDate_and_expenseCas`) |
 | `accounting-payment-integration-R1-P1-09` | P1 | **VERIFIED_SPEC_RESOLVED** (Stage B OPEN) | R5.1, R5.2, R5.3 | design §6.2 | 売上・仕入・入金・経費の 4 母集団完全照合。入金は `{externalDealId}:{paymentId}` および `amount + fee` 振込手数料込み総消込突合。同日同額曖昧時は `PAYMENT_AMBIGUOUS` で fail-closed。50 ページ上限到達時 `readyForClosing=false` | `R4-T07` (`AccountingReconciliationTest#reconciliation_fourPopulations_paginationFailClosed`) |
 | `accounting-payment-integration-R4-P1-01` | P1 | **VERIFIED_SPEC_RESOLVED** (Stage B OPEN) | handbook §8, §12 | tasks §1, §2 | 歴史的タスク（T094〜T101, `[x]`）と Stage B 是正タスク（R4-T01〜R4-T08, 全て `[ ]` かつ詳細 Demo / CONDITIONAL PASS 条件定義付き）を明確に分離し、台帳整合を完了 | `tasks.md`, `review-ledger.md`, `spec-execution-ledger.md` |
-| `accounting-payment-integration-R1-P1-04` | P1 | **Stage A 是正済** (Stage B OPEN) | R1.1 | design §1.1, §1.2 | `m_integration_connection_backup_v106_1` の完全 DDL 定義。厳格な Rollback 順序（新 UNIQUE 削除 → 退避行 UPDATE 復元 → 旧 UNIQUE 復元 → 全 11 追加列・生成列の個別独立 `information_schema` DROP → バックアップテーブル削除）、`flyway repair` を用いた途中失敗復旧手順の確立 | `R4-T01` (`IntegrationConnectionAndJobTest#uniqueConstraint_allowsSoftDeleteRecreation`) |
+| `accounting-payment-integration-R1-P1-04` | P1 | **VERIFIED_SPEC_RESOLVED** (Stage B OPEN) | R1.1 | design §1.1, §1.2 | 新 UNIQUE 先行削除 → 退避行 UPDATE 復元 → 旧 UNIQUE 復元 → 全 11 追加列の独立存在判定 DROP → backup 後置削除。direct MySQL regression 契約（NULL 法人重複 2 件 apply→rollback→全行復元、任意 partial 形状、V106 形状完全一致、repair→再適用）を確定。Review Head `e0d8a96f` で VERIFIED_SPEC_RESOLVED 確認 | `R4-T01` (`IntegrationConnectionAndJobTest#migration_rollback_partialSafeAllShapes`) |
 | `accounting-payment-integration-R1-P1-07` | P1 | **Stage A 是正済** (Stage B OPEN) | R2.2, R2.3 | design §1.1, §3.2 | `t_integration_job.payload_snapshot` 列追加。取消 enqueue 時点で `externalDealId`, `cancelReasonCode` を snapshot に固定し Worker は snapshot のみを取消 | `R4-T05` (`SalesInvoiceIntegrationTest#cancelJob_executesStrictlyFromSnapshot`) |
 | `accounting-payment-integration-R1-P1-10` | P1 | **Stage A 是正済** (Stage B OPEN) | R4.5 | design §7 | 生レスポンス・生例外の完全遮断。定型エラーコード (`VALIDATION_ERROR`, `UNAUTHORIZED`, `PLAN_LIMITATION`, `RATE_LIMITED`, `SERVER_ERROR`) と局所化キーのみ保存・ログ出力 | `R4-T03` (`FreeeAccountingProviderTest#errorHandling_sanitizedCodesAndNoPii`) |
 | `accounting-payment-integration-R1-P1-11` | P1 | **Stage A 是正済** (Stage B OPEN) | R6 | design §8 | `messages*.properties` (ja/en/zh/ko) を単一翻訳源とし、HTML / JS の全可視文言を `t(key)` 化。取消理由を機械可読コードで送信・保存 | `R4-T04` (`AccountingIntegrationApiAndPageTest#i18n_fourLanguages_stableReasonCodes`) |
