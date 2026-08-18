@@ -10,9 +10,10 @@
    - freee Public API (OAuth 2.0 Authorization Code Flow)
    - API未対応・プラン制限時は CSV エクスポート/インポートへのフォールバック
    - DB transaction 外で非同期 Job (Outbox パターン) による送信
-3. **PROVISIONAL 仕様と本番 Release Gate**:
-   - 開発・単体/統合テスト・MySQL回帰は、freee公式API仕様に完全準拠した PROVISIONAL 定義および WireMock fixture に基づき実行する。
-   - 実契約プラン (Standard / Professional / Enterprise)、実本番 `company_id`、本番 Client ID / Client Secret、実本番マスタIDは本番Release Gateとして分離管理する。
+3. **一次資料・PROVISIONAL 仕様と本番 Release Gate**:
+   - 一次資料: freee Developer Reference `https://developer.freee.co.jp/reference/accounting/reference` (Accounting API v1 / OpenAPI 3.0 specification), freee会計 API変更情報 `https://developer.freee.co.jp/info/accounting` (2026年7月税区分更新確認)。
+   - 開発・単体/統合テスト・MySQL回帰は、上記公式仕様から作成した固定 contract fixture（`src/test/resources/fixtures/accounting/freee/`）に基づき実行する（`PROVISIONAL` 運用契約）。
+   - 実契約プラン (Standard / Professional / Enterprise)、実本番 `company_id`、本番 Client ID / Client Secret、実本番マスタIDは本番Release Gate (`GATE-S15-FREEE-PROD`) として分離管理する。
 
 ---
 
@@ -20,16 +21,16 @@
 
 | No | マッピング種別 (`object_type`) | 正規識別子型 | freee API エンドポイント / 一次資料 | 存在検証・照合ルール | freee 送信時ペイロード適用先 (JSON型) | 確認状態 |
 |---|---|---|---|---|---|---|
-| 1 | `CUSTOMER_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (freee API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
-| 2 | `BP_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (freee API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
-| 3 | `ACCOUNT_SALES` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
-| 4 | `ACCOUNT_PURCHASE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
-| 5 | `ACCOUNT_EXPENSE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (freee API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
-| 6 | `TAX_SALES_10` | `tax_code` (Numeric Integer, 例: `34`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 34` (Number) | `PROVISIONAL` / Release Gate |
-| 7 | `TAX_PURCHASE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
-| 8 | `TAX_EXPENSE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (freee API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
-| 9 | `SECTION` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (freee API v1) | 一覧走査で `section.id == external_id` | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
-| 10 | `COST_CENTER` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (freee API v1) | G4 決定: SECTION へ写像して照合 | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
+| 1 | `CUSTOMER_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
+| 2 | `BP_PARTNER` | `id` (Numeric String) | `GET /api/1/partners/{id}?company_id={company_id}` (API v1) | `partner.id == external_id` かつ事業所一致 | deal `partner_id` (Number) | `PROVISIONAL` / Release Gate |
+| 3 | `ACCOUNT_SALES` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 4 | `ACCOUNT_PURCHASE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 5 | `ACCOUNT_EXPENSE` | `id` (Numeric String) | `GET /api/1/account_items?company_id={company_id}` (API v1) | 一覧走査で `account_item.id == external_id` | deal details `account_item_id` (Number) | `PROVISIONAL` / Release Gate |
+| 6 | `TAX_SALES_10` | `tax_code` (Numeric Integer, 例: `34`) | `GET /api/1/taxes/companies/{company_id}` (API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 34` (Number) | `PROVISIONAL` / Release Gate |
+| 7 | `TAX_PURCHASE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
+| 8 | `TAX_EXPENSE_10` | `tax_code` (Numeric Integer, 例: `21`) | `GET /api/1/taxes/companies/{company_id}` (API v1) | 一覧走査で `code == external_id` (Integer) | deal details `tax_code: 21` (Number) | `PROVISIONAL` / Release Gate |
+| 9 | `SECTION` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (API v1) | 一覧走査で `section.id == external_id` | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
+| 10 | `COST_CENTER` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (API v1) | G4 決定: SECTION へ写像して照合 | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
 
 - **フェイルクローズ**: 上記10種別以外の未知の `object_type` は `return false`（検証失敗）。一覧取得が 200 OK であっても該当 ID / code が存在しない場合は `false`。
 - **Canonical Snapshot 仕様**:
@@ -63,6 +64,6 @@
 - 相関: `X-Freee-Request-ID` (レスポンスヘッダから取得し Job に記録)
 - 冪等性: 送信時に `payload_snapshot` の UTF-8 SHA-256 ハッシュを `payload_hash` として記録
 - レート制限 (429): `Retry-After` ヘッダに基づく Exponential Backoff + Jitter
-- 認証失効 (401): `token_version` と 3段階リースによる multi-node 直列化 Token Refresh (1回のみ)。連続 401 は FAILED
+- 認証失効 (401): `token_version` と 3段階リースによる multi-node 直列化 Token Refresh (1回のみ)。敗者ノードは `TOKEN_REFRESH_IN_PROGRESS` で待機・リトライ。連続 401 は FAILED (`status = 'REAUTH_REQUIRED'`)
 - 入力エラー (400 / 422): リトライせず FAILED（人手修正待ち）
 - プラン制限 (403): リトライせず FAILED（CSV フォールバックを案内）

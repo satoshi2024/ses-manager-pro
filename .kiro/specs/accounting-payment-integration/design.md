@@ -29,6 +29,27 @@
   - `active_slot` INT GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN 1 ELSE NULL END) STORED
   - `UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, provider, product, active_slot)`
 
+- `m_integration_connection_backup_v106_1` (移行事前退避テーブル):
+  - `backup_id` BIGINT AUTO_INCREMENT PRIMARY KEY
+  - `original_id` BIGINT NOT NULL
+  - `tenant_id` VARCHAR(64) NOT NULL
+  - `legal_entity_id` BIGINT NULL
+  - `provider` VARCHAR(32) NOT NULL
+  - `product` VARCHAR(32) NOT NULL
+  - `external_company_id` BIGINT NULL
+  - `company_name` VARCHAR(255) NULL
+  - `encrypted_tokens` TEXT NULL
+  - `expires_at` DATETIME NULL
+  - `status` VARCHAR(32) NOT NULL
+  - `connected_by` BIGINT NULL
+  - `connected_at` DATETIME NULL
+  - `last_refreshed_at` DATETIME NULL
+  - `token_version` INT NOT NULL
+  - `deleted_flag` INT NOT NULL
+  - `version` INT NOT NULL
+  - `backup_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  - `INDEX idx_backup_orig (original_id)`
+
 - `m_external_mapping`:
   - `id` BIGINT AUTO_INCREMENT PRIMARY KEY
   - `connection_id` BIGINT NOT NULL
@@ -77,67 +98,91 @@
   - `occurred_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   - `safe_detail` VARCHAR(500) NULL COMMENT '安全な監査メッセージ'
 
-### 1.2 Migration 5形状契約・Failed Recovery & 完全 Rollback (platform-invariants §4.2 準拠)
+### 1.2 Migration 5形状契約・Partial-Safe Rollback & Flyway Repair (platform-invariants §4.2 準拠)
 
 - **番号採番ルール**: S15 の正式 migration は `V106`（Consolidated baseline V1 に反映済み）。既存 V106 適用済み環境用の forward repair migration は **`V106.1` / `V106_1__accounting_integration_snapshot_and_slot.sql`** とする（S16 に予約済みの `V107` と衝突させない）。
 - **5形状の契約手順**:
-  1. **Fresh V1**: `V1__create_tables.sql` に全最新スキーマ（`legal_entity_key`, `active_slot`, `token_version`, `refresh_lease_*`, `payload_snapshot`, `lease_*`, `tenant_id`, `legal_entity_id`, `organization_id`）を含め、新規DBを一発初期化。
+  1. **Fresh V1**: `V1__create_tables.sql` に全最新スキーマ（`legal_entity_key`, `active_slot`, `token_version`, `refresh_lease_*`, `payload_snapshot`, `lease_*`, `tenant_id`, `legal_entity_id`, `organization_id`）を含め新規DBを一括初期化。
   2. **Legacy V106**: 既存DBに対し `V106_1` を適用。
   3. **Partial (途中失敗リカバリ & Flyway Repair)**:
-     - DDL ステートメントは冪等（`IF NOT EXISTS` やカラム存在チェック）に記述。
-     - MySQL で非トランザクショナル DDL が途中失敗し `flyway_schema_history` に `success = 0` が記録された場合:
-       1. 後述の完全 Rollback SQL を実行して中間状態をクリーンアップ。
+     - 各DDLは `information_schema` チェック付きの冪等スクリプトとして記述。
+     - MySQL で非トランザクショナル DDL が途中失敗し `flyway_schema_history` に `success = 0` が残った場合:
+       1. 後述の `information_schema` ガード付き Rollback スクリプトを実行。
        2. `DELETE FROM flyway_schema_history WHERE version = '106.1' AND success = 0;` (または `flyway repair`) を実行。
        3. `V106_1` を再適用。
   4. **Backfill & Preflight**:
-     - `m_integration_connection`: `(tenant_id, COALESCE(legal_entity_id, 0), provider, product, deleted_flag = 0)` の重複行を検査。
+     - `m_integration_connection`: 重複行検査 (`tenant_id, COALESCE(legal_entity_id, 0), provider, product, deleted_flag = 0`)。
      - **Survivorship / Merge 優先度**:
-       - 優先度1: `status = 'CONNECTED'` かつ `encrypted_tokens IS NOT NULL` かつ `expires_at > NOW()` の有効接続を最優先で残す。
+       - 優先度1: `status = 'CONNECTED'` かつ `encrypted_tokens IS NOT NULL` かつ `expires_at > NOW()` の有効接続。
        - 優先度2: `last_refreshed_at` が最新の行。
        - 優先度3: `updated_at` が最新の行（IDが大きい行）。
-     - 重複行は監査退避テーブル `m_integration_connection_backup_v106_1` へ退避後、非残存行を `deleted_flag = 1` に論理削除。
-     - `t_integration_job`: 既存完了・失敗ジョブの `payload_snapshot IS NULL` はレガシー記録（読み取り専用）として保持。手動リトライ時は新スナップショットで新規Jobを作成。
+     - 重複レコードは `m_integration_connection_backup_v106_1` へ全列退避後、非残存行を `deleted_flag = 1` に論理削除。
+     - `t_integration_job`: 既存完了・失敗ジョブの `payload_snapshot IS NULL` はレガシー記録（読み取り専用）として保持。
   5. **Repair**: `V106_1` を再実行した場合、差分なしで正常終了。
-- **完全 Rollback SQL 及び順序**:
+- **Information Schema ガード付き 完全 Rollback SQL**:
   ```sql
-  -- 1. 新 UNIQUE インデックスの削除
-  ALTER TABLE m_integration_connection DROP INDEX uk_int_conn;
+  -- 1. バックアップが存在する場合のみ UPDATE で復元（PK衝突回避）
+  SET @restore_sql = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection_backup_v106_1') > 0,
+    'UPDATE m_integration_connection c JOIN m_integration_connection_backup_v106_1 b ON c.id = b.original_id SET c.deleted_flag = 0, c.version = c.version + 1',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @restore_sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 2. 退避テーブルからの重複レコード復元 (UPDATE により PK 衝突を防止)
-  UPDATE m_integration_connection c
-  JOIN m_integration_connection_backup_v106_1 b ON c.id = b.original_id
-  SET c.deleted_flag = 0, c.version = c.version + 1;
+  -- 2. 新 UNIQUE インデックスの削除（存在時のみ）
+  SET @drop_uk = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND index_name = 'uk_int_conn') > 0,
+    'ALTER TABLE m_integration_connection DROP INDEX uk_int_conn',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @drop_uk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 3. 旧 UNIQUE インデックスの復元
-  ALTER TABLE m_integration_connection ADD UNIQUE KEY uk_int_conn (tenant_id, legal_entity_id, provider, product, deleted_flag);
+  -- 3. 旧 UNIQUE インデックスの復元（未存在時のみ）
+  SET @create_old_uk = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND index_name = 'uk_int_conn') = 0,
+    'ALTER TABLE m_integration_connection ADD UNIQUE KEY uk_int_conn (tenant_id, legal_entity_id, provider, product, deleted_flag)',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @create_old_uk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 4. m_integration_connection の追加列・生成列削除
-  ALTER TABLE m_integration_connection
-    DROP COLUMN active_slot,
-    DROP COLUMN legal_entity_key,
-    DROP COLUMN refresh_lease_expires_at,
-    DROP COLUMN refresh_lease_token,
-    DROP COLUMN token_version;
+  -- 4. m_integration_connection の追加列・生成列削除（存在時のみ）
+  SET @drop_conn_cols = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'active_slot') > 0,
+    'ALTER TABLE m_integration_connection DROP COLUMN active_slot, DROP COLUMN legal_entity_key, DROP COLUMN refresh_lease_expires_at, DROP COLUMN refresh_lease_token, DROP COLUMN token_version',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @drop_conn_cols; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-  -- 5. t_integration_job の追加列削除
-  ALTER TABLE t_integration_job
-    DROP COLUMN organization_id,
-    DROP COLUMN legal_entity_id,
-    DROP COLUMN tenant_id,
-    DROP COLUMN lease_expires_at,
-    DROP COLUMN lease_token,
-    DROP COLUMN payload_snapshot;
+  -- 5. t_integration_job の追加列削除（存在時のみ）
+  SET @drop_job_cols = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_integration_job' AND column_name = 'payload_snapshot') > 0,
+    'ALTER TABLE t_integration_job DROP COLUMN organization_id, DROP COLUMN legal_entity_id, DROP COLUMN tenant_id, DROP COLUMN lease_expires_at, DROP COLUMN lease_token, DROP COLUMN payload_snapshot',
+    'SELECT 1'
+  ));
+  PREPARE stmt FROM @drop_job_cols; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
   -- 6. バックアップテーブルの削除
   DROP TABLE IF EXISTS m_integration_connection_backup_v106_1;
+
+  -- 7. Flyway 失敗履歴の削除
+  DELETE FROM flyway_schema_history WHERE version = '106.1' AND success = 0;
   ```
 
 ---
 
 ## 2. 外部マスタ 10種別 & G4 判定決定表
 
-- **一次資料**: freee Accounting API Reference (API v1 / OpenAPI 3.0 spec `https://api.freee.co.jp/api/1/`, 2026-08-18 確認済み公式仕様)。
-- **Contract Fixture Path**: `src/test/resources/fixtures/accounting/freee/` 配下の公式 JSON fixture (`partners_200.json`, `account_items_200.json`, `taxes_companies_200.json`, `sections_200.json`, `deals_post_200.json` 等)。
+- **一次資料**:
+  - freee Developer Reference: `https://developer.freee.co.jp/reference/accounting/reference` (Accounting API v1 / OpenAPI 3.0 specification)
+  - freee会計 API変更情報: `https://developer.freee.co.jp/info/accounting` (2026年7月税区分更新確認済み)
+- **Contract Fixture Path & Provenance**:
+  - 公式仕様から作成した固定 contract fixture（`src/test/resources/fixtures/accounting/freee/`）
+  - `partners_200.json` (SHA-256 fixture verification: `GET /api/1/partners/{id}`)
+  - `account_items_200.json` (from `GET /api/1/account_items`)
+  - `taxes_companies_200.json` (from `GET /api/1/taxes/companies/{company_id}`)
+  - `sections_200.json` (from `GET /api/1/sections`)
+  - `deals_post_200.json` (from `POST /api/1/deals`)
+  - `deals_get_200.json` (from `GET /api/1/deals/{id}`)
 
 | No | マッピング種別 | 正規識別子型 | freee API エンドポイント / 一次資料 | 存在検証ルール | deal ペイロード適用先 (JSON型) | 確認状態 |
 |---|---|---|---|---|---|---|
@@ -152,7 +197,7 @@
 | 9 | `SECTION` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (API v1) | 一覧走査で `section.id == external_id` | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
 | 10 | `COST_CENTER` | `id` (Numeric String) | `GET /api/1/sections?company_id={company_id}` (API v1) | G4 決定: SECTION へ写像 | deal details `section_id` (Number) | `PROVISIONAL` / Release Gate |
 
-- **PROVISIONAL 運用契約**: 開発・テスト（R4-T01〜R4-T08）は上記 PROVISIONAL 定義および WireMock fixture で進め、実契約プラン・実会社ID・本番マスタIDは本番Release Gate (`GATE-S15-FREEE-PROD`) として分離管理する。
+- **PROVISIONAL 運用契約**: 開発・テスト（R4-T01〜R4-T08）は上記 PROVISIONAL 定義および固定 contract fixture で進め、実契約プラン・実会社ID・本番マスタIDは本番Release Gate (`GATE-S15-FREEE-PROD`) として分離管理する。
 - 未知の `object_type` は即座に `return false` (fail-closed)。
 - `m_external_mapping.payload_snapshot` には allow-list された canonical snapshot (`{ "objectType": "...", "externalId": "...", "externalCode": "...", "name": "...", "companyId": ..., "verifiedAt": "..." }`) のみを保存。
 
@@ -165,7 +210,7 @@
 | 状態 (`status`) | 許可遷移 (種別条件) | 防重手段 | competing writer | rollback 挙動 |
 |---|---|---|---|---|
 | `PENDING` | → `RUNNING` (Worker claim: 全種別)<br>→ `CANCELLED` (ユーザー取消: `SALES_INVOICE_SYNC`, `BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `PAYMENT_SYNC` のみ。**`SALES_INVOICE_CANCEL` は 400 拒否**) | DB CAS (`status='PENDING' AND (next_retry_at IS NULL OR <= NOW())`) | 複数 Worker の同時 claim / Worker claim vs ユーザー取消 | claim CAS 失敗時は `PENDING` を維持。取消 CAS 失敗時は現状維持 |
-| `RUNNING` | → `SUCCEEDED` (HTTP 200: 全種別)<br>→ `RETRYABLE` (429/5xx/timeout: 全種別)<br>→ `FAILED` (400/422/改ざん: 全種別)<br>→ `CANCELLED` (**`SALES_INVOICE_SYNC`, `PAYMENT_SYNC` のみ許可**。**`BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `SALES_INVOICE_CANCEL` は 400 拒否**) | `status='RUNNING' AND lease_token=#{token}` による完了 CAS | Worker 完了 vs ユーザー取消 | HTTP in-flight 中に取消された場合、完了 CAS が失敗。同一 Tx 内で (1) `t_integration_job_event` 記録 + (2) 補償 `SALES_INVOICE_CANCEL` enqueue を原子実行。Tx 失敗時は全 rollback |
+| `RUNNING` | → `SUCCEEDED` (HTTP 200: 全種別)<br>→ `RETRYABLE` (429/5xx/timeout/OAuth遅延中: 全種別)<br>→ `FAILED` (400/422/改ざん: 全種別)<br>→ `CANCELLED` (**`SALES_INVOICE_SYNC`, `PAYMENT_SYNC` のみ許可**。**`BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `SALES_INVOICE_CANCEL` は 400 拒否**) | `status='RUNNING' AND lease_token=#{token}` による完了 CAS | Worker 完了 vs ユーザー取消 | HTTP in-flight 中に取消された場合、完了 CAS が失敗。同一 Tx 内で (1) `t_integration_job_event` 記録 + (2) 補償 `SALES_INVOICE_CANCEL` enqueue を原子実行。Tx 失敗時は全 rollback |
 | `RETRYABLE` | → `RUNNING` (Worker claim: 全種別)<br>→ `CANCELLED` (ユーザー取消: `SALES_INVOICE_SYNC`, `BP_PURCHASE_SYNC`, `EXPENSE_DEAL_SYNC`, `PAYMENT_SYNC` のみ。**`SALES_INVOICE_CANCEL` は 400 拒否**) | DB CAS (`status='RETRYABLE' AND next_retry_at <= NOW()`) | 複数 Worker の同時 claim | claim CAS 失敗時は `RETRYABLE` を維持 |
 | `FAILED` | → `PENDING` (手動リトライ: 全種別) | DB CAS (`status='FAILED'`) | 複数ユーザーの同時リトライ | 手動リトライ CAS 失敗時は `FAILED` を維持 |
 | `SUCCEEDED` | 終端 (遷移不可) | `UNIQUE(idempotency_key)` | 再実行リクエスト拒否 | 変更不可。取消時は別ジョブ (`SALES_INVOICE_CANCEL`) を新規作成 |
@@ -183,7 +228,7 @@
 
 ---
 
-## 4. Multi-node 401 Token Refresh (3段階リース・Fencing・CAS 状態機械) & 未知結果照合
+## 4. Multi-node 401 Token Refresh (3段階リース・Fencing・CAS 状態機械) & 敗者ノード復旧
 
 > **原則**: DB トランザクション内で HTTP を呼ばない（platform-invariants §3.3 遵守）。
 
@@ -199,6 +244,11 @@
                                     │                             Step 3: Update Tokens & CAS (短期DB Tx)
                                     ▼                                      │
                          再読込: 新トークン取得完了 <───────────────────────┘
+                                    │
+                                (3回待機後も更新未了の場合)
+                                    ▼
+                         TOKEN_REFRESH_IN_PROGRESS を返却
+                         呼び出し元 Job は RETRYABLE (next_retry_at = NOW()+5s) に移行
 ```
 
 1. **HTTP タイムアウト & リース安全幅**:
@@ -237,9 +287,15 @@
    ```
    - CAS 成功 (1件): トークン確定完了。
    - CAS 失敗 (0件): タイムアウト等でリースが失効し他ノードに奪われた場合、取得したトークンを破棄して現在行を再読込。
-5. **認証不能・障害時の復旧**:
+5. **敗者ノード（Loser Node）の最終動作仕様**:
+   - 3回のバックオフ待機（3.5秒）後も依然として `current.token_version == observedTokenVersion` かつ `refresh_lease_expires_at > NOW()` である場合:
+     - `TokenRefreshInProgressException` (`error_code = 'TOKEN_REFRESH_IN_PROGRESS'`) を送出。
+     - 呼び出し元の Worker は対象 Job を安全に **`RETRYABLE`**（`next_retry_at = NOW() + INTERVAL 5 SECOND`）に遷移させる。
+     - 5秒後のリトライ時には Node A の更新が完了して `token_version` がインクリメントされているため、確定した新トークンを読んで即時成功する。
+     - Node A がクラッシュして 45秒リースが失効した場合は、後続のリトライ Job が自らリースを獲得して自己修復する。
+6. **認証不能・障害時の復旧**:
    - OAuth エラー `invalid_grant`（リフレッシュトークン失効）時: `status = 'REAUTH_REQUIRED'` を設定し、全ノードで再認可を要求。
-6. **Deal 作成 Timeout 未知結果の Pagination 確定仕様 (`verifyDealCreatedByRefNumber`)**:
+7. **Deal 作成 Timeout 未知結果の Pagination 確定仕様 (`verifyDealCreatedByRefNumber`)**:
    - 取引登録 (`POST /api/1/deals`) でタイムアウトまたはネットワーク切断が発生した場合、即座の再 POST を禁止。
    - `GET /api/1/deals?company_id={company_id}&issue_date_from=...&issue_date_to=...&limit=100&offset=0` を全件走査 (最大 50 ページ / 5,000 件)。
    - `deal.ref_number == internalNo` かつ `deal.amount == expectedAmount` かつ `deal.company_id == externalCompanyId` の一致で確定:
@@ -251,7 +307,7 @@
 
 ## 5. 主体 × 操作 × SQL データスコープ決定表 (Consumer Inventory)
 
-### 5.1 実在エンティティに基づく組織導出ルール
+### 5.1 実在エンティティに基づく組織導出ルール (asOf 履歴照合完全準拠)
 
 1. **売上ジョブ (`SALES_INVOICE_SYNC`, `SALES_INVOICE_CANCEL`)**:
    - 基準日 `asOf`: **`invoice.issued_date`（NULL の場合は `YearMonth.parse(invoice.billing_month).atEndOfMonth()`）**。
@@ -275,8 +331,20 @@
    - 導出不能時: NULL (全社共通)。
 3. **経費ジョブ (`EXPENSE_DEAL_SYNC`)**:
    - 基準日 `asOf`: **`t_expense_request.expense_date`**。
-   - 優先度1: `t_expense_request.engineer_id` -> `t_engineer.organization_id`。
-   - 優先度2: `t_engineer.organization_id` が NULL の場合、`t_engineer_account_link` から `sys_user_id` を取得し、`t_user_organization` (`user_id = sys_user_id`, `primary_flag = 1`, `valid_from <= asOf AND (valid_to IS NULL OR valid_to >= asOf)`) で解決。
+   - 優先度1: `t_engineer_accounting_history` から該当時点の所属組織を解決:
+     ```sql
+     SELECT organization_id, organization_history_status
+     FROM t_engineer_accounting_history
+     WHERE engineer_id = #{expenseRequest.engineerId}
+       AND valid_from <= #{asOf}
+       AND (valid_to IS NULL OR valid_to >= #{asOf})
+       AND deleted_flag = 0
+     ORDER BY valid_from DESC, id DESC
+     LIMIT 1;
+     ```
+     - 履歴が存在し `organization_history_status = 'UNKNOWN'` の場合: **Fail-Closed として `organization_id = NULL`（全社共通・管理者のみ可視）** とし、現在値へは絶対にフォールバックしない。
+     - 履歴が存在し正常な場合: 取得された `organization_id` を採用（NULL の場合も明示的無所属として採用）。
+   - 優先度2: 履歴行が全く存在しない場合（V60 以前のレガシー要員データ）: `t_engineer.organization_id`（現在値）へフォールバック。
    - 導出不能時: NULL (全社共通)。
 
 ### 5.2 Consumer Inventory & SQL 述語
@@ -292,7 +360,7 @@
 | ジョブ再試行 / 取消 | `POST /api/accounting/jobs/{id}/retry|cancel` | `WHERE id = ? AND tenant_id = #{tenantId}` | `WHERE id = ? AND tenant_id = #{tenantId} AND organization_id IN (#{allowedOrgIds})` (SQL境界で検証) | 403 |
 | 月次照合 / エクスポート | `GET /api/accounting/reconciliation` | `WHERE tenant_id = #{tenantId}` | `WHERE tenant_id = #{tenantId} AND organization_id IN (#{allowedOrgIds})` | 403 |
 | 障害・照合通知 | イベント通知契機 | 管理者全員に配信 | ジョブの `organization_id IN (#{allowedOrgIds})` を満たすマネージャーに限定配信 | 403 |
-| スケジューラ / Worker | バックグラウンド実行 | システム Principal (try-finally で `AccountingTimezoneResolver` から `TenantContext` を設定・完全解除) | — | — |
+| スケジューラ / Worker | バックグラウンド実行 | システム Principal (try-finally で `AccountingTenantContextHolder` を設定・完全解除) | — | — |
 
 - **空集合ガード**: マネージャーの `allowedOrgIds` が空集合（無所属）の場合、`WHERE 1 = 0` を付加し DB レベルで 0 件を返却。
 
@@ -304,17 +372,19 @@
 
 | 対象 | current | history | snapshot | asOfで読む源 | 明示NULLの意味 |
 |---|---|---|---|---|---|
-| **connection token** | `encrypted_tokens` + `token_version` + `expires_at` | 監査ログ (`t_audit_log`) | — | 現在値 (`AccountingTimezoneResolver`) | 未接続。**外部送信即時停止** (R1.3) |
+| **connection token** | `encrypted_tokens` + `token_version` + `expires_at` | 監査ログ (`t_audit_log`) | — | 現在値 (`AccountingTenantContextHolder.getZoneId()`) | 未接続。**外部送信即時停止** (R1.3) |
 | **refresh lease** | `refresh_lease_token` + `refresh_lease_expires_at` | — | — | DB 現在時刻 (`NOW()`) | リース非保有 (待機中) |
 | **mapping** | `m_external_mapping.verified_at` あり | 上書き更新 (版なし) | `payload_snapshot` (検証時 allow-list JSON) | 現在値 | **未検証**。送信前バリデーションで停止 (R1.3) |
 | **job payload** | — | `t_integration_job_event` | `payload_snapshot` (不変 canonical JSON byte 列) | job enqueue 時点 | レガシージョブ (再試行時新規作成) |
-| **BP / 経費業務日付** | — | — | テナントタイムゾーンにおける `work_month` 末日 (`YYYY-MM-DD`) および契約支払期日 | `work_month` に基づく固定日 | — |
+| **BP / 経費業務日付** | — | `t_engineer_accounting_history` (asOf 照合) | テナントタイムゾーンにおける `work_month` 末日 (`YYYY-MM-DD`) および契約支払期日 | `work_month` / `expense_date` に基づく固定日 | — |
 | **外部連携状態** | job から**導出** | job event | — | 現在値 | job 無し＝**未送信** |
 | **支払実績** | 外部同期値 (金額 + 決済日) | — | 照合時の金額 / 日付 | 同期実行時点 | 未決済 |
-| **月次照合** | 都度計算 | 保存しない | — | 対象月 `[start_date, end_date + 1day)` 半開区間 (`AccountingTimezoneResolver`) | — |
+| **月次照合** | 都度計算 | 保存しない | — | 対象月 `[start_date, end_date + 1day)` 半開区間 (`AccountingTenantContextHolder.getZoneId()`) | — |
 | **job lease** | `lease_token` + `lease_expires_at` | — | — | DB 現在時刻 (`NOW()`) | リース非保有 |
 
-- **Timezone 解決規約**: `m_system_config` のキー `accounting.timezone`（設定なし・不正時は既定 `Asia/Tokyo` `+09:00` へ安全フォールバック）を `AccountingTimezoneResolver` が解決。
+- **Tenant Timezone 解決規約 & Context 管理**:
+  - `m_system_config` のキー `accounting.timezone.{tenantId}`（未設定時は `accounting.timezone`、不正時は既定 `Asia/Tokyo` `+09:00` へ安全フォールバック）を `AccountingTimezoneResolver.resolve(tenantId)` が解決。
+  - スケジューラ・Worker・リクエスト処理では `AccountingTenantContextHolder.setContext(tenantId, zoneId)` を `try-finally` で設定し、スレッドプール再利用時のリークを完全防止。
 - **確定日付ルール**: BP 仕入の canonical payload は `YearMonth.parse(workMonth).atEndOfMonth()` を固定設定。翌日再試行でも `payload_hash` が一切変動しない。
 
 ---
