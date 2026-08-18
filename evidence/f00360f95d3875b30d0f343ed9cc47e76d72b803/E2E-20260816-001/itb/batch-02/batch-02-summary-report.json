@@ -1,0 +1,60 @@
+{
+  "batch_id": "ITB-BATCH-02",
+  "execution_date": "2026-08-18T06:47:06.879Z",
+  "run_id": "ITB-20260818-2158",
+  "total_cases": 6,
+  "passed_cases": 6,
+  "failed_cases": 0,
+  "blocked_cases": 0,
+  "pass_rate": "100.0%",
+  "sys_user_invariants": {
+    "total": 300,
+    "active": 297,
+    "disabled": 3,
+    "verified": true
+  },
+  "results": [
+    {
+      "case_id": "ITB-04-05-06-N01",
+      "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+      "name": "商談->案件->スキル要件->AIマッチング->提案作成(ID chainと要員状態連動)",
+      "status": "PASS",
+      "duration_ms": 790
+    },
+    {
+      "case_id": "ITB-04-05-06-R01",
+      "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+      "name": "商談顧客不一致の提案作成拒否、同一案件への二重提案拒否、不正初期ステータス拒否",
+      "status": "PASS",
+      "duration_ms": 535
+    },
+    {
+      "case_id": "ITB-04-05-06-F01",
+      "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+      "name": "AIマッチング障害時の提案非作成整合性と再試行スコア決定性",
+      "status": "PASS",
+      "duration_ms": 568
+    },
+    {
+      "case_id": "ITB-06-07-N01",
+      "family": "3.4 MOD-06 <-> MOD-07",
+      "name": "提案成約->契約ドラフト自動生成・担当営業引き継ぎ・通知発行の連動",
+      "status": "PASS",
+      "duration_ms": 694
+    },
+    {
+      "case_id": "ITB-06-07-R01",
+      "family": "3.4 MOD-06 <-> MOD-07",
+      "name": "紐付案件削除済み時の成約拒否、無効営業時の未帰属フォールバック、二重成約契約生成冪等",
+      "status": "PASS",
+      "duration_ms": 922
+    },
+    {
+      "case_id": "ITB-06-07-F01",
+      "family": "3.4 MOD-06 <-> MOD-07",
+      "name": "成約トランザクション中途のREAL故障注入と全関連テーブル(提案/履歴/契約/通知)完全ロールバック",
+      "status": "PASS",
+      "duration_ms": 1010
+    }
+  ]
+}

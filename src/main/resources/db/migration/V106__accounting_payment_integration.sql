@@ -80,9 +80,9 @@ INSERT INTO m_integration_connection (
     tenant_id, legal_entity_id, provider, product, external_company_id,
     company_name, encrypted_tokens, expires_at, status, connected_by, connected_at
 )
-SELECT 
+SELECT
     'default', NULL, 'freee', 'payroll', c.company_id,
-    c.company_name, 
+    c.company_name,
     JSON_OBJECT('accessToken', c.access_token_encrypted, 'refreshToken', c.refresh_token_encrypted),
     c.token_expires_at,
     COALESCE(c.connection_status, 'CONNECTED'),
@@ -91,7 +91,7 @@ SELECT
 FROM t_freee_connection c
 WHERE c.deleted_flag = 0
   AND NOT EXISTS (
-      SELECT 1 FROM m_integration_connection ic 
+      SELECT 1 FROM m_integration_connection ic
       WHERE ic.provider = 'freee' AND ic.product = 'payroll' AND ic.deleted_flag = 0
   );
 
@@ -126,4 +126,3 @@ CROSS JOIN (SELECT 'accounting.*' AS action_key) a
 WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('ADMIN', 'EXECUTIVE', 'MANAGER', 'role-admin', 'role-manager');
-

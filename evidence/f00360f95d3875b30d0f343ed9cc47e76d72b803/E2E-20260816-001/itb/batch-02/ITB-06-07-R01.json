@@ -1,0 +1,48 @@
+{
+  "case_id": "ITB-06-07-R01",
+  "family": "3.4 MOD-06 <-> MOD-07",
+  "name": "紐付案件削除済み時の成約拒否、無効営業時の未帰属フォールバック、二重成約契約生成冪等",
+  "status": "PASS",
+  "duration_ms": 922,
+  "evidence_detail": {
+    "subcase_a_deleted_project": {
+      "request_payload": {
+        "status": "成約"
+      },
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "提案の案件が見つかりません",
+        "data": null
+      },
+      "expectedCode": 400,
+      "sql_verification": "SELECT count(*) FROM t_contract WHERE proposal_id = 6310 -> 0"
+    },
+    "subcase_b_disabled_sales_fallback": {
+      "assigned_sales_rep": {
+        "userId": 108,
+        "status": 0
+      },
+      "httpStatus": 200,
+      "generatedContract": {
+        "id": "7332",
+        "proposal_id": "6311",
+        "sales_user_id": null,
+        "status": "準備中"
+      },
+      "unattributed_verified": true,
+      "sql_verification": "SELECT sales_user_id FROM t_contract WHERE proposal_id = 6311 -> NULL"
+    },
+    "subcase_c_idempotent_contract_count": {
+      "initial_count": "1",
+      "after_count": "1",
+      "exact_one_verified": true
+    },
+    "teardown": {
+      "contract_residue": 0,
+      "proposal_residue": 0,
+      "project_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

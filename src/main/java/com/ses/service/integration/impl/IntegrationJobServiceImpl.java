@@ -66,12 +66,16 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
+    @Transactional
     public IntegrationJob claimJob(Long jobId) {
         LocalDateTime now = LocalDateTime.now();
         int updated = baseMapper.claimJob(jobId, now);
         if (updated > 0) {
             IntegrationJob job = getById(jobId);
-            recordEvent(jobId, "PENDING", "RUNNING", "Worker により Claim されました (試行回数: " + job.getAttemptCount() + ")");
+            // attempt_count が 1 なら最初の試行 (PENDING→RUNNING)、それ以外は RETRYABLE→RUNNING
+            String fromStatus = job.getAttemptCount() <= 1 ? "PENDING" : "RETRYABLE";
+            recordEvent(jobId, fromStatus, "RUNNING",
+                    "Worker により Claim されました (試行回数: " + job.getAttemptCount() + ")");
             return job;
         }
         return null;
@@ -82,15 +86,19 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     public void markSucceeded(Long jobId, String externalId, String providerRequestId, String safeDetail) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
+        // 終端状態の上書きを防止 (P1-02: CAS)
+        if ("SUCCEEDED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus())) {
+            log.warn("markSucceeded: jobId={} は既に終端状態 (status={}) のためスキップします", jobId, job.getStatus());
+            return;
+        }
 
         String fromStatus = job.getStatus();
-        job.setStatus("SUCCEEDED");
-        job.setExternalId(externalId);
-        job.setProviderRequestId(providerRequestId);
-        job.setSentAt(LocalDateTime.now());
-        job.setErrorCode(null);
-        job.setErrorMessageSafe(null);
-        updateById(job);
+        int updated = baseMapper.transitionToSucceeded(
+                jobId, job.getVersion(), externalId, providerRequestId, LocalDateTime.now());
+        if (updated == 0) {
+            log.warn("markSucceeded CAS 失敗: jobId={}, 競合更新が発生しました", jobId);
+            return;
+        }
 
         recordEvent(jobId, fromStatus, "SUCCEEDED", safeDetail != null ? safeDetail : "外部連携成功");
     }
@@ -107,11 +115,13 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         }
 
         String fromStatus = job.getStatus();
-        job.setStatus("RETRYABLE");
-        job.setErrorCode(errorCode);
-        job.setErrorMessageSafe(errorMessageSafe);
-        job.setNextRetryAt(LocalDateTime.now().plusSeconds(Math.max(1, backoffSeconds)));
-        updateById(job);
+        LocalDateTime nextRetry = LocalDateTime.now().plusSeconds(Math.max(1, backoffSeconds));
+        int updated = baseMapper.updateStatusToRetryable(
+                jobId, job.getVersion(), errorCode, errorMessageSafe, nextRetry);
+        if (updated == 0) {
+            log.warn("markRetryable CAS 失敗: jobId={}", jobId);
+            return;
+        }
 
         recordEvent(jobId, fromStatus, "RETRYABLE",
                 String.format("[%s] %s (次回試行: %d 秒後)", errorCode, errorMessageSafe, backoffSeconds));
@@ -119,17 +129,23 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
 
     @Override
     @Transactional
-    public void markFailed(Long jobId, String errorCode, String errorMessageSafe) {
+    public void markFailed(Long jobId, String errorCode, String safeMessage) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
+        // 終端状態の上書きを防止
+        if ("SUCCEEDED".equals(job.getStatus()) || "FAILED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus())) {
+            log.warn("markFailed: jobId={} は既に終端状態 (status={}) のためスキップします", jobId, job.getStatus());
+            return;
+        }
 
         String fromStatus = job.getStatus();
-        job.setStatus("FAILED");
-        job.setErrorCode(errorCode);
-        job.setErrorMessageSafe(errorMessageSafe);
-        updateById(job);
+        int updated = baseMapper.updateStatusWithError(jobId, job.getVersion(), "FAILED", errorCode, safeMessage);
+        if (updated == 0) {
+            log.warn("markFailed CAS 失敗: jobId={}", jobId);
+            return;
+        }
 
-        recordEvent(jobId, fromStatus, "FAILED", String.format("[%s] %s", errorCode, errorMessageSafe));
+        recordEvent(jobId, fromStatus, "FAILED", String.format("[%s] %s", errorCode, safeMessage));
     }
 
     @Override
@@ -137,11 +153,17 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     public void cancelJob(Long jobId, String reason) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
+        // 終端状態のジョブはキャンセル不可
+        if ("SUCCEEDED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus())) {
+            throw new BusinessException(400,
+                    "完了またはキャンセル済みのジョブはキャンセルできません (status=" + job.getStatus() + ")");
+        }
 
         String fromStatus = job.getStatus();
-        job.setStatus("CANCELLED");
-        job.setErrorMessageSafe(reason);
-        updateById(job);
+        int updated = baseMapper.updateStatusWithError(jobId, job.getVersion(), "CANCELLED", null, reason);
+        if (updated == 0) {
+            throw new BusinessException(409, "ジョブの状態が変更されました。再試行してください。");
+        }
 
         recordEvent(jobId, fromStatus, "CANCELLED", "キャンセル: " + reason);
     }
@@ -183,6 +205,39 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
             wrapper.eq(IntegrationJob::getJobType, jobType);
         }
         return getOne(wrapper.orderByDesc(IntegrationJob::getId).last("LIMIT 1"));
+    }
+
+    @Override
+    public List<IntegrationJob> listDueJobs(int limit) {
+        LocalDateTime now = LocalDateTime.now();
+        return baseMapper.selectList(new LambdaQueryWrapper<IntegrationJob>()
+                .in(IntegrationJob::getStatus, "PENDING", "RETRYABLE")
+                .and(w -> w.isNull(IntegrationJob::getNextRetryAt)
+                        .or().le(IntegrationJob::getNextRetryAt, now))
+                .eq(IntegrationJob::getDeletedFlag, 0)
+                .orderByAsc(IntegrationJob::getId)
+                .last("LIMIT " + Math.min(limit, 100)));
+    }
+
+    @Override
+    @Transactional
+    public int recoverStaleRunningJobs(int leaseMinutes) {
+        LocalDateTime leaseThreshold = LocalDateTime.now().minusMinutes(leaseMinutes);
+        List<IntegrationJob> staleJobs = baseMapper.selectList(new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getStatus, "RUNNING")
+                .le(IntegrationJob::getUpdatedAt, leaseThreshold)
+                .eq(IntegrationJob::getDeletedFlag, 0));
+        int count = 0;
+        for (IntegrationJob job : staleJobs) {
+            int updated = baseMapper.updateStatusWithError(job.getId(), job.getVersion(),
+                    "RETRYABLE", "LEASE_TIMEOUT", "Worker lease timeout 後に自動回収");
+            if (updated > 0) {
+                recordEvent(job.getId(), "RUNNING", "RETRYABLE",
+                        "Stale RUNNING: lease " + leaseMinutes + " 分超過で自動回収");
+                count++;
+            }
+        }
+        return count;
     }
 
     private void recordEvent(Long jobId, String fromStatus, String toStatus, String safeDetail) {

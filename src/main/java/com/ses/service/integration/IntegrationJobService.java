@@ -58,4 +58,18 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
      * 対象エンティティに紐づく最新ジョブを取得する。
      */
     IntegrationJob getLatestJob(String targetType, Long targetId, String jobType);
+
+    /**
+     * due な PENDING/RETRYABLE job を最大 limit 件取得する (ワーカー用)。
+     * next_retry_at が null または <= now のものを対象とする。
+     */
+    List<IntegrationJob> listDueJobs(int limit);
+
+    /**
+     * lease timeout を超えた RUNNING ジョブを RETRYABLE に戻す。
+     *
+     * @param leaseMinutes この分数以上 RUNNING のままのジョブを対象とする
+     * @return 回収件数
+     */
+    int recoverStaleRunningJobs(int leaseMinutes);
 }

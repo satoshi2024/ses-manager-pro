@@ -113,13 +113,59 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
         if (conn == null || conn.getEncryptedTokens() == null || conn.getEncryptedTokens().isBlank()) {
             return null;
         }
-        String decryptedJson = decrypt(conn.getEncryptedTokens());
+        String encrypted = conn.getEncryptedTokens().trim();
+
+        // 1. JSON形式の互換判定（V106で移行された旧フォーマット: {"accessToken": "iv:cipher", ...} または平文JSON）
+        if (encrypted.startsWith("{") && encrypted.endsWith("}")) {
+            try {
+                @SuppressWarnings("unchecked")
+                java.util.Map<String, Object> map = objectMapper.readValue(encrypted, java.util.Map.class);
+                String accessEnc = map.get("accessToken") != null ? map.get("accessToken").toString() : null;
+                String refreshEnc = map.get("refreshToken") != null ? map.get("refreshToken").toString() : null;
+
+                String accessToken = decryptLegacyOrPlain(accessEnc);
+                String refreshToken = decryptLegacyOrPlain(refreshEnc);
+
+                return IntegrationTokensDto.builder()
+                        .accessToken(accessToken)
+                        .refreshToken(refreshToken)
+                        .build();
+            } catch (Exception e) {
+                log.warn("Failed to parse/decrypt legacy JSON tokens for connectionId={}: {}", connectionId, e.getMessage());
+            }
+        }
+
+        // 2. 新フォーマット (Base64URL(12-byte IV + GCM ciphertext) of IntegrationTokensDto JSON)
         try {
+            String decryptedJson = decrypt(encrypted);
             return objectMapper.readValue(decryptedJson, IntegrationTokensDto.class);
         } catch (Exception e) {
-            log.error("Failed to deserialize tokens for connectionId={}", connectionId, e);
+            log.error("Failed to decrypt new-format tokens for connectionId={}", connectionId, e);
             throw new BusinessException(500, "トークン情報の復号・デシリアライズに失敗しました");
         }
+    }
+
+    private String decryptLegacyOrPlain(String cipherOrPlain) {
+        if (cipherOrPlain == null || cipherOrPlain.isBlank()) return null;
+        if (!cipherOrPlain.contains(":")) {
+            return cipherOrPlain; // plain text or already decrypted
+        }
+        try {
+            String[] p = cipherOrPlain.split(":");
+            if (p.length == 2) {
+                byte[] iv = Base64.getDecoder().decode(p[0]);
+                byte[] cipherText = Base64.getDecoder().decode(p[1]);
+                byte[] keyBytes = Arrays.copyOf(encryptionKey.getBytes(StandardCharsets.UTF_8), 32);
+                SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(128, iv));
+                byte[] plain = cipher.doFinal(cipherText);
+                return new String(plain, StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Legacy decryption failed, returning raw string: {}", e.getMessage());
+        }
+        return cipherOrPlain;
     }
 
     @Override
@@ -127,15 +173,27 @@ public class IntegrationConnectionServiceImpl extends ServiceImpl<IntegrationCon
         ReentrantLock lock = connectionLocks.computeIfAbsent(connectionId, k -> new ReentrantLock());
         lock.lock();
         try {
-            // ロック取得後に最新のトークンを取得
-            IntegrationTokensDto current = getDecryptedTokens(connectionId);
-            if (current == null) {
+            // ロック取得後に最新の接続情報をDBから再読込 (P1-03: race condition防止)
+            IntegrationConnection conn = getById(connectionId);
+            if (conn == null) {
                 throw new BusinessException(400, "接続情報が存在しません (id=" + connectionId + ")");
             }
-            // リフレッシュ実行
+
+            // 待機中に別スレッドがリフレッシュ成功していた場合 (expiresAtが現在+30秒より未来) は再リフレッシュをスキップ
+            if (conn.getExpiresAt() != null && conn.getExpiresAt().isAfter(LocalDateTime.now().plusSeconds(30))) {
+                log.info("Token for connectionId={} was already refreshed by another thread, skipping refreshFn", connectionId);
+                return getDecryptedTokens(connectionId);
+            }
+
+            IntegrationTokensDto current = getDecryptedTokens(connectionId);
+            if (current == null) {
+                throw new BusinessException(400, "トークン情報が存在しません (id=" + connectionId + ")");
+            }
+
+            // リフレッシュ実行 (1回のみ)
             IntegrationTokensDto refreshed = refreshFn.apply(current);
             if (refreshed != null) {
-                saveTokens(connectionId, refreshed, null, null, null);
+                saveTokens(connectionId, refreshed, conn.getExternalCompanyId(), conn.getCompanyName(), conn.getConnectedBy());
                 return refreshed;
             }
             return current;

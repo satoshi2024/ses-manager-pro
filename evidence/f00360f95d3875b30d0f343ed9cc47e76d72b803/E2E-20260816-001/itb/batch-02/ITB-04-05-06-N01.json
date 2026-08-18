@@ -1,0 +1,100 @@
+{
+  "case_id": "ITB-04-05-06-N01",
+  "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+  "name": "商談->案件->スキル要件->AIマッチング->提案作成(ID chainと要員状態連動)",
+  "status": "PASS",
+  "duration_ms": 790,
+  "evidence_detail": {
+    "id_chain": {
+      "opportunity_id": "14594",
+      "project_id": "5294",
+      "project_source_opportunity_id": "14594",
+      "proposal_id": "6305",
+      "proposal_source_opportunity_id": "14594",
+      "engineer_id": "1459"
+    },
+    "ai_matching_oracle": {
+      "reference": "com.ses.service.ai.MatchScoreCalculator (L33-87)",
+      "must_score": 50,
+      "nice_score": 20,
+      "price_score": 20,
+      "date_score": 10,
+      "expected_total": 100,
+      "api_returned_score": 100,
+      "api_response_body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": [
+          {
+            "projectId": 5294,
+            "projectName": "ITB-PROJ-ITB-20260818-2158-N01",
+            "score": 100,
+            "reason": "必須スキル 1/1 充足。単価レンジ内。稼動可能日OK。",
+            "sellingPoints": "Java(5年), Python(3年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          },
+          {
+            "projectId": 1,
+            "projectName": "金融系基盤システム移行",
+            "score": 95,
+            "reason": "必須スキル指定なし。単価レンジ内。",
+            "sellingPoints": "Java(5年), Python(3年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          },
+          {
+            "projectId": 3,
+            "projectName": "AI自動応答チャットボット開発",
+            "score": 75,
+            "reason": "必須スキル指定なし。単価レンジ外。",
+            "sellingPoints": "Java(5年), Python(3年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          }
+        ]
+      }
+    },
+    "proposal_creation": {
+      "request_body": {
+        "engineerId": "1459",
+        "projectId": "5294",
+        "proposedUnitPrice": 800000,
+        "sourceOpportunityId": "14594"
+      },
+      "response_body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_after": {
+      "proposal_row": {
+        "id": "6305",
+        "status": "書類選考中",
+        "source_opportunity_id": "14594",
+        "engineer_id": "1459",
+        "project_id": "5294"
+      },
+      "engineer_status_transition": {
+        "before": "Bench",
+        "after": "提案中"
+      }
+    },
+    "teardown": {
+      "opportunity_residue": 0,
+      "project_residue": 0,
+      "proposal_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

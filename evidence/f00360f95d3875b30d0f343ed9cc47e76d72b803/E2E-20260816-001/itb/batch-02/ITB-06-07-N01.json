@@ -1,0 +1,76 @@
+{
+  "case_id": "ITB-06-07-N01",
+  "family": "3.4 MOD-06 <-> MOD-07",
+  "name": "提案成約->契約ドラフト自動生成・担当営業引き継ぎ・通知発行の連動",
+  "status": "PASS",
+  "duration_ms": 694,
+  "evidence_detail": {
+    "proposal_status_response": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": true
+    },
+    "proposal_db_after": {
+      "id": "6309",
+      "status": "成約",
+      "closed_at": "2026-08-18 15:47:04"
+    },
+    "proposal_histories_table": [
+      {
+        "id": "7051",
+        "proposal_id": "6309",
+        "from_status": "書類選考中",
+        "to_status": "一次面接",
+        "changed_by": "102"
+      },
+      {
+        "id": "7052",
+        "proposal_id": "6309",
+        "from_status": "一次面接",
+        "to_status": "二次面接",
+        "changed_by": "102"
+      },
+      {
+        "id": "7053",
+        "proposal_id": "6309",
+        "from_status": "二次面接",
+        "to_status": "結果待ち",
+        "changed_by": "102"
+      },
+      {
+        "id": "7054",
+        "proposal_id": "6309",
+        "from_status": "結果待ち",
+        "to_status": "成約",
+        "changed_by": "102"
+      }
+    ],
+    "generated_contract_draft": {
+      "id": "7331",
+      "contract_no": "C-202609-0006",
+      "proposal_id": "6309",
+      "engineer_id": "1463",
+      "project_id": "5297",
+      "customer_id": "1",
+      "sales_user_id": "102",
+      "status": "準備中",
+      "contract_type": "準委任",
+      "selling_price": "850000",
+      "cost_price": "0"
+    },
+    "sales_notification": {
+      "id": "19497",
+      "recipient_user_id": "102",
+      "type": "CONTRACT_DRAFT",
+      "title": "契約ドラフト作成",
+      "message": "[\"notification.msg.CONTRACT_DRAFT\", \"C-202609-0006\"]"
+    },
+    "teardown": {
+      "contract_residue": 0,
+      "notification_residue": 0,
+      "proposal_residue": 0,
+      "project_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

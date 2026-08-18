@@ -1,0 +1,60 @@
+{
+  "batch_id": "ITB-BATCH-01",
+  "execution_date": "2026-08-18T04:02:46.028Z",
+  "run_id": "ITB-20260818-3689",
+  "total_cases": 6,
+  "passed_cases": 6,
+  "failed_cases": 0,
+  "blocked_cases": 0,
+  "pass_rate": "100.0%",
+  "sys_user_invariants": {
+    "total": 300,
+    "active": 297,
+    "disabled": 3,
+    "verified": true
+  },
+  "results": [
+    {
+      "case_id": "ITB-02-03-N01",
+      "family": "3.1 MOD-02 <-> MOD-03",
+      "name": "候補者の順序ステージ遷移(応募受付->書類選考->一次面談->最終面談->内定->入社)とエンジニア変換・紐付け",
+      "status": "PASS",
+      "duration_ms": 557
+    },
+    {
+      "case_id": "ITB-02-03-R01",
+      "family": "3.1 MOD-02 <-> MOD-03",
+      "name": "ステージ飛び越え遷移の拒否、未入社状態でのエンジニア紐付け拒否",
+      "status": "PASS",
+      "duration_ms": 194
+    },
+    {
+      "case_id": "ITB-02-03-F01",
+      "family": "3.1 MOD-02 <-> MOD-03",
+      "name": "エンジニア登録後の候補者リンク失敗注入と再試行整合性",
+      "status": "PASS",
+      "duration_ms": 505
+    },
+    {
+      "case_id": "ITB-03-14-N01",
+      "family": "3.2 MOD-03 <-> MOD-14",
+      "name": "主担当営業の変更(SALES_A->SALES_B)、旧主担当の副担当化、新旧契約の歩合・売上帰属分離",
+      "status": "PASS",
+      "duration_ms": 410
+    },
+    {
+      "case_id": "ITB-03-14-R01",
+      "family": "3.2 MOD-03 <-> MOD-14",
+      "name": "無効アカウント(s300.sales07)・非営業ロールの主担当指定拒否、重複割当拒否",
+      "status": "PASS",
+      "duration_ms": 225
+    },
+    {
+      "case_id": "ITB-03-14-F01",
+      "family": "3.2 MOD-03 <-> MOD-14",
+      "name": "主担当demote後・新割当保存時の失敗注入と旧主担当整合性回復",
+      "status": "PASS",
+      "duration_ms": 242
+    }
+  ]
+}

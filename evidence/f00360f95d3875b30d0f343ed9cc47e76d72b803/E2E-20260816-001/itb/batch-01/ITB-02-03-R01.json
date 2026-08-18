@@ -1,0 +1,46 @@
+{
+  "case_id": "ITB-02-03-R01",
+  "family": "3.1 MOD-02 <-> MOD-03",
+  "name": "ステージ飛び越え遷移の拒否、未入社状態でのエンジニア紐付け拒否",
+  "status": "PASS",
+  "duration_ms": 194,
+  "evidence_detail": {
+    "subcase_a_jump_stage": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "不正なステージ遷移です",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "subcase_b_premature_link": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "ステージが「入社」の候補者のみエンジニアへ変換できます",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "subcase_c_non_existent_link": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "ステージが「入社」の候補者のみエンジニアへ変換できます",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "db_state_after": {
+      "id": "13095",
+      "name": "ITB-CAND-ITB-20260818-3689-R01",
+      "current_stage": "応募受付",
+      "converted_engineer_id": null
+    },
+    "activities_count": "0",
+    "teardown": {
+      "candidate_residue": 0
+    }
+  }
+}

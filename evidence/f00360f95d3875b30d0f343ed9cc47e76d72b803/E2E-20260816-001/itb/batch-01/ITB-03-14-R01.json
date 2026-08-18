@@ -1,0 +1,49 @@
+{
+  "case_id": "ITB-03-14-R01",
+  "family": "3.2 MOD-03 <-> MOD-14",
+  "name": "無効アカウント(s300.sales07)・非営業ロールの主担当指定拒否、重複割当拒否",
+  "status": "PASS",
+  "duration_ms": 225,
+  "evidence_detail": {
+    "subcase_a_disabled_sales": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "担当営業には有効な営業ロールのユーザーを指定してください",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "subcase_b_non_sales_role": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "担当営業には有効な営業ロールのユーザーを指定してください",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "subcase_c_duplicate_assignment": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "このユーザーは既に現任の担当営業です",
+        "data": null
+      },
+      "expectedCode": 400
+    },
+    "db_assignments_after": [
+      {
+        "id": "5915",
+        "engineer_id": "1433",
+        "sales_user_id": "102",
+        "primary_flag": "1",
+        "released_at": null
+      }
+    ],
+    "teardown": {
+      "engineer_sales_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

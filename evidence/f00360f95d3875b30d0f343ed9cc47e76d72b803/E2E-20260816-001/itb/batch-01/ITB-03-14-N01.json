@@ -1,0 +1,80 @@
+{
+  "case_id": "ITB-03-14-N01",
+  "family": "3.2 MOD-03 <-> MOD-14",
+  "name": "主担当営業の変更(SALES_A->SALES_B)、旧主担当の副担当化、新旧契約の歩合・売上帰属分離",
+  "status": "PASS",
+  "duration_ms": 410,
+  "evidence_detail": {
+    "engineer_id": "1432",
+    "sales_a_assignment": {
+      "salesUserId": 102,
+      "response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "sales_b_assignment": {
+      "salesUserId": 103,
+      "response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "db_assignments_table": [
+      {
+        "id": "5913",
+        "engineer_id": "1432",
+        "sales_user_id": "102",
+        "primary_flag": "0",
+        "released_at": null
+      },
+      {
+        "id": "5914",
+        "engineer_id": "1432",
+        "sales_user_id": "103",
+        "primary_flag": "1",
+        "released_at": null
+      }
+    ],
+    "assignment_invariants": {
+      "active_primary_count": 1,
+      "active_secondary_count": 1
+    },
+    "sales_performance_api": {
+      "month": "2026-07",
+      "sales_a_data": {
+        "salesUserId": 102,
+        "salesUserName": "柴田 朱里",
+        "activePrimaryCount": 11,
+        "closedContractCount": 0,
+        "closedRate": null,
+        "activeContractCount": 6,
+        "totalSalesAmount": 3790000,
+        "totalProfitAmount": 1228000,
+        "totalCommissionAmount": 86081,
+        "unattributed": false,
+        "self": false
+      },
+      "sales_b_data": {
+        "salesUserId": 103,
+        "salesUserName": "青木 遼太郎",
+        "activePrimaryCount": 12,
+        "closedContractCount": 0,
+        "closedRate": null,
+        "activeContractCount": 7,
+        "totalSalesAmount": 4735000,
+        "totalProfitAmount": 1557000,
+        "totalCommissionAmount": 92667,
+        "unattributed": false,
+        "self": false
+      }
+    },
+    "teardown": {
+      "contract_residue": 0,
+      "engineer_sales_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

@@ -93,7 +93,7 @@ class IntegrationConnectionAndJobTest {
         IntegrationTokensDto initialTokens = IntegrationTokensDto.builder()
                 .accessToken("old-access-token")
                 .refreshToken("old-refresh-token")
-                .expiresIn(3600L)
+                .expiresIn(-100L)
                 .build();
         connectionService.saveTokens(conn.getId(), initialTokens, 20001L, "事業所X", 1L);
 
@@ -127,6 +127,22 @@ class IntegrationConnectionAndJobTest {
         // ロックにより直列化され、最終的に新トークンが保存されている
         IntegrationTokensDto finalTokens = connectionService.getDecryptedTokens(conn.getId());
         assertThat(finalTokens.getAccessToken()).startsWith("new-access-token-");
+        assertThat(refreshCallCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Legacy Token 復号: V106以前のJSON形式・legacy AES暗号トークンが正常に復号できること (P1-04)")
+    void legacyTokenDecryption() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("legacy-tenant", null, "freee", "payroll");
+        // V106で投入される形式: {"accessToken": "...", "refreshToken": "..."}
+        String legacyJson = "{\"accessToken\":\"legacy-access-token-val\",\"refreshToken\":\"legacy-refresh-token-val\"}";
+        conn.setEncryptedTokens(legacyJson);
+        connectionService.updateById(conn);
+
+        IntegrationTokensDto tokens = connectionService.getDecryptedTokens(conn.getId());
+        assertThat(tokens).isNotNull();
+        assertThat(tokens.getAccessToken()).isEqualTo("legacy-access-token-val");
+        assertThat(tokens.getRefreshToken()).isEqualTo("legacy-refresh-token-val");
     }
 
     @Test

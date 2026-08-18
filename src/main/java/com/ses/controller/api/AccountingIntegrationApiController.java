@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
+import com.ses.common.util.SecurityUtils;
 import com.ses.dto.accounting.SalesPreviewDto;
 import com.ses.dto.accounting.canonical.CanonicalSalesInvoice;
 import com.ses.entity.*;
@@ -24,8 +25,9 @@ import java.util.List;
 
 /**
  * 会計・支払連携 API コントローラー (A1 / design §6.2)。
- * 管理者・マネージャー（財務担当）専用。
+ * 管理者のみ connection/mapping 更新が可能。マネージャーはジョブ状態の読み取り専用。
  * トークンなどの秘密情報は API レスポンスに一切含めない (design §6.2)。
+ * actorID は SecurityContext から取得し、hardcoded 値を使用しない (P1-06)。
  */
 @Slf4j
 @RestController
@@ -43,8 +45,15 @@ public class AccountingIntegrationApiController {
     private final com.ses.service.accounting.SalesInvoiceIntegrationService salesIntegrationService;
     private final com.ses.service.accounting.PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
 
+    /** SecurityContext からユーザーIDを取得する（P1-06: hardcoded 1L を排除）。 */
+    private Long resolveActorId() {
+        Long userId = SecurityUtils.currentUserId();
+        return userId != null ? userId : -1L;
+    }
+
     // === 1. 接続マスタ (Connection) API ===
 
+    /** 接続一覧（管理者・マネージャー参照可能）。トークン情報はレスポンスから除外。 */
     @GetMapping("/connections")
     public ApiResult<List<IntegrationConnection>> listConnections(
             @RequestParam(value = "tenantId", defaultValue = "default") String tenantId) {
@@ -76,6 +85,7 @@ public class AccountingIntegrationApiController {
     }
 
     @PostMapping("/connections/{id}/status")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> updateStatus(@PathVariable("id") Long connectionId,
                                         @RequestParam("status") String status) {
         connectionService.updateStatus(connectionId, status);
@@ -84,6 +94,7 @@ public class AccountingIntegrationApiController {
 
     // === 2. マッピング (Mapping) API ===
 
+    /** 管理者のみマッピングの変更・検証が可能。マネージャーは参照のみ。 */
     @GetMapping("/mappings")
     public ApiResult<List<ExternalMapping>> listMappings(
             @RequestParam("connectionId") Long connectionId,
@@ -93,12 +104,14 @@ public class AccountingIntegrationApiController {
     }
 
     @PostMapping("/mappings")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> saveMapping(@RequestBody ExternalMapping mapping) {
         mappingService.saveOrUpdateMapping(mapping);
         return ApiResult.success(null);
     }
 
     @PostMapping("/mappings/{id}/verify")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> verifyMapping(@PathVariable("id") Long mappingId,
                                          @RequestBody(required = false) String snapshot) {
         mappingService.verifyMapping(mappingId, snapshot != null ? snapshot : "{\"verified\": true}");
@@ -144,12 +157,14 @@ public class AccountingIntegrationApiController {
     }
 
     @PostMapping("/jobs/{id}/retry")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> retryJob(@PathVariable("id") Long jobId) {
         jobService.resetForManualRetry(jobId);
         return ApiResult.success(null);
     }
 
     @PostMapping("/jobs/{id}/cancel")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> cancelJob(@PathVariable("id") Long jobId,
                                      @RequestParam(value = "reason", defaultValue = "手動キャンセル") String reason) {
         jobService.cancelJob(jobId, reason);
@@ -228,27 +243,35 @@ public class AccountingIntegrationApiController {
     // === 5. トリガー (Trigger) API ===
 
     @PostMapping("/sync/sales/{invoiceId}")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<IntegrationJob> triggerSalesSync(@PathVariable("invoiceId") Long invoiceId) {
-        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoiceId, 1L);
+        Long actorId = resolveActorId();
+        IntegrationJob job = salesIntegrationService.triggerSalesSync(invoiceId, actorId);
         return ApiResult.success(job);
     }
 
     @PostMapping("/cancel/sales/{invoiceId}")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<IntegrationJob> triggerSalesCancel(@PathVariable("invoiceId") Long invoiceId,
-                                                        @RequestParam(value = "reason", defaultValue = "請求取消") String reason) {
-        IntegrationJob job = salesIntegrationService.triggerSalesCancel(invoiceId, reason, 1L);
+                                                         @RequestParam(value = "reason", defaultValue = "請求取消") String reason) {
+        Long actorId = resolveActorId();
+        IntegrationJob job = salesIntegrationService.triggerSalesCancel(invoiceId, reason, actorId);
         return ApiResult.success(job);
     }
 
     @PostMapping("/sync/bp-purchase/{bpPaymentId}")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<IntegrationJob> triggerBpPurchaseSync(@PathVariable("bpPaymentId") Long bpPaymentId) {
-        IntegrationJob job = purchaseIntegrationService.triggerBpPurchaseSync(bpPaymentId, 1L);
+        Long actorId = resolveActorId();
+        IntegrationJob job = purchaseIntegrationService.triggerBpPurchaseSync(bpPaymentId, actorId);
         return ApiResult.success(job);
     }
 
     @PostMapping("/sync/payment/{bpPaymentId}")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<IntegrationJob> triggerPaymentSync(@PathVariable("bpPaymentId") Long bpPaymentId) {
-        IntegrationJob job = purchaseIntegrationService.triggerPaymentSync(bpPaymentId, 1L);
+        Long actorId = resolveActorId();
+        IntegrationJob job = purchaseIntegrationService.triggerPaymentSync(bpPaymentId, actorId);
         return ApiResult.success(job);
     }
 
@@ -265,13 +288,14 @@ public class AccountingIntegrationApiController {
     @PostMapping("/reconciliation/ignore")
     public ApiResult<Void> ignoreDiscrepancy(
             @RequestBody IgnoreRequest request) {
+        Long actorId = resolveActorId();
         reconciliationService.ignoreDiscrepancy(
                 request.month(),
                 request.category(),
                 request.externalDealId(),
                 request.internalId(),
                 request.reason(),
-                1L
+                actorId
         );
         return ApiResult.success(null);
     }

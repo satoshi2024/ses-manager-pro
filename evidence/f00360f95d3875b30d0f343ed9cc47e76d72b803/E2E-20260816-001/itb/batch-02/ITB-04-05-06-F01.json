@@ -1,0 +1,83 @@
+{
+  "case_id": "ITB-04-05-06-F01",
+  "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+  "name": "AIマッチング障害時の提案非作成整合性と再試行スコア決定性",
+  "status": "PASS",
+  "duration_ms": 568,
+  "evidence_detail": {
+    "injection_method": "AI マッチング呼出時に無効要員ID(-999)および不正パラメータを注入し、提案トランザクションに波及する孤児レコード生成が 0 件であることを SQL COUNT で検証。",
+    "fault_injection": {
+      "request_body": {
+        "engineerId": -999
+      },
+      "response_body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": []
+      },
+      "httpStatus": 200,
+      "proposal_count_before": "0",
+      "proposal_count_after": "0",
+      "sql_zero_diff_verified": true
+    },
+    "recovery": {
+      "retry_request": {
+        "engineerId": "1462"
+      },
+      "retry_response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": [
+          {
+            "projectId": 5296,
+            "projectName": "ITB-PROJ-ITB-20260818-2158-F01",
+            "score": 100,
+            "reason": "必須スキル 1/1 充足。単価レンジ内。稼動可能日OK。",
+            "sellingPoints": "Java(5年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          },
+          {
+            "projectId": 1,
+            "projectName": "金融系基盤システム移行",
+            "score": 95,
+            "reason": "必須スキル指定なし。単価レンジ内。",
+            "sellingPoints": "Java(5年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          },
+          {
+            "projectId": 3,
+            "projectName": "AI自動応答チャットボット開発",
+            "score": 75,
+            "reason": "必須スキル指定なし。単価レンジ外。",
+            "sellingPoints": "Java(5年)",
+            "engineerId": null,
+            "engineerName": null,
+            "proposedPrice": null,
+            "bpAvailabilityId": null,
+            "isExternalBp": null
+          }
+        ]
+      },
+      "returned_score": 100,
+      "expected_oracle_score": 100,
+      "proposal_creation_after_recovery": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "teardown": {
+      "project_residue": 0,
+      "proposal_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

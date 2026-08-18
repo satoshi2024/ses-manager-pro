@@ -1,0 +1,43 @@
+{
+  "case_id": "ITB-04-05-06-R01",
+  "family": "3.3 MOD-04 <-> MOD-05 <-> MOD-06",
+  "name": "商談顧客不一致の提案作成拒否、同一案件への二重提案拒否、不正初期ステータス拒否",
+  "status": "PASS",
+  "duration_ms": 535,
+  "evidence_detail": {
+    "subcase_a_customer_mismatch": {
+      "httpStatus": 404,
+      "body": {
+        "code": 404,
+        "message": "商機が見つかりません",
+        "data": null
+      },
+      "expectedStatus": 404
+    },
+    "subcase_b_duplicate_proposal": {
+      "initialProposalStatus": 200,
+      "duplicateHttpStatus": 409,
+      "body": {
+        "code": 409,
+        "message": "この要員は同じ案件で既に提案中です。",
+        "data": null
+      },
+      "expectedStatus": 409
+    },
+    "subcase_c_invalid_initial_status": {
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "「新規」から「成約」へは変更できません",
+        "data": null
+      },
+      "expectedStatus": 400
+    },
+    "teardown": {
+      "opportunity_residue": 0,
+      "project_residue": 0,
+      "proposal_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

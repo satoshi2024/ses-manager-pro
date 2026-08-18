@@ -1,0 +1,47 @@
+{
+  "case_id": "ITB-02-03-F01",
+  "family": "3.1 MOD-02 <-> MOD-03",
+  "name": "エンジニア登録後の候補者リンク失敗注入と再試行整合性",
+  "status": "PASS",
+  "duration_ms": 505,
+  "evidence_detail": {
+    "fault_injection": {
+      "injected_payload": {
+        "engineerId": null
+      },
+      "response": {
+        "code": 400,
+        "message": "不正なエンジニアIDです。",
+        "data": null
+      },
+      "httpStatus": 400,
+      "db_state_after_fault": {
+        "id": "13096",
+        "current_stage": "入社",
+        "converted_engineer_id": null
+      },
+      "rollback_verified": true
+    },
+    "recovery": {
+      "retry_payload": {
+        "engineerId": "1431"
+      },
+      "response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      },
+      "httpStatus": 200,
+      "db_state_after_recovery": {
+        "id": "13096",
+        "current_stage": "入社",
+        "converted_engineer_id": "1431"
+      }
+    },
+    "engineer_exact_count": "1",
+    "teardown": {
+      "candidate_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

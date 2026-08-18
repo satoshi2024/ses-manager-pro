@@ -526,7 +526,7 @@ async function run() {
 
     // Save to JSON evidence files
     const evidenceDir = path.resolve('evidence/f00360f95d3875b30d0f343ed9cc47e76d72b803/E2E-20260816-001/ita/batch-02');
-    
+
     const mod05_05_payload = {
       case_id: 'MOD05-05',
       dimension: 'N,B',

@@ -1,0 +1,227 @@
+{
+  "case_id": "ITB-02-03-N01",
+  "family": "3.1 MOD-02 <-> MOD-03",
+  "name": "候補者の順序ステージ遷移(応募受付->書類選考->一次面談->最終面談->内定->入社)とエンジニア変換・紐付け",
+  "status": "PASS",
+  "duration_ms": 557,
+  "evidence_detail": {
+    "candidate_creation": {
+      "request": {
+        "name": "ITB-CAND-ITB-20260818-3689-N01"
+      },
+      "response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      }
+    },
+    "stage_transitions": [
+      {
+        "stage": "書類選考",
+        "statusCode": 200,
+        "code": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        }
+      },
+      {
+        "stage": "一次面談",
+        "statusCode": 200,
+        "code": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        }
+      },
+      {
+        "stage": "最終面談",
+        "statusCode": 200,
+        "code": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        }
+      },
+      {
+        "stage": "内定",
+        "statusCode": 200,
+        "code": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        }
+      },
+      {
+        "stage": "入社",
+        "statusCode": 200,
+        "code": 200,
+        "body": {
+          "code": 200,
+          "message": "処理が成功しました",
+          "data": true
+        }
+      }
+    ],
+    "convert_initial_dto": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": {
+        "candidateId": 13094,
+        "fullName": "ITB-CAND-ITB-20260818-3689-N01",
+        "resumeSummary": "Java, Spring Boot, MySQL (実務経験3年)"
+      }
+    },
+    "engineer_creation": {
+      "request": {
+        "fullName": "ITB-ENG-ITB-20260818-3689-N01"
+      },
+      "response": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": {
+          "id": 1430,
+          "createdAt": "2026-08-18T13:02:43.9926925",
+          "updatedAt": "2026-08-18T13:02:43.9926925",
+          "deletedFlag": null,
+          "fullName": "ITB-ENG-ITB-20260818-3689-N01",
+          "fullNameKana": null,
+          "initialName": "T.N",
+          "gender": null,
+          "birthDate": null,
+          "nationality": null,
+          "nearestStation": null,
+          "phone": null,
+          "prefecture": null,
+          "railwayCompany": null,
+          "employmentType": null,
+          "status": "Bench",
+          "expectedUnitPrice": 750000,
+          "costCenterId": null,
+          "organizationId": null,
+          "overtimeExemptFlag": null,
+          "availableDate": "2026-09-01",
+          "experienceYears": null,
+          "japaneseLevel": null,
+          "resumeSummary": null,
+          "photoUrl": null,
+          "remarks": null,
+          "createdBy": 127
+        }
+      }
+    },
+    "link_response": {
+      "code": 200,
+      "message": "処理が成功しました",
+      "data": true
+    },
+    "db_after": {
+      "candidate": {
+        "id": "13094",
+        "name": "ITB-CAND-ITB-20260818-3689-N01",
+        "current_stage": "入社",
+        "converted_engineer_id": "1430"
+      },
+      "engineer": {
+        "id": "1430",
+        "full_name": "ITB-ENG-ITB-20260818-3689-N01",
+        "status": "Bench",
+        "expected_unit_price": "750000"
+      },
+      "activities_count": 5
+    },
+    "activities_table": [
+      {
+        "id": "13406",
+        "candidate_id": "13094",
+        "stage": "書類選考",
+        "remarks": "書類選考 実施完了",
+        "changed_at": "2026-08-18 13:02:44"
+      },
+      {
+        "id": "13407",
+        "candidate_id": "13094",
+        "stage": "一次面談",
+        "remarks": "一次面談 実施完了",
+        "changed_at": "2026-08-18 13:02:44"
+      },
+      {
+        "id": "13408",
+        "candidate_id": "13094",
+        "stage": "最終面談",
+        "remarks": "最終面談 実施完了",
+        "changed_at": "2026-08-18 13:02:44"
+      },
+      {
+        "id": "13409",
+        "candidate_id": "13094",
+        "stage": "内定",
+        "remarks": "内定 実施完了",
+        "changed_at": "2026-08-18 13:02:44"
+      },
+      {
+        "id": "13410",
+        "candidate_id": "13094",
+        "stage": "入社",
+        "remarks": "入社 実施完了",
+        "changed_at": "2026-08-18 13:02:44"
+      }
+    ],
+    "audit_log": [
+      {
+        "id": "22474",
+        "username": "s300.hr01",
+        "method": "PUT",
+        "uri": "/api/candidates/13094/converted-engineer",
+        "status": "200",
+        "application_code": "ses-manager",
+        "success_flag": "1"
+      },
+      {
+        "id": "22472",
+        "username": "s300.hr01",
+        "method": "POST",
+        "uri": "/api/candidates/13094/convert-to-engineer",
+        "status": "200",
+        "application_code": "ses-manager",
+        "success_flag": "1"
+      },
+      {
+        "id": "22471",
+        "username": "s300.hr01",
+        "method": "POST",
+        "uri": "/api/candidates/13094/activities",
+        "status": "200",
+        "application_code": "ses-manager",
+        "success_flag": "1"
+      },
+      {
+        "id": "22470",
+        "username": "s300.hr01",
+        "method": "POST",
+        "uri": "/api/candidates/13094/activities",
+        "status": "200",
+        "application_code": "ses-manager",
+        "success_flag": "1"
+      },
+      {
+        "id": "22469",
+        "username": "s300.hr01",
+        "method": "POST",
+        "uri": "/api/candidates/13094/activities",
+        "status": "200",
+        "application_code": "ses-manager",
+        "success_flag": "1"
+      }
+    ],
+    "teardown": {
+      "candidate_residue": 0,
+      "engineer_residue": 0,
+      "activities_residue": 0
+    }
+  }
+}

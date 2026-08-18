@@ -38,7 +38,7 @@
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="reconciliation-tab" data-bs-toggle="tab" data-bs-target="#reconciliation-panel" type="button" role="tab">
-                <i class="bi bi-file-earmark-check me-1"></i><span>月次照合</span>
+                <i class="bi bi-file-earmark-check me-1"></i><span th:text="#{accounting.tab.reconciliation}">月次照合</span>
             </button>
         </li>
     </ul>
@@ -51,28 +51,28 @@
                     <form id="searchForm" class="row g-2 align-items-center">
                         <div class="col-auto">
                             <select id="jobStatusFilter" class="form-select form-select-sm">
-                                <option value="">全ステータス</option>
-                                <option value="PENDING">PENDING (待機中)</option>
-                                <option value="RUNNING">RUNNING (処理中)</option>
-                                <option value="SUCCEEDED">SUCCEEDED (成功)</option>
-                                <option value="RETRYABLE">RETRYABLE (再試行待ち)</option>
-                                <option value="FAILED">FAILED (失敗)</option>
-                                <option value="CANCELLED">CANCELLED (取消)</option>
+                                <option value="" th:text="#{accounting.filter.allStatus}">全ステータス</option>
+                                <option value="PENDING">PENDING</option>
+                                <option value="RUNNING">RUNNING</option>
+                                <option value="SUCCEEDED">SUCCEEDED</option>
+                                <option value="RETRYABLE">RETRYABLE</option>
+                                <option value="FAILED">FAILED</option>
+                                <option value="CANCELLED">CANCELLED</option>
                             </select>
                         </div>
                         <div class="col-auto">
                             <select id="jobTypeFilter" class="form-select form-select-sm">
-                                <option value="">全ジョブ種別</option>
-                                <option value="SALES_INVOICE_SYNC">売上請求連携</option>
-                                <option value="SALES_INVOICE_CANCEL">売上取消連携</option>
-                                <option value="PURCHASE_DEAL_SYNC">BP仕入連携</option>
-                                <option value="EXPENSE_DEAL_SYNC">要員経費連携</option>
-                                <option value="PAYMENT_SYNC">支払実績同期</option>
+                                <option value="" th:text="#{accounting.filter.allJobTypes}">全ジョブ種別</option>
+                                <option value="SALES_INVOICE_SYNC" th:text="#{accounting.jobType.salesSync}">売上請求連携</option>
+                                <option value="SALES_INVOICE_CANCEL" th:text="#{accounting.jobType.salesCancel}">売上取消連携</option>
+                                <option value="PURCHASE_DEAL_SYNC" th:text="#{accounting.jobType.purchaseSync}">BP仕入連携</option>
+                                <option value="EXPENSE_DEAL_SYNC" th:text="#{accounting.jobType.expenseSync}">要員経費連携</option>
+                                <option value="PAYMENT_SYNC" th:text="#{accounting.jobType.paymentSync}">支払実績同期</option>
                             </select>
                         </div>
                         <div class="col-auto">
                             <button type="button" id="btnRefreshJobs" class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-arrow-clockwise me-1"></i>更新
+                                <i class="bi bi-arrow-clockwise me-1"></i><span th:text="#{accounting.btn.refresh}">更新</span>
                             </button>
                         </div>
                     </form>
@@ -84,18 +84,18 @@
                     <table class="table table-hover align-middle mb-0" id="jobsTable">
                         <thead class="table-light">
                         <tr>
-                            <th>ID</th>
-                            <th>ジョブ種別</th>
-                            <th>対象</th>
-                            <th>状態</th>
-                            <th>試行</th>
-                            <th>外部ID</th>
-                            <th>作成日時 / 送信日時</th>
-                            <th>操作</th>
+                            <th th:text="#{accounting.table.id}">ID</th>
+                            <th th:text="#{accounting.table.jobType}">ジョブ種別</th>
+                            <th th:text="#{accounting.table.target}">対象</th>
+                            <th th:text="#{accounting.table.status}">状態</th>
+                            <th th:text="#{accounting.table.attempts}">試行</th>
+                            <th th:text="#{accounting.table.externalId}">外部ID</th>
+                            <th th:text="#{accounting.table.createdAt}">作成日時 / 送信日時</th>
+                            <th th:text="#{accounting.table.actions}">操作</th>
                         </tr>
                         </thead>
                         <tbody id="jobsTbody">
-                        <tr><td colspan="8" class="text-center text-muted py-4">読み込み中...</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4" th:text="#{accounting.table.loading}">読み込み中...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -110,17 +110,17 @@
                 <div class="d-flex gap-2 align-items-center">
                     <select id="mappingConnSelect" class="form-select form-select-sm" style="width: 250px;"></select>
                     <select id="mappingTypeFilter" class="form-select form-select-sm" style="width: 200px;">
-                        <option value="">全オブジェクト種別</option>
-                        <option value="CUSTOMER_PARTNER">顧客取引先 (CUSTOMER_PARTNER)</option>
-                        <option value="BP_PARTNER">BP取引先 (BP_PARTNER)</option>
-                        <option value="ACCOUNT_SALES">売上勘定科目 (ACCOUNT_SALES)</option>
-                        <option value="ACCOUNT_OUTSOURCING">外注費勘定科目 (ACCOUNT_OUTSOURCING)</option>
-                        <option value="TAX_SALES_10">売上税区分10% (TAX_SALES_10)</option>
-                        <option value="SECTION">部門 (SECTION)</option>
+                        <option value="" th:text="#{accounting.filter.allObjectTypes}">全オブジェクト種別</option>
+                        <option value="CUSTOMER_PARTNER">CUSTOMER_PARTNER</option>
+                        <option value="BP_PARTNER">BP_PARTNER</option>
+                        <option value="ACCOUNT_SALES">ACCOUNT_SALES</option>
+                        <option value="ACCOUNT_OUTSOURCING">ACCOUNT_OUTSOURCING</option>
+                        <option value="TAX_SALES_10">TAX_SALES_10</option>
+                        <option value="SECTION">SECTION</option>
                     </select>
                 </div>
                 <button type="button" class="btn btn-sm btn-primary" id="btnNewMapping">
-                    <i class="bi bi-plus-lg me-1"></i>新規マッピング登録
+                    <i class="bi bi-plus-lg me-1"></i><span th:text="#{accounting.btn.newMapping}">新規マッピング登録</span>
                 </button>
             </div>
 
@@ -129,16 +129,16 @@
                     <table class="table table-hover align-middle mb-0" id="mappingsTable">
                         <thead class="table-light">
                         <tr>
-                            <th>種別</th>
-                            <th>内部キー / コード</th>
-                            <th>外部システムID</th>
-                            <th>外部コード / 名称</th>
-                            <th>検証状態</th>
-                            <th>操作</th>
+                            <th th:text="#{accounting.table.objectType}">種別</th>
+                            <th th:text="#{accounting.table.internalCode}">内部キー / コード</th>
+                            <th th:text="#{accounting.table.externalSysId}">外部システムID</th>
+                            <th th:text="#{accounting.table.externalCodeName}">外部コード / 名称</th>
+                            <th th:text="#{accounting.table.verified}">検証状態</th>
+                            <th th:text="#{accounting.table.actions}">操作</th>
                         </tr>
                         </thead>
                         <tbody id="mappingsTbody">
-                        <tr><td colspan="6" class="text-center text-muted py-4">接続を選択してください</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted py-4" th:text="#{accounting.table.selectConnPrompt}">接続を選択してください</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -148,7 +148,7 @@
         <!-- 3. 接続設定パネル -->
         <div class="tab-pane fade" id="connections-panel" role="tabpanel">
             <div class="row g-3" id="connectionsContainer">
-                <div class="col-12 text-center text-muted py-4">接続情報を読み込み中...</div>
+                <div class="col-12 text-center text-muted py-4" th:text="#{accounting.table.loadingConn}">接続情報を読み込み中...</div>
             </div>
         </div>
 
@@ -158,14 +158,14 @@
                 <div class="card-body">
                     <div class="row g-2 align-items-center">
                         <div class="col-auto">
-                            <label class="form-label mb-0 small fw-bold">請求書ID:</label>
+                            <label class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.invoiceIdLabel}">請求書ID:</label>
                         </div>
                         <div class="col-auto">
-                            <input type="number" id="previewInvoiceId" class="form-control form-control-sm" placeholder="例: 1" style="width: 150px;">
+                            <input type="number" id="previewInvoiceId" class="form-control form-control-sm" th:placeholder="#{accounting.preview.invoiceIdPlaceholder}" placeholder="例: 1" style="width: 150px;">
                         </div>
                         <div class="col-auto">
                             <button type="button" id="btnRunPreview" class="btn btn-sm btn-primary">
-                                <i class="bi bi-search me-1"></i>検証 & プレビュー表示
+                                <i class="bi bi-search me-1"></i><span th:text="#{accounting.btn.runPreview}">検証 & プレビュー表示</span>
                             </button>
                         </div>
                     </div>
@@ -183,14 +183,14 @@
                 <div class="card-body">
                     <div class="row g-2 align-items-center">
                         <div class="col-auto">
-                            <label class="form-label mb-0 small fw-bold">対象年月:</label>
+                            <label class="form-label mb-0 small fw-bold" th:text="#{accounting.reconcile.monthLabel}">対象年月:</label>
                         </div>
                         <div class="col-auto">
                             <input type="month" id="reconciliationMonth" class="form-control form-control-sm" style="width: 170px;">
                         </div>
                         <div class="col-auto">
                             <button type="button" id="btnRunReconciliation" class="btn btn-sm btn-primary">
-                                <i class="bi bi-search me-1"></i>月次照合を実行
+                                <i class="bi bi-search me-1"></i><span th:text="#{accounting.btn.runReconciliation}">月次照合を実行</span>
                             </button>
                         </div>
                     </div>
@@ -201,37 +201,37 @@
             <div class="row g-3 mb-3" id="reconcileSummaryCards" style="display: none;">
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">完全一致</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.matched}">完全一致</div>
                         <div class="fs-4 fw-bold text-success" id="summaryMatchedCount">0</div>
                     </div>
                 </div>
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">内部のみ (未連携)</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.internalOnly}">内部のみ (未連携)</div>
                         <div class="fs-4 fw-bold text-warning" id="summaryInternalOnlyCount">0</div>
                     </div>
                 </div>
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">外部のみ</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.externalOnly}">外部のみ</div>
                         <div class="fs-4 fw-bold text-secondary" id="summaryExternalOnlyCount">0</div>
                     </div>
                 </div>
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">金額不一致</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.mismatch}">金額不一致</div>
                         <div class="fs-4 fw-bold text-danger" id="summaryMismatchCount">0</div>
                     </div>
                 </div>
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">除外・無視済</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.ignored}">除外・無視済</div>
                         <div class="fs-4 fw-bold text-muted" id="summaryIgnoredCount">0</div>
                     </div>
                 </div>
                 <div class="col-md-2 col-6">
                     <div class="card border-0 bg-light text-center py-2">
-                        <div class="text-muted small">月次締め判定</div>
+                        <div class="text-muted small" th:text="#{accounting.summary.closingCheck}">月次締め判定</div>
                         <div class="mt-1" id="summaryClosingBadge">-</div>
                     </div>
                 </div>
@@ -243,18 +243,18 @@
                     <table class="table table-hover align-middle mb-0" id="reconcileTable">
                         <thead class="table-light">
                         <tr>
-                            <th>種別</th>
-                            <th>内部番号 / 取引先</th>
-                            <th>内部金額</th>
-                            <th>外部取引ID / 参照</th>
-                            <th>外部金額</th>
-                            <th>状態</th>
-                            <th>差異理由 / メモ</th>
-                            <th>操作</th>
+                            <th th:text="#{accounting.table.category}">種別</th>
+                            <th th:text="#{accounting.table.internalNoPartner}">内部番号 / 取引先</th>
+                            <th th:text="#{accounting.table.internalAmount}">内部金額</th>
+                            <th th:text="#{accounting.table.externalDealRef}">外部取引ID / 参照</th>
+                            <th th:text="#{accounting.table.externalAmount}">外部金額</th>
+                            <th th:text="#{accounting.table.status}">状態</th>
+                            <th th:text="#{accounting.table.diffReasonMemo}">差異理由 / メモ</th>
+                            <th th:text="#{accounting.table.actions}">操作</th>
                         </tr>
                         </thead>
                         <tbody id="reconcileTbody">
-                        <tr><td colspan="8" class="text-center text-muted py-4">対象年月を選択して照合を実行してください</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4" th:text="#{accounting.table.reconcilePrompt}">対象年月を選択して照合を実行してください</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -267,7 +267,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold">照合差異の除外設定</h5>
+                    <h5 class="modal-title fw-bold" th:text="#{accounting.modal.ignoreTitle}">照合差異の除外設定</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -277,18 +277,18 @@
                         <input type="hidden" id="ignoreExternalDealId">
                         <input type="hidden" id="ignoreInternalId">
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">対象項目</label>
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.ignoreTarget}">対象項目</label>
                             <input type="text" id="ignoreTargetLabel" class="form-control form-control-sm" readonly>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">除外・承認理由 (必須)</label>
-                            <textarea id="ignoreReasonInput" class="form-control form-control-sm" rows="3" placeholder="例: 翌月合算請求のため当月連携対象外" required></textarea>
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.ignoreReason}">除外・承認理由 (必須)</label>
+                            <textarea id="ignoreReasonInput" class="form-control form-control-sm" rows="3" th:placeholder="#{accounting.modal.ignoreReasonPlaceholder}" placeholder="例: 翌月合算請求のため当月連携対象外" required></textarea>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveIgnore">除外を保存</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" th:text="#{accounting.btn.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveIgnore" th:text="#{accounting.btn.saveIgnore}">除外を保存</button>
                 </div>
             </div>
         </div>
@@ -296,22 +296,22 @@
 
     <!-- ジョブ詳細モーダル -->
     <div class="modal fade" id="jobDetailModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold">ジョブ詳細</h5>
+                    <h5 class="modal-title fw-bold" th:text="#{accounting.modal.jobDetailTitle}">ジョブ詳細</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div id="jobDetailInfo"></div>
-                    <h6 class="fw-bold mt-4 mb-2">状態遷移イベント履歴</h6>
+                    <h6 class="fw-bold mt-4 mb-2" th:text="#{accounting.modal.jobEventsTitle}">状態遷移イベント履歴</h6>
                     <div class="table-responsive">
                         <table class="table table-sm table-bordered mb-0">
                             <thead class="table-light">
                             <tr>
-                                <th>日時</th>
-                                <th>遷移</th>
-                                <th>詳細</th>
+                                <th th:text="#{accounting.modal.eventTime}">日時</th>
+                                <th th:text="#{accounting.modal.eventTransition}">遷移</th>
+                                <th th:text="#{accounting.modal.eventDetail}">詳細</th>
                             </tr>
                             </thead>
                             <tbody id="jobEventsTbody"></tbody>
@@ -319,9 +319,9 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" id="btnModalRetry" class="btn btn-warning btn-sm" style="display:none;">再試行</button>
-                    <button type="button" id="btnModalCancel" class="btn btn-danger btn-sm" style="display:none;">キャンセル</button>
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">閉じる</button>
+                    <button type="button" id="btnModalRetry" class="btn btn-warning btn-sm" style="display:none;" th:text="#{accounting.btn.retry}">再試行</button>
+                    <button type="button" id="btnModalCancel" class="btn btn-danger btn-sm" style="display:none;" th:text="#{accounting.btn.cancelJob}">キャンセル</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" th:text="#{accounting.btn.close}">閉じる</button>
                 </div>
             </div>
         </div>
@@ -332,40 +332,40 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold" id="mappingModalTitle">マッピング設定</h5>
+                    <h5 class="modal-title fw-bold" id="mappingModalTitle" th:text="#{accounting.modal.mappingTitle}">マッピング設定</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <form id="mappingForm">
                         <input type="hidden" id="modalConnId">
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">オブジェクト種別</label>
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.objectType}">オブジェクト種別</label>
                             <select id="modalObjectType" class="form-select form-select-sm" required>
-                                <option value="CUSTOMER_PARTNER">顧客取引先 (CUSTOMER_PARTNER)</option>
-                                <option value="BP_PARTNER">BP取引先 (BP_PARTNER)</option>
-                                <option value="ACCOUNT_SALES">売上勘定科目 (ACCOUNT_SALES)</option>
-                                <option value="ACCOUNT_OUTSOURCING">外注費勘定科目 (ACCOUNT_OUTSOURCING)</option>
-                                <option value="TAX_SALES_10">売上税区分10% (TAX_SALES_10)</option>
-                                <option value="SECTION">部門 (SECTION)</option>
+                                <option value="CUSTOMER_PARTNER">CUSTOMER_PARTNER</option>
+                                <option value="BP_PARTNER">BP_PARTNER</option>
+                                <option value="ACCOUNT_SALES">ACCOUNT_SALES</option>
+                                <option value="ACCOUNT_OUTSOURCING">ACCOUNT_OUTSOURCING</option>
+                                <option value="TAX_SALES_10">TAX_SALES_10</option>
+                                <option value="SECTION">SECTION</option>
                             </select>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">内部キー / コード</label>
-                            <input type="text" id="modalInternalCode" class="form-control form-control-sm" placeholder="例: CUST-001 / SALES_DEFAULT" required>
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.internalCode}">内部キー / コード</label>
+                            <input type="text" id="modalInternalCode" class="form-control form-control-sm" th:placeholder="#{accounting.modal.internalCodePlaceholder}" placeholder="例: CUST-001 / SALES_DEFAULT" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">外部システムID</label>
-                            <input type="text" id="modalExternalId" class="form-control form-control-sm" placeholder="freee側のID (例: 1001)" required>
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.externalId}">外部システムID</label>
+                            <input type="text" id="modalExternalId" class="form-control form-control-sm" th:placeholder="#{accounting.modal.externalIdPlaceholder}" placeholder="freee側のID (例: 1001)" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label small fw-bold">外部システムコード / 名称</label>
-                            <input type="text" id="modalExternalCode" class="form-control form-control-sm" placeholder="例: 売上高 / 課税売上10%">
+                            <label class="form-label small fw-bold" th:text="#{accounting.modal.externalCode}">外部システムコード / 名称</label>
+                            <input type="text" id="modalExternalCode" class="form-control form-control-sm" th:placeholder="#{accounting.modal.externalCodePlaceholder}" placeholder="例: 売上高 / 課税売上10%">
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
-                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveMapping">保存</button>
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" th:text="#{accounting.btn.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btnSaveMapping" th:text="#{accounting.btn.save}">保存</button>
                 </div>
             </div>
         </div>

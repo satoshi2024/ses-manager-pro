@@ -38,6 +38,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     private final InvoiceMapper invoiceMapper;
     private final BpPaymentMapper bpPaymentMapper;
     private final CustomerMapper customerMapper;
+    private final com.ses.mapper.WorkRecordMapper workRecordMapper;
     private final IntegrationJobService jobService;
     private final IntegrationConnectionService connectionService;
     private final AccountingProviderFactory providerFactory;
@@ -110,8 +111,13 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 2. BP仕入の照合
-        List<BpPayment> bpPayments = bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>());
+        // 2. BP仕入の照合 (P1-09: 対象月に属するwork_recordに限定)
+        List<WorkRecord> workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
+                .eq(WorkRecord::getWorkMonth, month));
+        List<Long> wrIds = workRecords.stream().map(WorkRecord::getId).toList();
+        List<BpPayment> bpPayments = wrIds.isEmpty() ? Collections.emptyList() :
+                bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>().in(BpPayment::getWorkRecordId, wrIds));
+
         for (BpPayment bp : bpPayments) {
             IntegrationJob latestJob = jobService.getLatestJob("BP_PAYMENT", bp.getId(), "BP_PURCHASE_SYNC");
             String itemKey = "PURCHASE:" + bp.getId();
@@ -187,8 +193,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 重大不一致（未解決の金額不一致や未送信売上）が0件であれば月次締め可能
-        boolean readyForClosing = (mismatch == 0 && internalOnly == 0);
+        // 重大不一致（未解決の金額不一致、未送信売上/仕入、外部のみ取引）が0件であれば月次締め可能 (P1-09)
+        boolean readyForClosing = (mismatch == 0 && internalOnly == 0 && externalOnly == 0);
 
         return AccountingReconciliationSummaryDto.builder()
                 .month(month)

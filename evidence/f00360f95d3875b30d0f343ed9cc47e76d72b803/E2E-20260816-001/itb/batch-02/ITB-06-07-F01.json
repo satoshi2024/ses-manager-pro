@@ -1,0 +1,58 @@
+{
+  "case_id": "ITB-06-07-F01",
+  "family": "3.4 MOD-06 <-> MOD-07",
+  "name": "成約トランザクション中途のREAL故障注入と全関連テーブル(提案/履歴/契約/通知)完全ロールバック",
+  "status": "PASS",
+  "duration_ms": 1010,
+  "evidence_detail": {
+    "injection_method": "成約API(PUT /api/proposals/{id}/status)呼出直前に紐付案件(t_project)を論理削除(deleted_flag=1)し、同一tx内のProposalServiceImpl.changeStatus -> ContractServiceImpl.createDraftFromProposal において projectMapper.selectById が null となり BusinessException(\"error.contract.proposalProjectNotFound\") を発生させてtx全体を強制ロールバック。",
+    "fault_injection": {
+      "httpStatus": 400,
+      "responseBody": {
+        "code": 400,
+        "message": "提案の案件が見つかりません",
+        "data": null
+      },
+      "db_state_after_fault": {
+        "proposal": {
+          "id": "6312",
+          "status": "結果待ち",
+          "closed_at": null
+        },
+        "proposal_history_count": "3",
+        "contract_draft_count": "0",
+        "notification_count": "0"
+      },
+      "rollback_verified": true
+    },
+    "recovery": {
+      "recovery_httpStatus": 200,
+      "recovery_responseBody": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      },
+      "db_state_after_recovery": {
+        "proposal": {
+          "id": "6312",
+          "status": "成約",
+          "closed_at": "2026-08-18 15:47:06"
+        },
+        "proposal_history_count": "4",
+        "contract_draft": {
+          "id": "7333",
+          "contract_no": "C-202609-0006",
+          "status": "準備中"
+        },
+        "notification_count": "1"
+      }
+    },
+    "teardown": {
+      "contract_residue": 0,
+      "notification_residue": 0,
+      "proposal_residue": 0,
+      "project_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}

@@ -2,6 +2,22 @@
  * 会計・支払連携モジュール (accounting-integration.js / A1)
  */
 $(function () {
+    /**
+     * XSS対策: 任意文字列をHTMLとして安全にエスケープする (P1-10)。
+     * innerHTML / テンプレートリテラルにユーザーデータを埋め込む際は必ず本関数でエスケープする。
+     * @param {string} str エスケープ対象文字列
+     * @returns {string} エスケープ済み文字列
+     */
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;');
+    }
+
     let currentConnId = null;
     let jobModal = new bootstrap.Modal(document.getElementById('jobDetailModal'));
     let mapModal = new bootstrap.Modal(document.getElementById('mappingModal'));
@@ -72,7 +88,7 @@ $(function () {
             }
 
             list.forEach(function (c, idx) {
-                select.append(`<option value="${c.id}">${c.provider} (${c.product}) - ${c.companyName || '未接続'}</option>`);
+                select.append(`<option value="${escapeHtml(String(c.id))}">${escapeHtml(c.provider)} (${escapeHtml(c.product)}) - ${escapeHtml(c.companyName || '未接続')}</option>`);
                 if (idx === 0) currentConnId = c.id;
 
                 let statusBadge = c.status === 'CONNECTED' ? '<span class="badge bg-success">接続中</span>' :
@@ -85,14 +101,14 @@ $(function () {
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <h6 class="card-title fw-bold mb-0 text-primary">
-                                    <i class="bi bi-cloud-check me-1"></i>${c.provider.toUpperCase()} (${c.product})
+                                    <i class="bi bi-cloud-check me-1"></i>${escapeHtml(c.provider ? c.provider.toUpperCase() : '')} (${escapeHtml(c.product)})
                                 </h6>
                                 ${statusBadge}
                             </div>
-                            <div class="small text-muted mb-2">事業所ID: ${c.externalCompanyId || '-'}</div>
-                            <div class="small text-muted mb-3">事業所名: ${c.companyName || '-'}</div>
+                            <div class="small text-muted mb-2">事業所ID: ${escapeHtml(String(c.externalCompanyId || '-'))}</div>
+                            <div class="small text-muted mb-3">事業所名: ${escapeHtml(c.companyName || '-')}</div>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-primary btn-check-health" data-id="${c.id}">
+                                <button class="btn btn-sm btn-outline-primary btn-check-health" data-id="${escapeHtml(String(c.id))}">
                                     <i class="bi bi-activity me-1"></i>疎通確認
                                 </button>
                             </div>
@@ -135,18 +151,18 @@ $(function () {
             }
             list.forEach(function (m) {
                 let verifyBadge = m.verifiedAt ?
-                    `<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-circle me-1"></i>検証済 (${m.verifiedAt.substring(0, 10)})</span>` :
+                    `<span class="badge bg-success-subtle text-success border border-success"><i class="bi bi-check-circle me-1"></i>検証済 (${escapeHtml(m.verifiedAt.substring(0, 10))})</span>` :
                     `<span class="badge bg-danger-subtle text-danger border border-danger"><i class="bi bi-exclamation-triangle me-1"></i>未検証</span>`;
 
                 let tr = `
                 <tr>
-                    <td><span class="badge bg-light text-dark border">${m.objectType}</span></td>
-                    <td class="fw-bold">${m.internalCode}</td>
-                    <td><code>${m.externalId}</code></td>
-                    <td>${m.externalCode || '-'}</td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(m.objectType)}</span></td>
+                    <td class="fw-bold">${escapeHtml(m.internalCode)}</td>
+                    <td><code>${escapeHtml(m.externalId)}</code></td>
+                    <td>${escapeHtml(m.externalCode || '-')}</td>
                     <td>${verifyBadge}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-success btn-verify-map" data-id="${m.id}">
+                        <button class="btn btn-sm btn-outline-success btn-verify-map" data-id="${escapeHtml(String(m.id))}">
                             <i class="bi bi-shield-check me-1"></i>照合検証
                         </button>
                     </td>
@@ -194,15 +210,15 @@ $(function () {
 
                 let tr = `
                 <tr>
-                    <td>#${j.id}</td>
-                    <td class="small fw-bold">${j.jobType}</td>
-                    <td><span class="badge bg-light text-dark border">${j.targetType} #${j.targetId}</span></td>
+                    <td>#${escapeHtml(String(j.id))}</td>
+                    <td class="small fw-bold">${escapeHtml(j.jobType)}</td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(j.targetType)} #${escapeHtml(String(j.targetId))}</span></td>
                     <td>${statusBadge}</td>
-                    <td>${j.attemptCount} / ${j.maxAttempts}</td>
-                    <td><code>${j.externalId || '-'}</code></td>
-                    <td class="small text-muted">${j.createdAt ? j.createdAt.substring(0, 16) : '-'}</td>
+                    <td>${escapeHtml(String(j.attemptCount))} / ${escapeHtml(String(j.maxAttempts))}</td>
+                    <td><code>${escapeHtml(j.externalId || '-')}</code></td>
+                    <td class="small text-muted">${escapeHtml(j.createdAt ? j.createdAt.substring(0, 16) : '-')}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-secondary btn-job-detail" data-id="${j.id}">
+                        <button class="btn btn-sm btn-outline-secondary btn-job-detail" data-id="${escapeHtml(String(j.id))}">
                             <i class="bi bi-info-circle me-1"></i>詳細
                         </button>
                     </td>
@@ -226,15 +242,15 @@ $(function () {
 
             let html = `
             <div class="row g-2 mb-3">
-                <div class="col-sm-6"><strong>ジョブID:</strong> #${j.id}</div>
-                <div class="col-sm-6"><strong>種別:</strong> ${j.jobType}</div>
-                <div class="col-sm-6"><strong>対象:</strong> ${j.targetType} #${j.targetId}</div>
-                <div class="col-sm-6"><strong>ステータス:</strong> <span class="badge bg-primary">${j.status}</span></div>
-                <div class="col-sm-6"><strong>冪等キー:</strong> <code>${j.idempotencyKey}</code></div>
-                <div class="col-sm-6"><strong>外部取引ID:</strong> <code>${j.externalId || '-'}</code></div>
-                <div class="col-sm-6"><strong>Request ID:</strong> <code>${j.providerRequestId || '-'}</code></div>
-                <div class="col-sm-6"><strong>試行回数:</strong> ${j.attemptCount} / ${j.maxAttempts}</div>
-                <div class="col-12"><strong>エラー分類:</strong> <span class="text-danger">${j.errorCode ? '[' + j.errorCode + '] ' + (j.errorMessageSafe || '') : '-'}</span></div>
+                <div class="col-sm-6"><strong>ジョブID:</strong> #${escapeHtml(String(j.id))}</div>
+                <div class="col-sm-6"><strong>種別:</strong> ${escapeHtml(j.jobType)}</div>
+                <div class="col-sm-6"><strong>対象:</strong> ${escapeHtml(j.targetType)} #${escapeHtml(String(j.targetId))}</div>
+                <div class="col-sm-6"><strong>ステータス:</strong> <span class="badge bg-primary">${escapeHtml(j.status)}</span></div>
+                <div class="col-sm-6"><strong>冪等キー:</strong> <code>${escapeHtml(j.idempotencyKey)}</code></div>
+                <div class="col-sm-6"><strong>外部取引ID:</strong> <code>${escapeHtml(j.externalId || '-')}</code></div>
+                <div class="col-sm-6"><strong>Request ID:</strong> <code>${escapeHtml(j.providerRequestId || '-')}</code></div>
+                <div class="col-sm-6"><strong>試行回数:</strong> ${escapeHtml(String(j.attemptCount))} / ${escapeHtml(String(j.maxAttempts))}</div>
+                <div class="col-12"><strong>エラー分類:</strong> <span class="text-danger">${j.errorCode ? '[' + escapeHtml(j.errorCode) + '] ' + escapeHtml(j.errorMessageSafe || '') : '-'}</span></div>
             </div>`;
             $('#jobDetailInfo').html(html);
 
@@ -242,9 +258,9 @@ $(function () {
             events.forEach(function (e) {
                 eventRows += `
                 <tr>
-                    <td class="small text-muted">${e.occurredAt ? e.occurredAt.substring(0, 19) : '-'}</td>
-                    <td><span class="badge bg-light text-dark border">${e.fromStatus || 'INIT'}</span> &rarr; <span class="badge bg-secondary">${e.toStatus}</span></td>
-                    <td class="small">${e.safeDetail || '-'}</td>
+                    <td class="small text-muted">${escapeHtml(e.occurredAt ? e.occurredAt.substring(0, 19) : '-')}</td>
+                    <td><span class="badge bg-light text-dark border">${escapeHtml(e.fromStatus || 'INIT')}</span> &rarr; <span class="badge bg-secondary">${escapeHtml(e.toStatus)}</span></td>
+                    <td class="small">${escapeHtml(e.safeDetail || '-')}</td>
                 </tr>`;
             });
             $('#jobEventsTbody').html(eventRows || '<tr><td colspan="3" class="text-center text-muted">イベントなし</td></tr>');
@@ -283,7 +299,7 @@ $(function () {
 
         let errorAlert = '';
         if (!p.readyToSend) {
-            let errorList = (p.validationErrors || []).map(e => `<li>${e}</li>`).join('');
+            let errorList = (p.validationErrors || []).map(e => `<li>${escapeHtml(e)}</li>`).join('');
             errorAlert = `
             <div class="alert alert-danger shadow-sm">
                 <h6 class="alert-heading fw-bold mb-1"><i class="bi bi-x-circle me-1"></i>送信バリデーションエラー (送信不可)</h6>
@@ -302,9 +318,9 @@ $(function () {
             <div class="card-header bg-white fw-bold">Canonical 請求書データ</div>
             <div class="card-body">
                 <div class="row g-2 small">
-                    <div class="col-sm-4"><strong>請求書番号:</strong> ${inv.invoiceNo}</div>
-                    <div class="col-sm-4"><strong>顧客名 (コード):</strong> ${inv.customerName} (${inv.customerCode})</div>
-                    <div class="col-sm-4"><strong>発行日 / 期日:</strong> ${inv.issueDate} / ${inv.dueDate || '-'}</div>
+                    <div class="col-sm-4"><strong>請求書番号:</strong> ${escapeHtml(inv.invoiceNo)}</div>
+                    <div class="col-sm-4"><strong>顧客名 (コード):</strong> ${escapeHtml(inv.customerName)} (${escapeHtml(inv.customerCode)})</div>
+                    <div class="col-sm-4"><strong>発行日 / 期日:</strong> ${escapeHtml(String(inv.issueDate))} / ${escapeHtml(String(inv.dueDate || '-'))}</div>
                     <div class="col-sm-4"><strong>小計:</strong> ¥${inv.subtotal ? inv.subtotal.toLocaleString() : 0}</div>
                     <div class="col-sm-4"><strong>消費税 (10%):</strong> ¥${inv.tax ? inv.tax.toLocaleString() : 0}</div>
                     <div class="col-sm-4"><strong class="text-primary">合計金額:</strong> ¥${inv.total ? inv.total.toLocaleString() : 0}</div>
@@ -317,9 +333,10 @@ $(function () {
     // === 5. 月次照合 (Reconciliation) ===
     let ignoreModal = new bootstrap.Modal(document.getElementById('ignoreModal'));
 
-    // 今月を初期値にセット
-    let now = new Date();
-    let currentYm = now.toISOString().substring(0, 7);
+    // P2-02: JST で今月を正しく計算する。
+    // UTC の new Date().toISOString() は JST 月初 00:00~08:59 に前月を返すため使用不可。
+    let nowJst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+    let currentYm = nowJst.getFullYear() + '-' + String(nowJst.getMonth() + 1).padStart(2, '0');
     $('#reconciliationMonth').val(currentYm);
 
     $('#btnRunReconciliation').on('click', function () {
@@ -375,32 +392,32 @@ $(function () {
             let extAmt = it.externalAmount != null ? '¥' + it.externalAmount.toLocaleString() : '-';
 
             let reasonText = it.status === 'IGNORED' ?
-                `<span class="text-muted"><i class="bi bi-info-circle me-1"></i>除外: ${it.ignoreReason || '-'}</span>` :
-                (it.discrepancyReason ? `<span class="text-danger small">${it.discrepancyReason}</span>` : '-');
+                `<span class="text-muted"><i class="bi bi-info-circle me-1"></i>除外: ${escapeHtml(it.ignoreReason || '-')}</span>` :
+                (it.discrepancyReason ? `<span class="text-danger small">${escapeHtml(it.discrepancyReason)}</span>` : '-');
 
             let actionBtn = '';
             if (it.status !== 'MATCHED' && it.status !== 'IGNORED') {
                 actionBtn = `
                 <button class="btn btn-sm btn-outline-secondary btn-open-ignore"
-                        data-category="${it.category || ''}"
-                        data-internal-id="${it.internalId || ''}"
-                        data-external-id="${it.externalDealId || ''}"
-                        data-label="${it.internalNo || it.externalDealId || '取引'}">
+                        data-category="${escapeHtml(it.category || '')}"
+                        data-internal-id="${escapeHtml(String(it.internalId || ''))}"
+                        data-external-id="${escapeHtml(it.externalDealId || '')}"
+                        data-label="${escapeHtml(it.internalNo || it.externalDealId || '取引')}">
                     <i class="bi bi-slash-circle me-1"></i>除外設定
                 </button>`;
             }
 
             let tr = `
             <tr>
-                <td><span class="badge bg-light text-dark border">${it.category || '-'}</span></td>
+                <td><span class="badge bg-light text-dark border">${escapeHtml(it.category || '-')}</span></td>
                 <td>
-                    <div class="fw-bold">${it.internalNo || '-'}</div>
-                    <div class="small text-muted">${it.partnerName || '-'}</div>
+                    <div class="fw-bold">${escapeHtml(it.internalNo || '-')}</div>
+                    <div class="small text-muted">${escapeHtml(it.partnerName || '-')}</div>
                 </td>
                 <td class="fw-bold text-end">${intAmt}</td>
                 <td>
-                    <div><code>${it.externalDealId || '-'}</code></div>
-                    <div class="small text-muted">${it.externalRefNo || '-'}</div>
+                    <div><code>${escapeHtml(it.externalDealId || '-')}</code></div>
+                    <div class="small text-muted">${escapeHtml(it.externalRefNo || '-')}</div>
                 </td>
                 <td class="fw-bold text-end">${extAmt}</td>
                 <td>${statusBadge}</td>

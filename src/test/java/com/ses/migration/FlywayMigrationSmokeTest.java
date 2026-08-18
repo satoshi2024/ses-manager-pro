@@ -681,6 +681,20 @@ class FlywayMigrationSmokeTest {
             }
             org.junit.jupiter.api.Assertions.assertTrue(duplicateAcceptanceRejected,
                     "同一契約×同一月の検収はDBのUNIQUEでも拒否されるはず");
+
+            // V106: 会計・支払連携基盤 (accounting-payment-integration)
+            assertTableExists(st, "m_integration_connection");
+            assertTableExists(st, "m_external_mapping");
+            assertTableExists(st, "t_integration_job");
+            assertTableExists(st, "t_integration_job_event");
+            assertColumnExists(st, "m_integration_connection", "tenant_id");
+            assertColumnExists(st, "m_integration_connection", "encrypted_tokens");
+            assertColumnExists(st, "m_external_mapping", "object_type");
+            assertColumnExists(st, "m_external_mapping", "verified_at");
+            assertColumnExists(st, "t_integration_job", "idempotency_key");
+            assertColumnExists(st, "t_integration_job", "payload_hash");
+            assertColumnExists(st, "t_integration_job", "next_retry_at");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='accounting-integration'");
         }
     }
 

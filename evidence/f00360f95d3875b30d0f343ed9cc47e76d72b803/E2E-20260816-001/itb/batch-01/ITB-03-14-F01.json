@@ -1,0 +1,63 @@
+{
+  "case_id": "ITB-03-14-F01",
+  "family": "3.2 MOD-03 <-> MOD-14",
+  "name": "主担当demote後・新割当保存時の失敗注入と旧主担当整合性回復",
+  "status": "PASS",
+  "duration_ms": 242,
+  "evidence_detail": {
+    "fault_injection": {
+      "injected_payload": {
+        "salesUserId": 0,
+        "primaryFlag": true
+      },
+      "httpStatus": 400,
+      "body": {
+        "code": 400,
+        "message": "担当営業には有効な営業ロールのユーザーを指定してください",
+        "data": null
+      },
+      "db_after_fault": [
+        {
+          "id": "5916",
+          "engineer_id": "1434",
+          "sales_user_id": "102",
+          "primary_flag": "1",
+          "released_at": null
+        }
+      ],
+      "atomic_rollback_verified": true
+    },
+    "recovery": {
+      "retry_payload": {
+        "salesUserId": 103,
+        "primaryFlag": true
+      },
+      "httpStatus": 200,
+      "body": {
+        "code": 200,
+        "message": "処理が成功しました",
+        "data": true
+      },
+      "db_after_recovery": [
+        {
+          "id": "5916",
+          "engineer_id": "1434",
+          "sales_user_id": "102",
+          "primary_flag": "0",
+          "released_at": null
+        },
+        {
+          "id": "5917",
+          "engineer_id": "1434",
+          "sales_user_id": "103",
+          "primary_flag": "1",
+          "released_at": null
+        }
+      ]
+    },
+    "teardown": {
+      "engineer_sales_residue": 0,
+      "engineer_residue": 0
+    }
+  }
+}
