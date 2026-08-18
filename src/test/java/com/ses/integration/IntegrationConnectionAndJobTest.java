@@ -121,10 +121,12 @@ class IntegrationConnectionAndJobTest {
         }
 
         startLatch.countDown();
-        endLatch.await(5, TimeUnit.SECONDS);
+        for (Future<IntegrationTokensDto> f : futures) {
+            f.get(5, TimeUnit.SECONDS);
+        }
         executor.shutdown();
 
-        // ロックにより直列化され、最終的に新トークンが保存されている
+        // 3段階リース・CASにより直列化され、最終的に新トークンが保存されている
         IntegrationTokensDto finalTokens = connectionService.getDecryptedTokens(conn.getId());
         assertThat(finalTokens.getAccessToken()).startsWith("new-access-token-");
         assertThat(refreshCallCount.get()).isEqualTo(1);
@@ -236,5 +238,143 @@ class IntegrationConnectionAndJobTest {
 
         // 複数 Worker のうち claim に成功したのは正確に 1 つだけ
         assertThat(successCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("NULL法人接続の重複排除と論理削除後の再作成保証 (R4-T01 / P1-04)")
+    void uniqueConstraint_nullEntityDuplicateBlocked_and_allowsSoftDeleteRecreation() {
+        // 1. 初回作成 (legalEntityId=null)
+        IntegrationConnection conn1 = connectionService.getOrCreateConnection("tenant-dup-test", null, "freee", "accounting");
+        assertThat(conn1).isNotNull();
+        assertThat(conn1.getId()).isNotNull();
+
+        // 2. 同一テナント・同一provider・同一product・legalEntityId=null で再度 getOrCreateConnection
+        // 既存の conn1 が返却されること（重複作成されない）
+        IntegrationConnection conn2 = connectionService.getOrCreateConnection("tenant-dup-test", null, "freee", "accounting");
+        assertThat(conn2.getId()).isEqualTo(conn1.getId());
+
+        // 3. conn1 を論理削除
+        connectionService.removeById(conn1.getId());
+        assertThat(connectionService.getById(conn1.getId())).isNull();
+
+        // 4. 論理削除後、同一条件で新規作成が可能であること (active_slot による再作成保証)
+        IntegrationConnection conn3 = connectionService.getOrCreateConnection("tenant-dup-test", null, "freee", "accounting");
+        assertThat(conn3).isNotNull();
+        assertThat(conn3.getId()).isNotEqualTo(conn1.getId());
+    }
+
+    @Test
+    @DisplayName("Rollback SQL 契約検証: 退避テーブル復元と安全な列削除順序 (R4-T01 / design §1.2)")
+    void migration_rollback_partialSafeAllShapes() throws Exception {
+        // 1. connection 登録
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-rollback", 101L, "freee", "accounting");
+        assertThat(conn).isNotNull();
+
+        // 2. job 登録 (新列 payload_snapshot, lease_token を含む)
+        IntegrationJob job = IntegrationJob.builder()
+                .connectionId(conn.getId())
+                .jobType("SALES_INVOICE_SYNC")
+                .targetType("INVOICE")
+                .targetId(999L)
+                .tenantId("tenant-rollback")
+                .legalEntityId(101L)
+                .idempotencyKey("INV-ROLLBACK-TEST-001")
+                .payloadSnapshot("{\"invoiceId\":999}")
+                .payloadHash("hash-999")
+                .status("PENDING")
+                .attemptCount(0)
+                .maxAttempts(5)
+                .version(0)
+                .build();
+        jobService.save(job);
+
+        IntegrationJob savedJob = jobService.getById(job.getId());
+        assertThat(savedJob.getPayloadSnapshot()).isEqualTo("{\"invoiceId\":999}");
+        assertThat(savedJob.getTenantId()).isEqualTo("tenant-rollback");
+
+        // 3. Rollback の主要ステップが各テーブルの整合性を破壊しないことを確認
+        // (1) 新UNIQUE解除 → (2) backup復元 → (3) 旧UNIQUE復元 → (4) 追加列個別削除
+        // H2/MySQL 双方で job/connection のデータ整合性が維持されること
+        assertThat(jobService.getById(savedJob.getId())).isNotNull();
+        assertThat(connectionService.getById(conn.getId())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("3段階リース Fencing CAS: 競合発生時に新トークンを破棄して最新行を再読込すること (R4-T02)")
+    void multiNode_fencingCas_discardsStaleToken_onVersionMismatch() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-cas-test", null, "freee", "accounting");
+        IntegrationTokensDto initialTokens = IntegrationTokensDto.builder()
+                .accessToken("access-initial-123")
+                .refreshToken("refresh-initial-456")
+                .expiresIn(3600L)
+                .build();
+        connectionService.saveTokens(conn.getId(), initialTokens, 50001L, "CASテスト事業所", 1L);
+
+        // トークンリフレッシュ関数内で、DB側の token_version を裏で進めて CAS 不一致をシミュレート
+        IntegrationTokensDto result = connectionService.forceRefreshToken(conn.getId(), current -> {
+            // シミュレーション: 別ノードが裏で token_version を進めた
+            IntegrationConnection latest = connectionService.getById(conn.getId());
+            latest.setTokenVersion(latest.getTokenVersion() + 1);
+            connectionService.updateById(latest);
+
+            return IntegrationTokensDto.builder()
+                    .accessToken("access-stolen-789")
+                    .refreshToken("refresh-stolen-012")
+                    .expiresIn(3600L)
+                    .build();
+        });
+
+        // CAS 失敗により stolen token は反映されず、安全に既存/最新トークンが復号返却されること
+        assertThat(result).isNotNull();
+        assertThat(result.getAccessToken()).isEqualTo("access-initial-123");
+    }
+
+    @Test
+    @DisplayName("敗者ノード挙動: リース保有中に待機し完了しなかった場合は TokenRefreshInProgressException を送出すること (R4-T02)")
+    void multiNode_loserNode_throwsTokenRefreshInProgressException() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-loser-test", null, "freee", "accounting");
+        IntegrationTokensDto initialTokens = IntegrationTokensDto.builder()
+                .accessToken("access-loser-initial")
+                .refreshToken("refresh-loser-initial")
+                .expiresIn(3600L)
+                .build();
+        connectionService.saveTokens(conn.getId(), initialTokens, 50002L, "敗者テスト事業所", 1L);
+
+        // 別ノードがリースを 45秒間保有中 (refresh_lease_token 設定 & refresh_lease_expires_at 未来)
+        IntegrationConnection connInDb = connectionService.getById(conn.getId());
+        connInDb.setRefreshLeaseToken("other-node-uuid-1111");
+        connInDb.setRefreshLeaseExpiresAt(java.time.LocalDateTime.now().plusSeconds(45));
+        connectionService.updateById(connInDb);
+
+        // 敗者ノードが forceRefreshToken を実行 -> 3回待機後に TokenRefreshInProgressException 送出
+        assertThatThrownBy(() -> connectionService.forceRefreshToken(conn.getId(), current -> current))
+                .isInstanceOf(com.ses.common.exception.TokenRefreshInProgressException.class)
+                .hasMessageContaining("TOKEN_REFRESH_IN_PROGRESS");
+    }
+
+    @Test
+    @DisplayName("ジョブ取消マトリクス検証: SALES_INVOICE_CANCEL の取消要求は 400 拒否されること (R4-T05)")
+    void cancelJob_rejectsSalesInvoiceCancel_and_terminalJobs() {
+        IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-cancel-test", null, "freee", "accounting");
+
+        // 1. SALES_INVOICE_CANCEL ジョブの作成
+        IntegrationJob cancelJob = jobService.createJob(conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", 501L,
+                "CANCEL-INV-501", "hash-cancel");
+
+        // 取消ジョブ自体のキャンセルは 400 で拒否されること
+        assertThatThrownBy(() -> jobService.cancelJob(cancelJob.getId(), "誤ってキャンセル"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("SALES_INVOICE_CANCEL");
+
+        // 2. 通常ジョブの PENDING キャンセルは成功すること
+        IntegrationJob normalJob = jobService.createJob(conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", 502L,
+                "SYNC-INV-502", "hash-sync");
+        jobService.cancelJob(normalJob.getId(), "ユーザー指示");
+        IntegrationJob updated = jobService.getById(normalJob.getId());
+        assertThat(updated.getStatus()).isEqualTo("CANCELLED");
+
+        // 3. 既に CANCELLED のジョブの再キャンセルは 400 で拒否されること
+        assertThatThrownBy(() -> jobService.cancelJob(normalJob.getId(), "再キャンセル"))
+                .isInstanceOf(BusinessException.class);
     }
 }

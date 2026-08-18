@@ -44,6 +44,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     private final BpPaymentMapper bpPaymentMapper;
     private final CustomerMapper customerMapper;
     private final WorkRecordMapper workRecordMapper;
+    private final com.ses.mapper.ExpenseRequestMapper expenseRequestMapper;
+    private final com.ses.mapper.EngineerMapper engineerMapper;
     private final IntegrationJobService jobService;
     private final IntegrationConnectionService connectionService;
     private final AccountingProviderFactory providerFactory;
@@ -156,7 +158,50 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             }
         }
 
-        // 3. 外部のみ存在する取引 (EXTERNAL_ONLY) - 外部API呼出 (P1-09: 失敗時は fail-closed)
+        // 3. 経費申請の照合 (対象月のexpense_date)
+        YearMonth ymMonth = YearMonth.parse(month);
+        java.time.LocalDate startOfMonth = ymMonth.atDay(1);
+        java.time.LocalDate endOfMonth = ymMonth.atEndOfMonth();
+        List<ExpenseRequest> expenses = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
+                .ge(ExpenseRequest::getExpenseDate, startOfMonth)
+                .le(ExpenseRequest::getExpenseDate, endOfMonth));
+
+        for (ExpenseRequest exp : expenses) {
+            IntegrationJob latestJob = jobService.getLatestJob("EXPENSE_REQUEST", exp.getId(), "EXPENSE_DEAL_SYNC");
+            String itemKey = "EXPENSE:" + exp.getId();
+            String ignoreReason = ignoreMap.get(itemKey);
+
+            com.ses.entity.Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
+            String engineerName = eng != null ? eng.getFullName() : "要員ID:" + exp.getEngineerId();
+
+            if (latestJob != null && "SUCCEEDED".equals(latestJob.getStatus())) {
+                items.add(ReconciliationItemDto.builder()
+                        .category("EXPENSE")
+                        .internalId(exp.getId())
+                        .internalNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
+                        .partnerName(engineerName)
+                        .internalAmount(exp.getAmount())
+                        .externalDealId(latestJob.getExternalId())
+                        .externalRefNo(exp.getExpenseNo())
+                        .externalAmount(exp.getAmount())
+                        .status(ignoreReason != null ? "IGNORED" : "MATCHED")
+                        .ignoreReason(ignoreReason)
+                        .build());
+            } else if ("承認済".equals(exp.getStatus()) || "会計連携済".equals(exp.getStatus())) {
+                items.add(ReconciliationItemDto.builder()
+                        .category("EXPENSE")
+                        .internalId(exp.getId())
+                        .internalNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())
+                        .partnerName(engineerName)
+                        .internalAmount(exp.getAmount())
+                        .status(ignoreReason != null ? "IGNORED" : "INTERNAL_ONLY")
+                        .discrepancyReason("freee経費取引未送信")
+                        .ignoreReason(ignoreReason)
+                        .build());
+            }
+        }
+
+        // 4. 外部のみ存在する取引 (EXTERNAL_ONLY) - 外部API呼出 (P1-09: 失敗時は fail-closed)
         if (conn != null && conn.getEncryptedTokens() != null) {
             try {
                 AccountingProvider provider = providerFactory.getProvider(conn);

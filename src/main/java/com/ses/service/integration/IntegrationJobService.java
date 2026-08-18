@@ -17,6 +17,14 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
                              String idempotencyKey, String payloadHash);
 
     /**
+     * 新規ジョブをテナント・法人・組織スコープ付きで登録する。
+     */
+    IntegrationJob createJob(Long connectionId, String jobType, String targetType, Long targetId,
+                             String idempotencyKey, String payloadHash,
+                             String payloadSnapshot, String tenantId, Long legalEntityId, Long organizationId);
+
+
+    /**
      * ジョブを RUNNING 状態に claim する (CAS更新)。
      * 成功した worker のみ job を取得、二重処理を防止。
      *

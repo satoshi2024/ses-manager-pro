@@ -395,4 +395,150 @@ class FreeeAccountingProviderTest {
 
         mockServer.verify();
     }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: ページネーションにより次ページで作成済み取引を検知すること (R4-T02)")
+    void unknownOutcome_verifyDealCreatedByRefNumber_pagination() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(888L)
+                .invoiceNo("INV-PAGINATION-TEST")
+                .total(new BigDecimal("500000"))
+                .build();
+
+        // 1. POST /api/1/deals が SocketTimeoutException (タイムアウト) で失敗
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+
+        // 2. verifyDealCreatedByRefNumber: Page 0 (offset=0, limit=100) -> 該当なし (100件のダミー)
+        StringBuilder page0Deals = new StringBuilder("{\"deals\": [");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) page0Deals.append(",");
+            page0Deals.append("{\"id\": ").append(1000 + i).append(", \"ref_number\": \"OTHER-").append(i).append("\", \"amount\": 10000}");
+        }
+        page0Deals.append("]}");
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0Deals.toString(), MediaType.APPLICATION_JSON));
+
+        // 3. verifyDealCreatedByRefNumber: Page 1 (offset=100, limit=100) -> 対象 refNumber 発見！
+        String page1Deals = "{\"deals\": [{\"id\": 998877, \"ref_number\": \"INV-PAGINATION-TEST\", \"amount\": 500000}]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page1Deals, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("998877");
+        assertThat(result.getErrorMessageSafe()).contains("タイムアウト後に外部照合により取引作成を確認");
+    }
+
+    @Test
+    @DisplayName("全10種別マッピング照合・数値 Tax Code・未知種別 Fail-Closed 検証 (R4-T03)")
+    void verifyMaster_all10Types_contractFixtures_andFailClosed() throws Exception {
+        String partnerJson = org.springframework.util.StreamUtils.copyToString(
+                getClass().getResourceAsStream("/fixtures/accounting/freee/partners_200.json"), java.nio.charset.StandardCharsets.UTF_8);
+        String accountItemsJson = org.springframework.util.StreamUtils.copyToString(
+                getClass().getResourceAsStream("/fixtures/accounting/freee/account_items_200.json"), java.nio.charset.StandardCharsets.UTF_8);
+        String taxesJson = org.springframework.util.StreamUtils.copyToString(
+                getClass().getResourceAsStream("/fixtures/accounting/freee/taxes_companies_200.json"), java.nio.charset.StandardCharsets.UTF_8);
+        String sectionsJson = org.springframework.util.StreamUtils.copyToString(
+                getClass().getResourceAsStream("/fixtures/accounting/freee/sections_200.json"), java.nio.charset.StandardCharsets.UTF_8);
+
+        // 1. CUSTOMER_PARTNER (101) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/partners/101?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(partnerJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "CUSTOMER_PARTNER", "101", "CUST-001")).isTrue();
+        mockServer.verify();
+
+        // 2. BP_PARTNER (101) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/partners/101?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(partnerJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "BP_PARTNER", "101", "BP-001")).isTrue();
+        mockServer.verify();
+
+        // 3. ACCOUNT_SALES (201) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/account_items?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(accountItemsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "ACCOUNT_SALES", "201", "URIA")).isTrue();
+        mockServer.verify();
+
+        // 4. ACCOUNT_PURCHASE (202) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/account_items?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(accountItemsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "ACCOUNT_PURCHASE", "202", "GAICHU")).isTrue();
+        mockServer.verify();
+
+        // 5. ACCOUNT_EXPENSE (203) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/account_items?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(accountItemsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "ACCOUNT_EXPENSE", "203", "RYOHI")).isTrue();
+        mockServer.verify();
+
+        // 6. TAX_SALES_10 (21/34: 数値 tax_code) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/taxes/companies/99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(taxesJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "TAX_SALES_10", "34", "TAX_10")).isTrue();
+        mockServer.verify();
+
+        // 7. TAX_PURCHASE_10 (108: 数値 tax_code) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/taxes/companies/99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(taxesJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "TAX_PURCHASE_10", "108", "TAX_PURCHASE_10")).isTrue();
+        mockServer.verify();
+
+        // 8. TAX_EXPENSE_10 (108: 数値 tax_code) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/taxes/companies/99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(taxesJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "TAX_EXPENSE_10", "108", "TAX_EXPENSE_10")).isTrue();
+        mockServer.verify();
+
+        // 9. SECTION (301) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/sections?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(sectionsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "SECTION", "301", "SEC-01")).isTrue();
+        mockServer.verify();
+
+        // 10. COST_CENTER (302: G4 SECTIONへ写像) -> true
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/sections?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(sectionsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "COST_CENTER", "302", "CC-02")).isTrue();
+        mockServer.verify();
+
+        // 11. 未知種別 -> Fail-Closed (false, HTTP 呼ばず即時拒否)
+        assertThat(freeeProvider.verifyMaster(testConnection, "UNKNOWN_CUSTOM_TYPE", "999", "CODE")).isFalse();
+
+        // 12. 一覧 200 だが ID 不存在 -> false
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/sections?company_id=99999"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(sectionsJson, MediaType.APPLICATION_JSON));
+        assertThat(freeeProvider.verifyMaster(testConnection, "SECTION", "999999", "NOT_EXIST")).isFalse();
+        mockServer.verify();
+    }
 }

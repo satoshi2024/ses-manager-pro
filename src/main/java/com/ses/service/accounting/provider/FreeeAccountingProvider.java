@@ -249,7 +249,6 @@ public class FreeeAccountingProvider implements AccountingProvider {
             return null;
         }
     }
-
     @Override
     public boolean validateConnection(IntegrationConnection connection) {
         try {
@@ -267,22 +266,31 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode) {
-        if (externalId == null || externalId.isBlank()) return false;
+        if (externalId == null || externalId.isBlank() || objectType == null) return false;
         Long companyId = connection.getExternalCompanyId();
         if (companyId == null) companyId = 1L;
 
         String path;
+        boolean isListSearch = false;
         switch (objectType) {
-            case "CUSTOMER_PARTNER", "BP_PARTNER" ->
-                    path = "/api/1/partners/" + externalId + "?company_id=" + companyId;
-            case "ACCOUNT_SALES", "ACCOUNT_OUTSOURCING" ->
-                    path = "/api/1/account_items/" + externalId + "?company_id=" + companyId;
-            case "TAX_SALES_10" ->
-                    path = "/api/1/taxes/companies/" + companyId;
-            case "SECTION" ->
-                    path = "/api/1/sections?company_id=" + companyId;
+            case "CUSTOMER_PARTNER", "BP_PARTNER" -> {
+                path = "/api/1/partners/" + externalId + "?company_id=" + companyId;
+            }
+            case "ACCOUNT_SALES", "ACCOUNT_PURCHASE", "ACCOUNT_EXPENSE", "ACCOUNT_OUTSOURCING" -> {
+                path = "/api/1/account_items?company_id=" + companyId;
+                isListSearch = true;
+            }
+            case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+                path = "/api/1/taxes/companies/" + companyId;
+                isListSearch = true;
+            }
+            case "SECTION", "COST_CENTER" -> {
+                path = "/api/1/sections?company_id=" + companyId;
+                isListSearch = true;
+            }
             default -> {
-                return true; // 未知タイプは形式チェックのみ
+                log.warn("Unknown mapping objectType={}, fail-closed", objectType);
+                return false; // fail-closed
             }
         }
 
@@ -292,7 +300,59 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 HttpEntity<?> entity = new HttpEntity<>(headers);
                 return restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
             });
-            return res.getStatusCode().is2xxSuccessful();
+            if (!res.getStatusCode().is2xxSuccessful() || res.getBody() == null) {
+                return false;
+            }
+
+            if (!isListSearch) {
+                // Partner single object response
+                JsonNode root = objectMapper.readTree(res.getBody());
+                JsonNode partner = root.get("partner");
+                if (partner != null && partner.has("id")) {
+                    return String.valueOf(partner.get("id").asLong()).equals(externalId);
+                }
+                return false;
+            }
+
+            JsonNode root = objectMapper.readTree(res.getBody());
+            switch (objectType) {
+                case "ACCOUNT_SALES", "ACCOUNT_PURCHASE", "ACCOUNT_EXPENSE", "ACCOUNT_OUTSOURCING" -> {
+                    JsonNode items = root.get("account_items");
+                    if (items != null && items.isArray()) {
+                        for (JsonNode it : items) {
+                            if (it.has("id") && String.valueOf(it.get("id").asLong()).equals(externalId)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                case "TAX_SALES_10", "TAX_PURCHASE_10", "TAX_EXPENSE_10" -> {
+                    JsonNode taxes = root.get("taxes");
+                    if (taxes != null && taxes.isArray()) {
+                        for (JsonNode t : taxes) {
+                            if (t.has("code") && String.valueOf(t.get("code").asInt()).equals(externalId)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                case "SECTION", "COST_CENTER" -> {
+                    JsonNode sections = root.get("sections");
+                    if (sections != null && sections.isArray()) {
+                        for (JsonNode s : sections) {
+                            if (s.has("id") && String.valueOf(s.get("id").asLong()).equals(externalId)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+                default -> {
+                    return false;
+                }
+            }
         } catch (HttpClientErrorException.NotFound e) {
             log.warn("freee master not found: objectType={}, externalId={}", objectType, externalId);
             return false;
@@ -369,34 +429,47 @@ public class FreeeAccountingProvider implements AccountingProvider {
     private CanonicalDealResult verifyDealCreatedByRefNumber(IntegrationConnection connection,
                                                              String refNumber,
                                                              BigDecimal expectedTotal) {
-        try {
-            String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&limit=20";
-            ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
-                HttpEntity<?> entity = new HttpEntity<>(headers);
-                return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
-            });
-            if (res.getBody() != null) {
-                JsonNode root = objectMapper.readTree(res.getBody());
-                JsonNode deals = root.get("deals");
-                if (deals != null && deals.isArray()) {
-                    for (JsonNode d : deals) {
-                        if (d.has("ref_number") && refNumber.equals(d.get("ref_number").asText())) {
-                            Long dealId = d.get("id").asLong();
-                            Long amount = d.has("amount") ? d.get("amount").asLong() : null;
-                            log.info("Found existing deal for refNumber={} in freee after timeout: dealId={}", refNumber, dealId);
-                            return CanonicalDealResult.builder()
-                                    .success(true)
-                                    .externalId(String.valueOf(dealId))
-                                    .responseTotal(amount != null ? BigDecimal.valueOf(amount) : expectedTotal)
-                                    .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
-                                    .build();
+        int limit = 100;
+        int maxPages = 50;
+        for (int page = 0; page < maxPages; page++) {
+            int offset = page * limit;
+            try {
+                String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
+                        + "&limit=" + limit + "&offset=" + offset;
+                ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
+                });
+                if (res.getBody() != null) {
+                    JsonNode root = objectMapper.readTree(res.getBody());
+                    JsonNode deals = root.get("deals");
+                    if (deals != null && deals.isArray() && !deals.isEmpty()) {
+                        for (JsonNode d : deals) {
+                            if (d.has("ref_number") && refNumber.equals(d.get("ref_number").asText())) {
+                                Long dealId = d.get("id").asLong();
+                                Long amount = d.has("amount") ? d.get("amount").asLong() : null;
+                                log.info("Found existing deal for refNumber={} in freee after timeout (page={}): dealId={}", refNumber, page, dealId);
+                                return CanonicalDealResult.builder()
+                                        .success(true)
+                                        .externalId(String.valueOf(dealId))
+                                        .responseTotal(amount != null ? BigDecimal.valueOf(amount) : expectedTotal)
+                                        .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
+                                        .build();
+                            }
                         }
+                        if (deals.size() < limit) {
+                            break;
+                        }
+                    } else {
+                        break;
                     }
+                } else {
+                    break;
                 }
+            } catch (Exception ex) {
+                log.warn("Failed to check existing deal by refNumber after timeout on page {}: {}", page, ex.getMessage());
+                break;
             }
-        } catch (Exception ex) {
-            log.warn("Failed to check existing deal by refNumber after timeout: {}", ex.getMessage());
         }
         return null;
     }

@@ -28,7 +28,15 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     @Override
     @Transactional
     public IntegrationJob createJob(Long connectionId, String jobType, String targetType, Long targetId,
-                                   String idempotencyKey, String payloadHash) {
+                                    String idempotencyKey, String payloadHash) {
+        return createJob(connectionId, jobType, targetType, targetId, idempotencyKey, payloadHash, null, null, null, null);
+    }
+
+    @Override
+    @Transactional
+    public IntegrationJob createJob(Long connectionId, String jobType, String targetType, Long targetId,
+                                    String idempotencyKey, String payloadHash,
+                                    String payloadSnapshot, String tenantId, Long legalEntityId, Long organizationId) {
         IntegrationJob existing = getByIdempotencyKey(idempotencyKey);
         if (existing != null) {
             if (payloadHash != null && existing.getPayloadHash() != null && !payloadHash.equals(existing.getPayloadHash())) {
@@ -44,6 +52,10 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
                 .jobType(jobType)
                 .targetType(targetType)
                 .targetId(targetId)
+                .tenantId(tenantId)
+                .legalEntityId(legalEntityId)
+                .organizationId(organizationId)
+                .payloadSnapshot(payloadSnapshot)
                 .idempotencyKey(idempotencyKey)
                 .payloadHash(payloadHash)
                 .status("PENDING")
@@ -177,6 +189,9 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         IntegrationJob job = getById(jobId);
         if (job == null) {
             throw new BusinessException(404, "ジョブが見つかりません (id=" + jobId + ")");
+        }
+        if ("SALES_INVOICE_CANCEL".equals(job.getJobType())) {
+            throw new BusinessException(400, "取消連携ジョブ(SALES_INVOICE_CANCEL)はキャンセルできません");
         }
         if ("SUCCEEDED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus()) || "RUNNING".equals(job.getStatus())) {
             throw new BusinessException(400,

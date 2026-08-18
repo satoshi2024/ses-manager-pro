@@ -1,0 +1,16 @@
+{
+  "sections": [
+    {
+      "id": 301,
+      "company_id": 99999,
+      "name": "システム開発部",
+      "long_name": "第1事業本部 システム開発部"
+    },
+    {
+      "id": 302,
+      "company_id": 99999,
+      "name": "SES事業部",
+      "long_name": "営業統括本部 SES事業部"
+    }
+  ]
+}

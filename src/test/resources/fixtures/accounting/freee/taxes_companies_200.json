@@ -1,0 +1,22 @@
+{
+  "taxes": [
+    {
+      "code": 21,
+      "name": "課税売上 10%",
+      "name_ja": "課対売上10%",
+      "display_category": "tax"
+    },
+    {
+      "code": 34,
+      "name": "課対売上 10%",
+      "name_ja": "課対売上10%",
+      "display_category": "tax"
+    },
+    {
+      "code": 108,
+      "name": "課対仕入 10%",
+      "name_ja": "課対仕入10%",
+      "display_category": "tax"
+    }
+  ]
+}

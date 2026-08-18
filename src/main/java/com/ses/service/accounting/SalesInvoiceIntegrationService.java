@@ -26,4 +26,9 @@ public interface SalesInvoiceIntegrationService {
      * 売上取消連携ジョブを1件同期処理する。
      */
     void processSalesCancelJob(Long jobId);
+
+    /**
+     * 請求書から送信標準DTOを構築する（プレビュー用）。
+     */
+    com.ses.dto.accounting.canonical.CanonicalSalesInvoice buildCanonicalInvoice(Long invoiceId);
 }

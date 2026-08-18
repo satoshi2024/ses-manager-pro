@@ -29,7 +29,7 @@ public class IntegrationJob {
     /** 接続ID */
     private Long connectionId;
 
-    /** ジョブ種別 (SALES_INVOICE_SYNC, SALES_INVOICE_CANCEL, PURCHASE_DEAL_SYNC, EXPENSE_DEAL_SYNC, PAYMENT_SYNC) */
+    /** ジョブ種別 (SALES_INVOICE_SYNC, SALES_INVOICE_CANCEL, BP_PURCHASE_SYNC, EXPENSE_DEAL_SYNC, PAYMENT_SYNC) */
     private String jobType;
 
     /** 対象種別 (INVOICE, BP_PAYMENT, EXPENSE_REQUEST, PAYMENT) */
@@ -38,14 +38,33 @@ public class IntegrationJob {
     /** 対象エンティティID */
     private Long targetId;
 
+    /** テナントID */
+    @Builder.Default
+    private String tenantId = "default";
+
+    /** 法人ID */
+    private Long legalEntityId;
+
+    /** スコープ解決用組織IDスナップショット */
+    private Long organizationId;
+
     /** 冪等性キー (UNIQUE) */
     private String idempotencyKey;
+
+    /** 送信時canonical byte列 (不変スナップショットJSON) */
+    private String payloadSnapshot;
 
     /** 送信ペイロードSHA-256ハッシュ */
     private String payloadHash;
 
     /** 状態 (PENDING / RUNNING / SUCCEEDED / RETRYABLE / FAILED / CANCELLED) */
     private String status;
+
+    /** Worker lease UUID */
+    private String leaseToken;
+
+    /** Worker lease 期限 */
+    private LocalDateTime leaseExpiresAt;
 
     /** 試行回数 */
     private Integer attemptCount;

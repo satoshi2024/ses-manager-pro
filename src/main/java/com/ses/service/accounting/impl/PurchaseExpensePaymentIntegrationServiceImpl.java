@@ -15,6 +15,7 @@ import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpCompanyService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
@@ -52,6 +53,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final ExternalMappingService mappingService;
     private final IntegrationJobService jobService;
     private final AccountingProviderFactory providerFactory;
+    private final AccountingOrganizationResolver organizationResolver;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -122,10 +124,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         String payloadHash = calculateSha256(payloadJson);
         String idempotencyKey = "BP_PURCHASE:" + bpPayment.getId();
+        Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bpPayment);
 
-        log.info("Enqueueing BP purchase sync job for bpPaymentId={}, idempotencyKey={}", bpPaymentId, idempotencyKey);
+        log.info("Enqueueing BP purchase sync job for bpPaymentId={}, idempotencyKey={}, orgId={}", bpPaymentId, idempotencyKey, orgId);
         return jobService.createJob(
-                conn.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash);
+                conn.getId(), "BP_PURCHASE_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash,
+                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
 
     @Override
@@ -145,10 +149,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         String idempotencyKey = "PAYMENT_SYNC:" + bpPayment.getId() + ":" + latestPurchase.getExternalId();
         String payload = "{\"bpPaymentId\":" + bpPaymentId + ",\"externalDealId\":\"" + latestPurchase.getExternalId() + "\"}";
         String payloadHash = calculateSha256(payload);
+        Long orgId = organizationResolver.resolveBpPaymentOrganizationId(bpPayment);
 
-        log.info("Enqueueing payment sync job for bpPaymentId={}, externalDealId={}", bpPaymentId, latestPurchase.getExternalId());
+        log.info("Enqueueing payment sync job for bpPaymentId={}, externalDealId={}, orgId={}", bpPaymentId, latestPurchase.getExternalId(), orgId);
         return jobService.createJob(
-                conn.getId(), "PAYMENT_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash);
+                conn.getId(), "PAYMENT_SYNC", "BP_PAYMENT", bpPayment.getId(), idempotencyKey, payloadHash,
+                payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
 
     @Override
@@ -194,10 +200,12 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         String payloadHash = calculateSha256(payloadJson);
         String idempotencyKey = "EXPENSE:" + expense.getId() + ":" + canonical.getExpenseNo();
+        Long orgId = organizationResolver.resolveExpenseOrganizationId(expense);
 
-        log.info("Enqueueing expense sync job for expenseId={}, idempotencyKey={}", expenseRequestId, idempotencyKey);
+        log.info("Enqueueing expense sync job for expenseId={}, idempotencyKey={}, orgId={}", expenseRequestId, idempotencyKey, orgId);
         return jobService.createJob(
-                conn.getId(), "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", expense.getId(), idempotencyKey, payloadHash);
+                conn.getId(), "EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", expense.getId(), idempotencyKey, payloadHash,
+                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
 
     @Override
@@ -258,6 +266,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                     jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
                 }
             }
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            log.warn("Token refresh in progress during BP purchase job {}: rescheduling retry in 5s", jobId);
+            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing BP purchase job: jobId={}", jobId, e);
             jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", e.getMessage(), 60);
@@ -323,6 +334,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             jobService.markSucceeded(jobId, syncResult.getDealId(), null,
                     "決済同期完了: dealId=" + syncResult.getDealId() + ", paymentDate=" + syncResult.getPaymentDate());
 
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            log.warn("Token refresh in progress during payment sync job {}: rescheduling retry in 5s", jobId);
+            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing payment sync job: jobId={}", jobId, e);
             jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", e.getMessage(), 60);
@@ -381,6 +395,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                     jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
                 }
             }
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            log.warn("Token refresh in progress during expense job {}: rescheduling retry in 5s", jobId);
+            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing expense job: jobId={}", jobId, e);
             jobService.markRetryable(jobId, "EXPENSE_JOB_EXCEPTION", e.getMessage(), 60);

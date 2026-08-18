@@ -21,6 +21,10 @@ public interface UserOrganizationMapper extends BaseMapper<UserOrganization> {
     @Select("SELECT organization_id FROM t_user_organization WHERE user_id = #{userId} AND primary_flag = 1 AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0 ORDER BY id DESC LIMIT 1")
     Long selectPrimaryOrganizationId(@Param("userId") Long userId, @Param("asOf") java.time.LocalDate asOf);
 
+    default Long selectPrimaryOrganizationAt(Long userId, java.time.LocalDate asOf) {
+        return selectPrimaryOrganizationId(userId, asOf);
+    }
+
     /**
      * 組織統合で付け替える対象を行ロック付きで取得する。
      *

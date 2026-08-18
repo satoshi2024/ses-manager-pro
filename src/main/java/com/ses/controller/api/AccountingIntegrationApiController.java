@@ -54,6 +54,8 @@ public class AccountingIntegrationApiController {
     private final SalesInvoiceIntegrationService salesIntegrationService;
     private final PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
     private final AccountingReconciliationService reconciliationService;
+    private final com.ses.service.security.OrganizationScopeService organizationScopeService;
+    private final com.ses.service.accounting.AccountingOrganizationResolver organizationResolver;
 
     /** SecurityContext からユーザーIDを取得する (fail-closed)。 */
     private Long resolveActorId() {
@@ -148,6 +150,16 @@ public class AccountingIntegrationApiController {
             wrapper.eq(IntegrationJob::getTargetType, targetType);
         }
 
+        // マネージャーの組織スコープ境界適用 (design §5.2)
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (allowedOrgIds.isEmpty()) {
+                wrapper.apply("1 = 0"); // 空集合ガード
+            } else {
+                wrapper.in(IntegrationJob::getOrganizationId, allowedOrgIds);
+            }
+        }
+
         return ApiResult.success(jobService.page(page, wrapper));
     }
 
@@ -156,6 +168,12 @@ public class AccountingIntegrationApiController {
         IntegrationJob job = jobService.getById(jobId);
         if (job == null) {
             return ApiResult.error(404, "ジョブが見つかりません");
+        }
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (job.getOrganizationId() == null || !allowedOrgIds.contains(job.getOrganizationId())) {
+                return ApiResult.error(404, "ジョブが見つかりません");
+            }
         }
         List<IntegrationJobEvent> events = jobService.listEvents(jobId);
         return ApiResult.success(new IntegrationJobDetailDto(job, events));
@@ -183,6 +201,14 @@ public class AccountingIntegrationApiController {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
             return ApiResult.error(404, "請求書が見つかりません");
+        }
+
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
+            java.util.Set<Long> allowedOrgIds = organizationScopeService.allowedOrganizationIds(java.time.LocalDate.now());
+            if (orgId == null || !allowedOrgIds.contains(orgId)) {
+                return ApiResult.error(404, "請求書が見つかりません");
+            }
         }
 
         Customer customer = customerService.getById(invoice.getCustomerId());

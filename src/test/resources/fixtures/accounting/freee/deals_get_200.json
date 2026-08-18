@@ -1,0 +1,32 @@
+{
+  "deal": {
+    "id": 55555,
+    "company_id": 99999,
+    "issue_date": "2026-08-01",
+    "due_date": "2026-08-31",
+    "amount": 1100000,
+    "due_amount": 0,
+    "type": "income",
+    "partner_id": 101,
+    "ref_number": "INV-202608-001",
+    "status": "settled",
+    "details": [
+      {
+        "id": 70001,
+        "account_item_id": 201,
+        "tax_code": 21,
+        "amount": 1100000,
+        "vat": 100000,
+        "description": "SES請求: INV-202608-001"
+      }
+    ],
+    "payments": [
+      {
+        "id": 80001,
+        "date": "2026-08-31",
+        "from_walletable_type": "bank_account",
+        "amount": 1100000
+      }
+    ]
+  }
+}

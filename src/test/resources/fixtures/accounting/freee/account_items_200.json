@@ -1,0 +1,25 @@
+{
+  "account_items": [
+    {
+      "id": 201,
+      "name": "売上高",
+      "shortcut": "URIA",
+      "default_tax_code": 21,
+      "categories": ["売上高"]
+    },
+    {
+      "id": 202,
+      "name": "外注費",
+      "shortcut": "GAICHU",
+      "default_tax_code": 108,
+      "categories": ["売上原価"]
+    },
+    {
+      "id": 203,
+      "name": "旅費交通費",
+      "shortcut": "RYOHI",
+      "default_tax_code": 108,
+      "categories": ["販売管理費"]
+    }
+  ]
+}

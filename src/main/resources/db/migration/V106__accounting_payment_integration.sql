@@ -19,7 +19,12 @@ CREATE TABLE IF NOT EXISTS m_integration_connection (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0,
     version INT NOT NULL DEFAULT 0,
-    UNIQUE KEY uk_int_conn (tenant_id, legal_entity_id, provider, product, deleted_flag)
+    token_version INT NOT NULL DEFAULT 1 COMMENT 'トークン更新世代番号 (multi-node CAS用)',
+    refresh_lease_token VARCHAR(64) NULL COMMENT 'トークン更新排他リースUUID',
+    refresh_lease_expires_at DATETIME NULL COMMENT 'トークン更新排他リース期限',
+    legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) COMMENT 'NULL一意性保証用生成列',
+    active_slot INT GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN 1 ELSE NULL END) COMMENT '論理削除後の再登録保証用生成列',
+    UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, provider, product, active_slot)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部サービス連携接続マスタ';
 
 CREATE TABLE IF NOT EXISTS m_external_mapping (
@@ -43,12 +48,18 @@ CREATE TABLE IF NOT EXISTS m_external_mapping (
 CREATE TABLE IF NOT EXISTS t_integration_job (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     connection_id BIGINT NOT NULL COMMENT '接続ID',
-    job_type VARCHAR(64) NOT NULL COMMENT 'ジョブ種別 (SALES_INVOICE_SYNC, SALES_INVOICE_CANCEL, PURCHASE_DEAL_SYNC, EXPENSE_DEAL_SYNC, PAYMENT_SYNC)',
+    job_type VARCHAR(64) NOT NULL COMMENT 'ジョブ種別 (SALES_INVOICE_SYNC, SALES_INVOICE_CANCEL, BP_PURCHASE_SYNC, EXPENSE_DEAL_SYNC, PAYMENT_SYNC)',
     target_type VARCHAR(64) NOT NULL COMMENT '対象種別 (INVOICE, BP_PAYMENT, EXPENSE_REQUEST, PAYMENT)',
     target_id BIGINT NOT NULL COMMENT '対象エンティティID',
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default' COMMENT 'テナントID',
+    legal_entity_id BIGINT NULL COMMENT '法人ID',
+    organization_id BIGINT NULL COMMENT 'スコープ解決用組織IDスナップショット',
     idempotency_key VARCHAR(128) NOT NULL COMMENT '冪等性キー',
+    payload_snapshot LONGTEXT NULL COMMENT '送信時canonical byte列 (不変)',
     payload_hash VARCHAR(64) NOT NULL COMMENT '送信ペイロードSHA-256ハッシュ',
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT '状態 (PENDING / RUNNING / SUCCEEDED / RETRYABLE / FAILED / CANCELLED)',
+    lease_token VARCHAR(64) NULL COMMENT 'Worker lease UUID',
+    lease_expires_at DATETIME NULL COMMENT 'Worker lease 期限',
     attempt_count INT NOT NULL DEFAULT 0 COMMENT '試行回数',
     max_attempts INT NOT NULL DEFAULT 5 COMMENT '最大試行回数',
     next_retry_at DATETIME NULL COMMENT '次回再試行予定日時',

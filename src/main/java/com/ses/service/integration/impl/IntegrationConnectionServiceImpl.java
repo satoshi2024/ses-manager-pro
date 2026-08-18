@@ -191,13 +191,11 @@ public class IntegrationConnectionServiceImpl
     }
 
     @Override
-    @Transactional
     public IntegrationTokensDto rotateTokens(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
         return doRotateTokens(connectionId, refreshFn, false);
     }
 
     @Override
-    @Transactional
     public IntegrationTokensDto forceRefreshToken(Long connectionId, Function<IntegrationTokensDto, IntegrationTokensDto> refreshFn) {
         return doRotateTokens(connectionId, refreshFn, true);
     }
@@ -208,8 +206,8 @@ public class IntegrationConnectionServiceImpl
         ReentrantLock lock = connectionLocks.computeIfAbsent(connectionId, k -> new ReentrantLock());
         lock.lock();
         try {
-            // DB 行ロック (SELECT FOR UPDATE) を取得して他ノードとの競合を防止
-            IntegrationConnection conn = baseMapper.selectForUpdate(connectionId);
+            // 1. 現在行の読み込み (Non-locking)
+            IntegrationConnection conn = baseMapper.selectCurrentState(connectionId);
             if (conn == null) {
                 throw new BusinessException(400, "接続情報が存在しません (id=" + connectionId + ")");
             }
@@ -220,18 +218,95 @@ public class IntegrationConnectionServiceImpl
                 return getDecryptedTokens(connectionId);
             }
 
-            IntegrationTokensDto current = getDecryptedTokens(connectionId);
-            if (current == null) {
-                throw new BusinessException(400, "トークン情報が存在しません (id=" + connectionId + ")");
+            int observedTokenVersion = conn.getTokenVersion() != null ? conn.getTokenVersion() : 1;
+            String workerUuid = java.util.UUID.randomUUID().toString();
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime leaseExpiresAt = now.plusSeconds(45);
+
+            // Step 1: 排他リース獲得 CAS (短期 DB 操作、HTTP 前に完了)
+            int leaseClaimed = baseMapper.claimRefreshLeaseCas(connectionId, observedTokenVersion, workerUuid, leaseExpiresAt, now);
+            if (leaseClaimed == 0) {
+                // 敗者ノード: 他ノードがリース保有中または既に更新完了
+                // バックオフ待機: 500ms, 1000ms, 2000ms (計3回、合計最大 3.5秒)
+                long[] backoffs = {500, 1000, 2000};
+                for (long sleepMs : backoffs) {
+                    try {
+                        Thread.sleep(sleepMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new com.ses.common.exception.TokenRefreshInProgressException(connectionId);
+                    }
+
+                    IntegrationConnection state = baseMapper.selectCurrentState(connectionId);
+                    if (state != null) {
+                        int currentVersion = state.getTokenVersion() != null ? state.getTokenVersion() : 1;
+                        if (currentVersion > observedTokenVersion) {
+                            // 他ノードが更新完了 -> 確定トークンを復号して返却
+                            log.info("Node won by another worker, token_version advanced from {} to {}. Using new tokens.",
+                                    observedTokenVersion, currentVersion);
+                            return getDecryptedTokens(connectionId);
+                        }
+                        if (state.getRefreshLeaseExpiresAt() == null || state.getRefreshLeaseExpiresAt().isBefore(LocalDateTime.now())) {
+                            // リースが失効した -> 自ノードで再試行
+                            observedTokenVersion = currentVersion;
+                            now = LocalDateTime.now();
+                            leaseExpiresAt = now.plusSeconds(45);
+                            leaseClaimed = baseMapper.claimRefreshLeaseCas(connectionId, observedTokenVersion, workerUuid, leaseExpiresAt, now);
+                            if (leaseClaimed == 1) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (leaseClaimed == 0) {
+                    log.warn("Token refresh still in progress by another node after 3 backoffs (connectionId={}). Throwing TokenRefreshInProgressException", connectionId);
+                    throw new com.ses.common.exception.TokenRefreshInProgressException(connectionId);
+                }
             }
 
-            // リフレッシュ実行 (1回のみ)
-            IntegrationTokensDto refreshed = refreshFn.apply(current);
-            if (refreshed != null) {
-                saveTokens(connectionId, refreshed, conn.getExternalCompanyId(), conn.getCompanyName(), conn.getConnectedBy());
-                return refreshed;
+            // Step 2: 外部 OAuth トークン更新 (DB トランザクション外、10s timeout)
+            IntegrationTokensDto current = getDecryptedTokens(connectionId);
+            IntegrationTokensDto refreshed;
+            try {
+                refreshed = refreshFn.apply(current);
+            } catch (Exception e) {
+                log.error("Token refresh HTTP call failed for connectionId={}: {}", connectionId, e.getMessage());
+                if (e.getMessage() != null && e.getMessage().contains("invalid_grant")) {
+                    baseMapper.markReauthRequired(connectionId, LocalDateTime.now());
+                }
+                throw e;
             }
-            return current;
+
+            if (refreshed == null) {
+                return current;
+            }
+
+            // Step 3: 新トークン確定 Fencing CAS (短期 DB 操作)
+            String encrypted;
+            try {
+                String json = objectMapper.writeValueAsString(refreshed);
+                encrypted = encrypt(json);
+            } catch (Exception e) {
+                throw new RuntimeException("Tokens JSON serialization / encryption failed", e);
+            }
+
+            LocalDateTime expiresAt = null;
+            if (refreshed.getExpiresIn() != null) {
+                expiresAt = LocalDateTime.now().plusSeconds(refreshed.getExpiresIn());
+            }
+
+            int committed = baseMapper.commitRefreshTokenCas(
+                    connectionId, observedTokenVersion, workerUuid, encrypted, expiresAt, LocalDateTime.now());
+
+            if (committed == 1) {
+                log.info("Token refresh succeeded and committed via CAS for connectionId={}, new token_version={}",
+                        connectionId, observedTokenVersion + 1);
+                return refreshed;
+            } else {
+                log.warn("Token refresh fencing CAS failed for connectionId={} (lease expired or stolen). Discarding new token and reloading state.", connectionId);
+                return getDecryptedTokens(connectionId);
+            }
         } finally {
             lock.unlock();
         }

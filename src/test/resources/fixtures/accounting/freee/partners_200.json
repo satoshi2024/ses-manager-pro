@@ -1,0 +1,9 @@
+{
+  "partner": {
+    "id": 101,
+    "company_id": 99999,
+    "name": "テスト取引先株式会社",
+    "code": "CUST-001",
+    "org_code": "ORG-001"
+  }
+}

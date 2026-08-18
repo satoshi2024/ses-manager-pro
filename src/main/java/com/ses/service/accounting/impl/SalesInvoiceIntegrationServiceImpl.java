@@ -12,6 +12,7 @@ import com.ses.entity.Invoice;
 import com.ses.service.CustomerService;
 import com.ses.service.InvoiceService;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingOrganizationResolver;
 import com.ses.service.accounting.AccountingProvider;
 import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
@@ -44,6 +45,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final ExternalMappingService mappingService;
     private final IntegrationJobService jobService;
     private final AccountingProviderFactory providerFactory;
+    private final AccountingOrganizationResolver organizationResolver;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -109,10 +111,12 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
 
         String payloadHash = calculateSha256(payloadJson);
         String idempotencyKey = "SALES_INVOICE:" + invoice.getId() + ":" + invoice.getInvoiceNo();
+        Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
-        log.info("Enqueueing sales sync job for invoiceId={}, idempotencyKey={}", invoiceId, idempotencyKey);
+        log.info("Enqueueing sales sync job for invoiceId={}, idempotencyKey={}, orgId={}", invoiceId, idempotencyKey, orgId);
         return jobService.createJob(
-                conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoice.getId(), idempotencyKey, payloadHash);
+                conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
+                payloadJson, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
 
     @Override
@@ -137,10 +141,12 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         String idempotencyKey = "SALES_CANCEL:" + invoice.getId() + ":" + latestSync.getExternalId();
         String payload = "{\"invoiceId\":" + invoiceId + ",\"externalDealId\":\"" + latestSync.getExternalId() + "\",\"reason\":\"" + reason + "\"}";
         String payloadHash = calculateSha256(payload);
+        Long orgId = organizationResolver.resolveInvoiceOrganizationId(invoice);
 
-        log.info("Enqueueing sales cancel job for invoiceId={}, externalDealId={}", invoiceId, latestSync.getExternalId());
+        log.info("Enqueueing sales cancel job for invoiceId={}, externalDealId={}, orgId={}", invoiceId, latestSync.getExternalId(), orgId);
         return jobService.createJob(
-                conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), idempotencyKey, payloadHash);
+                conn.getId(), "SALES_INVOICE_CANCEL", "INVOICE", invoice.getId(), idempotencyKey, payloadHash,
+                payload, conn.getTenantId(), conn.getLegalEntityId(), orgId);
     }
 
     @Override
@@ -210,6 +216,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                     jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
                 }
             }
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            log.warn("Token refresh in progress during sales invoice job {}: rescheduling retry in 5s", jobId);
+            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing sales invoice job: jobId={}", jobId, e);
             jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", e.getMessage(), 60);
@@ -245,6 +254,9 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                     jobService.markFailed(jobId, result.getErrorCode(), result.getErrorMessageSafe());
                 }
             }
+        } catch (com.ses.common.exception.TokenRefreshInProgressException e) {
+            log.warn("Token refresh in progress during sales cancel job {}: rescheduling retry in 5s", jobId);
+            jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
         } catch (Exception e) {
             log.error("Error executing sales cancel job: jobId={}", jobId, e);
             jobService.markRetryable(jobId, "CANCEL_JOB_EXCEPTION", e.getMessage(), 60);
