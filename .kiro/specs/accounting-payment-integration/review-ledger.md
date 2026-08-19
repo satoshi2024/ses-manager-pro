@@ -93,6 +93,7 @@ S15 Stage B 2次独立再Review指摘（P1 7件：R1-P1-03/06/08/09/10/11, R4-P1
 | Task | Requirements | 変更file | Test | Demo | Commit | Risk |
 |---|---|---|---|---|---|---|
 | **T096 / R4-R2** | R1.3, R4.2、review issue R1-P1-03 | `src/test/java/com/ses/service/accounting/FreeeAccountingProviderTest.java` | `FreeeAccountingProviderTest` 26/26 PASS | Provider経由で50ページfullの完全一致0/1/複数を全走査しpage-cap fail-closed、50ページ目shortの唯一一致、途中API障害を確認 | T096 commit/push前 | 実freee契約の最終確認はR4-R6/GATE-S15-FREEE-PROD |
+| **T100 / R4-R4** | R5.1, R5.2、design §6.2、review issue R1-P1-09 | `FreeeAccountingProvider.java`, `AccountingReconciliationTest.java`, `FreeeAccountingProviderTest.java`, `design.md`, `canonical-mapping.md` | `AccountingReconciliationTest` 15/15 + `FreeeAccountingProviderTest` 28/28 PASS | deal発生日の固定±1月を廃止し、複数月前dealの8月1日/15日/31日paymentを取得、7月31日を除外、50ページ到達をfail-closed信号化 | T100 commit/push前 | 実freeeの一覧API契約・本番支払サイトはR4-R6/GATE-S15-FREEE-PROD |
 
 ## 6. 未検証環境・本番前条件 (Release Gate)
 

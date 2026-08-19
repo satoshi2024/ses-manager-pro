@@ -172,11 +172,9 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
-            // R1-P1-09: 入金母集団は決済日(paid)基準のため、dealの発生日が対象月の前後1ヶ月に跨る行も取得する。
-            //   deals母集団(売上/仕入/経費)は発生日が[fromDate,toDate]のものだけに絞り、payments母集団は決済日で絞る。
+            // R4-R4: 入金母集団は payments[].date 基準。dealの発生日による固定期間の絞り込みは
+            // 支払サイトを欠落させるため行わず、deals母集団だけを後段で対象月に絞る。
             String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&start_issue_date=" + fromDate.minusMonths(1)
-                    + "&end_issue_date=" + toDate.plusMonths(1)
                     + "&status=settled&limit=" + limit
                     + "&offset=" + offset;
 

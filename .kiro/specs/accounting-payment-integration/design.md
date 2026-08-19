@@ -328,7 +328,7 @@
    - OAuth エラー `invalid_grant`（リフレッシュトークン失効）時: `status = 'REAUTH_REQUIRED'` を設定し、全ノードで再認可を要求。
 7. **Deal 作成 Timeout 未知結果の Pagination 確定仕様 (`verifyDealCreatedByRefNumber`)**:
    - 取引登録 (`POST /api/1/deals`) でタイムアウトまたはネットワーク切断が発生した場合、即座の再 POST を禁止。
-   - `GET /api/1/deals?company_id={company_id}&issue_date_from=...&issue_date_to=...&limit=100&offset=0` を全件走査 (最大 50 ページ / 5,000 件)。
+   - `GET /api/1/deals?company_id={company_id}&status=settled&limit=100&offset=0` を全件走査 (最大 50 ページ / 5,000 件)。deal発生日の期間パラメータは付けず、支払サイトの長い入金を検索母集団から落とさない。
    - `deal.ref_number == internalNo` かつ `deal.amount == expectedAmount` かつ `deal.company_id == externalCompanyId` の一致で確定:
      - 存在確認できた場合: 外部取引作成済みとみなし `external_id = deal.id` を保存して `SUCCEEDED`（取消中なら補償ジョブ enqueue）。
      - 存在しない場合: 未作成とみなし `RETRYABLE` で安全にバックオフ再試行。
@@ -430,6 +430,7 @@
 | **経費** | `t_expense_request` (`status IN ('承認済', '会計連携済')`) | `deals` (type=`expense`, 経費) | `ref_number` (内部 `expense_no`) | `expense.amount` vs `deal.amount` | 金額完全一致で `MATCHED` |
 
 - **入金 1:1 突合規則**:
+  - 外部 deals は発生日で対象月を限定せず走査し、入金母集団は `payments[].date` が `[fromDate,toDate]` に入る決済だけを採用する。複数月前のdealに当月入金が紐づくケースを含む。
   - 外部決済の `payment_id` が判明している場合は `{externalDealId}:{paymentId}` で完全 1:1 結合。
   - 未突合決済は同日・同額の消込（`amount + fee`）と順次 1:1 で引当て、1つの外部決済を複数回二重突合させない（多重マッチ時は `PAYMENT_AMBIGUOUS` で fail-closed）。
 - **Fail-Closed 規則**:

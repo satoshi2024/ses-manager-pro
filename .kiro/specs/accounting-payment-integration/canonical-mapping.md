@@ -57,7 +57,7 @@
 | 仕入連携 | `/api/1/deals` | POST | 承認済BP支払の取引（支出・未決済）登録 |
 | 経費連携 | `/api/1/deals` | POST | 承認済要員経費の取引（支出・未決済）登録 |
 | 支払照合 | `/api/1/deals/{id}` | GET | 個別取引の決済状況・決済日・金額同期 |
-| 月次照合 | `/api/1/deals` | GET | 指定月（start_issue_date〜end_issue_date）の取引全件取得 (Pagination) |
+| 月次照合 | `/api/1/deals` | GET | `status=settled` の取引全件をPagination取得。deal発生日では絞らず、入金母集団は `payments[].date` を対象月でローカル抽出 |
 
 ### 共通ヘッダ & エラーハンドリング仕様
 - 認証: `Authorization: Bearer <access_token>`

@@ -575,6 +575,69 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
+    @DisplayName("入金母集団: 複数月前dealでも当月payment dateを取得し、issue dateで除外しない")
+    void fetchPayments_paymentDateBased_includesMultiMonthOldDeals() {
+        String deals = "{\"deals\": ["
+                + "{\"id\": 81001, \"issue_date\": \"2026-07-31\", \"amount\": 100000, \"status\": \"settled\", "
+                + "\"payments\": [{\"id\": 91001, \"date\": \"2026-08-01\", \"amount\": 100000}]} ,"
+                + "{\"id\": 81002, \"issue_date\": \"2026-06-15\", \"amount\": 200000, \"status\": \"settled\", "
+                + "\"payments\": [{\"id\": 91002, \"date\": \"2026-08-15\", \"amount\": 200000}]} ,"
+                + "{\"id\": 81003, \"issue_date\": \"2026-05-01\", \"amount\": 300000, \"status\": \"settled\", "
+                + "\"payments\": [{\"id\": 91003, \"date\": \"2026-08-31\", \"amount\": 300000}]} ,"
+                + "{\"id\": 81004, \"issue_date\": \"2026-05-01\", \"amount\": 400000, \"status\": \"settled\", "
+                + "\"payments\": [{\"id\": 91004, \"date\": \"2026-07-31\", \"amount\": 400000}]}"
+                + "]}";
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        com.ses.dto.accounting.PaymentFetchResult result = freeeProvider.fetchPayments(
+                testConnection, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31));
+
+        mockServer.verify();
+        assertThat(result.isFetchFailed()).isFalse();
+        assertThat(result.getDeals()).isEmpty();
+        assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId)
+                .containsExactlyInAnyOrder("91001", "91002", "91003");
+        assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentDate)
+                .containsExactlyInAnyOrder(LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 15), LocalDate.of(2026, 8, 31));
+    }
+
+    @Test
+    @DisplayName("入金母集団: 50ページ上限到達はpaymentを返しつつpage-cap fail-closed情報を返す")
+    void fetchPayments_pageCap50Pages_setsFailClosedSignal() {
+        for (int page = 0; page < 50; page++) {
+            StringBuilder deals = new StringBuilder("{\"deals\": [");
+            for (int i = 0; i < 100; i++) {
+                if (i > 0) {
+                    deals.append(',');
+                }
+                int id = 82000 + (page * 100) + i;
+                deals.append("{\"id\": ").append(id)
+                        .append(", \"issue_date\": \"2026-05-01\", \"amount\": 1000, \"status\": \"settled\"");
+                if (page == 49 && i == 99) {
+                    deals.append(", \"payments\": [{\"id\": 92099, \"date\": \"2026-08-31\", \"amount\": 1000}]");
+                }
+                deals.append('}');
+            }
+            deals.append("]}");
+            mockServer.expect(ExpectedCount.once(), requestTo(
+                            "https://api.freee.co.jp/api/1/deals?company_id=99999&status=settled&limit=100&offset=" + (page * 100)))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess(deals.toString(), MediaType.APPLICATION_JSON));
+        }
+
+        com.ses.dto.accounting.PaymentFetchResult result = freeeProvider.fetchPayments(
+                testConnection, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31));
+
+        mockServer.verify();
+        assertThat(result.isFetchFailed()).isFalse();
+        assertThat(result.isPageCapReached()).isTrue();
+        assertThat(result.getPayments()).extracting(CanonicalPaymentSync::getPaymentId).containsExactly("92099");
+    }
+
+    @Test
     @DisplayName("全10種別マッピング照合・数値 Tax Code・未知種別 Fail-Closed 検証 (R4-T03)")
     void verifyMaster_all10Types_contractFixtures_andFailClosed() throws Exception {
         String partnerJson = org.springframework.util.StreamUtils.copyToString(

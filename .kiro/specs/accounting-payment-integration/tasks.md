@@ -97,7 +97,7 @@
   - **Requirements**: R5.4、design §5.2、review issue R1-P1-06。
   - **Test/Demo**: 管理者の他tenant mapping list/save/verifyが全て404になることをSQL/MockMvcで確認する。
 
-- [ ] R4-R4. Payment-date母集団 direct regression
+- [x] R4-R4. Payment-date母集団 direct regression
   - **Objective**: deal発生日の固定±1月を廃止し、payment date基準で複数月前dealの当月入金を取得する。
   - **Requirements**: R5.1, R5.2、design §6.2、review issue R1-P1-09。
   - **Test/Demo**: 前月・2か月前・複数月前deal、月初/月末、50ページ上限を確認する。
