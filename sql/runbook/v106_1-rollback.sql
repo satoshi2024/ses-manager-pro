@@ -58,6 +58,9 @@ BEGIN
   -- 4a. active_slot
   SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'active_slot') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN active_slot', 'SELECT 1'));
   PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+  -- 4a'. external_company_key
+  SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'external_company_key') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN external_company_key', 'SELECT 1'));
+  PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
   -- 4b. legal_entity_key
   SET @drop_col = (SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'legal_entity_key') > 0, 'ALTER TABLE m_integration_connection DROP COLUMN legal_entity_key', 'SELECT 1'));
   PREPARE stmt FROM @drop_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;

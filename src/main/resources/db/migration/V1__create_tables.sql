@@ -2790,8 +2790,9 @@ CREATE TABLE IF NOT EXISTS m_integration_connection (
     refresh_lease_token VARCHAR(64) NULL COMMENT 'トークン更新排他リースUUID',
     refresh_lease_expires_at DATETIME NULL COMMENT 'トークン更新排他リース期限',
     legal_entity_key BIGINT GENERATED ALWAYS AS (COALESCE(legal_entity_id, 0)) COMMENT 'NULL一意性保証用生成列',
+    external_company_key BIGINT GENERATED ALWAYS AS (COALESCE(external_company_id, 0)) COMMENT '事業所(company_id)一意性保証用生成列 (G4: legal×product×company単位)',
     active_slot INT GENERATED ALWAYS AS (CASE WHEN deleted_flag = 0 THEN 1 ELSE NULL END) COMMENT '論理削除後の再登録保証用生成列',
-    UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, provider, product, active_slot)
+    UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, external_company_key, provider, product, active_slot)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部サービス連携接続マスタ';
 
 CREATE TABLE IF NOT EXISTS m_external_mapping (

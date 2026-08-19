@@ -96,11 +96,14 @@ public class IntegrationConnection {
     private Integer version;
 
     /**
-     * 生成列 legal_entity_key / active_slot はMyBatis-Plusの自動INSERT/UPDATEから除外する。
+     * 生成列 legal_entity_key / external_company_key / active_slot はMyBatis-Plusの自動INSERT/UPDATEから除外する。
      * MySQL 生成列は INSERT 時に値を指定できないため exist = false で除外。
      */
     @TableField(exist = false)
     private Long legalEntityKey;
+
+    @TableField(exist = false)
+    private Long externalCompanyKey;
 
     @TableField(exist = false)
     private Integer activeSlot;

@@ -92,12 +92,14 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
             st.execute("ALTER TABLE t_integration_job DROP COLUMN organization_id");
 
             // NULL法人 active 重複2件 + ジョブを投入 (Legacy V106 で許容される形状)
+            // company_id 単位 (G4) の identity では同一 (tenant/legal/company/provider/product) が重複とみなされるため、
+            // 両方 NULL 法人・NULL company で backfill 対象 (重複) にする
             st.executeUpdate("INSERT INTO m_integration_connection " +
                     "(id, tenant_id, legal_entity_id, provider, product, external_company_id, company_name, status, encrypted_tokens, expires_at, deleted_flag, version) " +
-                    "VALUES (8001, 'tenant_dup', NULL, 'freee', 'accounting', 101, 'Corp A', 'CONNECTED', 'token1', DATE_ADD(NOW(), INTERVAL 1 DAY), 0, 1)");
+                    "VALUES (8001, 'tenant_dup', NULL, 'freee', 'accounting', NULL, 'Corp A', 'CONNECTED', 'token1', DATE_ADD(NOW(), INTERVAL 1 DAY), 0, 1)");
             st.executeUpdate("INSERT INTO m_integration_connection " +
                     "(id, tenant_id, legal_entity_id, provider, product, external_company_id, company_name, status, encrypted_tokens, expires_at, deleted_flag, version) " +
-                    "VALUES (8002, 'tenant_dup', NULL, 'freee', 'accounting', 102, 'Corp B', 'CONNECTED', 'token2', DATE_ADD(NOW(), INTERVAL 2 DAY), 0, 1)");
+                    "VALUES (8002, 'tenant_dup', NULL, 'freee', 'accounting', NULL, 'Corp B', 'CONNECTED', 'token2', DATE_ADD(NOW(), INTERVAL 2 DAY), 0, 1)");
             st.executeUpdate("INSERT INTO t_integration_job " +
                     "(id, connection_id, target_type, target_id, job_type, idempotency_key, payload_hash, status, attempt_count, max_attempts, version, deleted_flag) " +
                     "VALUES (9001, 1, 'INVOICE', 1001, 'SALES_INVOICE_SYNC', 'idemp_9001', 'hash_9001', 'PENDING', 0, 5, 1, 0)");
@@ -135,7 +137,7 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
             for (String col : JOB_ADDED_COLUMNS) {
                 assertTrue(hasColumn(st, "t_integration_job", col), "job列 " + col + " が存在すること");
             }
-            assertEquals(Set.of("tenant_id", "legal_entity_key", "provider", "product", "active_slot"),
+            assertEquals(Set.of("tenant_id", "legal_entity_key", "external_company_key", "provider", "product", "active_slot"),
                     indexColumns(st, "m_integration_connection", "uk_int_conn"), "新UNIQUEの列構成");
         }
 
@@ -202,7 +204,7 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
             for (String col : JOB_ADDED_COLUMNS) {
                 assertTrue(hasColumn(st, "t_integration_job", col), "再適用後にjob列 " + col + " が存在すること");
             }
-            assertEquals(Set.of("tenant_id", "legal_entity_key", "provider", "product", "active_slot"),
+            assertEquals(Set.of("tenant_id", "legal_entity_key", "external_company_key", "provider", "product", "active_slot"),
                     indexColumns(st, "m_integration_connection", "uk_int_conn"), "再適用後に新UNIQUEが存在すること");
             try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '106.1' AND success = 1")) {
                 assertTrue(rs.next());

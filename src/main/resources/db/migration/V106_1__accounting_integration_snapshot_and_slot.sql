@@ -58,10 +58,10 @@ SELECT
 FROM m_integration_connection c
 WHERE c.deleted_flag = 0
   AND c.id NOT IN (
-      -- survivor: 各 (tenant_id, COALESCE(legal_entity_id,0), provider, product) グループで最優先1行
+      -- survivor: 各 (tenant_id, COALESCE(legal_entity_id,0), COALESCE(external_company_id,0), provider, product) グループで最優先1行
       SELECT survivor_id FROM (
           SELECT FIRST_VALUE(id) OVER (
-              PARTITION BY tenant_id, COALESCE(legal_entity_id, 0), provider, product
+              PARTITION BY tenant_id, COALESCE(legal_entity_id, 0), COALESCE(external_company_id, 0), provider, product
               ORDER BY
                   CASE WHEN status = 'CONNECTED' AND encrypted_tokens IS NOT NULL AND expires_at > NOW() THEN 0 ELSE 1 END,
                   COALESCE(last_refreshed_at, '1970-01-01') DESC,
@@ -73,11 +73,12 @@ WHERE c.deleted_flag = 0
       GROUP BY survivor_id
   )
   AND EXISTS (
-      -- 重複する active connection が複数存在する場合のみ退避
+      -- 重複する active connection が複数存在する場合のみ退避 (company_id 単位)
       SELECT 1
       FROM m_integration_connection c2
       WHERE c2.tenant_id = c.tenant_id
         AND COALESCE(c2.legal_entity_id, 0) = COALESCE(c.legal_entity_id, 0)
+        AND COALESCE(c2.external_company_id, 0) = COALESCE(c.external_company_id, 0)
         AND c2.provider = c.provider
         AND c2.product = c.product
         AND c2.deleted_flag = 0
@@ -144,7 +145,15 @@ SET @add_col = (SELECT IF(
     'SELECT 1'));
 PREPARE stmt FROM @add_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 4e. active_slot (生成列 — 論理削除後の再登録保証)
+-- 4e. external_company_key (生成列 — 事業所(company_id)単位の一意性保証: G4 legal×product×company)
+SET @add_col = (SELECT IF(
+    (SELECT COUNT(*) FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'external_company_key') = 0,
+    'ALTER TABLE m_integration_connection ADD COLUMN external_company_key BIGINT GENERATED ALWAYS AS (COALESCE(external_company_id, 0)) STORED COMMENT ''事業所(company_id)一意性保証用生成列''',
+    'SELECT 1'));
+PREPARE stmt FROM @add_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 4f. active_slot (生成列 — 論理削除後の再登録保証)
 SET @add_col = (SELECT IF(
     (SELECT COUNT(*) FROM information_schema.columns
      WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection' AND column_name = 'active_slot') = 0,
@@ -153,7 +162,7 @@ SET @add_col = (SELECT IF(
 PREPARE stmt FROM @add_col; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- ============================================================
--- Step 5: 新 UNIQUE インデックス作成 (生成列ベース / 未存在時のみ)
+-- Step 5: 新 UNIQUE インデックス作成 (生成列ベース / 未存在時のみ)  — company_id 単位 (G4)
 -- ============================================================
 SET @new_uk_exists = (
     SELECT COUNT(*)
@@ -163,7 +172,7 @@ SET @new_uk_exists = (
       AND index_name = 'uk_int_conn'
 );
 SET @create_new_uk = IF(@new_uk_exists = 0,
-    'ALTER TABLE m_integration_connection ADD UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, provider, product, active_slot)',
+    'ALTER TABLE m_integration_connection ADD UNIQUE KEY uk_int_conn (tenant_id, legal_entity_key, external_company_key, provider, product, active_slot)',
     'SELECT 1');
 PREPARE stmt FROM @create_new_uk;
 EXECUTE stmt;

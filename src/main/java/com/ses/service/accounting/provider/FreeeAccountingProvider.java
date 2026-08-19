@@ -172,9 +172,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
+            // R1-P1-09: 入金母集団は決済日(paid)基準のため、dealの発生日が対象月の前後1ヶ月に跨る行も取得する。
+            //   deals母集団(売上/仕入/経費)は発生日が[fromDate,toDate]のものだけに絞り、payments母集団は決済日で絞る。
             String url = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
-                    + "&start_issue_date=" + fromDate
-                    + "&end_issue_date=" + toDate
+                    + "&start_issue_date=" + fromDate.minusMonths(1)
+                    + "&end_issue_date=" + toDate.plusMonths(1)
                     + "&status=settled&limit=" + limit
                     + "&offset=" + offset;
 
@@ -207,15 +209,19 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     String issueDateStr = d.has("issue_date") && !d.get("issue_date").isNull() ? d.get("issue_date").asText() : null;
                     LocalDate issueDate = issueDateStr != null ? LocalDate.parse(issueDateStr) : null;
                     boolean settled = d.has("status") && "settled".equalsIgnoreCase(d.get("status").asText());
+                    // R1-P1-09: deals母集団は発生日が対象月内のもののみ (月跨ぎの前後月発行dealは deals へ含めない)
+                    boolean dealInMonth = issueDate == null || (!issueDate.isBefore(fromDate) && !issueDate.isAfter(toDate));
 
                     // 1. deal単位エントリ (売上/仕入/経費の母集団照合・EXTERNAL_ONLY表示用)
-                    deals.add(CanonicalPaymentSync.builder()
-                            .dealId(dealId)
-                            .amount(dealAmount)
-                            .issueDate(issueDate)
-                            .settled(settled)
-                            .refNumber(refNumber)
-                            .build());
+                    if (dealInMonth) {
+                        deals.add(CanonicalPaymentSync.builder()
+                                .dealId(dealId)
+                                .amount(dealAmount)
+                                .issueDate(issueDate)
+                                .settled(settled)
+                                .refNumber(refNumber)
+                                .build());
+                    }
 
                     // 2. payment単位エントリ (入金 1:1 消込用): freee payments[] を展開する (R1-P1-09)
                     JsonNode paymentsNode = d.get("payments");
@@ -236,6 +242,10 @@ public class FreeeAccountingProvider implements AccountingProvider {
                                     ? BigDecimal.valueOf(p.get("amount").asLong()) : null;
                             LocalDate paymentDate = p.has("date") && !p.get("date").isNull()
                                     ? LocalDate.parse(p.get("date").asText()) : null;
+                            // R1-P1-09: 入金母集団は決済日が対象月内のもののみ (月跨ぎ決済を取得)
+                            if (paymentDate == null || paymentDate.isBefore(fromDate) || paymentDate.isAfter(toDate)) {
+                                continue;
+                            }
 
                             payments.add(CanonicalPaymentSync.builder()
                                     .dealId(dealId)
@@ -506,6 +516,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
         int limit = 100;
         int maxPages = 50;
         List<String> strictlyMatchedDealIds = new ArrayList<>();
+        boolean pageCapReached = false;
 
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
@@ -544,6 +555,10 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         if (deals.size() < limit) {
                             break;
                         }
+                        if (page == maxPages - 1) {
+                            // R1-P1-03: 50ページ目も full なら次ページ以降が存在し得る -> page cap (一意性未確定)
+                            pageCapReached = true;
+                        }
                     } else {
                         break;
                     }
@@ -554,6 +569,13 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 log.warn("Failed to check existing deal by refNumber after timeout on page {}: error_code=UNKNOWN_ERROR", page);
                 return null;
             }
+        }
+
+        // R1-P1-03: 50ページ上限に到達した場合、完全一致数にかかわらず一意性を確定できないため fail-closed (RETRYABLE)
+        if (pageCapReached) {
+            log.warn("Reached 50-page cap while verifying deal by refNumber={} after timeout (matched={}), page-cap fail-closed",
+                    refNumber, strictlyMatchedDealIds.size());
+            return null;
         }
 
         // 全ページ走査後の一意性判定 (R1-P1-03)

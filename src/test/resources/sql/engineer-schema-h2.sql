@@ -2657,6 +2657,7 @@ CREATE TABLE m_integration_connection (
     provider VARCHAR(32) NOT NULL,
     product VARCHAR(32) NOT NULL,
     external_company_id BIGINT,
+    external_company_key BIGINT AS (COALESCE(external_company_id, 0)),
     company_name VARCHAR(255),
     encrypted_tokens TEXT,
     expires_at DATETIME,
@@ -2672,7 +2673,7 @@ CREATE TABLE m_integration_connection (
     deleted_flag INT NOT NULL DEFAULT 0,
     version INT NOT NULL DEFAULT 0
 );
-CREATE UNIQUE INDEX uk_int_conn ON m_integration_connection (tenant_id, legal_entity_id, provider, product, deleted_flag);
+CREATE UNIQUE INDEX uk_int_conn ON m_integration_connection (tenant_id, legal_entity_id, external_company_key, provider, product, deleted_flag);
 
 CREATE TABLE m_external_mapping (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

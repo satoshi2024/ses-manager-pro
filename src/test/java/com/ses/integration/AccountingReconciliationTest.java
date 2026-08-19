@@ -121,7 +121,7 @@ public class AccountingReconciliationTest {
                 "{\"id\": 1001, \"issue_date\": \"2026-09-10\", \"amount\": 1100000, \"ref_number\": \"" + matchedInv.getInvoiceNo() + "\", \"status\": \"settled\", \"payments\": [{\"id\": 7700, \"date\": \"2026-09-10\", \"amount\": 1100000}]}," +
                 "{\"id\": 99901, \"issue_date\": \"2026-09-15\", \"amount\": 220000, \"ref_number\": \"EXT-ONLY-999\", \"partner_id\": 3001, \"status\": \"settled\", \"payments\": [{\"id\": 7701, \"date\": \"2026-09-15\", \"amount\": 220000}]}" +
                 "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
 
@@ -146,10 +146,10 @@ public class AccountingReconciliationTest {
         Invoice inv = createInvoice(testMonth, "INV-RECON-IGN-001", new BigDecimal("500000"));
 
         // freee API からは空リスト
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-11-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-11-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
@@ -180,7 +180,7 @@ public class AccountingReconciliationTest {
         String testMonth = "2026-11";
         createInvoice(testMonth, "INV-RECON-ERR-001", new BigDecimal("800000"));
 
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2026-11-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-12-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
@@ -199,7 +199,7 @@ public class AccountingReconciliationTest {
         jobService.markSucceeded(job.getId(), "EXT-TIMEOUT-001", "req-T", "同期成功");
 
         // 外部 API が 500 / タイムアウトエラーを返す
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-10-31&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-11-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError());
 
@@ -215,7 +215,7 @@ public class AccountingReconciliationTest {
         int initialInvoiceCount = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>().eq(Invoice::getBillingMonth, testMonth)).size();
 
         String dealsResponseJson = "{\"deals\": [{\"id\": 88801, \"issue_date\": \"2026-12-10\", \"amount\": 990000, \"ref_number\": \"UNLINKED-DEAL-01\", \"status\": \"settled\", \"payments\": [{\"id\": 7702, \"date\": \"2026-12-10\", \"amount\": 990000}]}]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-12-01&end_issue_date=2026-12-31&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2027-01-31&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
 
@@ -295,7 +295,7 @@ public class AccountingReconciliationTest {
                 "{\"id\": 10004, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 5004, \"date\": \"2026-11-20\", \"amount\": 500000}]}" +
                 "]}";
 
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-11-01&end_issue_date=2026-11-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-10-01&end_issue_date=2026-12-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dealsResponseJson, MediaType.APPLICATION_JSON));
 
@@ -324,13 +324,13 @@ public class AccountingReconciliationTest {
             page0.append("{\"id\": ").append(2000 + i).append(", \"amount\": 1000, \"status\": \"settled\"}");
         }
         page0.append("]}");
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page0.toString(), MediaType.APPLICATION_JSON));
 
         // Page 1 (offset=100): 対象 deal (70001)
         String page1 = "{\"deals\": [{\"id\": 70001, \"amount\": 770000, \"ref_number\": \"INV-PAGE2-" + "1\", \"status\": \"settled\"}]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=100"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=100"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(page1, MediaType.APPLICATION_JSON));
 
@@ -354,7 +354,7 @@ public class AccountingReconciliationTest {
                 + "{\"id\": 55555, \"amount\": 500000, \"status\": \"settled\"},"
                 + "{\"id\": 55555, \"amount\": 500000, \"status\": \"settled\"}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(dupJson, MediaType.APPLICATION_JSON));
 
@@ -380,7 +380,7 @@ public class AccountingReconciliationTest {
                 deals.append("{\"id\": ").append(page * 100 + i).append(", \"amount\": 1000, \"status\": \"settled\"}");
             }
             deals.append("]}");
-            String url = "https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=" + (page * 100);
+            String url = "https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=" + (page * 100);
             mockServer.expect(requestTo(url))
                     .andExpect(method(HttpMethod.GET))
                     .andRespond(withSuccess(deals.toString(), MediaType.APPLICATION_JSON));
@@ -405,7 +405,7 @@ public class AccountingReconciliationTest {
         jobService.markSucceeded(job.getId(), "999-DELETED", "req-del", "同期成功");
 
         // freee 側で取引が削除済み (該当dealなし)
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"deals\": []}", MediaType.APPLICATION_JSON));
 
@@ -433,7 +433,7 @@ public class AccountingReconciliationTest {
                 + "{\"id\": 30001, \"amount\": 300000, \"status\": \"settled\", \"payments\": [{\"id\": 7001, \"date\": \"2026-09-10\", \"amount\": 300000}]},"
                 + "{\"id\": 30002, \"amount\": 200000, \"status\": \"settled\", \"payments\": [{\"id\": 7002, \"date\": \"2026-09-10\", \"amount\": 200000}]}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
 
@@ -456,7 +456,7 @@ public class AccountingReconciliationTest {
                 + "{\"id\": 31001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7101, \"date\": \"2026-09-10\", \"amount\": 500000}]},"
                 + "{\"id\": 31002, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7102, \"date\": \"2026-09-11\", \"amount\": 500000}]}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
 
@@ -478,7 +478,7 @@ public class AccountingReconciliationTest {
         String deals = "{\"deals\": ["
                 + "{\"id\": 32001, \"amount\": 500000, \"issue_date\": \"2026-09-10\", \"status\": \"settled\", \"payments\": [{\"id\": 7201, \"amount\": 500000}]}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
 
@@ -501,7 +501,7 @@ public class AccountingReconciliationTest {
                 + "{\"id\": 33001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7301, \"date\": \"2026-09-10\", \"amount\": 500000}]},"
                 + "{\"id\": 33002, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7302, \"date\": \"2026-09-10\", \"amount\": 500000}]}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
 
@@ -525,7 +525,7 @@ public class AccountingReconciliationTest {
         String deals = "{\"deals\": ["
                 + "{\"id\": 34001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7401, \"date\": \"2026-09-10\", \"amount\": 500000}]}"
                 + "]}";
-        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-08-01&end_issue_date=2026-10-30&status=settled&limit=100&offset=0"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
 

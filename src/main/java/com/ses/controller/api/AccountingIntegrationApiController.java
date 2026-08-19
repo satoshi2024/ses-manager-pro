@@ -164,7 +164,8 @@ public class AccountingIntegrationApiController {
     public ApiResult<List<ExternalMapping>> listMappings(
             @RequestParam("connectionId") Long connectionId,
             @RequestParam(value = "objectType", required = false) String objectType) {
-        // R1-P1-06: マネージャーは許可接続 (許可法人) のマッピングのみ (SQL境界)
+        // R1-P1-06: マネージャーは許可接続 (許可法人) のマッピングのみ (SQL境界)。管理者も current tenant に属する接続のみ。
+        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
         java.util.Set<Long> allowedConnectionIds = null;
@@ -173,8 +174,13 @@ public class AccountingIntegrationApiController {
                 return ApiResult.success(java.util.Collections.emptyList());
             }
             allowedConnectionIds = connectionService.listConnectionsByLegalEntities(
-                            AccountingTenantContextHolder.getCurrentTenantId(), allowedLegalEntities)
+                            currentTenantId, allowedLegalEntities)
                     .stream().map(IntegrationConnection::getId).collect(java.util.stream.Collectors.toSet());
+        } else {
+            // 管理者: 接続が current tenant に属することを SQL で確認 (他tenantは0件)
+            if (connectionService.getByIdScoped(connectionId, currentTenantId, null) == null) {
+                return ApiResult.success(java.util.Collections.emptyList());
+            }
         }
         List<ExternalMapping> list = mappingService.listByConnectionsScoped(connectionId, objectType, allowedConnectionIds);
         return ApiResult.success(list);
@@ -183,6 +189,15 @@ public class AccountingIntegrationApiController {
     @PostMapping("/mappings")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> saveMapping(@RequestBody ExternalMapping mapping) {
+        // R1-P1-06: 管理者も current tenant に属する接続のマッピングのみ変更可 (他tenantは404)
+        if (mapping.getConnectionId() == null) {
+            return ApiResult.error(400, "接続IDが必要です");
+        }
+        IntegrationConnection conn = connectionService.getByIdScoped(
+                mapping.getConnectionId(), AccountingTenantContextHolder.getCurrentTenantId(), null);
+        if (conn == null) {
+            return ApiResult.error(404, "接続マスタが見つかりません");
+        }
         mappingService.saveOrUpdateMapping(mapping);
         return ApiResult.success(null);
     }
@@ -190,6 +205,16 @@ public class AccountingIntegrationApiController {
     @PostMapping("/mappings/{id}/verify")
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> verifyMapping(@PathVariable("id") Long mappingId) {
+        // R1-P1-06: 他tenantのマッピングは verify も不可 (404)
+        ExternalMapping m = mappingService.getById(mappingId);
+        if (m == null) {
+            return ApiResult.error(404, "マッピングが見つかりません");
+        }
+        IntegrationConnection conn = connectionService.getByIdScoped(
+                m.getConnectionId(), AccountingTenantContextHolder.getCurrentTenantId(), null);
+        if (conn == null) {
+            return ApiResult.error(404, "マッピングが見つかりません");
+        }
         mappingService.verifyAndSnapshotMapping(mappingId);
         return ApiResult.success(null);
     }

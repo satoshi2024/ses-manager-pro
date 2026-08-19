@@ -49,7 +49,9 @@ public class AccountingIntegrationWorker {
             try {
                 dispatchJob(job);
             } catch (Exception e) {
-                log.error("Unexpected error dispatching jobId={}, jobType={}", job.getId(), job.getJobType(), e);
+                // R4.5: Worker最外層も raw throwable / stack trace をログへ出力しない (固定 error code + jobId のみ)
+                log.error("Unexpected error dispatching job: error_code=JOB_DISPATCH_ERROR, jobId={}, jobType={}",
+                        job.getId(), job.getJobType());
             }
         }
     }
