@@ -1,5 +1,6 @@
 package com.ses.migration;
 
+import db.migration.V74_3__crm_lead_search_key_nfkc;
 import com.ses.test.MySQLContainer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.UncheckedIOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -16,8 +18,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,6 +36,15 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_v106_2_repair")
+            .withUsername("root")
+            .withPassword("ses")
+            .withStartupTimeout(Duration.ofMinutes(10))
+            .withStartupAttempts(3);
+
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> PUBLISHED_V106_2_MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_v106_2_published")
             .withUsername("root")
             .withPassword("ses")
             .withStartupTimeout(Duration.ofMinutes(10))
@@ -101,6 +114,92 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
                     indexColumns(st, "m_integration_connection", "uk_int_conn"),
                     "V106.2 rollback後は旧V106.1形状へ戻ること");
             assertTrue(!hasColumn(st, "m_integration_connection", "external_company_key"));
+        }
+    }
+
+    @Test
+    void publishedV106_2HistoryValidatesWithCurrentArtifactAndHasNoPendingMigration() throws Exception {
+        Path publishedLocation = copyMigrationLocationWithPublishedV106_2Blob();
+        try {
+            Flyway published = Flyway.configure()
+                    .dataSource(PUBLISHED_V106_2_MYSQL.getJdbcUrl(), PUBLISHED_V106_2_MYSQL.getUsername(),
+                            PUBLISHED_V106_2_MYSQL.getPassword())
+                    .locations("filesystem:" + publishedLocation.toAbsolutePath())
+                    .javaMigrations(new V74_3__crm_lead_search_key_nfkc())
+                    .target("106.2")
+                    .load();
+            published.migrate();
+
+            Flyway current = Flyway.configure()
+                    .dataSource(PUBLISHED_V106_2_MYSQL.getJdbcUrl(), PUBLISHED_V106_2_MYSQL.getUsername(),
+                            PUBLISHED_V106_2_MYSQL.getPassword())
+                    .locations("classpath:db/migration")
+                    .load();
+            assertEquals(0, current.info().pending().length,
+                    "公開済みV106.2 historyから現artifactへ未適用migrationが発生しないこと");
+            current.validate();
+            assertEquals(0, current.migrate().migrationsExecuted,
+                    "公開済みV106.2 historyから追加migrationなしで起動できること");
+
+            try (Connection conn = PUBLISHED_V106_2_MYSQL.createConnection(""); Statement st = conn.createStatement()) {
+                assertEquals(0, queryInt(st, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '105.4'"),
+                        "公開済みV106.2 historyにV105.4が存在しないこと");
+                assertEquals(1, queryInt(st, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '106.2' AND success = 1"),
+                        "公開済みV106.2 historyがsuccessで1件だけ存在すること");
+            }
+        } finally {
+            deleteRecursively(publishedLocation);
+        }
+    }
+
+    /** 前回公開版のV106.2（コメント差分のみ）を一時Flyway locationへ再現する。 */
+    private Path copyMigrationLocationWithPublishedV106_2Blob() throws Exception {
+        Path source = Path.of("src", "main", "resources", "db", "migration");
+        Path destination = Files.createTempDirectory("s15-v1062-published-");
+        try (Stream<Path> paths = Files.walk(source)) {
+            paths.forEach(path -> {
+                try {
+                    Path target = destination.resolve(source.relativize(path));
+                    if (Files.isDirectory(path)) {
+                        Files.createDirectories(target);
+                    } else {
+                        Files.copy(path, target);
+                    }
+                } catch (java.io.IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+        }
+
+        Path v1062 = destination.resolve("V106_2__accounting_company_boundary_forward_repair.sql");
+        String current = Files.readString(v1062, StandardCharsets.UTF_8);
+        String published = current
+                .replace("-- Flyway外のlegacy preflight退避行およびV106.1 backupのcompany別行もここで復元する.",
+                        "-- V105.4 preflightの退避行およびV106.1 backupのcompany別行もここで復元する.")
+                .replace("-- V106到達前にrunbookが退避した複数companyのlegacy行を新connectionとして復元する.",
+                        "-- V105.4がV106到達前に退避した複数companyのlegacy行を新connectionとして復元する.");
+        // 日本語コメントは句点が「。」であるため、上のASCII置換が成立しない場合も明示的に処理する。
+        published = published
+                .replace("-- Flyway外のlegacy preflight退避行およびV106.1 backupのcompany別行もここで復元する。",
+                        "-- V105.4 preflightの退避行およびV106.1 backupのcompany別行もここで復元する。")
+                .replace("-- V106到達前にrunbookが退避した複数companyのlegacy行を新connectionとして復元する。",
+                        "-- V105.4がV106到達前に退避した複数companyのlegacy行を新connectionとして復元する。");
+        Files.writeString(v1062, published, StandardCharsets.UTF_8);
+        return destination;
+    }
+
+    private void deleteRecursively(Path root) throws Exception {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (java.io.IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
         }
     }
 

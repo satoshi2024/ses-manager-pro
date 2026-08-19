@@ -289,6 +289,18 @@ class MigrationScriptIntegrityTest {
     }
 
     @Test
+    void 公開済みV106_2はchecksumを変更しないこと() throws Exception {
+        Resource resource = new PathMatchingResourcePatternResolver()
+                .getResource("classpath:db/migration/V106_2__accounting_company_boundary_forward_repair.sql");
+        String normalized = resource.getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(normalized.getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals("2562d7b08bf441a45f249f7d6a4e6ce701dd0ed3dc9ace63f4a46c893fd8954a", checksum,
+                "適用済みV106.2を編集せず、追加修正は後続migrationまたはrunbookへ置いてください");
+    }
+
+    @Test
     void V60のlegacy補列は対象列ごとに独立しBP外部キーより先に追加されること() throws Exception {
         String sql = v60();
         int bpColumn = sql.indexOf("ALTER TABLE t_bp_payment ADD COLUMN cost_center_id");
