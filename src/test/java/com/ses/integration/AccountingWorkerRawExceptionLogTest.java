@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.ses.dto.accounting.IntegrationTokensDto;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
+import com.ses.service.accounting.AccountingIntegrationWorker;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -24,6 +25,7 @@ import java.security.MessageDigest;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 /**
  * R1-P1-10: Worker が生例外 (throwable / stack trace / 例外メッセージ) をログへ出力しないことを検証する。
@@ -56,6 +58,7 @@ class AccountingWorkerRawExceptionLogTest {
             com.ses.service.accounting.impl.PurchaseExpensePaymentIntegrationServiceImpl.class);
     private final Logger providerLogger = (Logger) LoggerFactory.getLogger(
             com.ses.service.accounting.provider.FreeeAccountingProvider.class);
+    private final Logger workerLogger = (Logger) LoggerFactory.getLogger(AccountingIntegrationWorker.class);
     private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
 
     private IntegrationConnection connection;
@@ -66,6 +69,7 @@ class AccountingWorkerRawExceptionLogTest {
         salesLogger.addAppender(appender);
         purchaseLogger.addAppender(appender);
         providerLogger.addAppender(appender);
+        workerLogger.addAppender(appender);
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
         connectionService.saveTokens(connection.getId(), IntegrationTokensDto.builder()
@@ -78,6 +82,7 @@ class AccountingWorkerRawExceptionLogTest {
         salesLogger.detachAppender(appender);
         purchaseLogger.detachAppender(appender);
         providerLogger.detachAppender(appender);
+        workerLogger.detachAppender(appender);
         appender.stop();
     }
 
@@ -143,5 +148,51 @@ class AccountingWorkerRawExceptionLogTest {
         IntegrationJob job = malformedJob("EXPENSE_DEAL_SYNC", "EXPENSE_REQUEST", 301L, "RAW-LOG-EXPENSE");
         purchaseIntegrationService.processExpenseJob(job.getId());
         assertNoRawExceptionLeak(jobService.getById(job.getId()));
+    }
+
+    @Test
+    @DisplayName("Worker最外層: processDueJobs経由の全dispatch例外も固定ログだけを出力する (R4-R5)")
+    void processDueJobs_outerCatch_sanitizesAllDispatchExceptions() {
+        IntegrationJobService dueJobService = mock(IntegrationJobService.class);
+        SalesInvoiceIntegrationService dueSalesService = mock(SalesInvoiceIntegrationService.class);
+        PurchaseExpensePaymentIntegrationService duePurchaseService = mock(PurchaseExpensePaymentIntegrationService.class);
+
+        List<IntegrationJob> dueJobs = List.of(
+                dueJob(501L, "SALES_INVOICE_SYNC"),
+                dueJob(502L, "SALES_INVOICE_CANCEL"),
+                dueJob(503L, "BP_PURCHASE_SYNC"),
+                dueJob(504L, "EXPENSE_DEAL_SYNC"),
+                dueJob(505L, "PAYMENT_SYNC"));
+        when(dueJobService.listDueJobs(10)).thenReturn(dueJobs);
+
+        doThrow(new IllegalStateException(SECRET)).when(dueSalesService).processSalesInvoiceJob(501L);
+        doThrow(new IllegalStateException(SECRET)).when(dueSalesService).processSalesCancelJob(502L);
+        doThrow(new IllegalStateException(SECRET)).when(duePurchaseService).processBpPurchaseJob(503L);
+        doThrow(new IllegalStateException(SECRET)).when(duePurchaseService).processExpenseJob(504L);
+        doThrow(new IllegalStateException(SECRET)).when(duePurchaseService).processPaymentSyncJob(505L);
+
+        new AccountingIntegrationWorker(dueJobService, dueSalesService, duePurchaseService).processDueJobs();
+
+        List<ILoggingEvent> workerEvents = appender.list.stream()
+                .filter(event -> event.getLoggerName().equals(AccountingIntegrationWorker.class.getName()))
+                .toList();
+        assertThat(workerEvents).hasSize(5);
+        for (int i = 0; i < workerEvents.size(); i++) {
+            ILoggingEvent event = workerEvents.get(i);
+            String message = event.getFormattedMessage();
+            assertThat(message).contains("error_code=JOB_DISPATCH_ERROR")
+                    .contains("jobId=" + (501 + i))
+                    .doesNotContain(SECRET)
+                    .doesNotContain("RawExceptionLogTest")
+                    .doesNotContain("at com.ses.");
+            assertThat(event.getThrowableProxy()).isNull();
+        }
+    }
+
+    private IntegrationJob dueJob(Long id, String jobType) {
+        IntegrationJob job = new IntegrationJob();
+        job.setId(id);
+        job.setJobType(jobType);
+        return job;
     }
 }

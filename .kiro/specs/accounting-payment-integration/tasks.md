@@ -102,7 +102,7 @@
   - **Requirements**: R5.1, R5.2、design §6.2、review issue R1-P1-09。
   - **Test/Demo**: 前月・2か月前・複数月前deal、月初/月末、50ページ上限を確認する。
 
-- [ ] R4-R5. Worker最外層logger direct regression
+- [x] R4-R5. Worker最外層logger direct regression
   - **Objective**: `processDueJobs()`経由のdispatch例外で固定error code/job safe fieldsだけをloggerへ渡す。
   - **Requirements**: R4.5、design §7、review issue R1-P1-10。
   - **Test/Demo**: 全job種別のdispatch例外で機密文字列・throwable・stack traceがlogger出力にないことを確認する。
