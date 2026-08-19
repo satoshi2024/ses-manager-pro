@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -568,7 +569,8 @@ class MigrationScriptIntegrityTest {
             Matcher m = referenced.matcher(sql);
             while (m.find()) {
                 String table = m.group(1).toLowerCase(java.util.Locale.ROOT);
-                if (NON_TABLE_TOKENS.contains(table) || createdTables.containsKey(table)) {
+                if (NON_TABLE_TOKENS.contains(table) || createdTables.containsKey(table)
+                        || EXTERNAL_RUNBOOK_TABLES.contains(table)) {
                     continue;
                 }
                 unknown.add(fileName + ": " + table);
@@ -817,6 +819,10 @@ class MigrationScriptIntegrityTest {
     /** {@code FROM}/{@code JOIN} の直後に現れうる、テーブル名ではない語。
      * {@code flyway_schema_history} はどのマイグレーションもCREATEしない
      * Flyway自身の管理テーブルだが、実行順序上R__より前に必ず存在するため除外する。 */
+    /** Flyway migrationが参照し、Flyway外の運用runbookが作成するstaging table。 */
+    private static final Set<String> EXTERNAL_RUNBOOK_TABLES = Set.of(
+            "m_accounting_legacy_freee_preflight_v105_4");
+
     private static final java.util.Set<String> NON_TABLE_TOKENS = java.util.Set.of(
             "information_schema", "dual", "select", "if", "not", "exists", "flyway_schema_history",
             "json_table");

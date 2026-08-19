@@ -1,9 +1,13 @@
--- V105.4: S15 legacy freee connection preflight
+-- S15 legacy freee connection preflight (Flyway外でV106適用前に一度だけ実行)
 --
--- V106/V106.1 は適用済み環境のchecksum契約により変更しない。
--- S15がまだ未適用の歴史的V105.3相当DBで、V106の旧UNIQUEへ複数companyを
--- 同時投入すると失敗するため、V106到達前だけ移行元を退避する。
--- V106.2 が退避行をcompany_id単位で復元し、処理成功後に退避表を削除する。
+-- このrunbookはFlywayのversioned migrationではない。
+-- V106/V106.1適用済み環境へ過去番号のmigrationを追加しないため、
+-- V105.3相当の歴史的DBだけで、アプリ起動/Flyway migrateの前に運用者が実行する。
+-- V106/V106.1は適用済み環境のchecksum契約により変更しない。
+--
+-- m_integration_connectionがまだ存在しないlegacy DBでは、V106の旧UNIQUEへ
+-- 複数companyを同時投入しないよう代表1行を残し、残余を一時退避する。
+-- V106.2が退避行をcompany_id単位で復元し、処理成功後に退避表を削除する。
 
 DELIMITER $$
 
@@ -11,7 +15,7 @@ DROP PROCEDURE IF EXISTS __ses_accounting_legacy_freee_preflight $$
 
 CREATE PROCEDURE __ses_accounting_legacy_freee_preflight()
 BEGIN
-    -- consolidated V1 は既にS15表を持つため、fresh経路では何もしない。
+    -- consolidated V1 は既にS15表を持つため、fresh/baseline経路では何もしない。
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.tables
         WHERE table_schema = DATABASE() AND table_name = 'm_integration_connection'
@@ -30,10 +34,8 @@ BEGIN
             connection_status VARCHAR(32) NULL,
             preflighted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-          COMMENT='V106到達前に退避したlegacy freee connection';
+          COMMENT='V106適用前に退避したlegacy freee connection';
 
-        -- V106は全legacy freee connectionを同一のdefault/payroll接続へ写像するため、
-        -- 旧UNIQUEに入る代表1行だけを残し、残りを退避する。
         INSERT IGNORE INTO m_accounting_legacy_freee_preflight_v105_4 (
             source_id, company_id, company_name, access_token_encrypted,
             refresh_token_encrypted, token_expires_at, connected_by,
@@ -70,8 +72,8 @@ BEGIN
     END IF;
 END $$
 
+CALL __ses_accounting_legacy_freee_preflight() $$
+
+DROP PROCEDURE IF EXISTS __ses_accounting_legacy_freee_preflight $$
+
 DELIMITER ;
-
-CALL __ses_accounting_legacy_freee_preflight();
-
-DROP PROCEDURE IF EXISTS __ses_accounting_legacy_freee_preflight;

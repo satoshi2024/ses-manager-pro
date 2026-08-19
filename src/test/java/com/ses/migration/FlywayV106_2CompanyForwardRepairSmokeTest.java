@@ -70,10 +70,13 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-        latest.migrate();
+        assertEquals(1, latest.migrate().migrationsExecuted,
+                "旧V106.1適用済みDBではV106.2だけがpendingであること（過去V105.4を要求しない）");
         latest.validate();
 
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
+            assertEquals(0, queryInt(st, "SELECT COUNT(*) FROM flyway_schema_history WHERE version = '105.4'"),
+                    "旧V106.1適用済みDBのFlyway historyにV105.4が存在しないこと");
             assertEquals(2, activeCompanyRows(st), "V106.2がbackupの別company行をactiveへ復元すること");
             assertEquals(Set.of("tenant_id", "legal_entity_key", "external_company_key", "provider", "product", "active_slot"),
                     indexColumns(st, "m_integration_connection", "uk_int_conn"));
@@ -125,6 +128,13 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
                 + "WHERE table_schema=DATABASE() AND table_name='" + table + "' AND column_name='" + column + "'")) {
             rs.next();
             return rs.getInt(1) > 0;
+        }
+    }
+
+    private int queryInt(Statement st, String sql) throws Exception {
+        try (ResultSet rs = st.executeQuery(sql)) {
+            rs.next();
+            return rs.getInt(1);
         }
     }
 

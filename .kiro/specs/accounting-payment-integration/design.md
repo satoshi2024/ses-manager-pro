@@ -7,10 +7,10 @@
 ### 1.0 Migration checksum契約とrepair経路の分離
 
 - **V106 と V106.1 は適用済み環境のchecksum契約によりbyte-for-byte不変**とする。既存DBへ適用済みのmigrationを編集してはならない。
-- `V105.4__accounting_legacy_freee_preflight.sql` は、S15未適用の歴史的V105.3相当DBだけで実行されるV106到達前preflightである。consolidated V1が既に`m_integration_connection`を持つfresh経路ではno-opとなる。V106の旧UNIQUEへ複数freee companyを同時投入しないよう、代表1行を残して残余を一時退避する。
-- `V106_2__accounting_company_boundary_forward_repair.sql` は、新しいforward migrationである。旧V106.1適用済みDBの退避行とV105.4のpreflight行を`company_id`単位で復元し、`external_company_key`を含むG4のUNIQUEへ修復する。V106.2はfresh/partial/retryで冪等に実行できる。
-- V107はS16予約のため使用しない。V105.4/V106.2はS15のchecksum修復専用であり、S16の採番を変更しない。
-- **逸脱と根拠**: platform-invariants §4.1の「既存migration不変」はそのまま適用する。歴史的V105.3がV106の旧UNIQUEでmulti-company upgrade不能になるため、V106前のpreflight（V105.4）とV106.1適用済みforward repair（V106.2）を分離した。これにより旧checksumを変更せず、fresh/legacy/partial/repairをそれぞれ検証できる。
+- `sql/runbook/v106_legacy_freee_preflight.sql` は、S15未適用の歴史的V105.3相当DBだけで、Flyway開始前に運用者が実行するpreflightである。通常Flyway locationには置かず、`flyway_schema_history`へversionを記録しない。consolidated V1が既に`m_integration_connection`を持つfresh経路ではno-opとなる。V106の旧UNIQUEへ複数freee companyを同時投入しないよう、代表1行を残して残余を一時退避する。
+- `V106_2__accounting_company_boundary_forward_repair.sql` は、新しいforward migrationである。旧V106.1適用済みDBの退避行とlegacy preflight行を`company_id`単位で復元し、`external_company_key`を含むG4のUNIQUEへ修復する。V106.2はfresh/partial/retryで冪等に実行できる。
+- V107はS16予約のため使用しない。S15の通常Flyway経路はV106/V106.1/V106.2だけであり、V105.4のversioned migrationは作成しない。
+- **逸脱と根拠**: platform-invariants §4.1の「既存migration不変」とout-of-order禁止をそのまま適用する。歴史的V105.3がV106の旧UNIQUEでmulti-company upgrade不能になるため、preflightはFlyway外のrunbookへ分離し、適用済みV106.1環境はV106.2だけでforward repairする。これにより旧checksumを変更せず、fresh/legacy/partial/repairをそれぞれ検証できる。
 
 ### 1.1 テーブル定義
 
@@ -109,10 +109,10 @@
 
 ### 1.2 Migration 5形状契約・Partial-Safe Rollback & Flyway Repair (platform-invariants §4.2 準拠)
 
-- **番号採番ルール**: S15の正式migrationは`V106`（Consolidated baseline V1に反映済み）である。旧V106適用済み環境向けの既存forward repair `V106.1`は変更せず、新しいcompany境界repairは`V106.2`で行う。V106到達前の歴史的legacy経路は`V105.4`へ分離し、S16予約の`V107`と衝突させない。
+- **番号採番ルール**: S15の正式migrationは`V106`（Consolidated baseline V1に反映済み）である。旧V106適用済み環境向けの既存forward repair `V106.1`は変更せず、新しいcompany境界repairは`V106.2`で行う。V106到達前の歴史的legacy経路はversionを持たないpreflight runbookへ分離し、S16予約の`V107`と衝突させない。Flyway out-of-orderは無効のままとする。
 - **5形状の契約手順**:
   1. **Fresh V1**: `V1__create_tables.sql` に全最新スキーマ（`legal_entity_key`, `active_slot`, `token_version`, `refresh_lease_*`, `payload_snapshot`, `lease_*`, `tenant_id`, `legal_entity_id`, `organization_id`）を含め新規DBを一括初期化。
-  2. **Legacy V105.3 → V106**: `V105.4` preflightが存在する複数companyのlegacy freee行を退避し、V106→V106.1→V106.2の順で適用する。`V106.2`が退避行をcompany単位で復元する。
+  2. **Legacy V105.3 → V106**: Flyway開始前に`sql/runbook/v106_legacy_freee_preflight.sql`を実行して複数companyのlegacy freee行を退避し、V106→V106.1→V106.2の順で適用する。`V106.2`が退避行をcompany単位で復元する。historyにV105.4を作らない。
   3. **Legacy V106.1**: 旧V106.1適用済みDBに対し`V106.2`だけを適用する。
   4. **Partial (途中失敗リカバリ & Flyway Repair)**:
      - 各DDLは `information_schema` チェック付きの冪等スクリプトとして記述。

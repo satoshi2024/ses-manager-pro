@@ -81,6 +81,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # 過去番号の未適用migrationを後から適用しない。legacy preflightはFlyway外のrunbookで実行する。
+    out-of-order: false
     baseline-on-migrate: true
     baseline-version: 9
     baseline-description: "手動SQL(001-009)適用済みベースライン"

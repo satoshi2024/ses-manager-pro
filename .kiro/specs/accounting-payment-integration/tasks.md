@@ -7,7 +7,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md`（特に§7 外部連携）を実装前に読む。
 > 時間/scope/状態/error分類の判断は `design.md` §6「決定表」を正とする。
 >
-> **Migration**: 本specの正式migrationは **V106**（consolidated baseline V1反映済み）。適用済みV106.1はchecksum不変とし、V106到達前legacy preflightをV105.4、新しいcompany boundary forward repairをV106.2へ分離する。
+> **Migration**: 本specの正式migrationは **V106**（consolidated baseline V1反映済み）。適用済みV106.1はchecksum不変とし、V106到達前legacy preflightはFlyway外の`sql/runbook/v106_legacy_freee_preflight.sql`、新しいcompany boundary forward repairはV106.2へ分離する。過去番号V105.4は作成しない。
 > `V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。V59は永久欠番。
 
 ---
@@ -83,7 +83,7 @@
 ## 3. R4再Review対応タスク（Round 4差分）
 
 - [x] R4-R1. Migration checksum不変・historical legacy multi-company経路
-  - **Objective**: 適用済みV106/V106.1を変更せず、V105.4 preflightとV106.2 forward repairを分離する。
+  - **Objective**: 適用済みV106/V106.1を変更せず、Flyway外preflightとV106.2 forward repairを分離する。
   - **Requirements**: R1.1, R4-T01, G4、Flyway checksum/repair契約。
   - **Test/Demo**: historical V105.3相当→latest、旧V106.1適用済み→V106.2、fresh、partial、rollback、`external_company_key`を含むsoft-delete再作成を実MySQLで確認する。
 
@@ -111,3 +111,10 @@
   - **Objective**: 同一clean/pushed HeadでFast/MySQL全shard/Performance/Backupを実行し、tasks/review-ledger/中央ledgerを同期する。
   - **Requirements**: R4-T08、handbook §8/§12。
   - **Test/Demo**: `verify-like-ci.ps1`を同一code Headで実行し、Fast 2435/0/0/0、MySQL 57/0/0/0、Performance 1/0/0/0、Browser 1/0/0/0、Backup SUCCESS（全skip 0）を確認。Head/origin一致、Review Packet整合を確認する。独立再Reviewは未実施のため、現行判定は`FIXED_PENDING_REVIEW`、S16はBLOCKEDのままとする。
+
+## 4. R5再Review対応タスク
+
+- [x] R5-R1. V105.4 out-of-order経路の撤去とFlyway前preflight runbook化
+  - **Objective**: 過去番号V105.4を通常Flyway locationから除外し、適用済みV106.1環境ではV106.2だけをpendingにする。V105.3相当legacyはFlyway開始前の明示runbookでpreflightする。
+  - **Requirements**: R1.1、T095/R4-R1、過去migration追加禁止、Flyway out-of-order禁止、旧V106.1環境の無停止forward migration。
+  - **Test/Demo**: `SpecDispatchConsistencyTest`/`MigrationScriptIntegrityTest` 37/37 PASS。旧V106.1 history（V105.4なし）→V106.2のみ、V105.3相当→runbook→V106→V106.1→V106.2、rollback、soft-delete後の再作成をMySQL 3/3 PASS。fresh/legacy schema smoke 3/3 PASS。historyにV105.4が残らないことを確認する。

@@ -11,6 +11,10 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,6 +62,11 @@ class FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest {
                     + "(456, 'Company B', 'access-b', 'refresh-b', DATE_ADD(NOW(), INTERVAL 2 DAY), 1, 'CONNECTED', 0)");
         }
 
+        // V105.4はFlyway locationへ追加しない。legacy preflightはV106適用前にrunbookとして実行する。
+        try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
+            executePreflightRunbook(st);
+        }
+
         Flyway latest = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -88,11 +97,12 @@ class FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest {
                 assertTrue(rs.next());
                 assertEquals(0, rs.getInt(1), "preflight退避表が成功後に削除されること");
             }
-            try (ResultSet rs = st.executeQuery("SELECT version, success FROM flyway_schema_history "
-                    + "WHERE version IN ('105.4','106','106.1','106.2') ORDER BY version")) {
+            try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '105.4'")) {
                 assertTrue(rs.next());
-                assertEquals("105.4", rs.getString("version"));
-                assertEquals(1, rs.getInt("success"));
+                assertEquals(0, rs.getInt(1), "過去番号のV105.4がFlyway historyへ記録されないこと");
+            }
+            try (ResultSet rs = st.executeQuery("SELECT version, success FROM flyway_schema_history "
+                    + "WHERE version IN ('106','106.1','106.2') ORDER BY version")) {
                 assertTrue(rs.next());
                 assertEquals("106", rs.getString("version"));
                 assertEquals(1, rs.getInt("success"));
@@ -102,6 +112,23 @@ class FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest {
                 assertTrue(rs.next());
                 assertEquals("106.2", rs.getString("version"));
                 assertEquals(1, rs.getInt("success"));
+            }
+        }
+    }
+
+    /** V106適用前のlegacy DBだけで運用者が実行するpreflight runbookを読み込む。 */
+    private void executePreflightRunbook(Statement st) throws Exception {
+        String runbook = Files.readString(
+                Path.of("sql", "runbook", "v106_legacy_freee_preflight.sql"), StandardCharsets.UTF_8);
+        for (String block : runbook.replace("DELIMITER $$", "")
+                .replace("DELIMITER ;", "").split("\\$\\$")) {
+            String executable = Arrays.stream(block.split("\\R"))
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("--"))
+                    .reduce("", (a, b) -> a + b + "\n").trim();
+            if (executable.startsWith("DROP PROCEDURE") || executable.startsWith("CREATE PROCEDURE")
+                    || executable.startsWith("CALL ")) {
+                st.execute(executable);
             }
         }
     }

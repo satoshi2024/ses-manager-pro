@@ -3,7 +3,7 @@
 -- V106/V106.1は適用済み環境のFlyway checksumを守るため変更しない。
 -- 旧V106.1が作成したlegal entity単位のUNIQUEを、G4の
 -- legal entity × freee product × company_id単位へ順方向に修復する。
--- V105.4 preflightの退避行およびV106.1 backupのcompany別行もここで復元する。
+-- Flyway外のlegacy preflight退避行およびV106.1 backupのcompany別行もここで復元する。
 
 DELIMITER $$
 
@@ -79,7 +79,7 @@ BEGIN
         DROP TEMPORARY TABLE __ses_v106_2_restore_ids;
     END IF;
 
-    -- V105.4がV106到達前に退避した複数companyのlegacy行を新connectionとして復元する。
+    -- V106到達前にrunbookが退避した複数companyのlegacy行を新connectionとして復元する。
     IF EXISTS (
         SELECT 1 FROM information_schema.tables
         WHERE table_schema = DATABASE()

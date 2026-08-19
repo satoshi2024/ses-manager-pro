@@ -16,6 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -364,6 +365,22 @@ class SpecDispatchConsistencyTest {
         assertTrue(conflicts.isEmpty(),
                 "予約番号が既に適用済みのMigrationと衝突しています（この指示どおりに実装すると全環境が起動不能）。"
                         + "実在最新はV" + latest + " です:\n  " + String.join("\n  ", conflicts));
+    }
+
+    /** S15 legacy preflightは通常Flyway locationへ置かず、過去番号のout-of-orderを発生させない。 */
+    @Test
+    void S15のlegacyPreflightがFlywayLocation外であること() throws Exception {
+        Path versionedPreflight = Path.of("src", "main", "resources", "db", "migration",
+                "V105_4__accounting_legacy_freee_preflight.sql");
+        Path runbook = Path.of("sql", "runbook", "v106_legacy_freee_preflight.sql");
+
+        assertFalse(Files.exists(versionedPreflight),
+                "V105.4 preflightを通常Flyway locationへ追加してはならない（V106.1適用済みDBでout-of-orderになる）");
+        assertTrue(Files.isRegularFile(runbook), "legacy preflight runbookが存在すること");
+        assertTrue(read(runbook).contains("Flyway外"), "runbookがFlyway外での事前実行契約を明記すること");
+        assertTrue(read(Path.of("src", "main", "resources", "application.yml"))
+                        .contains("out-of-order: false"),
+                "Flyway out-of-orderを明示的に無効化すること");
     }
 
     /** V59は永久欠番。どのspecも予約してはならない。 */
