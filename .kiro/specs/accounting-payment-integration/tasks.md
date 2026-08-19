@@ -118,3 +118,12 @@
   - **Objective**: 過去番号V105.4を通常Flyway locationから除外し、適用済みV106.1環境ではV106.2だけをpendingにする。V105.3相当legacyはFlyway開始前の明示runbookでpreflightする。
   - **Requirements**: R1.1、T095/R4-R1、過去migration追加禁止、Flyway out-of-order禁止、旧V106.1環境の無停止forward migration。
   - **Test/Demo**: `SpecDispatchConsistencyTest`/`MigrationScriptIntegrityTest` 37/37 PASS。旧V106.1 history（V105.4なし）→V106.2のみ、V105.3相当→runbook→V106→V106.1→V106.2、rollback、soft-delete後の再作成をMySQL 3/3 PASS。fresh/legacy schema smoke 3/3 PASS。historyにV105.4が残らないことを確認する。
+
+## 5. R6再Review対応タスク
+
+- [x] R6-R1. 公開済みV106.2 checksum復元と旧history validate回帰
+  - **Objective**: 前回公開Head `fe69dd3a` のV106.2をbyte-for-byteへ復元し、適用済みV106.2 historyから現artifactをvalidateできることを保証する。V106.2本体は今後変更せず、説明変更はspec/ledgerへ記録する。
+  - **Requirements**: R1.1、T095/R4-R1/R5-R1、platform migration不変条件、Flyway checksum維持。
+  - **Implementation guidance**: `V106_2__accounting_company_boundary_forward_repair.sql`を公開blobへ復元し、`MigrationScriptIntegrityTest`へ正規化UTF-8 SHA-256 guardを追加する。旧artifact相当のfilesystem Flyway locationはJava migration V74.3を明示登録し、V105.4を含まないV106.2 historyを再現する。
+  - **Test/Demo**: `MigrationScriptIntegrityTest` 28/28、`SpecDispatchConsistencyTest` 10/10、実MySQL `FlywayV106_2CompanyForwardRepairSmokeTest` 2/2を実行する。旧公開V106.2 historyからpending 0、checksum validate成功、追加migration 0、V105.4 history 0、V106.2 success 1件を確認する。
+  - **Rollback**: 実装commit `186b746c`をrevertする。V106.2適用済みDBはSQL本体を編集せず、checksum mismatch時は新migration追加ではなくartifactを公開blobへ戻す。
