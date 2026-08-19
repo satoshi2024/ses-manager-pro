@@ -92,7 +92,7 @@
   - **Requirements**: R1.3, R4.2, review issue R1-P1-03。
   - **Test/Demo**: 50ページfull、50ページ目short、途中API障害をProvider経由で確認する。
 
-- [ ] R4-R3. Mapping verify SQL scope direct regression
+- [x] R4-R3. Mapping verify SQL scope direct regression
   - **Objective**: mappingId＋current tenantをconnection joinした最初のSQLで解決し、取得後filterを除去する。
   - **Requirements**: R5.4、design §5.2、review issue R1-P1-06。
   - **Test/Demo**: 管理者の他tenant mapping list/save/verifyが全て404になることをSQL/MockMvcで確認する。

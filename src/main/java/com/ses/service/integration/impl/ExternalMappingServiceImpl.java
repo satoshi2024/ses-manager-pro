@@ -104,6 +104,36 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
     }
 
     @Override
+    @Transactional
+    public boolean verifyAndSnapshotMappingScoped(Long mappingId, String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        // R4-R3: mapping取得時点でconnection.tenant_idをJOINし、取得後のJava側filterに依存しない。
+        ExternalMapping mapping = baseMapper.selectByIdScopedToTenant(mappingId, effectiveTenant);
+        if (mapping == null) {
+            return false;
+        }
+        IntegrationConnection conn = connectionService.getByIdScoped(mapping.getConnectionId(), effectiveTenant, null);
+        if (conn == null) {
+            return false;
+        }
+
+        AccountingProvider provider = resolveProvider(conn.getProvider());
+        boolean verified = provider.verifyMaster(conn, mapping.getObjectType(), mapping.getExternalId(), mapping.getExternalCode());
+        if (!verified) {
+            throw new BusinessException(400, String.format(
+                    "外部マスタ照合に失敗しました。指定された外部ID '%s' は外部システム(%s)に存在しないか、事業所と一致しません (種別: %s)",
+                    mapping.getExternalId(), conn.getProvider(), mapping.getObjectType()));
+        }
+
+        String snapshot = String.format("{\"verified\":true,\"provider\":\"%s\",\"objectType\":\"%s\",\"externalId\":\"%s\",\"verifiedAt\":\"%s\"}",
+                conn.getProvider(), mapping.getObjectType(), mapping.getExternalId(), LocalDateTime.now());
+        mapping.setPayloadSnapshot(snapshot);
+        mapping.setVerifiedAt(LocalDateTime.now());
+        updateById(mapping);
+        return true;
+    }
+
+    @Override
     public void assertMappingVerified(Long connectionId, String objectType, String internalCode) {
         ExternalMapping mapping = getMapping(connectionId, objectType, internalCode);
         if (mapping == null) {

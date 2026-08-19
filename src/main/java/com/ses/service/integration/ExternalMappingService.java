@@ -27,6 +27,9 @@ public interface ExternalMappingService extends IService<ExternalMapping> {
      */
     boolean verifyAndSnapshotMapping(Long mappingId);
 
+    /** mappingIdと接続のtenantをjoinしたSQL境界で検証対象を取得する (R4-R3)。 */
+    boolean verifyAndSnapshotMappingScoped(Long mappingId, String tenantId);
+
     /**
      * 必要なマッピングがすべて登録・検証済みであることを確認する (R1.3)。
      * 欠落または verified_at IS NULL があれば BusinessException をスローする。

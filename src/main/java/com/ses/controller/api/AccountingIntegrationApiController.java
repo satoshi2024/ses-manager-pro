@@ -206,16 +206,12 @@ public class AccountingIntegrationApiController {
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> verifyMapping(@PathVariable("id") Long mappingId) {
         // R1-P1-06: 他tenantのマッピングは verify も不可 (404)
-        ExternalMapping m = mappingService.getById(mappingId);
-        if (m == null) {
+        // R4-R3: mappingId + current tenant をconnection JOIN付きの最初のSQLで解決する。
+        boolean verified = mappingService.verifyAndSnapshotMappingScoped(
+                mappingId, AccountingTenantContextHolder.getCurrentTenantId());
+        if (!verified) {
             return ApiResult.error(404, "マッピングが見つかりません");
         }
-        IntegrationConnection conn = connectionService.getByIdScoped(
-                m.getConnectionId(), AccountingTenantContextHolder.getCurrentTenantId(), null);
-        if (conn == null) {
-            return ApiResult.error(404, "マッピングが見つかりません");
-        }
-        mappingService.verifyAndSnapshotMapping(mappingId);
         return ApiResult.success(null);
     }
 

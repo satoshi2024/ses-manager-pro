@@ -513,6 +513,32 @@ class AccountingIntegrationApiAndPageTest {
 
         // 状態が変わっていないこと (DISCONNECTED へ遷移していない)
         assertThat(connectionService.getById(otherTenant.getId()).getStatus()).isEqualTo("CONNECTED");
+
+        ExternalMapping otherMapping = new ExternalMapping();
+        otherMapping.setConnectionId(otherTenant.getId());
+        otherMapping.setObjectType("CUSTOMER_PARTNER");
+        otherMapping.setInternalCode("ADMIN-CROSS-TENANT-MAPPING");
+        otherMapping.setExternalId("90001");
+        mappingService.saveOrUpdateMapping(otherMapping);
+
+        // 管理者でも他tenant mappingのlist/save/verifyは全てSQL境界で不可視/404。
+        mockMvc.perform(get("/api/accounting/mappings?connectionId=" + otherTenant.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+        ExternalMapping crossTenantSave = new ExternalMapping();
+        crossTenantSave.setConnectionId(otherTenant.getId());
+        crossTenantSave.setObjectType("CUSTOMER_PARTNER");
+        crossTenantSave.setInternalCode("ADMIN-CROSS-TENANT-SAVE");
+        crossTenantSave.setExternalId("90002");
+        mockMvc.perform(post("/api/accounting/mappings").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(crossTenantSave)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(post("/api/accounting/mappings/" + otherMapping.getId() + "/verify").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
     }
 
     private Long insertOrg(String code, String name, Long legalEntityId) {
