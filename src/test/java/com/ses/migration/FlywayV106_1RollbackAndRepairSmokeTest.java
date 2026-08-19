@@ -30,10 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>対象形状 (design.md §1.2 の 5形状契約):
  * <ul>
  *   <li>fresh V106 (V1 consolidated) への V106.1 適用前に runbook が SIGNAL で拒否されること</li>
- *   <li>legacy V106 -> V106.1 (NULL法人 active 重複2件の backfill / survivorship)</li>
+ *   <li>legacy V106 -> 旧V106.1 (NULL法人 active 重複2件の backfill / survivorship)</li>
  *   <li>各 partial 中断点 (追加列の一部だけが存在する形状・存在しない列はガードでスキップ) からの runbook rollback</li>
  *   <li>rollback 後の V106 期待形状完全一致 (全11列 DROP・旧 UNIQUE 復元・全行復元・backup 削除)</li>
- *   <li>flyway repair -> V106.1 再適用 (差分なし正常終了)</li>
+ *   <li>flyway repair -> 旧V106.1 再適用 (差分なし正常終了)</li>
  * </ul>
  * ロールバックは {@code sql/runbook/v106_1-rollback.sql} の実スクリプトを実行する。
  */
@@ -78,6 +78,7 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
         //    NULL 法人の active 行が複数存在し得る)
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
             st.execute("ALTER TABLE m_integration_connection DROP INDEX uk_int_conn");
+            st.execute("ALTER TABLE m_integration_connection DROP COLUMN external_company_key");
             st.execute("ALTER TABLE m_integration_connection DROP COLUMN active_slot");
             st.execute("ALTER TABLE m_integration_connection DROP COLUMN legal_entity_key");
             st.execute("ALTER TABLE m_integration_connection DROP COLUMN refresh_lease_expires_at");
@@ -137,7 +138,9 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
             for (String col : JOB_ADDED_COLUMNS) {
                 assertTrue(hasColumn(st, "t_integration_job", col), "job列 " + col + " が存在すること");
             }
-            assertEquals(Set.of("tenant_id", "legal_entity_key", "external_company_key", "provider", "product", "active_slot"),
+            assertFalse(hasColumn(st, "m_integration_connection", "external_company_key"),
+                    "旧V106.1はexternal_company_keyを追加しないこと");
+            assertEquals(Set.of("tenant_id", "legal_entity_key", "provider", "product", "active_slot"),
                     indexColumns(st, "m_integration_connection", "uk_int_conn"), "新UNIQUEの列構成");
         }
 
@@ -204,8 +207,8 @@ class FlywayV106_1RollbackAndRepairSmokeTest {
             for (String col : JOB_ADDED_COLUMNS) {
                 assertTrue(hasColumn(st, "t_integration_job", col), "再適用後にjob列 " + col + " が存在すること");
             }
-            assertEquals(Set.of("tenant_id", "legal_entity_key", "external_company_key", "provider", "product", "active_slot"),
-                    indexColumns(st, "m_integration_connection", "uk_int_conn"), "再適用後に新UNIQUEが存在すること");
+            assertEquals(Set.of("tenant_id", "legal_entity_key", "provider", "product", "active_slot"),
+                    indexColumns(st, "m_integration_connection", "uk_int_conn"), "再適用後に旧V106.1 UNIQUEが存在すること");
             try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM flyway_schema_history WHERE version = '106.1' AND success = 1")) {
                 assertTrue(rs.next());
                 assertEquals(1, rs.getInt(1), "再適用後に success=1 の 106.1 行があること");

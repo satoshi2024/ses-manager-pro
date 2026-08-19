@@ -4,8 +4,8 @@
 
 - **Spec**: `accounting-payment-integration` (S15)
 - **Wave**: Wave 3
-- **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）および `V106.1`（`V106_1__accounting_integration_snapshot_and_slot.sql` による forward repair）。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **FIXED_PENDING_REVIEW**（S15 Stage B 2次Review指摘 P1 7件を是正・直接回帰/L4クリーンで検証済み。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
+- **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）。適用済み `V106.1` はbyte-for-byte不変とし、historical V106到達前のlegacy退避を `V105.4`、旧V106.1適用済み環境のcompany境界修復を `V106.2` に分離した。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
+- **現行総合判定**: **FIXED_PENDING_REVIEW**（R4再Review P0/P1指摘のうちR4-R1を是正し、実MySQL direct regressionを通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
 - **Stage A SpecHead Review Head**: `e0d8a96f` / **SpecHead Base**: `f8b81e77`
 - **S15 独立再Review (FixHead `3ee44a9a`) 指摘**: P1 10件 + P2 1件 → 本Fixサイクルで全て是正し VERIFIED_CLOSED
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08 / 再Review 是正 (R1-P1-02..11, R1-P1-04, R4-P1-01, R4-P2-02)
@@ -24,6 +24,7 @@
 | **T099** | R3.1〜R3.4, R4.1, R4.2, design §4, §6, G9, platform-invariants §3.3 | `PurchaseExpensePaymentIntegrationService*`, `AccountingIntegrationApiController.java`, `PurchaseExpenseIntegrationTest.java` | `PurchaseExpenseIntegrationTest` 5/5 | 口座変更未承認時ブロック、仕入登録、決済情報照合(ID+金額+日付)、締め月保護 | — | — |
 | **T100** | R3.3, R4.1, R4.2, R4.4, design §5, §6, platform-invariants §3.3 | `AccountingReconciliationService*`, `MonthlyClosingServiceImpl.java`, `AccountingIntegrationApiController.java`, `integration.html`, `accounting-integration.js`, `AccountingReconciliationTest.java` | `AccountingReconciliationTest` 4/4, `MonthlyClosingServiceImplTest` 12/12 | MATCHED/INTERNAL_ONLY/AMOUNT_MISMATCH/EXTERNAL_ONLY分類、除外設定と締め可否、締めガード | — | — |
 | **T101** | 全 requirements, G4, platform-invariants §1〜§8 | `V106__accounting_payment_integration.sql`, `SpecDispatchConsistencyTest.java`, `AccountingIntegrationWorker.java`, `IntegrationJobServiceImpl.java`, `FreeeAccountingProvider.java`, `integration.html`, `messages*.properties`, `accounting-integration.js`, `design.md`, `tasks.md`, `review-ledger.md` | L4全量回帰 (`mvn test` 2366/2366 PASS, skip 0) | 全量回帰・障害耐性・暗号化・セキュリティ・ロール権限・マイグレーション整合性 | — | — |
+| **T095 / R4-R1** | R1.1, R4-T01, G4、Flyway checksum/repair契約 | `design.md`, `migration-matrix.md`, `tasks.md`, `V105_4__accounting_legacy_freee_preflight.sql`, `V106_2__accounting_company_boundary_forward_repair.sql`, `V106_1__accounting_integration_snapshot_and_slot.sql`（旧blob復元）, `sql/runbook/v106_2-rollback.sql`, historical/forward repair smoke tests, shard inventory | `FlywayV106_1RollbackAndRepairSmokeTest` 1/1、`FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest` 1/1、`FlywayV106_2CompanyForwardRepairSmokeTest` 1/1 PASS（MySQL 8） | V106/V106.1 checksum不変、V105.3相当multi-company upgrade、旧V106.1→V106.2 repair、soft-delete再作成、V106.2 rollbackを実MySQLで確認 | T095 commit/push前 | Fresh/partial/repair全組合せの最終CI GateはR4-R6、実freee契約はRelease Gate |
 
 ---
 

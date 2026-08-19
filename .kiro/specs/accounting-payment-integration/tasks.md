@@ -7,7 +7,7 @@
 > **既定解**: `customer-product-expansion-2026/platform-invariants.md`（特に§7 外部連携）を実装前に読む。
 > 時間/scope/状態/error分類の判断は `design.md` §6「決定表」を正とする。
 >
-> **Migration**: 本specの正式migrationは **V106**（consolidated baseline V1反映済み）および **V106.1** (`V106_1__accounting_integration_snapshot_and_slot.sql` による forward repair）。
+> **Migration**: 本specの正式migrationは **V106**（consolidated baseline V1反映済み）。適用済みV106.1はchecksum不変とし、V106到達前legacy preflightをV105.4、新しいcompany boundary forward repairをV106.2へ分離する。
 > `V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。V59は永久欠番。
 
 ---
@@ -79,3 +79,35 @@
   - **テスト要件**: L4全量回帰 (`mvn test` 2,381+ PASS, 0 fail, 0 error, 0 skip)、`scripts/verify-like-ci.ps1`（Fast Suite, MySQL Shards 1-3, Performance Suite, Backup Gate）全通過。
   - **Demo (CONDITIONAL PASS 条件)**: (1) 4母集団の月次照合完全一致と締め処理完了、(2) 管理者・マネージャーでの desktop/390px 画面操作と認可境界、(3) 401トークン失効からの自動復旧と障害耐性、(4) CI 4Gate の全グリーン通過ログを提示。
   - **未実行環境・本番前 Release Gate (`GATE-S15-FREEE-PROD`)**: 実 freee 契約プラン、本番 company_id、本番 OAuth クライアント認証情報、本番実マスタID への接続は本番前条件として明記し、CI 上での完了判定は **`CONDITIONAL PASS`** とする。
+
+## 3. R4再Review対応タスク（Round 4差分）
+
+- [x] R4-R1. Migration checksum不変・historical legacy multi-company経路
+  - **Objective**: 適用済みV106/V106.1を変更せず、V105.4 preflightとV106.2 forward repairを分離する。
+  - **Requirements**: R1.1, R4-T01, G4、Flyway checksum/repair契約。
+  - **Test/Demo**: historical V105.3相当→latest、旧V106.1適用済み→V106.2、fresh、partial、rollback、`external_company_key`を含むsoft-delete再作成を実MySQLで確認する。
+
+- [ ] R4-R2. Provider page-cap direct regression
+  - **Objective**: 50ページfullの未知結果照合で完全一致0/1/複数と50ページ目shortをfail-closed検証する。
+  - **Requirements**: R1.3, R4.2, review issue R1-P1-03。
+  - **Test/Demo**: 50ページfull、50ページ目short、途中API障害をProvider経由で確認する。
+
+- [ ] R4-R3. Mapping verify SQL scope direct regression
+  - **Objective**: mappingId＋current tenantをconnection joinした最初のSQLで解決し、取得後filterを除去する。
+  - **Requirements**: R5.4、design §5.2、review issue R1-P1-06。
+  - **Test/Demo**: 管理者の他tenant mapping list/save/verifyが全て404になることをSQL/MockMvcで確認する。
+
+- [ ] R4-R4. Payment-date母集団 direct regression
+  - **Objective**: deal発生日の固定±1月を廃止し、payment date基準で複数月前dealの当月入金を取得する。
+  - **Requirements**: R5.1, R5.2、design §6.2、review issue R1-P1-09。
+  - **Test/Demo**: 前月・2か月前・複数月前deal、月初/月末、50ページ上限を確認する。
+
+- [ ] R4-R5. Worker最外層logger direct regression
+  - **Objective**: `processDueJobs()`経由のdispatch例外で固定error code/job safe fieldsだけをloggerへ渡す。
+  - **Requirements**: R4.5、design §7、review issue R1-P1-10。
+  - **Test/Demo**: 全job種別のdispatch例外で機密文字列・throwable・stack traceがlogger出力にないことを確認する。
+
+- [ ] R4-R6. Review Packet・CI Gate・ledger収束
+  - **Objective**: 同一clean/pushed HeadでFast/MySQL全shard/Performance/Backupを実行し、tasks/review-ledger/中央ledgerを同期する。
+  - **Requirements**: R4-T08、handbook §8/§12。
+  - **Test/Demo**: `verify-like-ci.ps1`、Head/origin一致、clean status、Review Packet整合を確認する。
