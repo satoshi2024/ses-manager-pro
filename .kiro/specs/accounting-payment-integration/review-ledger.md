@@ -88,6 +88,12 @@ S15 Stage B 2次独立再Review指摘（P1 7件：R1-P1-03/06/08/09/10/11, R4-P1
 **実行証跡**: direct regression 92/92 PASS、**L4 fast `mvn test` 2427/2427 PASS（クリーン・Docker起動・単一実行・skip 0）**、VerifyLikeCiPowerShellCompatibilityTest 3/3 PASS。
 **未達（環境要因・S15と無関係）**: MySQL shards gate は既存 `FlywayV102_4FreeeCompanyBoundarySmokeTest`（migration変更なし・V106のfreee/payroll backfill重複）が1件失敗。Performance/Backup gate は環境不調で未実行。commit `908c9970`。
 
+## 4.6 R4再Review fix delta（今回のtask完了記録）
+
+| Task | Requirements | 変更file | Test | Demo | Commit | Risk |
+|---|---|---|---|---|---|---|
+| **T096 / R4-R2** | R1.3, R4.2、review issue R1-P1-03 | `src/test/java/com/ses/service/accounting/FreeeAccountingProviderTest.java` | `FreeeAccountingProviderTest` 26/26 PASS | Provider経由で50ページfullの完全一致0/1/複数を全走査しpage-cap fail-closed、50ページ目shortの唯一一致、途中API障害を確認 | T096 commit/push前 | 実freee契約の最終確認はR4-R6/GATE-S15-FREEE-PROD |
+
 ## 6. 未検証環境・本番前条件 (Release Gate)
 
 - **`GATE-S15-FREEE-PROD`**: 実 freee 契約プラン、本番 company_id、本番 OAuth クライアント認証情報、本番実マスタID への接続は本番前条件として分離管理。CI 上での完了判定は **`CONDITIONAL PASS`**。

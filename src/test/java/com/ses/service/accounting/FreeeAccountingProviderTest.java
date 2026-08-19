@@ -21,6 +21,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
@@ -437,6 +438,140 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getExternalId()).isEqualTo("998877");
         assertThat(result.getErrorMessageSafe()).contains("タイムアウト後に外部照合により取引作成を確認");
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 50ページfull・完全一致なしはpage-cap fail-closed")
+    void unknownOutcome_pageCap50Full_noExactMatch_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-NONE", 894L);
+        expectDealCreateTimeout();
+        expectFullDealPages("INV-PAGECAP-NONE", 0);
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 50ページfull・完全一致1件でもpage-cap未確定")
+    void unknownOutcome_pageCap50Full_oneExactMatch_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-ONE", 895L);
+        expectDealCreateTimeout();
+        expectFullDealPages("INV-PAGECAP-ONE", 1);
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 50ページfull・完全一致複数件はpage-cap fail-closed")
+    void unknownOutcome_pageCap50Full_multipleExactMatches_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-MULTI", 896L);
+        expectDealCreateTimeout();
+        expectFullDealPages("INV-PAGECAP-MULTI", 2);
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 50ページ目short・完全一致1件は照合成功")
+    void unknownOutcome_page50Short_oneExactMatch_succeeds() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-SHORT", 897L);
+        expectDealCreateTimeout();
+        expectFullDealPagesExceptLast("INV-PAGECAP-SHORT");
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=4900"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deals\": [{\"id\": 799999, \"ref_number\": \"INV-PAGECAP-SHORT\", \"amount\": 500000, \"company_id\": 99999}]}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("799999");
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 走査途中のAPI障害はretryable fail-closed")
+    void unknownOutcome_midPaginationApiFailure_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-PAGECAP-ERROR", 898L);
+        expectDealCreateTimeout();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(fullDealPage("INV-PAGECAP-ERROR", 0, 0), MediaType.APPLICATION_JSON));
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException(
+                            "Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    private CanonicalSalesInvoice timeoutInvoice(String invoiceNo, long invoiceId) {
+        return CanonicalSalesInvoice.builder()
+                .invoiceId(invoiceId)
+                .invoiceNo(invoiceNo)
+                .total(new BigDecimal("500000"))
+                .build();
+    }
+
+    private void expectDealCreateTimeout() {
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException(
+                            "Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+    }
+
+    private void expectFullDealPages(String refNumber, int exactMatchCount) {
+        for (int page = 0; page < 50; page++) {
+            String body = fullDealPage(refNumber, page, exactMatchCount);
+            mockServer.expect(ExpectedCount.once(), requestTo(
+                            "https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=" + (page * 100)))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+        }
+    }
+
+    private void expectFullDealPagesExceptLast(String refNumber) {
+        for (int page = 0; page < 49; page++) {
+            mockServer.expect(ExpectedCount.once(), requestTo(
+                            "https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=" + (page * 100)))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess(fullDealPage(refNumber, page, 0), MediaType.APPLICATION_JSON));
+        }
+    }
+
+    private String fullDealPage(String refNumber, int page, int exactMatchCount) {
+        StringBuilder deals = new StringBuilder("{\"deals\": [");
+        int matchStart = 1000 + (page * 100);
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                deals.append(',');
+            }
+            boolean exact = page == 49 && i >= 100 - exactMatchCount;
+            deals.append("{\"id\": ").append(matchStart + i)
+                    .append(", \"ref_number\": \"")
+                    .append(exact ? refNumber : "OTHER-").append(exact ? "" : page + "-" + i)
+                    .append("\", \"amount\": 500000, \"company_id\": 99999}");
+        }
+        return deals.append("]}").toString();
     }
 
     @Test

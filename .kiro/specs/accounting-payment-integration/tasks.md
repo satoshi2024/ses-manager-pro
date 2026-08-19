@@ -87,7 +87,7 @@
   - **Requirements**: R1.1, R4-T01, G4、Flyway checksum/repair契約。
   - **Test/Demo**: historical V105.3相当→latest、旧V106.1適用済み→V106.2、fresh、partial、rollback、`external_company_key`を含むsoft-delete再作成を実MySQLで確認する。
 
-- [ ] R4-R2. Provider page-cap direct regression
+- [x] R4-R2. Provider page-cap direct regression
   - **Objective**: 50ページfullの未知結果照合で完全一致0/1/複数と50ページ目shortをfail-closed検証する。
   - **Requirements**: R1.3, R4.2, review issue R1-P1-03。
   - **Test/Demo**: 50ページfull、50ページ目short、途中API障害をProvider経由で確認する。
