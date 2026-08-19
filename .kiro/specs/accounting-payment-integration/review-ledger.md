@@ -4,10 +4,10 @@
 
 - **Spec**: `accounting-payment-integration` (S15)
 - **Wave**: Wave 3
-- **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）。適用済み `V106.1` はbyte-for-byte不変とし、historical V106到達前のlegacy退避を `V105.4`、旧V106.1適用済み環境のcompany境界修復を `V106.2` に分離した。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **FIXED_PENDING_REVIEW**（R4再ReviewのR4-R1〜R4-R5を是正し、実MySQL direct regressionとM Gateを通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
+- **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）。適用済み `V106.1` はbyte-for-byte不変とし、通常Flywayは`V106`→`V106.1`→`V106.2`のみとする。V106到達前のlegacy退避はFlyway外の`sql/runbook/v106_legacy_freee_preflight.sql`、旧V106.1適用済み環境のcompany境界修復は`V106.2`へ分離した。過去番号V105.4は作成しない。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
+- **現行総合判定**: **FIXED_PENDING_REVIEW**（R5 P0のV105.4 out-of-order経路を撤去し、静的37/37、MySQL 3/3、fresh/legacy schema 3/3を通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
 - **Stage A SpecHead Review Head**: `e0d8a96f` / **SpecHead Base**: `f8b81e77`
-- **S15 Independent Re-Review R4 (Base `83f128f6` → FixHead `7219fd2a`)**: P0=1 / P1=5 / P2=0、総合FAIL。R4-R1〜R4-R5とM Gateは本実装Headで是正・完了したが、独立再Review待ちであり、S16はBLOCKED。
+- **S15 Independent Re-Review R5 (Base `7219fd2a` → FixHead `fe69dd3a`)**: P0=1 / P1=0 / P2=0、総合FAIL。R4のP1×5はVERIFIED_CLOSED。V105.4の過去番号追加によるout-of-order P0を本Fixで是正したが、独立再Review待ちであり、S16はBLOCKED。
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08 / 再Review 是正 (R1-P1-02..11, R1-P1-04, R4-P1-01, R4-P2-02)
 
 ---
@@ -24,7 +24,7 @@
 | **T099** | R3.1〜R3.4, R4.1, R4.2, design §4, §6, G9, platform-invariants §3.3 | `PurchaseExpensePaymentIntegrationService*`, `AccountingIntegrationApiController.java`, `PurchaseExpenseIntegrationTest.java` | `PurchaseExpenseIntegrationTest` 5/5 | 口座変更未承認時ブロック、仕入登録、決済情報照合(ID+金額+日付)、締め月保護 | — | — |
 | **T100** | R3.3, R4.1, R4.2, R4.4, design §5, §6, platform-invariants §3.3 | `AccountingReconciliationService*`, `MonthlyClosingServiceImpl.java`, `AccountingIntegrationApiController.java`, `integration.html`, `accounting-integration.js`, `AccountingReconciliationTest.java` | `AccountingReconciliationTest` 4/4, `MonthlyClosingServiceImplTest` 12/12 | MATCHED/INTERNAL_ONLY/AMOUNT_MISMATCH/EXTERNAL_ONLY分類、除外設定と締め可否、締めガード | — | — |
 | **T101** | 全 requirements, G4, platform-invariants §1〜§8 | `V106__accounting_payment_integration.sql`, `SpecDispatchConsistencyTest.java`, `AccountingIntegrationWorker.java`, `IntegrationJobServiceImpl.java`, `FreeeAccountingProvider.java`, `integration.html`, `messages*.properties`, `accounting-integration.js`, `design.md`, `tasks.md`, `review-ledger.md` | L4全量回帰 (`mvn test` 2366/2366 PASS, skip 0) | 全量回帰・障害耐性・暗号化・セキュリティ・ロール権限・マイグレーション整合性 | — | — |
-| **T095 / R4-R1** | R1.1, R4-T01, G4、Flyway checksum/repair契約 | `design.md`, `migration-matrix.md`, `tasks.md`, `V105_4__accounting_legacy_freee_preflight.sql`, `V106_2__accounting_company_boundary_forward_repair.sql`, `V106_1__accounting_integration_snapshot_and_slot.sql`（旧blob復元）, `sql/runbook/v106_1-rollback.sql`, `sql/runbook/v106_2-rollback.sql`, historical/forward repair smoke tests, shard inventory | `FlywayV106_1RollbackAndRepairSmokeTest` 1/1、`FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest` 1/1、`FlywayV106_2CompanyForwardRepairSmokeTest` 1/1 PASS（MySQL 8） | V106/V106.1 checksum不変、V105.3相当multi-company upgrade、旧V106.1→V106.2 repair、soft-delete再作成、V106.2 rollbackを実MySQLで確認 | `91080cc7` | 実freee契約はRelease Gate。最終CI GateはR4-R6で確認 |
+| **T095 / R4-R1** | R1.1, R4-T01, G4、Flyway checksum/repair契約 | `design.md`, `migration-matrix.md`, `tasks.md`, `sql/runbook/v106_legacy_freee_preflight.sql`, `V106_2__accounting_company_boundary_forward_repair.sql`, `V106_1__accounting_integration_snapshot_and_slot.sql`（旧blob復元）, `sql/runbook/v106_1-rollback.sql`, `sql/runbook/v106_2-rollback.sql`, historical/forward repair smoke tests, `application.yml`, ordering/integrity tests | `SpecDispatchConsistencyTest` + `MigrationScriptIntegrityTest` 37/37、`FlywayV106_1RollbackAndRepairSmokeTest` + `FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest` + `FlywayV106_2CompanyForwardRepairSmokeTest` 3/3、`FlywaySelfServiceSchemaSmokeTest` 3/3 PASS（MySQL 8） | 旧V106.1 history（V105.4なし）からV106.2のみ適用、V105.3相当はFlyway前runbook→V106→V106.1→V106.2、fresh/legacy、rollback、soft-delete再作成を確認。全historyにV105.4を記録しない | `91080cc7`（既存checksum/repair）＋`d6b8c307`（R5-R1 fix） | 実freee契約はRelease Gate。独立R5再Review待ち |
 
 ---
 
@@ -66,7 +66,7 @@ S15 Stage B 初回独立再Reviewの是正履歴。以下は当時の記録で�
 
 - **Base commit**: `3ee44a9a` (S15 Stage B 前回 FixHead)
 - **Fix Head**: 本サイクルの commit (下記 Commit 欄)
-- **Rollback 手順**: 本変更はfeatureフラグなしのロジック修正。`git revert <fix head>` でbaseへ復帰。今回のmigration経路は`V105.4`/`V106.2`のforward repairとして分離し、適用済み`V106`/`V106.1`は不変。V106.1適用済み環境のロールバックは`sql/runbook/v106_1-rollback.sql`、V106.2修復経路のロールバックは`sql/runbook/v106_2-rollback.sql`を実行する。
+- **Rollback 手順**: `V106`/`V106.1`は変更しない。R5-R1のコード・runbook・テスト差分は実装commit単位で`git revert`する。V106.1適用済み環境のロールバックは`sql/runbook/v106_1-rollback.sql`、V106.2修復経路のロールバックは`sql/runbook/v106_2-rollback.sql`を実行する。legacy preflightはFlyway historyを変更しないため、未実行legacy DBはrunbook適用前の状態へDBバックアップから戻す。
 
 ---
 
@@ -110,6 +110,14 @@ S15 Stage B 2次独立再Review指摘（P1 7件：R1-P1-03/06/08/09/10/11, R4-P1
 - Direct regression: T095 MySQL 3/3、T096 Provider 28/28、T097 API 11/11、T100 reconciliation 15/15 + Provider 28/28、T101 Worker 6/6。
 - Review開始条件: 最終push済みHeadと`origin/main`が一致し、tracked worktreeがcleanであること。既存のS15外untracked 4群は無関係なためReview Packetへ取り込まず保持する。
 - Independent Review合格前は`VERIFIED_CLOSED`へ更新せず、中央ledger上もS16を解放しない。
+
+## 4.8 R5再Review P0 fix（V105.4 out-of-order撤去）
+
+| Task | Requirements | 変更file | Test | Demo | Commit | Risk |
+|---|---|---|---|---|---|---|
+| **R5-R1** | R1.1、T095/R4-R1、過去migration追加禁止、Flyway out-of-order禁止 | `src/main/resources/db/migration/V105_4__accounting_legacy_freee_preflight.sql`削除、`sql/runbook/v106_legacy_freee_preflight.sql`追加、`application.yml`、`V106_2__accounting_company_boundary_forward_repair.sql`、migration matrix/design/tasks、historical/forward smoke、ordering/integrity test | Static 37/37、MySQL migration 3/3、fresh/legacy schema 3/3。旧V106.1 historyはV106.2のみ1件適用、V105.4 history 0件 | V105.3相当legacyでFlyway前runbookを実行後にV106→V106.1→V106.2、旧V106.1環境でV106.2のみ、rollback/soft-delete再作成を確認 | `d6b8c307` | 独立R5再Review待ち。実freee契約、実2 JVM 401競合はRelease Gate。S16はBLOCKED |
+
+R5再Reviewの入力は前回Review `Base 7219fd2a → FixHead fe69dd3a`。本Fixでは`V105.4`をFlyway locationへ戻さず、`flyway_schema_history`に過去versionを追加しない経路だけを残した。
 
 ## 6. 未検証環境・本番前条件 (Release Gate)
 
