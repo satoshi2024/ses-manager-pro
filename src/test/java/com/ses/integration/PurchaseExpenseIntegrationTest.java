@@ -1,4 +1,4 @@
-﻿package com.ses.integration;
+package com.ses.integration;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.accounting.IntegrationTokensDto;
@@ -541,6 +541,59 @@ class PurchaseExpenseIntegrationTest {
         assertThat(updatedPayment.getStatus()).isEqualTo("支払済");
     }
 
+    @Test
+    @DisplayName("実決済日欠落: payments[].dateが無い場合はissue_date/現在日付へ代用せずPAYMENT_DATE_MISSINGで拒否 (R1-P1-08)")
+    void paymentWorker_missingPaymentDate_rejected() throws Exception {
+        String payload = "{\"bpPaymentId\":" + bpPayment.getId() + ",\"externalDealId\":\"66611\",\"expectedAmount\":800000}";
+        String hash = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        IntegrationJob syncJob = jobService.createJob(connection.getId(), "PAYMENT_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "PAY-PDATE-NULL-1", hash, payload,
+                connection.getTenantId(), connection.getLegalEntityId(), null);
+
+        // ケース1: payments[] に date が無い (deal.issue_date はあるが代用しない)
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/66611?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 66611, \"issue_date\": \"2026-08-25\", \"status\": \"settled\", \"payments\": [{\"id\": 6601, \"amount\": 800000}]}}", MediaType.APPLICATION_JSON));
+        purchaseIntegrationService.processPaymentSyncJob(syncJob.getId());
+        IntegrationJob after = jobService.getById(syncJob.getId());
+        assertThat(after.getStatus()).isEqualTo("FAILED");
+        assertThat(after.getErrorCode()).isEqualTo("PAYMENT_DATE_MISSING");
+        assertThat(bpPaymentMapper.selectById(bpPayment.getId()).getStatus()).isEqualTo("未払");
+
+        // ケース2: payments[] 自体が無い (deal.status=settled でも date 不明)
+        mockServer.reset();
+        String payload2 = "{\"bpPaymentId\":" + bpPayment.getId() + ",\"externalDealId\":\"66612\",\"expectedAmount\":800000}";
+        String hash2 = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(payload2.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        IntegrationJob syncJob2 = jobService.createJob(connection.getId(), "PAYMENT_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "PAY-PDATE-NULL-2", hash2, payload2,
+                connection.getTenantId(), connection.getLegalEntityId(), null);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/66612?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 66612, \"amount\": 800000, \"status\": \"settled\"}}", MediaType.APPLICATION_JSON));
+        purchaseIntegrationService.processPaymentSyncJob(syncJob2.getId());
+        IntegrationJob after2 = jobService.getById(syncJob2.getId());
+        assertThat(after2.getStatus()).isEqualTo("FAILED");
+        assertThat(after2.getErrorCode()).isEqualTo("PAYMENT_DATE_MISSING");
+        assertThat(bpPaymentMapper.selectById(bpPayment.getId()).getStatus()).isEqualTo("未払");
+
+        // ケース3: 正常な決済日 (payments[].date あり) -> SUCCEEDED で 支払済
+        mockServer.reset();
+        String payload3 = "{\"bpPaymentId\":" + bpPayment.getId() + ",\"externalDealId\":\"66613\",\"expectedAmount\":800000}";
+        String hash3 = java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(payload3.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        IntegrationJob syncJob3 = jobService.createJob(connection.getId(), "PAYMENT_SYNC", "BP_PAYMENT",
+                bpPayment.getId(), "PAY-PDATE-OK-3", hash3, payload3,
+                connection.getTenantId(), connection.getLegalEntityId(), null);
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals/66613?company_id=99001"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"deal\": {\"id\": 66613, \"status\": \"settled\", \"payments\": [{\"id\": 6603, \"date\": \"2026-08-25\", \"amount\": 800000}]}}", MediaType.APPLICATION_JSON));
+        purchaseIntegrationService.processPaymentSyncJob(syncJob3.getId());
+        IntegrationJob after3 = jobService.getById(syncJob3.getId());
+        assertThat(after3.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(bpPaymentMapper.selectById(bpPayment.getId()).getStatus()).isEqualTo("支払済");
+    }
     @Test
     @DisplayName("テナント別タイムゾーン解決とWorkerコンテキスト解除・NULL金額/日付のfail-closed (R1-P1-08)")
     void tenantTimezoneResolution_contextClearedAfterWorker_nullRejected() {

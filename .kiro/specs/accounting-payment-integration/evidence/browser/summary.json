@@ -1,6 +1,6 @@
 {
-  "runId" : "browser-demo-20260819005820",
-  "baseUrl" : "http://localhost:53632",
+  "runId" : "browser-demo-20260819113528",
+  "baseUrl" : "http://localhost:60984",
   "connectionId" : 1,
   "jobId" : 1,
   "managerJobId" : 5,
@@ -30,12 +30,19 @@
     "consoleErrors" : 0,
     "domAssertPass" : true
   },
-  "managerBoundary" : {
+  "managerBoundary-desktop" : {
     "managerJobVisible" : true,
     "adminOnlyJobHidden" : true,
     "closingBadge" : "要確認 (締不可)",
     "consoleErrors" : 0,
     "boundaryScreenshot" : "desktop-06-manager-boundary.png"
+  },
+  "managerBoundary-mobile390" : {
+    "managerJobVisible" : true,
+    "adminOnlyJobHidden" : true,
+    "closingBadge" : "要確認 (締不可)",
+    "consoleErrors" : 0,
+    "boundaryScreenshot" : "mobile390-06-manager-boundary.png"
   },
   "deals401Count" : 1,
   "tokenRefreshCount" : 1

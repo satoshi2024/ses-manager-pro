@@ -420,6 +420,122 @@ public class AccountingReconciliationTest {
         assertThat(summary.isReadyForClosing()).isFalse();
     }
 
+    @Test
+    @DisplayName("入金1:1: 分割入金(内部2件 vs 外部payment単位2件)が {dealId}:{paymentId} で一意に照合される (R1-P1-09)")
+    void reconciliation_paymentUnit_splitInto2_matched() {
+        String testMonth = "2026-09";
+        Invoice invA = createInvoice("2026-10", "INV-PAY-1A", new BigDecimal("300000"));
+        Invoice invB = createInvoice("2026-10", "INV-PAY-1B", new BigDecimal("200000"));
+        createPayment(invA.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("300000"), BigDecimal.ZERO);
+        createPayment(invB.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("200000"), BigDecimal.ZERO);
+
+        String deals = "{\"deals\": ["
+                + "{\"id\": 30001, \"amount\": 300000, \"status\": \"settled\", \"payments\": [{\"id\": 7001, \"date\": \"2026-09-10\", \"amount\": 300000}]},"
+                + "{\"id\": 30002, \"amount\": 200000, \"status\": \"settled\", \"payments\": [{\"id\": 7002, \"date\": \"2026-09-10\", \"amount\": 200000}]}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getMatchedCount()).isEqualTo(2);
+        assertThat(summary.getExternalOnlyCount()).isEqualTo(0);
+        assertThat(summary.getInternalOnlyCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("入金1:1: 同額だが別日付の外部決済は日付一致の1件のみ消費され、他はEXTERNAL_ONLY (R1-P1-09)")
+    void reconciliation_paymentUnit_sameAmountDifferentDate_consumedByDate() {
+        String testMonth = "2026-09";
+        Invoice inv = createInvoice("2026-10", "INV-PAY-2", new BigDecimal("500000"));
+        createPayment(inv.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("500000"), BigDecimal.ZERO);
+
+        String deals = "{\"deals\": ["
+                + "{\"id\": 31001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7101, \"date\": \"2026-09-10\", \"amount\": 500000}]},"
+                + "{\"id\": 31002, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7102, \"date\": \"2026-09-11\", \"amount\": 500000}]}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getMatchedCount()).isEqualTo(1);
+        assertThat(summary.getExternalOnlyCount()).isEqualTo(1); // 別日付の外部決済は未消費
+    }
+
+    @Test
+    @DisplayName("入金fail-closed: 外部決済の date が欠落している場合は照合対象にせず INTERNAL_ONLY (R1-P1-09)")
+    void reconciliation_paymentUnit_missingPaymentDate_internalOnly() {
+        String testMonth = "2026-09";
+        Invoice inv = createInvoice("2026-10", "INV-PAY-3", new BigDecimal("500000"));
+        createPayment(inv.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("500000"), BigDecimal.ZERO);
+
+        // 金額は一致するが payment に date がない (issue_date は deal 側にある)
+        String deals = "{\"deals\": ["
+                + "{\"id\": 32001, \"amount\": 500000, \"issue_date\": \"2026-09-10\", \"status\": \"settled\", \"payments\": [{\"id\": 7201, \"amount\": 500000}]}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getMatchedCount()).isEqualTo(0);
+        assertThat(summary.getInternalOnlyCount()).isEqualTo(1); // 決済日不明のため照合不能 (fail-closed)
+        assertThat(summary.isReadyForClosing()).isFalse();
+    }
+
+    @Test
+    @DisplayName("入金fail-closed: 同日同額の外部決済が複数ある場合はPAYMENT_AMBIGUOUSで締め不可 (R1-P1-09)")
+    void reconciliation_paymentUnit_sameDaySameAmount_ambiguous() {
+        String testMonth = "2026-09";
+        Invoice inv = createInvoice("2026-10", "INV-PAY-4", new BigDecimal("500000"));
+        createPayment(inv.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("500000"), BigDecimal.ZERO);
+
+        String deals = "{\"deals\": ["
+                + "{\"id\": 33001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7301, \"date\": \"2026-09-10\", \"amount\": 500000}]},"
+                + "{\"id\": 33002, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7302, \"date\": \"2026-09-10\", \"amount\": 500000}]}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getAmountMismatchCount()).isEqualTo(1); // PAYMENT_AMBIGUOUS -> AMOUNT_MISMATCH
+        assertThat(summary.isReadyForClosing()).isFalse();
+    }
+
+    @Test
+    @DisplayName("入金1:1: 同一外部決済が複数の内部入金へ二重消費されない (R1-P1-09)")
+    void reconciliation_paymentUnit_noDoubleConsumption() {
+        String testMonth = "2026-09";
+        Invoice invA = createInvoice("2026-10", "INV-PAY-5A", new BigDecimal("500000"));
+        Invoice invB = createInvoice("2026-10", "INV-PAY-5B", new BigDecimal("500000"));
+        createPayment(invA.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("500000"), BigDecimal.ZERO);
+        createPayment(invB.getId(), LocalDate.of(2026, 9, 10), new BigDecimal("500000"), BigDecimal.ZERO);
+
+        // 外部決済は1件のみ
+        String deals = "{\"deals\": ["
+                + "{\"id\": 34001, \"amount\": 500000, \"status\": \"settled\", \"payments\": [{\"id\": 7401, \"date\": \"2026-09-10\", \"amount\": 500000}]}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99001&start_issue_date=2026-09-01&end_issue_date=2026-09-30&status=settled&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(deals, MediaType.APPLICATION_JSON));
+
+        AccountingReconciliationSummaryDto summary = reconciliationService.reconcileMonth(testMonth);
+        mockServer.verify();
+
+        assertThat(summary.getMatchedCount()).isEqualTo(1); // 1件のみ消費
+        assertThat(summary.getInternalOnlyCount()).isEqualTo(1); // 2件目は照合不能 (二重消費なし)
+    }
+
     private Invoice createInvoice(String billingMonth, String invoiceNo, BigDecimal total) {
         Invoice invoice = new Invoice();
         invoice.setBillingMonth(billingMonth);
@@ -433,5 +549,13 @@ public class AccountingReconciliationTest {
         invoice.setTaxRate(new BigDecimal("0.100"));
         invoiceMapper.insert(invoice);
         return invoice;
+    }
+    private void createPayment(Long invoiceId, LocalDate paidDate, BigDecimal amount, BigDecimal fee) {
+        InvoicePayment ip = new InvoicePayment();
+        ip.setInvoiceId(invoiceId);
+        ip.setPaidDate(paidDate);
+        ip.setAmount(amount);
+        ip.setFee(fee);
+        invoicePaymentMapper.insert(ip);
     }
 }

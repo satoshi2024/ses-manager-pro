@@ -66,7 +66,8 @@ public interface IntegrationConnectionService extends IService<IntegrationConnec
     List<IntegrationConnection> listConnectionsByLegalEntities(String tenantId, java.util.Set<Long> allowedLegalEntityIds);
 
     /**
-     * 許可法人集合に限定して接続を1件取得する (R1-P1-06)。権限外・不存在は null。
+     * tenant と許可法人集合に限定して接続を1件取得する (R1-P1-06)。権限外・不存在は null。
+     * allowedLegalEntityIds が null の場合は tenant のみで判定 (管理者)。空集合は 0 件。
      */
-    IntegrationConnection getByIdScoped(Long connectionId, java.util.Set<Long> allowedLegalEntityIds);
+    IntegrationConnection getByIdScoped(Long connectionId, String tenantId, java.util.Set<Long> allowedLegalEntityIds);
 }

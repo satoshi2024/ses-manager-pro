@@ -587,6 +587,101 @@ class FreeeAccountingProviderTest {
     }
 
     @Test
+    @DisplayName("タイムアウト未知結果照合: 同一ページ内でref_number不一致行より後方の完全一致を特定する (R1-P1-03)")
+    void unknownOutcome_samePage_mismatchThenExactMatch_succeeds() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(891L)
+                .invoiceNo("INV-SAMEPAGE-CONFLICT")
+                .total(new BigDecimal("500000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+        // 同一ページ: 先に金額不一致行、後方に完全一致行
+        String page0 = "{\"deals\": ["
+                + "{\"id\": 61001, \"ref_number\": \"INV-SAMEPAGE-CONFLICT\", \"amount\": 499999, \"company_id\": 99999},"
+                + "{\"id\": 61002, \"ref_number\": \"INV-SAMEPAGE-CONFLICT\", \"amount\": 500000, \"company_id\": 99999}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("61002");
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: ページ跨ぎで先行ページの不一致を継続走査し後続の完全一致を特定する (R1-P1-03)")
+    void unknownOutcome_pageCross_mismatchThenExactMatch_succeeds() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(892L)
+                .invoiceNo("INV-PAGECROSS-CONFLICT")
+                .total(new BigDecimal("500000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+        // Page 0: 満ページ (100件)。99件は他ref + 1件は当該refの金額不一致
+        StringBuilder page0 = new StringBuilder("{\"deals\": [");
+        for (int i = 0; i < 99; i++) {
+            if (i > 0) page0.append(",");
+            page0.append("{\"id\": ").append(2000 + i).append(", \"ref_number\": \"OTHER-").append(i).append("\", \"amount\": 10000, \"company_id\": 99999}");
+        }
+        page0.append(",{\"id\": 62001, \"ref_number\": \"INV-PAGECROSS-CONFLICT\", \"amount\": 499999, \"company_id\": 99999}");
+        page0.append("]}");
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0.toString(), MediaType.APPLICATION_JSON));
+        // Page 1: 完全一致
+        String page1 = "{\"deals\": [{\"id\": 62002, \"ref_number\": \"INV-PAGECROSS-CONFLICT\", \"amount\": 500000, \"company_id\": 99999}]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page1, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+        mockServer.verify();
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getExternalId()).isEqualTo("62002");
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 完全一致が複数存在する場合は曖昧としてfail-closed (R1-P1-03)")
+    void unknownOutcome_multipleExactMatches_failClosed() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(893L)
+                .invoiceNo("INV-MULTI-EXACT")
+                .total(new BigDecimal("500000"))
+                .build();
+
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(request -> {
+                    throw new org.springframework.web.client.ResourceAccessException("Read timed out", new java.net.SocketTimeoutException("Read timed out"));
+                });
+        // 同一refで完全一致2件 (二重登録の疑い) -> 曖昧
+        String page0 = "{\"deals\": ["
+                + "{\"id\": 63001, \"ref_number\": \"INV-MULTI-EXACT\", \"amount\": 500000, \"company_id\": 99999},"
+                + "{\"id\": 63002, \"ref_number\": \"INV-MULTI-EXACT\", \"amount\": 500000, \"company_id\": 99999}"
+                + "]}";
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(page0, MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
     @DisplayName("マルチノード3段階リース＆外部HTTPトランザクション外実行検証 (R1-P1-03 / design §1.3)")
     void forceRefreshToken_multiNode_3StepLease_httpOutsideTx() {
         IntegrationConnection conn = connectionService.getOrCreateConnection("tenant-refresh-test", null, "freee", "accounting");

@@ -392,15 +392,22 @@ public class IntegrationConnectionServiceImpl
     }
 
     @Override
-    public IntegrationConnection getByIdScoped(Long connectionId, java.util.Set<Long> allowedLegalEntityIds) {
-        IntegrationConnection conn = getById(connectionId);
-        if (conn == null || allowedLegalEntityIds == null) {
-            return conn;
+    public IntegrationConnection getByIdScoped(Long connectionId, String tenantId, java.util.Set<Long> allowedLegalEntityIds) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        // R1-P1-06: tenant と法人条件を SQL (LambdaQueryWrapper) で同時適用する (Java 側判定は行わない)
+        if (allowedLegalEntityIds == null) {
+            return getOne(new LambdaQueryWrapper<IntegrationConnection>()
+                    .eq(IntegrationConnection::getId, connectionId)
+                    .eq(IntegrationConnection::getTenantId, effectiveTenant));
         }
-        if (conn.getLegalEntityId() == null) {
-            return conn;
+        if (allowedLegalEntityIds.isEmpty()) {
+            return null;
         }
-        return allowedLegalEntityIds.contains(conn.getLegalEntityId()) ? conn : null;
+        return getOne(new LambdaQueryWrapper<IntegrationConnection>()
+                .eq(IntegrationConnection::getId, connectionId)
+                .eq(IntegrationConnection::getTenantId, effectiveTenant)
+                .and(w -> w.isNull(IntegrationConnection::getLegalEntityId)
+                        .or().in(IntegrationConnection::getLegalEntityId, allowedLegalEntityIds)));
     }
 
     // === AES-256 GCM 暗号化 / 復号 ===

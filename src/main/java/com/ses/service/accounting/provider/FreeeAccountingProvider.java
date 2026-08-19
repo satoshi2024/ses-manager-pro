@@ -158,12 +158,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
         log.info("Fetching payments from freee: companyId={}, fromDate={}, toDate={}",
                 connection.getExternalCompanyId(), fromDate, toDate);
 
-        List<CanonicalPaymentSync> result = new ArrayList<>();
+        List<CanonicalPaymentSync> deals = new ArrayList<>();
+        List<CanonicalPaymentSync> payments = new ArrayList<>();
         Set<String> seenDealIds = new HashSet<>();
+        Set<String> seenPaymentKeys = new HashSet<>();
         int limit = 100;
         int maxPages = 50;
         boolean pageCapReached = false;
         boolean duplicateDealId = false;
+        boolean duplicatePaymentId = false;
         boolean fetchFailed = false;
         String errorCode = null;
 
@@ -186,12 +189,12 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 }
 
                 JsonNode root = objectMapper.readTree(response.getBody());
-                JsonNode deals = root.get("deals");
-                if (deals == null || !deals.isArray() || deals.isEmpty()) {
+                JsonNode dealsNode = root.get("deals");
+                if (dealsNode == null || !dealsNode.isArray() || dealsNode.isEmpty()) {
                     break;
                 }
 
-                for (JsonNode d : deals) {
+                for (JsonNode d : dealsNode) {
                     String dealId = d.has("id") ? String.valueOf(d.get("id").asLong()) : null;
                     if (dealId != null && !seenDealIds.add(dealId)) {
                         // R1-P1-09: ページ跨ぎ重複IDは外部データ不整合として fail-closed
@@ -199,22 +202,55 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         log.warn("Duplicate dealId={} detected while fetching payments (fail-closed)", dealId);
                         continue;
                     }
-                    BigDecimal amount = d.has("amount") ? BigDecimal.valueOf(d.get("amount").asLong()) : BigDecimal.ZERO;
+                    BigDecimal dealAmount = d.has("amount") ? BigDecimal.valueOf(d.get("amount").asLong()) : BigDecimal.ZERO;
                     String refNumber = d.has("ref_number") && !d.get("ref_number").isNull() ? d.get("ref_number").asText() : null;
-                    String issueDateStr = d.has("issue_date") ? d.get("issue_date").asText() : null;
-                    LocalDate paymentDate = issueDateStr != null ? LocalDate.parse(issueDateStr) : null;
+                    String issueDateStr = d.has("issue_date") && !d.get("issue_date").isNull() ? d.get("issue_date").asText() : null;
+                    LocalDate issueDate = issueDateStr != null ? LocalDate.parse(issueDateStr) : null;
                     boolean settled = d.has("status") && "settled".equalsIgnoreCase(d.get("status").asText());
 
-                    result.add(CanonicalPaymentSync.builder()
+                    // 1. deal単位エントリ (売上/仕入/経費の母集団照合・EXTERNAL_ONLY表示用)
+                    deals.add(CanonicalPaymentSync.builder()
                             .dealId(dealId)
-                            .amount(amount)
-                            .paymentDate(paymentDate)
+                            .amount(dealAmount)
+                            .issueDate(issueDate)
                             .settled(settled)
                             .refNumber(refNumber)
                             .build());
+
+                    // 2. payment単位エントリ (入金 1:1 消込用): freee payments[] を展開する (R1-P1-09)
+                    JsonNode paymentsNode = d.get("payments");
+                    if (paymentsNode != null && paymentsNode.isArray()) {
+                        for (JsonNode p : paymentsNode) {
+                            String paymentId = p.has("id") ? String.valueOf(p.get("id").asLong()) : null;
+                            if (paymentId == null) {
+                                log.warn("Payment without id under dealId={} (fail-closed for reconciliation)", dealId);
+                                continue;
+                            }
+                            String paymentKey = dealId + ":" + paymentId;
+                            if (!seenPaymentKeys.add(paymentKey)) {
+                                duplicatePaymentId = true;
+                                log.warn("Duplicate payment key={} detected while fetching payments (fail-closed)", paymentKey);
+                                continue;
+                            }
+                            BigDecimal paymentAmount = p.has("amount") && !p.get("amount").isNull()
+                                    ? BigDecimal.valueOf(p.get("amount").asLong()) : null;
+                            LocalDate paymentDate = p.has("date") && !p.get("date").isNull()
+                                    ? LocalDate.parse(p.get("date").asText()) : null;
+
+                            payments.add(CanonicalPaymentSync.builder()
+                                    .dealId(dealId)
+                                    .paymentId(paymentId)
+                                    .amount(paymentAmount)
+                                    .paymentDate(paymentDate)
+                                    .issueDate(issueDate)
+                                    .settled(settled)
+                                    .refNumber(refNumber)
+                                    .build());
+                        }
+                    }
                 }
 
-                if (deals.size() < limit) {
+                if (dealsNode.size() < limit) {
                     break;
                 }
                 if (page == maxPages - 1) {
@@ -229,9 +265,11 @@ public class FreeeAccountingProvider implements AccountingProvider {
             }
         }
         return com.ses.dto.accounting.PaymentFetchResult.builder()
-                .payments(result)
+                .deals(deals)
+                .payments(payments)
                 .pageCapReached(pageCapReached)
                 .duplicateDealId(duplicateDealId)
+                .duplicatePaymentId(duplicatePaymentId)
                 .fetchFailed(fetchFailed)
                 .errorCode(errorCode)
                 .build();
@@ -264,19 +302,17 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 if (firstP.has("amount") && !firstP.get("amount").isNull()) {
                     amount = BigDecimal.valueOf(firstP.get("amount").asLong());
                 }
+                // R1-P1-08: 決済日は payments[].date のみから取得する。
+                // 欠落時は issue_date / 現在日付へ代用せず NULL のまま返し、Worker の PAYMENT_DATE_MISSING で拒否させる。
                 if (firstP.has("date") && !firstP.get("date").isNull()) {
                     paymentDate = LocalDate.parse(firstP.get("date").asText());
                 }
             }
 
-            if (paymentDate == null && deal.has("issue_date") && !deal.get("issue_date").isNull()) {
-                paymentDate = LocalDate.parse(deal.get("issue_date").asText());
-            }
-
             return CanonicalPaymentSync.builder()
                     .dealId(dealId)
                     .amount(amount)
-                    .paymentDate(paymentDate != null ? paymentDate : LocalDate.now())
+                    .paymentDate(paymentDate)
                     .settled(settled)
                     .build();
         } catch (Exception e) {
@@ -465,8 +501,12 @@ public class FreeeAccountingProvider implements AccountingProvider {
                                                              String refNumber,
                                                              BigDecimal expectedTotal,
                                                              Long expectedCompanyId) {
+        // R1-P1-03: 全ページを走査し、3項目 (ref_number + amount + company_id) 完全一致の件数を一意に特定する。
+        // 不一致行があっても走査を継続し、完全一致が1件だけなら成功、複数なら曖昧として fail-closed (再POST抑止)。
         int limit = 100;
         int maxPages = 50;
+        List<String> strictlyMatchedDealIds = new ArrayList<>();
+
         for (int page = 0; page < maxPages; page++) {
             int offset = page * limit;
             try {
@@ -486,25 +526,18 @@ public class FreeeAccountingProvider implements AccountingProvider {
                                 Long amount = d.has("amount") ? d.get("amount").asLong() : null;
                                 Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
 
-                                // R1-P1-03: 未知結果は ref_number + amount + company_id の3項目完全一致時のみ成功 (fail-closed)
                                 boolean strictAmountMatch = expectedTotal != null && amount != null
                                         && expectedTotal.compareTo(BigDecimal.valueOf(amount)) == 0;
                                 boolean strictCompanyMatch = expectedCompanyId != null && companyId != null
                                         && java.util.Objects.equals(companyId, expectedCompanyId);
 
                                 if (strictAmountMatch && strictCompanyMatch) {
-                                    log.info("Found matching deal for refNumber={}, amount={}, companyId={} in freee after timeout (page={}): dealId={}",
+                                    strictlyMatchedDealIds.add(String.valueOf(dealId));
+                                    log.info("Found strictly matching deal for refNumber={}, amount={}, companyId={} (page={}): dealId={}",
                                             refNumber, amount, companyId, page, dealId);
-                                    return CanonicalDealResult.builder()
-                                            .success(true)
-                                            .externalId(String.valueOf(dealId))
-                                            .responseTotal(BigDecimal.valueOf(amount))
-                                            .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
-                                            .build();
                                 } else {
-                                    log.warn("Deal found with refNumber={} but strict match failed (amount expected={}, actual={}; company expected={}, actual={}), fail-closed",
+                                    log.warn("Deal found with refNumber={} but strict match failed (amount expected={}, actual={}; company expected={}, actual={}), continuing scan",
                                             refNumber, expectedTotal, amount, expectedCompanyId, companyId);
-                                    return null; // fail-closed on mismatch
                                 }
                             }
                         }
@@ -522,6 +555,23 @@ public class FreeeAccountingProvider implements AccountingProvider {
                 return null;
             }
         }
+
+        // 全ページ走査後の一意性判定 (R1-P1-03)
+        if (strictlyMatchedDealIds.size() == 1) {
+            String dealId = strictlyMatchedDealIds.get(0);
+            return CanonicalDealResult.builder()
+                    .success(true)
+                    .externalId(dealId)
+                    .responseTotal(expectedTotal)
+                    .errorMessageSafe("タイムアウト後に外部照合により取引作成を確認 (dealId=" + dealId + ")")
+                    .build();
+        }
+        if (strictlyMatchedDealIds.size() > 1) {
+            log.warn("Multiple strictly matching deals found for refNumber={} after timeout (dealIds={}), ambiguous fail-closed",
+                    refNumber, strictlyMatchedDealIds);
+            return null; // 曖昧: 二重登録防止のため成功扱いしない
+        }
+        log.warn("No strictly matching deal found for refNumber={} after timeout, fail-closed (retryable)", refNumber);
         return null;
     }
 

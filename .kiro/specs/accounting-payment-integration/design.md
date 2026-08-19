@@ -454,3 +454,5 @@
    - `accounting-integration.js` 内の全可視文言（事業所、有効期限、最終更新、プレビュー見出し、テーブルヘッダー、空表示、ボタン）を `t(key)` 化。
 3. **取消理由コード**:
    - DB には機械可読コード (`REASON_CLIENT_CANCEL`, `REASON_AMOUNT_CORRECTION`, `REASON_DUPLICATE`, `REASON_DISPUTE`, `REASON_OTHER`) を保存し、UI 表示時に各言語へローカライズ。
+   - **allow-list 適用**: これら5コードとの完全一致のみ許容し、`REASON_` で始まる未定義値や日本語・PII を含む入力は `REASON_OTHER` へ正規化する (R1-P1-11)。
+   - **補償ジョブの system code**: in-flight 取消時の自動補償 (`CANCELLED_EXTERNALLY_CREATED`) が作成する `SALES_INVOICE_CANCEL` ジョブの snapshot 内 `reason` は、上記 UI 理由コードとは別の内部 system code **`IN_FLIGHT_CANCEL_COMPENSATION`** を固定で使用する（翻訳対象外・監査では job event の種別で判別）。

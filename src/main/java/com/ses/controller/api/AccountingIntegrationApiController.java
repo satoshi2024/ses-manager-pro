@@ -104,9 +104,9 @@ public class AccountingIntegrationApiController {
     // === 1. 接続マスタ (Connection) API ===
 
     @GetMapping("/connections")
-    public ApiResult<List<IntegrationConnection>> listConnections(
-            @RequestParam(value = "tenantId", defaultValue = "default") String tenantId) {
-        // R1-P1-06: マネージャーは許可法人の接続のみ (SQL境界)。空集合は0件。
+    public ApiResult<List<IntegrationConnection>> listConnections() {
+        // R1-P1-06: tenant は認証済みコンテキストから解決し、利用者指定パラメータを信用しない
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
 
@@ -127,17 +127,10 @@ public class AccountingIntegrationApiController {
 
     @GetMapping("/connections/{id}/health")
     public ApiResult<Boolean> checkHealth(@PathVariable("id") Long connectionId) {
-        // R1-P1-06: 権限外接続は存在しないものとして 404
-        IntegrationConnection conn = null;
+        // R1-P1-06: tenant + 法人条件を SQL で適用 (権限外・他tenantは 404)
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIdsOrNull());
-        if (allowedLegalEntities != null) {
-            if (allowedLegalEntities.isEmpty()) {
-                return ApiResult.error(404, "接続マスタが見つかりません");
-            }
-            conn = connectionService.getByIdScoped(connectionId, allowedLegalEntities);
-        } else {
-            conn = connectionService.getById(connectionId);
-        }
+        IntegrationConnection conn = connectionService.getByIdScoped(connectionId, tenantId, allowedLegalEntities);
         if (conn == null) {
             return ApiResult.error(404, "接続マスタが見つかりません");
         }
@@ -155,6 +148,12 @@ public class AccountingIntegrationApiController {
     @PreAuthorize("hasRole('管理者')")
     public ApiResult<Void> updateStatus(@PathVariable("id") Long connectionId,
                                         @RequestParam("status") String status) {
+        // R1-P1-06: 管理者も tenant 境界は SQL で適用 (他tenantの状態変更を防止)
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        IntegrationConnection conn = connectionService.getByIdScoped(connectionId, tenantId, null);
+        if (conn == null) {
+            return ApiResult.error(404, "接続マスタが見つかりません");
+        }
         connectionService.updateStatus(connectionId, status);
         return ApiResult.success(null);
     }
@@ -173,7 +172,8 @@ public class AccountingIntegrationApiController {
             if (allowedLegalEntities.isEmpty()) {
                 return ApiResult.success(java.util.Collections.emptyList());
             }
-            allowedConnectionIds = connectionService.listConnectionsByLegalEntities("default", allowedLegalEntities)
+            allowedConnectionIds = connectionService.listConnectionsByLegalEntities(
+                            AccountingTenantContextHolder.getCurrentTenantId(), allowedLegalEntities)
                     .stream().map(IntegrationConnection::getId).collect(java.util.stream.Collectors.toSet());
         }
         List<ExternalMapping> list = mappingService.listByConnectionsScoped(connectionId, objectType, allowedConnectionIds);
@@ -300,16 +300,16 @@ public class AccountingIntegrationApiController {
         return ApiResult.success(null);
     }
 
-    /** 取消理由コードのホワイトリスト正規化 (design §8.3)。 */
+    /** 取消理由コードの完全 allow-list (design §8.3)。これ以外は REASON_OTHER へ正規化。 */
+    private static final java.util.Set<String> CANCEL_REASON_CODES = java.util.Set.of(
+            "REASON_CLIENT_CANCEL", "REASON_AMOUNT_CORRECTION", "REASON_DUPLICATE", "REASON_DISPUTE", "REASON_OTHER");
+
     private static String normalizeCancelReason(String reason) {
         if (reason == null || reason.isBlank()) {
             return "REASON_CLIENT_CANCEL";
         }
         String trimmed = reason.trim();
-        if (trimmed.startsWith("REASON_")) {
-            return trimmed;
-        }
-        return "REASON_OTHER";
+        return CANCEL_REASON_CODES.contains(trimmed) ? trimmed : "REASON_OTHER";
     }
 
     // === 4. 送信プレビュー API ===

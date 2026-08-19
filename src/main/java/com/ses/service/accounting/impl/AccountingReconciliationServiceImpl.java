@@ -83,7 +83,8 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
 
         IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
         boolean externalFetchFailed = false;
-        List<CanonicalPaymentSync> extPayments = new ArrayList<>();
+        List<CanonicalPaymentSync> extDeals = new ArrayList<>();    // deal単位 (売上/仕入/経費照合・EXTERNAL_ONLY)
+        List<CanonicalPaymentSync> extPayments = new ArrayList<>(); // payment単位 (入金 1:1 消込)
 
         // 外部 API からのデータ取得 (P1-09: トークンなし、未接続、API 障害、50ページ上限、重複ID時は fail-closed)
         if (conn == null || conn.getEncryptedTokens() == null || conn.getEncryptedTokens().isBlank()) {
@@ -98,14 +99,18 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             try {
                 AccountingProvider provider = providerFactory.getProvider(conn);
                 com.ses.dto.accounting.PaymentFetchResult fetchResult = provider.fetchPayments(conn, startOfMonth, endOfMonth);
+                extDeals = fetchResult != null && fetchResult.getDeals() != null ? fetchResult.getDeals() : new ArrayList<>();
                 extPayments = fetchResult != null && fetchResult.getPayments() != null ? fetchResult.getPayments() : new ArrayList<>();
-                if (fetchResult != null && (fetchResult.isPageCapReached() || fetchResult.isDuplicateDealId() || fetchResult.isFetchFailed())) {
+                if (fetchResult != null && (fetchResult.isPageCapReached() || fetchResult.isDuplicateDealId()
+                        || fetchResult.isDuplicatePaymentId() || fetchResult.isFetchFailed())) {
                     externalFetchFailed = true;
                     String reason;
                     if (fetchResult.isPageCapReached()) {
                         reason = "外部取引一覧の取得が50ページ(5,000件)上限に到達しました。絞り込みまたはfreee側の確認が必要です (エラーコード: PAGE_CAP_REACHED)";
                     } else if (fetchResult.isDuplicateDealId()) {
                         reason = "外部取引一覧に重複する取引IDが含まれており、照合を実行できません (エラーコード: DUPLICATE_DEAL_ID)";
+                    } else if (fetchResult.isDuplicatePaymentId()) {
+                        reason = "外部取引一覧に重複する決済IDが含まれており、照合を実行できません (エラーコード: DUPLICATE_PAYMENT_ID)";
                     } else {
                         reason = "外部システムからの取引実績取得に失敗しました (エラーコード: " + (fetchResult.getErrorCode() != null ? fetchResult.getErrorCode() : "EXTERNAL_API_ERROR") + ")";
                     }
@@ -132,9 +137,9 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         boolean isManager = (organizationScopeService != null && !organizationScopeService.hasFullAccess());
         Set<Long> allowedOrgIds = isManager ? organizationScopeService.allowedOrganizationIds(LocalDate.now(zoneId)) : Collections.emptySet();
 
-        // 外部取引のマッピング用インデックス (dealId -> CanonicalPaymentSync)
+        // 外部取引 (deal単位) のマッピング用インデックス (dealId -> CanonicalPaymentSync)
         Map<String, CanonicalPaymentSync> extDealMap = new HashMap<>();
-        for (CanonicalPaymentSync ext : extPayments) {
+        for (CanonicalPaymentSync ext : extDeals) {
             if (ext.getDealId() != null) {
                 extDealMap.put(ext.getDealId(), ext);
             }
@@ -455,16 +460,19 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
             BigDecimal targetAmount = internalGross;
             LocalDate paidDate = ip.getPaidDate();
 
-            // P1-09: 未消費の外部決済から、金額・日付が一致する候補を 1:1 抽出
+            // P1-09: 未消費の外部決済から、金額・日付(非NULL必須)が一致する候補を {dealId}:{paymentId} で 1:1 抽出。
+            // 決済日不明 (paymentDate NULL) の外部決済は照合対象にせず fail-closed 側へ倒す。
             List<CanonicalPaymentSync> candidateExtPayments = extPayments.stream()
                     .filter(ext -> ext.getAmount() != null && ext.getAmount().compareTo(targetAmount) == 0
-                            && (paidDate == null || ext.getPaymentDate() == null || paidDate.equals(ext.getPaymentDate()))
-                            && ext.getDealId() != null && !consumedExternalPaymentKeys.contains(ext.getDealId()))
+                            && ext.getPaymentDate() != null
+                            && (paidDate == null || paidDate.equals(ext.getPaymentDate()))
+                            && ext.getDealId() != null && ext.getPaymentId() != null
+                            && !consumedExternalPaymentKeys.contains(ext.getDealId() + ":" + ext.getPaymentId()))
                     .toList();
 
             if (candidateExtPayments.size() == 1) {
                 CanonicalPaymentSync extMatch = candidateExtPayments.get(0);
-                consumedExternalPaymentKeys.add(extMatch.getDealId());
+                consumedExternalPaymentKeys.add(extMatch.getDealId() + ":" + extMatch.getPaymentId());
                 matchedExternalDealIds.add(extMatch.getDealId());
 
                 items.add(ReconciliationItemDto.builder()
@@ -474,7 +482,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
                         .partnerName(partnerName)
                         .internalAmount(internalGross)
                         .externalDealId(extMatch.getDealId())
-                        .externalRefNo(extMatch.getReferenceNo())
+                        .externalRefNo(extMatch.getReferenceNo() != null ? extMatch.getReferenceNo() : extMatch.getPaymentId())
                         .externalAmount(extMatch.getAmount())
                         .status(ignoreReason != null ? "IGNORED" : "MATCHED")
                         .ignoreReason(ignoreReason)
@@ -506,9 +514,9 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         }
 
         // ============================================================
-        // 5. 外部のみ存在する取引 (EXTERNAL_ONLY)
+        // 5. 外部のみ存在する取引 (EXTERNAL_ONLY)  — deal単位で判定
         // ============================================================
-        for (CanonicalPaymentSync ext : extPayments) {
+        for (CanonicalPaymentSync ext : extDeals) {
             if (ext.getDealId() != null && !matchedExternalDealIds.contains(ext.getDealId())) {
                 String extKey = "EXTERNAL:" + ext.getDealId();
                 String ignoreReason = ignoreMap.get(extKey);

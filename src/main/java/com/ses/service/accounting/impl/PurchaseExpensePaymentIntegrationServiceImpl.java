@@ -289,7 +289,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 log.warn("Token refresh in progress during BP purchase job {}: rescheduling retry in 5s", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing BP purchase job: jobId={}", jobId, e);
+                log.error("Error executing BP purchase job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType=BP_PURCHASE_SYNC", jobId);
                 jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "BP仕入取引作成中にシステムエラーが発生しました", 60);
             }
         });
@@ -380,7 +380,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 log.warn("Token refresh in progress during payment sync job {}: rescheduling retry in 5s", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing payment sync job: jobId={}", jobId, e);
+                log.error("Error executing payment sync job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType=PAYMENT_SYNC", jobId);
                 jobService.markRetryable(jobId, "PAYMENT_SYNC_EXCEPTION", "支払実績同期処理中にシステムエラーが発生しました", 60);
             }
         });
@@ -445,7 +445,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 log.warn("Token refresh in progress during expense job {}: rescheduling retry in 5s", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing expense job: jobId={}", jobId, e);
+                log.error("Error executing expense job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType=EXPENSE_DEAL_SYNC", jobId);
                 jobService.markRetryable(jobId, "EXPENSE_JOB_EXCEPTION", "経費取引連携処理中にエラーが発生しました", 60);
             }
         });

@@ -268,12 +268,14 @@ class AccountingIntegrationBrowserDemoTest {
         jobService.claimJob(expJob.getId());
         jobService.markSucceeded(expJob.getId(), "1003", "req-demo-c", "同期成功");
 
-        // freee stub 応答: 4母集団に一致する deal (401復旧後の2回目以降に返る)
+        // freee stub 応答: 4母集団に一致する deal (401復旧後の2回目以降に返る)。
+        // 入金 (1004) は payment 単位 (payments[]) を返し、内部入金 (1000000+手数料20000=1020000) と1:1照合させる (R1-P1-09)
         dealsJson = "{\"deals\": ["
                 + "{\"id\": 1001, \"issue_date\": \"" + today + "\", \"amount\": 1100000, \"ref_number\": \"INV-DEMO-A\", \"status\": \"settled\"},"
                 + "{\"id\": 1002, \"issue_date\": \"" + today + "\", \"amount\": 800000, \"ref_number\": \"BP-" + bpPayment.getId() + "\", \"status\": \"settled\"},"
                 + "{\"id\": 1003, \"issue_date\": \"" + today + "\", \"amount\": 15000, \"ref_number\": \"EX-DEMO-A\", \"status\": \"settled\"},"
-                + "{\"id\": 1004, \"issue_date\": \"" + today + "\", \"amount\": 1020000, \"ref_number\": \"PAY-DEMO-1004\", \"status\": \"settled\"}"
+                + "{\"id\": 1004, \"issue_date\": \"" + today + "\", \"amount\": 1020000, \"ref_number\": \"PAY-DEMO-1004\", \"status\": \"settled\","
+                + "\"payments\": [{\"id\": 9004, \"date\": \"" + today + "\", \"amount\": 1020000}]}"
                 + "]}";
 
         // ===== マネージャー (組織 X) と自組織ジョブ =====
@@ -319,7 +321,8 @@ class AccountingIntegrationBrowserDemoTest {
 
         runViewport(chrome, baseUrl, evidenceDir, runId, "desktop", 1920, 1080, conn.getId(), summary);
         runViewport(chrome, baseUrl, evidenceDir, runId, "mobile390", 390, 844, conn.getId(), summary);
-        runManagerBoundary(chrome, baseUrl, evidenceDir, runId, summary);
+        runManagerBoundary(chrome, baseUrl, evidenceDir, runId, "desktop", 1920, 1080, summary);
+        runManagerBoundary(chrome, baseUrl, evidenceDir, runId, "mobile390", 390, 844, summary);
 
         // 401 自動復旧の実演検証: 初回 deals 呼出は 401 -> OAuth 更新 -> リプレイ成功
         assertTrue(deals401Count.get() >= 1, "freee stub が初回のトークン失効 (401) を再現していること");
@@ -409,31 +412,32 @@ class AccountingIntegrationBrowserDemoTest {
         }
     }
 
-    /** マネージャー境界: 自組織ジョブのみ可視・全社共通ジョブ不可視・照合は要確認。 */
-    private void runManagerBoundary(Path chrome, String baseUrl, Path evidenceDir, String runId, ObjectNode summary) throws Exception {
-        Path profile = Files.createTempDirectory("chrome-profile-accounting-manager");
-        try (CdpBrowser browser = CdpBrowser.launch(chrome, profile, 1920, 1080)) {
-            login(browser, baseUrl, "manager_demo", "pass", "manager");
+    /** マネージャー境界: 自組織ジョブのみ可視・全社共通ジョブ不可視・照合は要確認。desktop / 390px 双方を実測 (R4-P1-01)。 */
+    private void runManagerBoundary(Path chrome, String baseUrl, Path evidenceDir, String runId,
+                                    String viewport, int width, int height, ObjectNode summary) throws Exception {
+        Path profile = Files.createTempDirectory("chrome-profile-accounting-manager-" + viewport);
+        try (CdpBrowser browser = CdpBrowser.launch(chrome, profile, width, height)) {
+            login(browser, baseUrl, "manager_demo", "pass", "manager-" + viewport);
 
             browser.navigate(baseUrl + "/accounting/integration");
             assertTrue(browser.waitFor("document.readyState === 'complete' && document.querySelector('#accountingTabs') !== null", java.time.Duration.ofSeconds(30)),
-                    "[manager] 会計連携画面のタブが表示されること");
+                    "[manager-" + viewport + "] 会計連携画面のタブが表示されること");
             browser.evaluate("if(window.AccountingIntegration && window.AccountingIntegration.loadJobs) window.AccountingIntegration.loadJobs(1);");
             browser.waitFor("document.querySelectorAll('#jobsTbody tr').length > 0", java.time.Duration.ofSeconds(20));
             String jobText = browser.evaluate("document.querySelector('#jobsTbody').textContent").asText("");
-            assertTrue(jobText.contains("#" + managerJobId), "[manager] 自組織ジョブが可視であること");
-            assertTrue(!jobText.contains("#" + adminJobId), "[manager] 全社共通 (organization_id NULL) ジョブが不可視であること (認可境界)");
+            assertTrue(jobText.contains("#" + managerJobId), "[manager-" + viewport + "] 自組織ジョブが可視であること");
+            assertTrue(!jobText.contains("#" + adminJobId), "[manager-" + viewport + "] 全社共通 (organization_id NULL) ジョブが不可視であること (認可境界)");
 
             // 照合: 組織外の内部データは不可視のため外部のみ取引となり「要確認 (締不可)」
             browser.evaluate("document.querySelector('#reconciliation-tab') && document.querySelector('#reconciliation-tab').click()");
             browser.waitFor("document.querySelector('#summaryClosingBadge') !== null && document.querySelector('#summaryClosingBadge').textContent.includes('締')", java.time.Duration.ofSeconds(30));
             String managerBadge = browser.evaluate("document.querySelector('#summaryClosingBadge').textContent").asText("");
             assertTrue(managerBadge.contains("要確認") || managerBadge.contains("締不可"),
-                    "[manager] 組織外データ不可視により締め不可 (要確認) 表示になること (badge=" + managerBadge + ")");
+                    "[manager-" + viewport + "] 組織外データ不可視により締め不可 (要確認) 表示になること (badge=" + managerBadge + ")");
 
-            assertConsoleErrorsZero(browser, "manager");
+            assertConsoleErrorsZero(browser, "manager-" + viewport);
 
-            Path boundaryPng = evidenceDir.resolve("desktop-06-manager-boundary.png");
+            Path boundaryPng = evidenceDir.resolve(viewport + "-06-manager-boundary.png");
             safeWriteFile(boundaryPng, browser.screenshot());
 
             ObjectNode mgrNode = MAPPER.createObjectNode();
@@ -442,7 +446,7 @@ class AccountingIntegrationBrowserDemoTest {
             mgrNode.put("closingBadge", managerBadge);
             mgrNode.put("consoleErrors", 0);
             mgrNode.put("boundaryScreenshot", boundaryPng.getFileName().toString());
-            summary.set("managerBoundary", mgrNode);
+            summary.set("managerBoundary-" + viewport, mgrNode);
         }
     }
 

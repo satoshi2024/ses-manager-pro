@@ -194,7 +194,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 log.warn("Token refresh in progress during sales invoice job {}: rescheduling retry in 5s", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing sales invoice job: jobId={}", jobId, e);
+                log.error("Error executing sales invoice job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType=SALES_INVOICE_SYNC", jobId);
                 jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上連携処理中にシステムエラーが発生しました", 60);
             }
         });
@@ -259,7 +259,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
                 log.warn("Token refresh in progress during sales cancel job {}: rescheduling retry in 5s", jobId);
                 jobService.markRetryable(jobId, "TOKEN_REFRESH_IN_PROGRESS", "他ノードでトークン更新中のため再試行待ち", 5);
             } catch (Exception e) {
-                log.error("Error executing sales cancel job: jobId={}", jobId, e);
+                log.error("Error executing sales cancel job: error_code=JOB_EXECUTION_EXCEPTION, jobId={}, jobType=SALES_INVOICE_CANCEL", jobId);
                 jobService.markRetryable(jobId, "JOB_EXECUTION_EXCEPTION", "売上取引取消処理中にシステムエラーが発生しました", 60);
             }
         });
@@ -299,16 +299,15 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
         return connectionService.getOrCreateConnection(tenantId, legalEntityId, provider, product);
     }
 
-    /** 取消理由の機械可読コードへの正規化 (design §8.3)。未知・空・日本語入力は既定/OTHER へ写像する。 */
+    /** 取消理由の機械可読コードへの正規化 (design §8.3)。5コードの完全 allow-list、それ以外は REASON_OTHER。 */
     static String normalizeCancelReason(String reason) {
         if (reason == null || reason.isBlank()) {
             return "REASON_CLIENT_CANCEL";
         }
         String trimmed = reason.trim();
-        if (trimmed.startsWith("REASON_")) {
-            return trimmed;
-        }
-        return "REASON_OTHER";
+        java.util.Set<String> allowed = java.util.Set.of(
+                "REASON_CLIENT_CANCEL", "REASON_AMOUNT_CORRECTION", "REASON_DUPLICATE", "REASON_DISPUTE", "REASON_OTHER");
+        return allowed.contains(trimmed) ? trimmed : "REASON_OTHER";
     }
 
     private String calculateSha256(String input) {

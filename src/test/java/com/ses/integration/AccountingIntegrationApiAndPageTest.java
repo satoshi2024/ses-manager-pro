@@ -313,6 +313,32 @@ class AccountingIntegrationApiAndPageTest {
                 .reduce("", (a, b) -> a + b);
         assertThat(eventDetail2).contains("REASON_OTHER");
         assertThat(eventDetail2).doesNotContain("手動キャンセル");
+
+        // 未知の REASON_* (allow-list 外・PII含む) は REASON_OTHER へ正規化され、未定義値が監査イベントへ保存されないこと (R1-P1-11)
+        IntegrationJob job3 = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 779L, "idemp-i18n-779", "hash779");
+        mockMvc.perform(post("/api/accounting/jobs/" + job3.getId() + "/cancel?reason=REASON_customer@example.com")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        String eventDetail3 = jobService.listEvents(job3.getId()).stream()
+                .map(e -> e.getSafeDetail() != null ? e.getSafeDetail() : "")
+                .reduce("", (a, b) -> a + b);
+        assertThat(eventDetail3).contains("REASON_OTHER");
+        assertThat(eventDetail3).doesNotContain("REASON_customer@example.com");
+        assertThat(eventDetail3).doesNotContain("@example.com");
+
+        // 定義済み5コードはそのまま保存されること (REASON_DUPLICATE)
+        IntegrationJob job4 = jobService.createJob(
+                connection.getId(), "SALES_INVOICE_SYNC", "INVOICE", 780L, "idemp-i18n-780", "hash780");
+        mockMvc.perform(post("/api/accounting/jobs/" + job4.getId() + "/cancel?reason=REASON_DUPLICATE")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+        String eventDetail4 = jobService.listEvents(job4.getId()).stream()
+                .map(e -> e.getSafeDetail() != null ? e.getSafeDetail() : "")
+                .reduce("", (a, b) -> a + b);
+        assertThat(eventDetail4).contains("REASON_DUPLICATE");
     }
 
     @Test
@@ -437,6 +463,56 @@ class AccountingIntegrationApiAndPageTest {
                         "admin_user", null,
                         java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者"))));
         org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("connection cross-tenant: マネージャー一覧/health で他テナント接続がSQL境界により不可視 (R1-P1-06)")
+    void connection_crossTenant_hidden_forManager() throws Exception {
+        Long orgXId = insertOrg("SCOPE-CONN-ORG", "スコープ接続組織", 1L);
+        Long managerUserId = insertManagerUser(orgXId);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        String.valueOf(managerUserId), null,
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_マネージャー"))));
+
+        IntegrationConnection otherTenantNull = connectionService.getOrCreateConnection("other-tenant", null, "freee", "accounting");
+        IntegrationConnection otherTenantSameLegal = connectionService.getOrCreateConnection("other-tenant", 1L, "freee", "accounting");
+
+        mockMvc.perform(get("/api/accounting/connections"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data[?(@.id == " + otherTenantNull.getId() + ")]").doesNotExist())
+                .andExpect(jsonPath("$.data[?(@.id == " + otherTenantSameLegal.getId() + ")]").doesNotExist())
+                .andExpect(jsonPath("$.data[?(@.id == " + connection.getId() + ")]").exists());
+
+        mockMvc.perform(get("/api/accounting/connections/" + otherTenantNull.getId() + "/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+        mockMvc.perform(get("/api/accounting/connections/" + otherTenantSameLegal.getId() + "/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("connection cross-tenant: 管理者のstatus更新も他テナント接続は404 (R1-P1-06)")
+    @WithMockUser(username = "admin_user", roles = {"管理者"})
+    void connection_crossTenant_statusUpdate_admin404() throws Exception {
+        // 他テナント接続を CONNECTED にしてから、管理者(default tenant)が状態変更を試みる
+        IntegrationConnection otherTenant = connectionService.getOrCreateConnection("other-tenant", null, "freee", "accounting");
+        connectionService.saveTokens(otherTenant.getId(), IntegrationTokensDto.builder()
+                .accessToken("x-other-tenant").refreshToken("x-other-refresh").tokenType("Bearer").expiresIn(3600L).build(),
+                90001L, "他テナント事業所", 1L);
+        assertThat(connectionService.getById(otherTenant.getId()).getStatus()).isEqualTo("CONNECTED");
+
+        mockMvc.perform(post("/api/accounting/connections/" + otherTenant.getId() + "/status?status=DISCONNECTED")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(404));
+
+        // 状態が変わっていないこと (DISCONNECTED へ遷移していない)
+        assertThat(connectionService.getById(otherTenant.getId()).getStatus()).isEqualTo("CONNECTED");
     }
 
     private Long insertOrg(String code, String name, Long legalEntityId) {
