@@ -5,9 +5,9 @@
 - **Spec**: `accounting-payment-integration` (S15)
 - **Wave**: Wave 3
 - **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）。適用済み `V106.1` はbyte-for-byte不変とし、historical V106到達前のlegacy退避を `V105.4`、旧V106.1適用済み環境のcompany境界修復を `V106.2` に分離した。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **FIXED_PENDING_REVIEW**（R4再Review P0/P1指摘のうちR4-R1を是正し、実MySQL direct regressionを通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
+- **現行総合判定**: **FIXED_PENDING_REVIEW**（R4再ReviewのR4-R1〜R4-R5を是正し、実MySQL direct regressionとM Gateを通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
 - **Stage A SpecHead Review Head**: `e0d8a96f` / **SpecHead Base**: `f8b81e77`
-- **S15 独立再Review (FixHead `3ee44a9a`) 指摘**: P1 10件 + P2 1件 → 本Fixサイクルで全て是正し VERIFIED_CLOSED
+- **S15 Independent Re-Review R4 (Base `83f128f6` → FixHead `7219fd2a`)**: P0=1 / P1=5 / P2=0、総合FAIL。R4-R1〜R4-R5とM Gateは本実装Headで是正・完了したが、独立再Review待ちであり、S16はBLOCKED。
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08 / 再Review 是正 (R1-P1-02..11, R1-P1-04, R4-P1-01, R4-P2-02)
 
 ---
@@ -24,7 +24,7 @@
 | **T099** | R3.1〜R3.4, R4.1, R4.2, design §4, §6, G9, platform-invariants §3.3 | `PurchaseExpensePaymentIntegrationService*`, `AccountingIntegrationApiController.java`, `PurchaseExpenseIntegrationTest.java` | `PurchaseExpenseIntegrationTest` 5/5 | 口座変更未承認時ブロック、仕入登録、決済情報照合(ID+金額+日付)、締め月保護 | — | — |
 | **T100** | R3.3, R4.1, R4.2, R4.4, design §5, §6, platform-invariants §3.3 | `AccountingReconciliationService*`, `MonthlyClosingServiceImpl.java`, `AccountingIntegrationApiController.java`, `integration.html`, `accounting-integration.js`, `AccountingReconciliationTest.java` | `AccountingReconciliationTest` 4/4, `MonthlyClosingServiceImplTest` 12/12 | MATCHED/INTERNAL_ONLY/AMOUNT_MISMATCH/EXTERNAL_ONLY分類、除外設定と締め可否、締めガード | — | — |
 | **T101** | 全 requirements, G4, platform-invariants §1〜§8 | `V106__accounting_payment_integration.sql`, `SpecDispatchConsistencyTest.java`, `AccountingIntegrationWorker.java`, `IntegrationJobServiceImpl.java`, `FreeeAccountingProvider.java`, `integration.html`, `messages*.properties`, `accounting-integration.js`, `design.md`, `tasks.md`, `review-ledger.md` | L4全量回帰 (`mvn test` 2366/2366 PASS, skip 0) | 全量回帰・障害耐性・暗号化・セキュリティ・ロール権限・マイグレーション整合性 | — | — |
-| **T095 / R4-R1** | R1.1, R4-T01, G4、Flyway checksum/repair契約 | `design.md`, `migration-matrix.md`, `tasks.md`, `V105_4__accounting_legacy_freee_preflight.sql`, `V106_2__accounting_company_boundary_forward_repair.sql`, `V106_1__accounting_integration_snapshot_and_slot.sql`（旧blob復元）, `sql/runbook/v106_2-rollback.sql`, historical/forward repair smoke tests, shard inventory | `FlywayV106_1RollbackAndRepairSmokeTest` 1/1、`FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest` 1/1、`FlywayV106_2CompanyForwardRepairSmokeTest` 1/1 PASS（MySQL 8） | V106/V106.1 checksum不変、V105.3相当multi-company upgrade、旧V106.1→V106.2 repair、soft-delete再作成、V106.2 rollbackを実MySQLで確認 | T095 commit/push前 | Fresh/partial/repair全組合せの最終CI GateはR4-R6、実freee契約はRelease Gate |
+| **T095 / R4-R1** | R1.1, R4-T01, G4、Flyway checksum/repair契約 | `design.md`, `migration-matrix.md`, `tasks.md`, `V105_4__accounting_legacy_freee_preflight.sql`, `V106_2__accounting_company_boundary_forward_repair.sql`, `V106_1__accounting_integration_snapshot_and_slot.sql`（旧blob復元）, `sql/runbook/v106_1-rollback.sql`, `sql/runbook/v106_2-rollback.sql`, historical/forward repair smoke tests, shard inventory | `FlywayV106_1RollbackAndRepairSmokeTest` 1/1、`FlywayV106CompanyBoundaryHistoricalUpgradeSmokeTest` 1/1、`FlywayV106_2CompanyForwardRepairSmokeTest` 1/1 PASS（MySQL 8） | V106/V106.1 checksum不変、V105.3相当multi-company upgrade、旧V106.1→V106.2 repair、soft-delete再作成、V106.2 rollbackを実MySQLで確認 | `91080cc7` | 実freee契約はRelease Gate。最終CI GateはR4-R6で確認 |
 
 ---
 
@@ -34,9 +34,9 @@
 
 ---
 
-## 4. S15 独立再Review 是正記録 (Base `3ee44a9a` → Fix Head)
+## 4. S15 初回独立再Review 是正記録（履歴: Base `3ee44a9a`）
 
-S15 Stage B 独立再Review (`accounting-payment-integration-R1-P1-02..11`, `R4-P1-01`, `R4-P2-02`) の全指摘を是正。いずれも **VERIFIED_CLOSED**。
+S15 Stage B 初回独立再Reviewの是正履歴。以下は当時の記録であり、最新R4の判定およびReview状態は本ledger冒頭と§4.7を正とする。
 
 | Issue ID | 要件/設計 | 是正内容 | 検証テスト (全て実DB/実ChromeでPASS) |
 |---|---|---|---|
@@ -54,7 +54,7 @@ S15 Stage B 独立再Review (`accounting-payment-integration-R1-P1-02..11`, `R4-
 
 ---
 
-## 5. 是正サイクルの実行テスト記録 (Fix Head)
+## 5. 是正サイクルの実行テスト記録（履歴。最新Gateは§4.7）
 
 | ゲート | 結果 |
 |---|---|
@@ -66,7 +66,7 @@ S15 Stage B 独立再Review (`accounting-payment-integration-R1-P1-02..11`, `R4-
 
 - **Base commit**: `3ee44a9a` (S15 Stage B 前回 FixHead)
 - **Fix Head**: 本サイクルの commit (下記 Commit 欄)
-- **Rollback 手順**: 本変更は feature フラグなしのロジック修正。`git revert <fix head>` で base へ復帰。DB マイグレーション変更なし (V106/V106.1 不変)。V106.1 適用済み環境のロールバックは `sql/runbook/v106_1-rollback.sql` を実行。
+- **Rollback 手順**: 本変更はfeatureフラグなしのロジック修正。`git revert <fix head>` でbaseへ復帰。今回のmigration経路は`V105.4`/`V106.2`のforward repairとして分離し、適用済み`V106`/`V106.1`は不変。V106.1適用済み環境のロールバックは`sql/runbook/v106_1-rollback.sql`、V106.2修復経路のロールバックは`sql/runbook/v106_2-rollback.sql`を実行する。
 
 ---
 
@@ -92,10 +92,24 @@ S15 Stage B 2次独立再Review指摘（P1 7件：R1-P1-03/06/08/09/10/11, R4-P1
 
 | Task | Requirements | 変更file | Test | Demo | Commit | Risk |
 |---|---|---|---|---|---|---|
-| **T096 / R4-R2** | R1.3, R4.2、review issue R1-P1-03 | `src/test/java/com/ses/service/accounting/FreeeAccountingProviderTest.java` | `FreeeAccountingProviderTest` 26/26 PASS | Provider経由で50ページfullの完全一致0/1/複数を全走査しpage-cap fail-closed、50ページ目shortの唯一一致、途中API障害を確認 | T096 commit/push前 | 実freee契約の最終確認はR4-R6/GATE-S15-FREEE-PROD |
-| **T100 / R4-R4** | R5.1, R5.2、design §6.2、review issue R1-P1-09 | `FreeeAccountingProvider.java`, `AccountingReconciliationTest.java`, `FreeeAccountingProviderTest.java`, `design.md`, `canonical-mapping.md` | `AccountingReconciliationTest` 15/15 + `FreeeAccountingProviderTest` 28/28 PASS | deal発生日の固定±1月を廃止し、複数月前dealの8月1日/15日/31日paymentを取得、7月31日を除外、50ページ到達をfail-closed信号化 | T100 commit/push前 | 実freeeの一覧API契約・本番支払サイトはR4-R6/GATE-S15-FREEE-PROD |
-| **T097 / R4-R3** | R5.4、design §5.2、review issue R1-P1-06 | `ExternalMappingMapper.java`, `ExternalMappingService.java`, `ExternalMappingServiceImpl.java`, `AccountingIntegrationApiController.java`, `AccountingIntegrationApiAndPageTest.java` | `AccountingIntegrationApiAndPageTest` 11/11 PASS | mapping verifyをconnection JOIN + current tenant条件の最初のSQLへ移し、管理者の他tenant mapping list/save/verifyをAPI code 404で確認 | T097 commit/push前 | API/UI以外の全consumer scopeはR4-R6で再確認 |
-| **T101 / R4-R5** | R4.5、design §7、review issue R1-P1-10 | `AccountingWorkerRawExceptionLogTest.java` | `AccountingWorkerRawExceptionLogTest` 6/6 PASS | `processDueJobs()`経由で全5 job種別のdispatch例外を発生させ、固定error code/jobId/jobTypeのみ、throwable/stack trace/機密文字列なしをlogger captureで確認 | T101 commit/push前 | 全CI Gateおよび他worker異常経路はR4-R6で再確認 |
+| **T096 / R4-R2** | R1.3, R4.2、review issue R1-P1-03 | `src/test/java/com/ses/service/accounting/FreeeAccountingProviderTest.java` | `FreeeAccountingProviderTest` 28/28 PASS | Provider経由で50ページfullの完全一致0/1/複数を全走査しpage-cap fail-closed、50ページ目shortの唯一一致、途中API障害を確認 | `35182517` | 実freee契約の最終確認は`GATE-S15-FREEE-PROD` |
+| **T100 / R4-R4** | R5.1, R5.2、design §6.2、review issue R1-P1-09 | `FreeeAccountingProvider.java`, `AccountingReconciliationTest.java`, `FreeeAccountingProviderTest.java`, `design.md`, `canonical-mapping.md` | `AccountingReconciliationTest` 15/15 + `FreeeAccountingProviderTest` 28/28 PASS | deal発生日の固定±1月を廃止し、複数月前dealの8月1日/15日/31日paymentを取得、7月31日を除外、50ページ到達をfail-closed信号化 | `fda08704` | 実freeeの一覧API契約・本番支払サイトは`GATE-S15-FREEE-PROD` |
+| **T097 / R4-R3** | R5.4、design §5.2、review issue R1-P1-06 | `ExternalMappingMapper.java`, `ExternalMappingService.java`, `ExternalMappingServiceImpl.java`, `AccountingIntegrationApiController.java`, `AccountingIntegrationApiAndPageTest.java` | `AccountingIntegrationApiAndPageTest` 11/11 PASS | mapping verifyをconnection JOIN + current tenant条件の最初のSQLへ移し、管理者の他tenant mapping list/save/verifyをAPI code 404で確認 | `71e77be8` | API/UI以外の全consumer scopeはM Gateで再確認済み |
+| **T101 / R4-R5** | R4.5、design §7、review issue R1-P1-10 | `AccountingWorkerRawExceptionLogTest.java` | `AccountingWorkerRawExceptionLogTest` 6/6 PASS | `processDueJobs()`経由で全5 job種別のdispatch例外を発生させ、固定error code/jobId/jobTypeのみ、throwable/stack trace/機密文字列なしをlogger captureで確認 | `70df0ea1` | 実freee契約および2 JVM競合の最終確認はRelease Gate |
+
+## 4.7 R4-R6 Review Packet / CI Gate収束
+
+| Task | Requirements | 変更file | Test | Demo | Commit | Risk |
+|---|---|---|---|---|---|---|
+| **R4-R6** | R4-T08、handbook §8/§12 | `tasks.md`, `review-ledger.md`, `spec-execution-ledger.md`, `evidence/browser/*` | 同一code Head `7dbd2c1a` で `verify-like-ci.ps1`: Fast 2435/0/0/0、MySQL 57/0/0/0、Performance 1/0/0/0、Browser 1/0/0/0、Backup SUCCESS、全skip 0。追加直接実行: Performance 1/1（p95=31ms、heapDelta=66KB）、S15 Browser 1/1 | ChromeのS15 accounting Demo 1/1（desktop/390px、4母集団照合・締可、401自動復旧、manager境界、console error 0）。Backup PITR restore `READY_FOR_CUTOVER`、restore-drill SUCCESS（RPO 60秒、RTO 14400秒、実測total 7秒）、secret scan 0 | Review Packet同期commit（本行を含む最終push） | 独立再Review待ち。`GATE-S15-FREEE-PROD`と実2 JVM 401競合はRelease Gate。S16はPASS確認までBLOCKED |
+
+### 最新Gate証跡とReview開始条件
+
+- Latest independent Review R4: Base `83f128f6` → FixHead `7219fd2a`、P0=1 / P1=5 / P2=0、FAIL。
+- Code/test Head: `7dbd2c1a`。同HeadでM Gate全件を完走し、`git diff --check`もPASS。最終Packet同期commit後に`HEAD`と`origin/main`の一致を再確認する。
+- Direct regression: T095 MySQL 3/3、T096 Provider 28/28、T097 API 11/11、T100 reconciliation 15/15 + Provider 28/28、T101 Worker 6/6。
+- Review開始条件: 最終push済みHeadと`origin/main`が一致し、tracked worktreeがcleanであること。既存のS15外untracked 4群は無関係なためReview Packetへ取り込まず保持する。
+- Independent Review合格前は`VERIFIED_CLOSED`へ更新せず、中央ledger上もS16を解放しない。
 
 ## 6. 未検証環境・本番前条件 (Release Gate)
 

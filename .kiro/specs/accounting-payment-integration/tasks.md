@@ -107,7 +107,7 @@
   - **Requirements**: R4.5、design §7、review issue R1-P1-10。
   - **Test/Demo**: 全job種別のdispatch例外で機密文字列・throwable・stack traceがlogger出力にないことを確認する。
 
-- [ ] R4-R6. Review Packet・CI Gate・ledger収束
+- [x] R4-R6. Review Packet・CI Gate・ledger収束
   - **Objective**: 同一clean/pushed HeadでFast/MySQL全shard/Performance/Backupを実行し、tasks/review-ledger/中央ledgerを同期する。
   - **Requirements**: R4-T08、handbook §8/§12。
-  - **Test/Demo**: `verify-like-ci.ps1`、Head/origin一致、clean status、Review Packet整合を確認する。
+  - **Test/Demo**: `verify-like-ci.ps1`を同一code Headで実行し、Fast 2435/0/0/0、MySQL 57/0/0/0、Performance 1/0/0/0、Browser 1/0/0/0、Backup SUCCESS（全skip 0）を確認。Head/origin一致、Review Packet整合を確認する。独立再Reviewは未実施のため、現行判定は`FIXED_PENDING_REVIEW`、S16はBLOCKEDのままとする。
