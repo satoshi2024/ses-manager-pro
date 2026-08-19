@@ -5,7 +5,7 @@
 - **Spec**: `accounting-payment-integration` (S15)
 - **Wave**: Wave 3
 - **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）および `V106.1`（`V106_1__accounting_integration_snapshot_and_slot.sql` による forward repair）。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **Stage B PASS (CONDITIONAL PASS on freee production release gate `GATE-S15-FREEE-PROD`)**
+- **現行総合判定**: **FIXED_PENDING_REVIEW**（S15 Stage B 2次Review指摘 P1 7件を是正・直接回帰/L4クリーンで検証済み。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
 - **Stage A SpecHead Review Head**: `e0d8a96f` / **SpecHead Base**: `f8b81e77`
 - **S15 独立再Review (FixHead `3ee44a9a`) 指摘**: P1 10件 + P2 1件 → 本Fixサイクルで全て是正し VERIFIED_CLOSED
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08 / 再Review 是正 (R1-P1-02..11, R1-P1-04, R4-P1-01, R4-P2-02)
@@ -68,6 +68,24 @@ S15 Stage B 独立再Review (`accounting-payment-integration-R1-P1-02..11`, `R4-
 - **Rollback 手順**: 本変更は feature フラグなしのロジック修正。`git revert <fix head>` で base へ復帰。DB マイグレーション変更なし (V106/V106.1 不変)。V106.1 適用済み環境のロールバックは `sql/runbook/v106_1-rollback.sql` を実行。
 
 ---
+
+## 4.5 S15 2次独立再Review 是正記録 (Base `6401f02b` → Fix `908c9970`)
+
+S15 Stage B 2次独立再Review指摘（P1 7件：R1-P1-03/06/08/09/10/11, R4-P1-01）を全件是正。状態は **FIXED_PENDING_REVIEW**（`VERIFIED_CLOSED` は独立Review側が行うため未設定）。
+
+| Issue ID | 是正内容 | 検証テスト |
+|---|---|---|
+| R1-P1-03 | `verifyDealCreatedByRefNumber` を全ページ走査＋一意性判定（完全一致1件のみ成功、複数は曖昧fail-closed）へ変更。同一ページ/ページ跨ぎの「不一致→完全一致」・複数完全一致・不一致のみを追加 | `FreeeAccountingProviderTest`（21/21 PASS） |
+| R1-P1-06 | connection一覧/health/status/getByIdScoped/listMappings を tenant＋法人条件SQLへ統一（利用者指定tenantパラメータ廃止）。他tenant接続（legal NULL・同一法人ID）を一覧/health/statusで不可視・404 | `AccountingIntegrationApiAndPageTest#connection_crossTenant_*`（11/11 PASS） |
+| R1-P1-08 | `fetchDealPayment` の決済日捏造（issue_date/now()フォールバック）を廃止し、`payments[].date` 欠落時はNULL返却。Worker の `PAYMENT_DATE_MISSING` が機能 | `PurchaseExpenseIntegrationTest#paymentWorker_missingPaymentDate_rejected`（13/13 PASS） |
+| R1-P1-09 | `fetchPayments` を deal単位＋`payments[]` を展開した payment単位フラット（`dealId:paymentId`キー・`duplicatePaymentId`）へ変更。reconciliation入金照合を payment単位・日付非NULL必須・1:1消費・`PAYMENT_AMBIGUOUS` fail-closed、EXTERNAL_ONLYを deal単位へ。分割/別日/日付NULL/同日同額/二重消費の5テスト追加 | `AccountingReconciliationTest`（15/15 PASS） |
+| R1-P1-10 | 5 Worker（売上sync/取消/BP/支払/経費）の `log.error(..., e)` を固定error code＋jobIdのみへ変更。機密入り不正snapshotの logger capture テストで raw 例外・PII 非出力を検証 | `AccountingWorkerRawExceptionLogTest`（5/5 PASS） |
+| R1-P1-11 | reason code を `Set.of(5コード)` 完全allow-list化（controller＋service）。未知 `REASON_*`・PII は `REASON_OTHER` へ正規化。design §8.3 に補償理由 `IN_FLIGHT_CANCEL_COMPENSATION` を明文化 | `AccountingIntegrationApiAndPageTest#i18n_fourLanguages_stableReasonCodes`（11/11 PASS） |
+| R4-P1-01 | Browser Demo の manager 境界を 390px 対応（desktop+mobile 両方）、入金fixtureを payment単位化 | `AccountingIntegrationBrowserDemoTest`（L4内1/1 PASS・manager mobile 390px 含む） |
+| 構造修正 | `AccountingReconciliationTest.createPayment()` をクラス内へ移動（余分 `}` 除去） | `mvn test-compile` BUILD SUCCESS |
+
+**実行証跡**: direct regression 92/92 PASS、**L4 fast `mvn test` 2427/2427 PASS（クリーン・Docker起動・単一実行・skip 0）**、VerifyLikeCiPowerShellCompatibilityTest 3/3 PASS。
+**未達（環境要因・S15と無関係）**: MySQL shards gate は既存 `FlywayV102_4FreeeCompanyBoundarySmokeTest`（migration変更なし・V106のfreee/payroll backfill重複）が1件失敗。Performance/Backup gate は環境不調で未実行。commit `908c9970`。
 
 ## 6. 未検証環境・本番前条件 (Release Gate)
 
