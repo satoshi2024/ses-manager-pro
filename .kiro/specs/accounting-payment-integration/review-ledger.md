@@ -5,10 +5,11 @@
 - **Spec**: `accounting-payment-integration` (S15)
 - **Wave**: Wave 3
 - **Migration 正式採番**: `V106`（Consolidated baseline V1反映済み）。適用済み `V106.1` と `V106.2` はbyte-for-byte不変とし、通常Flywayは`V106`→`V106.1`→`V106.2`のみとする。V106到達前のlegacy退避はFlyway外の`sql/runbook/v106_legacy_freee_preflight.sql`、旧V106.1適用済み環境のcompany境界修復は`V106.2`へ分離した。過去番号V105.4は作成しない。`V107` は S16 (`jp-pint-digital-invoice`) 予約済みのため使用しない。
-- **現行総合判定**: **FIXED_PENDING_REVIEW**（R6 P0の公開済みV106.2 checksum変更を是正し、V106.2を`fe69dd3a`のblobへ復元。静的38/38、実MySQL 2/2を通過。独立Review判定待ち。`VERIFIED_CLOSED` にはしていない）
+- **現行総合判定**: **CONDITIONAL PASS**（R7独立再ReviewでP0/P1/P2=0。R3-P0-01およびR6-R1は`VERIFIED_CLOSED`。S15本番deployは`GATE-S15-FREEE-PROD`と実2 JVM 401競合確認まで保留）
 - **Stage A SpecHead Review Head**: `e0d8a96f` / **SpecHead Base**: `f8b81e77`
 - **S15 Independent Re-Review R5 (Base `7219fd2a` → FixHead `fe69dd3a`)**: P0=1 / P1=0 / P2=0、総合FAIL。R4のP1×5はVERIFIED_CLOSED。V105.4の過去番号追加によるout-of-order P0を本Fixで是正したが、独立再Review待ちであり、S16はBLOCKED。
 - **S15 Independent Re-Review R6 (Base `fe69dd3a` → FixHead `951ac238`)**: P0=1 / P1=0 / P2=0、総合FAIL。R5のV105.4 out-of-order経路と旧V106.1→V106.2経路はVERIFIED_CLOSED。一方、公開済みV106.2のコメント変更によるchecksum P0がOPENとなったため、R6-R1で公開blob復元・guard・旧history回帰を実装した。独立再Review待ちであり、S16はBLOCKED。
+- **S15 Independent Re-Review R7 (Base `951ac238` → Head `a2ab297d`)**: P0=0 / P1=0 / P2=0、総合`CONDITIONAL PASS`。R3-P0-01/R6-R1は`VERIFIED_CLOSED`。S15本番deployはRelease Gate待ち、G5開始条件が満たされるためS16はT102 spikeから開始可能とする。
 - **対象タスク**: 歴史的タスク T094〜T101 / Stage B 是正タスク R4-T01〜R4-T08 / 再Review 是正 (R1-P1-02..11, R1-P1-04, R4-P1-01, R4-P2-02)
 
 ---
@@ -37,7 +38,7 @@
 
 ## 4. S15 初回独立再Review 是正記録（履歴: Base `3ee44a9a`）
 
-S15 Stage B 初回独立再Reviewの是正履歴。以下は当時の記録であり、最新R4の判定およびReview状態は本ledger冒頭と§4.7を正とする。
+S15 Stage B 初回独立再Reviewの是正履歴。以下は当時の記録であり、最新R7の判定およびReview状態は本ledger冒頭と§4.10を正とする。
 
 | Issue ID | 要件/設計 | 是正内容 | 検証テスト (全て実DB/実ChromeでPASS) |
 |---|---|---|---|
@@ -55,7 +56,7 @@ S15 Stage B 初回独立再Reviewの是正履歴。以下は当時の記録で�
 
 ---
 
-## 5. 是正サイクルの実行テスト記録（履歴。最新Gateは§4.9）
+## 5. 是正サイクルの実行テスト記録（履歴。最新Gateは§4.10）
 
 | ゲート | 結果 |
 |---|---|
@@ -126,7 +127,15 @@ R5再Reviewの入力は前回Review `Base 7219fd2a → FixHead fe69dd3a`。本Fi
 |---|---|---|---|---|---|---|
 | **R6-R1 / T095** | R1.1、T095/R4-R1/R5-R1、platform migration不変条件、Flyway checksum維持 | `src/main/resources/db/migration/V106_2__accounting_company_boundary_forward_repair.sql`（`fe69dd3a`版へ復元）、`src/test/java/com/ses/migration/MigrationScriptIntegrityTest.java`、`src/test/java/com/ses/migration/FlywayV106_2CompanyForwardRepairSmokeTest.java`、`tasks.md` | `MigrationScriptIntegrityTest` 28/28、`SpecDispatchConsistencyTest` 10/10、`FlywayV106_2CompanyForwardRepairSmokeTest` 実MySQL 2/2、`git diff --check` PASS | 旧公開V106.2相当artifactでV106.2まで適用後、現artifactのpending 0・validate成功・追加migration 0を確認。`flyway_schema_history`のV105.4=0、V106.2 success=1を確認。V74.3 Java migrationはfilesystem fixtureへ明示登録 | `186b746c`（実装）＋本Packet同期commit | V106.2は適用済みのため今後編集禁止。実freee契約、実2 JVM 401競合、独立R6再ReviewはRelease Gate。S16はBLOCKED |
 
-R6再Reviewの入力は `Base fe69dd3a → FixHead 951ac238`。V106.2の旧公開blobを復元し、正規化UTF-8 SHA-256 `2562d7b08bf441a45f249f7d6a4e6ce701dd0ed3dc9ace63f4a46c893fd8954a` を静的guardへ固定した。R6修正後のReview対象Headは実装commit `186b746c` と本Packet同期commitであり、`FIXED_PENDING_REVIEW`を維持する。
+R6再Reviewの入力は `Base fe69dd3a → FixHead 951ac238`。V106.2の旧公開blobを復元し、正規化UTF-8 SHA-256 `2562d7b08bf441a45f249f7d6a4e6ce701dd0ed3dc9ace63f4a46c893fd8954a` を静的guardへ固定した。R6修正後のReview対象Headは実装commit `186b746c` と本Packet同期commitであり、R7で`CONDITIONAL PASS`へ収束した。
+
+## 4.10 R7独立再Review結果
+
+| Task | Requirements | 変更file | Test | Demo | Commit | Risk |
+|---|---|---|---|---|---|---|
+| **T094〜T101 / R6-R1** | 全requirements、G4/G9、R1.1、Flyway checksum/repair契約、handbook §8/§12 | R7ではproduction code変更なし。R7対象は`a2ab297d`のspec、review ledger、direct regression assert、公開V106.2 blob | Static 38/38、MySQL direct regression 2/2。既存同一Head Gate証跡: Fast 2435、MySQL 57、Performance 1、Browser 1、Backup SUCCESS、全skip 0 | V106.2 checksum、既存history validate、pending 0、reapply 0、tenant/scope、外部障害、Browser、Performance、Backup証跡を確認 | `a2ab297d`（R7 Review Packet同期済みHead） | `GATE-S15-FREEE-PROD`（実freee plan/company/OAuth/master ID）と実2 JVM 401競合は本番Release Gate。S16 B1/B2/MはG5 sandbox証跡取得までPASS不可 |
+
+**R7判定**: P0=0 / P1=0 / P2=0、総合`CONDITIONAL PASS`。旧`accounting-payment-integration-R3-P0-01`は`VERIFIED_CLOSED`。S15本番deployはRelease Gate完了まで不可とし、S16はG5開始条件に基づきT102 `0. G5/provider/spec version spike`のみ開始可能とする。
 
 ## 6. 未検証環境・本番前条件 (Release Gate)
 

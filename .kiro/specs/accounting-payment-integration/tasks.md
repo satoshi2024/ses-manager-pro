@@ -110,7 +110,7 @@
 - [x] R4-R6. Review Packet・CI Gate・ledger収束
   - **Objective**: 同一clean/pushed HeadでFast/MySQL全shard/Performance/Backupを実行し、tasks/review-ledger/中央ledgerを同期する。
   - **Requirements**: R4-T08、handbook §8/§12。
-  - **Test/Demo**: `verify-like-ci.ps1`を同一code Headで実行し、Fast 2435/0/0/0、MySQL 57/0/0/0、Performance 1/0/0/0、Browser 1/0/0/0、Backup SUCCESS（全skip 0）を確認。Head/origin一致、Review Packet整合を確認する。独立再Reviewは未実施のため、現行判定は`FIXED_PENDING_REVIEW`、S16はBLOCKEDのままとする。
+  - **Test/Demo**: `verify-like-ci.ps1`を同一code Headで実行し、Fast 2435/0/0/0、MySQL 57/0/0/0、Performance 1/0/0/0、Browser 1/0/0/0、Backup SUCCESS（全skip 0）を確認。Head/origin一致、Review Packet整合を確認する。R7独立再ReviewでP0/P1/P2=0、`CONDITIONAL PASS`、R3-P0-01/R6-R1 `VERIFIED_CLOSED`を確認。S15本番deployはRelease Gate完了まで保留し、S16はG5開始条件確認後にT102 spikeから開始可能とする。
 
 ## 4. R5再Review対応タスク
 
