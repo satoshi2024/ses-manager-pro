@@ -480,7 +480,7 @@ class MigrationScriptIntegrityTest {
 
             // 特定テーブルのDDL記述 (CREATE/ALTER TABLE ... ;) を集める
             StringBuilder tableDdl = new StringBuilder();
-            Pattern pTable = Pattern.compile("(?:CREATE|ALTER)\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?" + tableName + "`?\\b[\\s\\S]*?;", Pattern.CASE_INSENSITIVE);
+            Pattern pTable = Pattern.compile("(?:CREATE\\s+(?:TEMPORARY\\s+)?|ALTER\\s+)TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?" + tableName + "`?\\b[\\s\\S]*?;", Pattern.CASE_INSENSITIVE);
             Matcher mTable = pTable.matcher(combinedSql);
             while (mTable.find()) {
                 tableDdl.append(mTable.group()).append("\n");
@@ -522,7 +522,7 @@ class MigrationScriptIntegrityTest {
 
             // 対象テーブルの DDL (CREATE/ALTER TABLE ... ;) を抽出
             StringBuilder tableDdl = new StringBuilder();
-            Pattern pTable = Pattern.compile("(?:CREATE|ALTER)\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?" + tableName + "`?\\b[\\s\\S]*?;", Pattern.CASE_INSENSITIVE);
+            Pattern pTable = Pattern.compile("(?:CREATE\\s+(?:TEMPORARY\\s+)?|ALTER\\s+)TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?`?" + tableName + "`?\\b[\\s\\S]*?;", Pattern.CASE_INSENSITIVE);
             Matcher mTable = pTable.matcher(combinedSql);
             while (mTable.find()) {
                 tableDdl.append(mTable.group()).append("\n");
@@ -827,7 +827,7 @@ class MigrationScriptIntegrityTest {
      */
     private Map<String, List<String>> createTableOccurrences() throws Exception {
         Pattern create = Pattern.compile(
-                "CREATE\\s+TABLE\\s+(IF\\s+NOT\\s+EXISTS\\s+)?`?([a-zA-Z_][a-zA-Z0-9_]*)`?",
+                "CREATE\\s+(?:TEMPORARY\\s+)?TABLE\\s+(IF\\s+NOT\\s+EXISTS\\s+)?`?([a-zA-Z_][a-zA-Z0-9_]*)`?",
                 Pattern.CASE_INSENSITIVE);
 
         // ファイル名の辞書順ではなくFlywayの適用順（バージョン昇順）で走査する。
