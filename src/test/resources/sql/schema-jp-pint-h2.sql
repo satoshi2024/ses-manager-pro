@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     updated_by VARCHAR(50) NULL,
     deleted_flag TINYINT(1) DEFAULT 0,
     UNIQUE KEY uk_digital_invoice_message (message_id),
-    UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, specification_version)
+    
 );
 
 CREATE TABLE IF NOT EXISTS t_digital_invoice_event (

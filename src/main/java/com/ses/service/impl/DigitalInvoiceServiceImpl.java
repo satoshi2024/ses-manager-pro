@@ -155,7 +155,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             // CanonicalInvoice生成 (簡易マッピング)
             com.ses.entity.Customer customer = customerService.getById(invoice.getCustomerId());
-            String peppolId = customer != null ? customer.getCompanyCode() : "buyer-peppol-id"; // Dummy since we didn't fetch participant
+            com.ses.entity.PeppolParticipant pp = peppolParticipantService.lambdaQuery().eq(com.ses.entity.PeppolParticipant::getOwnerType, "CUSTOMER").eq(com.ses.entity.PeppolParticipant::getOwnerId, invoice.getCustomerId()).one(); String peppolId = pp != null ? pp.getParticipantId() : "buyer-peppol-id";
 
             CanonicalInvoice.CustomerInfo customerInfo = CanonicalInvoice.CustomerInfo.builder()
                 .peppolParticipantId(peppolId)
@@ -169,7 +169,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             CanonicalInvoice canonicalInvoice = CanonicalInvoice.builder()
                     .invoiceNumber(invoice.getInvoiceNo())
                     .issuedDate(invoice.getIssuedDate())
-                    .dueDate(invoice.getIssuedDate() != null ? invoice.getIssuedDate().plusDays(30) : null)
+                    .dueDate(invoice.getDueDate())
                     .supplier(supplierInfo)
                     .customer(customerInfo)
                     .taxExclusiveAmount(invoice.getSubtotal())
@@ -185,30 +185,35 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             // XML生成
             String xml = renderer.render(canonicalInvoice, di.getSpecificationVersion());
 
-            // プロバイダAPIへ送信
-            String providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion());
-            
-            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                .documentType("INVOICE")
-                .direction("OUTGOING")
-                .sourceType("GENERATED")
-                .businessKey("DIGITAL_INVOICE_SEND:" + di.getId())
-                .versionDiscriminator("1")
-                .originalName(invoice.getInvoiceNo() + "_peppol.xml")
-                .contentType("application/xml")
-                .build();
-            try {
-                com.ses.entity.Document docEntity = documentService.registerGenerated(req, new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                di.setXmlDocumentId(docEntity.getId());
-            } catch (Exception e) {
-                log.error("Failed to archive outbound XML", e); throw new com.ses.common.exception.BusinessException("XMLのアーカイブに失敗しました。");
+            // 1. XML確定・アーカイブ
+            if (di.getXmlDocumentId() == null) {
+                com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                    .documentType("INVOICE")
+                    .direction("OUTGOING")
+                    .sourceType("GENERATED")
+                    .businessKey("DIGITAL_INVOICE_SEND:" + di.getId())
+                    .versionDiscriminator("1")
+                    .originalName(invoice.getInvoiceNo() + "_peppol.xml")
+                    .contentType("application/xml")
+                    .build();
+                try {
+                    com.ses.entity.Document docEntity = documentService.registerGenerated(req, new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                    di.setXmlDocumentId(docEntity.getId());
+                    if (!updateById(di)) { throw new com.ses.common.exception.BusinessException("ステータス更新の競合が発生しました。"); }
+                } catch (Exception e) {
+                    log.error("Failed to archive outbound XML", e); throw new com.ses.common.exception.BusinessException("XMLのアーカイブに失敗しました。");
+                }
             }
 
-            // ステータス更新
-            di.setProviderMessageId(providerMessageId);
-            di.setStatus("SENT");
-            di.setSentAt(LocalDateTime.now());
-            if (!updateById(di)) { throw new com.ses.common.exception.BusinessException("ステータス更新の競合が発生しました。"); }
+            // 2. プロバイダAPIへ送信 (transaction外)
+            String providerMessageId = di.getProviderMessageId();
+            if (providerMessageId == null) {
+                providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion());
+                di.setProviderMessageId(providerMessageId);
+                di.setStatus("SENT");
+                di.setSentAt(LocalDateTime.now());
+                if (!updateById(di)) { throw new com.ses.common.exception.BusinessException("ステータス更新の競合が発生しました。"); }
+            }
 
             integrationJobService.markSucceeded(jobId, String.valueOf(di.getId()), providerMessageId, "Invoice sent successfully.");
 
@@ -309,3 +314,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         digitalInvoiceEventService.save(event);
     }
 }
+
+
+
+

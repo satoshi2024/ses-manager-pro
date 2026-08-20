@@ -109,3 +109,5 @@ XML生成側で丸め直すと、会計・請求・外部で3つの数字が生�
 公式fixture/golden XML、XXE、rounding、participant、provider status、webhook signature/order/duplicate、
 受信duplicate/照合、spec version切替、PDF fallback。
 
+## R3 UNIQUE Key Update
+To support cancellation where a new message ID must be sent without replacing the original record (R4.1), the uk_digital_invoice_send unique key on t_digital_invoice (invoice_id, direction, specification_version) is dropped. It is no longer possible to prevent multiple SEND records via DB schema alone, so the application logic will handle deduplication.

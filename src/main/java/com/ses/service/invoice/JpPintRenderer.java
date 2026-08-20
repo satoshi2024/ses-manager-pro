@@ -62,6 +62,56 @@ public class JpPintRenderer {
             issueDate.setTextContent(invoice.getIssuedDate() != null ? invoice.getIssuedDate().toString() : "");
             root.appendChild(issueDate);
 
+            org.w3c.dom.Element dueDate = doc.createElement("cbc:DueDate");
+            dueDate.setTextContent(invoice.getDueDate() != null ? invoice.getDueDate().toString() : "");
+            root.appendChild(dueDate);
+
+            org.w3c.dom.Element currencyCode = doc.createElement("cbc:DocumentCurrencyCode");
+            currencyCode.setTextContent(invoice.getCurrency() != null ? invoice.getCurrency() : "JPY");
+            root.appendChild(currencyCode);
+
+            org.w3c.dom.Element buyerReference = doc.createElement("cbc:BuyerReference");
+            buyerReference.setTextContent(invoice.getCustomer() != null ? invoice.getCustomer().getPeppolParticipantId() : "REF");
+            root.appendChild(buyerReference);
+
+            org.w3c.dom.Element supplierParty = doc.createElement("cac:AccountingSupplierParty");
+            org.w3c.dom.Element supplierPartyName = doc.createElement("cac:Party");
+            org.w3c.dom.Element supplierName = doc.createElement("cac:PartyName");
+            org.w3c.dom.Element sName = doc.createElement("cbc:Name");
+            sName.setTextContent(invoice.getSupplier() != null ? invoice.getSupplier().getName() : "Seller");
+            supplierName.appendChild(sName);
+            supplierPartyName.appendChild(supplierName);
+            
+            org.w3c.dom.Element supplierTaxScheme = doc.createElement("cac:PartyTaxScheme");
+            org.w3c.dom.Element sCompanyId = doc.createElement("cbc:CompanyID");
+            sCompanyId.setTextContent(invoice.getSupplier() != null ? invoice.getSupplier().getCorporateNumber() : "T1234567890123");
+            supplierTaxScheme.appendChild(sCompanyId);
+            org.w3c.dom.Element sTaxScheme = doc.createElement("cac:TaxScheme");
+            org.w3c.dom.Element sTaxSchemeId = doc.createElement("cbc:ID");
+            sTaxSchemeId.setTextContent("VAT");
+            sTaxScheme.appendChild(sTaxSchemeId);
+            supplierTaxScheme.appendChild(sTaxScheme);
+            supplierPartyName.appendChild(supplierTaxScheme);
+            
+            supplierParty.appendChild(supplierPartyName);
+            root.appendChild(supplierParty);
+
+            org.w3c.dom.Element customerParty = doc.createElement("cac:AccountingCustomerParty");
+            org.w3c.dom.Element customerPartyName = doc.createElement("cac:Party");
+            org.w3c.dom.Element customerName = doc.createElement("cac:PartyName");
+            org.w3c.dom.Element cName = doc.createElement("cbc:Name");
+            cName.setTextContent(invoice.getCustomer() != null ? invoice.getCustomer().getName() : "Buyer");
+            customerName.appendChild(cName);
+            customerPartyName.appendChild(customerName);
+            customerParty.appendChild(customerPartyName);
+            root.appendChild(customerParty);
+
+            org.w3c.dom.Element taxTotal = doc.createElement("cac:TaxTotal");
+            org.w3c.dom.Element taxAmount = doc.createElement("cbc:TaxAmount");
+            taxAmount.setTextContent(invoice.getTaxAmount() != null ? invoice.getTaxAmount().toString() : "0");
+            taxTotal.appendChild(taxAmount);
+            root.appendChild(taxTotal);
+
             // LegalMonetaryTotal (合計金額)
             org.w3c.dom.Element legalMonetaryTotal = doc.createElement("cac:LegalMonetaryTotal");
             org.w3c.dom.Element lineExtensionAmount = doc.createElement("cbc:LineExtensionAmount");

@@ -16,7 +16,7 @@ public class InboundDigitalInvoiceApiController {
     private final DigitalInvoiceService digitalInvoiceService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
+    @PreAuthorize("hasAnyRole('管理者', 'マネージャー', '財務')")
     public ApiResult<Page<DigitalInvoice>> listInboundInvoices(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size) {
