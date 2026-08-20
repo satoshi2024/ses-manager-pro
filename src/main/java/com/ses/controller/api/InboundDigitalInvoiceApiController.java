@@ -16,7 +16,7 @@ public class InboundDigitalInvoiceApiController {
     private final DigitalInvoiceService digitalInvoiceService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('管理者', 'マネージャー', '財務')")
+    @PreAuthorize("hasAnyRole('管理者', 'マネージャー')")
     public ApiResult<Page<DigitalInvoice>> listInboundInvoices(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size) {
@@ -35,11 +35,11 @@ public class InboundDigitalInvoiceApiController {
     public ApiResult<Void> reviewInvoice(@PathVariable Long id, @RequestParam String action) {
         DigitalInvoice di = digitalInvoiceService.getById(id);
         if (di == null || !"RECEIVE".equals(di.getDirection())) {
-            return ApiResult.failed("対象が見つかりません。");
+            return ApiResult.error("対象が見つかりません。");
         }
         
         if (!"PENDING_REVIEW".equals(di.getStatus())) {
-            return ApiResult.failed("レビュー待ちのインボイスではありません。");
+            return ApiResult.error("レビュー待ちのインボイスではありません。");
         }
 
         if ("ACCEPT".equalsIgnoreCase(action)) {
@@ -49,10 +49,10 @@ public class InboundDigitalInvoiceApiController {
         } else if ("REJECT".equalsIgnoreCase(action)) {
             di.setStatus("REJECTED_MANUAL");
         } else {
-            return ApiResult.failed("不明なアクションです。");
+            return ApiResult.error("不明なアクションです。");
         }
 
         digitalInvoiceService.updateById(di);
-        return ApiResult.success();
+        return ApiResult.success(null);
     }
 }

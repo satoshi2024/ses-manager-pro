@@ -76,7 +76,7 @@
     field mask（営業からXML本文が見えないこと）、mobile 390px。
   - **Demo**: PDF顧客とPeppol顧客を別送信。participant未検証の顧客がPeppol送信対象に出ないことを確認。
 
-- [ ] B2. 受信review
+- [x] B2. 受信review
   - **Objective**: 受信したinvoiceの原本XML/PDFがarchiveへ保存され、
     BP/注文/契約の候補へ照合されたうえでreview queueに入る。
     人が確定するまで仕入登録や支払確定が行われない。重複受信が検知される。
@@ -86,7 +86,8 @@
     受信XMLは信頼できない入力として扱う。
   - **テスト要件**: L2〜L3。duplicate検知（3系統それぞれ）、不正XMLの拒否、
     照合ロジック、**review確定前に仕入/支払が作られないこと**。
-  - **Demo**: 受信invoiceをBP支払候補へ。review未確定の状態で支払が作られないことを確認。
+  - **Demo**: mock受信→PENDING_REVIEW／重複拒否。**sandbox Demo は PENDING_SANDBOX**。
+  - **完了条件メモ**: 開発完了＝mock定向PASS。本番受入はsandbox証跡必須。
 
 - [ ] M. provider受入/回帰
   - **Objective**: providerの公式conformance testに通り、送受信のend-to-endと障害復旧が確認できる。
