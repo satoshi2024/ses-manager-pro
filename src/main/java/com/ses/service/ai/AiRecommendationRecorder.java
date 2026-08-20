@@ -6,5 +6,10 @@ import java.util.List;
 
 public interface AiRecommendationRecorder {
 
-    String recordMatch(String useCase, Long actorUserId, List<MatchResultDto> results);
+    default String recordMatch(String useCase, Long actorUserId, List<MatchResultDto> results) {
+        return recordMatch(useCase, actorUserId, results, null, null);
+    }
+
+    String recordMatch(String useCase, Long actorUserId, List<MatchResultDto> results,
+                       Long sourceEngineerId, Long sourceProjectId);
 }

@@ -18,6 +18,7 @@ import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiOutcomeMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.service.ai.AiEvaluationMetrics;
 import com.ses.service.ai.AiEvaluationQueryService;
 import com.ses.service.ai.AiPiiMasker;
 import lombok.RequiredArgsConstructor;
@@ -25,11 +26,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -101,9 +100,13 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
             row.setStatus(version.getStatus());
             row.setPromptVersion(version.getPromptVersion());
             row.setRunCount(versionRuns.size());
-            row.setAdoptionRate(adoptionRate(versionItems, fbByItem));
-            row.setInterviewRate(existsRate(versionItems, ocByItem, "INTERVIEW"));
-            row.setWinRate(existsRate(versionItems, ocByItem, "WIN"));
+            row.setAdoptionRate(AiEvaluationMetrics.adoptionRate(versionItems, fbByItem));
+            row.setInterviewRate(AiEvaluationMetrics.existsRateAmongAccepted(
+                    versionItems, fbByItem, ocByItem, "INTERVIEW"));
+            row.setWinRate(AiEvaluationMetrics.existsRateAmongAccepted(
+                    versionItems, fbByItem, ocByItem, "WIN"));
+            row.setPrecisionAt5(AiEvaluationMetrics.precisionAt(versionItems, fbByItem, 5));
+            row.setPrecisionAt10(AiEvaluationMetrics.precisionAt(versionItems, fbByItem, 10));
             row.setLatencyP95(latencyP95(versionRuns));
             if (admin) {
                 row.setCostJpy(versionRuns.stream().map(AiRecommendationRun::getCostJpy)
@@ -155,41 +158,6 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
             sample++;
         }
         return dto;
-    }
-
-    private static double adoptionRate(List<AiRecommendationItem> items,
-                                       Map<Long, List<AiFeedback>> fbByItem) {
-        int accept = 0;
-        int judged = 0;
-        for (AiRecommendationItem item : items) {
-            List<AiFeedback> list = fbByItem.getOrDefault(item.getId(), List.of());
-            boolean hasAccept = list.stream().anyMatch(f -> "ACCEPT".equals(f.getDecision()));
-            boolean hasReject = list.stream().anyMatch(f -> "REJECT".equals(f.getDecision()));
-            if (!hasAccept && !hasReject) {
-                continue;
-            }
-            judged++;
-            if (hasAccept) {
-                accept++;
-            }
-        }
-        return judged == 0 ? 0 : accept * 100.0 / judged;
-    }
-
-    private static double existsRate(List<AiRecommendationItem> items,
-                                     Map<Long, List<AiOutcome>> ocByItem, String type) {
-        if (items.isEmpty()) {
-            return 0;
-        }
-        Set<Long> hits = new HashSet<>();
-        for (AiRecommendationItem item : items) {
-            boolean exists = ocByItem.getOrDefault(item.getId(), List.of()).stream()
-                    .anyMatch(o -> type.equals(o.getOutcomeType()));
-            if (exists) {
-                hits.add(item.getId());
-            }
-        }
-        return hits.size() * 100.0 / items.size();
     }
 
     private static Double latencyP95(List<AiRecommendationRun> runs) {

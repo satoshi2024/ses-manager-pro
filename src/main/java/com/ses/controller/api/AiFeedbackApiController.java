@@ -5,6 +5,7 @@ import com.ses.entity.AiFeedback;
 import com.ses.service.ai.AiFeedbackService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/ai")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('管理者','マネージャー','営業')")
 public class AiFeedbackApiController {
 
     private final AiFeedbackService aiFeedbackService;

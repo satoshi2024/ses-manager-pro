@@ -24,6 +24,8 @@ public class AiEvaluationDashboardDto {
         private double adoptionRate;
         private double interviewRate;
         private double winRate;
+        private double precisionAt5;
+        private double precisionAt10;
         private Double latencyP95;
         private Integer costJpy;
         private Integer tokenInput;

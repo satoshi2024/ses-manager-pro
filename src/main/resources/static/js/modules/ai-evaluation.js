@@ -36,6 +36,8 @@ function renderDashboard(data) {
             + '<td>' + formatRate(row.adoptionRate) + '</td>'
             + '<td>' + formatRate(row.interviewRate) + '</td>'
             + '<td>' + formatRate(row.winRate) + '</td>'
+            + '<td>' + formatRate(row.precisionAt5) + '</td>'
+            + '<td>' + formatRate(row.precisionAt10) + '</td>'
             + '<td>' + SES.escapeHtml(row.latencyP95 == null ? '-' : String(row.latencyP95)) + '</td>'
             + costCell
             + '</tr>'

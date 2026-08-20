@@ -6,28 +6,32 @@
 |---|---|
 | spec | `ai-feedback-learning` |
 | handbook | `v2.0` |
-| state | `IMPLEMENTER COMPLETE`（T109〜T115。独立Review待ち） |
+| state | `FIXING`（Round 2 P1-01〜04 修正済。再Review待ち） |
 | base | `9d2c229b6fe5033f1cc8275da116f65e98f2cd59` |
-| head | T111〜T115 working tree（T110 Head `0e12c894`） |
-| merge | `main` に T109〜T110 が入っている。T111〜T115 は本commit |
-| latest review | Round 1（独立、対象 T109 only） |
-| verdict | T109 intermediate **PASS**。T111〜T115 は独立Review前。spec総合 **NOT REVIEWABLE**（独立Review未実施 + `GATE-S17-G10-PROD`） |
-| issue count | P0=0 / P1=0 / P2=3（FIXED_BY_IMPLEMENTER、VERIFIED_CLOSEDはReviewのみ） |
-| next action | 独立Review。次specは開始しない。本番 PASS は出さない |
+| head | Round 2 P1 fix（前 Head `e90e0537`） |
+| merge | `main` に T109〜T115 が入っている |
+| latest review | Round 2（独立、T109–T115。spec総合 FAIL、P1=4） |
+| verdict | T109 intermediate **PASS** 維持。R1-P2-01/02/03 **VERIFIED_CLOSED**。R2-P1-01〜04 は FIXED_BY_IMPLEMENTER。spec総合は再Reviewまで **FAIL**。`GATE-S17-G10-PROD` は DEFERRED |
+| issue count | P0=0 / P1=4 FIXED_BY_IMPLEMENTER / P2=5 OPEN（非block） |
+| next action | Round 3 独立Review（OPEN P0/P1 のみ）。次specは開始しない。本番 PASS は出さない |
 
 ## 2. OPEN Issue Register
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ai-feedback-learning-R1-P2-01 | P2 | R4.1 / allowlist §4.3 / R3.3 | `g10-pii-allowlist.md` workLocation | `t_project.work_location` に番地 | T111 が番地を外部送信 | §6 grain=prefecture-municipality | T111 canary | FIXED_BY_IMPLEMENTER（未verify） | `214c6852` | Review 待ち |
-| ai-feedback-learning-R1-P2-02 | P2 | R2.2 / design §5.1 | outcome EARLY_EXIT 表 | `status=解約` かつ満了相当 | 満了解約が早期離場 | `occurred_at < original_end_date`。当日解約は除外 | T112 fixture | FIXED_BY_IMPLEMENTER（未verify） | `214c6852` | Review 待ち |
-| ai-feedback-learning-R1-P2-03 | P2 | T109 L0 非交差 | `AiG10AllowlistDocumentTest` | `engineer.age` 追加でも JSON 完全一致は通る | 将来の allowlist 追加を止めない | design §5.2 対応表 + prefix token | `AiG10AllowlistDocumentTest` | FIXED_BY_IMPLEMENTER（未verify） | `214c6852` | Review 待ち |
+| ai-feedback-learning-R2-P1-01 | P1 | design §5.2 | `AiFeedbackApiController` / `AiFeedbackServiceImpl` | 営業B/HR が他人の item に feedback | 他営業の採否・HR判断が学習に入る | item→run 所有者照合。HR/要員拒否 | `AiFeedbackApiControllerTest` + Outcome | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
+| ai-feedback-learning-R2-P1-02 | P1 | R3.1 / §8 | `AiEvaluationMetrics` | 面談率分母が全item | version比較が歪む | 分母=ACCEPT。0なら0 | `AiEvaluationMetricsTest` | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
+| ai-feedback-learning-R2-P1-03 | P1 | R1.1 / R3.3 | `AiRecommendationRecorderImpl` | matching の hash が 0×64 | 再現hash/segmentが無い | allowlist summary + sha256 | `AiRecommendationRecorderHashTest` | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
+| ai-feedback-learning-R2-P1-04 | P1 | R3.1 | VersionRow / evaluation UI | precision@k 非表示 | オンライン看板が offline と不一致 | precision@5/@10 を API と表に出す | Metrics + Eval API/画面列 | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
 
 ## 3. Closed/Deferred Issue
 
 | issue ID | final state | root cause | fix commit | verification evidence | closed round | reopen condition |
 |---|---|---|---|---|---|---|
 | GATE-S17-G10-PROD | DEFERRED | 実provider DPA/region/署名は本番gate | — | T109がmock/rule既定を記録 | T109 | 発注者がDPAと署名を閉じたとき |
+| ai-feedback-learning-R1-P2-01 | VERIFIED_CLOSED | workLocation grain | `214c6852` + T111 | `AiExecutionGatewayPiiTest` | Round 2 | 番地を allowlist に戻したとき |
+| ai-feedback-learning-R1-P2-02 | VERIFIED_CLOSED | EARLY_EXIT が全解約 | `214c6852` + T112 | `AiFeedbackOutcomeTest` | Round 2 | 当日解約を EARLY_EXIT にしたとき |
+| ai-feedback-learning-R1-P2-03 | VERIFIED_CLOSED | L0 が design 表を parse しない | `214c6852` | `AiG10AllowlistDocumentTest` | Round 2 | prefix token 検査を外したとき |
 
 owner: 発注者 / security / HR / product owner。期限: 本番release前。T115 Mの本番PASSを阻害する。開発task T110〜T114は阻害しない。
 
@@ -131,9 +135,9 @@ P2 は T110 DDL の blocker ではない。P2-01〜03 は `214c6852` で文書/L
 
 ```text
 ai-feedback-learning / handbook v2.0
-T109 intermediate=PASS（Head 835c8c86）。P2=3 FIXED_BY_IMPLEMENTER（214c6852）。
-T109〜T115 implementer complete。L4 2506/0/0/0。spec総合=NOT REVIEWABLE（独立Review未実施、GATE-S17-G10-PROD）。
-次task=独立Review。次spec=開始しない。本番 PASS は出さない。
+T109 intermediate=PASS（Head 835c8c86）。R1-P2=VERIFIED_CLOSED。
+Round 2 FAIL（P1=4）。実装は R2-P1-01〜04 を修正。spec総合は再Reviewまで FAIL。
+次task=Round 3 Review。次spec=開始しない。本番 PASS は出さない。
 ```
 
 ## Task log
@@ -146,4 +150,5 @@ T109〜T115 implementer complete。L4 2506/0/0/0。spec総合=NOT REVIEWABLE（�
 | T112 | R2, §5.1 EARLY_EXIT, 冪等 | V108_1 proposal trace, feedback API, outcome hooks | `AiFeedbackOutcomeTest` | 重複 WIN 1件。当日解約は EARLY_EXIT なし | 本working tree | AIは業務状態を変更しない。feedback NULL は却下ではない |
 | T113 | R3.2, §5.3 自動promotion禁止 | offline eval fixture, promoteApproved, rollback | `AiOfflineEvaluationTest` | FAILED は昇格拒否。rollback後も過去 run の version 不変 | 本working tree | shadow は ACTIVE 以外。承認は管理者 |
 | T114 | R3.3, §5.2 cost/HR | `/ai/evaluation`, `/api/ai/evaluations`, i18n 4言語, menu `ai-evaluation` | `AiEvaluationApiControllerTest`, PageRendering, MessageBundle | 少数segment非表示。HR 403。cost は管理者のみ | 本working tree | 最長 prefix `/api/ai/evaluations` |
-| T115 | M 回帰 | L4修正（H2 mismatch列、browser tag、PowerShell gate） | L4 `mvn test` **2506/0/0/0 BUILD SUCCESS skip 0**。MySQL smoke は Docker 欠如で未実行（CI shard-1）。browser Demo は markup + `-Pbrowser-tests` へ隔離 | mock既定の既存AI回帰。390px は `MobileResponsiveLayoutTest` `/ai/evaluation` | 本commit | 本番 PASS は GATE-S17-G10-PROD まで出さない。実Chrome Demo は browser profile |
+| T115 | M 回帰 | L4修正（H2 mismatch列、browser tag、PowerShell gate） | L4 `mvn test` **2506/0/0/0 BUILD SUCCESS skip 0**。MySQL smoke は Docker 欠如で未実行（CI shard-1）。browser Demo は markup + `-Pbrowser-tests` へ隔離 | mock既定の既存AI回帰。390px は `MobileResponsiveLayoutTest` `/ai/evaluation` | `e90e0537` | 本番 PASS は GATE-S17-G10-PROD まで出さない。実Chrome Demo は browser profile |
+| R2-P1 | R2-P1-01〜04 | feedback認可、metric分母、matching hash/summary、precision@k 表示 | 定向 **44/0/0/0**（G10/PII/Outcome/Schema/Offline/Scan/Eval/Feedback MVC/Metrics/Recorder） | 営業B/HR 403、面談率=採用分母、hash≠0、precision列 | 本commit | P2-01〜05 は未着手。再Review依頼 |

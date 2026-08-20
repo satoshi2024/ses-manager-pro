@@ -4,8 +4,10 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AiFeedback;
 import com.ses.entity.AiRecommendationItem;
+import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
+import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiFeedbackService;
 import com.ses.service.ai.AiPiiMasker;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
 
     private final AiFeedbackMapper feedbackMapper;
     private final AiRecommendationItemMapper itemMapper;
+    private final AiRecommendationRunMapper runMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -38,6 +41,11 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
         if (item == null) {
             throw new BusinessException(404, "推薦候補が見つかりません");
         }
+        AiRecommendationRun run = runMapper.selectById(item.getRunId());
+        if (run == null) {
+            throw new BusinessException(404, "推薦候補が見つかりません");
+        }
+        assertCanRecord(run);
         if (decision != null && !decision.isBlank() && !DECISIONS.contains(decision)) {
             throw new BusinessException(400, "decision が不正です");
         }
@@ -61,5 +69,19 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
             itemMapper.updateById(item);
         }
         return feedback;
+    }
+
+    private static void assertCanRecord(AiRecommendationRun run) {
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role) || "マネージャー".equals(role)) {
+            return;
+        }
+        if ("営業".equals(role)) {
+            Long userId = SecurityUtils.currentUserId();
+            if (userId != null && userId.equals(run.getActorUserId())) {
+                return;
+            }
+        }
+        throw BusinessException.of(403, "error.accessDenied");
     }
 }

@@ -6,7 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.test.context.support.WithMockUser;
+
+import java.nio.charset.StandardCharsets;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -36,6 +39,15 @@ class AiEvaluationApiControllerTest {
         AiEvaluationDashboardDto dto = data(result);
         assertTrue(dto.isCostVisible());
         assertTrue(dto.getMinSegmentCount() >= 5);
+        assertTrue(dto.getVersions().stream().allMatch(v -> v.getPrecisionAt5() >= 0 && v.getPrecisionAt10() >= 0));
+        String html = new ClassPathResource("templates/ai/evaluation.html")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String js = new ClassPathResource("static/js/modules/ai-evaluation.js")
+                .getContentAsString(StandardCharsets.UTF_8);
+        assertTrue(html.contains("ai.evaluation.col.precision5"));
+        assertTrue(html.contains("ai.evaluation.col.precision10"));
+        assertTrue(js.contains("precisionAt5"));
+        assertTrue(js.contains("precisionAt10"));
     }
 
     @Test

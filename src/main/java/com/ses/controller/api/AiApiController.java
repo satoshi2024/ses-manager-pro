@@ -31,7 +31,7 @@ public class AiApiController {
             dataScopeService.assertAllowedEngineer(engineerId);
         }
         List<MatchResultDto> results = aiMatchingService.findMatchingProjects(engineerId);
-        record(results);
+        record(results, engineerId, null);
         return ApiResult.success(results);
     }
 
@@ -41,14 +41,14 @@ public class AiApiController {
             dataScopeService.assertAllowedProject(projectId);
         }
         List<MatchResultDto> results = aiMatchingService.findMatchingEngineers(projectId);
-        record(results);
+        record(results, null, projectId);
         return ApiResult.success(results);
     }
 
-    private void record(List<MatchResultDto> results) {
+    private void record(List<MatchResultDto> results, Long engineerId, Long projectId) {
         AiRecommendationRecorder recorder = recommendationRecorder.getIfAvailable();
         if (recorder != null) {
-            recorder.recordMatch("MATCHING", null, results);
+            recorder.recordMatch("MATCHING", null, results, engineerId, projectId);
         }
     }
 }

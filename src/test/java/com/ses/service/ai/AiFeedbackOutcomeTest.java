@@ -1,18 +1,16 @@
 package com.ses.service.ai;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.AiFeedback;
 import com.ses.entity.AiOutcome;
-import com.ses.entity.AiRecommendationItem;
-import com.ses.entity.AiRecommendationRun;
 import com.ses.entity.Proposal;
 import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiOutcomeMapper;
-import com.ses.mapper.AiRecommendationItemMapper;
-import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.impl.AiOutcomeServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDate;
@@ -20,10 +18,12 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 @ActiveProfiles("test")
+@WithMockUser(username = "1", roles = "管理者")
 class AiFeedbackOutcomeTest {
 
     @Autowired
@@ -38,10 +38,6 @@ class AiFeedbackOutcomeTest {
     private AiFeedbackMapper feedbackMapper;
     @Autowired
     private AiOutcomeMapper outcomeMapper;
-    @Autowired
-    private AiRecommendationItemMapper itemMapper;
-    @Autowired
-    private AiRecommendationRunMapper runMapper;
 
     @Test
     void 未判断は却下ではなくfeedbackを残せる() {
@@ -86,6 +82,18 @@ class AiFeedbackOutcomeTest {
     }
 
     @Test
+    void 営業は他人のrunにfeedbackできない() {
+        Long itemId = newItem(10L);
+        setRole("11", "営業");
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> feedbackService.record(itemId, "REJECT", null, null));
+        assertEquals(403, denied.getCode());
+        setRole("10", "営業");
+        AiFeedback own = feedbackService.record(itemId, "HOLD", null, null);
+        assertEquals("HOLD", own.getDecision());
+    }
+
+    @Test
     void WINはEXISTSで提案源1件() {
         Long itemId = newItem();
         Proposal proposal = new Proposal();
@@ -107,17 +115,22 @@ class AiFeedbackOutcomeTest {
     }
 
     private Long newItem() {
+        return newItem(1L);
+    }
+
+    private Long newItem(Long actorUserId) {
         var dto = new com.ses.dto.ai.MatchResultDto();
         dto.setProjectId(101L);
         dto.setScore(80);
         dto.setReason("ok");
-        recorder.recordMatch("MATCHING", 1L, List.of(dto));
-        AiRecommendationRun run = runMapper.selectList(null).stream()
-                .reduce((a, b) -> a.getId() > b.getId() ? a : b).orElseThrow();
-        return itemMapper.selectList(null).stream()
-                .filter(i -> run.getId().equals(i.getRunId()))
-                .findFirst()
-                .map(AiRecommendationItem::getId)
-                .orElseThrow();
+        recorder.recordMatch("MATCHING", actorUserId, List.of(dto));
+        return dto.getItemId();
+    }
+
+    private static void setRole(String userId, String role) {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        userId, "x",
+                        List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role))));
     }
 }
