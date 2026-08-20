@@ -88,6 +88,10 @@ class JpPintDigitalInvoiceF2Test {
         CanonicalInvoice invoice = CanonicalInvoice.builder()
                 .invoiceNumber("INV-2026-001")
                 .issuedDate(LocalDate.of(2026, 8, 20))
+                .dueDate(LocalDate.of(2026, 9, 20))
+                .orderReference("PO-1234")
+                .contractReference("CONT-999")
+                .items(List.of(CanonicalInvoiceItem.builder().taxCategory("S").taxRate(new BigDecimal("10")).build()))
                 .build();
         
         String xml = renderer.render(invoice, "1.1.3");
@@ -95,5 +99,16 @@ class JpPintDigitalInvoiceF2Test {
         assertTrue(xml.contains("<cbc:ID>INV-2026-001</cbc:ID>"));
         assertTrue(xml.contains("<cbc:CustomizationID>urn:peppol:pint:billing-3.0@jp:1.0::1.1.3</cbc:CustomizationID>"));
         assertTrue(xml.contains("<cbc:IssueDate>2026-08-20</cbc:IssueDate>"));
+        assertTrue(xml.contains("<cbc:DueDate>2026-09-20</cbc:DueDate>"));
+        assertTrue(xml.contains("<cac:AccountingSupplierParty>"));
+        assertTrue(xml.contains("<cac:AccountingCustomerParty>"));
+        assertTrue(xml.contains("<cac:TaxTotal>"));
+        assertTrue(xml.contains("<cac:OrderReference>"));
+        assertTrue(xml.contains("<cbc:ID>PO-1234</cbc:ID>"));
+        assertTrue(xml.contains("<cac:ContractDocumentReference>"));
+        assertTrue(xml.contains("<cbc:ID>CONT-999</cbc:ID>"));
+        assertTrue(xml.contains("<cac:ClassifiedTaxCategory>"));
+        assertTrue(xml.contains("<cbc:Percent>10</cbc:Percent>"));
     }
 }
+

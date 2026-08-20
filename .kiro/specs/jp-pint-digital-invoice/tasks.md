@@ -28,7 +28,7 @@
     未検証の宛先へは送信できない。送受信のstatusとeventが記録され、
     同じproviderイベントが二重に処理されない。
   - **実装ガイダンス**: **V107**/V1/H2(`sql/schema-jp-pint-h2.sql`)/MySQL smoke、state/idempotency。
-    `provider_event_id`にUNIQUE。`(invoice_id, direction, specification_version)`にUNIQUE（design §5.4）。
+    `provider_event_id`にUNIQUE（送信側のUNIQUE制約は廃止）。
     **`verified_at IS NULL`の宛先へ送信しない**（design §5.1）。
     `t_digital_invoice.invoice_id IS NULL`は**受信invoice**を表す業務値。`direction`と併せて判定する。
   - **テスト要件**: L1〜L3。participant unique、status遷移、

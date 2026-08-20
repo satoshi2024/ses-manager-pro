@@ -18,7 +18,7 @@ WHERE m.menu_key = 'digital-invoice'
 
 INSERT IGNORE INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
-FROM (SELECT '管理者' AS role UNION ALL SELECT 'マネージャー' UNION ALL SELECT '財務') r
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'マネージャー' ) r
 CROSS JOIN m_menu m
 WHERE m.menu_key = 'inbound-invoice'
   AND NOT EXISTS (SELECT 1 FROM t_role_menu tr WHERE tr.role = r.role AND tr.menu_id = m.id);
@@ -40,3 +40,4 @@ WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('role-admin', 'role-manager');
 ALTER TABLE t_digital_invoice DROP INDEX uk_digital_invoice_send;
+

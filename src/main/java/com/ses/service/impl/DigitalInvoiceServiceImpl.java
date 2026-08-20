@@ -38,7 +38,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final com.ses.service.DocumentService documentService;
     private final com.ses.service.CustomerService customerService;
 
-    private static final Set<String> TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED");
+    private static final Set<String> TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED", "REVOKED");
 
     @Override
     @Transactional
@@ -90,10 +90,11 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         long count = lambdaQuery()
                 .eq(DigitalInvoice::getInvoiceId, invoiceId)
                 .eq(DigitalInvoice::getDirection, "SEND")
-                .eq(DigitalInvoice::getSpecificationVersion, specVersion)
+                .eq(DigitalInvoice::getProfile, "Standard")
+                .notIn(DigitalInvoice::getStatus, "CANCELLED", "REVOKED")
                 .count();
         if (count > 0) {
-            throw new BusinessException("このインボイスはすでに送信キューに登録されています。");
+            throw new BusinessException("このインボイスはすでに送信されています（または送信キューにあります）。");
         }
 
         DigitalInvoice di = new DigitalInvoice();
@@ -208,7 +209,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             // 2. プロバイダAPIへ送信 (transaction外)
             String providerMessageId = di.getProviderMessageId();
             if (providerMessageId == null) {
-                providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion());
+                providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion(), di.getMessageId());
                 di.setProviderMessageId(providerMessageId);
                 di.setStatus("SENT");
                 di.setSentAt(LocalDateTime.now());
@@ -228,6 +229,41 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
     @Override
     @Transactional
+    public void cancelInvoice(Long digitalInvoiceId) {
+        DigitalInvoice di = getById(digitalInvoiceId);
+        if (di == null) throw new BusinessException("Invoice not found");
+        if (!"SEND".equals(di.getDirection())) throw new BusinessException("Only SEND can be cancelled");
+        if ("CANCELLED".equals(di.getStatus()) || "REVOKED".equals(di.getStatus())) return;
+
+        if ("QUEUED".equals(di.getStatus()) || "FAILED".equals(di.getStatus())) {
+            // 未送信（あるいは送信失敗）の場合はキュー取消
+            di.setStatus("CANCELLED");
+            if (!updateById(di)) throw new BusinessException("Concurrent modification");
+            // ジョブのキャンセルは省略（IntegrationJobService側で status によってスキップされる）
+        } else {
+            // SENT, DELIVERED, REJECTED などの場合は網へ送信済（または処理中）。
+            // R4.1 に従い旧messageを上書きせず REVOKED とする
+            di.setStatus("REVOKED");
+            if (!updateById(di)) throw new BusinessException("Concurrent modification");
+
+            // 網への打消し電文 (Credit Note) レコードを作成
+            DigitalInvoice cn = new DigitalInvoice();
+            cn.setInvoiceId(di.getInvoiceId());
+            cn.setDirection("SEND");
+            cn.setProfile("CreditNote");
+            cn.setSpecificationVersion(di.getSpecificationVersion());
+            cn.setMessageId("MSG-" + UUID.randomUUID().toString());
+            cn.setStatus("QUEUED");
+            save(cn);
+
+            // 本来は enqueueInvoiceForSend と同様に t_integration_job に登録するが、ここでは簡略化。
+            String payload = "{\"digitalInvoiceId\":" + cn.getId() + "}";
+            String payloadHash = org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload);
+            String idempotencyKey = "digital_invoice_cancel_" + cn.getMessageId();
+            integrationJobService.enqueueJob("SEND_DIGITAL_INVOICE", payload, payloadHash, idempotencyKey);
+        }
+    }
+
     public void processInboundInvoice(String providerMessageId, String eventId, String xmlContent, String rawPayloadHash, java.time.LocalDateTime eventAt) {
         // 1. 重複チェック: providerMessageId
         long countMsg = lambdaQuery().eq(DigitalInvoice::getProviderMessageId, providerMessageId).count();
@@ -290,11 +326,15 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                     .one();
                 if (pp == null) {
                     di.setStatus("REJECTED_AUTO");
+                    di.setMatchStatus("UNMATCHED");
                 } else {
                     di.setStatus("PENDING_REVIEW");
+                    di.setSupplierCompanyId(pp.getOwnerId());
+                    di.setMatchStatus("MATCHED");
                 }
             } else {
                 di.setStatus("REJECTED_AUTO");
+                di.setMatchStatus("UNMATCHED");
             }
 
         } catch (Exception e) {
@@ -308,12 +348,19 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         event.setDigitalInvoiceId(di.getId());
         event.setProviderEventId(eventId);
         event.setEventType("RECEIVED");
-        event.setEventAt(LocalDateTime.now());
+        event.setEventAt(eventAt != null ? eventAt : LocalDateTime.now());
         event.setPayloadHash(rawPayloadHash);
         event.setSignatureValid(true);
         digitalInvoiceEventService.save(event);
     }
 }
+
+
+
+
+
+
+
 
 
 

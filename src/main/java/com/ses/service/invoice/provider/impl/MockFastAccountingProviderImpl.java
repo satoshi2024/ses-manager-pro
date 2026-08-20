@@ -9,7 +9,7 @@ import java.util.UUID;
 public class MockFastAccountingProviderImpl implements DigitalInvoiceProvider {
 
     @Override
-    public String sendInvoice(String xml, String specificationVersion) {
+    public String sendInvoice(String xml, String specificationVersion, String messageId) {
         // モック実装: Sandbox未契約のため、ダミーのprovider message IDを返す
         return "mock-fastaccounting-msg-" + UUID.randomUUID();
     }
@@ -20,3 +20,4 @@ public class MockFastAccountingProviderImpl implements DigitalInvoiceProvider {
         return "valid-sig".equals(signatureHeader);
     }
 }
+

@@ -24,6 +24,10 @@ public class DigitalInvoice {
 
     @Version
     private Long version;
+    private Long supplierCompanyId;
+    private Long purchaseOrderId;
+    private Long contractId;
+    private String matchStatus;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -40,3 +44,4 @@ public class DigitalInvoice {
     @TableLogic
     private Integer deletedFlag;
 }
+

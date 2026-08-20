@@ -10,7 +10,7 @@ public interface DigitalInvoiceProvider {
      * @param specificationVersion JP PINTバージョン
      * @return provider_message_id (プロバイダ側で採番された送信メッセージID)
      */
-    String sendInvoice(String xml, String specificationVersion);
+    String sendInvoice(String xml, String specificationVersion, String messageId);
 
     /**
      * Webhookの署名が正しいか検証する。(raw bodyを用いる)
@@ -20,3 +20,4 @@ public interface DigitalInvoiceProvider {
      */
     boolean verifyWebhookSignature(String rawBody, String signatureHeader);
 }
+

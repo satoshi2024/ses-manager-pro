@@ -17,6 +17,7 @@ import java.io.StringReader;
 import java.io.StringWriter;
 
 @Component
+@lombok.extern.slf4j.Slf4j
 public class JpPintRenderer {
 
     /**
@@ -74,6 +75,20 @@ public class JpPintRenderer {
             buyerReference.setTextContent(invoice.getCustomer() != null ? invoice.getCustomer().getPeppolParticipantId() : "REF");
             root.appendChild(buyerReference);
 
+            if (invoice.getOrderReference() != null) {
+                org.w3c.dom.Element orderRef = doc.createElement("cac:OrderReference");
+                org.w3c.dom.Element orderRefId = doc.createElement("cbc:ID");
+                orderRefId.setTextContent(invoice.getOrderReference());
+                orderRef.appendChild(orderRefId);
+                root.appendChild(orderRef);
+            }
+            if (invoice.getContractReference() != null) {
+                org.w3c.dom.Element contractRef = doc.createElement("cac:ContractDocumentReference");
+                org.w3c.dom.Element contractRefId = doc.createElement("cbc:ID");
+                contractRefId.setTextContent(invoice.getContractReference());
+                contractRef.appendChild(contractRefId);
+                root.appendChild(contractRef);
+            }
             org.w3c.dom.Element supplierParty = doc.createElement("cac:AccountingSupplierParty");
             org.w3c.dom.Element supplierPartyName = doc.createElement("cac:Party");
             org.w3c.dom.Element supplierName = doc.createElement("cac:PartyName");
@@ -110,6 +125,30 @@ public class JpPintRenderer {
             org.w3c.dom.Element taxAmount = doc.createElement("cbc:TaxAmount");
             taxAmount.setTextContent(invoice.getTaxAmount() != null ? invoice.getTaxAmount().toString() : "0");
             taxTotal.appendChild(taxAmount);
+            org.w3c.dom.Element taxSubtotal = doc.createElement("cac:TaxSubtotal");
+            org.w3c.dom.Element taxableAmount = doc.createElement("cbc:TaxableAmount");
+            taxableAmount.setTextContent(invoice.getTaxExclusiveAmount() != null ? invoice.getTaxExclusiveAmount().toString() : "0");
+            taxSubtotal.appendChild(taxableAmount);
+            org.w3c.dom.Element subTaxAmount = doc.createElement("cbc:TaxAmount");
+            subTaxAmount.setTextContent(invoice.getTaxAmount() != null ? invoice.getTaxAmount().toString() : "0");
+            taxSubtotal.appendChild(subTaxAmount);
+            
+            org.w3c.dom.Element taxCategory = doc.createElement("cac:TaxCategory");
+            org.w3c.dom.Element taxId = doc.createElement("cbc:ID");
+            taxId.setTextContent("S"); // S = Standard rate
+            taxCategory.appendChild(taxId);
+            org.w3c.dom.Element taxPercent = doc.createElement("cbc:Percent");
+            taxPercent.setTextContent("10"); // Defaults to 10% for basic JP PINT
+            taxCategory.appendChild(taxPercent);
+            
+            org.w3c.dom.Element taxScheme = doc.createElement("cac:TaxScheme");
+            org.w3c.dom.Element schemeId = doc.createElement("cbc:ID");
+            schemeId.setTextContent("VAT");
+            taxScheme.appendChild(schemeId);
+            taxCategory.appendChild(taxScheme);
+            
+            taxSubtotal.appendChild(taxCategory);
+            taxTotal.appendChild(taxSubtotal);
             root.appendChild(taxTotal);
 
             // LegalMonetaryTotal (合計金額)
@@ -142,7 +181,26 @@ public class JpPintRenderer {
                     org.w3c.dom.Element itemName = doc.createElement("cbc:Name");
                     itemName.setTextContent(item.getDescription() != null ? item.getDescription() : "");
                     itemElem.appendChild(itemName);
+                    org.w3c.dom.Element classifiedTaxCategory = doc.createElement("cac:ClassifiedTaxCategory");
+                    org.w3c.dom.Element taxId = doc.createElement("cbc:ID");
+                    taxId.setTextContent(item.getTaxCategory() != null ? item.getTaxCategory() : "S");
+                    classifiedTaxCategory.appendChild(taxId);
+                    org.w3c.dom.Element taxPercent = doc.createElement("cbc:Percent");
+                    taxPercent.setTextContent(item.getTaxRate() != null ? item.getTaxRate().toString() : "10");
+                    classifiedTaxCategory.appendChild(taxPercent);
+                    org.w3c.dom.Element taxScheme = doc.createElement("cac:TaxScheme");
+                    org.w3c.dom.Element schemeId = doc.createElement("cbc:ID");
+                    schemeId.setTextContent("VAT");
+                    taxScheme.appendChild(schemeId);
+                    classifiedTaxCategory.appendChild(taxScheme);
+                    itemElem.appendChild(classifiedTaxCategory);
                     invoiceLine.appendChild(itemElem);
+
+                    org.w3c.dom.Element price = doc.createElement("cac:Price");
+                    org.w3c.dom.Element priceAmount = doc.createElement("cbc:PriceAmount");
+                    priceAmount.setTextContent(item.getUnitPrice() != null ? item.getUnitPrice().toString() : "0");
+                    price.appendChild(priceAmount);
+                    invoiceLine.appendChild(price);
                     
                     root.appendChild(invoiceLine);
                 }
@@ -162,7 +220,7 @@ public class JpPintRenderer {
             return writer.toString();
 
         } catch (Exception e) {
-            throw new BusinessException("XMLの生成に失敗しました。", e);
+            log.error("XMLの生成に失敗しました。", e); throw new BusinessException("XMLの生成に失敗しました。");
         }
     }
 
@@ -175,3 +233,7 @@ public class JpPintRenderer {
         return builder.parse(is);
     }
 }
+
+
+
+

@@ -16,6 +16,8 @@ public class CanonicalInvoice {
     private LocalDate dueDate;
     
     private String currency; // "JPY"
+    private String orderReference;
+    private String contractReference;
     
     private SupplierInfo supplier;
     private CustomerInfo customer;
@@ -54,3 +56,4 @@ public class CanonicalInvoice {
         private BigDecimal taxRate;
     }
 }
+

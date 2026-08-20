@@ -2773,9 +2773,7 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by VARCHAR(50) NULL,
     deleted_flag TINYINT(1) DEFAULT 0,
-    UNIQUE KEY uk_digital_invoice_message (message_id),
-    UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, specification_version)
-);
+    UNIQUE KEY uk_digital_invoice_message (message_id));
 
 CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -2789,3 +2787,4 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
 );
+
