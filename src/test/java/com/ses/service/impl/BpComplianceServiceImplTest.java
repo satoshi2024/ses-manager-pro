@@ -236,4 +236,27 @@ class BpComplianceServiceImplTest {
         assertTrue(findings.stream().anyMatch(f -> "MISSING_INSPECTION_DUE_DATE".equals(f.getCode())));
         assertTrue(findings.stream().anyMatch(f -> "MISSING_PAYMENT_METHOD".equals(f.getCode())));
     }
+
+    @Test
+    @DisplayName("terms無しでも支払期日が60日超ならEXCEEDS_MAX_PAYMENT_DAYSを返す")
+    void noTerms_paymentDueOver60Days_emitsExceedsMaxPaymentDays() {
+        BpCompany company = BpCompany.builder()
+                .legalName("terms無し期日超過BP")
+                .entityType("CORPORATE")
+                .complianceApplicability("FREELANCE_ACT")
+                .build();
+        bpCompanyService.createBpCompany(company);
+
+        Contract contract = new Contract();
+        contract.setStartDate(LocalDate.of(2026, 5, 1));
+        contract.setEndDate(LocalDate.of(2026, 5, 31));
+        contract.setCostPrice(new BigDecimal("600000"));
+        contract.setPaymentDueDate(LocalDate.of(2026, 7, 15)); // 受領 5/1 から 75日
+
+        List<ProcurementComplianceFinding> findings = complianceService
+                .evaluateContractCompliance(company.getId(), contract, LocalDate.of(2026, 5, 1));
+        assertTrue(findings.stream().anyMatch(f -> "EXCEEDS_MAX_PAYMENT_DAYS".equals(f.getCode())),
+                "terms無しでも contract.paymentDueDate で60日超過を検知すること: " + findings);
+        assertTrue(findings.stream().noneMatch(f -> "MISSING_TERMS".equals(f.getCode())));
+    }
 }

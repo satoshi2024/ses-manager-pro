@@ -56,14 +56,42 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Value("${freee.api.base-url:https://api.freee.co.jp}")
     private String apiBaseUrl;
 
-    @Value("${freee.oauth.client-id:dummy-client-id}")
+    /** payroll と同じキー。dummy 既定は禁止（prod は PostConstruct で fail-closed）。 */
+    @Value("${freee.client-id:}")
     private String clientId;
 
-    @Value("${freee.oauth.client-secret:dummy-client-secret}")
+    @Value("${freee.client-secret:}")
     private String clientSecret;
 
-    @Value("${freee.oauth.token-url:https://accounts.secure.freee.co.jp/public_api/token}")
-    private String tokenUrl;
+    @Value("${freee.oauth-base-url:https://accounts.secure.freee.co.jp/public_api}")
+    private String oauthBaseUrl;
+
+    @Value("${spring.profiles.active:}")
+    private String activeProfiles;
+
+    @jakarta.annotation.PostConstruct
+    void rejectDummyOrMissingCredentialsInProd() {
+        boolean prod = activeProfiles != null
+                && java.util.Arrays.stream(activeProfiles.split(","))
+                .map(String::trim)
+                .anyMatch("prod"::equalsIgnoreCase);
+        if (!prod) {
+            return;
+        }
+        if (clientId == null || clientId.isBlank() || "dummy-client-id".equals(clientId)
+                || clientSecret == null || clientSecret.isBlank() || "dummy-client-secret".equals(clientSecret)) {
+            throw new IllegalStateException(
+                    "Fail-fast: freee.client-id / freee.client-secret (FREEE_CLIENT_ID/SECRET) must be set in prod; dummy defaults are forbidden");
+        }
+    }
+
+    private String tokenUrl() {
+        String base = oauthBaseUrl == null ? "" : oauthBaseUrl.trim();
+        if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base + "/token";
+    }
 
     @Override
     public String providerName() {
@@ -505,6 +533,60 @@ public class FreeeAccountingProvider implements AccountingProvider {
         }
     }
 
+    @Override
+    public Optional<String> findDealIdByRefNumber(IntegrationConnection connection, String refNumber) {
+        if (connection == null || refNumber == null || refNumber.isBlank()) {
+            return Optional.empty();
+        }
+        Long expectedCompanyId = connection.getExternalCompanyId();
+        List<String> matched = new ArrayList<>();
+        int limit = 100;
+        int maxPages = 50;
+        for (int page = 0; page < maxPages; page++) {
+            int offset = page * limit;
+            try {
+                String checkUrl = apiBaseUrl + "/api/1/deals?company_id=" + connection.getExternalCompanyId()
+                        + "&limit=" + limit + "&offset=" + offset;
+                ResponseEntity<String> res = executeWith401Recovery(connection, headers -> {
+                    HttpEntity<?> entity = new HttpEntity<>(headers);
+                    return restTemplate.exchange(checkUrl, HttpMethod.GET, entity, String.class);
+                });
+                if (res.getBody() == null) {
+                    break;
+                }
+                JsonNode deals = objectMapper.readTree(res.getBody()).get("deals");
+                if (deals == null || !deals.isArray() || deals.isEmpty()) {
+                    break;
+                }
+                for (JsonNode d : deals) {
+                    if (!d.has("ref_number") || !refNumber.equals(d.get("ref_number").asText())) {
+                        continue;
+                    }
+                    Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
+                    if (expectedCompanyId != null && companyId != null
+                            && !java.util.Objects.equals(companyId, expectedCompanyId)) {
+                        continue;
+                    }
+                    matched.add(String.valueOf(d.get("id").asLong()));
+                }
+                if (deals.size() < limit) {
+                    break;
+                }
+            } catch (Exception ex) {
+                log.warn("findDealIdByRefNumber failed for refNumber={}: error_code=UNKNOWN_ERROR", refNumber);
+                return Optional.empty();
+            }
+        }
+        if (matched.size() == 1) {
+            return Optional.of(matched.get(0));
+        }
+        if (matched.size() > 1) {
+            log.warn("Ambiguous deals for refNumber={} (count={}), refuse SUCCEEDED to avoid wrong binding",
+                    refNumber, matched.size());
+        }
+        return Optional.empty();
+    }
+
     private CanonicalDealResult verifyDealCreatedByRefNumber(IntegrationConnection connection,
                                                              String refNumber,
                                                              BigDecimal expectedTotal,
@@ -649,7 +731,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
         form.add("refresh_token", currentTokens.getRefreshToken());
 
         HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(form, headers);
-        ResponseEntity<Map> response = restTemplate.exchange(tokenUrl, HttpMethod.POST, request, Map.class);
+        ResponseEntity<Map> response = restTemplate.exchange(tokenUrl(), HttpMethod.POST, request, Map.class);
         if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
             Map<?, ?> body = response.getBody();
             String newAccessToken = (String) body.get("access_token");

@@ -1,25 +1,31 @@
 package com.ses.service.accounting;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
+import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * 会計・支払連携ジョブワーカー (P1-01 / design §6.2 scheduler/async)。
  * <p>
  * {@code app.scheduling.enabled=true} 時のみ有効化される。
  * テスト環境では {@code application-test.yml} が {@code app.scheduling.enabled=false} を設定するため
- * このコンポーネントはロードされない。
+ * スケジューラは動かないが、本コンポーネント自体はテストから明示呼び出し可能。
  * </p>
  * <ul>
  *   <li>5秒間隔で PENDING/RETRYABLE の due job を最大10件 claim・dispatch する。</li>
- *   <li>1分間隔で lease timeout (15分) を超えた stale RUNNING を RETRYABLE に戻す。</li>
+ *   <li>1分間隔で lease timeout (15分) を超えた stale RUNNING を回収する。
+ *       回収前に freee 上の ref_number を照合し、既存なら SUCCEEDED（再POST禁止）。</li>
  * </ul>
  */
 @Slf4j
@@ -30,11 +36,16 @@ public class AccountingIntegrationWorker {
     /** RUNNING state の lease 期限 (分)。この期間を超えると worker crash とみなして回収する。 */
     private static final int RUNNING_LEASE_MINUTES = 15;
 
+    private static final Set<String> DEAL_CREATE_JOB_TYPES = Set.of(
+            "SALES_INVOICE_SYNC", "BP_PURCHASE_SYNC", "PURCHASE_DEAL_SYNC", "EXPENSE_DEAL_SYNC");
+
     private final IntegrationJobService jobService;
+    private final IntegrationConnectionService connectionService;
+    private final AccountingProviderFactory providerFactory;
     private final SalesInvoiceIntegrationService salesInvoiceIntegrationService;
     private final PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
-
     private final com.ses.service.DigitalInvoiceService digitalInvoiceService;
+    private final ObjectMapper objectMapper;
 
     /**
      * due job (PENDING/RETRYABLE かつ next_retry_at <= now) を最大10件 claim して dispatch する。
@@ -59,14 +70,43 @@ public class AccountingIntegrationWorker {
     }
 
     /**
-     * 15分以上 RUNNING のまま残った stale job を RETRYABLE に戻す（worker crash 回収）。
+     * 15分以上 RUNNING のまま残った stale job を回収する。
+     * 取引作成系は回収前に ref_number で freee を照合し、既存なら SUCCEEDED（再POSTしない）。
      */
     @Scheduled(fixedDelay = 60_000)
     public void recoverStaleRunning() {
-        int recovered = jobService.recoverStaleRunningJobs(RUNNING_LEASE_MINUTES);
-        if (recovered > 0) {
-            log.warn("Recovered {} stale RUNNING job(s) (lease > {} minutes)", recovered, RUNNING_LEASE_MINUTES);
+        List<IntegrationJob> stale = jobService.listStaleRunningJobs(RUNNING_LEASE_MINUTES);
+        if (stale.isEmpty()) {
+            return;
         }
+        int succeeded = 0;
+        int retryable = 0;
+        for (IntegrationJob job : stale) {
+            try {
+                Optional<String> existingDealId = findExistingDealIfCreateJob(job);
+                if (existingDealId.isPresent()) {
+                    jobService.markSucceeded(job.getId(), existingDealId.get(), null,
+                            "stale lease recovery: deal already exists by ref_number");
+                    succeeded++;
+                } else {
+                    jobService.markRetryable(job.getId(), "STALE_LEASE",
+                            "lease timeout recovered", 0);
+                    retryable++;
+                }
+            } catch (Exception e) {
+                log.warn("Stale recovery failed for jobId={}, falling back to RETRYABLE: error_code=STALE_RECOVERY_ERROR",
+                        job.getId());
+                try {
+                    jobService.markRetryable(job.getId(), "STALE_LEASE",
+                            "lease timeout recovered (lookup failed)", 0);
+                    retryable++;
+                } catch (Exception ignored) {
+                    // 競合時は次周期へ
+                }
+            }
+        }
+        log.warn("Recovered {} stale RUNNING job(s) (lease > {} minutes): succeeded={}, retryable={}",
+                stale.size(), RUNNING_LEASE_MINUTES, succeeded, retryable);
     }
 
     /** ジョブ種別ごとに適切な process メソッドへ dispatch する (P1-01)。 */
@@ -91,5 +131,46 @@ public class AccountingIntegrationWorker {
                 }
             }
         }
+    }
+
+    private Optional<String> findExistingDealIfCreateJob(IntegrationJob job) {
+        if (job.getJobType() == null || !DEAL_CREATE_JOB_TYPES.contains(job.getJobType())) {
+            return Optional.empty();
+        }
+        String refNumber = resolveRefNumber(job);
+        if (refNumber == null || refNumber.isBlank()) {
+            return Optional.empty();
+        }
+        IntegrationConnection conn = connectionService.getById(job.getConnectionId());
+        if (conn == null) {
+            return Optional.empty();
+        }
+        AccountingProvider provider = providerFactory.getProvider(conn);
+        return provider.findDealIdByRefNumber(conn, refNumber);
+    }
+
+    private String resolveRefNumber(IntegrationJob job) {
+        if ("BP_PURCHASE_SYNC".equals(job.getJobType()) || "PURCHASE_DEAL_SYNC".equals(job.getJobType())) {
+            return job.getTargetId() == null ? null : "BP-" + job.getTargetId();
+        }
+        String snapshot = job.getPayloadSnapshot();
+        if (snapshot == null || snapshot.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(snapshot);
+            if (root.hasNonNull("invoiceNo")) {
+                return root.get("invoiceNo").asText();
+            }
+            if (root.hasNonNull("refNumber")) {
+                return root.get("refNumber").asText();
+            }
+            if (root.hasNonNull("expenseNo")) {
+                return root.get("expenseNo").asText();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse payloadSnapshot for jobId={}", job.getId());
+        }
+        return null;
     }
 }

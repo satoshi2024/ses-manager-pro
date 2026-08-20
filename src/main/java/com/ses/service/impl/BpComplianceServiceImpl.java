@@ -136,13 +136,16 @@ public class BpComplianceServiceImpl implements BpComplianceService {
         }
 
         // 3. 支払期日・受領日+法務設定上限（既定60日）超え判定
+        // terms が無くても contract.paymentDueDate があれば 60 日超過を必ず評価する。
         LocalDate refDate = receiptDate != null ? receiptDate : (contract.getStartDate() != null ? contract.getStartDate() : LocalDate.now());
         BpTerms terms = termsResolver.resolveTermsAsOf(bpCompanyId, refDate);
         int legalMaxDays = systemConfigService.getInt("procurement.payment-max-days", 60);
 
+        Integer day = null;
+        int offset = 1;
         if (terms != null) {
-            int offset = terms.getPaymentMonthOffset() != null ? terms.getPaymentMonthOffset() : 1;
-            Integer day = terms.getPaymentDay();
+            offset = terms.getPaymentMonthOffset() != null ? terms.getPaymentMonthOffset() : 1;
+            day = terms.getPaymentDay();
 
             if (day == null || day <= 0 || day > 31) {
                 findings.add(ProcurementComplianceFinding.builder()
@@ -153,49 +156,6 @@ public class BpComplianceServiceImpl implements BpComplianceService {
                         .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
                         .build());
             }
-
-            LocalDate paymentDueDate = contract.getPaymentDueDate();
-            if (paymentDueDate == null && day != null && day > 0 && day <= 31) {
-                // 支払予定日の概算計算 (例: 5月受領、1ヶ月オフセット30日 -> 6月30日)
-                paymentDueDate = refDate.plusMonths(offset).withDayOfMonth(Math.min(day, refDate.plusMonths(offset).lengthOfMonth()));
-            }
-
-            if (paymentDueDate == null) {
-                findings.add(ProcurementComplianceFinding.builder()
-                        .code("MISSING_PAYMENT_DUE_DATE")
-                        .severity("ERROR")
-                        .message("具体的な支払期日が未指定です")
-                        .field("paymentDueDate")
-                        .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
-                        .build());
-            } else {
-                long daysBetween = ChronoUnit.DAYS.between(refDate, paymentDueDate);
-                if (daysBetween > legalMaxDays) {
-                    findings.add(ProcurementComplianceFinding.builder()
-                            .code("EXCEEDS_MAX_PAYMENT_DAYS")
-                            .severity("ERROR")
-                            .message(String.format("受領日(%s)から支払日(%s)までの日数(%d日)が法務設定上限(%d日)を超過しています",
-                                    refDate, paymentDueDate, daysBetween, legalMaxDays))
-                            .field("paymentDueDate")
-                            .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
-                            .build());
-                }
-            }
-
-            // 4. 振込手数料負担チェック（例外理由と承認記録が無い場合のみ指摘）
-            if ("PAYEE".equalsIgnoreCase(terms.getFeeBearer())) {
-                boolean approvedException = StringUtils.hasText(terms.getFeeBearerExceptionReason())
-                        && terms.getFeeBearerApprovedBy() != null;
-                if (!approvedException) {
-                    findings.add(ProcurementComplianceFinding.builder()
-                            .code("FEE_BEARER_PAYEE_WARNING")
-                            .severity("ERROR")
-                            .message("振込手数料を受注者(BP)負担とする場合、書面による事前合意、正当な理由、承認記録が必須です")
-                            .field("feeBearer")
-                            .sourceUrl(SOURCE_URL_FREELANCE)
-                            .build());
-                }
-            }
         } else if (contract.getPaymentDueDate() == null) {
             findings.add(ProcurementComplianceFinding.builder()
                     .code("MISSING_TERMS")
@@ -204,6 +164,49 @@ public class BpComplianceServiceImpl implements BpComplianceService {
                     .field("terms")
                     .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
                     .build());
+        }
+
+        LocalDate paymentDueDate = contract.getPaymentDueDate();
+        if (paymentDueDate == null && day != null && day > 0 && day <= 31) {
+            // 支払予定日の概算計算 (例: 5月受領、1ヶ月オフセット30日 -> 6月30日)
+            paymentDueDate = refDate.plusMonths(offset).withDayOfMonth(Math.min(day, refDate.plusMonths(offset).lengthOfMonth()));
+        }
+
+        if (terms != null && paymentDueDate == null) {
+            findings.add(ProcurementComplianceFinding.builder()
+                    .code("MISSING_PAYMENT_DUE_DATE")
+                    .severity("ERROR")
+                    .message("具体的な支払期日が未指定です")
+                    .field("paymentDueDate")
+                    .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
+                    .build());
+        } else if (paymentDueDate != null) {
+            long daysBetween = ChronoUnit.DAYS.between(refDate, paymentDueDate);
+            if (daysBetween > legalMaxDays) {
+                findings.add(ProcurementComplianceFinding.builder()
+                        .code("EXCEEDS_MAX_PAYMENT_DAYS")
+                        .severity("ERROR")
+                        .message(String.format("受領日(%s)から支払日(%s)までの日数(%d日)が法務設定上限(%d日)を超過しています",
+                                refDate, paymentDueDate, daysBetween, legalMaxDays))
+                        .field("paymentDueDate")
+                        .sourceUrl(SOURCE_URL_SUBCOMMITTEE)
+                        .build());
+            }
+        }
+
+        // 4. 振込手数料負担チェック（例外理由と承認記録が無い場合のみ指摘）
+        if (terms != null && "PAYEE".equalsIgnoreCase(terms.getFeeBearer())) {
+            boolean approvedException = StringUtils.hasText(terms.getFeeBearerExceptionReason())
+                    && terms.getFeeBearerApprovedBy() != null;
+            if (!approvedException) {
+                findings.add(ProcurementComplianceFinding.builder()
+                        .code("FEE_BEARER_PAYEE_WARNING")
+                        .severity("ERROR")
+                        .message("振込手数料を受注者(BP)負担とする場合、書面による事前合意、正当な理由、承認記録が必須です")
+                        .field("feeBearer")
+                        .sourceUrl(SOURCE_URL_FREELANCE)
+                        .build());
+            }
         }
 
         return findings;

@@ -59,6 +59,12 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
         validate(allocation);
         normalize(allocation);
 
+        // 新規下書きではクライアントが送った契約紐付け/承認IDを受理しない（例外承認IDは後段でサーバが付与）。
+        if (allocation.getId() == null) {
+            allocation.setSourceContractId(null);
+            allocation.setApprovalRequestId(null);
+        }
+
         boolean over = isOverAllocated(allocation.getEngineerId(),
                 allocation.getStartDate(), normalizedEnd(allocation), allocation.getAllocationPercent(),
                 allocation.getId(), true);
@@ -85,6 +91,9 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
             }
             allocation.setEngineerId(existing.getEngineerId());
             allocation.setStatus(STATUS_DRAFT);
+            // 承認IDはサーバ例外経路のみ。クライアント改ざんを拒否する。
+            allocation.setApprovalRequestId(existing.getApprovalRequestId());
+            allocation.setSourceContractId(null);
             int rows = allocationMapper.updateById(allocation);
             if (rows == 0) {
                 throw BusinessException.of(409, "error.common.optimisticLock");

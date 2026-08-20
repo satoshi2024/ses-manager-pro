@@ -3,6 +3,8 @@ package com.ses.integration;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
 import com.ses.service.accounting.AccountingIntegrationWorker;
+import com.ses.service.accounting.AccountingProvider;
+import com.ses.service.accounting.AccountingProviderFactory;
 import com.ses.service.accounting.PurchaseExpensePaymentIntegrationService;
 import com.ses.service.accounting.SalesInvoiceIntegrationService;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -16,7 +18,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest
@@ -37,6 +43,9 @@ class AccountingIntegrationWorkerTest {
 
     @MockBean
     private PurchaseExpensePaymentIntegrationService purchaseService;
+
+    @MockBean
+    private AccountingProviderFactory providerFactory;
 
     private Long connId;
 
@@ -97,5 +106,28 @@ class AccountingIntegrationWorkerTest {
 
         IntegrationJob recovered = jobService.getById(j.getId());
         assertThat(recovered.getStatus()).isEqualTo("RETRYABLE");
+    }
+
+    @Test
+    @DisplayName("Stale Running Recovery: freee上に同一ref_numberが存在するならSUCCEEDED（再POSTしない）")
+    void worker_recoversStaleRunningToSucceededWhenDealExists() {
+        IntegrationJob j = jobService.createJob(connId, "BP_PURCHASE_SYNC", "BP_PAYMENT", 301L,
+                "KEY-STALE-EXIST", "hashE",
+                "{\"bpPaymentId\":301}", "default", null, null);
+        IntegrationJob claimed = jobService.claimJob(j.getId());
+        claimed.setUpdatedAt(java.time.LocalDateTime.now().minusMinutes(20));
+        jobService.updateById(claimed);
+
+        AccountingProvider provider = mock(AccountingProvider.class);
+        when(providerFactory.getProvider(any())).thenReturn(provider);
+        when(provider.findDealIdByRefNumber(any(), eq("BP-301"))).thenReturn(Optional.of("deal-901"));
+
+        worker.recoverStaleRunning();
+
+        IntegrationJob recovered = jobService.getById(j.getId());
+        assertThat(recovered.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(recovered.getExternalId()).isEqualTo("deal-901");
+        verify(provider, times(1)).findDealIdByRefNumber(any(), eq("BP-301"));
+        verify(purchaseService, never()).processBpPurchaseJob(any());
     }
 }

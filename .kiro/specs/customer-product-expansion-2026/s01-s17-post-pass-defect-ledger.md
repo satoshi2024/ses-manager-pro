@@ -44,6 +44,22 @@
 | CROSS-P2-01 | FIXED | `messages_en.properties` invoice/quotation 14 keys | `mvn test -Dtest=MessageBundleConsistencyTest` | 4/0/0 PASS |
 | CROSS-P2-02 | FIXED | `AttendanceSyncServiceImpl.exportCsv` max-rows | AttendanceSyncServiceTest | PASS |
 | S10 docs | FIXED（文書のみ） | `dispatch-outsourcing-compliance-ledger/tasks.md` | — | M に technical PASS / production B gate 未達を注記。T066 未チェック |
+| S13-P1-03 | FIXED | `PortalPageController` `@GetMapping("/portal/bp")` | `mvn test -Dtest=PortalScopeMatrixTest` | 15/0/0 PASS（BP login → `/portal/bp` 200） |
+| S07-P1-02 | FIXED | `ApprovalApiController.export` 真 CRLF + UTF-8 BOM | `mvn test -Dtest=ApprovalApiControllerTest` | 1/0/0 PASS |
+| S12-P1-02 | FIXED | `AllocationPlanServiceImpl.saveDraft` | `mvn test -Dtest=AllocationPlanServiceTest` | 17/0/0 PASS（POST の2フィールドは DB null） |
+| S06-P1-02 | FIXED | `BpComplianceServiceImpl` 60日判定 | `mvn test -Dtest=BpComplianceServiceImplTest` | 6/0/0 PASS（terms無し+期日超→EXCEEDS_MAX_PAYMENT_DAYS） |
+| S15-P0-02 | FIXED | `FreeeAccountingProvider` → `freee.client-id` | `mvn test -Dtest=FreeeAccountingProviderTest#clientCredentials*` | PASS（dummy 既定廃止、prod fail-fast） |
+| S15-P1-03 | FIXED | `AccountingIntegrationWorker.recoverStaleRunning` | `mvn test -Dtest=AccountingIntegrationWorkerTest` | 4/0/0 PASS（既存 deal → SUCCEEDED、無ければ RETRYABLE） |
+
+## 第二波・要確認（コード突合のみ・本輪未改修）
+
+| ID / 論点 | 判定 | 根拠 |
+|---|---|---|
+| S07 ORGANIZATION_MANAGER / Wave1 adapter `organizationId` | **CONFIRMED 欠陥・未修** | Quotation/SalesOrder/Invoice/Contract/Acceptance の `ApprovalSnapshot` 第3引数がいずれも `null` |
+| S07 見積 `amountSnapshot` | **CONFIRMED 欠陥・未修** | `QuotationApprovalAdapter` が `q.getUnitPrice()` を渡す（合計額ではない）。`Quotation` 自体に total 列無し |
+| S06 `updateBpCompany` の version | **CONFIRMED 欠陥・未修** | `applyNonNullFields` が `version` をコピーせず、DB 再読込の version で `updateById` → クライアント楽観ロック無効 |
+| S13 限流 X-Forwarded-For / アカウントロック | **CONFIRMED リスク・未修** | `PortalRateLimitFilter.clientIp` が XFF 先頭を信頼。`PortalAuthServiceImpl` に失敗回数ロック無し |
+| S17 FAILED 行の TX rollback | **NOT A DEFECT（第一波後）** | `execute` は `@Transactional` なし。FAILED は独立 `TransactionTemplate` で persist 済み |
 
 ## Flyway
 

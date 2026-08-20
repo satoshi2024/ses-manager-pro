@@ -21,8 +21,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.client.ExpectedCount;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
@@ -53,6 +55,9 @@ class FreeeAccountingProviderTest {
     @Autowired
     private CsvAccountingExportProvider csvProvider;
 
+    @Autowired
+    private Environment environment;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection testConnection;
 
@@ -68,6 +73,18 @@ class FreeeAccountingProviderTest {
                 .expiresIn(3600L)
                 .build();
         connectionService.saveTokens(testConnection.getId(), tokens, 99999L, "テスト事業所", 1L);
+    }
+
+    @Test
+    @DisplayName("S15-P0-02: client-id/secret は freee.client-id 系に束縛され dummy 既定ではない")
+    void clientCredentials_bindToYamlKeys_notDummyOauthDefaults() {
+        String boundId = (String) ReflectionTestUtils.getField(freeeProvider, "clientId");
+        String boundSecret = (String) ReflectionTestUtils.getField(freeeProvider, "clientSecret");
+        assertThat(boundId).isNotEqualTo("dummy-client-id");
+        assertThat(boundSecret).isNotEqualTo("dummy-client-secret");
+        assertThat(boundId).isEqualTo(environment.getProperty("freee.client-id", ""));
+        assertThat(boundSecret).isEqualTo(environment.getProperty("freee.client-secret", ""));
+        assertThat(environment.getProperty("freee.oauth.client-id")).isNull();
     }
 
     @Test

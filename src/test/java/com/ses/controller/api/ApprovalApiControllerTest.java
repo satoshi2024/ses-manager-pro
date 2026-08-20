@@ -34,5 +34,14 @@ class ApprovalApiControllerTest {
         String csv = new String(response.getBody(), StandardCharsets.UTF_8);
 
         assertThat(csv).contains("cost", "true").doesNotContain("100000");
+        // UTF-8 BOM + 真のCRLF（Excelが1行に潰さない）
+        byte[] body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body[0] & 0xFF).isEqualTo(0xEF);
+        assertThat(body[1] & 0xFF).isEqualTo(0xBB);
+        assertThat(body[2] & 0xFF).isEqualTo(0xBF);
+        assertThat(csv).contains("\r\n");
+        assertThat(csv).doesNotContain("\\r\\n");
+        assertThat(csv.chars().filter(ch -> ch == '\n').count()).isGreaterThan(1);
     }
 }

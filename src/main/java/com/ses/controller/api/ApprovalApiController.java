@@ -66,20 +66,25 @@ public class ApprovalApiController {
     public ResponseEntity<byte[]> export(@PathVariable Long id, Authentication authentication) {
         ApprovalRequestView view = approvalViewService.detail(id, SecurityUtils.currentUserId(),
                 SecurityUtils.currentRole(), authentication);
-        StringBuilder csv = new StringBuilder("field,label,before,after,changed,masked\\r\\n");
+        StringBuilder csv = new StringBuilder("field,label,before,after,changed,masked\r\n");
         view.diff().forEach(d -> csv.append(csv(d.field())).append(',')
                 .append(csv(d.label())).append(',').append(csv(string(d.before())))
                 .append(',').append(csv(string(d.after()))).append(',')
-                .append(d.changed()).append(',').append(d.masked()).append("\\r\\n"));
-        byte[] body = ("\\uFEFF" + csv).getBytes(StandardCharsets.UTF_8);
+                .append(d.changed()).append(',').append(d.masked()).append("\r\n"));
+        // UTF-8 BOM + RFC4180（真のCRLF）。Excelが1行に潰さない。
+        byte[] bom = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+        byte[] csvBytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+        byte[] body = new byte[bom.length + csvBytes.length];
+        System.arraycopy(bom, 0, body, 0, bom.length);
+        System.arraycopy(csvBytes, 0, body, bom.length, csvBytes.length);
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=approval-" + id + "-diff.csv")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(body);
     }
 
     private String csv(String value) {
-        String safe = value == null ? "" : value.replace("\\r", " ").replace("\\n", " ");
-        return "\\\"" + safe.replace("\\\"", "\\\"\\\"") + "\\\"";
+        String safe = value == null ? "" : value.replace("\r", " ").replace("\n", " ");
+        return "\"" + safe.replace("\"", "\"\"") + "\"";
     }
 
     private String string(Object value) {
