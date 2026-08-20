@@ -34,12 +34,12 @@ public class DigitalInvoiceApiController {
     public ApiResult<Map<String, Object>> previewDelivery(@PathVariable Long invoiceId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            return ApiResult.failed("請求書が見つかりません。");
+            return ApiResult.error("請求書が見つかりません。");
         }
         
         dataScopeService.assertAllowedCustomer(invoice.getCustomerId()); Customer customer = customerService.getById(invoice.getCustomerId());
         if (customer == null) {
-            return ApiResult.failed("請求先の顧客が見つかりません。");
+            return ApiResult.error("請求先の顧客が見つかりません。");
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -64,10 +64,12 @@ public class DigitalInvoiceApiController {
             result.put("canSend", true); // EMAILやPDF等
         }
         
-        // 既存の送信状態確認
+        // 既存の送信状態確認（Standard プロファイルの有効送信のみ。CreditNote は数えない）
         long sentCount = digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getInvoiceId, invoiceId)
-                .in(DigitalInvoice::getStatus, "QUEUED", "SENT", "DELIVERED")
+                .eq(DigitalInvoice::getDirection, "SEND")
+                .eq(DigitalInvoice::getProfile, "Standard")
+                .notIn(DigitalInvoice::getStatus, "CANCELLED", "REVOKED")
                 .count();
         if (sentCount > 0) {
             result.put("alreadySent", true);
@@ -84,14 +86,14 @@ public class DigitalInvoiceApiController {
     public ApiResult<Void> dispatchInvoice(@PathVariable Long invoiceId, @RequestParam(defaultValue = "1.1.3") String specVersion) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            return ApiResult.failed("請求書が見つかりません。");
+            return ApiResult.error("請求書が見つかりません。");
         }
         dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         try {
             deliveryDispatcher.dispatch(invoiceId, invoice.getCustomerId(), specVersion);
-            return ApiResult.success();
+            return ApiResult.success(null);
         } catch (Exception e) {
-            return ApiResult.failed(e.getMessage());
+            return ApiResult.error(e.getMessage());
         }
     }
 
@@ -99,7 +101,7 @@ public class DigitalInvoiceApiController {
     public ApiResult<Map<String, Object>> getStatusHistory(@PathVariable Long invoiceId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
-            return ApiResult.failed("請求書が見つかりません。");
+            return ApiResult.error("請求書が見つかりません。");
         }
         
         dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
@@ -140,32 +142,20 @@ public class DigitalInvoiceApiController {
     public ApiResult<Void> cancelInvoice(@PathVariable Long id) {
         DigitalInvoice di = digitalInvoiceService.getById(id);
         if (di == null || !"SEND".equals(di.getDirection())) {
-            return ApiResult.failed("対象のインボイスが見つかりません。");
+            return ApiResult.error("対象のインボイスが見つかりません。");
         }
-        
+
         Invoice invoice = invoiceService.getById(di.getInvoiceId());
         if (invoice != null) {
             dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         }
 
-        if ("QUEUED".equals(di.getStatus())) {
-            di.setStatus("CANCELLED");
-            digitalInvoiceService.updateById(di);
-            return ApiResult.success();
-        } else if ("SENT".equals(di.getStatus()) || "DELIVERED".equals(di.getStatus())) {
-            // R4.1 PINT送信済みの場合は新しいメッセージIDで打ち消しレコードを作成
-            DigitalInvoice cancelRow = new DigitalInvoice();
-            cancelRow.setInvoiceId(di.getInvoiceId());
-            cancelRow.setDirection("SEND");
-            cancelRow.setProfile(di.getProfile());
-            cancelRow.setSpecificationVersion(di.getSpecificationVersion());
-            cancelRow.setMessageId("MSG-CANCEL-" + java.util.UUID.randomUUID().toString());
-            cancelRow.setStatus("CANCELLED");
-            digitalInvoiceService.save(cancelRow);
-            return ApiResult.success();
+        try {
+            digitalInvoiceService.cancelInvoice(id);
+            return ApiResult.success(null);
+        } catch (Exception e) {
+            return ApiResult.error(e.getMessage());
         }
-        
-        return ApiResult.failed("キャンセルできないステータスです。");
     }
 
     @GetMapping(value = "/{id}/xml")

@@ -65,7 +65,7 @@
   - **Demo**: mock送信→SENT／偽造署名で状態不変。**sandbox送受信 Demo は PENDING_SANDBOX**（未契約のため本番PASSにしない）。
   - **完了条件メモ**: 開発完了＝mock定向PASS。本番受入はsandbox証跡必須。
 
-- [ ] A1. 設定/送信/状態UI
+- [x] A1. 設定/送信/状態UI
   - **Objective**: 顧客ごとにPDF/email/Peppolの送付方法を設定でき、
     送信前にvalidation結果が見え、送信後の状態とXML/receiptへ辿れる。
     participant未検証の顧客は送信対象に選べない。
