@@ -28,6 +28,7 @@ public class DigitalInvoiceApiController {
     private final PeppolParticipantService peppolParticipantService;
     private final InvoiceDeliveryDispatcher deliveryDispatcher;
     private final DataScopeService dataScopeService;
+    private final com.ses.service.DocumentService documentService;
 
     @GetMapping("/preview/{invoiceId}")
     public ApiResult<Map<String, Object>> previewDelivery(@PathVariable Long invoiceId) {
@@ -85,6 +86,7 @@ public class DigitalInvoiceApiController {
         if (invoice == null) {
             return ApiResult.failed("請求書が見つかりません。");
         }
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
         try {
             deliveryDispatcher.dispatch(invoiceId, invoice.getCustomerId(), specVersion);
             return ApiResult.success();
@@ -151,35 +153,51 @@ public class DigitalInvoiceApiController {
             digitalInvoiceService.updateById(di);
             return ApiResult.success();
         } else if ("SENT".equals(di.getStatus()) || "DELIVERED".equals(di.getStatus())) {
-            di.setStatus("CANCELLED");
-            digitalInvoiceService.updateById(di);
+            // R4.1 PINT送信済みの場合は新しいメッセージIDで打ち消しレコードを作成
+            DigitalInvoice cancelRow = new DigitalInvoice();
+            cancelRow.setInvoiceId(di.getInvoiceId());
+            cancelRow.setDirection("SEND");
+            cancelRow.setProfile(di.getProfile());
+            cancelRow.setSpecificationVersion(di.getSpecificationVersion());
+            cancelRow.setMessageId("MSG-CANCEL-" + java.util.UUID.randomUUID().toString());
+            cancelRow.setStatus("CANCELLED");
+            digitalInvoiceService.save(cancelRow);
             return ApiResult.success();
         }
         
         return ApiResult.failed("キャンセルできないステータスです。");
     }
 
-    @GetMapping(value = "/{id}/xml", produces = "application/xml")
-    public org.springframework.http.ResponseEntity<String> downloadXml(@PathVariable Long id) {
+    @GetMapping(value = "/{id}/xml")
+    public org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> downloadXml(@PathVariable Long id) {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         boolean isSales = auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_営業"));
         if (isSales) {
-            return org.springframework.http.ResponseEntity.status(403).body("Access Denied");
+            return org.springframework.http.ResponseEntity.status(403).build();
         }
 
         DigitalInvoice di = digitalInvoiceService.getById(id);
         if (di == null) return org.springframework.http.ResponseEntity.notFound().build();
         
-        Invoice invoice = invoiceService.getById(di.getInvoiceId());
-        if (invoice == null) return org.springframework.http.ResponseEntity.notFound().build();
-        
-        dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        if (di.getInvoiceId() != null) {
+            Invoice invoice = invoiceService.getById(di.getInvoiceId());
+            if (invoice == null) return org.springframework.http.ResponseEntity.notFound().build();
+            dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        }
 
-        // 本来は保存済みのXMLを返すべきだが、デモ用/再生成用
-        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>" + invoice.getInvoiceNo() + "</ID></Invoice>";
-        
-        return org.springframework.http.ResponseEntity.ok()
-                .header("Content-Disposition", "attachment; filename=\"invoice_" + invoice.getInvoiceNo() + ".xml\"")
-                .body(xml);
+        if (di.getXmlDocumentId() == null) {
+            return org.springframework.http.ResponseEntity.notFound().build();
+        }
+
+        try {
+            java.io.InputStream is = documentService.download(di.getXmlDocumentId(), null);
+            org.springframework.core.io.InputStreamResource resource = new org.springframework.core.io.InputStreamResource(is);
+            return org.springframework.http.ResponseEntity.ok()
+                    .header("Content-Disposition", "attachment; filename=\"invoice_" + (di.getInvoiceId() != null ? di.getInvoiceId() : di.getMessageId()) + ".xml\"")
+                    .contentType(org.springframework.http.MediaType.APPLICATION_XML)
+                    .body(resource);
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.internalServerError().build();
+        }
     }
 }

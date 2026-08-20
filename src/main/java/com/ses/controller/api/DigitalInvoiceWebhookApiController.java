@@ -47,7 +47,7 @@ public class DigitalInvoiceWebhookApiController {
             if ("RECEIVED".equalsIgnoreCase(eventType)) {
                 String xmlContent = root.path("xmlContent").asText();
                 String rawPayloadHash = org.apache.commons.codec.digest.DigestUtils.sha256Hex(rawBody);
-                digitalInvoiceService.processInboundInvoice(providerMessageId, eventId, xmlContent, rawPayloadHash);
+                digitalInvoiceService.processInboundInvoice(providerMessageId, eventId, xmlContent, rawPayloadHash, eventAt);
                 return ResponseEntity.ok("Inbound Invoice Received");
             }
             

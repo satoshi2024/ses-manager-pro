@@ -36,6 +36,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final InvoiceService invoiceService;
     private final com.ses.service.integration.IntegrationJobService integrationJobService;
     private final com.ses.service.DocumentService documentService;
+    private final com.ses.service.CustomerService customerService;
 
     private static final Set<String> TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED");
 
@@ -75,7 +76,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             String newStatus = event.getEventType().toUpperCase(); 
             invoice.setStatus(newStatus);
-            updateById(invoice);
+            if (!updateById(invoice)) { throw new com.ses.common.exception.BusinessException("ステータス更新の競合が発生しました。"); }
         }
     }
 
@@ -99,22 +100,6 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         di.setInvoiceId(invoiceId);
         di.setDirection("SEND");
         di.setProfile("Standard");
-        
-        com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-            .documentType("INVOICE")
-            .direction("INCOMING")
-            .sourceType("RECEIVED")
-            .businessKey("DIGITAL_INVOICE:" + providerMessageId)
-            .versionDiscriminator("1")
-            .originalName(providerMessageId + ".xml")
-            .contentType("application/xml")
-            .build();
-        try {
-            com.ses.entity.Document docEntity = documentService.registerReceived(req, new java.io.ByteArrayInputStream(xmlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            di.setXmlDocumentId(docEntity.getId());
-        } catch (Exception e) {
-            log.warn("Failed to archive inbound XML", e);
-        }
         di.setSpecificationVersion(specVersion);
         di.setMessageId("MSG-" + UUID.randomUUID().toString()); // 自システム内のMessageID
         di.setStatus("QUEUED");
@@ -169,9 +154,24 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             }).toList();
 
             // CanonicalInvoice生成 (簡易マッピング)
+            com.ses.entity.Customer customer = customerService.getById(invoice.getCustomerId());
+            String peppolId = customer != null ? customer.getCompanyCode() : "buyer-peppol-id"; // Dummy since we didn't fetch participant
+
+            CanonicalInvoice.CustomerInfo customerInfo = CanonicalInvoice.CustomerInfo.builder()
+                .peppolParticipantId(peppolId)
+                .name(customer != null ? customer.getCompanyName() : "Unknown Buyer")
+                .build();
+            CanonicalInvoice.SupplierInfo supplierInfo = CanonicalInvoice.SupplierInfo.builder()
+                .corporateNumber("T1234567890123")
+                .name("SES Manager Pro Inc.")
+                .build();
+
             CanonicalInvoice canonicalInvoice = CanonicalInvoice.builder()
                     .invoiceNumber(invoice.getInvoiceNo())
                     .issuedDate(invoice.getIssuedDate())
+                    .dueDate(invoice.getIssuedDate() != null ? invoice.getIssuedDate().plusDays(30) : null)
+                    .supplier(supplierInfo)
+                    .customer(customerInfo)
                     .taxExclusiveAmount(invoice.getSubtotal())
                     .taxAmount(invoice.getTax())
                     .taxInclusiveAmount(invoice.getTotal())
@@ -201,14 +201,14 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 com.ses.entity.Document docEntity = documentService.registerGenerated(req, new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                 di.setXmlDocumentId(docEntity.getId());
             } catch (Exception e) {
-                log.warn("Failed to archive outbound XML", e);
+                log.error("Failed to archive outbound XML", e); throw new com.ses.common.exception.BusinessException("XMLのアーカイブに失敗しました。");
             }
 
             // ステータス更新
             di.setProviderMessageId(providerMessageId);
             di.setStatus("SENT");
             di.setSentAt(LocalDateTime.now());
-            updateById(di);
+            if (!updateById(di)) { throw new com.ses.common.exception.BusinessException("ステータス更新の競合が発生しました。"); }
 
             integrationJobService.markSucceeded(jobId, String.valueOf(di.getId()), providerMessageId, "Invoice sent successfully.");
 
@@ -223,7 +223,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
     @Override
     @Transactional
-    public void processInboundInvoice(String providerMessageId, String eventId, String xmlContent, String rawPayloadHash) {
+    public void processInboundInvoice(String providerMessageId, String eventId, String xmlContent, String rawPayloadHash, java.time.LocalDateTime eventAt) {
         // 1. 重複チェック: providerMessageId
         long countMsg = lambdaQuery().eq(DigitalInvoice::getProviderMessageId, providerMessageId).count();
         if (countMsg > 0) return;
@@ -251,7 +251,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             com.ses.entity.Document docEntity = documentService.registerReceived(req, new java.io.ByteArrayInputStream(xmlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             di.setXmlDocumentId(docEntity.getId());
         } catch (Exception e) {
-            log.warn("Failed to archive inbound XML", e);
+            log.error("Failed to archive inbound XML", e); throw new com.ses.common.exception.BusinessException("XMLのアーカイブに失敗しました。");
         }
         di.setMessageId("MSG-" + java.util.UUID.randomUUID().toString()); // fallback
 
@@ -274,7 +274,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             // 宛先PeppolIDの特定
             String participantId = null;
-            org.w3c.dom.NodeList endpointNodes = doc.getElementsByTagName("EndpointID");
+            org.w3c.dom.NodeList endpointNodes = doc.getElementsByTagNameNS("*", "EndpointID");
             if (endpointNodes.getLength() > 0) {
                 participantId = endpointNodes.item(0).getTextContent();
             }
@@ -296,7 +296,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             di.setStatus("REJECTED_AUTO");
         }
 
-        di.setReceivedAt(LocalDateTime.now());
+        di.setReceivedAt(eventAt != null ? eventAt : LocalDateTime.now());
         save(di);
 
         DigitalInvoiceEvent event = new DigitalInvoiceEvent();

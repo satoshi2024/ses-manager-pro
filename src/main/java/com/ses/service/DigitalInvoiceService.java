@@ -25,5 +25,5 @@ public interface DigitalInvoiceService extends IService<DigitalInvoice> {
     /**
      * 受信したインボイスを処理する。重複検知、バリデーション、取引先特定を行う。
      */
-    void processInboundInvoice(String providerMessageId, String eventId, String xmlContent, String rawPayloadHash);
+    void processInboundInvoice(String providerMessageId, String eventId, String xmlContent, String rawPayloadHash, java.time.LocalDateTime eventAt);
 }

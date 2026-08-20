@@ -34,7 +34,7 @@ CREATE UNIQUE INDEX uk_int_conn ON m_integration_connection (tenant_id, legal_en
 
 CREATE TABLE m_external_mapping (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    connection_id BIGINT NOT NULL,
+    connection_id BIGINT NULL,
     object_type VARCHAR(64) NOT NULL,
     internal_id BIGINT,
     internal_code VARCHAR(64) NOT NULL,
@@ -52,7 +52,7 @@ CREATE INDEX idx_ext_mapping_conn ON m_external_mapping (connection_id, object_t
 
 CREATE TABLE t_integration_job (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    connection_id BIGINT NOT NULL,
+    connection_id BIGINT NULL,
     job_type VARCHAR(64) NOT NULL,
     target_type VARCHAR(64) NOT NULL,
     target_id BIGINT NOT NULL,

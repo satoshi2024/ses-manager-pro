@@ -49,7 +49,7 @@ class DigitalInvoiceApiControllerTest {
     @WithMockUser(roles = "管理者")
     void testPreviewDelivery_PeppolVerified() throws Exception {
         Customer c = new Customer();
-        c.setCustomerName("Test Co");
+        c.setCompanyName("Test Co");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -77,7 +77,7 @@ class DigitalInvoiceApiControllerTest {
     @WithMockUser(roles = "管理者")
     void testPreviewDelivery_PeppolUnverified() throws Exception {
         Customer c = new Customer();
-        c.setCustomerName("Test Co 2");
+        c.setCompanyName("Test Co 2");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -104,7 +104,7 @@ class DigitalInvoiceApiControllerTest {
     @WithMockUser(roles = "管理者")
     void testPreviewDelivery_AlreadySent() throws Exception {
         Customer c = new Customer();
-        c.setCustomerName("Test Co 3");
+        c.setCompanyName("Test Co 3");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -130,7 +130,7 @@ class DigitalInvoiceApiControllerTest {
     @WithMockUser(roles = "管理者")
     void testGetStatusHistory_AdminCanViewXml() throws Exception {
         Customer c = new Customer();
-        c.setCustomerName("Admin View XML Co");
+        c.setCompanyName("Admin View XML Co");
         customerService.save(c);
 
         Invoice inv = new Invoice();
@@ -157,7 +157,7 @@ class DigitalInvoiceApiControllerTest {
     @WithMockUser(roles = "営業")
     void testGetStatusHistory_SalesCannotViewXml() throws Exception {
         Customer c = new Customer();
-        c.setCustomerName("Sales View XML Co");
+        c.setCompanyName("Sales View XML Co");
         customerService.save(c);
 
         Invoice inv = new Invoice();

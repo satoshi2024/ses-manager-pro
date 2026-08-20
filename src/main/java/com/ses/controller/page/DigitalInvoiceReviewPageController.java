@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 @Controller
-@RequestMapping("/invoice/inbound")
+@RequestMapping("/inbound-invoice")
 public class DigitalInvoiceReviewPageController {
 
     @GetMapping

@@ -45,7 +45,7 @@ class DigitalInvoiceSendTest {
     @Test
     void testEnqueueInvoice_Success() {
         Customer c = new Customer();
-        c.setCustomerName("Test Co");
+        c.setCompanyName("Test Co");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -68,7 +68,7 @@ class DigitalInvoiceSendTest {
     @Test
     void testEnqueueInvoice_DuplicateThrowsException() {
         Customer c = new Customer();
-        c.setCustomerName("Test Co 2");
+        c.setCompanyName("Test Co 2");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -98,7 +98,7 @@ class DigitalInvoiceSendTest {
         invoiceService.save(inv); com.ses.entity.InvoiceItem item = new com.ses.entity.InvoiceItem(); item.setInvoiceId(inv.getId()); item.setDescription("Test"); item.setAmount(new java.math.BigDecimal("1000")); invoiceItemMapper.insert(item);
 
         Customer c = new Customer();
-        c.setCustomerName("Test Co 3");
+        c.setCompanyName("Test Co 3");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
@@ -135,7 +135,7 @@ class DigitalInvoiceSendTest {
         invoiceService.save(inv); com.ses.entity.InvoiceItem item = new com.ses.entity.InvoiceItem(); item.setInvoiceId(inv.getId()); item.setDescription("Test"); item.setAmount(new java.math.BigDecimal("1000")); invoiceItemMapper.insert(item);
 
         Customer c = new Customer();
-        c.setCustomerName("Test Co 4");
+        c.setCompanyName("Test Co 4");
         c.setDeliveryPreference("PEPPOL");
         customerService.save(c);
 
