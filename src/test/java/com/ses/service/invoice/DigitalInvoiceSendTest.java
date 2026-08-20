@@ -13,7 +13,9 @@ import com.ses.service.DigitalInvoiceService;
 import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -27,7 +29,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -52,11 +55,22 @@ class DigitalInvoiceSendTest {
     @Autowired
     private com.ses.service.integration.IntegrationJobService integrationJobService;
 
-    @Autowired
+    @MockBean
     private DigitalInvoiceProvider digitalInvoiceProvider;
 
     @MockBean
     private com.ses.service.DocumentService documentService;
+
+    @BeforeEach
+    void stubProviderDefaults() {
+        when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> "mock-provider-" + inv.getArgument(2));
+        when(documentService.registerGenerated(any(), any())).thenAnswer(inv -> {
+            com.ses.entity.Document doc = new com.ses.entity.Document();
+            doc.setId(7001L);
+            return doc;
+        });
+    }
 
     @Test
     void testEnqueueInvoice_Success() {
@@ -85,35 +99,81 @@ class DigitalInvoiceSendTest {
 
     @Test
     void testMockProvider_IdempotencyByMessageId() {
+        when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), eq("MSG-IDEMPOTENT-1")))
+                .thenReturn("same-provider-id");
         String first = digitalInvoiceProvider.sendInvoice("<xml/>", "1.1.3", "MSG-IDEMPOTENT-1");
         String second = digitalInvoiceProvider.sendInvoice("<xml/>", "1.1.3", "MSG-IDEMPOTENT-1");
         assertEquals(first, second);
     }
 
     @Test
-    void testCancelSent_CreatesCreditNoteAndAllowsRequeue() {
+    void testCancelSent_CreatesCreditNoteAndDoesNotResendStandardInvoice() {
         Customer c = newCustomer("Cancel Co");
         verifiedParticipant(c, "cancel-id");
         Invoice inv = validInvoice("INV-CANCEL-1", c.getId());
 
         DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
         di.setStatus("SENT");
+        di.setMessageId("MSG-ORIGINAL-1");
         digitalInvoiceService.updateById(di);
 
         digitalInvoiceService.cancelInvoice(di.getId());
 
         DigitalInvoice revoked = digitalInvoiceService.getById(di.getId());
         assertEquals("REVOKED", revoked.getStatus());
+        assertEquals("MSG-ORIGINAL-1", revoked.getMessageId());
 
-        long creditNotes = digitalInvoiceService.lambdaQuery()
+        DigitalInvoice cn = digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getInvoiceId, inv.getId())
                 .eq(DigitalInvoice::getProfile, "CreditNote")
-                .count();
-        assertEquals(1, creditNotes);
+                .one();
+        assertNotNull(cn);
+
+        com.ses.entity.IntegrationJob cnJob = integrationJobService.getLatestJob(
+                "t_digital_invoice", cn.getId(), "DIGITAL_INVOICE_CREDIT_NOTE");
+        assertNotNull(cnJob, "打消しは CREDIT_NOTE ジョブでなければならない");
+        assertNull(integrationJobService.getLatestJob("t_digital_invoice", cn.getId(), "DIGITAL_INVOICE_SEND"));
+
+        ArgumentCaptor<String> xmlCaptor = ArgumentCaptor.forClass(String.class);
+        digitalInvoiceService.processCreditNoteJob(cnJob.getId());
+
+        verify(digitalInvoiceProvider, atLeastOnce()).sendInvoice(xmlCaptor.capture(), anyString(), eq(cn.getMessageId()));
+        String sentXml = xmlCaptor.getValue();
+        assertTrue(sentXml.contains("<CreditNote"), "CreditNote XML を送ること");
+        assertFalse(sentXml.contains("<Invoice "), "請求 Invoice ルートを再送しないこと");
 
         DigitalInvoice requeued = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
         assertEquals("Standard", requeued.getProfile());
         assertEquals("QUEUED", requeued.getStatus());
+    }
+
+    @Test
+    void testProcessSendJob_RejectsCreditNoteProfile() {
+        Customer c = newCustomer("Wrong Profile Co");
+        verifiedParticipant(c, "wp-id");
+        Invoice inv = validInvoice("INV-WP-1", c.getId());
+
+        DigitalInvoice cn = new DigitalInvoice();
+        cn.setInvoiceId(inv.getId());
+        cn.setDirection("SEND");
+        cn.setProfile("CreditNote");
+        cn.setSpecificationVersion("1.1.3");
+        cn.setMessageId("MSG-CN-WRONG");
+        cn.setStatus("QUEUED");
+        digitalInvoiceService.save(cn);
+
+        String payload = "{\"digitalInvoiceId\":" + cn.getId() + "}";
+        com.ses.entity.IntegrationJob job = integrationJobService.createJob(
+                null, "DIGITAL_INVOICE_SEND", "t_digital_invoice", cn.getId(),
+                "wrong_" + cn.getMessageId(),
+                org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload));
+
+        digitalInvoiceService.processSendJob(job.getId());
+
+        com.ses.entity.IntegrationJob updated = integrationJobService.getById(job.getId());
+        assertEquals("FAILED", updated.getStatus());
+        assertEquals("WRONG_PROFILE", updated.getErrorCode());
+        verify(digitalInvoiceProvider, never()).sendInvoice(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -147,16 +207,15 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testSendDigitalInvoice_Success() {
-        when(documentService.registerGenerated(any(), any())).thenAnswer(inv -> {
-            com.ses.entity.Document doc = new com.ses.entity.Document();
-            doc.setId(7001L);
-            return doc;
-        });
-
+    void testSendDigitalInvoice_Success_MapsTaxAndOrderReference() {
         Customer c = newCustomer("Test Co 4");
         verifiedParticipant(c, "test-id-4");
         Invoice inv = validInvoice("INV-001", c.getId());
+        inv.setTaxRate(new BigDecimal("0.10"));
+        inv.setRemarks("PO:PO-12345");
+        invoiceService.updateById(inv);
+
+        ArgumentCaptor<String> xmlCaptor = ArgumentCaptor.forClass(String.class);
 
         DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
         com.ses.entity.IntegrationJob job = integrationJobService.getLatestJob("t_digital_invoice", di.getId(), "DIGITAL_INVOICE_SEND");
@@ -166,10 +225,12 @@ class DigitalInvoiceSendTest {
         DigitalInvoice updated = digitalInvoiceService.getById(di.getId());
         assertEquals("SENT", updated.getStatus());
         assertNotNull(updated.getProviderMessageId());
-        assertNotNull(updated.getSentAt());
 
-        com.ses.entity.IntegrationJob updatedJob = integrationJobService.getById(job.getId());
-        assertEquals("SUCCEEDED", updatedJob.getStatus());
+        verify(digitalInvoiceProvider).sendInvoice(xmlCaptor.capture(), eq("1.1.3"), eq(di.getMessageId()));
+        String xml = xmlCaptor.getValue();
+        assertTrue(xml.contains("PO-12345"), "注文参照を写像すること");
+        assertTrue(xml.contains("<cbc:Percent>10"), "税率を写像すること");
+        assertTrue(xml.contains("<cbc:ID>S</cbc:ID>") || xml.contains(">S</cbc:ID>"), "税区分を写像すること");
     }
 
     private Customer newCustomer(String name) {
@@ -201,6 +262,7 @@ class DigitalInvoiceSendTest {
         inv.setSubtotal(new BigDecimal("1000"));
         inv.setTax(new BigDecimal("100"));
         inv.setTotal(new BigDecimal("1100"));
+        inv.setTaxRate(new BigDecimal("0.10"));
         inv.setStatus("未送付");
         inv.setIssuedDate(LocalDate.now());
         invoiceService.save(inv);

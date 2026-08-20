@@ -225,6 +225,66 @@ public class JpPintRenderer {
     }
 
     /**
+     * 打消し電文（Credit Note）。通常請求の Invoice ルートを再利用しない（R4.1 / R5-P0-01）。
+     */
+    public String renderCreditNote(CanonicalInvoice original, String creditNoteId, String billingReferenceId, String specVersion) {
+        try {
+            DocumentBuilder builder = createSecureDocumentBuilder();
+            Document doc = builder.newDocument();
+
+            org.w3c.dom.Element root = doc.createElement("CreditNote");
+            root.setAttribute("xmlns", "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2");
+            root.setAttribute("xmlns:cac", "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2");
+            root.setAttribute("xmlns:cbc", "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2");
+            doc.appendChild(root);
+
+            org.w3c.dom.Element customizationId = doc.createElement("cbc:CustomizationID");
+            customizationId.setTextContent("urn:peppol:pint:billing-3.0@jp:1.0::" + specVersion);
+            root.appendChild(customizationId);
+
+            org.w3c.dom.Element id = doc.createElement("cbc:ID");
+            id.setTextContent(creditNoteId);
+            root.appendChild(id);
+
+            org.w3c.dom.Element issueDate = doc.createElement("cbc:IssueDate");
+            issueDate.setTextContent(java.time.LocalDate.now().toString());
+            root.appendChild(issueDate);
+
+            org.w3c.dom.Element currencyCode = doc.createElement("cbc:DocumentCurrencyCode");
+            currencyCode.setTextContent(original.getCurrency() != null ? original.getCurrency() : "JPY");
+            root.appendChild(currencyCode);
+
+            org.w3c.dom.Element billingReference = doc.createElement("cac:BillingReference");
+            org.w3c.dom.Element invoiceDocumentReference = doc.createElement("cac:InvoiceDocumentReference");
+            org.w3c.dom.Element refId = doc.createElement("cbc:ID");
+            refId.setTextContent(billingReferenceId != null ? billingReferenceId : original.getInvoiceNumber());
+            invoiceDocumentReference.appendChild(refId);
+            billingReference.appendChild(invoiceDocumentReference);
+            root.appendChild(billingReference);
+
+            org.w3c.dom.Element legalMonetaryTotal = doc.createElement("cac:LegalMonetaryTotal");
+            org.w3c.dom.Element taxInclusiveAmount = doc.createElement("cbc:TaxInclusiveAmount");
+            java.math.BigDecimal total = original.getTaxInclusiveAmount() != null ? original.getTaxInclusiveAmount() : java.math.BigDecimal.ZERO;
+            taxInclusiveAmount.setTextContent(total.toString());
+            legalMonetaryTotal.appendChild(taxInclusiveAmount);
+            root.appendChild(legalMonetaryTotal);
+
+            TransformerFactory tf = TransformerFactory.newInstance();
+            tf.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "");
+            tf.setAttribute("http://javax.xml.XMLConstants/property/accessExternalStylesheet", "");
+            Transformer transformer = tf.newTransformer();
+            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+            transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+            StringWriter writer = new StringWriter();
+            transformer.transform(new DOMSource(doc), new StreamResult(writer));
+            return writer.toString();
+        } catch (Exception e) {
+            log.error("CreditNote XMLの生成に失敗しました。", e);
+            throw new BusinessException("CreditNote XMLの生成に失敗しました。");
+        }
+    }
+
+    /**
      * テスト用に文字列からXMLをパースし、XXEが無効化されていることを確認する。
      */
     public Document parseSecurely(String xml) throws Exception {

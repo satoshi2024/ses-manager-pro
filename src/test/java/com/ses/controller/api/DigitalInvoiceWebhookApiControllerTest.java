@@ -129,7 +129,12 @@ class DigitalInvoiceWebhookApiControllerTest {
                 mockMvc.getDispatcherServlet().getServletContext());
         ctx.getBean(com.ses.service.PeppolParticipantService.class).save(pp);
 
-        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-999</ID><EndpointID schemeID=\"0188\">1234567890123</EndpointID></Invoice>";
+        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
+                + "<ID>INV-999</ID>"
+                + "<IssueDate>2026-08-01</IssueDate>"
+                + "<EndpointID schemeID=\"0188\">1234567890123</EndpointID>"
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>1100</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
         String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-in-1\", \"eventId\": \"ev-in-1\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
 
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
@@ -155,7 +160,11 @@ class DigitalInvoiceWebhookApiControllerTest {
         archived.setId(9002L);
         when(documentService.registerReceived(any(), any())).thenReturn(archived);
 
-        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-888</ID></Invoice>";
+        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
+                + "<ID>INV-888</ID>"
+                + "<IssueDate>2026-08-01</IssueDate>"
+                + "<LegalMonetaryTotal><TaxInclusiveAmount>500</TaxInclusiveAmount></LegalMonetaryTotal>"
+                + "</Invoice>";
         String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
 
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")

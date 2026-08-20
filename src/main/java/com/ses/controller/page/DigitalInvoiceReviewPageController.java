@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class DigitalInvoiceReviewPageController {
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('管理者', 'マネージャー', '財務')")
+    @PreAuthorize("hasAnyRole('管理者', 'マネージャー')")
     public String index() {
         return "invoice/inbound";
     }

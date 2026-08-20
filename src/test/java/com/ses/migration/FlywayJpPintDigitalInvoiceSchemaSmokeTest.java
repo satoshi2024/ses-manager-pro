@@ -49,11 +49,21 @@ class FlywayJpPintDigitalInvoiceSchemaSmokeTest {
             assertColumnExists(statement, "t_digital_invoice", "supplier_company_id");
             assertColumnExists(statement, "t_digital_invoice", "match_status");
             
-            // Menu entries
-            assertTrue(queryInt(statement, "SELECT COUNT(*) FROM m_menu WHERE menu_key IN ('digital-invoice-send', 'digital-invoice-review')") == 2);
-            
-            // Permissions
-            assertTrue(queryInt(statement, "SELECT COUNT(*) FROM t_permission_group_action WHERE group_key='role-admin' AND action_name LIKE 'digital-invoice%'") > 0);
+            // Menu entries (V107_2 seed)
+            assertTrue(queryInt(statement, "SELECT COUNT(*) FROM m_menu WHERE menu_key IN ('digital-invoice', 'inbound-invoice')") == 2,
+                    "digital-invoice / inbound-invoice メニューが2件あるはず");
+
+            // Permissions: action_key on t_permission_group_action, group_key on m_permission_group
+            assertTrue(queryInt(statement,
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key='role-admin' AND a.action_key LIKE 'digital-invoice%'") > 0,
+                    "role-admin に digital-invoice 権限があるはず");
+            assertTrue(queryInt(statement,
+                    "SELECT COUNT(*) FROM t_permission_group_action a "
+                            + "JOIN m_permission_group g ON g.id = a.group_id "
+                            + "WHERE g.group_key='role-manager' AND a.action_key LIKE 'inbound-invoice%'") > 0,
+                    "role-manager に inbound-invoice 権限があるはず");
             
             // connection_id nullability
             assertTrue(queryInt(statement, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='t_integration_job' AND column_name='connection_id' AND is_nullable='YES'") == 1);

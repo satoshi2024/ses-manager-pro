@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.dto.invoice.InboundPurchaseRequest;
 import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
 import lombok.RequiredArgsConstructor;
@@ -20,39 +21,39 @@ public class InboundDigitalInvoiceApiController {
     public ApiResult<Page<DigitalInvoice>> listInboundInvoices(
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size) {
-        
+
         Page<DigitalInvoice> page = new Page<>(current, size);
         digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getDirection, "RECEIVE")
                 .orderByDesc(DigitalInvoice::getReceivedAt)
                 .page(page);
-                
+
         return ApiResult.success(page);
     }
 
     @PostMapping("/{id}/review")
     @PreAuthorize("hasRole('管理者')")
-    public ApiResult<Void> reviewInvoice(@PathVariable Long id, @RequestParam String action) {
-        DigitalInvoice di = digitalInvoiceService.getById(id);
-        if (di == null || !"RECEIVE".equals(di.getDirection())) {
-            return ApiResult.error("対象が見つかりません。");
-        }
-        
-        if (!"PENDING_REVIEW".equals(di.getStatus())) {
-            return ApiResult.error("レビュー待ちのインボイスではありません。");
-        }
-
+    public ApiResult<InboundPurchaseRequest> reviewInvoice(@PathVariable Long id, @RequestParam String action) {
         if ("ACCEPT".equalsIgnoreCase(action)) {
-            // 受信invoiceを自動で支払確定しない（R5）。必ずreview queueを経由し、人が確定する。
-            // BP Purchase作成はreview確定後にaccounting canonical DTOへ渡すなどの処理を行う。
-            di.setStatus("ACCEPTED");
-        } else if ("REJECT".equalsIgnoreCase(action)) {
-            di.setStatus("REJECTED_MANUAL");
-        } else {
-            return ApiResult.error("不明なアクションです。");
+            try {
+                InboundPurchaseRequest request = digitalInvoiceService.acceptInboundReview(id);
+                return ApiResult.success(request);
+            } catch (Exception e) {
+                return ApiResult.error(e.getMessage());
+            }
         }
-
-        digitalInvoiceService.updateById(di);
-        return ApiResult.success(null);
+        if ("REJECT".equalsIgnoreCase(action)) {
+            DigitalInvoice di = digitalInvoiceService.getById(id);
+            if (di == null || !"RECEIVE".equals(di.getDirection())) {
+                return ApiResult.error("対象が見つかりません。");
+            }
+            if (!"PENDING_REVIEW".equals(di.getStatus())) {
+                return ApiResult.error("レビュー待ちのインボイスではありません。");
+            }
+            di.setStatus("REJECTED_MANUAL");
+            digitalInvoiceService.updateById(di);
+            return ApiResult.success(null);
+        }
+        return ApiResult.error("不明なアクションです。");
     }
 }
