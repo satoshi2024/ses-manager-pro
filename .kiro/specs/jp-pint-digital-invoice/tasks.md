@@ -23,7 +23,7 @@
   - **テスト要件**: L0。spec versionと確認日が記録されていること、
     未契約の場合にB1/B2/MのPASSを止めるblockerが明記されていること、`git diff --check` exit 0。
 
-- [ ] F1. participant/digital invoice/event DDL
+- [x] F1. participant/digital invoice/event DDL
   - **Objective**: 法人/顧客のPeppol participant IDを検証状態付きで管理でき、
     未検証の宛先へは送信できない。送受信のstatusとeventが記録され、
     同じproviderイベントが二重に処理されない。
