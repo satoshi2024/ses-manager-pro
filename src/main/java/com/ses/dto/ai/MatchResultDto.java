@@ -21,4 +21,7 @@ public class MatchResultDto {
     // 外部要員（BP）の場合
     private Long bpAvailabilityId;
     private Boolean isExternalBp;
+    private Long runId;
+    private Long itemId;
+    private String traceId;
 }

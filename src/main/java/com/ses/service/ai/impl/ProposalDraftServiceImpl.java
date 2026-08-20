@@ -3,7 +3,6 @@ package com.ses.service.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
-import com.ses.common.util.PriceFormatter;
 import com.ses.dto.ai.ProposalDraftDto;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 import com.ses.entity.Engineer;
@@ -11,7 +10,10 @@ import com.ses.entity.Project;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProjectMapper;
-import com.ses.service.ai.AiTextService;
+import com.ses.service.ai.AiAllowlistFields;
+import com.ses.service.ai.AiExecutionGateway;
+import com.ses.service.ai.AiGatewayRequest;
+import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.ProposalDraftService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
@@ -39,7 +41,7 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
     private final ProjectMapper projectMapper;
     private final ProjectSkillMapper projectSkillMapper;
     private final DataScopeService dataScopeService;
-    private final AiTextService aiTextService;
+    private final AiExecutionGateway aiExecutionGateway;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -85,50 +87,34 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
                 engineer.getExpectedUnitPrice(), project.getStartDate(), engineer.getAvailableDate()
         );
 
-        String prompt = buildPrompt(engineer, project, engSkills, score);
-
         try {
-            String aiResponse = aiTextService.generate(prompt);
-            return parseAiResponse(aiResponse);
+            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
+                    .useCase(AiGatewayRequest.USE_PROPOSAL_DRAFT)
+                    .taskMarker("[TASK:PROPOSAL_DRAFT]")
+                    .trustedInstruction("""
+                            あなたは優秀なSES営業担当です。ALLOWLIST_CONTEXT のみを根拠に、
+                            提案メール本文・マッチ理由・セールスポイント・スコアをJSONで作成してください。
+                            実名や連絡先は出力しないでください。要員名は initialName だけを使ってください。
+                            HTMLは出力しないでください。
+                            {"emailText":"...","matchReason":"...","sellingPoints":"...","matchScore":85}
+                            """)
+                    .allowlistedFields(AiAllowlistFields.merge(
+                            AiAllowlistFields.engineer(engineer, engSkills),
+                            AiAllowlistFields.project(project),
+                            AiAllowlistFields.ruleScore(score)))
+                    .persistRun(true)
+                    .requireJson(true)
+                    .build());
+            ProposalDraftDto dto = parseAiResponse(result.getText());
+            dto.setTraceId(result.getTraceId());
+            dto.setRunId(result.getRunId());
+            return dto;
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.error("Failed to generate proposal draft", e);
             throw BusinessException.of(500, "error.ai.unexpected");
         }
-    }
-
-    private String buildPrompt(Engineer engineer, Project project, List<EngineerSkillDetailDto> engSkills, MatchScore score) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("[TASK:PROPOSAL_DRAFT]\n");
-        sb.append("あなたは優秀なSES営業担当です。以下の情報を元に、お客様へ送付する提案メール本文、マッチ理由、セールスポイント、スコアをJSON形式で作成してください。\n\n");
-        
-        sb.append("【案件情報】\n");
-        sb.append("- 案件名: ").append(project.getProjectName()).append("\n");
-        sb.append("- 単価幅: ").append(PriceFormatter.format(project.getUnitPriceMin())).append("〜").append(PriceFormatter.format(project.getUnitPriceMax())).append("\n");
-        sb.append("- リモート: ").append(project.getRemoteType() != null ? project.getRemoteType() : "未設定").append("\n\n");
-
-        sb.append("【要員情報】\n");
-        sb.append("- 氏名(イニシャル): ").append(engineer.getInitialName() != null ? engineer.getInitialName() : "").append("\n");
-        sb.append("- 経験年数: ").append(engineer.getExperienceYears()).append("年\n");
-        sb.append("- 希望単価: ").append(PriceFormatter.format(engineer.getExpectedUnitPrice())).append("\n");
-        sb.append("- スキルサマリ: ").append(engSkills.stream().map(s -> s.getSkillName() + "(" + s.getExperienceYears() + "年)").collect(Collectors.joining(", "))).append("\n\n");
-        
-        sb.append("【ルールベーススコア計算結果】\n");
-        sb.append("- トータルスコア: ").append(score.getTotalScore()).append("\n");
-        sb.append("- 必須スキル充足率: ").append(score.getMustCoverage()).append("\n");
-        sb.append("- 単価適合スコア: ").append(score.getPriceScore()).append("/20\n\n");
-
-        sb.append("※注意: 個人情報保護のため、出力するメール本文や理由に実名や連絡先等を含めないでください。要員名は必ず上記のイニシャルを使用してください。\n\n");
-
-        sb.append("出力は以下のJSONフォーマットのみを返してください。不要なテキストやマークダウンブロックは含めないでください。\n");
-        sb.append("{\n");
-        sb.append("  \"emailText\": \"お客様への提案メール本文(挨拶文や署名も含む)\",\n");
-        sb.append("  \"matchReason\": \"案件と要員がマッチしている具体的な理由\",\n");
-        sb.append("  \"sellingPoints\": \"要員のアピールポイント(長所)\",\n");
-        sb.append("  \"matchScore\": 85\n");
-        sb.append("}");
-        return sb.toString();
     }
 
     private ProposalDraftDto parseAiResponse(String aiResponse) {

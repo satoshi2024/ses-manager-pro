@@ -26,4 +26,12 @@ public interface AiArtifactVersionMapper extends BaseMapper<AiArtifactVersion> {
     int casActivateShadow(@Param("id") Long id,
                           @Param("statusVersion") int statusVersion,
                           @Param("activatedAt") LocalDateTime activatedAt);
+
+    @Update("UPDATE m_ai_artifact_version SET status = 'ACTIVE', activated_at = #{activatedAt}, "
+            + "retired_at = NULL, status_version = status_version + 1, updated_at = #{activatedAt} "
+            + "WHERE id = #{id} AND status = 'RETIRED' AND status_version = #{statusVersion} "
+            + "AND deleted_flag = 0")
+    int casActivateRetired(@Param("id") Long id,
+                           @Param("statusVersion") int statusVersion,
+                           @Param("activatedAt") LocalDateTime activatedAt);
 }

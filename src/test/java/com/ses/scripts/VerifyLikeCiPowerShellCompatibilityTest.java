@@ -53,6 +53,12 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             assertStaticCompatibilityContract();
             return;
         }
+        // 失敗MavenのexitCode伝播は、scriptがDocker/Node/Chrome/Bashのtool gateを越えた後にしか到達しない。
+        // fast suiteはDocker必須ではないため、gateを越えられない環境では静的契約だけを固定する。
+        if (!ciToolGatesLikelyPass()) {
+            assertStaticCompatibilityContract();
+            return;
+        }
         Path directory = Files.createTempDirectory("verify-like-ci-failing-maven-");
         Path failing = directory.resolve("failing-maven.cmd");
         Files.writeString(failing, "@echo off\r\nexit /b 7\r\n", StandardCharsets.US_ASCII);
@@ -67,12 +73,30 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         assertTrue(skipDiagnosis < 0 || buildFailure < skipDiagnosis, result.output());
     }
 
+    private boolean ciToolGatesLikelyPass() {
+        try {
+            ProcessResult docker = run(List.of("docker", "info"), Duration.ofSeconds(8));
+            if (docker.exitCode() != 0) {
+                return false;
+            }
+            ProcessResult node = run(List.of("node", "--version"), Duration.ofSeconds(8));
+            if (node.exitCode() != 0) {
+                return false;
+            }
+        } catch (Exception | AssertionError ex) {
+            return false;
+        }
+        Path chrome = Path.of("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe");
+        Path bash = Path.of("C:\\Program Files\\Git\\bin\\bash.exe");
+        return Files.isRegularFile(chrome) && Files.isRegularFile(bash);
+    }
+
     private List<String> availablePowerShellExecutables() {
         List<String> available = new ArrayList<>();
         for (String candidate : List.of("powershell.exe", "pwsh")) {
             try {
                 ProcessResult result = run(List.of(candidate, "-NoProfile", "-Command",
-                        "$PSVersionTable.PSVersion.Major"));
+                        "$PSVersionTable.PSVersion.Major"), Duration.ofSeconds(15));
                 if (result.exitCode() == 0) {
                     available.add(candidate);
                 }
@@ -84,14 +108,18 @@ class VerifyLikeCiPowerShellCompatibilityTest {
     }
 
     private ProcessResult run(List<String> command) throws Exception {
+        return run(command, Duration.ofSeconds(120));
+    }
+
+    private ProcessResult run(List<String> command, Duration timeout) throws Exception {
         Process process = new ProcessBuilder(command)
                 .directory(Path.of("").toAbsolutePath().toFile())
                 .redirectErrorStream(true)
                 .start();
-        boolean completed = process.waitFor(Duration.ofSeconds(45).toMillis(), TimeUnit.MILLISECONDS);
+        boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
         if (!completed) {
             process.destroyForcibly();
-            throw new AssertionError("PowerShell helperが45秒以内に終了しませんでした");
+            throw new AssertionError("PowerShell helperが" + timeout.toSeconds() + "秒以内に終了しませんでした");
         }
         return new ProcessResult(process.exitValue(),
                 new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));

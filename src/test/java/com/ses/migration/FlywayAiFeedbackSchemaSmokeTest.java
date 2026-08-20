@@ -68,8 +68,18 @@ class FlywayAiFeedbackSchemaSmokeTest {
                     "SELECT COUNT(*) FROM information_schema.columns "
                             + "WHERE table_schema=DATABASE() AND table_name='t_ai_outcome' "
                             + "AND column_name='original_end_date'"));
-            assertEquals(3, queryInt(statement,
-                    "SELECT COUNT(*) FROM m_ai_artifact_version WHERE status='ACTIVE'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.columns "
+                            + "WHERE table_schema=DATABASE() AND table_name='t_proposal' "
+                            + "AND column_name='ai_item_id'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                            + "WHERE table_schema=DATABASE() AND table_name='m_menu'"));
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_menu WHERE menu_key='ai-evaluation'"));
+            assertEquals(0, queryInt(statement,
+                    "SELECT COUNT(*) FROM t_role_menu tr JOIN m_menu m ON m.id=tr.menu_id "
+                            + "WHERE m.menu_key='ai-evaluation' AND tr.role='HR'"));
 
             SQLException duplicateActive = assertThrows(SQLException.class, () -> statement.execute(
                     "INSERT INTO m_ai_artifact_version "

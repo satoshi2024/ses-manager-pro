@@ -36,7 +36,7 @@
     tenant分離、保存期限超過データのpurge、outcome重複登録の拒否。
   - **Demo**: 2つのversionを同時にACTIVEへ昇格させて片方が失敗することを確認。
 
-- [ ] F2. AiExecutionGateway/PII mask
+- [x] F2. AiExecutionGateway/PII mask
   - **Objective**: すべてのAI呼出がgateway経由になり、controller/serviceが直接providerを呼ばない。
     送信payloadに氏名・連絡先・住所・口座・自由記述PIIが含まれない。
     取込原文の中の指示文がAIへの命令として実行されない。
@@ -49,7 +49,7 @@
     log capture、gatewayを経由しないAI呼出が存在しないこと。
   - **Demo**: 送信payload inspectionでPII 0。命令文を含む取込原文を投入して指示が実行されないことを確認。
 
-- [ ] B1. feedback/outcome連携
+- [x] B1. feedback/outcome連携
   - **Objective**: 推薦ごとに採用/却下/保留と理由を登録でき、
     提案作成→面談→成約/失注が同一traceで追跡できる。同じeventが再送されても二重登録されない。
   - **実装ガイダンス**: matching画面の採否、proposal/contract event、冪等trace。
@@ -61,7 +61,7 @@
     AIから提案/契約/メール送信を変更する経路が存在しないこと。
   - **Demo**: 推薦から成約までtimeline。同じstate eventを2回流してoutcomeが1件のみを確認。
 
-- [ ] B2. offline evaluation/version promotion
+- [x] B2. offline evaluation/version promotion
   - **Objective**: 固定の匿名datasetで新versionと現行versionを比較でき、
     基準未達のversionは有効化が拒否される。rollback後は新規実行だけが旧versionを使い、過去記録は変わらない。
   - **実装ガイダンス**: dataset version、baseline比較、threshold、shadow/rollback。
@@ -73,7 +73,7 @@
     shadow versionの結果が業務作成へ流れないこと。
   - **Demo**: 基準未達version拒否→ruleへrollback。rollback後に過去recordのversion参照が変わらないことを確認。
 
-- [ ] A1. evaluation dashboard
+- [x] A1. evaluation dashboard
   - **Objective**: version別の採用率・面談率・成約率・理由分布・latency・costが見え、2versionを比較できる。
     少数のsegmentは非表示になり、個人が特定されない。
   - **実装ガイダンス**: funnel/reason/latency/cost/segment privacy。
@@ -84,7 +84,7 @@
     sample inspectionでPIIが出ないこと、機微属性がsegment軸に現れないこと。
   - **Demo**: 2version比較。1件しか回答のないsegmentが表示されないことを確認。
 
-- [ ] M. 回帰/安全性
+- [x] M. 回帰/安全性
   - **Objective**: mock既定のまま既存のAI機能が動き、実providerはopt-inでのみ有効になる。
     PII canaryがどこにも出ない。既存のmatching/proposal draft機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、

@@ -38,6 +38,8 @@ CREATE TABLE t_proposal (
   source_opportunity_id BIGINT,
   proposed_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
   closed_at           DATETIME,
+  ai_trace_id         VARCHAR(36),
+  ai_item_id          BIGINT,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT DEFAULT 0
 );

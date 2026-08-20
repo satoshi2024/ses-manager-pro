@@ -12,6 +12,7 @@ import com.ses.service.ContractService;
 import com.ses.service.staffing.AllocationPlanService;
 import com.ses.service.staffing.StaffingScenarioService;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,7 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * T080（M）browser Demo: staffing一気通貫（position→配置→heatmap→scenario compare）を
  * 実Chrome（CDP・headless）でdesktop（1920x1080）と390px（390x844）で実測し、
  * DOM検証・スクリーンショット・コンソールイベントを `evidence/browser-m/` へ保存する。
+ *
+ * <p>Chrome依存のため既定のfast suiteへ無条件追加しない。専用profile（-Pbrowser-tests）とCI gateで実行する。
  */
+@Tag("browser")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class StaffingBrowserMTest {

@@ -26,6 +26,7 @@ public class PageRenderingTest {
     @CsvSource({
             "/sales-performance, sales-performance.js",
             "/ai/matching, ai.js",
+            "/ai/evaluation, ai-evaluation.js",
             "/analytics/availability-calendar, availability-calendar.js",
             "/engineer/list, engineer.js",
             "/customer/list, customer.js",

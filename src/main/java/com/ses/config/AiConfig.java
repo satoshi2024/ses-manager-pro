@@ -43,4 +43,25 @@ public class AiConfig {
      * 最大トークン数
      */
     private int maxTokens = 4096;
+
+    /**
+     * 実providerへの外部送信。G10 既定は false。true は GATE-S17-G10-PROD 後のみ。
+     */
+    private boolean externalSendEnabled = false;
+
+    private Retention retention = new Retention();
+    private Evaluation evaluation = new Evaluation();
+
+    @Data
+    public static class Retention {
+        private int redactedDays = 730;
+        private int rawPromptDays = 0;
+    }
+
+    @Data
+    public static class Evaluation {
+        private int minSegmentCount = 5;
+        private int maxRegressionPp = 5;
+        private double maxLatencyP95Multiplier = 2.0;
+    }
 }

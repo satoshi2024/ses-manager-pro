@@ -1,0 +1,69 @@
+{
+  "datasetVersion": "anon-matching-v1",
+  "observationWindow": "fixture-offline",
+  "cases": [
+    {
+      "id": "c1",
+      "allowlistedFields": {
+        "engineer.experienceYears": 5,
+        "engineer.expectedUnitPrice": 700000,
+        "engineer.initialName": "Y.T",
+        "engineerSkill.skillName": "Java,Spring",
+        "project.projectName": "Web API",
+        "project.unitPriceMin": 650000,
+        "project.unitPriceMax": 800000,
+        "project.workLocation": "東京都千代田区",
+        "project.remoteType": "一部リモート"
+      },
+      "relevantTargetIds": [1, 2],
+      "baselineRanks": [1, 2, 3, 4, 5],
+      "candidateRanks": [1, 2, 3, 4, 5],
+      "baselineAccepted": true,
+      "candidateAccepted": true,
+      "baselineLatencyMs": 80,
+      "candidateLatencyMs": 90
+    },
+    {
+      "id": "c2",
+      "allowlistedFields": {
+        "engineer.experienceYears": 3,
+        "engineer.expectedUnitPrice": 550000,
+        "engineer.initialName": "A.K",
+        "engineerSkill.skillName": "Python",
+        "project.projectName": "Data pipeline",
+        "project.unitPriceMin": 500000,
+        "project.unitPriceMax": 600000,
+        "project.workLocation": "大阪府大阪市",
+        "project.remoteType": "フルリモート"
+      },
+      "relevantTargetIds": [2],
+      "baselineRanks": [2, 1, 3, 4, 5],
+      "candidateRanks": [2, 3, 1, 4, 5],
+      "baselineAccepted": true,
+      "candidateAccepted": true,
+      "baselineLatencyMs": 100,
+      "candidateLatencyMs": 110
+    },
+    {
+      "id": "c3",
+      "allowlistedFields": {
+        "engineer.experienceYears": 8,
+        "engineer.expectedUnitPrice": 900000,
+        "engineer.initialName": "M.S",
+        "engineerSkill.skillName": "AWS",
+        "project.projectName": "Cloud migration",
+        "project.unitPriceMin": 800000,
+        "project.unitPriceMax": 1000000,
+        "project.workLocation": "神奈川県横浜市",
+        "project.remoteType": "出社"
+      },
+      "relevantTargetIds": [1],
+      "baselineRanks": [1, 5, 2, 3, 4],
+      "candidateRanks": [1, 2, 5, 3, 4],
+      "baselineAccepted": false,
+      "candidateAccepted": false,
+      "baselineLatencyMs": 120,
+      "candidateLatencyMs": 125
+    }
+  ]
+}

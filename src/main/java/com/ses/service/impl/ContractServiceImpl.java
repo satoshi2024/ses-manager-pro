@@ -60,6 +60,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ScopeChangeInvalidator scopeChangeInvalidator;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.ai.AiOutcomeService> aiOutcomeService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
@@ -334,6 +337,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                     contract.getStatus(), newStatus);
         }
         String oldStatus = contract.getStatus();
+        LocalDate originalEndDate = contract.getEndDate();
         // 解約遷移では解約日(実質終了日)を必須とし、end_date を上書きする。
         // 解約日以降の月は集計対象から自然に外れる(R2/R3)。
         if (StatusConstants.CONTRACT_CANCELLED.equals(newStatus)) {
@@ -366,6 +370,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
         // staffing-capacity-planning: 状態遷移をactual allocationへ同期する（終了/解約→破棄）
         staffingSync.syncActual(contract.getId());
+        if (StatusConstants.CONTRACT_CANCELLED.equals(newStatus)) {
+            recordAiOutcome(svc -> svc.onContractCancelled(contract, originalEndDate, cancelDate));
+        }
     }
 
     @Override
@@ -403,7 +410,9 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 null,
                 null,
                 proposal.getPositionId());
-        return buildAndSaveDraft(src);
+        Contract draft = buildAndSaveDraft(src);
+        recordAiOutcome(svc -> svc.onContractPositionLinked(draft));
+        return draft;
     }
 
     @Override
@@ -688,6 +697,20 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 .eq("id", contractId)
                 .set("renewal_decision", decision)
                 .setSql("version = version + 1"));
+        if (com.ses.common.constant.RenewalState.DECISION_CONTINUE.equals(decision)) {
+            Contract contract = this.getById(contractId);
+            recordAiOutcome(svc -> svc.onContractRenewalContinued(contract));
+        }
+    }
+
+    private void recordAiOutcome(java.util.function.Consumer<com.ses.service.ai.AiOutcomeService> action) {
+        if (aiOutcomeService == null) {
+            return;
+        }
+        com.ses.service.ai.AiOutcomeService svc = aiOutcomeService.getIfAvailable();
+        if (svc != null) {
+            action.accept(svc);
+        }
     }
 
     /**

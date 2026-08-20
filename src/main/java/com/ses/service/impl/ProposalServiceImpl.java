@@ -39,6 +39,9 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     @org.springframework.context.annotation.Lazy
     private com.ses.service.security.DataScopeService dataScopeService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.ai.AiOutcomeService> aiOutcomeService;
+
     private static final Map<String, Set<String>> ALLOWED = Map.of(
         "書類選考中", Set.of("一次面接", "見送り"),
         "一次面接",   Set.of("二次面接", "結果待ち", "見送り"),
@@ -130,6 +133,9 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         if (result && proposal.getEngineerId() != null) {
             engineerStatusService.onProposalCreated(proposal.getEngineerId());
         }
+        if (result) {
+            recordOutcome(svc -> svc.onProposalSaved(proposal));
+        }
         return result;
     }
 
@@ -179,12 +185,10 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
         // トランザクション失敗時は成約遷移ごとロールバックされる。
         if ("成約".equals(newStatus)) {
             Contract draft = contractService.createDraftFromProposal(proposal);
-            // 主担当営業が退職済み等で未帰属(sales_user_id=NULL)になった場合は担当設定を促すメッセージにする。
             boolean unattributed = draft.getSalesUserId() == null;
             String msgKey = unattributed
                     ? "notification.msg.CONTRACT_DRAFT_UNATTRIBUTED"
                     : "notification.msg.CONTRACT_DRAFT";
-            // 契約ドラフト確認通知は担当営業本人へ個別配信する（未帰属時のみ全体通知 / R3R-33）。
             notificationService.publishToUser(
                     draft.getSalesUserId(),
                     "CONTRACT_DRAFT",
@@ -192,6 +196,17 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
                     "[\"" + msgKey + "\", \"" + draft.getContractNo() + "\"]",
                     com.ses.common.constant.NotificationLinks.CONTRACT_LIST,
                     "contract-draft:" + proposal.getId());
+        }
+        recordOutcome(svc -> svc.onProposalStatusChanged(proposal));
+    }
+
+    private void recordOutcome(java.util.function.Consumer<com.ses.service.ai.AiOutcomeService> action) {
+        if (aiOutcomeService == null) {
+            return;
+        }
+        com.ses.service.ai.AiOutcomeService svc = aiOutcomeService.getIfAvailable();
+        if (svc != null) {
+            action.accept(svc);
         }
     }
 

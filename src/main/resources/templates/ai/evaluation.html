@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{ai.evaluation.title}">AI評価</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h3 mb-0 text-light">
+            <i class="bi bi-graph-up-arrow me-2 text-accent-purple"></i>
+            <span th:text="#{ai.evaluation.title}">AI評価</span>
+        </h2>
+    </div>
+    <p class="text-muted" th:text="#{ai.evaluation.lead}">version別の採用率・面談率・成約率を表示します。少数segmentは非表示です。</p>
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0" id="aiEvalVersionTable">
+                    <thead>
+                    <tr>
+                        <th th:text="#{ai.evaluation.col.version}">version</th>
+                        <th th:text="#{ai.evaluation.col.status}">状態</th>
+                        <th th:text="#{ai.evaluation.col.adoption}">採用率</th>
+                        <th th:text="#{ai.evaluation.col.interview}">面談率</th>
+                        <th th:text="#{ai.evaluation.col.win}">成約率</th>
+                        <th th:text="#{ai.evaluation.col.latency}">latency p95</th>
+                        <th class="js-cost-col" th:text="#{ai.evaluation.col.cost}">cost</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark" th:text="#{ai.evaluation.reason}">理由分布</div>
+                <div class="card-body" id="aiEvalReasons"></div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark" th:text="#{ai.evaluation.samples}">sample inspection</div>
+                <div class="card-body" id="aiEvalSamples"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script src="/js/modules/ai-evaluation.js"></script>
+</th:block>
+</body>
+</html>

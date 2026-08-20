@@ -102,9 +102,14 @@ app:
 
 ai:
   enabled: false
+  external-send-enabled: false
   retention:
     redacted-days: 730
     raw-prompt-days: 0
+  evaluation:
+    min-segment-count: 5
+    max-regression-pp: 5
+    max-latency-p95-multiplier: 2.0
 
 menu:
   cache:

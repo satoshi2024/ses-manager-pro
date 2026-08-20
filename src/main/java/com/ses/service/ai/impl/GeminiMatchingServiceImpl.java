@@ -3,7 +3,6 @@ package com.ses.service.ai.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.util.SecurityUtils;
-import com.ses.common.util.PriceFormatter;
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.dto.ai.MatchScore;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
@@ -21,8 +20,11 @@ import com.ses.mapper.ProjectSkillMapper;
 import com.ses.mapper.SkillTagMapper;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.entity.BpAvailability;
+import com.ses.service.ai.AiAllowlistFields;
+import com.ses.service.ai.AiExecutionGateway;
+import com.ses.service.ai.AiGatewayRequest;
+import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiMatchingService;
-import com.ses.service.ai.AiTextService;
 import com.ses.service.ai.MatchScoreCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +50,7 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
     private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
-    private final AiTextService aiTextService;
+    private final AiExecutionGateway aiExecutionGateway;
 
     @Override
     public List<MatchResultDto> findMatchingProjects(Long engineerId) {
@@ -110,17 +112,10 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
             dto.setProjectId(p.getId());
             dto.setProjectName(p.getProjectName());
             dto.setScore(score.getTotalScore());
-            
-            // Generate prompt and call AI
-            String prompt = buildPromptForProjectMatch(engineer, p, score, mustIds, niceIds, tagNameMap, engSkills);
-            try {
-                String aiResponse = aiTextService.generate(prompt);
-                parseAiResponseIntoDto(aiResponse, dto, score.getTotalScore());
-            } catch (Exception e) {
-                log.warn("AI text generation failed for project match, using fallback", e);
-                dto.setReason("AI解析に失敗しました");
-                dto.setSellingPoints("アピールポイントの生成に失敗しました");
-            }
+            fillMatchExplanation(dto, AiAllowlistFields.merge(
+                    AiAllowlistFields.engineer(engineer, engSkills),
+                    AiAllowlistFields.project(p),
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
             results.add(dto);
         }
 
@@ -192,17 +187,14 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
             dto.setEngineerName(e.getFullName());
             dto.setProposedPrice(e.getExpectedUnitPrice() != null ? e.getExpectedUnitPrice().intValue() : null);
             dto.setScore(score.getTotalScore());
-            
-            String prompt = buildPromptForEngineerMatch(project, e, score, mustIds, niceIds, tagNameMap, eSkills);
-            try {
-                String aiResponse = aiTextService.generate(prompt);
-                parseAiResponseIntoDto(aiResponse, dto, score.getTotalScore());
-            } catch (Exception ex) {
-                log.warn("AI text generation failed for engineer match", ex);
-                dto.setReason("AI解析に失敗しました");
-                dto.setSellingPoints("アピールポイントの生成に失敗しました");
-            }
-            
+            fillMatchExplanation(dto, AiAllowlistFields.merge(
+                    AiAllowlistFields.engineer(e, null),
+                    AiAllowlistFields.project(project),
+                    Map.of("engineerSkill.skillName", eSkills.stream()
+                            .map(id -> tagNameMap.getOrDefault(id, ""))
+                            .filter(n -> n != null && !n.isBlank())
+                            .collect(Collectors.joining(","))),
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
             results.add(dto);
         }
 
@@ -246,16 +238,13 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
             dto.setEngineerName("[BP] " + (bp.getInitialName() != null ? bp.getInitialName() : "不明"));
             dto.setProposedPrice(bp.getUnitPrice() != null ? bp.getUnitPrice().intValue() : null);
             dto.setScore(score.getTotalScore());
-            
-            String prompt = buildPromptForBpMatch(project, bp, score, mustIds, niceIds, tagNameMap, bpSkills);
-            try {
-                String aiResponse = aiTextService.generate(prompt);
-                parseAiResponseIntoDto(aiResponse, dto, score.getTotalScore());
-            } catch (Exception ex) {
-                log.warn("AI text generation failed for BP match", ex);
-                dto.setReason("AIマッチングに失敗しました");
-                dto.setSellingPoints(bp.getRemarks() != null ? bp.getRemarks() : "外部要員（BP）");
-            }
+            fillMatchExplanation(dto, AiAllowlistFields.merge(
+                    AiAllowlistFields.bp(bp, bpSkills.stream()
+                            .map(id -> tagNameMap.getOrDefault(id, ""))
+                            .filter(n -> n != null && !n.isBlank())
+                            .collect(Collectors.joining(","))),
+                    AiAllowlistFields.project(project),
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
             results.add(dto);
         }
 
@@ -266,88 +255,25 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
         return results;
     }
 
-    private String buildPromptForProjectMatch(Engineer engineer, Project project, MatchScore score, 
-                                              Set<Long> mustIds, Set<Long> niceIds, Map<Long, String> tagNameMap, 
-                                              List<EngineerSkillDetailDto> engSkills) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("あなたはSES営業アシスタントです。以下の案件に対して、提案する要員のマッチ理由とアピールポイントを作成してください。\n\n");
-        sb.append("【案件情報】\n");
-        sb.append("- 案件名: ").append(project.getProjectName()).append("\n");
-        sb.append("- 単価幅: ").append(PriceFormatter.format(project.getUnitPriceMin())).append("〜").append(PriceFormatter.format(project.getUnitPriceMax())).append("\n");
-        sb.append("- 必須スキル: ").append(mustIds.stream().map(id -> tagNameMap.getOrDefault(id, "")).collect(Collectors.joining(", "))).append("\n");
-        sb.append("- 案件詳細: ").append(project.getDescription() != null ? project.getDescription() : "").append("\n\n");
-
-        sb.append("【要員情報】\n");
-        sb.append("- イニシャル: ").append(engineer.getInitialName() != null ? engineer.getInitialName() : "").append("\n");
-        sb.append("- 希望単価: ").append(PriceFormatter.format(engineer.getExpectedUnitPrice())).append("\n");
-        sb.append("- スキル概要: ").append(engSkills.stream().map(s -> s.getSkillName() + "(" + s.getExperienceYears() + "年)").collect(Collectors.joining(", "))).append("\n\n");
-
-        sb.append("【ルールベーススコア計算結果】\n");
-        sb.append("- トータルスコア: ").append(score.getTotalScore()).append("\n");
-        sb.append("- 必須スキル充足率: ").append(score.getMustCoverage()).append("\n");
-        sb.append("- 単価適合スコア: ").append(score.getPriceScore()).append("/20\n\n");
-
-        sb.append("出力は以下のJSONフォーマットのみを返してください。不要なテキストやマークダウンブロックは含めないでください。\n");
-        sb.append("{\n");
-        sb.append("  \"reason\": \"マッチしている具体的な理由(1〜2文)\",\n");
-        sb.append("  \"sellingPoints\": \"要員のアピールポイント(1〜2文)\",\n");
-        sb.append("  \"score\": ").append(score.getTotalScore()).append("\n");
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private String buildPromptForEngineerMatch(Project project, Engineer engineer, MatchScore score, 
-                                               Set<Long> mustIds, Set<Long> niceIds, Map<Long, String> tagNameMap, 
-                                               Set<Long> eSkills) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("あなたはSES営業アシスタントです。以下の案件に推薦する要員のマッチ理由とアピールポイントを作成してください。\n\n");
-        sb.append("【案件情報】\n");
-        sb.append("- 案件名: ").append(project.getProjectName()).append("\n");
-        sb.append("- 単価幅: ").append(PriceFormatter.format(project.getUnitPriceMin())).append("〜").append(PriceFormatter.format(project.getUnitPriceMax())).append("\n");
-        sb.append("- 必須スキル: ").append(mustIds.stream().map(id -> tagNameMap.getOrDefault(id, "")).collect(Collectors.joining(", "))).append("\n\n");
-
-        sb.append("【要員情報】\n");
-        sb.append("- イニシャル: ").append(engineer.getInitialName() != null ? engineer.getInitialName() : "").append("\n");
-        sb.append("- 希望単価: ").append(PriceFormatter.format(engineer.getExpectedUnitPrice())).append("\n");
-        sb.append("- 保持スキル: ").append(eSkills.stream().map(id -> tagNameMap.getOrDefault(id, "")).collect(Collectors.joining(", "))).append("\n\n");
-
-        sb.append("【ルールベーススコア計算結果】\n");
-        sb.append("- トータルスコア: ").append(score.getTotalScore()).append("\n\n");
-
-        sb.append("出力は以下のJSONフォーマットのみを返してください。不要なテキストやマークダウンブロックは含めないでください。\n");
-        sb.append("{\n");
-        sb.append("  \"reason\": \"マッチしている具体的な理由(1〜2文)\",\n");
-        sb.append("  \"sellingPoints\": \"要員のアピールポイント(1〜2文)\",\n");
-        sb.append("  \"score\": ").append(score.getTotalScore()).append("\n");
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private String buildPromptForBpMatch(Project project, BpAvailability bp, MatchScore score, 
-                                         Set<Long> mustIds, Set<Long> niceIds, Map<Long, String> tagNameMap, 
-                                         Set<Long> bpSkills) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("あなたはSES営業アシスタントです。以下の案件に推薦する外部要員(BP)のマッチ理由とアピールポイントを作成してください。\n\n");
-        sb.append("【案件情報】\n");
-        sb.append("- 案件名: ").append(project.getProjectName()).append("\n");
-        sb.append("- 単価幅: ").append(PriceFormatter.format(project.getUnitPriceMin())).append("〜").append(PriceFormatter.format(project.getUnitPriceMax())).append("\n");
-        sb.append("- 必須スキル: ").append(mustIds.stream().map(id -> tagNameMap.getOrDefault(id, "")).collect(Collectors.joining(", "))).append("\n\n");
-
-        sb.append("【要員情報】\n");
-        sb.append("- イニシャル: ").append(bp.getInitialName() != null ? bp.getInitialName() : "").append("\n");
-        sb.append("- 単価: ").append(PriceFormatter.format(bp.getUnitPrice())).append("\n");
-        sb.append("- 保持スキル: ").append(bpSkills.stream().map(id -> tagNameMap.getOrDefault(id, "")).collect(Collectors.joining(", "))).append("\n\n");
-
-        sb.append("【ルールベーススコア計算結果】\n");
-        sb.append("- トータルスコア: ").append(score.getTotalScore()).append("\n\n");
-
-        sb.append("出力は以下のJSONフォーマットのみを返してください。不要なテキストやマークダウンブロックは含めないでください。\n");
-        sb.append("{\n");
-        sb.append("  \"reason\": \"マッチしている具体的な理由(1〜2文)\",\n");
-        sb.append("  \"sellingPoints\": \"要員のアピールポイント(1〜2文)\",\n");
-        sb.append("  \"score\": ").append(score.getTotalScore()).append("\n");
-        sb.append("}");
-        return sb.toString();
+    private void fillMatchExplanation(MatchResultDto dto, Map<String, Object> fields, int defaultScore) {
+        try {
+            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
+                    .useCase(AiGatewayRequest.USE_MATCHING)
+                    .trustedInstruction("""
+                            あなたはSES営業アシスタントです。ALLOWLIST_CONTEXT のみを根拠に
+                            マッチ理由とアピールポイントをJSONで返してください。HTMLは禁止です。
+                            {"reason":"...","sellingPoints":"...","score":0}
+                            """)
+                    .allowlistedFields(fields)
+                    .persistRun(false)
+                    .requireJson(true)
+                    .build());
+            parseAiResponseIntoDto(result.getText(), dto, defaultScore);
+        } catch (Exception e) {
+            log.warn("AI text generation failed for match explanation", e);
+            dto.setReason("AI解析に失敗しました");
+            dto.setSellingPoints("アピールポイントの生成に失敗しました");
+        }
     }
 
     private void parseAiResponseIntoDto(String aiResponse, MatchResultDto dto, int defaultScore) {

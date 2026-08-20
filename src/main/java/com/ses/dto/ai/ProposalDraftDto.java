@@ -16,4 +16,7 @@ public class ProposalDraftDto {
     private String sellingPoints;
     /** AIマッチスコア (0-100) */
     private BigDecimal matchScore;
+    private String traceId;
+    private Long itemId;
+    private Long runId;
 }

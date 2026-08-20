@@ -291,12 +291,18 @@
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('ai')}">
-                    <a th:href="@{/ai/matching}" class="nav-link px-3 py-2 rounded-md d-flex justify-content-between align-items-center" th:classappend="${#strings.startsWith(currentUri, '/ai') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/ai/matching}" class="nav-link px-3 py-2 rounded-md d-flex justify-content-between align-items-center" th:classappend="${#strings.startsWith(currentUri, '/ai/matching') or currentUri == '/ai' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <div>
                             <i class="bi bi-robot me-2 text-accent-purple"></i>
                             <span th:text="#{menu.ai}">AI機能</span>
                         </div>
                         <span class="badge bg-purple rounded-pill shadow-sm">AI</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('ai-evaluation')}">
+                    <a th:href="@{/ai/evaluation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/ai/evaluation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-graph-up-arrow me-2 text-accent-purple"></i>
+                        <span th:text="#{menu.ai.evaluation}">AI評価</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('email')}">

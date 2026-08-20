@@ -38,7 +38,7 @@ class ApprovalUiContractTest {
 
         String invoice = read("static/js/modules/invoice.js");
         assertThat(invoice).contains("/api/invoices/${id}/status", "/api/invoices/${id}/void",
-                "/api/invoices/bp-payments/${id}", "送付を申請", "取消を申請", "支払確定を申請",
+                "/api/invoices/bp-payments/${id}", "請求書送付", "取消を申請", "支払確定を申請",
                 "approval.requestSubmitted");
 
         String closing = read("static/js/modules/monthly-closing.js");

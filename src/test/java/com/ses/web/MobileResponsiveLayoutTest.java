@@ -69,6 +69,7 @@ class MobileResponsiveLayoutTest {
             "/crm/opportunities/kpi",
             "/email/template/list",
             "/ai/matching",
+            "/ai/evaluation",
             // order-acceptance-workflow(S09) の新規ページ（R09-P2-07）
             "/sales-order",
             "/acceptance"
@@ -101,6 +102,7 @@ class MobileResponsiveLayoutTest {
             "/crm/opportunities/kpi",
             "/email/template/list",
             "/ai/matching",
+            "/ai/evaluation",
             "/sales-order",
             "/acceptance"
     })

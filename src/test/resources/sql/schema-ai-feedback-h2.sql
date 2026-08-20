@@ -151,3 +151,19 @@ WHERE NOT EXISTS (
     SELECT 1 FROM m_ai_artifact_version
     WHERE use_case = 'CHAT' AND status = 'ACTIVE' AND deleted_flag = 0
 );
+
+-- T112: 提案へ AI trace を保存。H2 は schema-locations 再実行のため IF NOT EXISTS。
+ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
+ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_item_id BIGINT;
+
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+SELECT 'ai-evaluation', 'AI評価', '/ai/evaluation', '/api/ai/evaluations', 73
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM m_menu WHERE menu_key = 'ai-evaluation');
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM (SELECT '管理者' AS role UNION ALL SELECT 'マネージャー' UNION ALL SELECT '営業') r
+CROSS JOIN m_menu m
+WHERE m.menu_key = 'ai-evaluation'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu tr WHERE tr.role = r.role AND tr.menu_id = m.id);

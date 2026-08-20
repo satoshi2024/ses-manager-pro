@@ -3,8 +3,10 @@ package com.ses.controller.api;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.service.ai.AiMatchingService;
+import com.ses.service.ai.AiRecommendationRecorder;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,27 +22,33 @@ public class AiApiController {
 
     private final AiMatchingService aiMatchingService;
     private final DataScopeService dataScopeService;
+    private final ObjectProvider<AiRecommendationRecorder> recommendationRecorder;
 
-    /**
-     * エンジニアと案件のマッチングを行う
-     */
     @PostMapping("/match/engineer-to-projects")
     public ApiResult<List<MatchResultDto>> matchEngineerToProjects(@RequestBody java.util.Map<String, Long> payload) {
         Long engineerId = payload.get("engineerId");
         if (engineerId != null) {
             dataScopeService.assertAllowedEngineer(engineerId);
         }
-        return ApiResult.success(aiMatchingService.findMatchingProjects(engineerId));
+        List<MatchResultDto> results = aiMatchingService.findMatchingProjects(engineerId);
+        record(results);
+        return ApiResult.success(results);
     }
 
-    /**
-     * 案件にマッチする要員を検索する（逆方向推薦）
-     */
     @GetMapping("/matching/project/{projectId}")
     public ApiResult<List<MatchResultDto>> findMatchingEngineers(@PathVariable Long projectId) {
         if (projectId != null) {
             dataScopeService.assertAllowedProject(projectId);
         }
-        return ApiResult.success(aiMatchingService.findMatchingEngineers(projectId));
+        List<MatchResultDto> results = aiMatchingService.findMatchingEngineers(projectId);
+        record(results);
+        return ApiResult.success(results);
+    }
+
+    private void record(List<MatchResultDto> results) {
+        AiRecommendationRecorder recorder = recommendationRecorder.getIfAvailable();
+        if (recorder != null) {
+            recorder.recordMatch("MATCHING", null, results);
+        }
     }
 }

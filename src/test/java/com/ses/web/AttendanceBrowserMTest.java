@@ -3,6 +3,7 @@ package com.ses.web;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -26,7 +27,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>R2-P2-01（390px実ブラウザ）の再評価も兼ねる。ログイン→勤怠管理画面→同期カード/差異カードの
  * 表示を同一ブラウザセッションで検証する。</p>
+ *
+ * <p>Chrome依存のため既定のfast suiteへ無条件追加しない。専用profile（-Pbrowser-tests）とCI gateで実行する。
  */
+@Tag("browser")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 class AttendanceBrowserMTest {

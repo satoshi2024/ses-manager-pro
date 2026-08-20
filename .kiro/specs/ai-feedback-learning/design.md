@@ -122,6 +122,9 @@ T110実装注記（G0、決定表は読み替えない）: 独立DBのため `te
 （`status=ACTIVE AND deleted_flag=0` のとき `use_case` を生成列にする）で実現する。
 tenant境界はプロセス/DB分離。将来の全表tenant化時に生成列へ tenant を足す。
 
+T112実装注記: 提案へ `ai_trace_id` / `ai_item_id` を載せる follow-up は **V108_1**。
+V108 は変更しない。欠番埋めはしない。
+
 ### 5.4 PII境界（本specの中核リスク）
 
 | 論点 | 決定 |

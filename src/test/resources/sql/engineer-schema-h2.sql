@@ -611,6 +611,7 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VA
   ('proposal',  '提案管理',       '/proposal',  '/api/proposals', 5),
   ('contract',  '契約管理',       '/contract',  '/api/contracts', 6),
   ('ai',        'AI機能',         '/ai',        '/api/ai', 7),
+  ('ai-evaluation', 'AI評価',     '/ai/evaluation', '/api/ai/evaluations', 73),
   ('email',     'メールテンプレート', '/email/template', '/api/email-templates', 8),
   ('user',      'ユーザー管理',   '/user',       '/api/users', 9),
   ('compliance-gate', '派遣コンプライアンスG2', '/compliance-gate', '/api/compliance-gate', 73);
@@ -628,7 +629,12 @@ INSERT INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
 FROM m_menu m
 CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
-WHERE m.menu_key <> 'user';
+WHERE m.menu_key <> 'user' AND m.menu_key <> 'ai-evaluation';
+INSERT INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM m_menu m
+CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'マネージャー') r
+WHERE m.menu_key = 'ai-evaluation';
 
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
@@ -2792,4 +2798,7 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
 );
+
+ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
+ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_item_id BIGINT;
 

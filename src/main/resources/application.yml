@@ -246,9 +246,14 @@ app:
 ai:
   enabled: true
   provider: mock
+  external-send-enabled: false
   retention:
     redacted-days: 730
     raw-prompt-days: 0
+  evaluation:
+    min-segment-count: 5
+    max-regression-pp: 5
+    max-latency-p95-multiplier: 2.0
   # 以下は将来のAPI接続時に有効化
   # api-key: ${AI_API_KEY:}
   # api-url: https://your-resource.openai.azure.com/

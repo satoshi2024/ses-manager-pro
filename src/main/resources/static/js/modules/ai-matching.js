@@ -282,8 +282,20 @@ function renderMatchResultsHTML(loadingId, results) {
                         <div class="fs-6 fw-bold ${scoreColor}">${match.score}%</div>
                     </div>
                     <p class="small text-muted mb-2"><span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-50 me-1">${SES.i18n.t('ai.badge.evaluation')}</span>${SES.escapeHtml(match.reason)}</p>
-                    <div class="text-end">
-                        <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm" onclick="proposeToProject(${match.projectId}, ${match.score})">
+                    <div class="text-end d-flex justify-content-end gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-outline-success" type="button"
+                            data-item-id="${match.itemId || ''}" data-decision="ACCEPT"
+                            onclick="submitAiFeedback(this)">${SES.escapeHtml(SES.i18n.t('ai.btn.feedback.accept'))}</button>
+                        <button class="btn btn-sm btn-outline-danger" type="button"
+                            data-item-id="${match.itemId || ''}" data-decision="REJECT"
+                            onclick="submitAiFeedback(this)">${SES.escapeHtml(SES.i18n.t('ai.btn.feedback.reject'))}</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-item-id="${match.itemId || ''}" data-decision="HOLD"
+                            onclick="submitAiFeedback(this)">${SES.escapeHtml(SES.i18n.t('ai.btn.feedback.hold'))}</button>
+                        <button class="btn btn-sm btn-primary bg-gradient-blue border-0 rounded-pill px-3 shadow-sm"
+                            data-project-id="${match.projectId}" data-score="${match.score}"
+                            data-item-id="${match.itemId || ''}" data-trace-id="${match.traceId || ''}"
+                            onclick="proposeToProjectFromBtn(this)">
                             <i class="bi bi-send-fill me-1"></i>${SES.i18n.t('ai.btn.propose')}
                         </button>
                     </div>
@@ -294,7 +306,40 @@ function renderMatchResultsHTML(loadingId, results) {
     replaceAiLoadingWithMessage(loadingId, html);
 }
 
-function proposeToProject(projectId, score) {
+function proposeToProjectFromBtn(btn) {
+    const el = $(btn);
+    proposeToProject(el.data('project-id'), el.data('score'), el.data('item-id'), el.data('trace-id'));
+}
+
+function submitAiFeedback(btn) {
+    const itemId = $(btn).data('item-id');
+    const decision = $(btn).data('decision');
+    if (!itemId) {
+        return;
+    }
+    $.ajax({
+        url: '/api/ai/feedback',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            itemId: itemId,
+            decision: decision,
+            reasonCode: decision === 'REJECT' ? 'OTHER_REDACTED' : null
+        }),
+        success: function(res) {
+            if (res.code === 200) {
+                Toast.success(SES.i18n.t('ai.msg.feedbackSuccess'));
+            } else {
+                Toast.error(res.message || SES.i18n.t('common.msg.networkError'));
+            }
+        },
+        error: function() {
+            Toast.error(SES.i18n.t('common.msg.networkError'));
+        }
+    });
+}
+
+function proposeToProject(projectId, score, itemId, traceId) {
     // 希望単価は表示文字列からではなく、要員詳細が保持している生値(円)から取る。
     // 表示は "¥600,000 / 月" のように整形されるため、文字列を parseInt しても必ず NaN になり、
     // 提案単価が黙って未設定のまま登録されていた。
@@ -306,7 +351,9 @@ function proposeToProject(projectId, score) {
         proposedUnitPrice: proposedPrice,
         status: '書類選考中',
         aiMatchScore: score,
-        matchReason: 'AIマッチング経由'
+        matchReason: 'AIマッチング経由',
+        aiItemId: itemId || null,
+        aiTraceId: traceId || null
     };
 
     $.ajax({

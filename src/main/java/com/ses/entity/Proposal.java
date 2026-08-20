@@ -74,4 +74,10 @@ public class Proposal extends BaseEntity {
 
     /** クローズ日時 */
     private LocalDateTime closedAt;
+
+    /** AI推薦のtrace */
+    private String aiTraceId;
+
+    /** AI推薦item */
+    private Long aiItemId;
 }

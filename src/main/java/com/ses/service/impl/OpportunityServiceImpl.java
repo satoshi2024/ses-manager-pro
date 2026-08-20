@@ -72,6 +72,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     private Clock clock = Clock.systemDefaultZone();
     @Autowired(required = false)
     private CrmScopeService crmScopeService;
+    @Autowired(required = false)
+    private org.springframework.beans.factory.ObjectProvider<com.ses.service.ai.AiOutcomeService> aiOutcomeService;
 
     /**
      * 汎用CRUD経路から状態機械を迂回させない。stage変更はchangeStageだけが許可し、
@@ -137,7 +139,18 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (STAGE_WON.equals(newStage)) {
             convertLocked(current);
         }
+        recordAiOutcome(current);
         return current;
+    }
+
+    private void recordAiOutcome(Opportunity current) {
+        if (aiOutcomeService == null) {
+            return;
+        }
+        com.ses.service.ai.AiOutcomeService svc = aiOutcomeService.getIfAvailable();
+        if (svc != null) {
+            svc.onOpportunityStageChanged(current);
+        }
     }
 
     @Override

@@ -20,4 +20,10 @@ public class AiPageController {
         model.addAttribute("currentUri", "/ai/matching");
         return "ai/matching";
     }
+
+    @GetMapping("/evaluation")
+    public String evaluation(Model model) {
+        model.addAttribute("currentUri", "/ai/evaluation");
+        return "ai/evaluation";
+    }
 }
