@@ -93,6 +93,35 @@ class AiG10AllowlistDocumentTest {
     }
 
     @Test
+    void designDeniedTermsBlockPrefixedAllowlistIds() {
+        Set<String> allowlistIds = new HashSet<>();
+        allowlistIds.addAll(ids(root.get("matchingFeatures")));
+        allowlistIds.addAll(ids(root.get("sendOnlyFields")));
+
+        Set<String> requiredTokens = Set.of("age", "gender", "nationality", "birthDate");
+        Set<String> allTokens = new HashSet<>(requiredTokens);
+        for (JsonNode binding : root.get("designDeniedTermBindings")) {
+            String term = binding.get("term").asText();
+            assertTrue(design.contains(term), "design.md §5.2 に禁止語がない: " + term);
+            binding.get("tokens").forEach(t -> allTokens.add(t.asText()));
+        }
+        assertTrue(allTokens.containsAll(requiredTokens),
+                "対応表に age/gender/nationality/birthDate が無い");
+
+        for (String id : allowlistIds) {
+            for (String token : allTokens) {
+                assertFalse(idContainsDeniedToken(id, token),
+                        id + " が禁止token " + token + " と交差する");
+            }
+        }
+        assertTrue(idContainsDeniedToken("engineer.age", "age"));
+        assertTrue(idContainsDeniedToken("engineer.birthDate", "birthDate"));
+        assertTrue(idContainsDeniedToken("age", "age"));
+        assertFalse(idContainsDeniedToken("engineer.experienceYears", "age"));
+        assertFalse(idContainsDeniedToken("engineer.initialName", "fullName"));
+    }
+
+    @Test
     void eachProviderDefinesRetentionAndGeminiIsUnsigned() {
         boolean sawMock = false;
         boolean sawRule = false;
@@ -155,6 +184,18 @@ class AiG10AllowlistDocumentTest {
             }
         }
         assertTrue(found, "japaneseLevel は send-only でなければならない");
+        JsonNode workLocation = matchingField("project.workLocation");
+        assertTrue(workLocation.get("send").asBoolean());
+        assertTrue(workLocation.get("segment").asBoolean());
+        assertEquals("prefecture-municipality", workLocation.get("grain").asText());
+        assertTrue(markdown.contains("prefecture-municipality")
+                || markdown.contains("都道府県および市区町村"));
+        JsonNode earlyExit = root.path("outcomes").path("earlyExit");
+        assertTrue(earlyExit.get("requireOccurredAtBeforeOriginalEndDate").asBoolean());
+        assertTrue(earlyExit.get("sameDayCancellationIsNotEarlyExit").asBoolean());
+        assertTrue(markdown.contains("original_end_date"));
+        assertTrue(markdown.contains("当日解約"));
+        assertTrue(root.path("outcomes").get("winExistsNotCount").asBoolean());
         for (JsonNode field : root.get("matchingFeatures")) {
             if (field.path("segment").asBoolean(false)) {
                 String id = field.get("id").asText();
@@ -164,6 +205,28 @@ class AiG10AllowlistDocumentTest {
                         "segment軸が skill/単価/勤務地以外: " + id);
             }
         }
+    }
+
+    private static JsonNode matchingField(String id) {
+        for (JsonNode field : root.get("matchingFeatures")) {
+            if (id.equals(field.get("id").asText())) {
+                return field;
+            }
+        }
+        throw new AssertionError("matchingFeatures に無い: " + id);
+    }
+
+    static boolean idContainsDeniedToken(String id, String token) {
+        if (id == null || token == null || token.isBlank()) {
+            return false;
+        }
+        String needle = token.toLowerCase();
+        for (String part : id.split("[._]")) {
+            if (part.equalsIgnoreCase(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Set<String> ids(JsonNode array) {

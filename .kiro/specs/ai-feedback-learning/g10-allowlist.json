@@ -162,7 +162,8 @@
       "id": "project.workLocation",
       "send": true,
       "segment": true,
-      "rationale": "作業場所。R3.3の勤務地segment。"
+      "grain": "prefecture-municipality",
+      "rationale": "勤務地segment。都道府県/市区町村まで。番地・建物は落とす。正規化不能なら送らない。"
     },
     {
       "id": "project.remoteType",
@@ -337,6 +338,45 @@
       "productionSend": false,
       "runtimeAllowedWithoutGate": false
     }
+  ],
+  "outcomes": {
+    "winExistsNotCount": true,
+    "winSources": ["t_proposal.status=成約", "t_opportunity.stage=受注"],
+    "earlyExit": {
+      "status": "解約",
+      "requireOccurredAtBeforeOriginalEndDate": true,
+      "sameDayCancellationIsNotEarlyExit": true
+    }
+  },
+  "designDeniedTermBindings": [
+    { "term": "本籍", "tokens": ["honseki"] },
+    { "term": "出生地", "tokens": ["birthplace"] },
+    { "term": "国籍", "tokens": ["nationality"] },
+    { "term": "人種", "tokens": ["race"] },
+    { "term": "民族", "tokens": ["ethnicity"] },
+    { "term": "家族の職業", "tokens": ["familyOccupation"] },
+    { "term": "住宅状況", "tokens": ["housingStatus"] },
+    { "term": "生活環境", "tokens": ["livingEnvironment"] },
+    { "term": "宗教", "tokens": ["religion"] },
+    { "term": "支持政党", "tokens": ["politicalParty"] },
+    { "term": "人生観", "tokens": ["lifeView"] },
+    { "term": "生活信条", "tokens": ["lifeCreed"] },
+    { "term": "尊敬する人物", "tokens": ["respectedPerson"] },
+    { "term": "社会運動歴", "tokens": ["socialMovementHistory"] },
+    { "term": "購読新聞", "tokens": ["subscribedNewspaper"] },
+    { "term": "愛読書", "tokens": ["favoriteBook"] },
+    { "term": "性別", "tokens": ["gender"] },
+    { "term": "年齢", "tokens": ["age"] },
+    { "term": "生年月日", "tokens": ["birthDate"] },
+    { "term": "障害", "tokens": ["disability"] },
+    { "term": "健康状態", "tokens": ["healthStatus"] },
+    { "term": "病歴", "tokens": ["medicalHistory"] },
+    { "term": "婚姻状況", "tokens": ["maritalStatus"] },
+    { "term": "妊娠", "tokens": ["pregnancy"] },
+    { "term": "出産", "tokens": ["childbirth"] },
+    { "term": "育児", "tokens": ["childcareAgreement"] },
+    { "term": "顔写真", "tokens": ["photoUrl"] },
+    { "term": "氏名から推定", "tokens": ["nameInferredAttribute"] }
   ],
   "metrics": {
     "observationWindowDefaultDays": 90,

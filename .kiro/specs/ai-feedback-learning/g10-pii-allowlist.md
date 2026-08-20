@@ -47,10 +47,10 @@ CRM / 提案 / staffing は merge済みで、成果eventの母集団は次で足
 |---|---|---|
 | `PROPOSAL_CREATED` | `t_proposal.id` | 推薦itemから提案が作成された |
 | `INTERVIEW` | `t_proposal.status` ∈ {一次面接, 二次面接, 結果待ち} | 面談が発生 |
-| `WIN` | `t_proposal.status=成約` または `t_opportunity.stage=受注` | 成約。功績断定はしない |
+| `WIN` | `t_proposal.status=成約` または `t_opportunity.stage=受注` | 成約。功績断定はしない。同一traceに両源があっても **EXISTS（1回）** であり件数加算しない |
 | `LOSS` | `t_proposal.status=見送り` または `t_opportunity.stage=失注` | 失注。`lost_reason` はredactしてcategoryのみ |
 | `CONTRACT_CONTINUED` | `t_contract.renewal_decision=CONTINUE` | 契約継続 |
-| `EARLY_EXIT` | `t_contract.status=解約` | 早期離場。予定終了日前の終了を含む |
+| `EARLY_EXIT` | `t_contract.status=解約` **かつ** `occurred_at < original_end_date` | 予定終了日より前の打ち切りだけ。`original_end_date` は解約CAS前に snapshot した当初 `end_date`。満了解約および `occurred_at = original_end_date`（当日解約）は EARLY_EXIT にしない。outcome未発生は失敗ではない |
 | `POSITION_LINKED` | `t_proposal.position_id` / `t_contract.position_id` | staffing枠への紐付け |
 
 冪等キーは `UNIQUE(item_id, outcome_type, source_type, source_id)`（design §5.3）。
@@ -83,7 +83,7 @@ segment軸は `segment=yes` の行だけ（R3.3: skill / 単価 / 勤務地）�
 | `career.periodMonths` | yes | no | 従事月数。暦日は送らず年齢推定を防ぐ |
 | `project.unitPriceMin` | yes | yes | 案件単価下限(円) |
 | `project.unitPriceMax` | yes | yes | 案件単価上限(円) |
-| `project.workLocation` | yes | yes | 作業場所 |
+| `project.workLocation` | yes | yes | 勤務地segment。粒度は都道府県/市区町村まで（§6） |
 | `project.remoteType` | yes | yes | リモート区分 |
 | `project.startDate` | yes | no | 開始予定日 |
 | `project.endDate` | yes | no | 終了予定日 |
@@ -160,9 +160,10 @@ segment軸は `segment=yes` の行だけ（R3.3: skill / 単価 / 勤務地）�
 3. 連絡先・住所・口座: 削除。部分マスクもしない（復元可能なため）。
 4. 自由記述: 削除。取込原文は別チャネルの untrusted data として渡し、system/developer命令と連結しない。
 5. 固有名詞が混入しうる `career.role`: 英数・役職語以外を `***` にする（T111実装）。
-6. HTMLは送らない・renderしない。応答はJSON schema検証。
-7. ログ・DB summary・画面sample inspectionは同じmaskを通す。
-8. PII canary: `SES-PII-CANARY-T109-7f2e9c1a` を氏名/電話/自由記述に埋め、provider request・ログ・`redacted_summary_json` に出ないこと（T111/T115）。
+6. `project.workLocation`（grain=`prefecture-municipality`）: **都道府県および市区町村トークンまで**残す。番地・丁目・番・号・建物名・部屋番号は落とす。正規化できない値（トークン分割不能、数字始まりの番地だけ、など）は **送らず segment にも使わない**。`engineer.prefecture` は都道府県列なので追加正規化しない。
+7. HTMLは送らない・renderしない。応答はJSON schema検証。
+8. ログ・DB summary・画面sample inspectionは同じmaskを通す。
+9. PII canary: `SES-PII-CANARY-T109-7f2e9c1a` を氏名/電話/自由記述に埋め、provider request・ログ・`redacted_summary_json` に出ないこと（T111/T115）。番地 canary（例: `丸の内1-1-1`）は `workLocation` 正規化後の payload に出ないこと。
 
 ## 7. Provider別 DPA / region / 保存期間 / opt-out
 
