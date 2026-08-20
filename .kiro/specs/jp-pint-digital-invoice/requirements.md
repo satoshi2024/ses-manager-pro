@@ -22,7 +22,7 @@
 ## R3. 送受信/status
 
 1. THE 送信 SHALL provider adapter/jobで冪等実行し、message ID、provider ID、送信version/statusを保存する。
-2. THE status SHALL queued/sent/delivered/rejected/failed/cancelledをmappingし、webhook署名を検証する。
+2. THE status SHALL queued/sent/delivered/rejected/failed/**cancelled/revoked**をmappingし、webhook署名を検証する。
 3. THE 受信invoice SHALL archiveへ原本XML/PDFを保存し、BP/注文/契約候補へ照合後、人が仕入登録を確定する。
 4. THE duplicate SHALL message ID、supplier invoice number、hashで検知する。
 

@@ -23,12 +23,15 @@
   - **テスト要件**: L0。spec versionと確認日が記録されていること、
     未契約の場合にB1/B2/MのPASSを止めるblockerが明記されていること、`git diff --check` exit 0。
 
-- [x] F1. participant/digital invoice/event DDL
+- [ ] F1. participant/digital invoice/event DDL
   - **Objective**: 法人/顧客のPeppol participant IDを検証状態付きで管理でき、
     未検証の宛先へは送信できない。送受信のstatusとeventが記録され、
     同じproviderイベントが二重に処理されない。
   - **実装ガイダンス**: **V107**/V1/H2(`sql/schema-jp-pint-h2.sql`)/MySQL smoke、state/idempotency。
-    `provider_event_id`にUNIQUE（送信側のUNIQUE制約は廃止）。
+    **UNIQUE 方針（design §5.5 / §7）**:
+    - 残す: `uk_digital_invoice_message (message_id)`、`uk_digital_invoice_event_provider (provider_event_id)`
+    - **作らない / DROP する**: `uk_digital_invoice_send (invoice_id, direction, specification_version)` — V107 CREATE 後 **V107_2 で DROP**。H2 replay / `engineer-schema-h2.sql` にも含めない。
+    - 有効送信 1 件はアプリ層（`profile='Standard'` かつ status ∉ {CANCELLED, REVOKED}）で制御する。
     **`verified_at IS NULL`の宛先へ送信しない**（design §5.1）。
     `t_digital_invoice.invoice_id IS NULL`は**受信invoice**を表す業務値。`direction`と併せて判定する。
   - **テスト要件**: L1〜L3。participant unique、status遷移、
@@ -37,7 +40,7 @@
   - **Demo**: 未検証participantへの送信が拒否されることを確認。
     古いeventを後から流して`delivered`が巻き戻らないことを確認。
 
-- [x] F2. CanonicalInvoice/renderer/validator
+- [ ] F2. CanonicalInvoice/renderer/validator
   - **Objective**: 既存請求からJP PINT XMLが生成され、schema/business ruleのvalidatorに通る。
     金額が既存invoiceと1円も食い違わず、合計が合わないXMLは送信前に拒否される。
     不正なXMLでXXEが発火しない。
@@ -49,7 +52,7 @@
     **検算NG時の送信拒否**、**XXE fixtureで外部entityが解決されないこと**、spec version切替。
   - **Demo**: 既存invoiceをvalidatorへ通す。合計が合わないinvoiceで送信が拒否されることを確認。
 
-- [x] B1. provider送信/status/webhook
+- [ ] B1. provider送信/status/webhook
   - **Objective**: 請求がprovider経由で送信され、同じinvoiceを再送してもmessageが1件しかできない。
     webhookの署名が検証され、偽造・順序逆転・重複が安全に処理される。
   - **実装ガイダンス**: accounting jobの基盤を再利用、participant verify、署名、fallback。
@@ -60,7 +63,7 @@
     **偽造署名の拒否**、out-of-order event、重複webhook、PDF fallback。
   - **Demo**: sandbox送信→delivered。偽造署名のwebhookを送って状態が変わらないことを確認。
 
-- [x] A1. 設定/送信/状態UI
+- [ ] A1. 設定/送信/状態UI
   - **Objective**: 顧客ごとにPDF/email/Peppolの送付方法を設定でき、
     送信前にvalidation結果が見え、送信後の状態とXML/receiptへ辿れる。
     participant未検証の顧客は送信対象に選べない。
@@ -71,7 +74,7 @@
     field mask（営業からXML本文が見えないこと）、mobile 390px。
   - **Demo**: PDF顧客とPeppol顧客を別送信。participant未検証の顧客がPeppol送信対象に出ないことを確認。
 
-- [x] B2. 受信review
+- [ ] B2. 受信review
   - **Objective**: 受信したinvoiceの原本XML/PDFがarchiveへ保存され、
     BP/注文/契約の候補へ照合されたうえでreview queueに入る。
     人が確定するまで仕入登録や支払確定が行われない。重複受信が検知される。
@@ -83,7 +86,7 @@
     照合ロジック、**review確定前に仕入/支払が作られないこと**。
   - **Demo**: 受信invoiceをBP支払候補へ。review未確定の状態で支払が作られないことを確認。
 
-- [x] M. provider受入/回帰
+- [ ] M. provider受入/回帰
   - **Objective**: providerの公式conformance testに通り、送受信のend-to-endと障害復旧が確認できる。
     既存のinvoice/PDF送付機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、provider official conformance、
