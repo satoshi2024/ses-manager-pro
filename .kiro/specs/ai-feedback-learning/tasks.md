@@ -24,7 +24,7 @@
     **allowlistが`design.md`§5.2の禁止属性と1件も交差しないこと**、
     保存期間がprovider別に定義されていること、`git diff --check` exit 0。
 
-- [ ] F1. version/run/item/feedback/outcome/evaluation DDL
+- [x] F1. version/run/item/feedback/outcome/evaluation DDL
   - **Objective**: AIのmodel/prompt/rule versionが登録でき、推薦の実行・候補・採否・成果が
     同一traceで追跡できる。use case×tenantでactive versionが常に1つに保たれる。
   - **実装ガイダンス**: **V108**/V1/H2(`sql/schema-ai-feedback-h2.sql`)/MySQL smoke、legacy移行方針。

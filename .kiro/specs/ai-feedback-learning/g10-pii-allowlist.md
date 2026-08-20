@@ -224,13 +224,11 @@ low-volume: `ai.evaluation.min-segment-count` 既定 **5**。未満のsegmentは
 | 開発baseline | **記録済** | mock/rule既定、allowlist、mask、保存期間、metric。security/HR/POがレビュー可能な正本が本ファイル |
 | 本番 `GATE-S17-G10-PROD` | **未達** | 実provider DPA、region確定、学習opt-out、security/HR/product ownerの署名。未達のまま実データ外部送信とM本番PASSをしない |
 
-## 12. Flyway確認（T109時点、DDLは作らない）
+## 12. Flyway確認（T110時点）
 
 | location | 実在 | 本spec |
 |---|---|---|
-| `db/migration` | latest整数 **V107**（`V107_3`）。V108ファイルなし | 予約 **V108** を維持 |
+| `db/migration` | latest整数 **V108**（`V108__ai_feedback_learning.sql`）。欠番埋めなし | 本spec正式migration |
 | `db/migration-dev` | `V100__seed_r3_scale_300.sql` | commonへ再利用しない |
 | `db/migration-prod` | `R__update_admin_password_bcrypt.sql` のみ | 番号なし |
 | 永久欠番 | V59, V72, V82, V99（common） | 埋めない |
-
-T110着手時に再確認し、衝突していれば後発を繰り上げる。

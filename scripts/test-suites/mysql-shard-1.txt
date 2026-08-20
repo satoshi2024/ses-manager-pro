@@ -9,3 +9,4 @@ FlywayV73PartialRepairSmokeTest
 FlywayV79_1RepairSmokeTest
 FlywayV84FailedHistoryRepairSmokeTest
 FlywayJpPintDigitalInvoiceSchemaSmokeTest
+FlywayAiFeedbackSchemaSmokeTest

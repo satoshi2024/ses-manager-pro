@@ -117,6 +117,11 @@ SESの要員推薦は雇用そのものではないが、就業機会の配分�
 - **AIは業務状態を自動変更しない**（前提節、roadmap Wave 4の制約）。
   feedback/outcomeの登録以外に、提案・契約・メール送信・人事判断を変更する経路を作らない。
 
+T110実装注記（G0、決定表は読み替えない）: 独立DBのため `tenant_id` 列は作らない。
+`UNIQUE(use_case, tenant) WHERE status=ACTIVE` は `uk_ai_artifact_active_use_case`
+（`status=ACTIVE AND deleted_flag=0` のとき `use_case` を生成列にする）で実現する。
+tenant境界はプロセス/DB分離。将来の全表tenant化時に生成列へ tenant を足す。
+
 ### 5.4 PII境界（本specの中核リスク）
 
 | 論点 | 決定 |

@@ -58,7 +58,7 @@ BP支払・月次締め・売上/粗利/キャッシュフロー・営業成績�
 | 14 | `engineer-self-service-portal-v2` | 要員のプロフィール変更申請・給与・経費・1on1 | XL | **V105** | 仕様済み |
 | 15 | `accounting-payment-integration` | freee売上/仕入/支払の冪等連携 | XL | **V106** | 仕様済み・G4決定済み |
 | 16 | `jp-pint-digital-invoice` | Peppol/JP PINT送受信 | XL | **V107** | 仕様済み・G5決定済み |
-| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V108** | 実装中（T109完了、T110未着手） |
+| 17 | `ai-feedback-learning` | 推薦採否・成果・モデル版の評価ループ | L | **V108** | 実装中（T109/T110完了、T111未着手） |
 
 採番の最新は仕様作成時点のV58だった。その後 `organization-management-accounting` の独立Reviewで
 V61（組織/要員会計属性の履歴テーブル）とV62（要員の所属組織履歴拡張）を実際に使用し、
