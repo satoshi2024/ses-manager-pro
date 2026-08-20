@@ -40,7 +40,7 @@
   - **Demo**: 未検証participantへの送信が拒否されることを確認。
     古いeventを後から流して`delivered`が巻き戻らないことを確認。
 
-- [ ] F2. CanonicalInvoice/renderer/validator
+- [x] F2. CanonicalInvoice/renderer/validator
   - **Objective**: 既存請求からJP PINT XMLが生成され、schema/business ruleのvalidatorに通る。
     金額が既存invoiceと1円も食い違わず、合計が合わないXMLは送信前に拒否される。
     不正なXMLでXXEが発火しない。

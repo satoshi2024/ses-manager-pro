@@ -182,17 +182,17 @@ public class JpPintRenderer {
                     itemName.setTextContent(item.getDescription() != null ? item.getDescription() : "");
                     itemElem.appendChild(itemName);
                     org.w3c.dom.Element classifiedTaxCategory = doc.createElement("cac:ClassifiedTaxCategory");
-                    org.w3c.dom.Element taxId = doc.createElement("cbc:ID");
-                    taxId.setTextContent(item.getTaxCategory() != null ? item.getTaxCategory() : "S");
-                    classifiedTaxCategory.appendChild(taxId);
-                    org.w3c.dom.Element taxPercent = doc.createElement("cbc:Percent");
-                    taxPercent.setTextContent(item.getTaxRate() != null ? item.getTaxRate().toString() : "10");
-                    classifiedTaxCategory.appendChild(taxPercent);
-                    org.w3c.dom.Element taxScheme = doc.createElement("cac:TaxScheme");
-                    org.w3c.dom.Element schemeId = doc.createElement("cbc:ID");
-                    schemeId.setTextContent("VAT");
-                    taxScheme.appendChild(schemeId);
-                    classifiedTaxCategory.appendChild(taxScheme);
+                    org.w3c.dom.Element lineTaxId = doc.createElement("cbc:ID");
+                    lineTaxId.setTextContent(item.getTaxCategory() != null ? item.getTaxCategory() : "S");
+                    classifiedTaxCategory.appendChild(lineTaxId);
+                    org.w3c.dom.Element lineTaxPercent = doc.createElement("cbc:Percent");
+                    lineTaxPercent.setTextContent(item.getTaxRate() != null ? item.getTaxRate().toString() : "10");
+                    classifiedTaxCategory.appendChild(lineTaxPercent);
+                    org.w3c.dom.Element lineTaxScheme = doc.createElement("cac:TaxScheme");
+                    org.w3c.dom.Element lineSchemeId = doc.createElement("cbc:ID");
+                    lineSchemeId.setTextContent("VAT");
+                    lineTaxScheme.appendChild(lineSchemeId);
+                    classifiedTaxCategory.appendChild(lineTaxScheme);
                     itemElem.appendChild(classifiedTaxCategory);
                     invoiceLine.appendChild(itemElem);
 
