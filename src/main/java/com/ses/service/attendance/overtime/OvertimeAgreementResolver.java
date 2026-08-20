@@ -23,11 +23,20 @@ public class OvertimeAgreementResolver {
 
     @Transactional(readOnly = true)
     public OvertimeAgreementSnapshot resolve(Long legalEntityId, YearMonth targetMonth) {
+        return OvertimeAgreementSnapshot.from(findActive(legalEntityId, targetMonth));
+    }
+
+    /**
+     * 対象月時点の有効協定行を返す。協定年度起算（valid_from月）の算出に使う。
+     * 行が無い場合はnull（呼び出し側が判定不能findingにする）。
+     */
+    @Transactional(readOnly = true)
+    public OvertimeAgreement findActive(Long legalEntityId, YearMonth targetMonth) {
         if (legalEntityId == null || targetMonth == null) {
             return null;
         }
         LocalDate asOf = targetMonth.atDay(1);
-        OvertimeAgreement agreement = overtimeAgreementMapper.selectOne(
+        return overtimeAgreementMapper.selectOne(
                 new LambdaQueryWrapper<OvertimeAgreement>()
                         .eq(OvertimeAgreement::getLegalEntityId, legalEntityId)
                         .le(OvertimeAgreement::getValidFrom, asOf)
@@ -36,6 +45,5 @@ public class OvertimeAgreementResolver {
                                 .ge(OvertimeAgreement::getValidTo, asOf))
                         .orderByDesc(OvertimeAgreement::getValidFrom)
                         .last("LIMIT 1"));
-        return OvertimeAgreementSnapshot.from(agreement);
     }
 }

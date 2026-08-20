@@ -23,6 +23,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
@@ -505,6 +506,33 @@ class AttendanceSyncServiceTest {
         assertTrue(csv.contains("要員ID"));
         assertTrue(csv.contains(String.valueOf(engineerId)));
         assertTrue(csv.contains("2026-08-03"));
+    }
+
+    @Test
+    void csv出力はmaxRows超過でBusinessException() {
+        authenticate(93001L, "管理者");
+        insertMonth("承認済", "2026-08");
+        jdbcTemplate.update("INSERT INTO t_employee_attendance (engineer_id, legal_entity_id, organization_id, work_date, "
+                + "clock_in, clock_out, break_minutes, regular_minutes, overtime_minutes, holiday_minutes, late_night_minutes, "
+                + "work_type, source, status) "
+                + "VALUES (?, 72001, ?, '2026-08-03', '09:00', '18:00', 60, 480, 0, 0, 0, '通常', 'manual', '入力中')",
+                engineerId, organizationId);
+        jdbcTemplate.update("INSERT INTO t_employee_attendance (engineer_id, legal_entity_id, organization_id, work_date, "
+                + "clock_in, clock_out, break_minutes, regular_minutes, overtime_minutes, holiday_minutes, late_night_minutes, "
+                + "work_type, source, status) "
+                + "VALUES (?, 72001, ?, '2026-08-04', '09:00', '18:00', 60, 480, 0, 0, 0, '通常', 'manual', '入力中')",
+                engineerId, organizationId);
+
+        Object previous = ReflectionTestUtils.getField(attendanceSyncService, "configuredMaxRows");
+        try {
+            ReflectionTestUtils.setField(attendanceSyncService, "configuredMaxRows", 1);
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> attendanceSyncService.exportCsv("2026-08", new ByteArrayOutputStream()));
+            assertEquals("error.export.maxRows", ex.getMessageKey());
+            assertEquals(400, ex.getCode());
+        } finally {
+            ReflectionTestUtils.setField(attendanceSyncService, "configuredMaxRows", previous);
+        }
     }
 
     @Test
