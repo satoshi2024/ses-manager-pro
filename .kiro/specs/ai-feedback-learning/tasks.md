@@ -10,7 +10,7 @@
 > **Migration**: 本specの予約番号は **V108**。Wave 2と先行outcome source完了後に着手する。
 > 着手時にmerge済み`db/migration`の最新を再確認し、衝突していれば後発を上へ繰り上げる。V59は永久欠番。
 
-- [ ] 0. G10/use case/PII/metric確定
+- [x] 0. G10/use case/PII/metric確定
   - **Objective**: 外部AIへ送ってよいfieldのallowlist・mask規則・保存期間・成功metric・
     matchingに使ってはならない属性が確定する。以降のgateway実装が送信可否を推測せずに済む状態にする。
   - **成果物**: provider DPA、field allowlist、mask規則、保存期間、成功metric、禁止属性。

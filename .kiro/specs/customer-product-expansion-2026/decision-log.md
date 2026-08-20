@@ -15,7 +15,7 @@
 | G7 | no | 承認金額閾値と承認者 | 組織上長→財務/管理者。閾値は設定画面で管理 | approval | 未決 |
 | G8 | no | 顧客/BPポータルで公開する文書種別 | 顧客=見積/注文請/契約/検収/請求、BP=発注/検収/BP請求/支払状況 | portal | 決定済（2026-08-16、S13 T081で推奨既定を採用・記録） |
 | G9 | no | 要員経費の精算先 | 本システムで申請・承認、会計確定はfreee | engineer/accounting | 決定済（2026-08-17、S14にて推奨既定を採用・記録。詳細は engineer-self-service-portal-v2/review-ledger.md の「G9 決定記録」） |
-| G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 未決 |
+| G10 | no | AI実プロバイダとデータ送信許可 | mock/ruleを既定維持。実AIはPIIマスキングとDPA承認後 | AI/security | 決定済（2026-08-20） |
 
 ## G2 R21 canonical payload sync docs-only fix（2026-08-11）
 
@@ -106,6 +106,16 @@
 - 根拠: `requirements.md` R2.1（顧客は見積・注文請・契約・作業報告・検収・請求を閲覧/download）・R3.2/R3.3（BPは発注・検収・請求・支払状況）が推奨既定を明示しており、推奨既定どおり。顧客の「作業報告」はR2.1で明示されているため、G8推奨既定（顧客=見積/注文請/契約/検収/請求）へ**要件が明示する行のみ追加**した。追加はここだけであり、allow-list外を「たぶん見せてよい」で追加しない。
 - 詳細なpermission×画面×field matrixとthreat modelは `external-customer-bp-portal/field-inventory.md` を正とする。
 - 影響するspecへ反映したファイル: `decision-log.md`、`external-customer-bp-portal/field-inventory.md`（新規）、`external-customer-bp-portal/review-ledger.md`（新規）。
+
+## G10 決定記録（S17 T109 にて推奨既定を採用）
+
+- ID: G10
+- 決定: mock/rule providerを既定として維持する。実データ（氏名・連絡先・住所・口座・自由記述PII、およびallowlist外field）を外部AIへ送らない。Gemini等の実providerは、DPA締結・region確定・学習利用禁止（training opt-out）・送信allowlist・保存期間が発注者承認され `GATE-S17-G10-PROD` が閉じるまで production で有効化しない。
+- 決定日: 2026-08-20
+- 決定者: S17主実装（blocking=noのため推奨既定の記録。発注者の明示委任に基づく。G8/G9と同型）
+- 根拠: `decision-log.md` の推奨既定、`gate-0-readiness-report.md` 「mock/ruleと実送信禁止を採用する場合、現時点の追加回答は不要」、現行 `ai.provider: mock`。送信field・mask・保存期間・metricの正本は `ai-feedback-learning/g10-pii-allowlist.md`。禁止属性は `design.md` §5.2 を決め直していない。
+- 本番gate: security / HR / product owner の実署名とDPAが未取得のまま、実データ外部送信および本spec M taskの本番PASSをしない。
+- 影響するspecへ反映したファイル: `decision-log.md`、`ai-feedback-learning/g10-pii-allowlist.md`、`ai-feedback-learning/g10-allowlist.json`、`ai-feedback-learning/design.md`、`ai-feedback-learning/tasks.md`、`ai-feedback-learning/review-ledger.md`。
 
 ## 決定テンプレート
 

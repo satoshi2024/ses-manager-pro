@@ -1,0 +1,349 @@
+{
+  "spec": "ai-feedback-learning",
+  "task": "T109",
+  "sourceOfTruthMarkdown": "g10-pii-allowlist.md",
+  "designDeniedTable": "design.md §5.2",
+  "g10": {
+    "decision": "MOCK_RULE_DEFAULT_NO_EXTERNAL_SEND",
+    "decisionDate": "2026-08-20",
+    "defaultProvider": "mock",
+    "allowedRuntimeProvidersWithoutDpa": ["mock", "rule"],
+    "productionExternalSend": false,
+    "productionReleaseGate": "GATE-S17-G10-PROD",
+    "canary": "SES-PII-CANARY-T109-7f2e9c1a"
+  },
+  "deniedAttributeIds": [
+    "engineer.nationality",
+    "engineer.gender",
+    "engineer.birthDate",
+    "engineer.photoUrl",
+    "engineer.fullName",
+    "engineer.fullNameKana",
+    "engineer.phone",
+    "honseki",
+    "birthplace",
+    "race",
+    "ethnicity",
+    "familyOccupation",
+    "familyRelation",
+    "familyEducation",
+    "familyIncome",
+    "familyAssets",
+    "housingStatus",
+    "livingEnvironment",
+    "religion",
+    "politicalParty",
+    "lifeView",
+    "lifeCreed",
+    "respectedPerson",
+    "socialMovementHistory",
+    "subscribedNewspaper",
+    "favoriteBook",
+    "age",
+    "disability",
+    "healthStatus",
+    "medicalHistory",
+    "maritalStatus",
+    "pregnancy",
+    "childbirth",
+    "childcareAgreement",
+    "nameInferredAttribute"
+  ],
+  "matchingFeatures": [
+    {
+      "id": "engineer.experienceYears",
+      "send": true,
+      "segment": false,
+      "rationale": "職務能力の経験年数。生年月日から逆算しない列値のみ。"
+    },
+    {
+      "id": "engineer.expectedUnitPrice",
+      "send": true,
+      "segment": true,
+      "rationale": "希望単価(円)。R3.3の単価segment。"
+    },
+    {
+      "id": "engineer.availableDate",
+      "send": true,
+      "segment": false,
+      "rationale": "稼動可能日。現MatchScoreCalculatorの入力。"
+    },
+    {
+      "id": "engineer.status",
+      "send": true,
+      "segment": false,
+      "rationale": "稼動/Bench等の業務状態。個人属性ではない。"
+    },
+    {
+      "id": "engineer.employmentType",
+      "send": true,
+      "segment": false,
+      "rationale": "正社員/契約/BPの運用区分。内部とBP在庫の推薦経路を分ける。"
+    },
+    {
+      "id": "engineer.prefecture",
+      "send": true,
+      "segment": true,
+      "rationale": "最寄り駅の都道府県=勤務地。本籍ではない。R3.3の勤務地segment。"
+    },
+    {
+      "id": "engineer.nearestStation",
+      "send": true,
+      "segment": false,
+      "rationale": "通勤地制約。氏名・住所番地を含まない駅名。"
+    },
+    {
+      "id": "engineer.railwayCompany",
+      "send": true,
+      "segment": false,
+      "rationale": "通勤路線制約。segment軸には使わない（件数稀疏）。"
+    },
+    {
+      "id": "engineerSkill.skillId",
+      "send": true,
+      "segment": true,
+      "rationale": "保有スキルID。R3.3のskill segment。"
+    },
+    {
+      "id": "engineerSkill.skillName",
+      "send": true,
+      "segment": true,
+      "rationale": "スキル名。説明生成とsegment表示に使う。"
+    },
+    {
+      "id": "engineerSkill.proficiency",
+      "send": true,
+      "segment": false,
+      "rationale": "初級/中級/上級。職務能力。"
+    },
+    {
+      "id": "engineerSkill.experienceYears",
+      "send": true,
+      "segment": false,
+      "rationale": "スキル別経験年数。年齢ではない。"
+    },
+    {
+      "id": "career.techStack",
+      "send": true,
+      "segment": false,
+      "rationale": "技術スタック名。自由記述の案件説明は含めない。"
+    },
+    {
+      "id": "career.role",
+      "send": true,
+      "segment": false,
+      "rationale": "役割名（SE/PM等）。個人が特定できる固有名詞はmask対象。"
+    },
+    {
+      "id": "career.clientIndustry",
+      "send": true,
+      "segment": false,
+      "rationale": "業種カテゴリ。顧客名・案件名は送らない。"
+    },
+    {
+      "id": "career.periodMonths",
+      "send": true,
+      "segment": false,
+      "rationale": "従事月数。開始・終了の暦日は送らず年齢推定を防ぐ。"
+    },
+    {
+      "id": "project.unitPriceMin",
+      "send": true,
+      "segment": true,
+      "rationale": "案件単価下限(円)。"
+    },
+    {
+      "id": "project.unitPriceMax",
+      "send": true,
+      "segment": true,
+      "rationale": "案件単価上限(円)。"
+    },
+    {
+      "id": "project.workLocation",
+      "send": true,
+      "segment": true,
+      "rationale": "作業場所。R3.3の勤務地segment。"
+    },
+    {
+      "id": "project.remoteType",
+      "send": true,
+      "segment": true,
+      "rationale": "リモート区分。勤務形態。"
+    },
+    {
+      "id": "project.startDate",
+      "send": true,
+      "segment": false,
+      "rationale": "開始予定日。MatchScoreCalculatorの入力。"
+    },
+    {
+      "id": "project.endDate",
+      "send": true,
+      "segment": false,
+      "rationale": "終了予定日。期間適合の説明に使う。"
+    },
+    {
+      "id": "project.requiredCount",
+      "send": true,
+      "segment": false,
+      "rationale": "募集人数。個人属性ではない。"
+    },
+    {
+      "id": "projectSkill.skillId",
+      "send": true,
+      "segment": true,
+      "rationale": "案件スキルID。"
+    },
+    {
+      "id": "projectSkill.skillName",
+      "send": true,
+      "segment": true,
+      "rationale": "案件スキル名。"
+    },
+    {
+      "id": "projectSkill.isMust",
+      "send": true,
+      "segment": false,
+      "rationale": "必須/尚可フラグ。"
+    },
+    {
+      "id": "bp.experienceYears",
+      "send": true,
+      "segment": false,
+      "rationale": "BP在庫の経験年数。内部要員と同じ口径。"
+    },
+    {
+      "id": "bp.unitPrice",
+      "send": true,
+      "segment": true,
+      "rationale": "BP希望単価(円)。"
+    },
+    {
+      "id": "bp.availableFrom",
+      "send": true,
+      "segment": false,
+      "rationale": "BP稼動可能日。"
+    },
+    {
+      "id": "bp.skillNames",
+      "send": true,
+      "segment": true,
+      "rationale": "BPスキル名。skillsJsonからskill名だけ抽出。"
+    }
+  ],
+  "sendOnlyFields": [
+    {
+      "id": "engineer.initialName",
+      "send": true,
+      "rationale": "氏名のマスク済みイニシャル。fullNameは禁止。CLAUDE.mdの既存規約。"
+    },
+    {
+      "id": "engineer.japaneseLevel",
+      "send": true,
+      "rationale": "日本語能力は職務スキル。国籍ではない。matching特徴量にもsegment軸にも使わない。"
+    },
+    {
+      "id": "bp.initialName",
+      "send": true,
+      "rationale": "BPのイニシャル。氏名は持たない前提を維持する。"
+    },
+    {
+      "id": "bp.bpCompany",
+      "send": true,
+      "rationale": "BP会社名。個人PIIではない。会社マスタIDがある場合はIDを優先。"
+    },
+    {
+      "id": "project.projectName",
+      "send": true,
+      "rationale": "案件名。説明文ではなく名称。顧客担当者の個人名を含まないこと。"
+    },
+    {
+      "id": "ruleScore.total",
+      "send": true,
+      "rationale": "ルールベース合計点。再現用。"
+    },
+    {
+      "id": "ruleScore.mustCoverage",
+      "send": true,
+      "rationale": "必須スキル充足率。"
+    },
+    {
+      "id": "ruleScore.priceScore",
+      "send": true,
+      "rationale": "単価適合スコア。"
+    },
+    {
+      "id": "ruleScore.dateScore",
+      "send": true,
+      "rationale": "稼働日適合スコア。"
+    }
+  ],
+  "neverSend": [
+    "engineer.fullName",
+    "engineer.fullNameKana",
+    "engineer.gender",
+    "engineer.birthDate",
+    "engineer.nationality",
+    "engineer.phone",
+    "engineer.photoUrl",
+    "engineer.resumeSummary",
+    "engineer.remarks",
+    "career.description",
+    "career.projectName",
+    "career.periodFrom",
+    "career.periodTo",
+    "project.description",
+    "project.remarks",
+    "bp.remarks",
+    "customer.contactPerson",
+    "customer.email",
+    "customer.phone",
+    "bankAccount",
+    "address",
+    "rawPrompt",
+    "ingestionExtractedTextAsInstruction"
+  ],
+  "providers": [
+    {
+      "id": "mock",
+      "dpa": "N/A-no-egress",
+      "region": "local-process",
+      "retentionDaysRawPrompt": 0,
+      "retentionDaysRedacted": 730,
+      "retentionDaysLegacyAiLog": 30,
+      "trainingOptOut": "N/A",
+      "productionSend": false,
+      "runtimeAllowedWithoutGate": true
+    },
+    {
+      "id": "rule",
+      "dpa": "N/A-no-llm",
+      "region": "local-process",
+      "retentionDaysRawPrompt": 0,
+      "retentionDaysRedacted": 730,
+      "retentionDaysLegacyAiLog": 30,
+      "trainingOptOut": "N/A",
+      "productionSend": false,
+      "runtimeAllowedWithoutGate": true
+    },
+    {
+      "id": "gemini",
+      "dpa": "UNSIGNED",
+      "region": "google-global-generativelanguage-unverified-cross-border",
+      "retentionDaysRawPrompt": 0,
+      "retentionDaysRedacted": 730,
+      "retentionDaysLegacyAiLog": 30,
+      "trainingOptOut": "REQUIRED-BEFORE-PRODUCTION",
+      "productionSend": false,
+      "runtimeAllowedWithoutGate": false
+    }
+  ],
+  "metrics": {
+    "observationWindowDefaultDays": 90,
+    "minSegmentCount": 5,
+    "precisionK": [5, 10],
+    "offlineMaxRegressionPp": 5,
+    "offlineMaxLatencyP95Multiplier": 2.0,
+    "autoPromotion": false
+  }
+}

@@ -129,6 +129,11 @@ SESの要員推薦は雇用そのものではないが、就業機会の配分�
 | response | JSON schema検証。**HTMLとしてrenderしない**（design §2） |
 | 保存期間 | provider別に設定し、超過分は論理削除・purge（`app.resume.retention-days`と同方式） |
 
+送信field allowlist、mask規則、provider別DPA/region/保存期間、成功metricの正本は
+`.kiro/specs/ai-feedback-learning/g10-pii-allowlist.md`（T109、機械可読 `g10-allowlist.json`）。
+禁止属性リスト（本節）と交差させない。G10はmock/rule既定、実データ外部送信禁止
+（本番gate `GATE-S17-G10-PROD`）。
+
 - **PII canary test**を必須にする（R5）: canary文字列を含むデータでrunし、
   provider request・ログ・DB summaryのいずれにも出ないことをassertする。
 - **prompt injection fixture**を持つ（design §5）。取込原文に命令文を仕込んだfixtureで、
