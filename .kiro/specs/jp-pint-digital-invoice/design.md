@@ -97,18 +97,10 @@ XML生成側で丸め直すと、会計・請求・外部で3つの数字が生�
   - **古いeventで終端statusを巻き戻さない。** `event_at`が現在stateより古いeventは記録のみ。
   - 署名検証は**raw body**に対して行う。parse後のオブジェクトで検証しない。
   - 署名不正は`signature_valid=false`で記録し、**状態遷移させない**（fail-closed）。
-- **送信の冪等**: (移行によりUNIQUEキー `uk_digital_invoice_send` は削除。5.5項の決定表参照)
 - **受信の重複検知**: `message_id` / supplier invoice number / payload hash の3系統（R3.4）。
 - **受信invoiceを自動で支払確定しない**（R5）。必ずreview queueを経由し、人が確定する。
 - XML parseは**XXE無効・external entity禁止・DTD禁止**（design §2）。
   受信XMLは信頼できない入力として扱う。
-
-## 6. テスト
-
-公式fixture/golden XML、XXE、rounding、participant、provider status、webhook signature/order/duplicate、
-受信duplicate/照合、spec version切替、PDF fallback。
-
-
 
 ### 5.5 送信の冪等・Cancel・重複制約 (UNIQUE / R4.1 / R5)
 
@@ -116,20 +108,26 @@ XML生成側で丸め直すと、会計・請求・外部で3つの数字が生�
 
 | 事象 | 制約・動作 | 冪等性 / 補償 |
 |---|---|---|
-| Send冪等 (R5) | 同一invoiceで有効な(CANCELLED以外)送信レコードは1件とする。 | アプリケーション側の count > 0 検査（CANCELLEDを除く）で多重Queueを防ぐ。 |
-| Provider送信と保存 | XML確定/Archive後、transaction外で送信。送信直後にDB更新。 | 送信後、DB更新(providerMessageId等)が失敗した場合は未保存状態となる。ジョブ再試行時は、未保存なら再度sendInvoiceする（Provider側のIdempotencyKey仕様等に依存または補償処理を検討）、既に保存済なら送信をスキップ。 |
-| Cancel (R4.1) | キャンセルは旧レコードを上書きせず、Peppol網への打消し電文として別messageを送る。 | 新しいmessage_idでレコードをINSERT（direction="SEND", status="CANCELLED"等）。旧行はそのまま。 |
+| Send冪等 (R5) | 同一invoiceで有効な送信レコードは1件とする（R5, platform-invariants §7）。 | 初回からproviderに自システムの `message_id` を **Idempotency-Key** として渡し、retryのHTTPが同じmessageになることをAPI契約で固定する。DB保存失敗時の再試行でもPeppol上は重複しない。 |
+| Cancel: QUEUED | 未送信（QUEUED）の送信取消。 | 既存行の `status` を `CANCELLED` に更新。APIは呼ばない。CANCELLED行は再送判定の対象外となり、再Queue可能となる。 |
+| Cancel: SENT等 | 既にPeppol網へ送信された（SENT/DELIVERED）請求書の打消し（R4.1: 旧messageの上書き禁止）。 | 既存行の `status` を `REVOKED` に更新し（再Queue可能にする）、新しく `direction="SEND"` の打消し電文レコード（Credit Note等）を新 `message_id` で作成・送信する。 |
 
-## 6. テストマトリクス (Test Matrix)
+### 5.6 受信時の照合と Purchase 候補 (P1-06)
+受信請求書の照合および Purchase (仕入) 候補の提示については、ACを縮小せず、設計（design §4）の通り supplier / amount / date / PO の完全キー一致による照合ロジックを実装し、テストマトリクスでもアサート対象とする。
+
+## 6. テストマトリクス
+
+公式fixture/golden XML、XXE、rounding、participant、provider status、webhook signature/order/duplicate、受信duplicate/照合、spec version切替、PDF fallbackを包含する。
 
 | 分類 | テスト対象 | アサーション |
 |---|---|---|
-| **Build** | コンパイル | mvn compile および mvn test-compile が全件成功する（BusinessException引数エラー等の不在）。 |
+| **Build** | コンパイル | `mvn compile` および `mvn test-compile` が全件成功する（BusinessExceptionの引数エラー等の不在）。 |
 | **Migration** | Flyway latest | 空DBから latest (V107, V107_1改, V107_2) が正常適用される。menu 2件、connection_id NULL、UNIQUE不在、権限seed成功。 |
-| **XML Render** | Renderer R2.2ノード | JpPintRendererが DueDate, BuyerReference, AccountingSupplierParty, AccountingCustomerParty, TaxTotal を正しく出力すること。 |
-| **Cancel** | Cancel動作 | Cancel時に旧行を上書きせず、DBエラー(UNIQUE等)にならず、別レコードが生成されること。 |
-| **Inbound** | Review → 仕入 (P1-06) | 受信XMLの照合、BP purchase候補の挙動が設計通り行われること。 |
+| **XML Render** | Renderer R2.2ノード | JpPintRendererが DueDate, BuyerReference, AccountingSupplierParty, AccountingCustomerParty, TaxTotal, **税区分, 税率, 注文/契約参照** を正しく出力すること。 |
+| **Cancel** | Cancel動作 | QUEUEDのCancelは同レコードを更新。SENTのCancel時は旧行をREVOKEDとし、新レコード(打消し)を生成しAPIへ送ること。 |
+| **Inbound** | Review → 仕入 (P1-06) | 受信XMLの supplier / amount / date / PO 照合を行い、一致したBP purchase候補を画面・DTOへ正しく提示すること。 |
 | **Webhook** | event_at処理 | Webhookで受領した event_at をそのまま利用し、順序逆転を防ぐこと。 |
+| **Idempotency**| HTTP + DB障害 | HTTP成功直後にDB永続化が失敗した場合でも、再試行時に外部プロバイダ側で2件の重複メッセージとならないこと（message_id 冪等）。 |
 
 ## 7. Migration Fixture と修復手順
 
@@ -137,15 +135,14 @@ V107_1 の不正なDDLによるFlyway適用失敗に対応するため、以下�
 
 ### 経路1: 空DBからの新規起動 (Latest)
 - V107 → V107_1（修正済） → V107_2 の順に実行される。
-- **V107_1 成功化手順**: V107_1__jp_pint_digital_invoice_fixes.sql を編集し、不正なINSERT文を削除する。中身を ALTER TABLE t_integration_job MODIFY connection_id BIGINT NULL; と SELECT 1; のみとする。
-- V107_2 にて menu, 権限シード, UNIQUE DROP（uk_digital_invoice_send）を投入する。
+- **V107_1 成功化手順**: `V107_1__jp_pint_digital_invoice_fixes.sql` を編集し、不正なINSERT文を削除する。中身を `ALTER TABLE t_integration_job MODIFY connection_id BIGINT NULL;` と `SELECT 1;` のみとする。
+- V107_2 にて menu, 権限シード, UNIQUE DROP（`uk_digital_invoice_send`）を投入する。
+- ※ H2環境 (`engineer-schema-h2.sql`) からも `uk_digital_invoice_send` を削除する。
+- ※ V107_2 の権限付与において、Inboundメニューには管理者とマネージャーのみを含め、`財務` ロール(存在しない) や HR は含めない。
 
 ### 経路2: V107適用済・V107.1失敗済環境の復旧
 - MySQL等の環境でV107_1が部分適用（ALTERのみ成功しINSERTで失敗）されている場合：
   1. データベースのバックアップを取得。
   2. V107_1 のファイルを上記「成功化」の通り修正。
-  3. flyway repair を実行して checksum を再計算・記録し、V107_1 のステータスを修復する。
+  3. `flyway repair` を実行して checksum を再計算・記録し、V107_1 のステータスを修復する。
   4. 続けてアプリを再起動（またはFlyway実行）し、V107_2 を適用して残りのDDL/DMLを完了させる。
-
-### 5.6 受信時の照合と Purchase 候補 (P1-06)
-受信請求書の照合（BP/PO/契約）および Purchase (仕入) 候補の提示については、ACを縮小せず、当初のdesignの通り完全な一致/類似度ベースの照合ロジックを実装し、テストマトリクスでもアサート対象とする。

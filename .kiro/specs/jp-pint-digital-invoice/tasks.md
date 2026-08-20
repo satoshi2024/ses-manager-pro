@@ -91,3 +91,4 @@
   - **Demo**: end-to-end送受信と障害復旧。PDF顧客の請求が従来どおり送れることを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
     provider契約/sandbox未取得の場合、B1/B2/Mを**PASSにしない**。本番releaseのgateとして別管理する。
+
