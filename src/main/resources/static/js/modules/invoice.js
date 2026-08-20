@@ -95,8 +95,8 @@ function loadInvoices(page = window.invoiceCurrentPage) {
                     <td>${inv.paidDate || ''}</td>
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
-                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="updateInvoiceStatus(${inv.id}, '送付済')">${SES.i18n.t('approval.request', '送付を申請')}</button>` : ''}
-                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
+                        ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="openDigitalInvoiceModal(${inv.id})">請求書送付</button>` : ''}
+                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-info" onclick="viewDigitalInvoiceStatus(${inv.id})">送信状況</button> <button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
                         ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder', '督促')}</button>` : ''}
                         ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('approval.request', '取消を申請')}</button>` : ''}
                     </td>
@@ -619,4 +619,103 @@ document.addEventListener('DOMContentLoaded', () => {
 function getLocalDateString() {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function openDigitalInvoiceModal(invoiceId) {
+    SES.api.get(/api/digital-invoices/preview/).then(res => {
+        if (res.code === 200) {
+            const data = res.data;
+            if (data.alreadySent) {
+                Swal.fire({ icon: 'warning', title: '警告', text: data.reason, ...SES.swal.darkConfig });
+                return;
+            }
+            
+            let html = <p>顧客の送付設定: <strong></strong></p>;
+            
+            if (data.deliveryPreference === 'PEPPOL') {
+                if (data.peppolStatus === 'VERIFIED') {
+                    html += <p class="text-success"><i class="bi bi-check-circle"></i> Peppol Participant IDは検証済みです。Peppolネットワーク経由でデジタルインボイスを送信します。</p>;
+                } else {
+                    html += <p class="text-danger"><i class="bi bi-x-circle"></i> </p>;
+                }
+            } else if (data.deliveryPreference === 'EMAIL') {
+                html += <p class="text-info"><i class="bi bi-envelope"></i> メールにPDFを添付して送信します。</p>;
+            } else {
+                html += <p class="text-warning"><i class="bi bi-file-pdf"></i> 手動で送付済みにマークします。（自動送信は行われません）</p>;
+            }
+            
+            Swal.fire({
+                title: '請求書送付',
+                html: html,
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: '送付する',
+                cancelButtonText: 'キャンセル',
+                confirmButtonColor: '#3085d6',
+                cancelButtonColor: '#d33',
+                showConfirmButton: data.canSend,
+                ...SES.swal.darkConfig
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    dispatchDigitalInvoice(invoiceId);
+                }
+            });
+        } else {
+            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
+        }
+    });
+}
+
+function dispatchDigitalInvoice(invoiceId) {
+    SES.api.post(/api/digital-invoices/dispatch/?specVersion=1.1.3).then(res => {
+        if (res.code === 200) {
+            SES.toast.success('請求書の送付処理を開始しました。');
+            
+            // ステータスを「送付済」に更新する
+            fetch(/api/invoices//status, {
+                method: 'PUT',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+                body: JSON.stringify({ status: '送付済', paidDate: null })
+            }).then(() => loadInvoices());
+            
+        } else {
+            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
+        }
+    });
+}
+
+function viewDigitalInvoiceStatus(invoiceId) {
+    SES.api.get(/api/digital-invoices//status-history).then(res => {
+        if (res.code === 200) {
+            const data = res.data;
+            if (!data.digitalInvoiceId) {
+                Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...SES.swal.darkConfig });
+                return;
+            }
+            
+            let html = <div class="text-start">;
+            html += <p>現在のステータス: <strong></strong></p>;
+            
+            if (data.events && data.events.length > 0) {
+                html += <table class="table table-sm table-dark"><thead><tr><th>日時</th><th>ステータス</th></tr></thead><tbody>;
+                data.events.forEach(ev => {
+                    html += <tr><td></td><td></td></tr>;
+                });
+                html += </tbody></table>;
+            }
+            
+            if (data.canViewXml && data.xmlUrl) {
+                html += <div class="mt-3"><a href="" target="_blank" class="btn btn-sm btn-outline-info"><i class="bi bi-file-code"></i> XMLデータをダウンロード</a></div>;
+            }
+            
+            html += </div>;
+            
+            Swal.fire({
+                title: 'デジタルインボイス送信状況',
+                html: html,
+                width: 600,
+                ...SES.swal.darkConfig
+            });
+        }
+    });
 }

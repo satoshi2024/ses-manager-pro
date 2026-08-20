@@ -34,6 +34,8 @@ public class AccountingIntegrationWorker {
     private final SalesInvoiceIntegrationService salesInvoiceIntegrationService;
     private final PurchaseExpensePaymentIntegrationService purchaseIntegrationService;
 
+    private final com.ses.service.DigitalInvoiceService digitalInvoiceService;
+
     /**
      * due job (PENDING/RETRYABLE かつ next_retry_at <= now) を最大10件 claim して dispatch する。
      * fixedDelay=5000ms: 前回の完了から5秒後に次の実行を開始する（同時実行なし）。
@@ -72,6 +74,7 @@ public class AccountingIntegrationWorker {
         if (job == null || job.getJobType() == null) return;
 
         switch (job.getJobType()) {
+            case "DIGITAL_INVOICE_SEND" -> digitalInvoiceService.processSendJob(job.getId());
             case "SALES_INVOICE_SYNC"   -> salesInvoiceIntegrationService.processSalesInvoiceJob(job.getId());
             case "SALES_INVOICE_CANCEL" -> salesInvoiceIntegrationService.processSalesCancelJob(job.getId());
             case "BP_PURCHASE_SYNC",

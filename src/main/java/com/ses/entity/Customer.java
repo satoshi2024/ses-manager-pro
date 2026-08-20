@@ -63,6 +63,11 @@ public class Customer extends BaseEntity {
     private String trustLevel;
 
     /**
+     * 送付方法 (PDF, EMAIL, PEPPOL)
+     */
+    private String deliveryPreference;
+
+    /**
      * 備考
      */
     private String remarks;

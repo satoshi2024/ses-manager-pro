@@ -1,0 +1,171 @@
+package com.ses.controller.api;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.entity.DigitalInvoice;
+import com.ses.entity.DigitalInvoiceEvent;
+import com.ses.service.DigitalInvoiceEventService;
+import com.ses.service.DigitalInvoiceService;
+import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Transactional
+class DigitalInvoiceWebhookApiControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private DigitalInvoiceService digitalInvoiceService;
+    
+    @Autowired
+    private DigitalInvoiceEventService digitalInvoiceEventService;
+
+    @MockBean
+    private DigitalInvoiceProvider provider;
+
+    @Test
+    void testReceiveWebhook_Success_ValidSignature() throws Exception {
+        DigitalInvoice di = new DigitalInvoice();
+        di.setInvoiceId(100L);
+        di.setDirection("SEND");
+        di.setProfile("Standard");
+        di.setSpecificationVersion("1.1.3");
+        di.setMessageId("MSG-1");
+        di.setProviderMessageId("provider-msg-1");
+        di.setStatus("SENT");
+        digitalInvoiceService.save(di);
+
+        String json = "{\"messageId\":\"provider-msg-1\", \"status\":\"DELIVERED\", \"eventId\":\"evt-1\"}";
+
+        when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
+
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Signature", "valid-sig")
+                .content(json))
+                .andExpect(status().isOk());
+
+        DigitalInvoice updated = digitalInvoiceService.getById(di.getId());
+        assertEquals("DELIVERED", updated.getStatus());
+
+        List<DigitalInvoiceEvent> events = digitalInvoiceEventService.lambdaQuery()
+                .eq(DigitalInvoiceEvent::getDigitalInvoiceId, di.getId())
+                .list();
+        assertEquals(1, events.size());
+        assertEquals(true, events.get(0).getSignatureValid());
+    }
+
+    @Test
+    void testReceiveWebhook_InvalidSignature_DoesNotChangeStatus() throws Exception {
+        DigitalInvoice di = new DigitalInvoice();
+        di.setInvoiceId(101L);
+        di.setDirection("SEND");
+        di.setProfile("Standard");
+        di.setSpecificationVersion("1.1.3");
+        di.setMessageId("MSG-2");
+        di.setProviderMessageId("provider-msg-2");
+        di.setStatus("SENT");
+        digitalInvoiceService.save(di);
+
+        String json = "{\"messageId\":\"provider-msg-2\", \"status\":\"DELIVERED\", \"eventId\":\"evt-2\"}";
+
+        when(provider.verifyWebhookSignature(any(), any())).thenReturn(false);
+
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Signature", "invalid-sig")
+                .content(json))
+                .andExpect(status().isOk()); // APIとしては200を返す
+
+        DigitalInvoice updated = digitalInvoiceService.getById(di.getId());
+        assertEquals("SENT", updated.getStatus()); // ステータスは変わらない
+
+        List<DigitalInvoiceEvent> events = digitalInvoiceEventService.lambdaQuery()
+                .eq(DigitalInvoiceEvent::getDigitalInvoiceId, di.getId())
+                .list();
+        assertEquals(1, events.size());
+        assertEquals(false, events.get(0).getSignatureValid()); // 不正イベントとして記録
+    }
+
+    @Test
+    void testReceiveInboundInvoice() throws Exception {
+        when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
+        
+        com.ses.entity.PeppolParticipant pp = new com.ses.entity.PeppolParticipant();
+        pp.setOwnerType("BP");
+        pp.setOwnerId(1L);
+        pp.setSchemeId("0188");
+        pp.setParticipantId("1234567890123");
+        pp.setProvider("FAST_ACCOUNTING");
+        pp.setStatus("VERIFIED");
+        pp.setVerifiedAt(java.time.LocalDateTime.now());
+        
+        org.springframework.context.ApplicationContext ctx = 
+            org.springframework.web.context.support.WebApplicationContextUtils.getRequiredWebApplicationContext(
+                mockMvc.getDispatcherServlet().getServletContext());
+        ctx.getBean(com.ses.service.PeppolParticipantService.class).save(pp);
+
+        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-999</ID><EndpointID schemeID=\"0188\">1234567890123</EndpointID></Invoice>";
+        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-in-1\", \"eventId\": \"ev-in-1\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
+
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload)
+                .header("X-Signature", "valid-signature"))
+                .andExpect(status().isOk());
+
+        DigitalInvoice di = digitalInvoiceService.lambdaQuery()
+                .eq(DigitalInvoice::getProviderMessageId, "msg-in-1")
+                .one();
+        
+        org.junit.jupiter.api.Assertions.assertNotNull(di);
+        assertEquals("RECEIVE", di.getDirection());
+        assertEquals("PENDING_REVIEW", di.getStatus());
+        assertEquals("INV-999", di.getMessageId());
+    }
+
+    @Test
+    void testReceiveInboundInvoice_DuplicateMessageId() throws Exception {
+        when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
+
+        String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-888</ID></Invoice>";
+        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
+
+        // 1st request
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload)
+                .header("X-Signature", "valid-signature"))
+                .andExpect(status().isOk());
+
+        // 2nd request
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload)
+                .header("X-Signature", "valid-signature"))
+                .andExpect(status().isOk());
+
+        long count = digitalInvoiceService.lambdaQuery()
+                .eq(DigitalInvoice::getProviderMessageId, "msg-dup")
+                .count();
+        
+        assertEquals(1, count, "Should not create duplicate DigitalInvoice on duplicate webhook");
+    }
+}

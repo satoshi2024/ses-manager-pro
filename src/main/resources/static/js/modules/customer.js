@@ -160,31 +160,38 @@ function renderCustomers(records) {
 }
 
 function editCustomer(id) {
-    $.ajax({
-        url: '/api/customers/' + id,
-        method: 'GET',
-        success: function(res) {
-            if (res.code === 200 && res.data) {
+    if (id) {
+        SES.api.get(`/api/customers/${id}`).then(res => {
+            if (res.code === 200) {
                 const cust = res.data;
                 $('#cust-id').val(cust.id);
                 $('#cust-companyName').val(cust.companyName);
                 $('#cust-commercialFlow').val(cust.commercialFlow);
                 $('#cust-trustLevel').val(cust.trustLevel);
+                $('#cust-deliveryPreference').val(cust.deliveryPreference || 'PDF');
                 $('#cust-contactPerson').val(cust.contactPerson);
                 $('#cust-contactPhone').val(cust.contactPhone);
-                
-                bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).show();
-            } else {
-                Toast.error(SES.i18n.t('error.getDataFailed'));
+                const modal = new bootstrap.Modal(document.getElementById('customerModal'));
+                modal.show();
             }
-        }
-    });
+        });
+    } else {
+        $('#cust-id').val('');
+        $('#cust-companyName').val('');
+        $('#cust-commercialFlow').val('エンド直');
+        $('#cust-trustLevel').val('B');
+        $('#cust-deliveryPreference').val('PDF');
+        $('#cust-contactPerson').val('');
+        $('#cust-contactPhone').val('');
+        const modal = new bootstrap.Modal(document.getElementById('customerModal'));
+        modal.show();
+    }
 }
 
 function saveCustomer() {
     const companyName = $('#cust-companyName').val();
     if (!companyName) {
-        Toast.error(SES.i18n.t('validation.required', [SES.i18n.t('customer.companyName')]));
+        Swal.fire({ icon: 'error', title: 'エラー', text: '会社名は必須です。', ...SES.swal.darkConfig });
         return;
     }
     
@@ -192,7 +199,8 @@ function saveCustomer() {
     const data = {
         companyName: companyName,
         commercialFlow: $('#cust-commercialFlow').val(),
-        trustLevel: $('#cust-trustLevel').val()
+        trustLevel: $('#cust-trustLevel').val(),
+        deliveryPreference: $('#cust-deliveryPreference').val()
     };
 
     if (id) {

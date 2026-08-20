@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
       layout:decorate="~{layout/base}">
@@ -120,7 +120,7 @@
                             <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.companyName}" required>
                         </div>
                         <div class="row g-3 mb-3">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <label class="form-label text-muted small" th:text="#{customer.commercialFlow}">商流</label>
                                 <select id="cust-commercialFlow" class="form-select form-select-dark bg-secondary text-white border-dark">
                                     <option value="エンド直" th:text="#{customer.commercialFlow.prime}">エンド直</option>
@@ -129,13 +129,21 @@
                                     <option value="それ以降" th:text="#{customer.commercialFlow.other}">それ以降</option>
                                 </select>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <label class="form-label text-muted small" th:text="#{customer.trustLevel}">信頼度</label>
                                 <select id="cust-trustLevel" class="form-select form-select-dark bg-secondary text-white border-dark">
                                     <option value="S" th:text="#{customer.trustLevel.s}">Sランク (優良)</option>
                                     <option value="A" th:text="#{customer.trustLevel.a}">Aランク (良好)</option>
                                     <option value="B" th:text="#{customer.trustLevel.b}">Bランク (普通)</option>
                                     <option value="C" th:text="#{customer.trustLevel.c}">Cランク (注意)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label text-muted small" th:text="#{customer.deliveryPreference:送付方法}">送付方法</label>
+                                <select id="cust-deliveryPreference" class="form-select form-select-dark bg-secondary text-white border-dark">
+                                    <option value="PDF">PDF</option>
+                                    <option value="EMAIL">Email</option>
+                                    <option value="PEPPOL">Peppol</option>
                                 </select>
                             </div>
                         </div>
