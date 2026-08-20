@@ -12,6 +12,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 @Transactional
 class DigitalInvoiceWebhookApiControllerTest {
 
@@ -39,6 +41,9 @@ class DigitalInvoiceWebhookApiControllerTest {
 
     @MockBean
     private DigitalInvoiceProvider provider;
+
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private com.ses.service.DocumentService documentService;
 
     @Test
     void testReceiveWebhook_Success_ValidSignature() throws Exception {
@@ -106,7 +111,10 @@ class DigitalInvoiceWebhookApiControllerTest {
     @Test
     void testReceiveInboundInvoice() throws Exception {
         when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
-        
+        com.ses.entity.Document archived = new com.ses.entity.Document();
+        archived.setId(9001L);
+        when(documentService.registerReceived(any(), any())).thenReturn(archived);
+
         com.ses.entity.PeppolParticipant pp = new com.ses.entity.PeppolParticipant();
         pp.setOwnerType("BP");
         pp.setOwnerId(1L);
@@ -115,8 +123,8 @@ class DigitalInvoiceWebhookApiControllerTest {
         pp.setProvider("FAST_ACCOUNTING");
         pp.setStatus("VERIFIED");
         pp.setVerifiedAt(java.time.LocalDateTime.now());
-        
-        org.springframework.context.ApplicationContext ctx = 
+
+        org.springframework.context.ApplicationContext ctx =
             org.springframework.web.context.support.WebApplicationContextUtils.getRequiredWebApplicationContext(
                 mockMvc.getDispatcherServlet().getServletContext());
         ctx.getBean(com.ses.service.PeppolParticipantService.class).save(pp);
@@ -133,7 +141,7 @@ class DigitalInvoiceWebhookApiControllerTest {
         DigitalInvoice di = digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getProviderMessageId, "msg-in-1")
                 .one();
-        
+
         org.junit.jupiter.api.Assertions.assertNotNull(di);
         assertEquals("RECEIVE", di.getDirection());
         assertEquals("PENDING_REVIEW", di.getStatus());
@@ -143,18 +151,19 @@ class DigitalInvoiceWebhookApiControllerTest {
     @Test
     void testReceiveInboundInvoice_DuplicateMessageId() throws Exception {
         when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
+        com.ses.entity.Document archived = new com.ses.entity.Document();
+        archived.setId(9002L);
+        when(documentService.registerReceived(any(), any())).thenReturn(archived);
 
         String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-888</ID></Invoice>";
         String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
 
-        // 1st request
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload)
                 .header("X-Signature", "valid-signature"))
                 .andExpect(status().isOk());
 
-        // 2nd request
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(payload)
@@ -164,7 +173,7 @@ class DigitalInvoiceWebhookApiControllerTest {
         long count = digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getProviderMessageId, "msg-dup")
                 .count();
-        
+
         assertEquals(1, count, "Should not create duplicate DigitalInvoice on duplicate webhook");
     }
 }

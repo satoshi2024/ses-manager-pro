@@ -38,7 +38,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final com.ses.service.DocumentService documentService;
     private final com.ses.service.CustomerService customerService;
 
-    private static final Set<String> TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED", "REVOKED");
+    private static final Set<String> WEBHOOK_TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED", "REVOKED");
 
     @Override
     @Transactional
@@ -59,7 +59,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
         DigitalInvoice invoice = getById(event.getDigitalInvoiceId());
         if (invoice != null) {
-            if (TERMINAL_STATUSES.contains(invoice.getStatus())) {
+            if (WEBHOOK_TERMINAL_STATUSES.contains(invoice.getStatus())) {
                 return;
             }
 
@@ -256,11 +256,18 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             cn.setStatus("QUEUED");
             save(cn);
 
-            // 本来は enqueueInvoiceForSend と同様に t_integration_job に登録するが、ここでは簡略化。
+            // 本来は enqueueInvoiceForSend と同様に t_integration_job に登録
             String payload = "{\"digitalInvoiceId\":" + cn.getId() + "}";
             String payloadHash = org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload);
-            String idempotencyKey = "digital_invoice_cancel_" + cn.getMessageId();
-            integrationJobService.enqueueJob("SEND_DIGITAL_INVOICE", payload, payloadHash, idempotencyKey);
+            String idempotencyKey = "digital_invoice_send_" + cn.getMessageId();
+            integrationJobService.createJob(
+                null,
+                "DIGITAL_INVOICE_SEND",
+                "t_digital_invoice",
+                cn.getId(),
+                idempotencyKey,
+                payloadHash
+            );
         }
     }
 

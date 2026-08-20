@@ -52,16 +52,18 @@
     **検算NG時の送信拒否**、**XXE fixtureで外部entityが解決されないこと**、spec version切替。
   - **Demo**: 既存invoiceをvalidatorへ通す。合計が合わないinvoiceで送信が拒否されることを確認。
 
-- [ ] B1. provider送信/status/webhook
+- [x] B1. provider送信/status/webhook
   - **Objective**: 請求がprovider経由で送信され、同じinvoiceを再送してもmessageが1件しかできない。
     webhookの署名が検証され、偽造・順序逆転・重複が安全に処理される。
   - **実装ガイダンス**: accounting jobの基盤を再利用、participant verify、署名、fallback。
     **署名検証はraw bodyに対して行う**（design §5.4）。parse後のオブジェクトで検証しない。
     署名不正は`signature_valid=false`で記録し**状態遷移させない**（fail-closed）。
     古いeventで終端statusを巻き戻さない。
+    **Option B**: `message_id` を Idempotency-Key。mockは同一キーで同一provider message。
   - **テスト要件**: L2〜L3。retry、**同一invoiceの再送でmessage 1件**、
     **偽造署名の拒否**、out-of-order event、重複webhook、PDF fallback。
-  - **Demo**: sandbox送信→delivered。偽造署名のwebhookを送って状態が変わらないことを確認。
+  - **Demo**: mock送信→SENT／偽造署名で状態不変。**sandbox送受信 Demo は PENDING_SANDBOX**（未契約のため本番PASSにしない）。
+  - **完了条件メモ**: 開発完了＝mock定向PASS。本番受入はsandbox証跡必須。
 
 - [ ] A1. 設定/送信/状態UI
   - **Objective**: 顧客ごとにPDF/email/Peppolの送付方法を設定でき、

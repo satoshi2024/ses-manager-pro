@@ -171,7 +171,8 @@ class AccountingWorkerRawExceptionLogTest {
         doThrow(new IllegalStateException(SECRET)).when(duePurchaseService).processExpenseJob(504L);
         doThrow(new IllegalStateException(SECRET)).when(duePurchaseService).processPaymentSyncJob(505L);
 
-        new AccountingIntegrationWorker(dueJobService, dueSalesService, duePurchaseService).processDueJobs();
+        new AccountingIntegrationWorker(dueJobService, dueSalesService, duePurchaseService,
+                mock(com.ses.service.DigitalInvoiceService.class)).processDueJobs();
 
         List<ILoggingEvent> workerEvents = appender.list.stream()
                 .filter(event -> event.getLoggerName().equals(AccountingIntegrationWorker.class.getName()))
