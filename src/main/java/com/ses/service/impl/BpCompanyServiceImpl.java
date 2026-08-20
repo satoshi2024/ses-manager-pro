@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.bpcompany.BpBankAccountDto;
 import com.ses.dto.bpcompany.BpCompanyDto;
@@ -74,7 +75,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
 
     @Override
     public Page<BpCompanyDto> searchBpCompanies(String keyword, String entityType, String status, long current, long size) {
-        Page<BpCompany> pageParam = new Page<>(current, size);
+        Page<BpCompany> pageParam = PageUtils.safePage(current, size);
         LambdaQueryWrapper<BpCompany> wrapper = new LambdaQueryWrapper<>();
 
         if (StringUtils.hasText(keyword)) {
@@ -113,7 +114,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
             return dto;
         }).collect(Collectors.toList());
 
-        Page<BpCompanyDto> dtoPage = new Page<>(current, size, pageResult.getTotal());
+        Page<BpCompanyDto> dtoPage = new Page<>(pageResult.getCurrent(), pageResult.getSize(), pageResult.getTotal());
         dtoPage.setRecords(dtoList);
         return dtoPage;
     }

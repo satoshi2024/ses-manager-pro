@@ -1,5 +1,7 @@
 package com.ses.service.security;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.util.PageUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -101,5 +103,40 @@ class ActionPermissionResolverTest {
                 "POST", "/api/acceptances/30/document"));
         assertEquals("file.download", ActionPermissionResolver.resolve(
                 "GET", "/api/acceptances/30/document/download"));
+    }
+
+    /** CROSS-P1-01: 未登録rootだとMenuPermissionFilterが管理者bypassより前にdenyする。 */
+    @Test
+    void bpAffiliationsとbpMigrationsのURIが既知actionへ解決される() {
+        assertEquals("bp-company.view",
+                ActionPermissionResolver.resolve("GET", "/api/bp-affiliations/engineer/1"));
+        assertEquals("bp-company.view",
+                ActionPermissionResolver.resolve("GET", "/api/bp-affiliations/engineer/1/active"));
+        assertEquals("bp-company.create",
+                ActionPermissionResolver.resolve("POST", "/api/bp-affiliations"));
+        assertEquals("bp-migration.view",
+                ActionPermissionResolver.resolve("GET", "/api/bp-migrations/exceptions"));
+        assertEquals("bp-migration.create",
+                ActionPermissionResolver.resolve("POST", "/api/bp-migrations/run"));
+        assertEquals("bp-migration.create",
+                ActionPermissionResolver.resolve("POST", "/api/bp-migrations/resolve"));
+        assertTrue(ActionPermissionResolver.isKnownAction("bp-company.view"));
+        assertTrue(ActionPermissionResolver.isKnownAction("bp-migration.view"));
+    }
+
+    /**
+     * CROSS-P1-02: Math.min(size,1000) では size&lt;=0 の全件取得を止められない。
+     * 一覧実装が委譲する PageUtils.safePage の契約を固定する。
+     */
+    @Test
+    void safePageはsize0をdefaultへ99999を上限へ正規化する() {
+        Page<Object> zero = PageUtils.safePage(1, 0);
+        assertEquals(1, zero.getCurrent());
+        assertEquals(PageUtils.DEFAULT_PAGE_SIZE, zero.getSize());
+
+        Page<Object> huge = PageUtils.safePage(1, 99999);
+        assertEquals(1, huge.getCurrent());
+        assertEquals(PageUtils.MAX_PAGE_SIZE, huge.getSize());
+        assertTrue(huge.getSize() <= 1000);
     }
 }

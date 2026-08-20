@@ -33,6 +33,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentMatchers;
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -517,6 +518,7 @@ class WorkRecordServiceImplTest {
         WorkRecord record = new WorkRecord();
         record.setId(1L);
         record.setContractId(10L);
+        record.setWorkMonth(workMonth);
         record.setStatus("入力中");
         record.setPaymentAmount(new BigDecimal("600000"));
 
@@ -526,7 +528,11 @@ class WorkRecordServiceImplTest {
         // baseMapper.updateById を使うため Mapper にスタブ
         when(workRecordMapper.update(isNull(), any())).thenReturn(1);
         // Contract ロック取得
-        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(new Contract());
+        Contract contract = new Contract();
+        contract.setId(10L);
+        contract.setEngineerId(20L);
+        when(contractMapper.selectByIdForUpdate(10L)).thenReturn(contract);
+        when(contractMapper.selectById(10L)).thenReturn(contract);
 
         // グリッドDTOでBPを返す
         WorkRecordGridDto dto = new WorkRecordGridDto();
@@ -535,13 +541,28 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectMonthlyGrid(eq(workMonth), any())).thenReturn(Collections.singletonList(dto));
         when(workRecordMapper.selectEmploymentTypeByContractId(any())).thenReturn("BP");
 
-        // BP支払未存在
+        // BP支払未存在 + 所属BP解決
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.insert(any(BpPayment.class))).thenReturn(1);
+        com.ses.service.EngineerBpAffiliationService affiliationService =
+                mock(com.ses.service.EngineerBpAffiliationService.class);
+        com.ses.mapper.BpCompanyMapper bpCompanyMapper = mock(com.ses.mapper.BpCompanyMapper.class);
+        ReflectionTestUtils.setField(workRecordService, "engineerBpAffiliationService", affiliationService);
+        ReflectionTestUtils.setField(workRecordService, "bpCompanyMapper", bpCompanyMapper);
+        com.ses.entity.EngineerBpAffiliation affiliation = new com.ses.entity.EngineerBpAffiliation();
+        affiliation.setBpCompanyId(30L);
+        when(affiliationService.getActiveAffiliationAsOf(eq(20L), any())).thenReturn(affiliation);
+        com.ses.entity.BpCompany company = new com.ses.entity.BpCompany();
+        company.setId(30L);
+        company.setLegalName("株式会社テストBP");
+        when(bpCompanyMapper.selectById(30L)).thenReturn(company);
 
         workRecordService.confirmMonth(workMonth);
 
-        verify(bpPaymentMapper, times(1)).insert(any(BpPayment.class));
+        verify(bpPaymentMapper, times(1)).insert((BpPayment) ArgumentMatchers.<BpPayment>argThat(bp ->
+                bp.getBpCompanyId() != null
+                        && bp.getBpCompanyId().equals(30L)
+                        && "株式会社テストBP".equals(bp.getBpCompanyNameSnapshot())));
     }
 
     @Test
@@ -994,6 +1015,7 @@ class WorkRecordServiceImplTest {
         when(workRecordMapper.selectByIdForUpdate(5L)).thenReturn(r);
         Contract c = new Contract();
         c.setId(1L);
+        c.setEngineerId(20L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(c);
         when(contractMapper.selectById(1L)).thenReturn(c);
         // R3R-10: 条件付きUPDATE(CAS)。
@@ -1002,10 +1024,25 @@ class WorkRecordServiceImplTest {
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.insert(any(BpPayment.class))).thenReturn(1);
 
+        com.ses.service.EngineerBpAffiliationService affiliationService =
+                mock(com.ses.service.EngineerBpAffiliationService.class);
+        com.ses.mapper.BpCompanyMapper bpCompanyMapper = mock(com.ses.mapper.BpCompanyMapper.class);
+        ReflectionTestUtils.setField(workRecordService, "engineerBpAffiliationService", affiliationService);
+        ReflectionTestUtils.setField(workRecordService, "bpCompanyMapper", bpCompanyMapper);
+        com.ses.entity.EngineerBpAffiliation affiliation = new com.ses.entity.EngineerBpAffiliation();
+        affiliation.setBpCompanyId(30L);
+        when(affiliationService.getActiveAffiliationAsOf(eq(20L), any())).thenReturn(affiliation);
+        com.ses.entity.BpCompany company = new com.ses.entity.BpCompany();
+        company.setId(30L);
+        company.setLegalName("株式会社テストBP");
+        when(bpCompanyMapper.selectById(30L)).thenReturn(company);
+
         workRecordService.approve(5L);
 
         assertThat(r.getStatus()).isEqualTo("確定");
-        verify(bpPaymentMapper, times(1)).insert(any(BpPayment.class));
+        verify(bpPaymentMapper, times(1)).insert((BpPayment) ArgumentMatchers.<BpPayment>argThat(bp ->
+                Long.valueOf(30L).equals(bp.getBpCompanyId())
+                        && "株式会社テストBP".equals(bp.getBpCompanyNameSnapshot())));
     }
 
     @Test

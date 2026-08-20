@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.CrmNormalize;
 import com.ses.dto.customer.CustomerContactDto;
 import com.ses.dto.customer.CustomerContactSaveRequest;
 import com.ses.entity.CustomerContact;
@@ -282,16 +283,15 @@ public class CustomerContactServiceImpl implements CustomerContactService {
     }
 
     private boolean sameEmail(String left, String right) {
-        return hasText(left) && hasText(right)
-                && left.trim().toLowerCase(java.util.Locale.ROOT)
-                .equals(right.trim().toLowerCase(java.util.Locale.ROOT));
+        String a = CrmNormalize.contactKey(left);
+        String b = CrmNormalize.contactKey(right);
+        return a != null && a.equals(b);
     }
 
     private boolean samePhone(String left, String right) {
-        if (!hasText(left) || !hasText(right)) return false;
-        String a = left.replaceAll("[^0-9+]", "");
-        String b = right.replaceAll("[^0-9+]", "");
-        return !a.isBlank() && a.equals(b);
+        String a = CrmNormalize.contactKey(left);
+        String b = CrmNormalize.contactKey(right);
+        return a != null && a.equals(b);
     }
 
     /** 非管理者の表示マスクを更新値として書き戻さず、明示的な空欄はクリアとして扱う。 */

@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -46,8 +47,12 @@ class AiEvaluationApiControllerTest {
                 .getContentAsString(StandardCharsets.UTF_8);
         assertTrue(html.contains("ai.evaluation.col.precision5"));
         assertTrue(html.contains("ai.evaluation.col.precision10"));
+        assertTrue(html.contains("ai.evaluation.segments"));
+        assertTrue(html.contains("aiEvalSegments"));
         assertTrue(js.contains("precisionAt5"));
         assertTrue(js.contains("precisionAt10"));
+        assertTrue(js.contains("data.segments"));
+        assertTrue(js.contains("aiEvalSegments"));
     }
 
     @Test
@@ -66,6 +71,25 @@ class AiEvaluationApiControllerTest {
     void HRは評価APIに到達できない() throws Exception {
         mockMvc.perform(get("/api/ai/evaluations/dashboard"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "sales", roles = "営業")
+    void 営業はlistとrunが403() throws Exception {
+        mockMvc.perform(get("/api/ai/evaluations"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/ai/evaluations/run")
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"candidateVersionId\":1,\"baselineVersionId\":2}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "sales", roles = "営業")
+    void 営業はdashboardに到達できる() throws Exception {
+        mockMvc.perform(get("/api/ai/evaluations/dashboard"))
+                .andExpect(status().isOk());
     }
 
     private AiEvaluationDashboardDto data(MvcResult result) throws Exception {

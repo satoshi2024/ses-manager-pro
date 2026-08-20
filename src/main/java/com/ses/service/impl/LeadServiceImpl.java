@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.CrmNormalize;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.crm.LeadConversionDto;
 import com.ses.dto.crm.LeadSaveRequest;
@@ -25,7 +26,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.text.Normalizer;
 
 /** リードサービス実装。未割当leadは営業全員へ公開する。 */
 @Service
@@ -151,13 +151,7 @@ public class LeadServiceImpl implements LeadService {
     }
 
     private String normalizeSearchKey(String value, boolean company) {
-        if (!StringUtils.hasText(value)) return null;
-        String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC)
-                .toLowerCase(java.util.Locale.ROOT);
-        String key = company
-                ? normalized.replaceAll("\\s+", "")
-                : normalized.replaceAll("[^a-z0-9+@.]", "");
-        return key.isEmpty() ? null : key;
+        return CrmNormalize.searchKey(value, company);
     }
 
     private void applySearchKeys(Lead lead) {

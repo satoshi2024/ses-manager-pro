@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.invoice.InboundPurchaseRequest;
 import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
@@ -22,7 +23,7 @@ public class InboundDigitalInvoiceApiController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "10") long size) {
 
-        Page<DigitalInvoice> page = new Page<>(current, size);
+        Page<DigitalInvoice> page = PageUtils.safePage(current, size);
         digitalInvoiceService.lambdaQuery()
                 .eq(DigitalInvoice::getDirection, "RECEIVE")
                 .orderByDesc(DigitalInvoice::getReceivedAt)

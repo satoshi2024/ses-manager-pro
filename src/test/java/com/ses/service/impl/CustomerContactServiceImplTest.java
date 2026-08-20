@@ -83,6 +83,35 @@ class CustomerContactServiceImplTest {
         assertEquals("090-1234-5678", plain.getPhone());
     }
 
+    @Test
+    void duplicateCandidatesはNFKC正規化で全角emailを同一視する() {
+        CustomerContactServiceImpl service = service();
+        CustomerContact existing = contact("[]");
+        existing.setEmail("test@example.com");
+        when(mapper.selectList(any())).thenReturn(List.of(existing));
+        when(authorizationService.isAllowed(any(), eq("customer.pii.view"))).thenReturn(true);
+
+        var candidates = service.duplicateCandidates(10L, "ｔｅｓｔ＠example.com", null, null);
+
+        assertEquals(1, candidates.size());
+        assertEquals(existing.getId(), candidates.get(0).getId());
+        assertEquals("test@example.com", candidates.get(0).getEmail());
+    }
+
+    @Test
+    void duplicateCandidatesはNFKC正規化で全角phoneを同一視する() {
+        CustomerContactServiceImpl service = service();
+        CustomerContact existing = contact("[]");
+        existing.setPhone("03-1234-5678");
+        when(mapper.selectList(any())).thenReturn(List.of(existing));
+        when(authorizationService.isAllowed(any(), eq("customer.pii.view"))).thenReturn(true);
+
+        var candidates = service.duplicateCandidates(10L, null, "０３－１２３４－５６７８", null);
+
+        assertEquals(1, candidates.size());
+        assertEquals(existing.getId(), candidates.get(0).getId());
+    }
+
     private CustomerContactServiceImpl service() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("sales", "n/a"));

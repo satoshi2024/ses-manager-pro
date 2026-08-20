@@ -37,13 +37,19 @@
         </div>
     </div>
     <div class="row g-3">
-        <div class="col-lg-6">
+        <div class="col-lg-4">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header border-dark" th:text="#{ai.evaluation.reason}">理由分布</div>
                 <div class="card-body" id="aiEvalReasons"></div>
             </div>
         </div>
-        <div class="col-lg-6">
+        <div class="col-lg-4">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark" th:text="#{ai.evaluation.segments}">セグメント</div>
+                <div class="card-body" id="aiEvalSegments"></div>
+            </div>
+        </div>
+        <div class="col-lg-4">
             <div class="card bg-card border-dark shadow-sm h-100">
                 <div class="card-header border-dark" th:text="#{ai.evaluation.samples}">sample inspection</div>
                 <div class="card-body" id="aiEvalSamples"></div>

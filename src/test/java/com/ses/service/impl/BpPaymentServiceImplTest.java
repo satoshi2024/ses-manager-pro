@@ -34,6 +34,9 @@ class BpPaymentServiceImplTest {
     private com.ses.service.MonthlyClosingService monthlyClosingService;
 
     @Mock
+    private com.ses.mapper.BpCompanyMapper bpCompanyMapper;
+
+    @Mock
     private com.ses.service.WorkRecordService workRecordService;
 
     @InjectMocks
@@ -49,12 +52,18 @@ class BpPaymentServiceImplTest {
         BpPayment payment = new BpPayment();
         payment.setWorkRecordId(1L);
         payment.setLayerOrder(1);
+        payment.setBpCompanyId(10L);
 
+        com.ses.entity.BpCompany company = new com.ses.entity.BpCompany();
+        company.setId(10L);
+        company.setLegalName("テストBP");
+        when(bpCompanyMapper.selectById(10L)).thenReturn(company);
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
         when(bpPaymentMapper.insert(payment)).thenReturn(1);
 
         BpPayment result = bpPaymentService.addLayer(payment);
         assertNotNull(result);
+        assertEquals("テストBP", result.getBpCompanyNameSnapshot());
         verify(bpPaymentMapper, times(1)).insert(payment);
     }
 
@@ -63,7 +72,12 @@ class BpPaymentServiceImplTest {
         BpPayment payment = new BpPayment();
         payment.setWorkRecordId(1L);
         payment.setLayerOrder(1);
+        payment.setBpCompanyId(10L);
 
+        com.ses.entity.BpCompany company = new com.ses.entity.BpCompany();
+        company.setId(10L);
+        company.setLegalName("テストBP");
+        when(bpCompanyMapper.selectById(10L)).thenReturn(company);
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
 
         Exception exception = assertThrows(BusinessException.class, () -> {
@@ -78,7 +92,12 @@ class BpPaymentServiceImplTest {
         payment.setWorkRecordId(1L);
         payment.setLayerOrder(2);
         payment.setParentPaymentId(100L);
+        payment.setBpCompanyId(10L);
 
+        com.ses.entity.BpCompany company = new com.ses.entity.BpCompany();
+        company.setId(10L);
+        company.setLegalName("テストBP");
+        when(bpCompanyMapper.selectById(10L)).thenReturn(company);
         when(bpPaymentMapper.selectCount(any())).thenReturn(0L);
 
         BpPayment parent = new BpPayment();

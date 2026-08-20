@@ -20,6 +20,11 @@ public final class ActionPermissionResolver {
             Map.entry("approval", "approval"),
             Map.entry("bp-availabilities", "bp-availability"),
             Map.entry("bp-companies", "bp-company"),
+            // BP所属履歴(S03)。未登録のままだと/api/bp-affiliations/**が管理者を含む全roleで
+            // 403になる（CRM-R2-P1-01と同じ罠）。bp-company権限で到達させる。
+            Map.entry("bp-affiliations", "bp-company"),
+            // BP移行例外一覧(S03)。管理者専用APIだが、未登録だと管理者bypassより前にdenyされる。
+            Map.entry("bp-migrations", "bp-migration"),
             Map.entry("bp-availability-ingestions", "bp-availability-ingestion"),
             Map.entry("candidates", "candidate"),
             Map.entry("cashflow", "cashflow"),
