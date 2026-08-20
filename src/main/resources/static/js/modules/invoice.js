@@ -622,28 +622,28 @@ function getLocalDateString() {
 }
 
 function openDigitalInvoiceModal(invoiceId) {
-    SES.api.get(/api/digital-invoices/preview/).then(res => {
+    SES.api.get(`/api/digital-invoices/preview/${invoiceId}`).then(res => {
         if (res.code === 200) {
             const data = res.data;
             if (data.alreadySent) {
                 Swal.fire({ icon: 'warning', title: '警告', text: data.reason, ...SES.swal.darkConfig });
                 return;
             }
-            
-            let html = <p>顧客の送付設定: <strong></strong></p>;
-            
+
+            let html = `<p>顧客の送付設定: <strong>${data.deliveryPreference || ''}</strong></p>`;
+
             if (data.deliveryPreference === 'PEPPOL') {
                 if (data.peppolStatus === 'VERIFIED') {
-                    html += <p class="text-success"><i class="bi bi-check-circle"></i> Peppol Participant IDは検証済みです。Peppolネットワーク経由でデジタルインボイスを送信します。</p>;
+                    html += `<p class="text-success"><i class="bi bi-check-circle"></i> Peppol Participant IDは検証済みです。Peppolネットワーク経由でデジタルインボイスを送信します。</p>`;
                 } else {
-                    html += <p class="text-danger"><i class="bi bi-x-circle"></i> </p>;
+                    html += `<p class="text-danger"><i class="bi bi-x-circle"></i> ${data.reason || 'Peppol Participant IDが未検証です。'}</p>`;
                 }
             } else if (data.deliveryPreference === 'EMAIL') {
-                html += <p class="text-info"><i class="bi bi-envelope"></i> メールにPDFを添付して送信します。</p>;
+                html += `<p class="text-info"><i class="bi bi-envelope"></i> メールにPDFを添付して送信します。</p>`;
             } else {
-                html += <p class="text-warning"><i class="bi bi-file-pdf"></i> 手動で送付済みにマークします。（自動送信は行われません）</p>;
+                html += `<p class="text-warning"><i class="bi bi-file-pdf"></i> 手動で送付済みにマークします。（自動送信は行われません）</p>`;
             }
-            
+
             Swal.fire({
                 title: '請求書送付',
                 html: html,
@@ -667,17 +667,17 @@ function openDigitalInvoiceModal(invoiceId) {
 }
 
 function dispatchDigitalInvoice(invoiceId) {
-    SES.api.post(/api/digital-invoices/dispatch/?specVersion=1.1.3).then(res => {
+    SES.api.post(`/api/digital-invoices/dispatch/${invoiceId}?specVersion=1.1.3`).then(res => {
         if (res.code === 200) {
             SES.toast.success('請求書の送付処理を開始しました。');
-            
+
             // ステータスを「送付済」に更新する
-            fetch(/api/invoices//status, {
+            fetch(`/api/invoices/${invoiceId}/status`, {
                 method: 'PUT',
                 headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
                 body: JSON.stringify({ status: '送付済', paidDate: null })
             }).then(() => loadInvoices());
-            
+
         } else {
             Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
         }
@@ -685,31 +685,31 @@ function dispatchDigitalInvoice(invoiceId) {
 }
 
 function viewDigitalInvoiceStatus(invoiceId) {
-    SES.api.get(/api/digital-invoices//status-history).then(res => {
+    SES.api.get(`/api/digital-invoices/${invoiceId}/status-history`).then(res => {
         if (res.code === 200) {
             const data = res.data;
             if (!data.digitalInvoiceId) {
                 Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...SES.swal.darkConfig });
                 return;
             }
-            
-            let html = <div class="text-start">;
-            html += <p>現在のステータス: <strong></strong></p>;
-            
+
+            let html = `<div class="text-start">`;
+            html += `<p>現在のステータス: <strong>${data.status || ''}</strong></p>`;
+
             if (data.events && data.events.length > 0) {
-                html += <table class="table table-sm table-dark"><thead><tr><th>日時</th><th>ステータス</th></tr></thead><tbody>;
+                html += `<table class="table table-sm table-dark"><thead><tr><th>日時</th><th>ステータス</th></tr></thead><tbody>`;
                 data.events.forEach(ev => {
-                    html += <tr><td></td><td></td></tr>;
+                    html += `<tr><td>${ev.eventAt || ''}</td><td>${ev.eventType || ''}</td></tr>`;
                 });
-                html += </tbody></table>;
+                html += `</tbody></table>`;
             }
-            
+
             if (data.canViewXml && data.xmlUrl) {
-                html += <div class="mt-3"><a href="" target="_blank" class="btn btn-sm btn-outline-info"><i class="bi bi-file-code"></i> XMLデータをダウンロード</a></div>;
+                html += `<div class="mt-3"><a href="${data.xmlUrl}" target="_blank" class="btn btn-sm btn-outline-info"><i class="bi bi-file-code"></i> XMLデータをダウンロード</a></div>`;
             }
-            
-            html += </div>;
-            
+
+            html += `</div>`;
+
             Swal.fire({
                 title: 'デジタルインボイス送信状況',
                 html: html,

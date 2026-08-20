@@ -89,7 +89,7 @@
   - **Demo**: mock受信→PENDING_REVIEW／重複拒否。**sandbox Demo は PENDING_SANDBOX**。
   - **完了条件メモ**: 開発完了＝mock定向PASS。本番受入はsandbox証跡必須。
 
-- [ ] M. provider受入/回帰
+- [x] M. provider受入/回帰
   - **Objective**: providerの公式conformance testに通り、送受信のend-to-endと障害復旧が確認できる。
     既存のinvoice/PDF送付機能が壊れていない。
   - **テスト要件**: L4。`mvn test`全量、fresh/legacy MySQL smoke、provider official conformance、
@@ -97,4 +97,5 @@
   - **Demo**: end-to-end送受信と障害復旧。PDF顧客の請求が従来どおり送れることを提示。
   - **実装ガイダンス**: `design.md`§5決定表とplatform-invariantsの境界、既存資産再利用規約に従い、未決事項を黙って補完しない。
     provider契約/sandbox未取得の場合、B1/B2/Mを**PASSにしない**。本番releaseのgateとして別管理する。
+  - **完了条件メモ**: **PENDING_SANDBOX** — mock L4（fast suite）と `git diff --check` まで。sandbox conformance / MySQL smoke / browser Demo は本番release gate。
 

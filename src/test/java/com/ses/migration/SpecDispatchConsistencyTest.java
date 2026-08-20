@@ -59,7 +59,7 @@ class SpecDispatchConsistencyTest {
         // SPEC_BY_CONVERSATION.put("S13", "external-customer-bp-portal"); // V104実装済み（予約→実在へ移行）
         SPEC_BY_CONVERSATION.put("S14", "engineer-self-service-portal-v2");
         // SPEC_BY_CONVERSATION.put("S15", "accounting-payment-integration"); // V106実装済み（予約→実在へ移行）
-        SPEC_BY_CONVERSATION.put("S16", "jp-pint-digital-invoice");
+        // SPEC_BY_CONVERSATION.put("S16", "jp-pint-digital-invoice"); // V107実装済み（予約→実在へ移行）
         SPEC_BY_CONVERSATION.put("S17", "ai-feedback-learning");
     }
 
@@ -72,7 +72,8 @@ class SpecDispatchConsistencyTest {
             "staffing-capacity-planning", List.of(103),
             "external-customer-bp-portal", List.of(104),
             "engineer-self-service-portal-v2", List.of(105),
-            "accounting-payment-integration", List.of(106));
+            "accounting-payment-integration", List.of(106),
+            "jp-pint-digital-invoice", List.of(107));
 
     /** S10の正式V84とは別に、R19-P1-01受理後のG2 follow-upはV102へ追加する。 */
     private static final Map<String, List<Integer>> FOLLOW_UP_MIGRATIONS = Map.of(
