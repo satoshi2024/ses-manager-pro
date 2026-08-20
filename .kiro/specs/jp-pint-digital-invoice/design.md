@@ -97,8 +97,7 @@ XML生成側で丸め直すと、会計・請求・外部で3つの数字が生�
   - **古いeventで終端statusを巻き戻さない。** `event_at`が現在stateより古いeventは記録のみ。
   - 署名検証は**raw body**に対して行う。parse後のオブジェクトで検証しない。
   - 署名不正は`signature_valid=false`で記録し、**状態遷移させない**（fail-closed）。
-- **送信の冪等**: `(invoice_id, direction, specification_version)`にUNIQUE ＋ accounting基盤の
-  `idempotency_key`。同一invoiceの再送でmessage 1件（R5）。
+- **送信の冪等**: (移行によりUNIQUEキー `uk_digital_invoice_send` は削除。5.5項の決定表参照)
 - **受信の重複検知**: `message_id` / supplier invoice number / payload hash の3系統（R3.4）。
 - **受信invoiceを自動で支払確定しない**（R5）。必ずreview queueを経由し、人が確定する。
 - XML parseは**XXE無効・external entity禁止・DTD禁止**（design §2）。
@@ -109,5 +108,44 @@ XML生成側で丸め直すと、会計・請求・外部で3つの数字が生�
 公式fixture/golden XML、XXE、rounding、participant、provider status、webhook signature/order/duplicate、
 受信duplicate/照合、spec version切替、PDF fallback。
 
-## R3 UNIQUE Key Update
-To support cancellation where a new message ID must be sent without replacing the original record (R4.1), the uk_digital_invoice_send unique key on t_digital_invoice (invoice_id, direction, specification_version) is dropped. It is no longer possible to prevent multiple SEND records via DB schema alone, so the application logic will handle deduplication.
+
+
+### 5.5 送信の冪等・Cancel・重複制約 (UNIQUE / R4.1 / R5)
+
+本スペックにおいて、同一請求書に対する多重送信とキャンセルは以下のロジックで制御する（DB UNIQUE制約に依存しない）。
+
+| 事象 | 制約・動作 | 冪等性 / 補償 |
+|---|---|---|
+| Send冪等 (R5) | 同一invoiceで有効な(CANCELLED以外)送信レコードは1件とする。 | アプリケーション側の count > 0 検査（CANCELLEDを除く）で多重Queueを防ぐ。 |
+| Provider送信と保存 | XML確定/Archive後、transaction外で送信。送信直後にDB更新。 | 送信後、DB更新(providerMessageId等)が失敗した場合は未保存状態となる。ジョブ再試行時は、未保存なら再度sendInvoiceする（Provider側のIdempotencyKey仕様等に依存または補償処理を検討）、既に保存済なら送信をスキップ。 |
+| Cancel (R4.1) | キャンセルは旧レコードを上書きせず、Peppol網への打消し電文として別messageを送る。 | 新しいmessage_idでレコードをINSERT（direction="SEND", status="CANCELLED"等）。旧行はそのまま。 |
+
+## 6. テストマトリクス (Test Matrix)
+
+| 分類 | テスト対象 | アサーション |
+|---|---|---|
+| **Build** | コンパイル | mvn compile および mvn test-compile が全件成功する（BusinessException引数エラー等の不在）。 |
+| **Migration** | Flyway latest | 空DBから latest (V107, V107_1改, V107_2) が正常適用される。menu 2件、connection_id NULL、UNIQUE不在、権限seed成功。 |
+| **XML Render** | Renderer R2.2ノード | JpPintRendererが DueDate, BuyerReference, AccountingSupplierParty, AccountingCustomerParty, TaxTotal を正しく出力すること。 |
+| **Cancel** | Cancel動作 | Cancel時に旧行を上書きせず、DBエラー(UNIQUE等)にならず、別レコードが生成されること。 |
+| **Inbound** | Review → 仕入 (P1-06) | 受信XMLの照合、BP purchase候補の挙動が設計通り行われること。 |
+| **Webhook** | event_at処理 | Webhookで受領した event_at をそのまま利用し、順序逆転を防ぐこと。 |
+
+## 7. Migration Fixture と修復手順
+
+V107_1 の不正なDDLによるFlyway適用失敗に対応するため、以下の2経路をサポートするFixtureと修復手順を定める。
+
+### 経路1: 空DBからの新規起動 (Latest)
+- V107 → V107_1（修正済） → V107_2 の順に実行される。
+- **V107_1 成功化手順**: V107_1__jp_pint_digital_invoice_fixes.sql を編集し、不正なINSERT文を削除する。中身を ALTER TABLE t_integration_job MODIFY connection_id BIGINT NULL; と SELECT 1; のみとする。
+- V107_2 にて menu, 権限シード, UNIQUE DROP（uk_digital_invoice_send）を投入する。
+
+### 経路2: V107適用済・V107.1失敗済環境の復旧
+- MySQL等の環境でV107_1が部分適用（ALTERのみ成功しINSERTで失敗）されている場合：
+  1. データベースのバックアップを取得。
+  2. V107_1 のファイルを上記「成功化」の通り修正。
+  3. flyway repair を実行して checksum を再計算・記録し、V107_1 のステータスを修復する。
+  4. 続けてアプリを再起動（またはFlyway実行）し、V107_2 を適用して残りのDDL/DMLを完了させる。
+
+### 5.6 受信時の照合と Purchase 候補 (P1-06)
+受信請求書の照合（BP/PO/契約）および Purchase (仕入) 候補の提示については、ACを縮小せず、当初のdesignの通り完全な一致/類似度ベースの照合ロジックを実装し、テストマトリクスでもアサート対象とする。
