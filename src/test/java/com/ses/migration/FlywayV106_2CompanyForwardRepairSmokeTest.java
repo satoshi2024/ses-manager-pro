@@ -82,6 +82,7 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
         Flyway latest = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
+                .target("106.2")
                 .load();
         assertEquals(1, latest.migrate().migrationsExecuted,
                 "旧V106.1適用済みDBではV106.2だけがpendingであること（過去V105.4を要求しない）");
@@ -134,6 +135,7 @@ class FlywayV106_2CompanyForwardRepairSmokeTest {
                     .dataSource(PUBLISHED_V106_2_MYSQL.getJdbcUrl(), PUBLISHED_V106_2_MYSQL.getUsername(),
                             PUBLISHED_V106_2_MYSQL.getPassword())
                     .locations("classpath:db/migration")
+                    .target("106.2")
                     .load();
             assertEquals(0, current.info().pending().length,
                     "公開済みV106.2 historyから現artifactへ未適用migrationが発生しないこと");

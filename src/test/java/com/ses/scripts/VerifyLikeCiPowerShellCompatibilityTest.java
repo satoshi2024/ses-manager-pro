@@ -39,7 +39,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
             return;
         }
         for (String executable : executables) {
-            ProcessResult result = run(List.of(executable, "-NoProfile", "-File", SCRIPT.toString(),
+            ProcessResult result = run(List.of(executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT.toString(),
                     "-PreflightOnly"));
             assertEquals(0, result.exitCode(), executable + "\n" + result.output());
             assertTrue(result.output().contains("PreflightOnly"));
@@ -63,7 +63,7 @@ class VerifyLikeCiPowerShellCompatibilityTest {
         Path failing = directory.resolve("failing-maven.cmd");
         Files.writeString(failing, "@echo off\r\nexit /b 7\r\n", StandardCharsets.US_ASCII);
 
-        ProcessResult result = run(List.of(executables.get(0), "-NoProfile", "-File", SCRIPT.toString(),
+        ProcessResult result = run(List.of(executables.get(0), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT.toString(),
                 "-MavenExecutable", failing.toString()));
 
         assertEquals(7, result.exitCode(), result.output());
