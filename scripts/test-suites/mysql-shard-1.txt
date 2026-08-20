@@ -8,3 +8,4 @@ FlywayV62ClosedHistoryMigrationSmokeTest
 FlywayV73PartialRepairSmokeTest
 FlywayV79_1RepairSmokeTest
 FlywayV84FailedHistoryRepairSmokeTest
+com.ses.migration.FlywayJpPintDigitalInvoiceSchemaSmokeTest

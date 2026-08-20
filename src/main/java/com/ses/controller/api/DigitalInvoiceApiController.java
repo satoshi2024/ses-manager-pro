@@ -36,7 +36,7 @@ public class DigitalInvoiceApiController {
             return ApiResult.failed("請求書が見つかりません。");
         }
         
-        Customer customer = customerService.getById(invoice.getCustomerId());
+        dataScopeService.assertAllowedCustomer(invoice.getCustomerId()); Customer customer = customerService.getById(invoice.getCustomerId());
         if (customer == null) {
             return ApiResult.failed("請求先の顧客が見つかりません。");
         }
@@ -132,6 +132,31 @@ public class DigitalInvoiceApiController {
         }
 
         return ApiResult.success(result);
+    }
+
+    @PostMapping("/{id}/cancel")
+    public ApiResult<Void> cancelInvoice(@PathVariable Long id) {
+        DigitalInvoice di = digitalInvoiceService.getById(id);
+        if (di == null || !"SEND".equals(di.getDirection())) {
+            return ApiResult.failed("対象のインボイスが見つかりません。");
+        }
+        
+        Invoice invoice = invoiceService.getById(di.getInvoiceId());
+        if (invoice != null) {
+            dataScopeService.assertAllowedCustomer(invoice.getCustomerId());
+        }
+
+        if ("QUEUED".equals(di.getStatus())) {
+            di.setStatus("CANCELLED");
+            digitalInvoiceService.updateById(di);
+            return ApiResult.success();
+        } else if ("SENT".equals(di.getStatus()) || "DELIVERED".equals(di.getStatus())) {
+            di.setStatus("CANCELLED");
+            digitalInvoiceService.updateById(di);
+            return ApiResult.success();
+        }
+        
+        return ApiResult.failed("キャンセルできないステータスです。");
     }
 
     @GetMapping(value = "/{id}/xml", produces = "application/xml")

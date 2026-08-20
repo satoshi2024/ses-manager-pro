@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
+@lombok.extern.slf4j.Slf4j
 @RequiredArgsConstructor
 public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper, DigitalInvoice> implements DigitalInvoiceService {
 
@@ -31,8 +32,10 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final JpPintValidator validator;
     private final JpPintRenderer renderer;
     private final DigitalInvoiceProvider provider;
+    private final com.ses.mapper.InvoiceItemMapper invoiceItemMapper;
     private final InvoiceService invoiceService;
     private final com.ses.service.integration.IntegrationJobService integrationJobService;
+    private final com.ses.service.DocumentService documentService;
 
     private static final Set<String> TERMINAL_STATUSES = Set.of("DELIVERED", "REJECTED", "CANCELLED");
 
@@ -96,22 +99,38 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         di.setInvoiceId(invoiceId);
         di.setDirection("SEND");
         di.setProfile("Standard");
+        
+        com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+            .documentType("INVOICE")
+            .direction("INCOMING")
+            .sourceType("RECEIVED")
+            .businessKey("DIGITAL_INVOICE:" + providerMessageId)
+            .versionDiscriminator("1")
+            .originalName(providerMessageId + ".xml")
+            .contentType("application/xml")
+            .build();
+        try {
+            com.ses.entity.Document docEntity = documentService.registerReceived(req, new java.io.ByteArrayInputStream(xmlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            di.setXmlDocumentId(docEntity.getId());
+        } catch (Exception e) {
+            log.warn("Failed to archive inbound XML", e);
+        }
         di.setSpecificationVersion(specVersion);
         di.setMessageId("MSG-" + UUID.randomUUID().toString()); // 自システム内のMessageID
         di.setStatus("QUEUED");
         save(di);
 
-        // P1-1修正: ジョブ基盤への登録 (Outboxパターン)
-        String idempotencyKey = "digital_invoice_send_" + di.getId();
+        String payload = "{\"digitalInvoiceId\":" + di.getId() + "}";
+        String payloadHash = org.apache.commons.codec.digest.DigestUtils.sha256Hex(payload);
+        String idempotencyKey = "digital_invoice_send_" + di.getMessageId(); // 業務キー(message_id)に基づく冪等性
         integrationJobService.createJob(
-            null, // connectionId (Sandbox/直接APIキーなので一旦nullまたは不要)
+            null, // connectionId はV107でNULL可に変更
             "DIGITAL_INVOICE_SEND",
             "t_digital_invoice",
             di.getId(),
             idempotencyKey,
-            "hash"
+            payloadHash
         );
-
         return di;
     }
 
@@ -136,6 +155,19 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 return;
             }
 
+            // P1-01: InvoiceItem/税 snapshot を写像
+            java.util.List<com.ses.entity.InvoiceItem> items = invoiceItemMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.InvoiceItem>()
+                    .eq(com.ses.entity.InvoiceItem::getInvoiceId, invoice.getId())
+            );
+            
+            java.util.List<CanonicalInvoice.CanonicalInvoiceItem> canonicalItems = items.stream().map(item -> {
+                CanonicalInvoice.CanonicalInvoiceItem line = CanonicalInvoice.CanonicalInvoiceItem.builder().build();
+                line.setDescription(item.getDescription());
+                line.setLineAmount(item.getAmount());
+                return line;
+            }).toList();
+
             // CanonicalInvoice生成 (簡易マッピング)
             CanonicalInvoice canonicalInvoice = CanonicalInvoice.builder()
                     .invoiceNumber(invoice.getInvoiceNo())
@@ -144,6 +176,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                     .taxAmount(invoice.getTax())
                     .taxInclusiveAmount(invoice.getTotal())
                     .roundingAmount(java.math.BigDecimal.ZERO)
+                    .items(canonicalItems)
                     .build();
 
             // 金額の検算
@@ -154,6 +187,22 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             // プロバイダAPIへ送信
             String providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion());
+            
+            com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+                .documentType("INVOICE")
+                .direction("OUTGOING")
+                .sourceType("GENERATED")
+                .businessKey("DIGITAL_INVOICE_SEND:" + di.getId())
+                .versionDiscriminator("1")
+                .originalName(invoice.getInvoiceNo() + "_peppol.xml")
+                .contentType("application/xml")
+                .build();
+            try {
+                com.ses.entity.Document docEntity = documentService.registerGenerated(req, new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                di.setXmlDocumentId(docEntity.getId());
+            } catch (Exception e) {
+                log.warn("Failed to archive outbound XML", e);
+            }
 
             // ステータス更新
             di.setProviderMessageId(providerMessageId);
@@ -188,12 +237,28 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         di.setProviderMessageId(providerMessageId);
         di.setSpecificationVersion("1.1.3"); // fallback
         di.setProfile("Standard");
+        
+        com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
+            .documentType("INVOICE")
+            .direction("INCOMING")
+            .sourceType("RECEIVED")
+            .businessKey("DIGITAL_INVOICE:" + providerMessageId)
+            .versionDiscriminator("1")
+            .originalName(providerMessageId + ".xml")
+            .contentType("application/xml")
+            .build();
+        try {
+            com.ses.entity.Document docEntity = documentService.registerReceived(req, new java.io.ByteArrayInputStream(xmlContent.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            di.setXmlDocumentId(docEntity.getId());
+        } catch (Exception e) {
+            log.warn("Failed to archive inbound XML", e);
+        }
         di.setMessageId("MSG-" + java.util.UUID.randomUUID().toString()); // fallback
 
         try {
             // セキュアパース
             org.w3c.dom.Document doc = renderer.parseSecurely(xmlContent);
-            org.w3c.dom.NodeList idNodes = doc.getElementsByTagName("ID");
+            org.w3c.dom.NodeList idNodes = doc.getElementsByTagNameNS("*", "ID");
             String invoiceNo = idNodes.getLength() > 0 ? idNodes.item(0).getTextContent() : di.getMessageId();
             di.setMessageId(invoiceNo); // invoiceNo を messageId として扱う (R3.4 supplier invoice number重複)
             

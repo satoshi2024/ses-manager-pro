@@ -62,7 +62,41 @@ public class JpPintRenderer {
             issueDate.setTextContent(invoice.getIssuedDate() != null ? invoice.getIssuedDate().toString() : "");
             root.appendChild(issueDate);
 
-            // TODO: 詳細なマッピング実装（今回はSpikeとして最小限）
+            // LegalMonetaryTotal (合計金額)
+            org.w3c.dom.Element legalMonetaryTotal = doc.createElement("cac:LegalMonetaryTotal");
+            org.w3c.dom.Element lineExtensionAmount = doc.createElement("cbc:LineExtensionAmount");
+            lineExtensionAmount.setTextContent(invoice.getTaxExclusiveAmount() != null ? invoice.getTaxExclusiveAmount().toString() : "0");
+            legalMonetaryTotal.appendChild(lineExtensionAmount);
+            org.w3c.dom.Element taxExclusiveAmount = doc.createElement("cbc:TaxExclusiveAmount");
+            taxExclusiveAmount.setTextContent(invoice.getTaxExclusiveAmount() != null ? invoice.getTaxExclusiveAmount().toString() : "0");
+            legalMonetaryTotal.appendChild(taxExclusiveAmount);
+            org.w3c.dom.Element taxInclusiveAmount = doc.createElement("cbc:TaxInclusiveAmount");
+            taxInclusiveAmount.setTextContent(invoice.getTaxInclusiveAmount() != null ? invoice.getTaxInclusiveAmount().toString() : "0");
+            legalMonetaryTotal.appendChild(taxInclusiveAmount);
+            root.appendChild(legalMonetaryTotal);
+
+            // InvoiceLine (明細)
+            if (invoice.getItems() != null) {
+                int lineId = 1;
+                for (CanonicalInvoice.CanonicalInvoiceItem item : invoice.getItems()) {
+                    org.w3c.dom.Element invoiceLine = doc.createElement("cac:InvoiceLine");
+                    org.w3c.dom.Element lineIdElem = doc.createElement("cbc:ID");
+                    lineIdElem.setTextContent(String.valueOf(lineId++));
+                    invoiceLine.appendChild(lineIdElem);
+                    
+                    org.w3c.dom.Element itemLineAmount = doc.createElement("cbc:LineExtensionAmount");
+                    itemLineAmount.setTextContent(item.getLineAmount() != null ? item.getLineAmount().toString() : "0");
+                    invoiceLine.appendChild(itemLineAmount);
+
+                    org.w3c.dom.Element itemElem = doc.createElement("cac:Item");
+                    org.w3c.dom.Element itemName = doc.createElement("cbc:Name");
+                    itemName.setTextContent(item.getDescription() != null ? item.getDescription() : "");
+                    itemElem.appendChild(itemName);
+                    invoiceLine.appendChild(itemElem);
+                    
+                    root.appendChild(invoiceLine);
+                }
+            }
 
             TransformerFactory tf = TransformerFactory.newInstance();
             // TransformerにもXXE対策推奨だが、出力側なので比較的安全

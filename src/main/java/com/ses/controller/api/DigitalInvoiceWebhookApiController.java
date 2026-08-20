@@ -29,11 +29,19 @@ public class DigitalInvoiceWebhookApiController {
         
         try {
             boolean isValid = provider.verifyWebhookSignature(rawBody, signature);
+            if (!isValid) {
+                // P0-02: すべての event type で raw body 署名が false なら状態も受信行も作らない。
+                // provider_event_id UNIQUE に無効署名を載せない
+                return ResponseEntity.ok("Invalid signature recorded");
+            }
+
             JsonNode root = objectMapper.readTree(rawBody);
 
             String providerMessageId = root.path("messageId").asText();
             String eventType = root.path("status").asText(); // DELIVERED, REJECTED, RECEIVED etc.
             String eventId = root.path("eventId").asText();
+            String eventAtStr = root.path("eventAt").asText();
+            LocalDateTime eventAt = eventAtStr.isEmpty() ? LocalDateTime.now() : java.time.OffsetDateTime.parse(eventAtStr).toLocalDateTime();
 
             // 受信(Inbound)イベントの処理
             if ("RECEIVED".equalsIgnoreCase(eventType)) {
@@ -57,7 +65,7 @@ public class DigitalInvoiceWebhookApiController {
             event.setDigitalInvoiceId(di.getId());
             event.setProviderEventId(eventId);
             event.setEventType(eventType);
-            event.setEventAt(LocalDateTime.now());
+            event.setEventAt(eventAt);
             event.setPayloadHash(org.apache.commons.codec.digest.DigestUtils.sha256Hex(rawBody));
             event.setSignatureValid(isValid);
             

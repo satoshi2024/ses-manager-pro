@@ -28,6 +28,8 @@ public final class ActionPermissionResolver {
             // 管理者を含む全roleで403になる（CRM-R2-P1-01と同じ罠）。V102_2のm_menu seedと対にする。
             Map.entry("compliance-gate", "compliance-gate"),
             Map.entry("contract-documents", "contract-document"),
+            Map.entry("digital-invoices", "digital-invoice"),
+            Map.entry("inbound-invoices", "inbound-invoice"),
             Map.entry("contracts", "contract"),
             // CRM(S08)。ここへ登録しないと resolve() が null を返し、V73が m_menu へ入れた
             // path_prefix='/crm/leads' に MenuPermissionFilter がヒットした時点で

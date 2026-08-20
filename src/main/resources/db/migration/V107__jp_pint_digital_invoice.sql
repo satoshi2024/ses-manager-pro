@@ -69,3 +69,35 @@ CREATE TABLE t_digital_invoice_event (
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='デジタルインボイスWebhookイベント';
+
+-- ============================================================
+-- 5. m_menu, t_permission_group_action シードデータ追加
+-- ============================================================
+INSERT INTO m_menu (menu_key, name, icon, path_prefix, api_prefix, sort_order)
+VALUES 
+('digital-invoice', 'デジタルインボイス', 'bi-receipt', '/invoice', '/api/digital-invoices', 801),
+('inbound-invoice', '受信インボイス', 'bi-inbox', '/invoice/inbound', '/api/inbound-invoices', 802);
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '管理者', id FROM m_menu WHERE menu_key IN ('digital-invoice', 'inbound-invoice');
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '営業', id FROM m_menu WHERE menu_key IN ('digital-invoice');
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT 'HR', id FROM m_menu WHERE menu_key IN ('inbound-invoice');
+
+INSERT INTO t_role_menu (role, menu_id)
+SELECT 'マネージャー', id FROM m_menu WHERE menu_key IN ('inbound-invoice', 'digital-invoice');
+
+INSERT INTO t_permission_group_action (group_id, action_key)
+SELECT id, 'digital-invoice:read' FROM m_permission_group WHERE group_code = 'ADMIN_GROUP';
+INSERT INTO t_permission_group_action (group_id, action_key)
+SELECT id, 'digital-invoice:write' FROM m_permission_group WHERE group_code = 'ADMIN_GROUP';
+INSERT INTO t_permission_group_action (group_id, action_key)
+SELECT id, 'inbound-invoice:read' FROM m_permission_group WHERE group_code = 'ADMIN_GROUP';
+INSERT INTO t_permission_group_action (group_id, action_key)
+SELECT id, 'inbound-invoice:write' FROM m_permission_group WHERE group_code = 'ADMIN_GROUP';
+
+-- 営業、HR、マネージャーなど他の適切なグループにも必要に応じて割り当て。
+ALTER TABLE t_integration_job MODIFY connection_id BIGINT NULL;

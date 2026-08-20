@@ -52,3 +52,4 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
 );
+ALTER TABLE m_customer ADD COLUMN IF NOT EXISTS delivery_preference VARCHAR(20) NOT NULL DEFAULT 'PDF';

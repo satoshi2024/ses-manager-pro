@@ -123,7 +123,7 @@ public class SecurityConfig {
             // DB上で失効・期限切れになったsessionを即時拒否
             .addFilterAfter(persistentSessionFilter, MfaEnforcementFilter.class)
             // アクセス制御の設定
-            .authorizeHttpRequests(auth -> auth
+                .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
                 .requestMatchers(
                     "/login",
@@ -136,7 +136,8 @@ public class SecurityConfig {
                     "/favicon.ico",
                     "/api/auth/**",
                     "/oauth2/**",
-                    "/login/oauth2/**"
+                    "/login/oauth2/**",
+                    "/api/webhooks/**"
                 ).permitAll()
                 // ユーザー管理・ロール権限設定は管理者のみアクセス可能
                 .requestMatchers(
@@ -265,6 +266,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository())
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                .ignoringRequestMatchers("/api/webhooks/**")
             )
             .headers(headers -> {
                 if (requireHttps) {

@@ -100,8 +100,7 @@ class DigitalInvoiceWebhookApiControllerTest {
         List<DigitalInvoiceEvent> events = digitalInvoiceEventService.lambdaQuery()
                 .eq(DigitalInvoiceEvent::getDigitalInvoiceId, di.getId())
                 .list();
-        assertEquals(1, events.size());
-        assertEquals(false, events.get(0).getSignatureValid()); // 不正イベントとして記録
+        assertEquals(0, events.size(), "不正イベントは記録されない");
     }
 
     @Test
@@ -123,7 +122,7 @@ class DigitalInvoiceWebhookApiControllerTest {
         ctx.getBean(com.ses.service.PeppolParticipantService.class).save(pp);
 
         String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-999</ID><EndpointID schemeID=\"0188\">1234567890123</EndpointID></Invoice>";
-        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-in-1\", \"eventId\": \"ev-in-1\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
+        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-in-1\", \"eventId\": \"ev-in-1\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
 
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -146,7 +145,7 @@ class DigitalInvoiceWebhookApiControllerTest {
         when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
 
         String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice><ID>INV-888</ID></Invoice>";
-        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
+        String payload = "{\"status\": \"RECEIVED\", \"messageId\": \"msg-dup\", \"eventId\": \"ev-dup\", \"eventAt\": \"2026-08-20T12:00:00Z\", \"xmlContent\": \""+ xmlContent.replace("\"", "\\\"") +"\"}";
 
         // 1st request
         mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
@@ -169,3 +168,5 @@ class DigitalInvoiceWebhookApiControllerTest {
         assertEquals(1, count, "Should not create duplicate DigitalInvoice on duplicate webhook");
     }
 }
+
+

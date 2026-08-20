@@ -37,6 +37,9 @@ class DigitalInvoiceSendTest {
     private InvoiceService invoiceService;
 
     @Autowired
+    private com.ses.mapper.InvoiceItemMapper invoiceItemMapper;
+
+    @Autowired
     private com.ses.service.integration.IntegrationJobService integrationJobService;
 
     @Test
@@ -92,7 +95,7 @@ class DigitalInvoiceSendTest {
         inv.setTax(new BigDecimal("100"));
         inv.setTotal(new BigDecimal("9999")); // 合計が合わない
         inv.setIssuedDate(LocalDate.now());
-        invoiceService.save(inv);
+        invoiceService.save(inv); com.ses.entity.InvoiceItem item = new com.ses.entity.InvoiceItem(); item.setInvoiceId(inv.getId()); item.setDescription("Test"); item.setAmount(new java.math.BigDecimal("1000")); invoiceItemMapper.insert(item);
 
         Customer c = new Customer();
         c.setCustomerName("Test Co 3");
@@ -129,7 +132,7 @@ class DigitalInvoiceSendTest {
         inv.setTax(new BigDecimal("100"));
         inv.setTotal(new BigDecimal("1100"));
         inv.setIssuedDate(LocalDate.now());
-        invoiceService.save(inv);
+        invoiceService.save(inv); com.ses.entity.InvoiceItem item = new com.ses.entity.InvoiceItem(); item.setInvoiceId(inv.getId()); item.setDescription("Test"); item.setAmount(new java.math.BigDecimal("1000")); invoiceItemMapper.insert(item);
 
         Customer c = new Customer();
         c.setCustomerName("Test Co 4");
