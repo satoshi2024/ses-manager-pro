@@ -6,23 +6,24 @@
 |---|---|
 | spec | `ai-feedback-learning` |
 | handbook | `v2.0` |
-| state | `FIXING`（Round 2 P1-01〜04 修正済。再Review待ち） |
+| state | `CONDITIONAL PASS`（Round 3。最終/本番 PASS は出さない） |
 | base | `9d2c229b6fe5033f1cc8275da116f65e98f2cd59` |
-| head | Round 2 P1 fix（前 Head `e90e0537`） |
-| merge | `main` に T109〜T115 が入っている |
-| latest review | Round 2（独立、T109–T115。spec総合 FAIL、P1=4） |
-| verdict | T109 intermediate **PASS** 維持。R1-P2-01/02/03 **VERIFIED_CLOSED**。R2-P1-01〜04 は FIXED_BY_IMPLEMENTER。spec総合は再Reviewまで **FAIL**。`GATE-S17-G10-PROD` は DEFERRED |
-| issue count | P0=0 / P1=4 FIXED_BY_IMPLEMENTER / P2=5 OPEN（非block） |
-| next action | Round 3 独立Review（OPEN P0/P1 のみ）。次specは開始しない。本番 PASS は出さない |
+| head | `6b4cc56f393132f2fe4df2b084f8ee10065f706c` |
+| merge | `origin/main` 一致 |
+| latest review | Round 3（独立、OPEN P0/P1 のみ） |
+| verdict | **CONDITIONAL PASS**。P0=0 / P1=0。R2-P1-01〜04 と R1-P2-01〜03 は **VERIFIED_CLOSED**。P2=5 OPEN。`GATE-S17-G10-PROD` は DEFERRED |
+| issue count | P0=0 / P1=0 / P2=5 OPEN |
+| next action | P2 と G10 を閉じない限り最終 PASS にしない。次specは開始しない |
 
 ## 2. OPEN Issue Register
 
 | issue ID | severity | AC | file:line | reproduction | impact | minimum fix | regression scope | state | fix commit | verified by |
 |---|---|---|---|---|---|---|---|---|---|---|
-| ai-feedback-learning-R2-P1-01 | P1 | design §5.2 | `AiFeedbackApiController` / `AiFeedbackServiceImpl` | 営業B/HR が他人の item に feedback | 他営業の採否・HR判断が学習に入る | item→run 所有者照合。HR/要員拒否 | `AiFeedbackApiControllerTest` + Outcome | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
-| ai-feedback-learning-R2-P1-02 | P1 | R3.1 / §8 | `AiEvaluationMetrics` | 面談率分母が全item | version比較が歪む | 分母=ACCEPT。0なら0 | `AiEvaluationMetricsTest` | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
-| ai-feedback-learning-R2-P1-03 | P1 | R1.1 / R3.3 | `AiRecommendationRecorderImpl` | matching の hash が 0×64 | 再現hash/segmentが無い | allowlist summary + sha256 | `AiRecommendationRecorderHashTest` | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
-| ai-feedback-learning-R2-P1-04 | P1 | R3.1 | VersionRow / evaluation UI | precision@k 非表示 | オンライン看板が offline と不一致 | precision@5/@10 を API と表に出す | Metrics + Eval API/画面列 | FIXED_BY_IMPLEMENTER | 本commit | Review 待ち |
+| ai-feedback-learning-R2-P2-01 | P2 | platform §3.3 | `AiExecutionGatewayImpl.execute` | `@Transactional` のまま `callProvider` | 外部HTTPがTX内。現状mock | persist と HTTP を分ける | GATE 前 | OPEN | — | — |
+| ai-feedback-learning-R2-P2-02 | P2 | R3.3 | `ai-evaluation.js` | `dto.segments` を描画しない。90日窓なし | 件数≥5でも画面に出ない | UI と 90日窓 | P1-03 後 | OPEN | — | — |
+| ai-feedback-learning-R2-P2-03 | P2 | R2.4 | proposal draft | 人手修正差分の経路なし | 学習に人手差分が残らない | design に列が無いので P1 にしない | — | OPEN | — | — |
+| ai-feedback-learning-R2-P2-04 | P2 | T110 raw停止 | Gemini/Rule matching | `t_ai_log.request_params` に ID | raw prompt ではないが二重記録 | 新規 raw/params 停止 | — | OPEN | — | — |
+| ai-feedback-learning-R2-P2-05 | P2 | design §5.2 | `/api/ai/evaluations/run` | 営業が run でき list が全件 | 昇格は管理者のみ | 営業の run/list を絞る | — | OPEN | — | — |
 
 ## 3. Closed/Deferred Issue
 
@@ -32,24 +33,27 @@
 | ai-feedback-learning-R1-P2-01 | VERIFIED_CLOSED | workLocation grain | `214c6852` + T111 | `AiExecutionGatewayPiiTest` | Round 2 | 番地を allowlist に戻したとき |
 | ai-feedback-learning-R1-P2-02 | VERIFIED_CLOSED | EARLY_EXIT が全解約 | `214c6852` + T112 | `AiFeedbackOutcomeTest` | Round 2 | 当日解約を EARLY_EXIT にしたとき |
 | ai-feedback-learning-R1-P2-03 | VERIFIED_CLOSED | L0 が design 表を parse しない | `214c6852` | `AiG10AllowlistDocumentTest` | Round 2 | prefix token 検査を外したとき |
+| ai-feedback-learning-R2-P1-01 | VERIFIED_CLOSED | feedback が所有者照合なし | `6b4cc56f` | MVC 本人200 / 他営業・HR 403 | Round 3 | 所有者照合を外したとき |
+| ai-feedback-learning-R2-P1-02 | VERIFIED_CLOSED | 面談/成約率の分母が全item | `6b4cc56f` | ACCEPT 2 / INTERVIEW 1 → 50% | Round 3 | 分母を全 item に戻したとき |
+| ai-feedback-learning-R2-P1-03 | VERIFIED_CLOSED | matching hash が 0×64 | `6b4cc56f` | hash≠0、grain済み勤務地 | Round 3 | matching hash をゼロ埋めに戻したとき |
+| ai-feedback-learning-R2-P1-04 | VERIFIED_CLOSED | precision@k 非表示 | `6b4cc56f` | DTO・HTML・JS・4言語 | Round 3 | precision 列を落としたとき |
 
 owner: 発注者 / security / HR / product owner。期限: 本番release前。T115 Mの本番PASSを阻害する。開発task T110〜T114は阻害しない。
 
 ## 4. 最新Review Packet
 
 ```text
-REVIEW PACKET（Review側でgitから再固定）
+REVIEW PACKET（Round 3。Review側でgitから再固定）
 - handbook version: v2.0
-- spec/tasks: T109 のみ（T110〜T115 は Head に diff なし）
+- spec/tasks: T109〜T115
 - base: 9d2c229b6fe5033f1cc8275da116f65e98f2cd59
-- head: 835c8c867de4b33cd12f04251980719a555495ef（origin/main と一致、worktree clean）
-- merge: main に入っている（T109 docs commit）
-- changed files: 9 files / +913 / -4（src/main なし）
-- requested verdict: intermediate（T109）
-- 最終PASS対象ではない（T110〜T115未実装、M未実施）
+- head: 6b4cc56f393132f2fe4df2b084f8ee10065f706c（origin/main 一致）
+- 前 Head: e90e0537
+- requested verdict: CONDITIONAL PASS（P0=0 / P1=0 / P2=5 / GATE-S17-G10-PROD）
+- 最終/本番 PASS 対象ではない
 ```
 
-Review は git を正とした。実装ledgerの「未commit Head」は破棄。
+Review は git を正とした。S17 差分は `6b4cc56f` のみ。P2 と G10 は未改修。
 
 ## 5. Requirements Trace
 
@@ -97,8 +101,11 @@ T109はDDLなし。T110で正式migration **V108** を追加。欠番埋めな�
 | L3 | `mvn test -Pmysql-tests -Dtest=FlywayAiFeedbackSchemaSmokeTest` | ローカル Docker なし | 1 | 0 | 0 | 1 | 0 | 本commit | implementer（`disabledWithoutDocker`。CI shard-1） |
 | L4 | `mvn test` | JDK17 / H2 / excludedGroups=`mysql \| performance \| browser` | 2506 | 0 | 0 | 0 | 0 | 本commit | implementer |
 | L0 | `git diff --check` | 作業tree | — | 0 | 0 | 0 | 0 | 本commit | implementer |
+| Review 定向 | P1回帰 + R1 P2 直接 | JDK17 / Head `6b4cc56f` | 40 | 0 | 0 | 0 | 0 | `6b4cc56f` | Round 3 独立Review |
 
-L4 checkpoint: T115 完了。除外は pom 既定の mysql/performance/browser。MySQL smoke はクラスと shard-1 登録済み。ローカル Docker なしのため未実行。本番 PASS は `GATE-S17-G10-PROD` まで出さない。
+L4 checkpoint: T115 完了（Head `e90e0537`。Round 3 は同一 Head のため L4 再実行なし）。除外は pom 既定の mysql/performance/browser。MySQL smoke はクラスと shard-1 登録済み。ローカル Docker なしのため未実行。本番 PASS は `GATE-S17-G10-PROD` まで出さない。
+
+NOTE（P1ではない）: 日本語 bundle の precision 見出しが `precision@5` のまま。hash テストが共有 H2 の project 1 を更新する。
 
 ## 8. Demo Evidence
 
@@ -131,13 +138,43 @@ T109 intermediate=PASS。spec総合=NOT REVIEWABLE。
 
 P2 は T110 DDL の blocker ではない。P2-01〜03 は `214c6852` で文書/L0修正済。P2-01 の grain 実装は T111、P2-02 の fixture は T112。
 
+### Round 2（独立Review、T109–T115 初回、Head `e90e0537`）
+
+```text
+ai-feedback-learning / Round 2 / handbook v2.0
+Base 9d2c229b / Head e90e0537 / origin/main 一致
+R1-P2-01/02/03 = VERIFIED_CLOSED
+P0=0 / P1=4 OPEN / P2=5 OPEN
+spec総合 = FAIL
+次task = R2-P1-01〜04
+```
+
+### Round 3（独立Review、OPEN P0/P1 のみ、Head `6b4cc56f`）
+
+```text
+ai-feedback-learning / Round 3 / handbook v2.0
+Base 9d2c229b / Head 6b4cc56f / origin/main 一致
+R2-P1-01..04 = VERIFIED_CLOSED
+R1-P2-01..03 = VERIFIED_CLOSED（再起票なし）
+P0=0 / P1=0 / P2=5 OPEN
+必須test（Review）= 40/0/0/0 exit 0
+release gate=GATE-S17-G10-PROD
+T109 intermediate PASS 維持
+spec総合 = CONDITIONAL PASS（最終/本番 PASS は出さない）
+次spec = 開始しない
+```
+
 ## 10. 転記用最終結論
 
 ```text
 ai-feedback-learning / handbook v2.0
-T109 intermediate=PASS（Head 835c8c86）。R1-P2=VERIFIED_CLOSED。
-Round 2 FAIL（P1=4）。実装は R2-P1-01〜04 を修正。spec総合は再Reviewまで FAIL。
-次task=Round 3 Review。次spec=開始しない。本番 PASS は出さない。
+Head 6b4cc56f / origin/main 一致
+R2-P1-01..04 = VERIFIED_CLOSED（Round 3 / 6b4cc56f）
+R1-P2-01..03 = VERIFIED_CLOSED
+P0=0 / P1=0 / P2=5 OPEN
+spec総合 = CONDITIONAL PASS
+release gate = GATE-S17-G10-PROD（DEFERRED）
+次spec = 開始しない。最終/本番 PASS は出さない。
 ```
 
 ## Task log
@@ -151,4 +188,5 @@ Round 2 FAIL（P1=4）。実装は R2-P1-01〜04 を修正。spec総合は再Rev
 | T113 | R3.2, §5.3 自動promotion禁止 | offline eval fixture, promoteApproved, rollback | `AiOfflineEvaluationTest` | FAILED は昇格拒否。rollback後も過去 run の version 不変 | 本working tree | shadow は ACTIVE 以外。承認は管理者 |
 | T114 | R3.3, §5.2 cost/HR | `/ai/evaluation`, `/api/ai/evaluations`, i18n 4言語, menu `ai-evaluation` | `AiEvaluationApiControllerTest`, PageRendering, MessageBundle | 少数segment非表示。HR 403。cost は管理者のみ | 本working tree | 最長 prefix `/api/ai/evaluations` |
 | T115 | M 回帰 | L4修正（H2 mismatch列、browser tag、PowerShell gate） | L4 `mvn test` **2506/0/0/0 BUILD SUCCESS skip 0**。MySQL smoke は Docker 欠如で未実行（CI shard-1）。browser Demo は markup + `-Pbrowser-tests` へ隔離 | mock既定の既存AI回帰。390px は `MobileResponsiveLayoutTest` `/ai/evaluation` | `e90e0537` | 本番 PASS は GATE-S17-G10-PROD まで出さない。実Chrome Demo は browser profile |
-| R2-P1 | R2-P1-01〜04 | feedback認可、metric分母、matching hash/summary、precision@k 表示 | 定向 **44/0/0/0**（G10/PII/Outcome/Schema/Offline/Scan/Eval/Feedback MVC/Metrics/Recorder） | 営業B/HR 403、面談率=採用分母、hash≠0、precision列 | 本commit | P2-01〜05 は未着手。再Review依頼 |
+| R2-P1 | R2-P1-01〜04 | feedback認可、metric分母、matching hash/summary、precision@k 表示 | Review 定向 **40/0/0/0**。implementer 44/0/0/0 | 営業B/HR 403、面談率=採用分母、hash≠0、precision列 | `6b4cc56f` | P2-01〜05 と G10 は未閉じ。最終 PASS にしない |
+| R3 ledger | Round 3 CONDITIONAL PASS 転記 | review-ledger / 中央台帳 / expansion README | Review 判定を正とする。テスト再実行なし | P1=VERIFIED_CLOSED。次spec開始しない | 本commit | 最終/本番 PASS は出さない |
