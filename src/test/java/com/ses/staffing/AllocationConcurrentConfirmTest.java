@@ -2,7 +2,6 @@ package com.ses.staffing;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.AllocationPlan;
-import com.ses.entity.Engineer;
 import com.ses.entity.ProjectPosition;
 import com.ses.mapper.AllocationPlanMapper;
 import com.ses.mapper.ProjectPositionMapper;
@@ -29,13 +28,14 @@ import java.util.concurrent.TimeUnit;
 
 import static com.ses.entity.AllocationPlan.STATUS_CONFIRMED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T077 A1: 同一要員への同時配置（確認）で片方が失敗することを検証する（L2〜L3）。
+ * T077 A1 / S12-P1-01: 同一要員への同時配置（確認）で片方が失敗することを検証する（L2〜L3）。
  *
- * <p>確定transaction内のFOR UPDATEロック（design §5.4）により、後着の配置は先行の確定を
- * 読んでから過配賦判定される。REQUIRES_NEWで2txを並行実行し、
- * 「成功1件・失敗1件」の不変条件を確認する（H2のロックタイムアウトも失敗側として許容）。
+ * <p>確定transaction内で {@code t_engineer} を FOR UPDATE ロック（S12-P1-01）し、
+ * 続けて期間行をロックして再検証する（design §5.4）。REQUIRES_NEWで2txを並行実行し、
+ * 「成功1件・失敗1件」の不変条件を確認する（H2のロックタイムアウト等も失敗側として許容）。
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -72,65 +72,22 @@ class AllocationConcurrentConfirmTest {
         TransactionTemplate setup = new TransactionTemplate(transactionManager);
         setup.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         Long sharedDraftId = setup.execute(s -> {
-            // 基準の40%確定配置（FOR UPDATEのロック対象行）
-            jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T077cc-cust-" + System.nanoTime());
-            long customerId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM m_customer WHERE company_name LIKE 'T077cc-cust-%' ORDER BY id DESC LIMIT 1",
-                    Long.class);
-            jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
-                    + "VALUES (?, ?, '募集中')", "T077cc-prj-" + System.nanoTime(), customerId);
-            long projectId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM t_project WHERE project_name LIKE 'T077cc-prj-%' ORDER BY id DESC LIMIT 1",
-                    Long.class);
-            ProjectPosition position = new ProjectPosition();
-            position.setProjectId(projectId);
-            position.setPositionNo("P1");
-            position.setRoleName("Javaエンジニア");
-            position.setRequiredCount(1);
-            position.setAllocationPercent(new BigDecimal("100"));
-            positionMapper.insert(position);
+            // 基準の40%確定配置（期間行FOR UPDATEのロック対象）
+            Long positionId = insertPosition();
 
-            AllocationPlan base = plan(position.getId(), "40", "2026-09-01", "2026-09-30");
+            AllocationPlan base = plan(positionId, "40", "2026-09-01", "2026-09-30");
             base.setStatus(STATUS_CONFIRMED);
             base.setVersion(0);
             allocationMapper.insert(base);
             // 競合させる60%の下書き（40+60=100で単独なら確定可能）
-            AllocationPlan draft = plan(position.getId(), "60", "2026-09-01", "2026-09-30");
+            AllocationPlan draft = plan(positionId, "60", "2026-09-01", "2026-09-30");
             allocationMapper.insert(draft);
             return draft.getId();
         });
 
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        try {
-            List<Future<Boolean>> results = new ArrayList<>();
-            for (int i = 0; i < 2; i++) {
-                results.add(pool.submit(() -> {
-                    start.await(5, TimeUnit.SECONDS);
-                    try {
-                        tx.executeWithoutResult(s -> allocationService.confirm(sharedDraftId));
-                        return true;
-                    } catch (BusinessException e) {
-                        return false;
-                    } catch (Exception e) {
-                        // H2のロックタイムアウト等も「失敗側」として扱う
-                        return false;
-                    }
-                }));
-            }
-            start.countDown();
-            List<Boolean> outcomes = new ArrayList<>();
-            for (Future<Boolean> future : results) {
-                outcomes.add(future.get(30, TimeUnit.SECONDS));
-            }
-            pool.shutdown();
-            long success = outcomes.stream().filter(Boolean::booleanValue).count();
-            assertEquals(1, success, "同一配置の同時確定では状態CASで片方だけが成功するはず: " + outcomes);
-        } finally {
-            pool.shutdownNow();
-        }
+        List<Boolean> outcomes = confirmConcurrently(List.of(sharedDraftId, sharedDraftId));
+        long success = outcomes.stream().filter(Boolean::booleanValue).count();
+        assertEquals(1, success, "同一配置の同時確定では状態CASで片方だけが成功するはず: " + outcomes);
 
         // 確定は基準40%＋成功した1件の合計2件
         long confirmed = allocationMapper.selectCount(
@@ -141,34 +98,52 @@ class AllocationConcurrentConfirmTest {
     }
 
     @Test
+    void 確定済み無しで二つの60パーセント下書きを同時確定すると片方だけ成功し同日合計は100以下() throws Exception {
+        // S12-P1-01: 確定済み期間行が無いと期間行FOR UPDATEだけでは直列化できない。
+        // t_engineer センチネルロックにより、60+60=120の二重確定を防ぐ。
+        TransactionTemplate setup = new TransactionTemplate(transactionManager);
+        setup.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        List<Long> draftIds = setup.execute(s -> {
+            Long positionId = insertPosition();
+            AllocationPlan a = plan(positionId, "60", "2026-09-01", "2026-09-30");
+            AllocationPlan b = plan(positionId, "60", "2026-09-01", "2026-09-30");
+            allocationMapper.insert(a);
+            allocationMapper.insert(b);
+            return List.of(a.getId(), b.getId());
+        });
+
+        List<Boolean> outcomes = confirmConcurrently(draftIds);
+        long success = outcomes.stream().filter(Boolean::booleanValue).count();
+        long failure = outcomes.stream().filter(v -> !v).count();
+        assertEquals(1, success, "成功は1件のはず: " + outcomes);
+        assertEquals(1, failure, "失敗は1件のはず: " + outcomes);
+
+        List<AllocationPlan> confirmed = allocationMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AllocationPlan>()
+                        .eq(AllocationPlan::getEngineerId, engineerId)
+                        .eq(AllocationPlan::getStatus, STATUS_CONFIRMED));
+        assertEquals(1, confirmed.size(), "確定は1件のみ");
+        BigDecimal dayTotal = confirmed.stream()
+                .map(AllocationPlan::getAllocationPercent)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertTrue(dayTotal.compareTo(new BigDecimal("100")) <= 0,
+                "同日合計は100%以下のはず: " + dayTotal);
+    }
+
+    @Test
     void 後着の配置は先行の確定を読んで過配賦で拒否される() throws Exception {
         // 同一要員への同時配置のうち、後着側は先行のコミット済み確定を見て失敗する（L2）
         TransactionTemplate setup = new TransactionTemplate(transactionManager);
         setup.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         setup.executeWithoutResult(s -> {
-            jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T077cc-cust-" + System.nanoTime());
-            long customerId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM m_customer WHERE company_name LIKE 'T077cc-cust-%' ORDER BY id DESC LIMIT 1",
-                    Long.class);
-            jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
-                    + "VALUES (?, ?, '募集中')", "T077cc-prj-" + System.nanoTime(), customerId);
-            long projectId = jdbcTemplate.queryForObject(
-                    "SELECT id FROM t_project WHERE project_name LIKE 'T077cc-prj-%' ORDER BY id DESC LIMIT 1",
-                    Long.class);
-            ProjectPosition position = new ProjectPosition();
-            position.setProjectId(projectId);
-            position.setPositionNo("P1");
-            position.setRoleName("Javaエンジニア");
-            position.setRequiredCount(1);
-            position.setAllocationPercent(new BigDecimal("100"));
-            positionMapper.insert(position);
+            Long positionId = insertPosition();
 
-            AllocationPlan base = plan(position.getId(), "40", "2026-09-01", "2026-09-30");
+            AllocationPlan base = plan(positionId, "40", "2026-09-01", "2026-09-30");
             base.setStatus(STATUS_CONFIRMED);
             base.setVersion(0);
             allocationMapper.insert(base);
-            AllocationPlan b = plan(position.getId(), "60", "2026-09-01", "2026-09-30");
-            AllocationPlan c = plan(position.getId(), "60", "2026-09-01", "2026-09-30");
+            AllocationPlan b = plan(positionId, "60", "2026-09-01", "2026-09-30");
+            AllocationPlan c = plan(positionId, "60", "2026-09-01", "2026-09-30");
             allocationMapper.insert(b);
             allocationMapper.insert(c);
         });
@@ -184,6 +159,61 @@ class AllocationConcurrentConfirmTest {
         BusinessException ex = org.junit.jupiter.api.Assertions.assertThrows(BusinessException.class,
                 () -> allocationService.confirm(drafts.get(1).getId()));
         assertEquals("error.staffing.overAllocation", ex.getMessageKey());
+    }
+
+    private Long insertPosition() {
+        jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", "T077cc-cust-" + System.nanoTime());
+        long customerId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_customer WHERE company_name LIKE 'T077cc-cust-%' ORDER BY id DESC LIMIT 1",
+                Long.class);
+        jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) "
+                + "VALUES (?, ?, '募集中')", "T077cc-prj-" + System.nanoTime(), customerId);
+        long projectId = jdbcTemplate.queryForObject(
+                "SELECT id FROM t_project WHERE project_name LIKE 'T077cc-prj-%' ORDER BY id DESC LIMIT 1",
+                Long.class);
+        ProjectPosition position = new ProjectPosition();
+        position.setProjectId(projectId);
+        position.setPositionNo("P1");
+        position.setRoleName("Javaエンジニア");
+        position.setRequiredCount(1);
+        position.setAllocationPercent(new BigDecimal("100"));
+        positionMapper.insert(position);
+        return position.getId();
+    }
+
+    private List<Boolean> confirmConcurrently(List<Long> allocationIds) throws Exception {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        CountDownLatch ready = new CountDownLatch(allocationIds.size());
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(allocationIds.size());
+        try {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (Long allocationId : allocationIds) {
+                results.add(pool.submit(() -> {
+                    ready.countDown();
+                    start.await(5, TimeUnit.SECONDS);
+                    try {
+                        tx.executeWithoutResult(s -> allocationService.confirm(allocationId));
+                        return true;
+                    } catch (BusinessException e) {
+                        return false;
+                    } catch (Exception e) {
+                        // H2のロックタイムアウト等も「失敗側」として扱う
+                        return false;
+                    }
+                }));
+            }
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            List<Boolean> outcomes = new ArrayList<>();
+            for (Future<Boolean> future : results) {
+                outcomes.add(future.get(30, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     private AllocationPlan plan(Long positionIdRow, String percent, String start, String end) {

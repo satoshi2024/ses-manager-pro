@@ -40,7 +40,7 @@ public class SalesOrder extends BaseEntity {
     /** 顧客担当者ID */
     private Long contactId;
 
-    /** 生成元見積ID */
+    /** 生成元見積ID（nullable UNIQUE: uk_sales_order_quotation。見積由来は1見積1注文） */
     private Long quotationId;
 
     /** 注文日 */

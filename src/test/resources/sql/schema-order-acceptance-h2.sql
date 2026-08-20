@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS t_sales_order (
   deleted_flag             TINYINT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_no ON t_sales_order(order_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_quotation ON t_sales_order(quotation_id);
 CREATE INDEX IF NOT EXISTS idx_sales_order_customer ON t_sales_order(customer_id);
 CREATE INDEX IF NOT EXISTS idx_sales_order_po ON t_sales_order(customer_id, customer_po_no);
 CREATE INDEX IF NOT EXISTS idx_sales_order_date ON t_sales_order(order_date);

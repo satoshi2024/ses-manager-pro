@@ -656,9 +656,16 @@ public class FreeeAccountingProvider implements AccountingProvider {
             String newRefreshToken = (String) body.get("refresh_token");
             Number expiresIn = (Number) body.get("expires_in");
 
+            // S15-P1-02: refresh_token欠落時は旧tokenへフォールバックせずfail-closed（REAUTH誘発）
+            if (newAccessToken == null || newAccessToken.isBlank()
+                    || newRefreshToken == null || newRefreshToken.isBlank()) {
+                throw new IllegalStateException(
+                        "invalid_grant: freee token response missing access_token/refresh_token (fail-closed)");
+            }
+
             return IntegrationTokensDto.builder()
                     .accessToken(newAccessToken)
-                    .refreshToken(newRefreshToken != null ? newRefreshToken : currentTokens.getRefreshToken())
+                    .refreshToken(newRefreshToken)
                     .expiresIn(expiresIn != null ? expiresIn.longValue() : 3600L)
                     .build();
         }

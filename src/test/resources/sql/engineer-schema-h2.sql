@@ -272,6 +272,7 @@ CREATE TABLE t_sales_order (
   deleted_flag             TINYINT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_no ON t_sales_order(order_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sales_order_quotation ON t_sales_order(quotation_id);
 CREATE TABLE t_sales_order_line (
   id             BIGINT AUTO_INCREMENT PRIMARY KEY,
   order_id       BIGINT NOT NULL,
@@ -2783,7 +2784,17 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by VARCHAR(50) NULL,
     deleted_flag TINYINT(1) DEFAULT 0,
-    UNIQUE KEY uk_digital_invoice_message (message_id)
+    send_active_slot TINYINT GENERATED ALWAYS AS (
+        CASE
+            WHEN direction = 'SEND'
+             AND deleted_flag = 0
+             AND status NOT IN ('CANCELLED', 'REVOKED')
+            THEN 1
+            ELSE NULL
+        END
+    ),
+    UNIQUE KEY uk_digital_invoice_message (message_id),
+    UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, profile, specification_version, send_active_slot)
 );
 
 CREATE TABLE IF NOT EXISTS t_digital_invoice_event (

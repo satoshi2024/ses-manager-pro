@@ -97,7 +97,9 @@ class DigitalInvoiceWebhookApiControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("X-Signature", "invalid-sig")
                 .content(json))
-                .andExpect(status().isOk()); // APIとしては200を返す
+                .andExpect(status().isUnauthorized())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string("Invalid signature"));
 
         DigitalInvoice updated = digitalInvoiceService.getById(di.getId());
         assertEquals("SENT", updated.getStatus()); // ステータスは変わらない
@@ -106,6 +108,35 @@ class DigitalInvoiceWebhookApiControllerTest {
                 .eq(DigitalInvoiceEvent::getDigitalInvoiceId, di.getId())
                 .list();
         assertEquals(0, events.size(), "不正イベントは記録されない");
+    }
+
+    @Test
+    void testReceiveWebhook_MagicValidSigHeader_DoesNotBypassWhenProviderRejects() throws Exception {
+        DigitalInvoice di = new DigitalInvoice();
+        di.setInvoiceId(102L);
+        di.setDirection("SEND");
+        di.setProfile("Standard");
+        di.setSpecificationVersion("1.1.3");
+        di.setMessageId("MSG-3");
+        di.setProviderMessageId("provider-msg-3");
+        di.setStatus("SENT");
+        digitalInvoiceService.save(di);
+
+        String json = "{\"messageId\":\"provider-msg-3\", \"status\":\"DELIVERED\", \"eventId\":\"evt-3\"}";
+
+        // マジック文字列 valid-sig を provider が拒否した場合、状態は変わらない（S16-P1-01）
+        when(provider.verifyWebhookSignature(any(), org.mockito.ArgumentMatchers.eq("valid-sig"))).thenReturn(false);
+
+        mockMvc.perform(post("/api/webhooks/digital-invoice/fastaccounting")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Signature", "valid-sig")
+                .content(json))
+                .andExpect(status().isUnauthorized());
+
+        assertEquals("SENT", digitalInvoiceService.getById(di.getId()).getStatus());
+        assertEquals(0, digitalInvoiceEventService.lambdaQuery()
+                .eq(DigitalInvoiceEvent::getDigitalInvoiceId, di.getId())
+                .count());
     }
 
     @Test

@@ -10,8 +10,11 @@ import com.ses.service.BatchOperationService;
 import com.ses.service.EngineerService;
 import com.ses.service.ProjectService;
 import com.ses.service.security.DataScopeService;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -29,22 +32,34 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     private final EngineerService engineerService;
     private final ProjectService projectService;
     private final DataScopeService dataScopeService;
+    private final Environment environment;
+
+    @Value("${app.batch.token-secret:}")
+    private String tokenSecret;
 
     private static final int MAX_BATCH_SIZE = 200;
-    private static final String SECRET_KEY = "SES_MANAGER_BATCH_TOKEN_SECRET";
     private static final long TOKEN_EXPIRATION_MS = 15 * 60 * 1000L; // 15分
 
     private static final Set<String> VALID_ENGINEER_STATUSES = Set.of("稼動中", "提案中", "退場予定", "Bench", "待機");
     private static final Set<String> VALID_PROJECT_STATUSES = Set.of("募集中", "選考中", "充足", "クローズ");
 
+    @PostConstruct
+    void validateTokenSecretOnStartup() {
+        if (isProdProfile() && !StringUtils.hasText(tokenSecret)) {
+            throw new IllegalStateException(
+                    "Fail-fast: app.batch.token-secret (BATCH_TOKEN_SECRET) must be set in prod profile");
+        }
+    }
+
     @Override
     public BatchPreviewResultDTO previewEngineerStatusUpdate(List<Long> ids, String targetStatus, Long currentUserId) {
         validateBatchSize(ids);
         validateEngineerStatus(targetStatus);
+        assertTokenSecretConfigured();
 
         BatchPreviewResultDTO dto = new BatchPreviewResultDTO();
         if (ids == null || ids.isEmpty()) {
-            dto.setPreviewToken(generateToken("engineer", List.of(), targetStatus));
+            dto.setPreviewToken(generateToken("engineer", List.of(), targetStatus, currentUserId));
             return dto;
         }
 
@@ -83,7 +98,7 @@ public class BatchOperationServiceImpl implements BatchOperationService {
 
         dto.setValidCount(validCount);
         dto.setInvalidCount(invalidCount);
-        dto.setPreviewToken(generateToken("engineer", ids, targetStatus));
+        dto.setPreviewToken(generateToken("engineer", ids, targetStatus, currentUserId));
         return dto;
     }
 
@@ -92,11 +107,12 @@ public class BatchOperationServiceImpl implements BatchOperationService {
         if (request == null) {
             throw new BusinessException(400, "リクエスト情報が空です");
         }
+        assertTokenSecretConfigured();
         List<Long> ids = request.getIds();
         String targetStatus = request.getStatus();
         validateBatchSize(ids);
         validateEngineerStatus(targetStatus);
-        verifyToken("engineer", ids, targetStatus, request.getPreviewToken());
+        verifyToken("engineer", ids, targetStatus, request.getPreviewToken(), currentUserId);
 
         BatchOperationResultDTO result = new BatchOperationResultDTO();
         if (ids == null || ids.isEmpty()) {
@@ -135,10 +151,11 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     public BatchPreviewResultDTO previewProjectStatusUpdate(List<Long> ids, String targetStatus, Long currentUserId) {
         validateBatchSize(ids);
         validateProjectStatus(targetStatus);
+        assertTokenSecretConfigured();
 
         BatchPreviewResultDTO dto = new BatchPreviewResultDTO();
         if (ids == null || ids.isEmpty()) {
-            dto.setPreviewToken(generateToken("project", List.of(), targetStatus));
+            dto.setPreviewToken(generateToken("project", List.of(), targetStatus, currentUserId));
             return dto;
         }
 
@@ -175,7 +192,7 @@ public class BatchOperationServiceImpl implements BatchOperationService {
 
         dto.setValidCount(validCount);
         dto.setInvalidCount(invalidCount);
-        dto.setPreviewToken(generateToken("project", ids, targetStatus));
+        dto.setPreviewToken(generateToken("project", ids, targetStatus, currentUserId));
         return dto;
     }
 
@@ -184,11 +201,12 @@ public class BatchOperationServiceImpl implements BatchOperationService {
         if (request == null) {
             throw new BusinessException(400, "リクエスト情報が空です");
         }
+        assertTokenSecretConfigured();
         List<Long> ids = request.getIds();
         String targetStatus = request.getStatus();
         validateBatchSize(ids);
         validateProjectStatus(targetStatus);
-        verifyToken("project", ids, targetStatus, request.getPreviewToken());
+        verifyToken("project", ids, targetStatus, request.getPreviewToken(), currentUserId);
 
         BatchOperationResultDTO result = new BatchOperationResultDTO();
         if (ids == null || ids.isEmpty()) {
@@ -240,42 +258,60 @@ public class BatchOperationServiceImpl implements BatchOperationService {
         }
     }
 
-    private String generateToken(String resource, List<Long> ids, String targetStatus) {
+    private void assertTokenSecretConfigured() {
+        if (!StringUtils.hasText(tokenSecret)) {
+            throw new BusinessException(503, "一括操作トークン秘密鍵が未設定です。処理を拒否します。");
+        }
+    }
+
+    private String generateToken(String resource, List<Long> ids, String targetStatus, Long userId) {
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
         long expiresAt = System.currentTimeMillis() + TOKEN_EXPIRATION_MS;
         String hash = computeIdsHash(ids);
-        String payload = resource + ":" + targetStatus + ":" + hash + ":" + expiresAt;
+        String payload = resource + ":" + targetStatus + ":" + hash + ":" + userId + ":" + expiresAt;
         String signature = hmacSha256(payload);
         return payload + ":" + signature;
     }
 
-    private void verifyToken(String resource, List<Long> ids, String targetStatus, String token) {
+    private void verifyToken(String resource, List<Long> ids, String targetStatus, String token, Long userId) {
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(400, "プレビューTokenがありません");
         }
+        if (userId == null) {
+            throw new BusinessException(401, "認証が必要です");
+        }
         String[] parts = token.split(":");
-        if (parts.length != 5) {
+        if (parts.length != 6) {
             throw new BusinessException(400, "プレビューTokenの形式が不正です");
         }
         String res = parts[0];
         String status = parts[1];
         String hash = parts[2];
+        String tokenUserId = parts[3];
         long expiresAt;
         try {
-            expiresAt = Long.parseLong(parts[3]);
+            expiresAt = Long.parseLong(parts[4]);
         } catch (NumberFormatException e) {
             throw new BusinessException(400, "プレビューTokenの有効期限が不正です");
         }
-        String expectedSignature = parts[4];
+        String expectedSignature = parts[5];
 
         if (System.currentTimeMillis() > expiresAt) {
             throw new BusinessException(400, "プレビューTokenの有効期限が切れています");
         }
-        String payload = res + ":" + status + ":" + hash + ":" + expiresAt;
+        String payload = res + ":" + status + ":" + hash + ":" + tokenUserId + ":" + expiresAt;
         String actualSignature = hmacSha256(payload);
-        if (!Objects.equals(expectedSignature, actualSignature)) {
+        if (!MessageDigest.isEqual(
+                expectedSignature.getBytes(StandardCharsets.UTF_8),
+                actualSignature.getBytes(StandardCharsets.UTF_8))) {
             throw new BusinessException(400, "プレビューTokenの署名が改ざんされています");
         }
-        if (!res.equals(resource) || !status.equals(targetStatus) || !hash.equals(computeIdsHash(ids))) {
+        if (!res.equals(resource)
+                || !status.equals(targetStatus)
+                || !hash.equals(computeIdsHash(ids))
+                || !tokenUserId.equals(String.valueOf(userId))) {
             throw new BusinessException(400, "対象リクエストがプレビュー内容と一致しません");
         }
     }
@@ -297,14 +333,29 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     }
 
     private String hmacSha256(String data) {
+        assertTokenSecretConfigured();
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKey = new SecretKeySpec(SECRET_KEY.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            SecretKeySpec secretKey = new SecretKeySpec(tokenSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             mac.init(secretKey);
             byte[] rawHmac = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(rawHmac);
         } catch (Exception e) {
             throw new RuntimeException("HMAC計算に失敗しました", e);
         }
+    }
+
+    private boolean isProdProfile() {
+        String[] activeProfiles = environment.getActiveProfiles();
+        boolean hasProd = false;
+        for (String profile : activeProfiles) {
+            if ("test".equalsIgnoreCase(profile)) {
+                return false;
+            }
+            if ("prod".equalsIgnoreCase(profile)) {
+                hasProd = true;
+            }
+        }
+        return hasProd;
     }
 }

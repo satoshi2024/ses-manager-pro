@@ -6,6 +6,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AllocationPlan;
 import com.ses.entity.ApprovalRequest;
+import com.ses.entity.Engineer;
 import com.ses.entity.ProjectPosition;
 import com.ses.mapper.AllocationPlanMapper;
 import com.ses.mapper.ApprovalRequestMapper;
@@ -36,9 +37,10 @@ import static com.ses.entity.AllocationPlan.TYPE_PROJECT;
 /**
  * 要員配置計画の実装。区間代数・日単位の過配賦判定・例外承認を担当する。
  *
- * <p>競合対策（design §5.4）: 確定・変更はtransaction内で対象要員の期間行を
- * FOR UPDATEでロックしてから再検証する。読んでから書くまでの間に別の配置が
- * 入る競合を防ぐ。状態遷移は状態CAS（status+version条件付きUPDATE）。
+ * <p>競合対策（design §5.4 / S12-P1-01）: 確定はtransaction内で先に
+ * {@code t_engineer} 行を FOR UPDATE でロックし（確定済み期間行が無い場合の
+ * センチネル）、続けて期間行をロックして再検証する。読んでから書くまでの間に
+ * 別の配置が入る競合を防ぐ。状態遷移は状態CAS（status+version条件付きUPDATE）。
  */
 @Service
 @RequiredArgsConstructor
@@ -106,6 +108,9 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
         if (allocation.getExceptionReason() != null || allocation.getApprovalRequestId() != null) {
             requireApprovedException(allocation);
         }
+        // 確定済み期間行が無いと期間行FOR UPDATEだけでは直列化できないため、
+        // 要員行をセンチネルとして先にロックする（S12-P1-01）。
+        lockEngineerForConfirm(allocation.getEngineerId());
         // ロック付きで再検証（読んでから書くまでの競合防止。design §5.4）
         boolean over = isOverAllocated(allocation.getEngineerId(), allocation.getStartDate(),
                 normalizedEnd(allocation), allocation.getAllocationPercent(), allocation.getId(), true);
@@ -207,6 +212,17 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     // ---------------------------------------------------------------
     // 過配賦判定（日単位・design §5.2）
     // ---------------------------------------------------------------
+
+    /**
+     * 同一要員への確定を直列化するセンチネルロック（S12-P1-01）。
+     * 確定済み {@code t_allocation_plan} が0件でも競合を防ぐため {@code t_engineer} をロックする。
+     */
+    private void lockEngineerForConfirm(Long engineerId) {
+        Engineer locked = engineerMapper.selectByIdForUpdate(engineerId);
+        if (locked == null) {
+            throw BusinessException.of(400, "error.staffing.engineerRequired");
+        }
+    }
 
     /**
      * 指定区間の各日に、既存の確定配置（＋当該候補）の配賦率合計が100%を超える日があるか。

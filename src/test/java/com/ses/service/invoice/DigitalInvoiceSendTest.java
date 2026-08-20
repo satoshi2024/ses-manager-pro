@@ -91,10 +91,25 @@ class DigitalInvoiceSendTest {
         Customer c = newCustomer("Test Co 2");
         verifiedParticipant(c, "test-id-2");
 
-        digitalInvoiceService.enqueueInvoiceForSend(20L, "1.1.3", c.getId());
+        DigitalInvoice first = digitalInvoiceService.enqueueInvoiceForSend(20L, "1.1.3", c.getId());
+        assertNotNull(first.getId());
 
-        assertThrows(BusinessException.class, () ->
+        BusinessException ex = assertThrows(BusinessException.class, () ->
                 digitalInvoiceService.enqueueInvoiceForSend(20L, "1.1.3", c.getId()));
+        assertEquals(409, ex.getCode());
+
+        long sendRows = digitalInvoiceService.lambdaQuery()
+                .eq(DigitalInvoice::getInvoiceId, 20L)
+                .eq(DigitalInvoice::getDirection, "SEND")
+                .eq(DigitalInvoice::getProfile, "Standard")
+                .count();
+        assertEquals(1, sendRows);
+
+        long jobs = integrationJobService.lambdaQuery()
+                .eq(com.ses.entity.IntegrationJob::getIdempotencyKey,
+                        "digital_invoice_send_20_Standard_1.1.3_g0")
+                .count();
+        assertEquals(1, jobs);
     }
 
     @Test

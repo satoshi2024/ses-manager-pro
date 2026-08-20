@@ -601,6 +601,8 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_sales_order", "acknowledgement_document_id");
             assertColumnExists(st, "t_sales_order", "version");
             assertIndexExists(st, "t_sales_order", "uk_sales_order_no");
+            // V108.2: 見積→注文の1見積1注文（nullable UNIQUE）
+            assertIndexExists(st, "t_sales_order", "uk_sales_order_quotation");
             assertColumnExists(st, "t_sales_order_line", "order_id");
             assertColumnExists(st, "t_sales_order_line", "line_no");
             assertColumnExists(st, "t_sales_order_line", "engineer_id");

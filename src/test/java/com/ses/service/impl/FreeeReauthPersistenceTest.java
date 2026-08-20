@@ -28,7 +28,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  * HFP-01-REV-002の正規化test。
  *
  * <p>refreshのinvalid_grant時、REAUTH_REQUIREDがDBへ永続化されることを
- * Spring AOP（REQUIRES_NEW）とH2の実DB経由で検証する（rollbackで消えないこと）。
+ * Spring AOP（FreeeReauthMarker REQUIRES_NEW）とH2の実DB経由で検証する。
  * 既存unit test（mock mapper・proxyなし）はこの経路を通らないため、こちらが正本。</p>
  */
 @SpringBootTest
@@ -77,6 +77,6 @@ class FreeeReauthPersistenceTest {
         String status = jdbcTemplate.queryForObject(
                 "SELECT connection_status FROM t_freee_connection", String.class);
         assertEquals("REAUTH_REQUIRED", status,
-                "REQUIRES_NEW txのrollbackで消えず、DBへ永続化されること（AC04/REV-002）");
+                "REAUTH_REQUIREDがDBへ永続化されること（AC04/REV-002/S15-P1-01）");
     }
 }

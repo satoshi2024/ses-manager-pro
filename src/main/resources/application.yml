@@ -211,6 +211,14 @@ app:
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
+  # ===== 一括操作 preview token HMAC（S05-P1-01） =====
+  # 本番は BATCH_TOKEN_SECRET を secret store から注入すること。prod 未設定は起動 fail-fast。
+  batch:
+    token-secret: ${BATCH_TOKEN_SECRET:dev-only-change-this-batch-token-secret}
+  # ===== デジタルインボイス（JP PINT。dev/test 既定は mock。prod は application-prod.yml） =====
+  digital-invoice:
+    provider: ${DIGITAL_INVOICE_PROVIDER:mock}
+    webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:dev-only-change-this-digital-invoice-hmac}
   # ===== 外部顧客/BPポータル（S13。内部管理画面と分離したchain/session/rate limit: G3） =====
   portal:
     # portal session cookie名（内部JSESSIONIDと分離）

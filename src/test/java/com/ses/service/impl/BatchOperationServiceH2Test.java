@@ -94,6 +94,28 @@ public class BatchOperationServiceH2Test {
     }
 
     @Test
+    void testApplyRejectsTokenFromDifferentUser() {
+        Engineer eng1 = new Engineer();
+        eng1.setFullName("要員一");
+        eng1.setEmploymentType("正社員");
+        eng1.setStatus("Bench");
+        engineerMapper.insert(eng1);
+
+        List<Long> ids = List.of(eng1.getId());
+        given(dataScopeService.isScoped()).willReturn(false);
+
+        BatchPreviewResultDTO preview = batchOperationService.previewEngineerStatusUpdate(ids, "稼動中", 1L);
+
+        BatchApplyRequestDTO otherUserReq = new BatchApplyRequestDTO();
+        otherUserReq.setIds(ids);
+        otherUserReq.setStatus("稼動中");
+        otherUserReq.setPreviewToken(preview.getPreviewToken());
+
+        assertThrows(BusinessException.class, () ->
+                batchOperationService.applyEngineerStatusUpdate(otherUserReq, 2L));
+    }
+
+    @Test
     void testPartialSuccessAndFailureIsolation() {
         Engineer eng1 = new Engineer();
         eng1.setFullName("要員一");

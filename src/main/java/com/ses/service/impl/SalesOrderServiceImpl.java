@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.order.SalesOrderDetailDto;
 import com.ses.dto.order.SalesOrderListDto;
 import com.ses.dto.order.SalesOrderSaveRequest;
@@ -90,7 +91,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     public Page<SalesOrderListDto> pageOrders(long current, long size, String status, String keyword,
                                               LocalDate dateFrom, LocalDate dateTo) {
         List<Long> customerIds = scopedCustomerIds();
-        Page<SalesOrderListDto> page = new Page<>(current, Math.min(size, 1000));
+        Page<SalesOrderListDto> page = PageUtils.safePage(current, size);
         return baseMapper.selectPageWithNames(page, status, keyword, dateFrom, dateTo, customerIds);
     }
 
@@ -348,8 +349,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         }
         dataScopeService.assertAllowedCustomer(quotation.getCustomerId());
         // 冪等: 同一見積から生成済みの注文があればそれを返す。
-        SalesOrder existing = this.baseMapper.selectOne(new LambdaQueryWrapper<SalesOrder>()
-                .eq(SalesOrder::getQuotationId, quotationId).last("LIMIT 1"));
+        SalesOrder existing = findByQuotationId(quotationId);
         if (existing != null) {
             return existing;
         }
@@ -362,7 +362,16 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         order.setOrderDate(LocalDate.now());
         order.setStartDate(quotation.getValidUntil());
         order.setStatus(StatusConstants.ORDER_DRAFT);
-        insertWithNoRetry(order);
+        try {
+            insertWithNoRetry(order);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // uk_sales_order_quotation 競合: 先行txの勝者を返して冪等化する（S09-P1-01）。
+            SalesOrder winner = findByQuotationId(quotationId);
+            if (winner != null) {
+                return winner;
+            }
+            throw e;
+        }
 
         SalesOrderLine line = new SalesOrderLine();
         line.setOrderId(order.getId());
@@ -474,10 +483,23 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 this.baseMapper.insert(order);
                 return;
             } catch (DuplicateKeyException e) {
+                // quotation_id UNIQUE 競合は採番再試行の対象外。呼出元で既存行を返す。
+                if (order.getQuotationId() != null && findByQuotationId(order.getQuotationId()) != null) {
+                    throw e;
+                }
                 // 同時採番の衝突。次のループで最新の最大値から再採番する
+                order.setId(null);
             }
         }
         throw BusinessException.of("error.order.numberGenerateFailed");
+    }
+
+    private SalesOrder findByQuotationId(Long quotationId) {
+        if (quotationId == null) {
+            return null;
+        }
+        return this.baseMapper.selectOne(new LambdaQueryWrapper<SalesOrder>()
+                .eq(SalesOrder::getQuotationId, quotationId).last("LIMIT 1"));
     }
 
     private void insertLines(Long orderId, List<SalesOrderSaveRequest.Line> lines) {
