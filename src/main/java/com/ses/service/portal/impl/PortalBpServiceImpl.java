@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.bpcompany.BpBankAccountDto;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.portal.PortalBpAvailabilityDto;
@@ -75,10 +76,11 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     public Page<PortalBpAvailabilityDto> availabilities(long current, long size, Long bpCompanyId) {
         if (bpCompanyId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalBpAvailabilityDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
         Page<BpAvailability> page = availabilityMapper.selectPage(
-                new Page<>(current, Math.min(size, 1000)),
+                PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<BpAvailability>()
                         .eq(BpAvailability::getBpCompanyId, bpCompanyId)
                         .orderByDesc(BpAvailability::getId));
@@ -151,10 +153,11 @@ public class PortalBpServiceImpl implements PortalBpService {
     @Override
     public Page<PortalBpPaymentDto> payments(long current, long size, Long bpCompanyId, String status) {
         if (bpCompanyId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalBpPaymentDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
         Page<PortalBpPaymentDto> page = paymentMapper.selectPortalPageDto(
-                new Page<>(current, Math.min(size, 1000)), bpCompanyId, status);
+                PageUtils.safePage(current, size), bpCompanyId, status);
         page.getRecords().forEach(dto -> {
             dto.setPaymentScheduleDate(estimatePaymentDate(bpCompanyId));
             dto.setSubmissionCount(documentLinkMapper.findDocumentIdsByTarget(LINK_TARGET_BP_PAYMENT, dto.getId()).size());

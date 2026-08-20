@@ -20,11 +20,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PutMapping;
 import java.util.Map;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * portal認証API（/api/portal/auth/**）。portal専用chainで処理され、内部/LoginUserとは独立（G3）。
+ * portal認証API（/api/portal/auth/**）。portal専用chainで処理され、内部LoginUserとは独立（G3）。
  */
 @RestController
 @RequestMapping("/api/portal/auth")
@@ -47,7 +46,7 @@ public class PortalAuthApiController {
                                                        HttpServletRequest httpRequest,
                                                        HttpServletResponse httpResponse) {
         return ApiResult.success(authService.completeMfa(body.get("email"), body.get("code"),
-                httpRequest, httpResponse));
+                body.get("password"), httpRequest, httpResponse));
     }
 
     @PostMapping("/accept-invitation")

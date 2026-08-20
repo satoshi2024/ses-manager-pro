@@ -3,6 +3,7 @@ package com.ses.service.portal.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.PageUtils;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.entity.PortalAccessLog;
 import com.ses.entity.PortalInvitation;
@@ -73,13 +74,14 @@ public class PortalAdminServiceImpl implements PortalAdminService {
             if (allowedCustomerIds == null) {
                 wrapper.eq(PortalOrganization::getType, "CUSTOMER");
             } else if (allowedCustomerIds.isEmpty()) {
-                return new Page<>(current, Math.min(size, 1000), 0);
+                Page<PortalOrganization> empty = PageUtils.safePage(current, size);
+                return new Page<>(empty.getCurrent(), empty.getSize(), 0);
             } else {
                 wrapper.eq(PortalOrganization::getType, "CUSTOMER")
                         .in(PortalOrganization::getCustomerId, allowedCustomerIds);
             }
         }
-        return organizationMapper.selectPage(new Page<>(current, Math.min(size, 1000)), wrapper);
+        return organizationMapper.selectPage(PageUtils.safePage(current, size), wrapper);
     }
 
     @Override
@@ -139,7 +141,7 @@ public class PortalAdminServiceImpl implements PortalAdminService {
     @Override
     public Page<PortalUser> users(long current, long size, Long orgId) {
         requireOrg(orgId);
-        return userMapper.selectPage(new Page<>(current, Math.min(size, 1000)),
+        return userMapper.selectPage(PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<PortalUser>()
                         .eq(PortalUser::getPortalOrgId, orgId)
                         .orderByDesc(PortalUser::getId));
@@ -245,7 +247,7 @@ public class PortalAdminServiceImpl implements PortalAdminService {
                 .eq(orgId != null, PortalInvitation::getPortalOrgId, orgId)
                 .orderByDesc(PortalInvitation::getId);
         applyOrgScope(wrapper, allowedOrgIds, PortalInvitation::getPortalOrgId);
-        return invitationMapper.selectPage(new Page<>(current, Math.min(size, 1000)), wrapper);
+        return invitationMapper.selectPage(PageUtils.safePage(current, size), wrapper);
     }
 
     @Override
@@ -272,7 +274,7 @@ public class PortalAdminServiceImpl implements PortalAdminService {
                 .eq(StringUtils.hasText(action), PortalAccessLog::getAction, action)
                 .orderByDesc(PortalAccessLog::getId);
         applyOrgScope(wrapper, allowedOrgIds, PortalAccessLog::getPortalOrgId);
-        return accessLogMapper.selectPage(new Page<>(current, Math.min(size, 1000)), wrapper);
+        return accessLogMapper.selectPage(PageUtils.safePage(current, size), wrapper);
     }
 
     /** 営業scope: 可視組織ID集合（null=全件、空集合=0件）をSQL条件へ適用する。 */

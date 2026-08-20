@@ -187,6 +187,7 @@ public class ApprovalAdministrationServiceImpl implements ApprovalAdministration
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApprovalDelegationView createDelegation(ApprovalDelegationRequest request, Long actorId) {
+        // from==to のみ拒否。to=申請者 の経路は承認時 authorizeActor で selfApproveForbidden にする。
         if (Objects.equals(request.fromUserId(), request.toUserId())) {
             throw BusinessException.of(400, "error.approval.delegationSelf");
         }

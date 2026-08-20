@@ -113,12 +113,17 @@ public class PortalMfaServiceImpl implements PortalMfaService {
                     .set("last_used_step", acceptedStep));
             return updated == 1;
         }
-        // recovery code（1回限り。hash照合+使用済みCAS）
+        // recovery code（1回限り。hash照合は恒時比較 + 使用済みCAS。S13-P2-01）
         if (!StringUtils.hasText(normalizedCode)) {
             return false;
         }
         PortalUser fresh = userMapper.selectById(portalUserId);
-        if (fresh == null || !SecurityHashUtil.sha256(normalizedCode).equals(fresh.getRecoveryCodeHash())
+        String expectedHash = fresh == null ? null : fresh.getRecoveryCodeHash();
+        String actualHash = SecurityHashUtil.sha256(normalizedCode);
+        if (fresh == null || expectedHash == null || actualHash == null
+                || !java.security.MessageDigest.isEqual(
+                        expectedHash.getBytes(StandardCharsets.UTF_8),
+                        actualHash.getBytes(StandardCharsets.UTF_8))
                 || fresh.getRecoveryCodeUsedAt() != null) {
             return false;
         }

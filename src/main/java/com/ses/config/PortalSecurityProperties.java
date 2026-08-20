@@ -40,5 +40,7 @@ public class PortalSecurityProperties {
         private int uploadPerMinute = 20;
         /** 検収API（userあたり/分） */
         private int acceptancePerMinute = 20;
+        /** MFA有効化API（IP+emailあたり/分。S13-P1-02） */
+        private int mfaCompletePerMinute = 10;
     }
 }

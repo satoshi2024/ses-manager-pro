@@ -93,6 +93,7 @@ public class DocumentExportServiceImpl implements DocumentExportService {
                 for (DocumentVersion ver : versions) {
                     String sha256 = ver.getSha256() != null ? ver.getSha256() : "";
                     Integer versionNo = ver.getVersionNo() != null ? ver.getVersionNo() : 1;
+                    boolean clean = "CLEAN".equals(ver.getScanStatus());
                     String sanitizedOriginal = sanitizeFileName(ver.getOriginalName());
                     String filename = doc.getId() + "_v" + versionNo + "_" + (sanitizedOriginal != null ? sanitizedOriginal : "document.pdf");
 
@@ -107,8 +108,8 @@ public class DocumentExportServiceImpl implements DocumentExportService {
                             .append(csvEscape(doc.getCurrency())).append(",")
                             .append(csvEscape(doc.getDirection())).append(",")
                             .append(sha256).append(",")
-                            .append("MATCH").append(",")
-                            .append(csvEscape(filename)).append("\n");
+                            .append(clean ? "MATCH" : "SKIPPED").append(",")
+                            .append(clean ? csvEscape(filename) : "").append("\n");
                 }
             }
 
@@ -119,11 +120,11 @@ public class DocumentExportServiceImpl implements DocumentExportService {
             zos.write(manifestBytes);
             zos.closeEntry();
 
-            // 2. 各文書ファイル（全版）の追加
+            // 2. CLEAN 版のみバイナリ追加。非 CLEAN は manifest で SKIPPED。
             for (Document doc : documents) {
                 List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(doc.getId());
                 for (DocumentVersion ver : versions) {
-                    if (ver.getStorageKey() == null) {
+                    if (ver.getStorageKey() == null || !"CLEAN".equals(ver.getScanStatus())) {
                         continue;
                     }
 

@@ -27,6 +27,8 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
 
     private static final Pattern DOWNLOAD = Pattern.compile("^/api/portal/.*/download$");
     private static final Pattern UPLOAD = Pattern.compile("^/api/portal/.*/(attachments|files)$");
+    /** BP提出物アップロード。実パスは .../payments/{id}/submissions（末尾スラッシュ無し。S13-P2-02） */
+    private static final Pattern SUBMISSION_UPLOAD = Pattern.compile("^/api/portal/.*/submissions$");
     private static final Pattern ACCEPTANCE = Pattern.compile("^/api/portal/customer/acceptances/[^/]+/(accept|reject)$");
 
     private final PortalRateLimiter rateLimiter;
@@ -49,7 +51,8 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
         } else if ("GET".equals(method) && DOWNLOAD.matcher(uri).matches()) {
             key = "download:" + currentUserId();
             perMinute = properties.getRateLimit().getDownloadPerMinute();
-        } else if ("POST".equals(method) && (UPLOAD.matcher(uri).matches() || uri.contains("/submissions/"))) {
+        } else if ("POST".equals(method)
+                && (UPLOAD.matcher(uri).matches() || SUBMISSION_UPLOAD.matcher(uri).matches())) {
             key = "upload:" + currentUserId();
             perMinute = properties.getRateLimit().getUploadPerMinute();
         } else if ("POST".equals(method) && ACCEPTANCE.matcher(uri).matches()) {

@@ -54,22 +54,23 @@ public class DocumentApiController {
             @PathVariable("id") Long id,
             @PathVariable("versionNo") Integer versionNo) {
 
+        // detail DTO は storageKey を null 化するため、FileScope 判定には DB 上の実キーを使う
         DocumentDetailDTO detail = documentService.getDocumentDetail(id);
-        String storageKey = null;
         String fileName = "document.pdf";
         if (detail.getVersions() != null) {
             for (var v : detail.getVersions()) {
                 if (v.getVersionNo().equals(versionNo)) {
-                    storageKey = v.getStorageKey();
                     fileName = v.getOriginalName();
                     break;
                 }
             }
         }
 
-        if (storageKey != null) {
-            fileScopeValidationService.assertDownloadAllowed(storageKey);
+        String storageKey = documentService.getVersionStorageKey(id, versionNo);
+        if (storageKey == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.document.versionNotFound");
         }
+        fileScopeValidationService.assertDownloadAllowed(storageKey);
 
         InputStream stream = documentService.download(id, versionNo);
         return ResponseEntity.ok()

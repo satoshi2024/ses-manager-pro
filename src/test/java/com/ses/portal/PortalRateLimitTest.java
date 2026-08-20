@@ -26,7 +26,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
         "app.portal.rate-limit.login-per-minute=3",
-        "app.portal.rate-limit.invite-per-minute=2"
+        "app.portal.rate-limit.invite-per-minute=2",
+        "app.portal.rate-limit.mfa-complete-per-minute=3",
+        "app.portal.rate-limit.upload-per-minute=2"
 })
 @Transactional
 class PortalRateLimitTest extends PortalTestSupport {
@@ -89,6 +91,54 @@ class PortalRateLimitTest extends PortalTestSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"unknown-token-2\",\"email\":\"x2@example.com\","
                                 + "\"displayName\":\"x\",\"password\":\"password123\"}"))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void mfaComplete超過で429を返す() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+        PortalOrganization org = createCustomerOrg("mfa-rate");
+        String email = "mfa-rate-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8)
+                + "@example.com";
+        createUser(org, email);
+
+        // password無しで3回 → 4回目はIP+email rate limitで429（S13-P1-02）
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"" + email + "\",\"code\":\"000000\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"code\":\"000000\"}"))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void submissionsアップロード超過で429を返す() throws Exception {
+        // 実パスは .../payments/{id}/submissions（末尾スラッシュ無し。S13-P2-02）
+        PortalOrganization bpOrg = createBpOrg("upload-rate");
+        UserFixture fixture = readyUser(bpOrg, "upload-rate-"
+                + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8) + "@example.com");
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        long paymentId = 1L;
+        for (int i = 0; i < 2; i++) {
+            // 業務エラー(4xx/5xx)でもfilterのrate limitは消費される
+            mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .multipart("/api/portal/bp/payments/" + paymentId + "/submissions")
+                            .with(rateIp())
+                            .cookie(fixture.sessionCookie())
+                            .cookie(csrf.cookie())
+                            .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue()));
+        }
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/portal/bp/payments/" + paymentId + "/submissions")
+                        .with(rateIp())
+                        .cookie(fixture.sessionCookie())
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue()))
                 .andExpect(status().isTooManyRequests());
     }
 }
