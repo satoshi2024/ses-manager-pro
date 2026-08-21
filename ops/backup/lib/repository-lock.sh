@@ -14,7 +14,7 @@ REPOSITORY_LOCK_DIR=${REPOSITORY_LOCK_DIR:-/var/lib/ses-backup/locks}
 # 子プロセス側で 9>&- を明示できるようにするため）
 REPO_LOCK_FD=9
 
-repository_lock::acquire() { # mode timeout_seconds owner
+repository_lock::acquire() { # mode timeout_seconds owne
   local mode=$1 timeout=$2 owner=$3
   case "$mode" in
     shared) : ;;

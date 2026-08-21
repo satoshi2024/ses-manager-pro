@@ -135,7 +135,7 @@ EOF
 }
 
 # 簡易 manifest（tmp へ書いてから mv する。直書きすると find が空 manifest を見る）
-make_manifest() { # dir
+make_manifest() { # di
   local dir=$1
   jq -s '{schema_version:1, files: .}' \
     < <(cd "$dir" && find . -type f -not -name 'manifest.json*' | while read -r f; do
@@ -149,7 +149,7 @@ make_manifest() { # dir
 make_claims() { # plan_path
   local plan_path=$1
   local sha
-  sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  sha=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   local future
   future=$(date -u -d "now + 2 hours" +%Y-%m-%dT%H:%M:%SZ)
   local a
@@ -182,8 +182,11 @@ prebuild_plan() {
   return "$rc"
 }
 
-run_drill() { # plan_id
-  OUT=$("$DRILL" --plan "$1" --report-dir "$T/drill-report" \
+run_drill() { # plan_id target_ts
+  local pid=$1
+  local ts=${2:-}
+  [[ -n "$ts" ]] || ts=$(jq -r '.requested_target' "$PLANS_DIR/$pid.json")
+  OUT=$("$DRILL" --target "$ts" --plan "$pid" --report-dir "$T/drill-report" \
     --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
   RC=$?
 }
@@ -191,15 +194,34 @@ run_drill() { # plan_id
 case_drill_success() {
   setup_drill
   prebuild_plan > /dev/null
-  echo '' > /dev/null # (smoke は固定)
-  run_drill "$(ls "$PLANS_DIR"/*.json | head -1 | xargs -r basename | sed "s/.json$//")"
+  local pid ts
+  pid=$(ls "$PLANS_DIR"/*.json | head -1 | xargs -r basename | sed "s/.json$//")
+  ts=$(jq -r '.requested_target' "$PLANS_DIR/$pid.json")
+  run_drill "$pid" "$ts"
   assert_zero "$RC" "drill 成功"
   assert_contains "$OUT" '"state": "SUCCESS"' "SUCCESS"
-  assert_contains "$OUT" '"rto_ok": true' "RTO OK"
+  assert_contains "$OUT" "\"requested_target\": \"$ts\"" "requested_target bind"
   assert_file "$T/drill-report/drill-report.json" "report"
   local seg
   seg=$(jq -r '.segments | length' "$T/drill-report/drill-report.json")
   assert_eq "5" "$seg" "5 segments（plan/integrity/restore/validate/cutover）"
+}
+
+case_drill_target_plan_mismatch() {
+  setup_drill
+  prebuild_plan > /dev/null
+  local pid
+  pid=$(ls "$PLANS_DIR"/*.json | head -1 | xargs -r basename | sed "s/.json$//")
+  rm -rf "$T/drill-report"
+  OUT=$("$DRILL" --target "2099-01-01T00:00:00Z" --plan "$pid" --report-dir "$T/drill-report" \
+    --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_nonzero "$?" "target/plan mismatch は非 0"
+  assert_contains "$OUT" "一致しません" "理由"
+  if [[ -f "$T/drill-report/drill-report.json" ]]; then
+    assert_not_contains "$(cat "$T/drill-report/drill-report.json")" '"state": "SUCCESS"' "SUCCESS 報告なし"
+  else
+    test_assert "SUCCESS 報告なし"
+  fi
 }
 
 case_drill_plan_fail() {
@@ -270,6 +292,7 @@ EOF
 }
 
 run_case case_drill_success
+run_case case_drill_target_plan_mismatch
 run_case case_drill_plan_fail
 run_case case_drill_validate_not_ready
 run_case case_drill_evidence_missing

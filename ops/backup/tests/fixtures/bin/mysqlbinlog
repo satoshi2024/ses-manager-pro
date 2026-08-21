@@ -29,7 +29,8 @@ for arg in "$@"; do
       ;;
     --host=*|--port=*|--user=*|--raw|--stop-never|--force-read) : ;;
     *)
-      if [[ "$arg" == binlog.* ]]; then
+      # 位置引数の binlog file 名（接頭辞は binlog / mysql-bin 等）
+      if [[ "$arg" != -* && "$arg" == *.[0-9]* ]]; then
         initial=$arg
       fi
       ;;

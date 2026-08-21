@@ -434,6 +434,22 @@ EOF
   assert_eq "new-key-value2" "$(cat "$T/pw-file2")" "TMPDIR 未設定でもキーが切替わる"
 }
 
+case_retention_timezone_matrix() {
+  setup_metadata
+  local out_utc out_jst
+  out_utc=$(TZ=UTC "$RETENTION" --dry-run 2>&1)
+  assert_zero "$?" "UTC dry-run 成功"
+  out_jst=$(TZ=Asia/Tokyo "$RETENTION" --dry-run 2>&1)
+  assert_zero "$?" "JST dry-run 成功"
+  local kept_utc kept_jst del_utc del_jst
+  kept_utc=$(printf '%s' "$out_utc" | jq -cS '.kept_snapshots')
+  kept_jst=$(printf '%s' "$out_jst" | jq -cS '.kept_snapshots')
+  del_utc=$(printf '%s' "$out_utc" | jq -cS '.deletable_snapshots')
+  del_jst=$(printf '%s' "$out_jst" | jq -cS '.deletable_snapshots')
+  assert_eq "$kept_utc" "$kept_jst" "TZ=UTC/Asia/Tokyo で kept 一致"
+  assert_eq "$del_utc" "$del_jst" "TZ=UTC/Asia/Tokyo で deletable 一致"
+}
+
 run_case case_retention_window_all_kept
 run_case case_retention_daily_weekly_rep
 run_case case_retention_old_chain_deletable
@@ -448,6 +464,7 @@ run_case case_retention_apply_executes
 run_case case_retention_apply_report_mismatch
 run_case case_retention_apply_approval_missing
 run_case case_retention_prune_race
+run_case case_retention_timezone_matrix
 run_case case_key_rotation
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

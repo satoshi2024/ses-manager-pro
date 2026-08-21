@@ -40,7 +40,7 @@ main() {
   [[ -f "$plan_path" ]] || { echo "[rollback] ERROR: plan がありません: $plan_path" >&2; exit 1; }
   plan::verify "$plan_path" || { echo "[rollback] ERROR: plan の検証に失敗しました" >&2; exit 1; }
 
-  local cur
+  local cu
   [[ -f "$CUTOVER_STATE_FILE" ]] || {
     echo "[rollback] ERROR: CUTOVER_STATE_FILE がありません（write-enabled 後に削除された可能性を含む未知の状態。rollback 不可）" >&2
     exit 1

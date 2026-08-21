@@ -22,6 +22,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/plan.sh"
 . "$LIB_DIR/validate-db.sh"
 . "$LIB_DIR/validate-uploads.sh"
+. "$LIB_DIR/mysql-options.sh"
 
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
 VALIDATION_STATE="VALIDATING"
@@ -46,6 +47,13 @@ main() {
   common::require_env BACKUP_WORK_DIR
   TARGET_PORT=${TARGET_PORT:-3306}
 
+  # AC-008-01: MYSQL_PWD 禁止。秘密は option file のみ。
+  if [[ -n "${MYSQL_PWD:-}" ]]; then
+    echo "validate-db: MYSQL_PWD の使用は禁止です（TARGET_PASSWORD_FILE を使用してください）" >&2
+    exit 18
+  fi
+  unset MYSQL_PWD 2>/dev/null || true
+
   # R1 P1-05: 検証先への接続は VERIFY 系 TLS のみ許可（DISABLED/平文は拒否）
   case "${TARGET_TLS_MODE:-VERIFY_CA}" in
     VERIFY_IDENTITY|VERIFY_CA) TARGET_TLS_MODE_SAFE=${TARGET_TLS_MODE:-VERIFY_CA} ;;
@@ -63,20 +71,16 @@ main() {
   local plan_json
   plan_json=$(cat "$plan_path")
 
-  # target 接続（restore と同様の option file 方式）
-  target_optfile=$(mktemp)
-  {
-    echo '[client]'
-    echo "user=$TARGET_USER"
-    echo "port=$TARGET_PORT"
-    echo "database=$TARGET_DATABASE"
-    echo "password=$(head -n1 "$TARGET_PASSWORD_FILE")"
-    echo "ssl-mode=$TARGET_TLS_MODE_SAFE"
-    [[ -n "${TARGET_SSL_CAPATH:-}" ]] && echo "ssl-capath=$TARGET_SSL_CAPATH"
-  } > "$target_optfile"
-  chmod 600 "$target_optfile"
-  TARGET_OPT_ARGS=(--defaults-extra-file="$target_optfile" -h "$TARGET_HOST")
-  common::trap_add 'rm -f "$target_optfile"'
+  # target 接続（mysql_options::init を再利用）
+  # 注意: VAR=val func 形式は bash の local/pop_var_context 不具合を起こすため使わない
+  MYSQL_USER="$TARGET_USER"
+  MYSQL_PASSWORD_FILE="$TARGET_PASSWORD_FILE"
+  MYSQL_PORT="$TARGET_PORT"
+  MYSQL_SSL_CAPATH="${TARGET_SSL_CAPATH:-}"
+  MYSQL_TLS_MODE="$TARGET_TLS_MODE_SAFE"
+  mysql_options::init || validate_db::fail "mysql option file を作成できません（接続設定を確認してください）"
+  TARGET_OPT_ARGS=("${MYSQL_OPT_ARGS[@]}" -h "$TARGET_HOST" "$TARGET_DATABASE")
+  # mysql_options::init の trap が option file を掃除する
 
   # R1 P1-04: checkpoint metadata は plan が参照する checkpoint の index file に限定
   # （find | head -1 の任意 file ではなく、plan の effective_checkpoint.index を読む）

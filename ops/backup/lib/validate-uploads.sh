@@ -10,7 +10,7 @@
 validate_uploads::fail() { echo "validate-uploads: $*" >&2; return 1; }
 
 # staging の inventory を JSON で出力
-validate_uploads::inventory() { # dir
+validate_uploads::inventory() { # di
   local dir=$1
   (cd "$dir" && find . -type f -print0 | sort -z | while IFS= read -r -d '' f; do
     local rel sha

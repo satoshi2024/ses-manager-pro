@@ -31,7 +31,7 @@ approval::verify_claim() { # claim_file pubkey
 }
 
 # actor ごとの検証鍵を解決（APPROVAL_PUBKEY_DIR/<actor>.pem、無ければ APPROVAL_PUBKEY）
-approval::resolve_pubkey() { # actor
+approval::resolve_pubkey() { # acto
   local actor=$1
   if [[ -n "${APPROVAL_PUBKEY_DIR:-}" && -f "$APPROVAL_PUBKEY_DIR/$actor.pem" ]]; then
     echo "$APPROVAL_PUBKEY_DIR/$actor.pem"
@@ -46,21 +46,27 @@ approval::resolve_pubkey() { # actor
 }
 
 # 2 名の claim を収集・検証（plan・target に bind、異なる actor、期限内）
+# plan SHA は sidecar（plan::content_for_sha の canonical）と同一値を使う。
+# sidecar が無い対象（例: retention report）は file SHA にフォールバックする。
 approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
   local plan_path=$1 target_uuid=$2 claim1=$3 claim2=$4
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  if [[ -f "${plan_path}.sha256" ]]; then
+    plan_sha=$(tr -d ' \t\r\n' < "${plan_path}.sha256")
+  else
+    plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  fi
   local KEY1=""
 
   local actor1="" actor2=""
   for claim in "$claim1" "$claim2"; do
-    local actor
+    local acto
     actor=$(jq -r '.actor // empty' "$claim" 2>/dev/null)
     [[ -n "$actor" ]] || { echo "approval: claim に actor がありません: $claim" >&2; return 1; }
     if [[ -z "$actor1" ]]; then
-      actor1=$actor
+      actor1=$acto
     elif [[ "$actor" != "$actor1" ]]; then
-      actor2=$actor
+      actor2=$acto
     else
       echo "approval: 同一 actor の claim を 2 件受け付けません: $actor" >&2
       return 1
@@ -70,7 +76,7 @@ approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
 
   for claim in "$claim1" "$claim2"; do
     # plan SHA / target UUID / 有効期限の bind 検査
-    local c_plan c_target c_expires c_actor
+    local c_plan c_target c_expires c_acto
     c_plan=$(jq -r '.plan_sha256 // empty' "$claim" 2>/dev/null)
     c_target=$(jq -r '.target_uuid // empty' "$claim" 2>/dev/null)
     c_expires=$(jq -r '.expires_at_utc // empty' "$claim" 2>/dev/null)

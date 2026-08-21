@@ -51,6 +51,13 @@ main() {
   common::require_env TARGET_PASSWORD_FILE
   common::require_env TARGET_DATABASE
   TARGET_PORT=${TARGET_PORT:-3306}
+
+  # AC-008-01: MYSQL_PWD 禁止。秘密は option file のみ。
+  if [[ -n "${MYSQL_PWD:-}" ]]; then
+    echo "[cutover] ERROR: MYSQL_PWD の使用は禁止です（TARGET_PASSWORD_FILE を使用してください）" >&2
+    exit 18
+  fi
+  unset MYSQL_PWD 2>/dev/null || true
   common::trap_add 'rm -f "${TARGET_OPTFILE:-}"'
 
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
@@ -67,7 +74,7 @@ main() {
   [[ "$vstate" == "READY_FOR_CUTOVER" ]] || cutover::fail "validation が READY_FOR_CUTOVER ではありません（state=$vstate）"
 
   # 状態遷移（initial/staged から開始）
-  local cur
+  local cu
   cur=$(cutover::read_state)
   cutover::guard_transition "$cur" "read-only-smoke-passed" || cutover::fail "現在の state から cutover を開始できません（state=$cur）"
 
@@ -80,7 +87,7 @@ main() {
   esac
   [[ -n "${TARGET_SSL_CAPATH:-}" ]] || cutover::fail "TARGET_SSL_CAPATH が未設定です（VERIFY 系 TLS には CA 証明書が必要）"
 
-  # target UUID（claim の bind 検証に使用）
+  # target UUID（claim の bind 検証に使用）— 0600 option file（MYSQL_PWD / -p$PW 禁止）
   local target_uuid_optfile
   target_uuid_optfile=$(mktemp)
   TARGET_OPTFILE=$target_uuid_optfile
@@ -106,11 +113,13 @@ main() {
 
   cutover::write_state "read-only-smoke-passed" "$PLAN_ID"
 
-  # read-only smoke（rollback 判定の境界）
+  # read-only smoke（rollback 判定の境界）— パスワードは file 経由のみ渡す
   if [[ -n "${APP_SMOKE_SCRIPT:-}" && -x "$APP_SMOKE_SCRIPT" ]]; then
     local smoke_rc=0
-    TARGET_HOST="$TARGET_HOST" TARGET_PORT="$TARGET_PORT" TARGET_USER="$TARGET_USER" \
-    TARGET_PASSWORD="$(head -n1 "$TARGET_PASSWORD_FILE")" TARGET_DATABASE="$TARGET_DATABASE" \
+    env -u MYSQL_PWD -u TARGET_PASSWORD \
+      TARGET_HOST="$TARGET_HOST" TARGET_PORT="$TARGET_PORT" TARGET_USER="$TARGET_USER" \
+      TARGET_PASSWORD_FILE="$TARGET_PASSWORD_FILE" TARGET_DATABASE="$TARGET_DATABASE" \
+      TARGET_SSL_CAPATH="${TARGET_SSL_CAPATH:-}" TARGET_TLS_MODE="$TARGET_TLS_MODE_SAFE" \
       bash "$APP_SMOKE_SCRIPT" || smoke_rc=$?
     if (( smoke_rc != 0 )); then
       echo "cutover: read-only smoke 失敗（rc=$smoke_rc）。旧環境への rollback 指示（state=rolled-back）。" >&2
@@ -127,8 +136,10 @@ main() {
 
   local wc=${WRITE_ENABLE_COMMAND:-}
   [[ -n "$wc" && -x "$wc" ]] || cutover::fail "WRITE_ENABLE_COMMAND がありません（write-enable 未実施は cutover 不可）"
-  if ! TARGET_HOST="$TARGET_HOST" TARGET_USER="$TARGET_USER" TARGET_PORT="$TARGET_PORT" \
-    TARGET_PASSWORD="$(head -n1 "$TARGET_PASSWORD_FILE")" TARGET_DATABASE="$TARGET_DATABASE" \
+  if ! env -u MYSQL_PWD -u TARGET_PASSWORD \
+    TARGET_HOST="$TARGET_HOST" TARGET_USER="$TARGET_USER" TARGET_PORT="$TARGET_PORT" \
+    TARGET_PASSWORD_FILE="$TARGET_PASSWORD_FILE" TARGET_DATABASE="$TARGET_DATABASE" \
+    TARGET_SSL_CAPATH="${TARGET_SSL_CAPATH:-}" TARGET_TLS_MODE="$TARGET_TLS_MODE_SAFE" \
     PLAN_ID="$PLAN_ID" \
     bash "$wc"; then
     cutover::write_state "single-writer" "$PLAN_ID"   # write-enable 失敗は single-writer のまま

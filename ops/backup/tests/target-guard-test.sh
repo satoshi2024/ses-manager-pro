@@ -106,12 +106,31 @@ case_guard_default_host_user() {
   export TARGET_HOST="localhost"
   run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
   assert_nonzero "$GUARD_RC" "localhost は拒否"
+  export TARGET_HOST="127.0.0.1"
+  run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
+  assert_nonzero "$GUARD_RC" "127.0.0.1 は拒否"
+  export TARGET_HOST="::1"
+  run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
+  assert_nonzero "$GUARD_RC" "::1 は拒否"
   export TARGET_HOST=10.0.0.9 TARGET_USER="root"
   run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
   assert_nonzero "$GUARD_RC" "root user は拒否"
   export TARGET_USER="restore-svc" TARGET_DATABASE=""
   run_guard "$(mkplan "$SOURCE_UUID")" ""
   assert_nonzero "$GUARD_RC" "DB 名空は拒否"
+}
+
+case_guard_count_fail_closed() {
+  setup_guard
+  export FAKE_TABLE_COUNT_FAIL=1
+  run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
+  assert_nonzero "$GUARD_RC" "COUNT 失敗は fail-closed"
+  assert_contains "$GUARD_OUT" "COUNT" "理由を通知"
+  unset FAKE_TABLE_COUNT_FAIL
+  export FAKE_TABLE_COUNT_EMPTY=1
+  run_guard "$(mkplan "$SOURCE_UUID")" ses_manager_db
+  assert_nonzero "$GUARD_RC" "COUNT 空出力は fail-closed"
+  unset FAKE_TABLE_COUNT_EMPTY
 }
 
 case_guard_same_host_as_source() {
@@ -136,9 +155,10 @@ run_case case_guard_allowlist_mismatch
 run_case case_guard_marker_mismatch
 run_case case_guard_marker_missing
 run_case case_guard_nonempty_db
-run_case case_guard_default_host_user
+run_case case_guard_default_host_use
+run_case case_guard_count_fail_closed
 run_case case_guard_same_host_as_source
-run_case case_guard_plan_tamper
+run_case case_guard_plan_tampe
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

@@ -204,7 +204,7 @@ quiesce_local::ddl_lock_acquire() { # state_dir timeout_seconds
   return 0
 }
 
-quiesce_local::ddl_lock_release() { # state_dir
+quiesce_local::ddl_lock_release() { # state_di
   local state_dir=$1
   local pidfile="$state_dir/ddl-session.pid"
   if [[ ! -f "$pidfile" ]]; then

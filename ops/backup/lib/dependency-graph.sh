@@ -75,16 +75,29 @@ dep::chain_complete() { # chain_json -> true/false
   echo "true"
 }
 
+# UTC 時刻の差を日数で返す（date -u。jq fromdateiso8601 / ホスト TZ 非依存）
+dep::age_days() { # now_utc ts_utc
+  local now_e ts_e
+  now_e=$(date -u -d "$1" +%s 2>/dev/null) || return 1
+  ts_e=$(date -u -d "$2" +%s 2>/dev/null) || return 1
+  echo $(( (now_e - ts_e) / 86400 ))
+}
+
 # retention policy に基づき保持/削除候補を計算（dry-run と同一ロジック）
 dep::compute_retention() { # graph_json pitr_days daily_days weekly_count monthly_count now_utc -> JSON
   local graph=$1 pitr=$2 daily=$3 weekly=$4 monthly=$5 now=$6
   local kept_cp_ids="[]"
-  # 1) PITR window 内の checkpoint は全て保持
-  # 2) window 外は daily_days 分は日次代表 1 つ、その後 weekly_count 週は週次代表、
-  #    monthly_count ヶ月は月次代表
-  local cp_rows
-  cp_rows=$(printf '%s' "$graph" | jq -c --arg t "$now" \
-    '[.checkpoints[] | select(.status == "VALID") | . + {age_days: (((($t | fromdateiso8601) - (.consistency_time_utc | fromdateiso8601)) / 86400) | floor)}]')
+  # age_days は selector::epoch_of と同じ UTC epoch（fromdateiso8601 禁止）
+  local cp_rows="[]"
+  local row ts age
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    ts=$(printf '%s' "$row" | jq -r '.consistency_time_utc // empty')
+    age=$(dep::age_days "$now" "$ts") || continue
+    cp_rows=$(printf '%s' "$cp_rows" | jq -c --argjson r "$row" --argjson a "$age" \
+      '. + [$r + {age_days: $a}]')
+  done <<< "$(printf '%s' "$graph" | jq -c '.checkpoints[] | select(.status == "VALID")')"
+
   kept_cp_ids=$(printf '%s' "$cp_rows" | jq -c \
     --argjson pitr "$pitr" --argjson daily "$daily" --argjson weekly "$weekly" --argjson monthly "$monthly" '
       def bucket7: ((.age_days / 7) | floor);

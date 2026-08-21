@@ -36,7 +36,7 @@ setup_common() {
   export FAKE_GET_LOCK_HOLD=1
   # 前 case の fake 制御 env が漏れないようにする
   unset FAKE_BINLOG_VERIFY_RC FAKE_ARCHIVE_RC FAKE_FLUSH_RC FAKE_GET_LOCK FAKE_RELEASE_LOCK \
-    FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID
+    FAKE_DUMP_FILE FULL_COORDINATE_FILE BINLOG_SERVER_ID FAKE_RESTIC_BACKUP_RC
   unset MYSQL_PWD
 }
 
@@ -117,6 +117,7 @@ case_archive_restart_resume() {
   setup_binlog_env
   export FAKE_ARCHIVE_FILES="binlog.000002 binlog.000003"
   # 前回 file が source の File_size(180) 以上で完全に存在する
+  # last_file(000001) は source current(000003) より厳密に古い → 次 file から
   head -c 200 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000001"
   printf 'binlog.000001\t180\nbinlog.000002\t200\nbinlog.000003\t157\n' > "$FAKE_BINLOG_STATE"
   jq -n --arg last "binlog.000001" --arg sid "50001" --arg uuid "$FAKE_UUID" \
@@ -126,6 +127,34 @@ case_archive_restart_resume() {
   assert_zero "$ARCHIVE_CODE" "restart resume 成功"
   assert_contains "$(cat "$FAKE_ARGV_LOG")" "binlog.000002" "最後の complete file の次から開始"
   assert_file "$BINLOG_RAW_DIR/binlog.000001" "既存 file を上書きしない"
+}
+
+case_archive_restart_active_current() {
+  # last_file == source current かつ size 一致でも active として同 file から継続
+  setup_binlog_env
+  export FAKE_ARCHIVE_FILES="binlog.000002"
+  head -c 200 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/binlog.000002"
+  printf 'binlog.000001\t180\nbinlog.000002\t200\n' > "$FAKE_BINLOG_STATE"
+  jq -n --arg last "binlog.000002" --arg sid "50011" --arg uuid "$FAKE_UUID" \
+    '{last_file: $last, connection_server_id: $sid, source_server_uuid: $uuid}' > "$BINLOG_STATE"
+  export BINLOG_SERVER_ID=50011
+  run_archive_once
+  assert_zero "$ARCHIVE_CODE" "active current からの継続成功"
+  assert_contains "$(cat "$FAKE_ARGV_LOG")" "binlog.000002" "同 file から継続（次へ飛ばさない）"
+  assert_not_contains "$(cat "$FAKE_ARGV_LOG")" "binlog.000003" "次 file へスキップしない"
+}
+
+case_archive_nondefault_basename() {
+  setup_binlog_env
+  export FAKE_ARCHIVE_FILES="mysql-bin.000002"
+  head -c 200 /dev/zero | tr '\0' 'a' > "$BINLOG_RAW_DIR/mysql-bin.000001"
+  printf 'mysql-bin.000001\t180\nmysql-bin.000002\t200\nmysql-bin.000003\t157\n' > "$FAKE_BINLOG_STATE"
+  jq -n --arg last "mysql-bin.000001" --arg sid "50012" --arg uuid "$FAKE_UUID" \
+    '{last_file: $last, connection_server_id: $sid, source_server_uuid: $uuid}' > "$BINLOG_STATE"
+  export BINLOG_SERVER_ID=50012
+  run_archive_once
+  assert_zero "$ARCHIVE_CODE" "非デフォルト basename で resume 成功"
+  assert_contains "$(cat "$FAKE_ARGV_LOG")" "mysql-bin.000002" "接頭辞を保持した次 file"
 }
 
 case_archive_restart_incomplete() {
@@ -201,6 +230,23 @@ case_snapshot_binlog_checksum_fail() {
   out=$("$SNAPSHOT" 2>&1)
   assert_zero "$?" "checksum 失敗 file はスキップして続行"
   assert_no_file "$BINLOG_IMMUTABLE_DIR/binlog.000001" "checksum NG は immutable 化しない"
+}
+
+case_snapshot_restic_fail_keeps_raw() {
+  setup_binlog_env
+  head -c 190 /dev/zero | tr '\0' 'b' > "$BINLOG_RAW_DIR/binlog.000001"
+  printf 'binlog.000001\t180\nbinlog.000002\t200\n' > "$FAKE_BINLOG_STATE"
+  export FAKE_RESTIC_BACKUP_RC=1
+  local out=""
+  out=$("$SNAPSHOT" 2>&1)
+  assert_nonzero "$?" "restic 失敗は非 0"
+  assert_file "$BINLOG_RAW_DIR/binlog.000001" "失敗後も RAW に残り再試行可能"
+  assert_no_file "$BINLOG_IMMUTABLE_DIR/binlog.000001" "immutable へ移さない"
+  unset FAKE_RESTIC_BACKUP_RC
+  # 再実行で成功すること
+  out=$("$SNAPSHOT" 2>&1)
+  assert_zero "$?" "再試行で成功"
+  assert_file "$BINLOG_IMMUTABLE_DIR/binlog.000001" "再試行後に immutable 化"
 }
 
 case_continuity_gap() {
@@ -280,12 +326,15 @@ case_checkpoint_rotation_twice() {
 run_case case_archive_normal_once
 run_case case_archive_first_run_without_coordinate_fails
 run_case case_archive_restart_resume
+run_case case_archive_restart_active_current
+run_case case_archive_nondefault_basename
 run_case case_archive_restart_incomplete
 run_case case_archive_uuid_mismatch
 run_case case_archive_server_id_mismatch
 run_case case_archive_state_ahead_of_source
 run_case case_snapshot_binlog_closed_only
 run_case case_snapshot_binlog_checksum_fail
+run_case case_snapshot_restic_fail_keeps_raw
 run_case case_continuity_gap
 run_case case_checkpoint_normal
 run_case case_checkpoint_truncated_reject

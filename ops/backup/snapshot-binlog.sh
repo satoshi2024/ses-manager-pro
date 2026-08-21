@@ -2,10 +2,10 @@
 # ============================================================
 # HFP-03-004 閉じた binlog の immutable snapshot（BL-004/008 対応）
 # - RAW_DIR（archiver の work area）のうち、source の File_size と一致し
-#   checksum 検証済みの closed file だけを IMMUTABLE_DIR へ rename する。
+#   checksum 検証済みの closed file だけを restic へ載せ、成功後に
+#   IMMUTABLE_DIR へ rename する（restic 失敗時は RAW に残して再試行可能）。
 # - active（書込み中）file は repository 対象にしない。
-# - 新しい immutable file を restic snapshot 化し binlog-index.json へ
-#   記録する（restore plan の依存解決に使う）。
+# - 閉じた候補の 1 つでも restic/index 失敗なら非 0（checkpoint を VALID にしない）。
 #
 # usage: snapshot-binlog.sh [--help]
 # ============================================================
@@ -28,8 +28,7 @@ BINLOG_RAW_DIR=${BINLOG_RAW_DIR:?BINLOG_RAW_DIR is required}
 BINLOG_IMMUTABLE_DIR=${BINLOG_IMMUTABLE_DIR:?BINLOG_IMMUTABLE_DIR is required}
 BINLOG_INDEX=${BINLOG_INDEX:-$BINLOG_IMMUTABLE_DIR/binlog-index.json}
 
-# source の現在の binlog file と size 一覧（SHOW BINARY LOGS）
-binlog_snap::source_logs() { # -> "file<TAB>size" 1行ずつ
+binlog_snap::source_logs() {
   if ! mysql_options::init; then
     echo "snapshot-binlog: mysql option file を作成できませんでした" >&2
     return 1
@@ -54,8 +53,6 @@ main() {
   restic::ensure_repository "$RESTIC_BIN" "$BINLOG_IMMUTABLE_DIR/restic.log" \
     || common::fail "restic repository を準備できません"
 
-  # 既定は exclusive lock。create-checkpoint から呼ばれる場合（lock 保持済み）は
-  # --no-lock でスキップする（自己デッドロック防止）
   if [[ "${SKIP_LOCK:-}" != "1" ]]; then
     if ! repository_lock::acquire exclusive "${BACKUP_LOCK_TIMEOUT:-120}" "snapshot-binlog"; then
       common::fail "repository lock を取得できませんでした"
@@ -65,27 +62,20 @@ main() {
   local src_logs=""
   src_logs=$(binlog_snap::source_logs) || common::fail "source の binlog 一覧を取得できません"
 
-  # source の最新 file は active（対象外）。それ以外を closed 候補とする
   local last_file=""
   last_file=$(printf '%s\n' "$src_logs" | awk 'END{print $1}')
   [[ -n "$last_file" ]] || common::fail "source に binlog がありません"
 
   local moved=0
-  local f=""
-  local size=0
+  local failures=0
   local rel=""
+  local size=0
   local snap=""
-  local stamp
-  stamp=$(date -u +%Y%m%dT%H%M%SZ)
 
-  # RAW_DIR の file を suffix 順に処理
   local raw_file=""
   while IFS= read -r -d '' raw_file; do
     rel=$(basename "$raw_file")
-    [[ "$rel" == binlog.* ]] || continue
-    [[ "$rel" != "$last_file" ]] || continue   # active file は除外
-
-    # source の File_size と一致（truncated 拒否）
+    [[ "$rel" != "$last_file" ]] || continue
     size=$(printf '%s\n' "$src_logs" | awk -v f="$rel" '$1 == f {print $2; exit}')
     if [[ -z "$size" ]]; then
       echo "snapshot-binlog: source に無い file（別 lineage?）: $rel" >&2
@@ -100,60 +90,85 @@ main() {
       continue
     fi
 
-    # immutable 領域へ rename（同一 fs 前提。既存を上書きしない）
     local dest="$BINLOG_IMMUTABLE_DIR/$rel"
     if [[ -f "$dest" ]]; then
-      continue
+      if [[ -f "$BINLOG_INDEX" ]] && jq -e --arg f "$rel" 'map(select(.file == $f)) | length > 0' "$BINLOG_INDEX" >/dev/null 2>&1; then
+        continue
+      fi
+      echo "snapshot-binlog: index 欠落のため immutable から RAW へ戻します: $rel" >&2
+      mv -f "$dest" "$raw_file" || {
+        echo "snapshot-binlog: RAW への復帰に失敗: $rel" >&2
+        failures=$((failures + 1))
+        continue
+      }
     fi
-    if ! mv -n "$raw_file" "$dest"; then
-      echo "snapshot-binlog: rename に失敗しました: $rel" >&2
-      continue
-    fi
-    chmod 400 "$dest"
 
-    # 1 file = 1 snapshot（依存解決を単純化）
-    if ! snap=$("$RESTIC_BIN" backup "$dest" --tag "kind=binlog" --tag "file=$rel" \
+    # 先に restic backup（成功するまで RAW に残す → 次回再試行可能）
+    if ! snap=$("$RESTIC_BIN" backup "$raw_file" --tag "kind=binlog" --tag "file=$rel" \
         --tag "status=pending" --json 2>> "$BINLOG_IMMUTABLE_DIR/restic.log" \
         | jq -rs 'map(select(.message_type == "summary"))[0].snapshot_id // empty'); then
       echo "snapshot-binlog: restic backup 失敗: $rel" >&2
+      failures=$((failures + 1))
       continue
     fi
     if [[ -z "$snap" ]]; then
       echo "snapshot-binlog: snapshot ID を取得できません: $rel" >&2
+      failures=$((failures + 1))
       continue
     fi
     "$RESTIC_BIN" tag --add "status=valid" --remove "status=pending" "$snap" \
       >> "$BINLOG_IMMUTABLE_DIR/restic.log" 2>&1 || true
-    # restic 0.17 の tag は新 id の snapshot を作るため、id を再解決する
     snap=$(restic::resolve_snapshot_by_tag "$RESTIC_BIN" "file=$rel")
-    [[ -n "$snap" ]] || {
+    if [[ -z "$snap" ]]; then
       echo "snapshot-binlog: tag 更新後の snapshot ID を解決できません: $rel" >&2
+      failures=$((failures + 1))
       continue
-    }
+    fi
 
-    # binlog-index.json に記録（追記）
+    if ! mv -n "$raw_file" "$dest"; then
+      echo "snapshot-binlog: rename に失敗しました: $rel" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    chmod 400 "$dest"
+
     local index="[]"
     [[ -f "$BINLOG_INDEX" ]] && index=$(cat "$BINLOG_INDEX")
-    printf '%s' "$index" | jq -c \
+    if ! printf '%s' "$index" | jq -c \
       --arg file "$rel" \
       --arg snapshot_id "$snap" \
       --arg size "$size" \
       --arg sha256 "$(common::sha256_file "$dest")" \
       --arg archived_at_utc "$(common::now_utc)" \
       '. + [{file: $file, snapshot_id: $snapshot_id, size: ($size|tonumber), sha256: $sha256, archived_at_utc: $archived_at_utc}]' \
-      > "$BINLOG_INDEX.tmp" && mv "$BINLOG_INDEX.tmp" "$BINLOG_INDEX"
+      > "$BINLOG_INDEX.tmp"; then
+      echo "snapshot-binlog: index 更新に失敗: $rel" >&2
+      mv -f "$dest" "$raw_file" 2>/dev/null || true
+      failures=$((failures + 1))
+      continue
+    fi
+    mv "$BINLOG_INDEX.tmp" "$BINLOG_INDEX"
     chmod 600 "$BINLOG_INDEX"
     moved=$((moved + 1))
-  done < <(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -name 'binlog.*' -print0 | sort -z)
+  done < <(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -print0 | sort -z)
 
+  local status="OK"
+  if (( failures > 0 )); then
+    status="FAILED"
+  fi
   jq -n \
     --arg kind "binlog-snapshot" \
-    --arg status "OK" \
+    --arg status "$status" \
     --arg moved "$moved" \
-    --arg last_closed_file "$(ls "$BINLOG_IMMUTABLE_DIR"/binlog.* 2>/dev/null | xargs -r basename | sort | tail -n1)" \
+    --arg failures "$failures" \
+    --arg last_closed_file "$(find "$BINLOG_IMMUTABLE_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | grep -E '\.[0-9]+$' | sort | tail -n1)" \
     --arg source_current_file "$last_file" \
     '{kind: $kind, status: $status, moved_files: ($moved|tonumber),
+      failed_files: ($failures|tonumber),
       last_closed_file: $last_closed_file, source_current_file: $source_current_file}'
+  if (( failures > 0 )); then
+    return 1
+  fi
   return 0
 }
 

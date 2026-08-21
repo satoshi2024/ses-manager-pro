@@ -49,13 +49,26 @@ exit "${OLD_SMOKE_RC:-0}"
 EOF
   chmod +x "$T/smoke-ok.sh" "$T/old-smoke-ok.sh"
   export APP_SMOKE_SCRIPT="$T/smoke-ok.sh" OLD_ENV_SMOKE_SCRIPT="$T/old-smoke-ok.sh"
-  # write-enable provider
+  # write-enable provider（argv / environ に秘密を載せないことを検証）
   cat > "$T/write-enable.sh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "argv:$*" >> "${WRITE_ENABLE_LOG:-/dev/null}"
+env | sort >> "${WRITE_ENABLE_ENV_LOG:-/dev/null}"
+if printf '%s' "$*" | grep -q -- '-p'; then
+  echo "write-enable: password on argv" >&2
+  exit 9
+fi
+if [[ -n "${TARGET_PASSWORD:-}" || -n "${MYSQL_PWD:-}" ]]; then
+  echo "write-enable: password in environ" >&2
+  exit 9
+fi
+[[ -n "${TARGET_PASSWORD_FILE:-}" ]] || { echo "TARGET_PASSWORD_FILE required" >&2; exit 1; }
 exit "${WRITE_RC:-0}"
 EOF
   chmod +x "$T/write-enable.sh"
   export WRITE_ENABLE_COMMAND="$T/write-enable.sh"
+  export WRITE_ENABLE_LOG="$T/we-argv.log" WRITE_ENABLE_ENV_LOG="$T/we-env.log"
+  : > "$WRITE_ENABLE_LOG" ; : > "$WRITE_ENABLE_ENV_LOG"
   # 承認鍵
   openssl genrsa -out "$T/priv1.pem" 2048 2>/dev/null
   openssl rsa -in "$T/priv1.pem" -pubout -out "$T/pub1.pem" 2>/dev/null
@@ -77,7 +90,7 @@ EOF
 make_claims() {
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  plan_sha=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   local future
   future=$(date -u -d "now + 2 hours" +%Y-%m-%dT%H:%M:%SZ)
   local a
@@ -100,20 +113,40 @@ run_cutover() {
 state_now() { jq -r '.state' "$T/state.json"; }
 
 case_cutover_normal() {
-  setup_cutover
+  setup_cutove
   make_claims
   export SMOKE_RC=0 WRITE_RC=0
-  run_cutover
+  run_cutove
   assert_zero "$RC" "正常 cutover 成功"
   assert_contains "$OUT" '"state": "write-enabled"' "write-enabled を返す"
   assert_eq "write-enabled" "$(state_now)" "state file が write-enabled"
+  if grep -q "$FAKE_PW" "$WRITE_ENABLE_LOG" "$WRITE_ENABLE_ENV_LOG" "$TEST_LOG" 2>/dev/null; then
+    test_fail "cutover-secret-scan" "write-enable 経路に秘密が露出"
+  else
+    test_assert "cutover-secret-scan"
+  fi
+  if grep -q 'TARGET_PASSWORD=' "$WRITE_ENABLE_ENV_LOG" 2>/dev/null; then
+    test_fail "cutover-no-target-password-env" "TARGET_PASSWORD が environ に残存"
+  else
+    test_assert "cutover-no-target-password-env"
+  fi
+}
+
+case_cutover_mysql_pwd_rejected() {
+  setup_cutove
+  make_claims
+  export MYSQL_PWD="$FAKE_PW" SMOKE_RC=0 WRITE_RC=0
+  run_cutove
+  assert_eq 18 "$RC" "MYSQL_PWD 使用検出で exit 18"
+  assert_contains "$OUT" "MYSQL_PWD" "MYSQL_PWD を拒否メッセージに含む"
+  unset MYSQL_PWD
 }
 
 case_cutover_smoke_fail_rollback() {
-  setup_cutover
+  setup_cutove
   make_claims
   export SMOKE_RC=7 WRITE_RC=0
-  run_cutover
+  run_cutove
   assert_eq 3 "$RC" "smoke 失敗は exit 3（rollback 指示）"
   assert_contains "$OUT" "rollback" "rollback を通知"
   assert_eq "rolled-back" "$(state_now)" "state file が rolled-back"
@@ -121,17 +154,17 @@ case_cutover_smoke_fail_rollback() {
 }
 
 case_cutover_validation_not_ready() {
-  setup_cutover
+  setup_cutove
   make_claims
   jq -n --arg p "$PLAN_ID" '{state:"FAILED_VALIDATION"}' > "$T/validation.json"
   export SMOKE_RC=0
-  run_cutover
+  run_cutove
   assert_nonzero "$RC" "validation 未 READY は非 0"
   assert_contains "$OUT" "READY_FOR_CUTOVER" "理由を表示"
 }
 
 case_cutover_approval_missing() {
-  setup_cutover
+  setup_cutove
   make_claims
   export SMOKE_RC=0
   OUT=$("$CUTOVER" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-alice.json" 2>&1)
@@ -140,34 +173,34 @@ case_cutover_approval_missing() {
 }
 
 case_cutover_write_enable_fail() {
-  setup_cutover
+  setup_cutove
   make_claims
   export SMOKE_RC=0 WRITE_RC=1
-  run_cutover
+  run_cutove
   assert_nonzero "$RC" "write-enable 失敗は非 0"
   assert_eq "single-writer" "$(state_now)" "state は single-writer のまま"
 }
 
 case_cutover_already_write_enabled() {
-  setup_cutover
+  setup_cutove
   make_claims
   jq -n --arg p "$PLAN_ID" '{state:"write-enabled", plan_id:$p}' > "$T/state.json"
   export SMOKE_RC=0
-  run_cutover
+  run_cutove
   assert_nonzero "$RC" "write-enabled 後は非 0"
   assert_contains "$OUT" "write-enabled" "理由を表示"
 }
 
 case_cutover_no_smoke_script() {
-  setup_cutover
+  setup_cutove
   make_claims
   unset APP_SMOKE_SCRIPT
-  run_cutover
+  run_cutove
   assert_nonzero "$RC" "smoke script 未設定は非 0"
 }
 
 case_rollback_after_write_enabled_forbidden() {
-  setup_cutover
+  setup_cutove
   jq -n --arg p "$PLAN_ID" '{state:"write-enabled", plan_id:$p}' > "$T/state.json"
   export OLD_SMOKE_RC=0
   OUT=$("$ROLLBACK" --plan "$PLAN_ID" 2>&1)
@@ -176,7 +209,7 @@ case_rollback_after_write_enabled_forbidden() {
 }
 
 case_rollback_state_file_missing_forbidden() {
-  setup_cutover
+  setup_cutove
   # R1 P1-07: state file が存在しない（write-enabled 後に削除された可能性）場合は
   # rollback を許可しない（unknown 扱い）
   rm -f "$T/state.json"
@@ -187,7 +220,7 @@ case_rollback_state_file_missing_forbidden() {
 }
 
 case_rollback_normal() {
-  setup_cutover
+  setup_cutove
   jq -n --arg p "$PLAN_ID" '{state:"read-only-smoke-passed", plan_id:$p}' > "$T/state.json"
   export OLD_SMOKE_RC=0
   OUT=$("$ROLLBACK" --plan "$PLAN_ID" 2>&1)
@@ -196,7 +229,7 @@ case_rollback_normal() {
 }
 
 case_rollback_from_single_writer() {
-  setup_cutover
+  setup_cutove
   jq -n --arg p "$PLAN_ID" '{state:"single-writer", plan_id:$p}' > "$T/state.json"
   export OLD_SMOKE_RC=0
   OUT=$("$ROLLBACK" --plan "$PLAN_ID" 2>&1)
@@ -205,7 +238,7 @@ case_rollback_from_single_writer() {
 }
 
 case_rollback_old_env_fail() {
-  setup_cutover
+  setup_cutove
   jq -n --arg p "$PLAN_ID" '{state:"staged", plan_id:$p}' > "$T/state.json"
   export OLD_SMOKE_RC=1
   OUT=$("$ROLLBACK" --plan "$PLAN_ID" 2>&1)
@@ -214,6 +247,7 @@ case_rollback_old_env_fail() {
 }
 
 run_case case_cutover_normal
+run_case case_cutover_mysql_pwd_rejected
 run_case case_cutover_smoke_fail_rollback
 run_case case_cutover_validation_not_ready
 run_case case_cutover_approval_missing
@@ -223,7 +257,7 @@ run_case case_cutover_no_smoke_script
 run_case case_rollback_after_write_enabled_forbidden
 run_case case_rollback_state_file_missing_forbidden
 run_case case_rollback_normal
-run_case case_rollback_from_single_writer
+run_case case_rollback_from_single_write
 run_case case_rollback_old_env_fail
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

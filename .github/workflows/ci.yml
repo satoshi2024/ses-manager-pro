@@ -196,6 +196,9 @@ jobs:
             exit 1
           fi
 
+      - name: Run backup unit suite
+        run: bash ops/backup/tests/run-unit-tests.sh
+
       # preflight -> full -> checkpoint -> PITR restore -> validate（before/after marker 照合）
       - name: Run backup integration suite
         run: bash ops/backup/tests/run-integration.sh
