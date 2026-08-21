@@ -1,5 +1,6 @@
 $(function () {
     if (!$('#approvalRoutesPage').length) return;
+    loadApprovalRouteSelectOptions();
     loadApprovalRoutes();
     loadApprovalResponsibilities();
     loadApprovalDelegations();
@@ -8,6 +9,35 @@ $(function () {
     $('#approvalResponsibilityForm').on('submit', function (e) { e.preventDefault(); saveApprovalResponsibility(); });
     $('#approvalDelegationForm').on('submit', function (e) { e.preventDefault(); saveApprovalDelegation(); });
 });
+
+function approvalUserLabel(u) {
+    return (u.realName || u.username || '') + (u.role ? ' (' + u.role + ')' : '');
+}
+
+function loadApprovalRouteSelectOptions() {
+    $.get('/api/autocomplete/organizations', function (res) {
+        if (res.code !== 200) return;
+        const options = (res.data || []).map(function (o) {
+            return '<option value="' + o.id + '">' + SES.escapeHtml((o.code ? o.code + ' ' : '') + (o.name || '')) + '</option>';
+        }).join('');
+        $('.approval-org-select').each(function () {
+            const placeholder = $(this).find('option[value=""]').first().prop('outerHTML')
+                || '<option value="">' + SES.escapeHtml(SES.i18n.t('approval.routes.selectOrganization', '組織を選択...')) + '</option>';
+            $(this).html(placeholder + options);
+        });
+    });
+    $.get('/api/autocomplete/assignable-users', function (res) {
+        if (res.code !== 200) return;
+        const options = (res.data || []).map(function (u) {
+            return '<option value="' + u.id + '">' + SES.escapeHtml(approvalUserLabel(u)) + '</option>';
+        }).join('');
+        $('.approval-user-select').each(function () {
+            const placeholder = $(this).find('option[value=""]').first().prop('outerHTML')
+                || '<option value="">' + SES.escapeHtml(SES.i18n.t('approval.routes.selectUser', 'ユーザーを選択...')) + '</option>';
+            $(this).html(placeholder + options);
+        });
+    });
+}
 
 function routeNumber(value) { return value === '' ? null : Number(value); }
 function routeDate(value) { return value === '' ? null : value; }
@@ -18,6 +48,14 @@ async function loadApprovalRoutes() {
 }
 function renderApprovalRoutes(routes) {
     const body = $('#approvalRoutesBody').empty();
+    const routeSelect = $('#approvalRouteIdSelect');
+    const current = routeSelect.val();
+    if (routeSelect.length) {
+        routeSelect.html('<option value="">—</option>' + (routes || []).map(function (r) {
+            return '<option value="' + SES.escapeHtml(r.id) + '">#' + SES.escapeHtml(r.id) + ' v' + SES.escapeHtml(r.versionNo) + ' ' + SES.escapeHtml(r.requestType || '') + '</option>';
+        }).join(''));
+        if (current) routeSelect.val(current);
+    }
     (routes || []).forEach(function (r) {
         const period = (r.validFrom || '-') + '〜' + (r.validTo || SES.i18n.t('approval.routes.openEnded', '無期限'));
         const steps = (r.steps || []).map(function (s) { return 'step ' + SES.escapeHtml(s.stepNo) + ': ' + SES.escapeHtml(s.approverType) + ' ' + SES.escapeHtml(s.approverValue || ''); }).join('<br>');

@@ -1,15 +1,10 @@
 const CRM_OPPORTUNITY_STAGES = ['見込', '要件確認', '提案準備', '見積提出', '交渉', '受注', '失注'];
-$(function () { replaceCustomerInputWithSelect(); loadAssignees(); loadCustomerOptions(); loadOpportunities(); initOpportunityDragDrop(); $('#opportunityModal .modal-footer').prepend(`<button type="button" id="opportunity-create-proposal" class="btn btn-outline-info me-auto" onclick="openOpportunityProposal()">${SES.i18n.t('crm.opportunity.createProposal')}</button>`); $('#opportunityModal').on('hidden.bs.modal', function () { window._editingOpportunityId = null; }); });
-
-function replaceCustomerInputWithSelect() {
-    $('#opportunity-customer').replaceWith(`<select id="opportunity-customer" class="form-select bg-dark text-light border-secondary" required><option value="">${SES.i18n.t('crm.opportunity.selectCustomer')}</option></select>`);
-    $('label[for="opportunity-customer"]').text(SES.i18n.t('crm.opportunity.customer'));
-}
+$(function () { loadAssignees(); loadCustomerOptions(); loadOpportunities(); initOpportunityDragDrop(); $('#opportunityModal .modal-footer').prepend(`<button type="button" id="opportunity-create-proposal" class="btn btn-outline-info me-auto" onclick="openOpportunityProposal()">${SES.i18n.t('crm.opportunity.createProposal')}</button>`); $('#opportunityModal').on('hidden.bs.modal', function () { window._editingOpportunityId = null; }); });
 
 function loadCustomerOptions() {
     $.get('/api/customers/options', function(res) {
         if (res.code !== 200) return;
-        const options = (res.data || []).map(c => `<option value="${c.value}">${SES.escapeHtml(c.label || '')}</option>`).join('');
+        const options = (res.data || []).map(c => `<option value="${c.id}">${SES.escapeHtml(c.name || '')}</option>`).join('');
         $('#opportunity-customer-filter').append(options);
         $('#opportunity-customer').append(options);
     });

@@ -1,15 +1,18 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
 import com.ses.dto.invoice.InboundPurchaseRequest;
 import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/inbound-invoices")
 @RequiredArgsConstructor
@@ -39,8 +42,11 @@ public class InboundDigitalInvoiceApiController {
             try {
                 InboundPurchaseRequest request = digitalInvoiceService.acceptInboundReview(id);
                 return ApiResult.success(request);
+            } catch (BusinessException e) {
+                throw e;
             } catch (Exception e) {
-                return ApiResult.error(e.getMessage());
+                log.warn("受信電子請求書のACCEPTに失敗しました digitalInvoiceId={}", id, e);
+                return ApiResult.error("error.invoice.acceptFailed");
             }
         }
         if ("REJECT".equalsIgnoreCase(action)) {

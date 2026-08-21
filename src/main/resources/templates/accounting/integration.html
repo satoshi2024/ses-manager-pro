@@ -158,10 +158,12 @@
                 <div class="card-body">
                     <div class="row g-2 align-items-center">
                         <div class="col-auto">
-                            <label class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.invoiceIdLabel}">請求書ID:</label>
+                            <label class="form-label mb-0 small fw-bold" th:text="#{accounting.preview.invoiceIdLabel}">請求書:</label>
                         </div>
                         <div class="col-auto">
-                            <input type="number" id="previewInvoiceId" class="form-control form-control-sm" th:placeholder="#{accounting.preview.invoiceIdPlaceholder}" placeholder="例: 1" style="width: 150px;">
+                            <select id="previewInvoiceId" class="form-select form-select-sm" style="min-width: 220px;">
+                                <option value="" th:text="#{accounting.preview.selectInvoice}">請求書を選択...</option>
+                            </select>
                         </div>
                         <div class="col-auto">
                             <button type="button" id="btnRunPreview" class="btn btn-sm btn-primary">
@@ -379,6 +381,7 @@
          th:data-mapping-verified="#{accounting.msg.mappingVerified}"
          th:data-verify-failed="#{accounting.msg.verifyFailed}"
          th:data-input-invoice-id="#{accounting.msg.inputInvoiceId}"
+         th:data-select-invoice="#{accounting.preview.selectInvoice}"
          th:data-retry-requested="#{accounting.msg.retryRequested}"
          th:data-cancel-requested="#{accounting.msg.cancelRequested}"
          th:data-input-ignore-reason="#{accounting.msg.inputIgnoreReason}"

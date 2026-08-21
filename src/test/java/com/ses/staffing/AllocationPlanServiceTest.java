@@ -420,6 +420,69 @@ class AllocationPlanServiceTest {
         assertNull(reloaded.getApprovalRequestId());
     }
 
+    @Test
+    void 例外理由付き下書きの部分更新でexceptionReasonは保持される() {
+        AllocationPlan a = save(percent(60), SEPT, SEP30);
+        allocationService.confirm(a.getId());
+
+        AllocationPlan draft = plan(percent(50), SEPT, SEP30);
+        draft.setExceptionReason("特例: ドラッグ保持検証");
+        AllocationPlan saved = allocationService.saveDraft(draft);
+        assertEquals("特例: ドラッグ保持検証", saved.getExceptionReason());
+        assertNotNull(saved.getApprovalRequestId());
+
+        ProjectPosition other = new ProjectPosition();
+        other.setProjectId(positionMapper.selectById(positionId).getProjectId());
+        other.setPositionNo("P2");
+        other.setRoleName("別ポジション");
+        other.setRequiredCount(1);
+        other.setAllocationPercent(new BigDecimal("100"));
+        positionMapper.insert(other);
+
+        // カンバン移動 POST を模擬: exceptionReason キー未出現
+        AllocationPlan move = new AllocationPlan();
+        move.setId(saved.getId());
+        move.setEngineerId(engineerId);
+        move.setAllocationType(TYPE_PROJECT);
+        move.setPositionId(other.getId());
+        move.setStartDate(saved.getStartDate());
+        move.setEndDate(saved.getEndDate());
+        move.setAllocationPercent(saved.getAllocationPercent());
+        move.setVersion(saved.getVersion());
+
+        AllocationPlan updated = allocationService.saveDraft(move);
+        assertEquals(other.getId(), updated.getPositionId());
+        assertEquals("特例: ドラッグ保持検証", updated.getExceptionReason());
+        assertEquals("特例: ドラッグ保持検証",
+                allocationMapper.selectById(saved.getId()).getExceptionReason());
+    }
+
+    @Test
+    void 過配賦かつ例外理由が空の部分更新は拒否される() {
+        AllocationPlan a = save(percent(60), SEPT, SEP30);
+        allocationService.confirm(a.getId());
+
+        AllocationPlan draft = plan(percent(50), SEPT, SEP30);
+        draft.setExceptionReason("特例: クリア拒否検証");
+        AllocationPlan saved = allocationService.saveDraft(draft);
+
+        // 明示 null で理由を消そうとしても、過配賦なら 400
+        AllocationPlan clearReason = new AllocationPlan();
+        clearReason.setId(saved.getId());
+        clearReason.setEngineerId(engineerId);
+        clearReason.setAllocationType(TYPE_PROJECT);
+        clearReason.setPositionId(positionId);
+        clearReason.setStartDate(saved.getStartDate());
+        clearReason.setEndDate(saved.getEndDate());
+        clearReason.setAllocationPercent(saved.getAllocationPercent());
+        clearReason.setVersion(saved.getVersion());
+        clearReason.setExceptionReason(null);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> allocationService.saveDraft(clearReason));
+        assertEquals("error.staffing.overAllocation", ex.getMessageKey());
+    }
+
     // ---------------------------------------------------------------
     // ヘルパー
     // ---------------------------------------------------------------

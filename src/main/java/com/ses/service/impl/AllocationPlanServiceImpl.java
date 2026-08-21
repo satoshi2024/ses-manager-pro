@@ -26,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.ses.entity.AllocationPlan.STATUS_CONFIRMED;
 import static com.ses.entity.AllocationPlan.STATUS_DISCARDED;
@@ -63,6 +64,23 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
         if (allocation.getId() == null) {
             allocation.setSourceContractId(null);
             allocation.setApprovalRequestId(null);
+        } else {
+            AllocationPlan existing = require(allocation.getId());
+            if (!STATUS_DRAFT.equals(existing.getStatus())) {
+                throw BusinessException.of(400, "error.staffing.invalidTransition",
+                        existing.getStatus(), STATUS_DRAFT);
+            }
+            if (existing.getSourceContractId() != null) {
+                throw BusinessException.of(400, "error.staffing.actualManagedByContract");
+            }
+            // CON-01: 未出現 ALWAYS を回填してから過配賦判定する（ドラッグ POST で exceptionReason 欠落しても保持）。
+            restoreAbsentAlwaysFields(allocation, existing);
+            allocation.setEngineerId(existing.getEngineerId());
+            allocation.setStatus(STATUS_DRAFT);
+            // 承認IDはサーバ例外経路のみ。クライアント改ざんを拒否する。
+            allocation.setApprovalRequestId(existing.getApprovalRequestId());
+            // draft は実契約を持てない（actual 行は上で拒否済み）。
+            allocation.setSourceContractId(null);
         }
 
         boolean over = isOverAllocated(allocation.getEngineerId(),
@@ -81,19 +99,6 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
             allocation.setCreatedBy(SecurityUtils.currentUserId());
             allocationMapper.insert(allocation);
         } else {
-            AllocationPlan existing = require(allocation.getId());
-            if (!STATUS_DRAFT.equals(existing.getStatus())) {
-                throw BusinessException.of(400, "error.staffing.invalidTransition",
-                        existing.getStatus(), STATUS_DRAFT);
-            }
-            if (existing.getSourceContractId() != null) {
-                throw BusinessException.of(400, "error.staffing.actualManagedByContract");
-            }
-            allocation.setEngineerId(existing.getEngineerId());
-            allocation.setStatus(STATUS_DRAFT);
-            // 承認IDはサーバ例外経路のみ。クライアント改ざんを拒否する。
-            allocation.setApprovalRequestId(existing.getApprovalRequestId());
-            allocation.setSourceContractId(null);
             int rows = allocationMapper.updateById(allocation);
             if (rows == 0) {
                 throw BusinessException.of(409, "error.common.optimisticLock");
@@ -104,6 +109,26 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
             requestExceptionApproval(allocationMapper.selectById(allocation.getId()));
         }
         return allocationMapper.selectById(allocation.getId());
+    }
+
+    /**
+     * payload に未出現の ALWAYS フィールドを既存行から回填する（CON-01）。
+     * {@code sourceContractId}/{@code approvalRequestId} は saveDraft 側の draft 規則で別途強制する。
+     */
+    private void restoreAbsentAlwaysFields(AllocationPlan incoming, AllocationPlan existing) {
+        Set<String> present = incoming.getPresentAlwaysFields();
+        if (present == null) {
+            present = Set.of();
+        }
+        if (!present.contains("exceptionReason")) {
+            incoming.setExceptionReason(existing.getExceptionReason());
+        }
+        if (!present.contains("endDate")) {
+            incoming.setEndDate(existing.getEndDate());
+        }
+        if (!present.contains("positionId")) {
+            incoming.setPositionId(existing.getPositionId());
+        }
     }
 
     @Override

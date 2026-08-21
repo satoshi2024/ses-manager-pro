@@ -191,9 +191,11 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             integrationJobService.markSucceeded(jobId, String.valueOf(di.getId()), providerMessageId, "Invoice sent successfully.");
         } catch (BusinessException e) {
-            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", e.getMessage());
+            log.warn("電子請求書送信ジョブの業務エラー jobId={}", jobId, e);
+            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
         } catch (Exception e) {
-            integrationJobService.markRetryable(jobId, "SEND_ERROR", e.getMessage(), 300);
+            log.warn("電子請求書送信ジョブのシステムエラー jobId={}", jobId, e);
+            integrationJobService.markRetryable(jobId, "SEND_ERROR", "error.invoice.dispatchFailed", 300);
         }
     }
 
@@ -255,10 +257,31 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             integrationJobService.markSucceeded(jobId, String.valueOf(cn.getId()), providerMessageId, "Credit note sent successfully.");
         } catch (BusinessException e) {
-            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", e.getMessage());
+            log.warn("CreditNote送信ジョブの業務エラー jobId={}", jobId, e);
+            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
         } catch (Exception e) {
-            integrationJobService.markRetryable(jobId, "SEND_ERROR", e.getMessage(), 300);
+            log.warn("CreditNote送信ジョブのシステムエラー jobId={}", jobId, e);
+            integrationJobService.markRetryable(jobId, "SEND_ERROR", "error.invoice.dispatchFailed", 300);
         }
+    }
+
+    /**
+     * ジョブの errorMessage には i18n キーまたは固定の業務文言のみを残す。
+     * SQL/ドライバ/スタック原文など技術詳細は保存しない。
+     */
+    static String safeJobErrorMessage(BusinessException e) {
+        String key = e.getMessageKey();
+        if (key != null && key.startsWith("error.")) {
+            return key;
+        }
+        String message = e.getMessage();
+        if (message != null && message.startsWith("error.")) {
+            return message;
+        }
+        if (message != null && !message.isBlank()) {
+            return message;
+        }
+        return "error.invoice.dispatchFailed";
     }
 
     @Override

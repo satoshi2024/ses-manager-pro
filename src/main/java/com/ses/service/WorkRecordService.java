@@ -2,6 +2,7 @@ package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.WorkRecordGridDto;
+import com.ses.dto.workrecord.PendingApprovalSummaryDto;
 import com.ses.entity.WorkRecord;
 import com.ses.entity.WorkRecordDaily;
 
@@ -12,6 +13,8 @@ import java.util.List;
 public interface WorkRecordService extends IService<WorkRecord> {
     List<WorkRecordGridDto> monthlyGrid(String workMonth);
     com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> monthlyGridPage(String workMonth, Long current, Long size, String keyword, String status);
+    /** 対象月の提出済（未承認）滞留サマリ。SQL で提出済のみをページングする（全件 monthlyGrid は使わない）。 */
+    PendingApprovalSummaryDto pendingApprovalSummary(String workMonth, Long current, Long size);
     WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks);
     void confirmMonth(String workMonth);
     void reopenMonth(String workMonth);

@@ -222,6 +222,27 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
+    void testSendDigitalInvoice_SystemErrorHidesExceptionMessage() {
+        Customer c = newCustomer("Test Co Secret");
+        verifiedParticipant(c, "test-id-secret");
+        Invoice inv = validInvoice("INV-SECRET", c.getId());
+
+        when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("db password=secret"));
+
+        DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
+        com.ses.entity.IntegrationJob job = integrationJobService.getLatestJob("t_digital_invoice", di.getId(), "DIGITAL_INVOICE_SEND");
+
+        digitalInvoiceService.processSendJob(job.getId());
+
+        com.ses.entity.IntegrationJob updatedJob = integrationJobService.getById(job.getId());
+        assertNotNull(updatedJob.getErrorMessageSafe());
+        assertEquals("error.invoice.dispatchFailed", updatedJob.getErrorMessageSafe());
+        assertFalse(updatedJob.getErrorMessageSafe().contains("secret"));
+        assertEquals("SEND_ERROR", updatedJob.getErrorCode());
+    }
+
+    @Test
     void testSendDigitalInvoice_Success_MapsTaxAndOrderReference() {
         Customer c = newCustomer("Test Co 4");
         verifiedParticipant(c, "test-id-4");

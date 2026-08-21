@@ -49,6 +49,27 @@ window.AccountingIntegration = (function () {
         return el ? bootstrap.Modal.getOrCreateInstance(el) : null;
     }
 
+    function loadPreviewInvoiceOptions() {
+        let sel = $('#previewInvoiceId');
+        if (!sel.length) return;
+        let current = sel.val();
+        $.ajax({
+            url: '/api/invoices',
+            type: 'GET',
+            data: { current: 1, size: 1000 }
+        }).done(function (res) {
+            if (!res || res.code !== 200) return;
+            let placeholder = sel.find('option[value=""]').first().prop('outerHTML')
+                || `<option value="">${escapeHtml(t('selectInvoice') || SES.i18n.t('accounting.preview.selectInvoice', '請求書を選択...'))}</option>`;
+            let options = ((res.data && res.data.records) || []).map(function (inv) {
+                let label = (inv.invoiceNo || ('#' + inv.id)) + (inv.billingMonth ? ' / ' + inv.billingMonth : '');
+                return `<option value="${escapeHtml(String(inv.id))}">${escapeHtml(label)}</option>`;
+            }).join('');
+            sel.html(placeholder + options);
+            if (current) sel.val(current);
+        });
+    }
+
     // === 接続設定 ===
     function loadConnections() {
         $.ajax({
@@ -469,6 +490,7 @@ window.AccountingIntegration = (function () {
         // 初期ロード
         loadConnections();
         loadJobs(1);
+        loadPreviewInvoiceOptions();
 
         // タブ切り替え時の自動ロード
         $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
@@ -478,6 +500,8 @@ window.AccountingIntegration = (function () {
                 if (connId) loadMappings(connId);
             } else if (target === '#connections-panel') {
                 loadConnections();
+            } else if (target === '#preview-panel') {
+                loadPreviewInvoiceOptions();
             } else if (target === '#reconciliation-panel') {
                 loadReconciliation();
             }

@@ -2,7 +2,9 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.WorkRecordGridDto;
+import com.ses.dto.workrecord.PendingApprovalSummaryDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 
@@ -40,6 +43,7 @@ import static org.mockito.Mockito.verify;
 
 /**
  * SC-02: 月次勤怠グリッドの SQL ページングと、月次確定が全月対象であることの回帰。
+ * P2-2: 承認滞留サマリも提出済のみを SQL ページングし、全件 monthlyGrid に依存しない。
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -101,7 +105,53 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
         assertTrue(contractIds.size() == 6);
     }
 
+    @Test
+    @DisplayName("pendingApprovalSummaryは提出済のみSQLページングし全件monthlyGridを呼ばない")
+    void pendingApprovalSummary_usesSqlPendingPageNotFullMonthlyGrid() {
+        String workMonth = YearMonth.now().toString();
+        // 非提出済を大量に置き、提出済は少数だけ。全件グリッド経由だと非提出済も読むことになる。
+        seedContracts(20, workMonth, "入力中");
+        seedContractsWithUpdatedAt(3, workMonth, "提出済",
+                LocalDateTime.now().minusDays(7),
+                LocalDateTime.now().minusDays(3),
+                LocalDateTime.now().minusDays(1));
+
+        PendingApprovalSummaryDto summary = workRecordService.pendingApprovalSummary(workMonth, 1L, 2L);
+
+        assertEquals(3, summary.getSubmittedCount());
+        assertEquals(2, summary.getItems().size());
+        assertEquals(7, summary.getMaxPendingDays());
+        assertEquals(7, summary.getItems().get(0).getDaysPending());
+        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString());
+        verify(workRecordMapper, never()).selectMonthlyGridScoped(anyString(), anyString(), any(), any(Boolean.class), any(), any(), any());
+        verify(workRecordMapper, atLeastOnce()).selectPendingApprovalPage(any(), eq(workMonth), anyString());
+    }
+
+    @Test
+    @DisplayName("pendingApprovalSummaryのpage sizeはPageUtilsで上限に丸められる")
+    void pendingApprovalSummary_clampsPageSizeViaPageUtils() {
+        String workMonth = YearMonth.now().toString();
+        seedContractsWithUpdatedAt(2, workMonth, "提出済",
+                LocalDateTime.now().minusDays(2),
+                LocalDateTime.now().minusDays(1));
+
+        // MAX_PAGE_SIZE(1000) を超える size を渡しても、SQL へ渡る Page は丸め後の値になる。
+        workRecordService.pendingApprovalSummary(workMonth, 1L, PageUtils.MAX_PAGE_SIZE + 500);
+
+        verify(workRecordMapper).selectPendingApprovalPage(
+                org.mockito.ArgumentMatchers.argThat(page ->
+                        page != null && page.getSize() == PageUtils.MAX_PAGE_SIZE && page.getCurrent() == 1L),
+                eq(workMonth),
+                anyString());
+        verify(workRecordMapper, never()).selectMonthlyGrid(anyString(), anyString());
+    }
+
     private List<Long> seedContracts(int count, String workMonth, String recordStatus) {
+        return seedContractsWithUpdatedAt(count, workMonth, recordStatus);
+    }
+
+    private List<Long> seedContractsWithUpdatedAt(int count, String workMonth, String recordStatus,
+                                                   LocalDateTime... updatedAts) {
         Customer customer = new Customer();
         customer.setCompanyName("勤怠Grid顧客");
         customerMapper.insert(customer);
@@ -141,7 +191,16 @@ class WorkRecordServiceMonthlyGridSqlPageTest {
             record.setBillingAmount(new BigDecimal("600000"));
             record.setPaymentAmount(new BigDecimal("400000"));
             record.setStatus(recordStatus);
+            if (updatedAts != null && updatedAts.length >= i) {
+                record.setUpdatedAt(updatedAts[i - 1]);
+            }
             workRecordMapper.insert(record);
+            if (updatedAts != null && updatedAts.length >= i) {
+                // insert 時の DEFAULT/ON UPDATE を上書きして滞留日数を安定させる。
+                workRecordMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<WorkRecord>()
+                        .eq("id", record.getId())
+                        .set("updated_at", updatedAts[i - 1]));
+            }
         }
         return ids;
     }
