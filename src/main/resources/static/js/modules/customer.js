@@ -134,13 +134,13 @@ function renderCustomers(records) {
         let followUpBadge = '';
         const count = followUpCounts[cust.id];
         if (count && count > 0) {
-            followUpBadge = `<span class="badge bg-danger rounded-pill ms-2" title="${SES.i18n.t('customer.followUpNeeded')}">${count}${SES.i18n.t('customer.followUp')}</span>`;
+            followUpBadge = `<span class="badge bg-danger rounded-pill" title="${SES.i18n.t('customer.followUpNeeded')}">${count}${SES.i18n.t('customer.followUp')}</span>`;
         }
 
         const tr = `
             <tr style="cursor: pointer;" onclick="location.href='/customer/${cust.id}'">
                 <td class="ps-4 py-3">
-                    <div class="fw-bold text-light">${SES.escapeHtml(cust.companyName)} ${followUpBadge}</div>
+                    <div class="d-flex flex-wrap align-items-center gap-1 fw-bold text-light"><span>${SES.escapeHtml(cust.companyName)}</span>${followUpBadge}</div>
                     <div class="text-muted small">${SES.escapeHtml(cust.address || '')}</div>
                 </td>
                 <td>${flowBadge}</td>

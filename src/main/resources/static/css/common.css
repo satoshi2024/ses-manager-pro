@@ -199,6 +199,224 @@
     color: var(--text-secondary) !important;
 }
 
+/* ============================================================
+   Light theme: コンテンツ領域 / モーダルのコントラスト補正
+   深色 markup（text-white / bg-dark / form-*-dark）を浅色で読めるようにする。
+   バッジ・主ボタン・アバター・カンバン列頭の白字は維持する。
+   login / portal / error は content-area 外のため対象外。
+   ============================================================ */
+
+/* --- 1) 正文の白/浅字 → テーマ字色（content-area + modal） --- */
+[data-bs-theme="light"] .content-area .text-white:not(.badge):not(.btn):not(.avatar):not([class*="bg-gradient"]),
+[data-bs-theme="light"] .modal .text-white:not(.badge):not(.btn):not(.avatar):not([class*="bg-gradient"]) {
+    color: var(--heading-color) !important;
+}
+[data-bs-theme="light"] .content-area .text-light:not(.badge):not(.btn),
+[data-bs-theme="light"] .modal .text-light:not(.badge):not(.btn) {
+    color: var(--text-primary) !important;
+}
+
+/* 彩色底 / グラデ / バッジ / ボタン内は白字を復元 */
+[data-bs-theme="light"] .content-area .badge.text-white,
+[data-bs-theme="light"] .content-area .badge.text-light,
+[data-bs-theme="light"] .content-area .btn.text-white,
+[data-bs-theme="light"] .content-area .btn-primary .text-white,
+[data-bs-theme="light"] .content-area .btn-success .text-white,
+[data-bs-theme="light"] .content-area .btn-danger .text-white,
+[data-bs-theme="light"] .content-area .btn-info .text-white,
+[data-bs-theme="light"] .content-area .btn-warning .text-white,
+[data-bs-theme="light"] .content-area .avatar.text-white,
+[data-bs-theme="light"] .content-area [class*="bg-gradient"].text-white,
+[data-bs-theme="light"] .content-area [class*="bg-gradient"] .text-white,
+[data-bs-theme="light"] .content-area .bg-primary .text-white,
+[data-bs-theme="light"] .content-area .bg-primary.text-white,
+[data-bs-theme="light"] .content-area .bg-success .text-white,
+[data-bs-theme="light"] .content-area .bg-success.text-white,
+[data-bs-theme="light"] .content-area .bg-danger .text-white,
+[data-bs-theme="light"] .content-area .bg-danger.text-white,
+[data-bs-theme="light"] .content-area .bg-info .text-white,
+[data-bs-theme="light"] .content-area .bg-info.text-white,
+[data-bs-theme="light"] .content-area .bg-warning .text-white,
+[data-bs-theme="light"] .content-area .bg-warning.text-white,
+[data-bs-theme="light"] .modal .badge.text-white,
+[data-bs-theme="light"] .modal .btn.text-white,
+[data-bs-theme="light"] .modal .bg-primary .text-white,
+[data-bs-theme="light"] .modal .bg-success .text-white,
+[data-bs-theme="light"] .modal .bg-danger .text-white,
+[data-bs-theme="light"] .modal .bg-info .text-white {
+    color: #ffffff !important;
+}
+
+/* ページネーション現在ページ */
+[data-bs-theme="light"] .content-area .page-link.bg-primary.text-white,
+[data-bs-theme="light"] .content-area .page-item.active .page-link,
+[data-bs-theme="light"] .modal .page-link.bg-primary.text-white {
+    color: #ffffff !important;
+}
+
+/* カンバン列頭: 濃色帯のまま白字を維持 */
+[data-bs-theme="light"] .content-area .kanban-column-header.bg-dark {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+}
+[data-bs-theme="light"] .content-area .kanban-column-header .text-white,
+[data-bs-theme="light"] .content-area .kanban-column-header .text-light {
+    color: #ffffff !important;
+}
+
+/* 廃棄済など意図的な badge.bg-dark は深底白字のまま */
+[data-bs-theme="light"] .content-area .badge.bg-dark,
+[data-bs-theme="light"] .modal .badge.bg-dark {
+    background-color: #212529 !important;
+    color: #ffffff !important;
+}
+
+/* --- 2) 表単/控件の深底 → 白底深字 --- */
+[data-bs-theme="light"] .content-area .form-control.bg-dark,
+[data-bs-theme="light"] .content-area .form-select.bg-dark,
+[data-bs-theme="light"] .content-area .form-control-dark,
+[data-bs-theme="light"] .content-area .form-select-dark,
+[data-bs-theme="light"] .content-area .form-control.bg-secondary,
+[data-bs-theme="light"] .content-area .form-select.bg-secondary,
+[data-bs-theme="light"] .content-area .input-group-text.bg-dark,
+[data-bs-theme="light"] .content-area .input-group-text.bg-secondary,
+[data-bs-theme="light"] .content-area .bg-input,
+[data-bs-theme="light"] .content-area textarea.bg-dark,
+[data-bs-theme="light"] .content-area textarea.form-control-dark,
+[data-bs-theme="light"] .modal .form-control.bg-dark,
+[data-bs-theme="light"] .modal .form-select.bg-dark,
+[data-bs-theme="light"] .modal .form-control-dark,
+[data-bs-theme="light"] .modal .form-select-dark,
+[data-bs-theme="light"] .modal .form-control.bg-secondary,
+[data-bs-theme="light"] .modal .form-select.bg-secondary,
+[data-bs-theme="light"] .modal .input-group-text.bg-dark,
+[data-bs-theme="light"] .modal .input-group-text.bg-secondary,
+[data-bs-theme="light"] .modal textarea.bg-dark,
+[data-bs-theme="light"] .modal textarea.form-control-dark {
+    background-color: #ffffff !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+[data-bs-theme="light"] .content-area .form-control.bg-dark::placeholder,
+[data-bs-theme="light"] .content-area .form-control-dark::placeholder,
+[data-bs-theme="light"] .modal .form-control.bg-dark::placeholder,
+[data-bs-theme="light"] .modal .form-control-dark::placeholder {
+    color: var(--text-muted) !important;
+}
+[data-bs-theme="light"] .content-area .form-control.bg-dark:focus,
+[data-bs-theme="light"] .content-area .form-select.bg-dark:focus,
+[data-bs-theme="light"] .content-area .form-control-dark:focus,
+[data-bs-theme="light"] .content-area .form-select-dark:focus,
+[data-bs-theme="light"] .modal .form-control.bg-dark:focus,
+[data-bs-theme="light"] .modal .form-select.bg-dark:focus,
+[data-bs-theme="light"] .modal .form-control-dark:focus,
+[data-bs-theme="light"] .modal .form-select-dark:focus {
+    background-color: #ffffff !important;
+    color: var(--text-primary) !important;
+    border-color: var(--accent-blue) !important;
+}
+
+/* --- 3) 表面（フッタ / モーダル / ページネーション / カード） --- */
+[data-bs-theme="light"] .content-area .card-footer.bg-secondary {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    border-color: var(--border-color) !important;
+}
+[data-bs-theme="light"] .modal-content.bg-secondary,
+[data-bs-theme="light"] .modal-content.bg-dark {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+[data-bs-theme="light"] .modal-header.bg-dark,
+[data-bs-theme="light"] .modal-footer.bg-dark,
+[data-bs-theme="light"] .modal-header.bg-secondary,
+[data-bs-theme="light"] .modal-footer.bg-secondary {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+[data-bs-theme="light"] .content-area .page-link.bg-dark,
+[data-bs-theme="light"] .content-area .page-link.bg-secondary:not(.bg-primary),
+[data-bs-theme="light"] .modal .page-link.bg-dark,
+[data-bs-theme="light"] .modal .page-link.bg-secondary:not(.bg-primary) {
+    background-color: #ffffff !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+[data-bs-theme="light"] .content-area .card.bg-dark,
+[data-bs-theme="light"] .content-area .list-group-item.bg-dark,
+[data-bs-theme="light"] .modal .list-group-item.bg-dark {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+
+/* カード本体の bg-secondary（稼働カレンダー等） */
+[data-bs-theme="light"] .content-area .card.bg-secondary {
+    background-color: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+/* BP会社詳細などの card-header.bg-dark：見出し text-white は既に深字へ写るので、ヘッダも浅底にする */
+[data-bs-theme="light"] .content-area .card-header.bg-dark,
+[data-bs-theme="light"] .content-area .card-header.bg-secondary {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--heading-color) !important;
+    border-color: var(--border-color) !important;
+}
+
+/* アクティブタブの bg-dark + 写った深字で文字が消えるのを防ぐ（要員詳細 / ToDo / ヒートマップ） */
+[data-bs-theme="light"] .content-area .nav-tabs .nav-link {
+    color: var(--text-secondary) !important;
+    background-color: transparent !important;
+}
+[data-bs-theme="light"] .content-area .nav-tabs .nav-link:hover {
+    color: var(--heading-color) !important;
+}
+[data-bs-theme="light"] .content-area .nav-tabs .nav-link.active {
+    color: var(--heading-color) !important;
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) var(--border-color) var(--bg-card) !important;
+}
+
+/* 予算差など：text-light の浅色上書きより成功/失敗色を優先 */
+[data-bs-theme="light"] .content-area .text-danger {
+    color: #dc2626 !important;
+}
+[data-bs-theme="light"] .content-area .text-success {
+    color: #059669 !important;
+}
+
+/* 半透明の深行（配置ボード等） */
+[data-bs-theme="light"] .content-area .bg-dark.bg-opacity-25,
+[data-bs-theme="light"] .content-area .bg-dark.bg-opacity-10 {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+}
+
+/* outline ボタン上の text-light / hover-text-white は浅色でも主字色 */
+[data-bs-theme="light"] .content-area .btn-outline-secondary.text-light,
+[data-bs-theme="light"] .content-area .btn-outline-light.text-light,
+[data-bs-theme="light"] .content-area .hover-text-white {
+    color: var(--text-secondary) !important;
+}
+[data-bs-theme="light"] .content-area .hover-text-white:hover {
+    color: var(--heading-color) !important;
+}
+
+/* KPI カード水印（穿模防止。数字・バッジは兄弟要素を前面へ） */
+.content-area .kpi-watermark {
+    z-index: 0;
+    pointer-events: none;
+    transform: translate(12%, -18%) scale(0.85);
+    opacity: 0.18 !important;
+}
+.content-area .card-body.position-relative.overflow-hidden > *:not(.kpi-watermark) {
+    position: relative;
+    z-index: 1;
+}
+
 /* ================== GLOBAL STYLES ================== */
 body {
     background-color: var(--bg-primary);
@@ -253,6 +471,7 @@ a:hover {
 .bg-card { background-color: var(--bg-card) !important; }
 
 .text-accent-blue { color: var(--accent-blue) !important; }
+.bg-accent-blue { background-color: var(--accent-blue) !important; color: #ffffff !important; }
 .text-accent-green { color: var(--accent-green) !important; }
 .text-accent-red { color: var(--accent-red) !important; }
 .text-accent-yellow { color: var(--accent-yellow) !important; }
