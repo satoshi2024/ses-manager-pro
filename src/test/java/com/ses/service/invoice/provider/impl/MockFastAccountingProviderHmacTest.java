@@ -4,7 +4,6 @@ import com.ses.common.exception.BusinessException;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Profile;
@@ -68,7 +67,11 @@ class MockFastAccountingProviderHmacTest {
         Profile failClosedProfile = FailClosedDigitalInvoiceProvider.class.getAnnotation(Profile.class);
         assertNotNull(failClosedProfile);
         assertTrue(Arrays.asList(failClosedProfile.value()).contains("prod"));
-        assertNotNull(FailClosedDigitalInvoiceProvider.class.getAnnotation(ConditionalOnMissingBean.class));
+        ConditionalOnProperty failClosedProp =
+                FailClosedDigitalInvoiceProvider.class.getAnnotation(ConditionalOnProperty.class);
+        assertNotNull(failClosedProp);
+        assertEquals("app.digital-invoice.provider", failClosedProp.name()[0]);
+        assertEquals("none", failClosedProp.havingValue());
     }
 
     @Test

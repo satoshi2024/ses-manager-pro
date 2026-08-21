@@ -2,17 +2,18 @@ package com.ses.service.invoice.provider.impl;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
  * 本番で実プロバイダ未配線時の fail-closed 実装（S16-P1-03）。
  * Mock は prod に載せない。sandbox 未接続のまま誤って本番送信しない。
+ * {@code app.digital-invoice.provider=none}（prod 既定）のとき装配する。
  */
 @Component
 @Profile("prod")
-@ConditionalOnMissingBean(DigitalInvoiceProvider.class)
+@ConditionalOnProperty(name = "app.digital-invoice.provider", havingValue = "none", matchIfMissing = true)
 public class FailClosedDigitalInvoiceProvider implements DigitalInvoiceProvider {
 
     @Override
