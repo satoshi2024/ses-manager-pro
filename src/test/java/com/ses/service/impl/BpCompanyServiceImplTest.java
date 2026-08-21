@@ -62,6 +62,43 @@ class BpCompanyServiceImplTest {
     }
 
     @Test
+    @DisplayName("BP会社更新はクライアントversion必須・不一致は409")
+    void updateBpCompany_requiresClientVersionAndRejectsStale() {
+        BpCompany company = BpCompany.builder()
+                .legalName("楽観ロックBP")
+                .entityType("CORPORATE")
+                .status("ACTIVE")
+                .build();
+        bpCompanyService.createBpCompany(company);
+        BpCompanyDto created = bpCompanyService.getBpCompanyDetail(company.getId());
+        Integer version = created.getVersion();
+        assertNotNull(version);
+
+        BpCompany missingVersion = new BpCompany();
+        missingVersion.setId(company.getId());
+        missingVersion.setLegalName("version無し");
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> bpCompanyService.updateBpCompany(missingVersion));
+
+        BpCompany stale = new BpCompany();
+        stale.setId(company.getId());
+        stale.setLegalName("古いversion");
+        stale.setVersion(version - 1);
+        com.ses.common.exception.BusinessException staleEx = assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> bpCompanyService.updateBpCompany(stale));
+        assertEquals(409, staleEx.getCode());
+
+        BpCompany ok = new BpCompany();
+        ok.setId(company.getId());
+        ok.setLegalName("新しい名称");
+        ok.setVersion(version);
+        BpCompany updated = bpCompanyService.updateBpCompany(ok);
+        assertEquals("新しい名称", updated.getLegalName());
+        assertEquals(version + 1, updated.getVersion());
+    }
+
+    @Test
     @DisplayName("銀行口座の登録時に口座番号がマスクされ、復号値がDTOに漏洩しないことの検証")
     void bankAccountMaskingTest() {
         BpCompany company = BpCompany.builder()

@@ -1,6 +1,7 @@
 package com.ses.service.portal.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.dto.portal.PortalAcceptInvitationRequest;
@@ -64,11 +65,14 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private final SystemConfigService systemConfigService;
     private final PortalRateLimiter rateLimiter;
     private final PortalSecurityProperties portalSecurityProperties;
+    private final ClientIpResolver clientIpResolver;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
     /** setup ticket hash → (userId, expiresAtEpochMs)。単一インスタンス運用向けインメモリ。 */
     private final Map<String, MfaSetupTicket> setupTickets = new ConcurrentHashMap<>();
+    /** email → login失敗ガード（単一インスタンス。S13-XFF-01） */
+    private final Map<String, LoginFailureGuard> loginFailureGuards = new ConcurrentHashMap<>();
 
     @Value("${app.security.require-https:false}")
     private boolean requireHttps;
@@ -76,15 +80,22 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private record MfaSetupTicket(long userId, long expiresAtEpochMs) {
     }
 
+    private record LoginFailureGuard(int failedCount, long lockedUntilEpochMs) {
+    }
+
     @Override
     @Transactional
     public PortalLoginResponse login(PortalLoginRequest request, HttpServletRequest httpRequest,
                                      HttpServletResponse httpResponse) {
-        PortalUser user = userMapper.selectByEmail(normalizeEmail(request.getEmail()));
+        String email = normalizeEmail(request.getEmail());
+        assertLoginNotLocked(email);
+        PortalUser user = userMapper.selectByEmail(email);
         if (user == null || !StringUtils.hasText(user.getPasswordHash())
                 || !PASSWORD_ENCODER.matches(request.getPassword(), user.getPasswordHash())) {
+            recordLoginFailure(email);
             throw BusinessException.of(401, "error.portal.login.invalid");
         }
+        clearLoginFailures(email);
         if (!"ACTIVE".equals(user.getStatus())) {
             throw BusinessException.of(403, "error.portal.user.suspended");
         }
@@ -351,11 +362,50 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         return email == null ? null : email.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
-    private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
+    private void assertLoginNotLocked(String email) {
+        if (email == null) {
+            return;
         }
-        return request.getRemoteAddr();
+        int threshold = portalSecurityProperties.getRateLimit().getLoginFailureLockThreshold();
+        if (threshold <= 0) {
+            return;
+        }
+        LoginFailureGuard guard = loginFailureGuards.get(email);
+        if (guard != null && guard.lockedUntilEpochMs() > System.currentTimeMillis()) {
+            throw BusinessException.of(429, "error.portal.login.locked");
+        }
+    }
+
+    private void recordLoginFailure(String email) {
+        if (email == null) {
+            return;
+        }
+        int threshold = portalSecurityProperties.getRateLimit().getLoginFailureLockThreshold();
+        if (threshold <= 0) {
+            return;
+        }
+        int lockMinutes = Math.max(1, portalSecurityProperties.getRateLimit().getLoginFailureLockMinutes());
+        loginFailureGuards.compute(email, (key, prev) -> {
+            long now = System.currentTimeMillis();
+            if (prev != null && prev.lockedUntilEpochMs() > now) {
+                return prev;
+            }
+            int next = (prev == null || prev.lockedUntilEpochMs() > 0 && prev.lockedUntilEpochMs() <= now)
+                    ? 1 : prev.failedCount() + 1;
+            if (next >= threshold) {
+                return new LoginFailureGuard(next, now + lockMinutes * 60_000L);
+            }
+            return new LoginFailureGuard(next, 0L);
+        });
+    }
+
+    private void clearLoginFailures(String email) {
+        if (email != null) {
+            loginFailureGuards.remove(email);
+        }
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        return clientIpResolver.resolve(request);
     }
 }

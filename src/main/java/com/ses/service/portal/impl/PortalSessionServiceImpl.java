@@ -1,5 +1,6 @@
 package com.ses.service.portal.impl;
 
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.entity.PortalOrganization;
@@ -49,6 +50,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
     private final PortalTermsConsentMapper termsConsentMapper;
     private final SystemConfigService systemConfigService;
     private final PortalSecurityProperties properties;
+    private final ClientIpResolver clientIpResolver;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -232,11 +234,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 
     private String truncate(String value, int max) {

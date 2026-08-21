@@ -169,6 +169,8 @@ app:
     dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
+    # X-Forwarded-For を読むのは remoteAddr がこのリストに含まれるときだけ（CIDR可。空=常に remoteAddr）
+    trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:false}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
@@ -240,6 +242,11 @@ app:
       upload-per-minute: ${PORTAL_RATE_UPLOAD:20}
       # 検収API（userあたり/分）
       acceptance-per-minute: ${PORTAL_RATE_ACCEPTANCE:20}
+      # MFA有効化API（IP+emailあたり/分。S13-P1-02）
+      mfa-complete-per-minute: ${PORTAL_RATE_MFA_COMPLETE:10}
+      # login失敗のアカウントロック（同一email。S13-XFF-01）
+      login-failure-lock-threshold: ${PORTAL_LOGIN_LOCK_THRESHOLD:5}
+      login-failure-lock-minutes: ${PORTAL_LOGIN_LOCK_MINUTES:15}
   # ===== PDF設定 =====
   pdf:
     # PDF出力用のCJKフォントパス（明示指定用）。

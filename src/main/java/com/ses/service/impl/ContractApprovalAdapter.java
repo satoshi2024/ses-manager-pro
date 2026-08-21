@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.ContractService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -21,9 +22,14 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
     private final ContractMapper mapper;
     private final ContractService service;
     private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
 
-    public ContractApprovalAdapter(ContractMapper mapper, ContractService service, ObjectMapper objectMapper) {
-        this.mapper = mapper; this.service = service; this.objectMapper = objectMapper;
+    public ContractApprovalAdapter(ContractMapper mapper, ContractService service, ObjectMapper objectMapper,
+                                   ApprovalOrganizationResolver organizationResolver) {
+        this.mapper = mapper;
+        this.service = service;
+        this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
     }
     @Override public String requestType() { return "contract.activate"; }
     @Override public Set<String> supportedRequestTypes() { return Set.of("contract.activate", "contract.revisePrice", "contract.status"); }
@@ -44,7 +50,7 @@ public class ContractApprovalAdapter implements ApprovalTargetAdapter {
         payload.put("cancelDate", command.getOrDefault("cancelDate", ""));
         Map<String, Object> diff = new java.util.LinkedHashMap<>();
         diff.put("operation", Map.of("label", "契約操作", "before", c.getStatus() == null ? "" : c.getStatus(), "after", operation));
-        return new ApprovalSnapshot(version(c.getVersion()), amount, null, payload, diff);
+        return new ApprovalSnapshot(version(c.getVersion()), amount, organizationResolver.forContract(c), payload, diff);
     }
 
     @Override

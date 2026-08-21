@@ -50,15 +50,22 @@
 | S06-P1-02 | FIXED | `BpComplianceServiceImpl` 60日判定 | `mvn test -Dtest=BpComplianceServiceImplTest` | 6/0/0 PASS（terms無し+期日超→EXCEEDS_MAX_PAYMENT_DAYS） |
 | S15-P0-02 | FIXED | `FreeeAccountingProvider` → `freee.client-id` | `mvn test -Dtest=FreeeAccountingProviderTest#clientCredentials*` | PASS（dummy 既定廃止、prod fail-fast） |
 | S15-P1-03 | FIXED | `AccountingIntegrationWorker.recoverStaleRunning` | `mvn test -Dtest=AccountingIntegrationWorkerTest` | 4/0/0 PASS（既存 deal → SUCCEEDED、無ければ RETRYABLE） |
+| S07-ORG-01 | FIXED | `ApprovalOrganizationResolver` + Wave1 adapters | `mvn test -Dtest=ApprovalTargetAdapterTest,SalesOrderApprovalAdapterTest,AcceptanceApprovalAdapterTest` | snapshot に organizationId。ORGANIZATION_MANAGER が空承認者にならない |
+| S07-AMT-01 | FIXED | `QuotationApprovalAdapter`（単価帯として明示） | `ApprovalTargetAdapterTest#quotationAdapterのsnapshot*` | SES見積は明細無し。amountSnapshot=unitPrice（唯一行金額）。ledger で単価帯と確定 |
+| S06-VER-01 | FIXED | `BpCompanyServiceImpl.updateBpCompany` | `mvn test -Dtest=BpCompanyServiceImplTest#updateBpCompany*` | client version 必須・不一致 409 |
+| S13-XFF-01 | FIXED | `ClientIpResolver` + portal login lock | `mvn test -Dtest=ClientIpResolverTest,PortalAuthFlowTest,PortalRateLimitTest` | 非信頼 remote の XFF 無視。login 失敗 N 回で 429 |
+| FIND-I18N-01 | FIXED | `static/js/common.js` SES.i18n.t | `mvn test -Dtest=I18nTFallbackTest` | 2引数 fallback。placeholder 付きは置換継続 |
+| FIND-SCHED-01 | FIXED | `AccountingIntegrationWorker` `@SchedulerLock` | `mvn test -Dtest=AccountingIntegrationWorkerTest` | processDueJobs / recoverStaleRunning に短 lock。HTTP は従来どおり TX 外 |
 
-## 第二波・要確認（コード突合のみ・本輪未改修）
+## 第二波・要確認（修復後）
 
 | ID / 論点 | 判定 | 根拠 |
 |---|---|---|
-| S07 ORGANIZATION_MANAGER / Wave1 adapter `organizationId` | **CONFIRMED 欠陥・未修** | Quotation/SalesOrder/Invoice/Contract/Acceptance の `ApprovalSnapshot` 第3引数がいずれも `null` |
-| S07 見積 `amountSnapshot` | **CONFIRMED 欠陥・未修** | `QuotationApprovalAdapter` が `q.getUnitPrice()` を渡す（合計額ではない）。`Quotation` 自体に total 列無し |
-| S06 `updateBpCompany` の version | **CONFIRMED 欠陥・未修** | `applyNonNullFields` が `version` をコピーせず、DB 再読込の version で `updateById` → クライアント楽観ロック無効 |
-| S13 限流 X-Forwarded-For / アカウントロック | **CONFIRMED リスク・未修** | `PortalRateLimitFilter.clientIp` が XFF 先頭を信頼。`PortalAuthServiceImpl` に失敗回数ロック無し |
+| S07 ORGANIZATION_MANAGER / Wave1 adapter `organizationId` | **FIXED** | `ApprovalOrganizationResolver` 経由で createdBy/salesUser/costCenter/engineer から解決 |
+| S07 見積 `amountSnapshot` | **FIXED（単価帯）** | 明細テーブル無しのため `unitPrice` を唯一行金額＝金額帯基準と明記。seed 変更不要 |
+| S06 `updateBpCompany` の version | **FIXED** | 更新前に client `version` をセット。null → 400 |
+| S13 限流 X-Forwarded-For / アカウントロック | **FIXED** | `app.security.trusted-proxies` 時のみ XFF。email 失敗ロック（既定 5 回/15 分） |
+| FIND-I18N-01 / FIND-SCHED-01 | **FIXED** | 上記表参照 |
 | S17 FAILED 行の TX rollback | **NOT A DEFECT（第一波後）** | `execute` は `@Transactional` なし。FAILED は独立 `TransactionTemplate` で persist 済み |
 
 ## Flyway

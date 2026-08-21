@@ -1,5 +1,6 @@
 package com.ses.config.portal;
 
+import com.ses.common.util.ClientIpResolver;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.portal.PortalLoginUser;
@@ -11,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 /**
  * portal APIのrate limit適用フィルタ（R4.5）。
  * login/招待はIP単位、download/upload/検収はuser単位（未認証は対象APIに到達できない）。
+ * IPは {@link ClientIpResolver}（信頼プロキシ時のみ XFF）で解決する（S13-XFF-01）。
  */
 @RequiredArgsConstructor
 public class PortalRateLimitFilter extends OncePerRequestFilter {
@@ -33,6 +34,7 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
 
     private final PortalRateLimiter rateLimiter;
     private final PortalSecurityProperties properties;
+    private final ClientIpResolver clientIpResolver;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -71,11 +73,7 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 
     private String currentUserId() {

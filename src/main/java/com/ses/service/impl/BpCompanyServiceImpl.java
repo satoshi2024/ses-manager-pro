@@ -168,6 +168,10 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
             }
         }
         applyNonNullFields(existing, bpCompany);
+        if (bpCompany.getVersion() == null) {
+            throw new BusinessException(400, "楽観ロック用のversionが必要です");
+        }
+        existing.setVersion(bpCompany.getVersion());
         boolean updated = this.updateById(existing);
         if (!updated) {
             throw new BusinessException(409, "他のユーザーによって更新されました。画面を再読み込みしてください。");

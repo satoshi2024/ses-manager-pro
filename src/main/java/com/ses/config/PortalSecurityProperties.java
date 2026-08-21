@@ -42,5 +42,9 @@ public class PortalSecurityProperties {
         private int acceptancePerMinute = 20;
         /** MFA有効化API（IP+emailあたり/分。S13-P1-02） */
         private int mfaCompletePerMinute = 10;
+        /** login失敗のアカウントロック閾値（同一email。0以下=無効） */
+        private int loginFailureLockThreshold = 5;
+        /** login失敗ロック時間（分） */
+        private int loginFailureLockMinutes = 15;
     }
 }

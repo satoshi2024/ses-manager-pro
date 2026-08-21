@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.BpPayment;
 import com.ses.mapper.BpPaymentMapper;
 import com.ses.service.InvoiceService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -17,8 +18,18 @@ import java.util.Set;
 /** BP支払確定を承認engineへ接続するadapter。 */
 @Component
 public class BpPaymentApprovalAdapter implements ApprovalTargetAdapter {
-    private final BpPaymentMapper mapper; private final InvoiceService service; private final ObjectMapper objectMapper;
-    public BpPaymentApprovalAdapter(BpPaymentMapper mapper, InvoiceService service, ObjectMapper objectMapper) { this.mapper = mapper; this.service = service; this.objectMapper = objectMapper; }
+    private final BpPaymentMapper mapper;
+    private final InvoiceService service;
+    private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
+
+    public BpPaymentApprovalAdapter(BpPaymentMapper mapper, InvoiceService service, ObjectMapper objectMapper,
+                                    ApprovalOrganizationResolver organizationResolver) {
+        this.mapper = mapper;
+        this.service = service;
+        this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
+    }
     @Override public String requestType() { return "bp_payment.confirm"; }
     @Override public Set<String> supportedRequestTypes() { return Set.of("bp_payment.confirm"); }
     @Override public ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command) {
@@ -33,7 +44,7 @@ public class BpPaymentApprovalAdapter implements ApprovalTargetAdapter {
         statusDiff.put("before", p.getStatus() == null ? "" : p.getStatus());
         statusDiff.put("after", nextStatus);
         diff.put("status", statusDiff);
-        return new ApprovalSnapshot(version(p.getVersion()), p.getAmount(), null, payload, diff);
+        return new ApprovalSnapshot(version(p.getVersion()), p.getAmount(), organizationResolver.forBpPayment(p), payload, diff);
     }
     @Override
     public long currentVersion(Long targetId) {

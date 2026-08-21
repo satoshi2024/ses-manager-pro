@@ -8,6 +8,7 @@ import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -52,6 +53,7 @@ public class AccountingIntegrationWorker {
      * fixedDelay=5000ms: 前回の完了から5秒後に次の実行を開始する（同時実行なし）。
      */
     @Scheduled(fixedDelay = 5000)
+    @SchedulerLock(name = "accountingProcessDueJobs", lockAtLeastFor = "PT1S", lockAtMostFor = "PT4M")
     public void processDueJobs() {
         List<IntegrationJob> dueJobs = jobService.listDueJobs(10);
         if (dueJobs.isEmpty()) {
@@ -74,6 +76,7 @@ public class AccountingIntegrationWorker {
      * 取引作成系は回収前に ref_number で freee を照合し、既存なら SUCCEEDED（再POSTしない）。
      */
     @Scheduled(fixedDelay = 60_000)
+    @SchedulerLock(name = "accountingRecoverStaleRunning", lockAtLeastFor = "PT1S", lockAtMostFor = "PT2M")
     public void recoverStaleRunning() {
         List<IntegrationJob> stale = jobService.listStaleRunningJobs(RUNNING_LEASE_MINUTES);
         if (stale.isEmpty()) {
