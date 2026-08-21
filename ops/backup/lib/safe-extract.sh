@@ -5,7 +5,7 @@
 # - 展開前に entry 一覧を検査し、安全な entry だけを展開する
 # ============================================================
 
-safe_extract::check_entries() { # src_di
+safe_extract::check_entries() { # src_dir
   local src=$1
   local p=""
   while IFS= read -r -d '' p; do
@@ -31,7 +31,7 @@ safe_extract::check_entries() { # src_di
 }
 
 # src の内容を dest へ安全に複製（検査済み entry のみ）
-safe_extract::copy() { # src_dir dest_di
+safe_extract::copy() { # src_dir dest_dir
   local src=$1 dest=$2
   safe_extract::check_entries "$src" || return 1
   mkdir -p "$dest"

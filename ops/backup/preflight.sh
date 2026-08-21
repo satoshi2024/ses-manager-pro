@@ -285,7 +285,7 @@ main() {
         binlog_expire_seconds: ($binlog_expire_seconds // ""),
         uploads: {status: $uploads_status, filesystem: $uploads_fs, free_bytes: ($uploads_free_bytes // "")},
         disk_free_bytes: ($disk_free_bytes // ""),
-        work_dir: $work_di
+        work_dir: $work_dir
       }
     }'
 

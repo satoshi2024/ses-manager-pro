@@ -155,10 +155,10 @@ run_case case_guard_allowlist_mismatch
 run_case case_guard_marker_mismatch
 run_case case_guard_marker_missing
 run_case case_guard_nonempty_db
-run_case case_guard_default_host_use
+run_case case_guard_default_host_user
 run_case case_guard_count_fail_closed
 run_case case_guard_same_host_as_source
-run_case case_guard_plan_tampe
+run_case case_guard_plan_tamper
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"
