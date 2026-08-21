@@ -36,7 +36,7 @@ selector::epoch_of() { # utc_ts
 
 # index 配下の VALID な full/checkpoint を読み込み JSON 配列として出力
 # （consistency_epoch を付与して時刻比較を数値化する）
-selector::load_entries() { # index_di
+selector::load_entries() { # index_dir
   local index_dir=$1
   local out="[]"
   local f=""

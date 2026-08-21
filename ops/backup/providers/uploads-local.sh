@@ -20,7 +20,7 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 [[ -d "$LIB_DIR" ]] || LIB_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 . "$LIB_DIR/common.sh"
 
-uploads_local::check_safe() { # src_di
+uploads_local::check_safe() { # src_dir
   local src_dir=$1
   local entry=""
   # special file（symlink / pipe / socket / block / char）を拒否

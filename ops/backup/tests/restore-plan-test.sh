@@ -249,7 +249,7 @@ case_approval_verify() {
   local stdout_sha
   stdout_sha=$(printf '%s\n' "$PLAN_OUT" | sed -n 's/^plan_sha256=//p' | tail -n1)
   assert_eq "$(tr -d ' \t\r\n' < "$plan_path.sha256")" "$stdout_sha" "stdout SHA == sidecar SHA"
-  # 同一 acto
+  # 同一 actor
   approval::collect_and_verify "$plan_path" target-uuid-001 "$T/claim-a.json" "$T/claim-a.json"
   assert_nonzero "$?" "同一 actor は拒否"
   # 単一 claim の署名は valid（署名検証自体）

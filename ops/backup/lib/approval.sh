@@ -31,7 +31,7 @@ approval::verify_claim() { # claim_file pubkey
 }
 
 # actor ごとの検証鍵を解決（APPROVAL_PUBKEY_DIR/<actor>.pem、無ければ APPROVAL_PUBKEY）
-approval::resolve_pubkey() { # acto
+approval::resolve_pubkey() { # actor
   local actor=$1
   if [[ -n "${APPROVAL_PUBKEY_DIR:-}" && -f "$APPROVAL_PUBKEY_DIR/$actor.pem" ]]; then
     echo "$APPROVAL_PUBKEY_DIR/$actor.pem"
@@ -60,13 +60,13 @@ approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
 
   local actor1="" actor2=""
   for claim in "$claim1" "$claim2"; do
-    local acto
+    local actor
     actor=$(jq -r '.actor // empty' "$claim" 2>/dev/null)
     [[ -n "$actor" ]] || { echo "approval: claim に actor がありません: $claim" >&2; return 1; }
     if [[ -z "$actor1" ]]; then
-      actor1=$acto
+      actor1=$actor
     elif [[ "$actor" != "$actor1" ]]; then
-      actor2=$acto
+      actor2=$actor
     else
       echo "approval: 同一 actor の claim を 2 件受け付けません: $actor" >&2
       return 1
@@ -76,7 +76,7 @@ approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
 
   for claim in "$claim1" "$claim2"; do
     # plan SHA / target UUID / 有効期限の bind 検査
-    local c_plan c_target c_expires c_acto
+    local c_plan c_target c_expires c_actor
     c_plan=$(jq -r '.plan_sha256 // empty' "$claim" 2>/dev/null)
     c_target=$(jq -r '.target_uuid // empty' "$claim" 2>/dev/null)
     c_expires=$(jq -r '.expires_at_utc // empty' "$claim" 2>/dev/null)

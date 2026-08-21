@@ -27,7 +27,7 @@ plan::content_for_id() { # plan_json
 }
 
 # canonical plan JSON を生成し、plan.sha256 を書き、plans ディレクトリへ保存
-plan::write() { # plan_json plans_di
+plan::write() { # plan_json plans_dir
   local plan_json=$1 plans_dir=$2
   mkdir -p "$plans_dir"
   local canonical
