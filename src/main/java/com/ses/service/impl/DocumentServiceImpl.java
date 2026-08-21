@@ -118,7 +118,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         StreamDigestResult streamResult = writeToTempAndDigest(content);
 
         // 3. スキャン処理（未知/失敗/感染はStorageへ保存する前にfail-closed）
-        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
+        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath(), request.getDocumentType());
         if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
             deleteTempFile(streamResult.tempPath());
             log.warn("[文書台帳] スキャン失敗・感染のため登録を拒否します: result={}", scanResult);
@@ -203,7 +203,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         StreamDigestResult streamResult = writeToTempAndDigest(content);
 
         // fail-closed スキャン
-        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath());
+        FileScanResult scanResult = scanQuarantinedPath(streamResult.tempPath(), request.getDocumentType());
         if (scanResult == null || scanResult.status() != FileScanResult.Status.CLEAN) {
             deleteTempFile(streamResult.tempPath());
             throw BusinessException.of(400, "error.file.scanRejected");
@@ -697,18 +697,32 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
     }
 
-    private FileScanResult scanQuarantinedPath(Path path) {
+    private FileScanResult scanQuarantinedPath(Path path, String documentType) {
         FileScanner scanner = fileScannerProvider.getIfAvailable();
         if (scanner == null) {
             log.warn("[文書台帳] FileScannerが未配線のためfail-closedで感染扱いとします");
             return FileScanResult.infected("scanner-unavailable");
         }
         try {
-            return scanner.scan(path, com.ses.common.enums.FileKind.SKILL_SHEET);
+            // 契約書PDFはSKILL_SHEET(10MB)を代用しない（HFP-02-BUG-04）
+            com.ses.common.enums.FileKind kind = isContractPdfDocumentType(documentType)
+                    ? com.ses.common.enums.FileKind.CONTRACT_PDF
+                    : com.ses.common.enums.FileKind.SKILL_SHEET;
+            return scanner.scan(path, kind);
         } catch (Exception e) {
             log.warn("[文書台帳] スキャン実行中例外: {}", e.getMessage());
             return FileScanResult.unavailable(e.getMessage());
         }
+    }
+
+    /** 契約書・署名PDF・合意締結証明書は CONTRACT_PDF（50MB）でscanする。 */
+    private static boolean isContractPdfDocumentType(String documentType) {
+        if (documentType == null || documentType.isBlank()) {
+            return false;
+        }
+        return "CONTRACT".equals(documentType)
+                || "SIGNED_PDF".equals(documentType)
+                || "ESIGN_CERT".equals(documentType);
     }
 
     private void deleteTempFile(Path temp) {

@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -494,5 +495,125 @@ class CloudSignDispatchIntegrationTest {
         } finally {
             props.setEnabled(original);
         }
+    }
+
+    // ===== HFP-02-BUG-01: SENDING再claim禁止・GET照合のみ =====
+
+    @Test
+    void SENDING中の再claimはsendDocumentを呼ばずGET照合のみ() throws Exception {
+        Path pdf = writeSourcePdf("doc-send-recl.pdf", "content-send-recl");
+        ContractDocument d = insertDocument(DispatchState.SENDING, pdf, 0);
+        documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ContractDocument>()
+                .eq(ContractDocument::getId, d.getId())
+                .set(ContractDocument::getClaimedAt, LocalDateTime.now().minusMinutes(10))
+                .set(ContractDocument::getClaimOwner, "dead-worker")
+                .set(ContractDocument::getCloudsignStatus, 0));
+
+        when(api.getDocument(DOC_ID)).thenReturn(remoteDocument(1));
+
+        dispatchService.dispatchDue(10);
+
+        ContractDocument after = documentMapper.selectById(d.getId());
+        assertEquals(DispatchState.SENT.name(), after.getDispatchState());
+        verify(api, never()).sendDocument(any());
+        verify(api, atLeastOnce()).getDocument(DOC_ID);
+    }
+
+    @Test
+    void send成功後checkpoint前crashでも再POSTしない() throws Exception {
+        // send POST済み・checkpoint前crashをSENDING+stale claimで再現
+        Path pdf = writeSourcePdf("doc-send-crash.pdf", "content-send-crash");
+        ContractDocument d = insertDocument(DispatchState.SENDING, pdf, 0);
+        documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ContractDocument>()
+                .eq(ContractDocument::getId, d.getId())
+                .set(ContractDocument::getClaimedAt, LocalDateTime.now().minusMinutes(10))
+                .set(ContractDocument::getClaimOwner, "crashed-worker"));
+
+        when(api.getDocument(DOC_ID)).thenReturn(remoteDocument(1));
+
+        dispatchService.dispatchDue(10);
+
+        verify(api, never()).sendDocument(any());
+        verify(api, times(1)).getDocument(DOC_ID);
+        assertEquals(DispatchState.SENT.name(), documentMapper.selectById(d.getId()).getDispatchState());
+    }
+
+    @Test
+    void ShedLock期限切れ中の二重dispatchDueでもsendは1回() throws Exception {
+        Path pdf = writeSourcePdf("doc-shed.pdf", "content-shed");
+        ContractDocument d = insertDocument(DispatchState.READY_TO_SEND, pdf, 0);
+        d.setCloudsignStatus(0);
+        documentMapper.updateById(d);
+
+        CountDownLatch inSend = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger sendCalls = new AtomicInteger();
+        when(api.getDocument(DOC_ID)).thenReturn(remoteDocument(0), remoteDocument(1));
+        when(api.sendDocument(DOC_ID)).thenAnswer(inv -> {
+            sendCalls.incrementAndGet();
+            inSend.countDown();
+            assertTrue(release.await(15, java.util.concurrent.TimeUnit.SECONDS));
+            return remoteDocument(1);
+        });
+
+        Thread t1 = new Thread(() -> dispatchService.dispatchDue(10));
+        Thread t2 = new Thread(() -> {
+            try {
+                assertTrue(inSend.await(15, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            dispatchService.dispatchDue(10);
+            release.countDown();
+        });
+        t1.start();
+        t2.start();
+        t1.join(30000);
+        t2.join(30000);
+
+        assertEquals(1, sendCalls.get(), "provider send POSTは1回のみ");
+        verify(api, times(1)).sendDocument(DOC_ID);
+    }
+
+    // ===== HFP-02-BUG-03: 確定済みpayload再検証 =====
+
+    @Test
+    void queue後に宛先が変わると送信せずPAYLOAD_CHANGED() throws Exception {
+        Path pdf = writeSourcePdf("doc-payload.pdf", "content-payload");
+        ContractDocument d = insertDocument(DispatchState.QUEUED, pdf, 0);
+        documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ContractDocument>()
+                .eq(ContractDocument::getId, d.getId())
+                .set(ContractDocument::getRecipientEmail, "changed-recipient@example.invalid"));
+
+        dispatchService.dispatchDue(10);
+
+        ContractDocument after = documentMapper.selectById(d.getId());
+        assertEquals(DispatchState.RECONCILIATION_REQUIRED.name(), after.getDispatchState());
+        assertEquals("PAYLOAD_CHANGED", after.getLastProviderErrorCode());
+        verify(api, never()).createDocument(any());
+    }
+
+    @Test
+    void workerは確定済みlanguageCodeをparticipantへ渡す() throws Exception {
+        Path pdf = writeSourcePdf("doc-lang.pdf", "content-lang");
+        ContractDocument d = insertDocument(DispatchState.FILE_UPLOADED, pdf, 0);
+        // queue時 languageCode=en のhashを保存（現行宛先のまま）
+        String enHash = CloudSignPayloadHasher.hash(new ConfirmedSendRequest(
+                contractNo(), 1, "マスク宛先", "recipient-masked@example.invalid",
+                "SES契約書 " + contractId, "en"));
+        documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<ContractDocument>()
+                .eq(ContractDocument::getId, d.getId())
+                .set(ContractDocument::getSendPayloadSha256, enHash));
+
+        when(api.addParticipant(eq(DOC_ID), any())).thenReturn(remoteDocument(0));
+
+        dispatchService.dispatchDue(10);
+
+        org.mockito.ArgumentCaptor<AddParticipantRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(AddParticipantRequest.class);
+        verify(api, times(1)).addParticipant(eq(DOC_ID), captor.capture());
+        assertEquals("en", captor.getValue().languageCode());
+        assertEquals(DispatchState.READY_TO_SEND.name(),
+                documentMapper.selectById(d.getId()).getDispatchState());
     }
 }

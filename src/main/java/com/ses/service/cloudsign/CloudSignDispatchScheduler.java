@@ -20,7 +20,8 @@ public class CloudSignDispatchScheduler {
     private final com.ses.config.CloudSignProperties properties;
 
     @Scheduled(cron = "${cloudsign.dispatch-cron:*/5 * * * * *}")
-    @SchedulerLock(name = "cloudsignDispatch", lockAtLeastFor = "PT5S", lockAtMostFor = "PT10M")
+    // lockAtMostForは最悪batch（pollBatchSize×各工程HTTP+mutation反映待ち）を超えること（HFP-02-BUG-01）
+    @SchedulerLock(name = "cloudsignDispatch", lockAtLeastFor = "PT5S", lockAtMostFor = "PT30M")
     public void dispatchDueOperations() {
         if (!properties.isEnabled()) {
             return;

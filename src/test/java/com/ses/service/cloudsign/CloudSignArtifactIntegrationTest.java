@@ -337,6 +337,20 @@ class CloudSignArtifactIntegrationTest {
         verify(fileScanner, atLeast(2)).scan(any(), eq(FileKind.CONTRACT_PDF));
     }
 
+    @Test
+    void 台帳登録のscanはCONTRACT_PDFである() throws Exception {
+        // HFP-02-BUG-04: registerReceived経由のDocumentServiceImpl.scanもCONTRACT_PDF
+        ContractDocument d = insertCompleted(null, null);
+        when(api.downloadFile(DOC_ID, FILE_ID)).thenReturn(pdfDownload("signed-ledger-kind"));
+        when(api.downloadCertificate(DOC_ID)).thenReturn(pdfDownload("cert-ledger-kind"));
+
+        artifactService.collectPending(10);
+
+        assertNotNull(mapper.selectById(d.getId()).getSignedArchiveDocumentId());
+        verify(fileScanner, atLeastOnce()).scan(any(), eq(FileKind.CONTRACT_PDF));
+        verify(fileScanner, never()).scan(any(), eq(FileKind.SKILL_SHEET));
+    }
+
     // ===== REV-006: FND-006 close evidence — download失敗・ledger失敗を握り潰さない =====
 
     @Test

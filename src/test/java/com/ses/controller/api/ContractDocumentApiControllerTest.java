@@ -230,4 +230,43 @@ class ContractDocumentApiControllerTest {
         verify(cloudSignSyncService, never()).syncDocument(any());
         verifyNoInteractions(cloudSignArtifactService);
     }
+
+    @Test
+    @WithMockUser(roles = {"管理者"})
+    void createはJSON_bodyで宛先を受け取りqueryにemailを含まない() throws Exception {
+        ContractDocument created = document();
+        created.setId(11L);
+        when(service.create(eq(100L), eq(1L), eq("マスク宛先"), eq("recipient-masked@example.invalid")))
+                .thenReturn(created);
+
+        mockMvc.perform(post("/api/contract-documents")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractId\":100,\"templateId\":1,\"recipientName\":\"マスク宛先\","
+                                + "\"recipientEmail\":\"recipient-masked@example.invalid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(result -> {
+                    String uri = result.getRequest().getRequestURI();
+                    String query = result.getRequest().getQueryString();
+                    org.junit.jupiter.api.Assertions.assertFalse(uri != null && uri.contains("@"));
+                    org.junit.jupiter.api.Assertions.assertTrue(query == null || !query.contains("@"));
+                    org.junit.jupiter.api.Assertions.assertTrue(query == null || !query.contains("recipient"));
+                });
+
+        verify(service).create(100L, 1L, "マスク宛先", "recipient-masked@example.invalid");
+    }
+
+    @Test
+    @WithMockUser(roles = {"営業"})
+    void 営業もJSON_bodyで契約書を作成できる() throws Exception {
+        when(service.create(eq(100L), eq(1L), any(), any())).thenReturn(document());
+
+        mockMvc.perform(post("/api/contract-documents")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"contractId\":100,\"templateId\":1,\"recipientName\":\"マスク宛先\","
+                                + "\"recipientEmail\":\"recipient-masked@example.invalid\"}"))
+                .andExpect(status().isOk());
+    }
 }
