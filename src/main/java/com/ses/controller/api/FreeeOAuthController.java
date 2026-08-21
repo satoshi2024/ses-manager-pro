@@ -1,12 +1,15 @@
 package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.service.AuditLogService;
 import com.ses.service.FreeeIntegrationService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
@@ -28,6 +31,8 @@ import java.util.Base64;
  *
  * <p>HFP-01-007: OAuth応答もno-store。接続/解除はFREEE_CONNECT/FREEE_DISCONNECTで監査する
  * （成否のみ。company ID・token・codeは記録しない）。</p>
+ *
+ * <p>接続解除（DELETE）はJSON（ApiResult）を返す。302 opaque redirectでは成否をUIが判定できないため。</p>
  */
 @Controller
 @RequiredArgsConstructor
@@ -59,7 +64,6 @@ public class FreeeOAuthController {
         try {
             return new RedirectView(service.authorizationUrl(state));
         } catch (BusinessException e) {
-            // 設定不足は接続画面へ固定error codeで戻す（client_id等は載せない）
             return new RedirectView("/payroll?error=config");
         }
     }
@@ -74,14 +78,12 @@ public class FreeeOAuthController {
             Authentication auth) {
 
         noStore(response);
-        // sessionのstateは先に除去し、再送・二重callbackでは受理しない
         Object expected = session.getAttribute(SESSION_STATE);
         Object issuedObj = session.getAttribute(SESSION_STATE_ISSUED);
         session.removeAttribute(SESSION_STATE);
         session.removeAttribute(SESSION_STATE_ISSUED);
 
         if (error != null) {
-            // freee側の認可拒否（access_denied等）。token交換しない。
             return new RedirectView("/payroll?error=denied");
         }
         if (expected == null || !constantTimeEquals(expected.toString(), state)) {
@@ -102,13 +104,10 @@ public class FreeeOAuthController {
         try {
             service.handleCallback(code, state, uid);
         } catch (BusinessException e) {
-            // token/company検証失敗。provider messageやcodeはredirectへ載せない。
-            // 失敗もFREEE_CONNECTとして1 row監査する（REV-003 / R09-4）。
             auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 400,
                     CODE_CONNECT, false);
             return new RedirectView("/payroll?error=oauth");
         } catch (Exception e) {
-            // DB障害等の非業務例外でも失敗を監査する（REV-008）。元例外はerror dispatchへ
             auditLogService.record(SecurityUtils.currentUsername(), "GET", URI_CONNECT, 500,
                     CODE_CONNECT, false);
             throw e;
@@ -118,22 +117,27 @@ public class FreeeOAuthController {
         return new RedirectView("/payroll?connected=1");
     }
 
+    /**
+     * 接続解除。成功/失敗をJSONで返す（opaque 302を成功扱いしない）。
+     */
     @DeleteMapping
-    public RedirectView disconnect(HttpServletResponse response) {
+    @ResponseBody
+    public ResponseEntity<ApiResult<Boolean>> disconnect(HttpServletResponse response) {
         noStore(response);
         try {
             service.disconnect();
-            auditLogService.recordRequired(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT, 302,
+            auditLogService.recordRequired(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT, 200,
                     CODE_DISCONNECT, true);
-            return new RedirectView("/payroll");
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.noStore())
+                    .header("Pragma", "no-cache")
+                    .header("Expires", "0")
+                    .body(ApiResult.success(true));
         } catch (BusinessException e) {
-            // 一時障害ではlocal rowを保持し、「解除済み」と表示しない。
-            // 失敗もFREEE_DISCONNECTとして1 row監査する（REV-003 / R09-4）。
             auditLogService.record(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT,
                     e.getCode() == 0 ? 400 : e.getCode(), CODE_DISCONNECT, false);
-            return new RedirectView("/payroll?error=disconnect");
+            throw e;
         } catch (Exception e) {
-            // DB障害等の非業務例外でも失敗を監査する（REV-008）。元例外はerror dispatchへ
             auditLogService.record(SecurityUtils.currentUsername(), "DELETE", URI_DISCONNECT,
                     500, CODE_DISCONNECT, false);
             throw e;

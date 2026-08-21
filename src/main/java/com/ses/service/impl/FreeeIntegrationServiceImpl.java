@@ -477,8 +477,8 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         }
 
         List<Engineer> engineers = engineerMapper.selectList(new LambdaQueryWrapper<>());
-        Map<Long, String> engineerMap = engineers.stream()
-                .collect(Collectors.toMap(Engineer::getId, Engineer::getFullName, (a, b) -> a));
+        Map<Long, Engineer> engineerById = engineers.stream()
+                .collect(Collectors.toMap(Engineer::getId, eng -> eng, (a, b) -> a));
 
         List<FreeeEmployeeDto> out = new ArrayList<>();
         for (FreeeHrEmployee e : all) {
@@ -492,9 +492,23 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             // freeeのemployment_typeにはBPは存在しない。BP判定は本システム側（t_engineer）で行う。
             FreeeEmployeeLink link = currentLinks.get(d.getId());
             if (link != null) {
-                d.setLinkState("LINKED");
-                d.setLinkedEngineerId(link.getEngineerId());
-                d.setLinkedEngineerName(engineerMap.get(link.getEngineerId()));
+                Engineer eng = engineerById.get(link.getEngineerId());
+                // 論理削除済み（selectListに出ない）またはBPへ変更済みはLINKEDにしない。
+                // unique(company,employee)は残るためRECONFIRM_REQUIREDとして画面から明示解除できるようにする。
+                boolean inactive = eng == null
+                        || (eng.getDeletedFlag() != null && eng.getDeletedFlag() != 0)
+                        || "BP".equalsIgnoreCase(eng.getEmploymentType());
+                if (inactive) {
+                    d.setLinkState("RECONFIRM_REQUIRED");
+                    d.setLinkedEngineerId(link.getEngineerId());
+                    if (eng != null) {
+                        d.setLinkedEngineerName(eng.getFullName());
+                    }
+                } else {
+                    d.setLinkState("LINKED");
+                    d.setLinkedEngineerId(link.getEngineerId());
+                    d.setLinkedEngineerName(eng.getFullName());
+                }
             } else if (staleLinks.containsKey(d.getId())) {
                 d.setLinkState("RECONFIRM_REQUIRED");
             } else {
@@ -1168,7 +1182,9 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
                 if (refreshed) {
                     log.warn("freee API unauthorized after refresh: status=401 code={} requestId={} correlationId={}",
                             code == null ? "-" : code, requestId(ex), correlation);
-                    throw BusinessException.of(401, "error.payroll.tokenError");
+                    // HTTP 401にしない（SES.apiがセッション期限切れと誤認して /login へ飛ばすため）。
+                    // reauthRequired と同様に業務エラーとして 400 を返す。
+                    throw BusinessException.of(400, "error.payroll.tokenError");
                 }
                 applicationContext.getBean(FreeeIntegrationService.class).refreshForced();
                 c = latestActiveRow();

@@ -109,7 +109,22 @@ const SES = {
                 }
 
                 // HTTPステータスエラーハンドリング
+                // freee tokenError等の業務401は /api/payroll・/api/my/payroll ではログインへ飛ばさない
+                // （SESセッションは生きている。未知の401は従来どおりtimeout扱い）。
                 if (response.status === 401) {
+                    const payrollApi = typeof url === 'string'
+                        && (url.indexOf('/api/payroll') === 0 || url.indexOf('/api/my/payroll') === 0);
+                    if (payrollApi) {
+                        let message = '給与連携で認証エラーが発生しました。';
+                        try {
+                            const errBody = await response.json();
+                            if (errBody && errBody.message) {
+                                message = errBody.message;
+                            }
+                        } catch (_) { /* JSONでない場合は固定文言 */ }
+                        SES.toast.error(message);
+                        throw new Error(message);
+                    }
                     window.location.href = '/login?error=timeout';
                     throw new Error('Unauthorized');
                 }

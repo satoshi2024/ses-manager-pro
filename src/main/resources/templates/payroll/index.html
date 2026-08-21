@@ -21,9 +21,10 @@
       </div>
       <div class="mt-2 d-flex flex-wrap gap-2"
            th:if="${#authorization.expression('hasRole(''管理者'')')}">
-        <button type="button" class="btn btn-primary btn-sm" id="connectBtn" hidden>接続</button>
-        <button type="button" class="btn btn-warning btn-sm" id="reconnectBtn" hidden>再接続</button>
-        <button type="button" class="btn btn-outline-danger btn-sm" id="disconnectBtn" hidden>接続解除</button>
+        <!-- hidden属性は使わない（UA/Bootstrapの[hidden]{display:none!important}がjQuery .show()を無効化するため）。初期非表示はJSのhiddenプロパティで制御する。 -->
+        <button type="button" class="btn btn-primary btn-sm" id="connectBtn" style="display:none">接続</button>
+        <button type="button" class="btn btn-warning btn-sm" id="reconnectBtn" style="display:none">再接続</button>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="disconnectBtn" style="display:none">接続解除</button>
       </div>
     </div>
   </section>

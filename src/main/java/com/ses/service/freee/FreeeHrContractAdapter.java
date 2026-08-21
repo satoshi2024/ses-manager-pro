@@ -72,7 +72,7 @@ public class FreeeHrContractAdapter {
             if (!node.path("id").isNumber()) {
                 throw contractError("給与明細のid欠落");
             }
-            FreeeSalaryStatement s = objectMapper.convertValue(node, FreeeSalaryStatement.class);
+            FreeeSalaryStatement s = convertStatement(node, FreeeSalaryStatement.class);
             validateAmounts(s.getGrossPaymentAmount(), s.getTotalDeductionAmount(),
                     s.getNetPaymentAmount(), s.getTotalDeductionEmployerShare());
             validateItems(s.getPayments());
@@ -91,7 +91,7 @@ public class FreeeHrContractAdapter {
             if (!node.path("id").isNumber()) {
                 throw contractError("賞与明細のid欠落");
             }
-            FreeeBonusStatement s = objectMapper.convertValue(node, FreeeBonusStatement.class);
+            FreeeBonusStatement s = convertStatement(node, FreeeBonusStatement.class);
             validateAmounts(s.getGrossPaymentAmount(), s.getTotalDeductionAmount(), s.getNetPaymentAmount());
             validateItems(s.getAllowances());
             validateItems(s.getDeductions());
@@ -119,6 +119,18 @@ public class FreeeHrContractAdapter {
     private void requireArray(JsonNode root, String what) {
         if (root == null || !root.isArray()) {
             throw contractError(what + "のrootが配列でない");
+        }
+    }
+
+    /**
+     * typed convert。未知fieldはDTOのignoreUnknownで許容し、型変換失敗は502 contractErrorへ寄せる
+     * （IllegalArgumentExceptionを500「システムエラー」にしない）。
+     */
+    private <T> T convertStatement(JsonNode node, Class<T> type) {
+        try {
+            return objectMapper.convertValue(node, type);
+        } catch (IllegalArgumentException e) {
+            throw contractError("明細の型変換失敗");
         }
     }
 

@@ -26,6 +26,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -370,14 +371,14 @@ class MyPayrollApiControllerTest {
         mockMvc.perform(get("/api/my/payroll/statements")
                         .with(engineerUser(USER_ID_A))
                         .param("year", "2026").param("month", "8"))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value(503))
                 .andExpect(jsonPath("$.data").doesNotExist());
 
         mockMvc.perform(get("/api/my/payroll/statement")
                         .with(engineerUser(USER_ID_A)).session(reauthSession())
                         .param("year", "2026").param("month", "8"))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value(503));
     }
 
@@ -408,6 +409,59 @@ class MyPayrollApiControllerTest {
                         .param("year", "2026").param("month", "8").param("type", "overtime"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    // ============================================================
+    // 金額GET監査（HFP-01-BUG-06 / R09）
+    // ============================================================
+
+    @Test
+    @DisplayName("明細成功とreauth失敗が各1監査rowで金額・氏名・IDを載せない（HFP-01-BUG-06）")
+    void statementSuccessAndReauthFailureEachLeaveOneAuditRowWithoutAmounts() throws Exception {
+        long before = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(id), 0) FROM t_audit_log", Long.class);
+
+        mockMvc.perform(get("/api/my/payroll/statement")
+                        .with(engineerUser(USER_ID_A)).session(reauthSession())
+                        .param("year", "2026").param("month", "8").param("type", "salary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        mockMvc.perform(get("/api/my/payroll/statement")
+                        .with(engineerUser(USER_ID_A))
+                        .param("year", "2026").param("month", "8").param("type", "salary"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+
+        List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT username, method, uri, status, application_code, success_flag "
+                        + "FROM t_audit_log WHERE id > ? ORDER BY id", before);
+        assertEquals(2, rows.size(), "成功・失敗で各1 row");
+
+        java.util.Map<String, Object> ok = rows.get(0);
+        assertEquals("MY_PAYROLL_SALARY_VIEW_202608", ok.get("application_code"));
+        assertEquals("/api/my/payroll/statement", ok.get("uri"));
+        assertEquals(Boolean.TRUE, ok.get("success_flag"));
+        assertEquals(200, ((Number) ok.get("status")).intValue());
+
+        java.util.Map<String, Object> ng = rows.get(1);
+        assertEquals("MY_PAYROLL_SALARY_VIEW_202608", ng.get("application_code"));
+        assertEquals("/api/my/payroll/statement", ng.get("uri"));
+        assertEquals(Boolean.FALSE, ng.get("success_flag"));
+        assertEquals(403, ((Number) ng.get("status")).intValue());
+
+        for (java.util.Map<String, Object> row : rows) {
+            // usernameはテストfixtureのuserId文字列であり監査payloadではない。URI/codeのみを検査する。
+            String uri = String.valueOf(row.get("uri"));
+            String code = String.valueOf(row.get("application_code"));
+            for (String forbidden : new String[]{"300000", "45000", "給与A", "給与B", "emp-"}) {
+                assertFalse(uri.contains(forbidden) || code.contains(forbidden),
+                        "監査URI/codeへ禁止値が混入: " + forbidden + " in " + uri + " / " + code);
+            }
+            assertFalse(uri.contains(String.valueOf(ENGINEER_ID_A)) || uri.contains(String.valueOf(ENGINEER_ID_B)),
+                    "監査URIへengineerIdを載せない: " + uri);
+            assertEquals("/api/my/payroll/statement", uri);
+        }
     }
 
     // ============================================================

@@ -405,6 +405,28 @@ class FreeeHrContractTest {
     }
 
     @Test
+    @DisplayName("明細項目の未知fieldは許容する（HFP-01-BUG-05）")
+    void 明細項目の未知fieldは許容する() throws Exception {
+        seedConnection();
+        String body = "{\"employee_payroll_statements\":["
+                + "{\"id\":9001,\"company_id\":123,\"employee_id\":501,\"employee_num\":\"E-501\","
+                + "\"fixed\":true,\"calc_status\":\"calculated\","
+                + "\"gross_payment_amount\":\"250000\",\"total_deduction_amount\":\"50000\",\"net_payment_amount\":\"200000\","
+                + "\"total_deduction_employer_share\":\"30000\","
+                + "\"payments\":[{\"name\":\"基本給\",\"amount\":\"250000\",\"future_unknown_field\":\"ignored\"}],"
+                + "\"deductions\":[{\"name\":\"所得税\",\"amount\":\"50000\",\"another_unknown\":1}],"
+                + "\"deductions_employer_share\":[],"
+                + "\"future_unknown_field\":\"ignored\"}],\"total_count\":1}";
+        server.expect(once(), statementQuery(SALARY, 0))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+
+        List<PayrollStatementDto> all = service.statements(2026, 7, "salary");
+        assertEquals(1, all.size());
+        assertEquals(0, all.get(0).getGrossAmount().compareTo(new java.math.BigDecimal("250000")));
+        assertTrue(all.get(0).getItems().stream().anyMatch(i -> "基本給".equals(i.getName())));
+    }
+
+    @Test
     @DisplayName("未知fieldは許容し、計算中null金額は0へ変換しない（AC07/R05-6）")
     void 未知field許容とnull保持() throws Exception {
         seedConnection();
