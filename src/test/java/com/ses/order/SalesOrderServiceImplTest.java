@@ -222,7 +222,7 @@ class SalesOrderServiceImplTest {
         quotation.setEngineerId(20L);
         quotation.setProjectId(30L);
         quotation.setUnitPrice(new BigDecimal("600000"));
-        when(quotationMapper.selectById(99L)).thenReturn(quotation);
+        when(quotationMapper.selectByIdForUpdate(99L)).thenReturn(quotation);
 
         SalesOrder winner = new SalesOrder();
         winner.setId(7L);
