@@ -41,7 +41,7 @@ public interface ContractDocumentMapper extends BaseMapper<ContractDocument> {
             + "claimed_at = #{claimedAt}, claim_owner = #{owner}, next_attempt_at = NULL, "
             + "version = version + 1, updated_at = NOW() "
             + "WHERE id = #{id} AND deleted_flag = 0 AND dispatch_state = #{from} "
-            + "AND version = #{expectedVersion} "
+            + "AND version = #{expectedVersion} AND claimed_at IS NULL "
             + "AND (next_attempt_at IS NULL OR next_attempt_at <= #{now})")
     int casClaim(@Param("id") Long id,
                  @Param("expectedVersion") int expectedVersion,

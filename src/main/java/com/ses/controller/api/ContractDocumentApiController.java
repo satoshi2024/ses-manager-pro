@@ -124,12 +124,13 @@ public class ContractDocumentApiController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('管理者','営業','マネージャー')")
-    public ApiResult<ContractDocumentDetailDto> create(@RequestParam Long contractId,
-                                                       @RequestParam Long templateId,
-                                                       @RequestParam String recipientName,
-                                                       @RequestParam String recipientEmail) {
-        assertContractVisible(contractId);
-        ContractDocument created = service.create(contractId, templateId, recipientName, recipientEmail);
+    public ApiResult<ContractDocumentDetailDto> create(@RequestBody com.ses.dto.contractdocument.CreateContractDocumentRequest request) {
+        if (request == null || request.contractId() == null || request.templateId() == null) {
+            throw BusinessException.of("error.contract.document.recipientInvalid");
+        }
+        assertContractVisible(request.contractId());
+        ContractDocument created = service.create(request.contractId(), request.templateId(),
+                request.recipientName(), request.recipientEmail());
         return ApiResult.success(detailOf(created));
     }
 

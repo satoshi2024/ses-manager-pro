@@ -150,6 +150,26 @@ class CloudSignClientContractTest {
     }
 
     @Test
+    void sendはformUrlEncodedの空bodyでPOSTする() {
+        server.expect(requestTo(BASE + "/token")).andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(TOKEN_BODY, MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(BASE + "/documents/" + DOC_ID))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> {
+                    MediaType ct = request.getHeaders().getContentType();
+                    assertNotNull(ct, "sendのContent-Typeが必要");
+                    assertTrue(ct.toString().startsWith("application/x-www-form-urlencoded"),
+                            "sendはform-urlencoded契約だが " + ct);
+                })
+                .andRespond(withSuccess(documentJson("1"), MediaType.APPLICATION_JSON));
+
+        CloudSignDocument sent = client.sendDocument(DOC_ID);
+
+        assertEquals(1, sent.status());
+        server.verify();
+    }
+
+    @Test
     void uploadはmultipartで送信原本bytesと同一のPDFを送る() throws Exception {
         server.expect(requestTo(BASE + "/token")).andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(TOKEN_BODY, MediaType.APPLICATION_JSON));

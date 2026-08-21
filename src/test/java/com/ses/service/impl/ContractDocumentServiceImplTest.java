@@ -313,4 +313,74 @@ class ContractDocumentServiceImplTest {
             props.setEnabled(true);
         }
     }
+
+    @Test
+    void pdfFailedは例外messageやpathをAPIへ出さない() {
+        ContractTemplate template = new ContractTemplate();
+        template.setId(100L);
+        template.setActiveFlag(1);
+        template.setHtmlContent("<p>x</p>");
+        template.setVersion(1);
+        when(templateMapper.selectById(100L)).thenReturn(template);
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setContractNo("C-2026-001");
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+
+        when(pdfFontUtils.resolveCjkFont()).thenThrow(
+                new RuntimeException("I/O failed: uploads/contracts/1/document-999.pdf"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.create(1L, 100L, "山田太郎", "yamada@example.com"));
+
+        assertEquals("error.contract.document.pdfFailed", ex.getMessageKey());
+        assertTrue(ex.getArgs() == null || ex.getArgs().length == 0,
+                "例外message/pathをAPI引数に載せない");
+        String visible = ex.getMessageKey() + (ex.getArgs() == null ? "" : String.join(",",
+                java.util.Arrays.stream(ex.getArgs()).map(String::valueOf).toArray(String[]::new)));
+        assertFalse(visible.contains("uploads"));
+        assertFalse(visible.contains("document-999"));
+    }
+
+    @Test
+    void 締結済NONEはqueueSendを拒否する() throws Exception {
+        ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
+        ContractDocument doc = new ContractDocument();
+        doc.setId(43L);
+        doc.setContractId(1L);
+        doc.setTemplateId(100L);
+        doc.setTemplateVersion(1);
+        doc.setStatus("締結済");
+        doc.setDispatchState(com.ses.common.enums.DispatchState.NONE.name());
+        doc.setVersion(0);
+        doc.setRecipientName("マスク宛先");
+        doc.setRecipientEmail("recipient-masked@example.invalid");
+        when(baseMapper.selectById(43L)).thenReturn(doc);
+
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setContractNo("C-2026-001");
+        when(contractMapper.selectById(1L)).thenReturn(contract);
+
+        Path dir = tempDir.resolve("contracts").resolve("1");
+        Files.createDirectories(dir);
+        Path pdf = dir.resolve("document-43.pdf");
+        Files.write(pdf, "%PDF-1.4\n1 0 obj\nendobj\ntrailer\n%%EOF\n".getBytes());
+        doc.setPdfPath(pdf.toString());
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        StringBuilder sb = new StringBuilder();
+        for (byte v : md.digest(Files.readAllBytes(pdf))) {
+            sb.append(String.format("%02x", v));
+        }
+        doc.setPdfSha256(sb.toString());
+
+        com.ses.dto.cloudsign.ConfirmedSendRequest request =
+                new com.ses.dto.cloudsign.ConfirmedSendRequest("C-2026-001", 1, "マスク宛先",
+                        "recipient-masked@example.invalid", "SES契約書 1", "ja");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.queueSend(43L, request));
+        assertEquals("error.contract.document.invalidState", ex.getMessageKey());
+        verify(baseMapper, never()).casQueue(anyLong(), anyInt(), anyString(), anyString());
+    }
 }

@@ -25,6 +25,7 @@ import java.util.Set;
  * <p>外部APIを一切呼ばず、曖昧な行を自動再送しない。既存形状はdesign §5.1の表どおり分類する:
  * <ul>
  *   <li>外部ID無し・下書き → {@code NONE}（変更不要）</li>
+ *   <li>外部ID無し・確認中/締結済 → {@code RECONCILIATION_REQUIRED}（再送可能なNONE残置を防ぐ）</li>
  *   <li>外部ID有り・送信中/確認中 → {@code RECONCILIATION_REQUIRED}（provider GET待ち）</li>
  *   <li>締結済/完了・artifact path有り → hash再計算でsigned/certificate hashを記録し、
  *       文書台帳への移行候補（archive document id NULL）として {@code COMPLETED}</li>
@@ -82,8 +83,11 @@ public class ContractDocumentDispatchBackfill implements ApplicationRunner {
             // 外部ID無し・下書き = NONEのまま。外部ID有り・下書き = 矛盾
             return hasExternal && markFinding(doc, "BACKFILL_CONTRADICTION");
         }
-        // 外部ID無しで確認中/締結済: provider連携の痕跡が無いため触らない（安全側でNONEのまま）
+        // 外部ID無しで確認中/締結済: 再送可能なNONEのまま残すと危険 → 要確認へ（HFP-02-BUG-07）
         if (!hasExternal) {
+            if (CONFIRMING.contains(status) || COMPLETED.contains(status)) {
+                return markFinding(doc, "BACKFILL_LOCAL_TERMINAL");
+            }
             return false;
         }
         if (CONFIRMING.contains(status)) {

@@ -120,6 +120,28 @@ class ContractDocumentDispatchStateTest {
     }
 
     @Test
+    void workerClaimCASはclaimed_atがある行を再claimできない() {
+        ContractDocument d = insertRow("claim2-" + System.nanoTime(), "下書き", null, null);
+        LocalDateTime now = LocalDateTime.now();
+
+        assertEquals(1, mapper.casClaim(d.getId(), 0, DispatchState.NONE.name(),
+                DispatchState.CREATING.name(), now, "worker-a", now));
+        ContractDocument claimed = mapper.selectById(d.getId());
+        // claimed_at IS NULL 条件により、同一versionでも再claim不可（HFP-02-BUG-01）
+        assertEquals(0, mapper.casClaim(d.getId(), claimed.getVersion(), DispatchState.CREATING.name(),
+                DispatchState.CREATING.name(), now, "worker-b", now));
+    }
+
+    @Test
+    void backfillは外部IDなし締結済を要確認に分類する() {
+        ContractDocument d = insertRow("bf-local-" + System.nanoTime(), "締結済", null, null);
+        backfill.run(mockArgs());
+        ContractDocument after = mapper.selectById(d.getId());
+        assertEquals(DispatchState.RECONCILIATION_REQUIRED.name(), after.getDispatchState());
+        assertEquals("BACKFILL_LOCAL_TERMINAL", after.getLastProviderErrorCode());
+    }
+
+    @Test
     void backfillは外部IDなし下書きを変更しない() {
         ContractDocument d = insertRow("bf-none-" + System.nanoTime(), "下書き", null, null);
         backfill.run(mockArgs());

@@ -104,7 +104,9 @@ public class CloudSignApiClientImpl implements CloudSignApiClient {
 
     @Override
     public CloudSignDocument sendDocument(String documentId) {
-        return executeWithTokenRetry("/documents/" + documentId, HttpMethod.POST, null,
+        // 公式OpenAPI: POST /documents/{id} は application/x-www-form-urlencoded（空body可）
+        MultiValueMap<String, String> emptyForm = new LinkedMultiValueMap<>();
+        return executeWithTokenRetry("/documents/" + documentId, HttpMethod.POST, emptyForm,
                 CloudSignDocument.class, true);
     }
 
