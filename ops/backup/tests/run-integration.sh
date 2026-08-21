@@ -108,6 +108,13 @@ fi
 echo "== restore-drill 実行（実環境に対する drill。RPO/RTO segment 記録） =="
 PLAN_ID=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
   jq -r '.plan_id' /work/integration-summary.json)
+# BUG-06: --target 必須。plan.requested_target と一致させる（不一致は drill が非 0）
+TARGET_TS=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
+  jq -r '.requested_target // empty' "/work/plans/${PLAN_ID}.json")
+if [[ -z "$TARGET_TS" || "$TARGET_TS" == "null" ]]; then
+  echo "FAIL: plan.requested_target を取得できません（plan_id=$PLAN_ID）" >&2
+  exit 1
+fi
 printf '#!/usr/bin/env bash\nexit 1\n' > "$WORK/drill-cutover-smoke.sh"
 chmod +x "$WORK/drill-cutover-smoke.sh"
 # drill の restore 用に target を初期化（target guard の空チェックを通す）
@@ -129,6 +136,7 @@ docker run --rm --network "$NET" \
   -e RTO_SECONDS=14400 -e RPO_MAX_SECONDS=900 \
   -v "$WWORK:/work:rw" \
   ses-backup-tool:integration /usr/local/bin/restore-drill.sh \
+  --target "$TARGET_TS" \
   --plan "$PLAN_ID" \
   --approval /work/claim-alice.json --approval /work/claim-bob.json \
   --report-dir /work/drill-evidence

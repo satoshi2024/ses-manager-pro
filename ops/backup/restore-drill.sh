@@ -163,7 +163,7 @@ main() {
   drill::segment_end validate
 
   echo "== drill: read-only cutover リハーサル → rollback =="
-  drill::segment_start cutove
+  drill::segment_start cutover
   local cs="$report_dir/cutover-state.json"
   CUTOVER_STATE_FILE="$cs" VALIDATION_STATE_FILE="$validate_log" \
     TARGET_SSL_CAPATH="${TARGET_SSL_CAPATH:-}" TARGET_TLS_MODE="${TARGET_TLS_MODE:-VERIFY_CA}" \
@@ -180,7 +180,7 @@ main() {
       drill::fail "cutover リハーサルが期待状態になりません（state=$cstate）"
       ;;
   esac
-  drill::segment_end cutove
+  drill::segment_end cutover
 
   echo "== drill: report =="
   local report="$report_dir/drill-report.json"
