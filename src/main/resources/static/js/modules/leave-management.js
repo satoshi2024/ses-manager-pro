@@ -6,7 +6,31 @@
     month.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     month.addEventListener('change', load);
     document.getElementById('leaveBalanceLoad').addEventListener('click', loadBalance);
+    loadEngineerOptions();
     load();
+
+    function loadEngineerOptions() {
+        const sel = document.getElementById('leaveBalanceEngineer');
+        if (!sel) return;
+        fetch('/api/engineers/options').then(read).then(data => {
+            if (data.code !== 200) return;
+            const placeholder = sel.querySelector('option[value=""]');
+            sel.innerHTML = '';
+            if (placeholder) sel.appendChild(placeholder);
+            else {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = t('leave.selectEngineer', '要員を選択...');
+                sel.appendChild(opt);
+            }
+            (data.data || []).forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.id;
+                opt.textContent = e.name || '';
+                sel.appendChild(opt);
+            });
+        }).catch(() => {});
+    }
 
     function load() {
         fetch(`/api/leave?month=${encodeURIComponent(month.value)}`).then(read).then(data => {

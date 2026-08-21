@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -84,10 +85,15 @@ class DashboardRolloffTopNTest {
         when(contractMapper.selectList(any())).thenReturn(contracts);
         when(engineerMapper.selectList(any())).thenReturn(engineers);
         when(engineerMapper.selectBatchIds(any())).thenReturn(engineers);
+        when(engineerSkillMapper.selectTopSkillCandidates(any())).thenReturn(List.of());
+        when(proposalMapper.selectList(any())).thenReturn(List.of());
 
         DashboardSummaryDto summary = dashboardService.getSummary(3);
 
         // retiring list size should be capped at 10
         assertEquals(10, summary.getRetiring().size(), "retiringListは最大10件に制限されること");
+        assertEquals(15, summary.getRetiringTotal(), "retiringTotalはTop10切り捨て前の全件数であること");
+        assertNotNull(summary.getRetiringFrom());
+        assertNotNull(summary.getRetiringTo());
     }
 }

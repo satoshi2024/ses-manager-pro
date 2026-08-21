@@ -133,6 +133,40 @@
         });
     }
 
+    /** portalユーザー選択肢。session照会でID直打ちにしない。 */
+    function loadSessionUserOptions() {
+        $.get('/api/portal-admin/orgs', { current: 1, size: 100 }, function (res) {
+            if (!res || res.code !== 200) {
+                return;
+            }
+            const orgs = (res.data && res.data.records) || [];
+            if (!orgs.length) {
+                return;
+            }
+            const requests = orgs.map(function (org) {
+                return $.get('/api/portal-admin/orgs/' + org.id + '/users', { current: 1, size: 100 });
+            });
+            $.when.apply($, requests).done(function () {
+                const responses = requests.length === 1 ? [arguments[0]] : Array.prototype.map.call(arguments, function (a) { return a[0]; });
+                const seen = {};
+                let options = '<option value="">' + esc(t('portalAdmin.sessions.selectUser')) + '</option>';
+                responses.forEach(function (userRes) {
+                    if (!userRes || userRes.code !== 200) {
+                        return;
+                    }
+                    ((userRes.data && userRes.data.records) || []).forEach(function (user) {
+                        if (seen[user.id]) {
+                            return;
+                        }
+                        seen[user.id] = true;
+                        options += '<option value="' + user.id + '">' + esc(user.email || ('#' + user.id)) + '</option>';
+                    });
+                });
+                $('#sessionUserId').html(options);
+            });
+        });
+    }
+
     // ===== session =====
     function loadSessions() {
         const userId = $('#sessionUserId').val();
@@ -182,6 +216,7 @@
         loadOrgs();
         loadInvitations();
         loadOrgOptions();
+        loadSessionUserOptions();
         loadLogs();
         loadTerms();
 

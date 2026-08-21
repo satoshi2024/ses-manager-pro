@@ -792,6 +792,180 @@ class ContractServiceImplTest {
                 eq("compliance:DOUBLE_DISPATCH"), eq(false));
     }
 
+    // ===== CON-01: ALWAYS フィールドの未出現回填 =====
+
+    /**
+     * 契約画面 DTO は positionId / renewalDecision を運ばない。updateById は ALWAYS のため
+     * null のまま渡すと列を NULL 上書きし、staffing の actual 配賦や更新判断が消える。
+     * 画面保存相当（SAVE_PAYLOAD_ALWAYS_FIELDS）では当該列を old から回填すること。
+     */
+    @Test
+    void updateWithBusinessRules_DTOに無いALWAYS項目はoldから回填される() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setPositionId(55L);
+        old.setRenewalDecision("CONTINUE");
+        old.setSalesUserId(10L);
+        old.setCommissionBaseType("粗利");
+        old.setCommissionRate(new BigDecimal("5"));
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+        when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
+        // 回填後の positionId 検証を通す
+        com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
+        position.setId(55L);
+        position.setProjectId(200L);
+        when(positionMapper.selectById(55L)).thenReturn(position);
+        Project project = new Project();
+        project.setId(200L);
+        project.setCustomerId(300L);
+        when(projectMapper.selectById(200L)).thenReturn(project);
+
+        // 画面保存相当: DTO が運ぶ列だけセット。positionId / renewalDecision は未設定(null)
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setEngineerId(100L);
+        update.setProjectId(200L);
+        update.setCustomerId(300L);
+        update.setStartDate(LocalDate.of(2026, 7, 1));
+        update.setSellingPrice(new BigDecimal("600000"));
+        update.setCostPrice(new BigDecimal("400000"));
+        update.setSalesUserId(10L);
+        update.setCommissionBaseType("粗利");
+        update.setCommissionRate(new BigDecimal("5"));
+
+        org.mockito.ArgumentCaptor<Contract> captor = org.mockito.ArgumentCaptor.forClass(Contract.class);
+        when(contractMapper.updateById(captor.capture())).thenReturn(1);
+
+        contractService.updateWithBusinessRules(update);
+
+        Contract saved = captor.getValue();
+        assertEquals(55L, saved.getPositionId(), "positionId は DTO に無いため old を維持");
+        assertEquals("CONTINUE", saved.getRenewalDecision(), "renewalDecision は DTO に無いため old を維持");
+        assertEquals(10L, saved.getSalesUserId(), "salesUserId は payload 値を維持");
+    }
+
+    /**
+     * payload に含まれない salesUserId は明示クリアではなく未出現。old の担当営業を残す。
+     */
+    @Test
+    void updateWithBusinessRules_payloadに無い担当営業は維持される() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setSalesUserId(10L);
+        old.setPositionId(55L);
+        old.setRenewalDecision("END");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+        when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
+        com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
+        position.setId(55L);
+        position.setProjectId(200L);
+        when(positionMapper.selectById(55L)).thenReturn(position);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStartDate(LocalDate.of(2026, 7, 1));
+        update.setSellingPrice(new BigDecimal("600000"));
+        update.setCostPrice(new BigDecimal("400000"));
+        // salesUserId / positionId / renewalDecision いずれも未設定
+
+        org.mockito.ArgumentCaptor<Contract> captor = org.mockito.ArgumentCaptor.forClass(Contract.class);
+        when(contractMapper.updateById(captor.capture())).thenReturn(1);
+
+        // どの ALWAYS 列も payload 未出現
+        contractService.updateWithBusinessRules(update, java.util.Set.of());
+
+        Contract saved = captor.getValue();
+        assertEquals(10L, saved.getSalesUserId());
+        assertEquals(55L, saved.getPositionId());
+        assertEquals("END", saved.getRenewalDecision());
+    }
+
+    /**
+     * フォームが運ぶ ALWAYS 列は明示 null でクリアできる（「既定に戻す」）。
+     * positionId / renewalDecision は DTO 外のため、同時に old から回填されたまま残る。
+     */
+    @Test
+    void updateWithBusinessRules_payloadで明示nullの担当営業はクリアできる() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setSalesUserId(10L);
+        old.setPositionId(55L);
+        old.setRenewalDecision("CONTINUE");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+        when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
+        com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
+        position.setId(55L);
+        position.setProjectId(200L);
+        when(positionMapper.selectById(55L)).thenReturn(position);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStartDate(LocalDate.of(2026, 7, 1));
+        update.setSellingPrice(new BigDecimal("600000"));
+        update.setCostPrice(new BigDecimal("400000"));
+        update.setSalesUserId(null); // 明示クリア
+
+        org.mockito.ArgumentCaptor<Contract> captor = org.mockito.ArgumentCaptor.forClass(Contract.class);
+        when(contractMapper.updateById(captor.capture())).thenReturn(1);
+
+        contractService.updateWithBusinessRules(update); // SAVE_PAYLOAD_ALWAYS_FIELDS
+
+        Contract saved = captor.getValue();
+        assertNull(saved.getSalesUserId(), "DTO が運ぶ salesUserId の明示 null はクリアされる");
+        assertEquals(55L, saved.getPositionId(), "DTO 外の positionId は維持");
+        assertEquals("CONTINUE", saved.getRenewalDecision(), "DTO 外の renewalDecision は維持");
+    }
+
+    /**
+     * commission* / endDate を present に含めない場合は old を維持。明示 null の列だけクリア。
+     */
+    @Test
+    void updateWithBusinessRules_省略キーは維持し明示nullだけクリア() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setSalesUserId(10L);
+        old.setCommissionBaseType("粗利");
+        old.setCommissionRate(new BigDecimal("5"));
+        old.setEndDate(LocalDate.of(2026, 12, 31));
+        old.setPositionId(55L);
+        old.setRenewalDecision("CONTINUE");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+        when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
+        com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
+        position.setId(55L);
+        position.setProjectId(200L);
+        when(positionMapper.selectById(55L)).thenReturn(position);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStartDate(LocalDate.of(2026, 7, 1));
+        update.setSellingPrice(new BigDecimal("600000"));
+        update.setCostPrice(new BigDecimal("400000"));
+        update.setSalesUserId(null); // 明示クリア
+        // commission* / endDate / positionId / renewalDecision は未設定（省略相当）
+
+        org.mockito.ArgumentCaptor<Contract> captor = org.mockito.ArgumentCaptor.forClass(Contract.class);
+        when(contractMapper.updateById(captor.capture())).thenReturn(1);
+
+        contractService.updateWithBusinessRules(update, java.util.Set.of("salesUserId"));
+
+        Contract saved = captor.getValue();
+        assertNull(saved.getSalesUserId(), "明示 null の salesUserId はクリア");
+        assertEquals("粗利", saved.getCommissionBaseType(), "省略した commissionBaseType は old 維持");
+        assertEquals(0, new BigDecimal("5").compareTo(saved.getCommissionRate()), "省略した commissionRate は old 維持");
+        assertEquals(LocalDate.of(2026, 12, 31), saved.getEndDate(), "省略した endDate は old 維持");
+        assertEquals(55L, saved.getPositionId());
+        assertEquals("CONTINUE", saved.getRenewalDecision());
+    }
+
     // ===== contract-renewal-calendar (FR-06) 更新判断の部分更新 =====
 
     /**

@@ -3,6 +3,7 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
@@ -10,11 +11,16 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Setter;
+import lombok.ToString;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 案件ポジション（募集枠）。
@@ -24,7 +30,8 @@ import java.time.LocalDate;
  * {@code end_date IS NULL} はopen end（計画window末まで）。
  */
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, exclude = "presentAlwaysFields")
+@ToString(callSuper = true, exclude = "presentAlwaysFields")
 @TableName("t_project_position")
 public class ProjectPosition extends BaseEntity {
 
@@ -63,8 +70,17 @@ public class ProjectPosition extends BaseEntity {
     private LocalDate startDate;
 
     /** 終了日（inclusive・NULL=open end: 計画window末まで） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private LocalDate endDate;
+
+    /**
+     * JSON に出現した ALWAYS フィールド名（CON-01）。
+     * setter 経由でキー出現を記録し、未出現はサービス側で既存値へ回填する。
+     */
+    @JsonIgnore
+    @TableField(exist = false)
+    private final Set<String> presentAlwaysFields = new HashSet<>();
 
     /** 勤務地 */
     private String location;
@@ -84,6 +100,14 @@ public class ProjectPosition extends BaseEntity {
     /** 楽観ロック */
     @Version
     private Integer version;
+
+    /**
+     * endDate の setter。Jackson / MyBatis が呼んだ時点で「payload 出現」とみなす（明示 null もクリア可）。
+     */
+    public void setEndDate(LocalDate endDate) {
+        this.endDate = endDate;
+        presentAlwaysFields.add("endDate");
+    }
 
     @AssertTrue(message = "単価上限は下限以上の値を指定してください")
     public boolean isUnitPriceRangeValid() {

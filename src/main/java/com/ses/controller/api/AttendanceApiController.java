@@ -45,8 +45,17 @@ public class AttendanceApiController {
     }
 
     @GetMapping("/api/work-records/attendance")
-    public ApiResult<AttendanceOverviewDto> management(@RequestParam String month) {
-        return ApiResult.success(attendanceService.management(month));
+    public ApiResult<AttendanceOverviewDto> management(
+            @RequestParam String month,
+            @RequestParam(required = false) Long current,
+            @RequestParam(required = false) Long size) {
+        return ApiResult.success(attendanceService.management(month, current, size));
+    }
+
+    @GetMapping("/api/work-records/attendance/{engineerId}/days")
+    public ApiResult<java.util.List<com.ses.dto.attendance.AttendanceDayDto>> managementDays(
+            @PathVariable Long engineerId, @RequestParam String month) {
+        return ApiResult.success(attendanceService.managementDays(engineerId, month));
     }
 
     @PostMapping("/api/work-records/attendance/{engineerId}/reject")

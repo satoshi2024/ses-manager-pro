@@ -170,6 +170,54 @@ class DashboardServiceImplTest {
     }
 
     @Test
+    void testGetProfitAnalysis_大きな単価でもint溢出しない() {
+        // Integer.MAX_VALUE を超える単価でも long で粗利を保持する
+        Contract c1 = createContract(1L, "C-BIG", null, null, LocalDate.of(2026, 7, 1));
+        c1.setSellingPrice(new java.math.BigDecimal("3000000000"));
+        c1.setCostPrice(new java.math.BigDecimal("1000000000"));
+        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(engineerMapper.selectBatchIds(any())).thenReturn(List.of(createEngineer(1L, "Eng")));
+        when(projectMapper.selectBatchIds(any())).thenReturn(List.of(createProject(1L, "Proj")));
+
+        List<ContractProfitDto> result = dashboardService.getProfitAnalysis();
+
+        assertEquals(1, result.size());
+        assertEquals(3_000_000_000L, result.get(0).getSellingPrice());
+        assertEquals(1_000_000_000L, result.get(0).getCostPrice());
+        assertEquals(2_000_000_000L, result.get(0).getGrossProfitAmount());
+        assertEquals("66.7%", result.get(0).getGrossProfitRate());
+    }
+
+    @Test
+    void testGetSummary_FiscalYear_下々月開始の稼動契約も売上に含む() {
+        // 旧実装は start_date <= 当月末+1ヶ月 のため、下々月開始契約がFY図から欠落していた。
+        // Export(buildMonthlyRevenueRows) と同様、対象月内なら MonthlyRevenueCalc が拾う。
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        java.time.YearMonth startYm = java.time.YearMonth.now().plusMonths(2);
+        int fiscalYear = startYm.getMonthValue() >= 4 ? startYm.getYear() : startYm.getYear() - 1;
+
+        Contract future = new Contract();
+        future.setId(99L);
+        future.setStatus("稼動中");
+        future.setStartDate(startYm.atDay(1));
+        future.setEndDate(null);
+        future.setSellingPrice(new java.math.BigDecimal("800000"));
+        future.setCostPrice(new java.math.BigDecimal("500000"));
+        when(contractMapper.selectList(any())).thenReturn(List.of(future));
+
+        var revenue = dashboardService.getSummary(fiscalYear).getCharts().getRevenue();
+
+        java.time.YearMonth fyStart = java.time.YearMonth.of(fiscalYear, 4);
+        int monthIndex = (int) java.time.temporal.ChronoUnit.MONTHS.between(fyStart, startYm);
+        assertTrue(monthIndex >= 0 && monthIndex < 12, "開始月は対象FY内であること: " + startYm);
+        assertEquals(800000L, revenue.getSales().get(monthIndex),
+                "下々月開始の稼動契約の売上がFY図に含まれること");
+        assertEquals(300000L, revenue.getProfit().get(monthIndex));
+    }
+
+    @Test
     void testGetSummary_WithYear() {
         when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(contractMapper.selectList(any())).thenReturn(Collections.emptyList());

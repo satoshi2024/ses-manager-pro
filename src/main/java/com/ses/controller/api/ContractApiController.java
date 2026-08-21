@@ -171,7 +171,9 @@ public class ContractApiController {
         // 状態は専用 API の状態機械を経由させる。通常更新 payload に含まれていても無視し、
         // 準備中→稼動中などの遷移検証を迂回できないようにする。
         contract.setStatus(null);
-        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings = contractService.updateWithBusinessRules(contract);
+        // CON-01: JSON 未出現の ALWAYS 列は old 回填。明示 null のみクリア可。
+        java.util.List<com.ses.dto.compliance.ComplianceFinding> findings =
+                contractService.updateWithBusinessRules(contract, dto.getPresentAlwaysFields());
         return buildSaveResult(contract, findings);
     }
 

@@ -120,12 +120,12 @@ class AttendanceApiControllerTest {
         AttendanceOverviewDto overview = new AttendanceOverviewDto();
         overview.setMonth("2026-08");
         overview.setMonths(java.util.List.of());
-        when(attendanceService.management(anyString())).thenReturn(overview);
+        when(attendanceService.management(anyString(), any(), any())).thenReturn(overview);
 
         mockMvc.perform(get("/api/work-records/attendance").param("month", "2026-08"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
-        verify(attendanceService).management("2026-08");
+        verify(attendanceService).management(eq("2026-08"), any(), any());
     }
 
     @Test

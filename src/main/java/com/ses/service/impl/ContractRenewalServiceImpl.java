@@ -62,7 +62,7 @@ public class ContractRenewalServiceImpl implements ContractRenewalService {
                 notificationServiceProvider.ifAvailable(ns -> ns.publish(
                         "SYSTEM",
                         "契約更新ドラフト作成エラー",
-                        "契約 " + original.getContractNo() + " の自動更新でエラーが発生しました: " + e.getMessage(),
+                        "契約 " + original.getContractNo() + " の自動更新でエラーが発生しました。",
                         null, null));
             }
         }

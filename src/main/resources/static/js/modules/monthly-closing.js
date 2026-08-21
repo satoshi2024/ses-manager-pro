@@ -5,8 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 既定=前月
     const now = new Date();
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    document.getElementById('closingMonth').value =
-        prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2, '0');
+    document.getElementById('closingMonth').value = SES.util.getLocalDateString(prev).slice(0, 7);
 
     document.getElementById('btnLoadClosing').addEventListener('click', loadClosing);
     // 締め完了/解除ボタンは権限のないロール（HR等）には描画されないためnullガードする（R3R-08）。
@@ -22,7 +21,10 @@ function loadClosing() {
     if (!month) return;
     fetch('/api/monthly-closing/summary?month=' + encodeURIComponent(month))
         .then(res => res.json()).then(data => {
-            if (data.code !== 200) { alert(data.message); return; }
+            if (data.code !== 200) {
+                (window.Toast || SES.toast).error(data.message);
+                return;
+            }
             closingSummary = data.data;
             renderCards();
         });
@@ -84,48 +86,49 @@ function showClosingDetail(key) {
     const month = encodeURIComponent(s.month);
     let rows = [];
     let headers = [];
+    const h = (k) => SES.i18n.t(k);
     if (key === 'closing.item.unentered') {
-        headers = ['契約番号', '要員', '案件', '操作'];
-        rows = s.unenteredWork.map(r => [r.contractNo, r.engineerName, r.projectName, `<a href="/work-record?month=${month}" class="btn btn-sm btn-outline-primary">修正画面</a>`]);
+        headers = [h('closing.detail.contractNo'), h('closing.detail.engineer'), h('closing.detail.project'), h('closing.detail.action')];
+        rows = s.unenteredWork.map(r => [r.contractNo, r.engineerName, r.projectName, `<a href="/work-record?month=${month}" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.openWorkRecord'))}</a>`]);
     } else if (key === 'closing.item.unconfirmed') {
-        headers = ['契約ID', 'ステータス', '工数', '操作'];
-        rows = s.unconfirmedRecords.map(r => [r.contractId, r.status, r.actualHours, `<a href="/work-record?month=${month}" class="btn btn-sm btn-outline-primary">修正画面</a>`]);
+        headers = [h('closing.detail.contractId'), h('closing.detail.status'), h('closing.detail.hours'), h('closing.detail.action')];
+        rows = s.unconfirmedRecords.map(r => [r.contractId, r.status, r.actualHours, `<a href="/work-record?month=${month}" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.openWorkRecord'))}</a>`]);
     } else if (key === 'closing.item.unbilled') {
-        headers = ['顧客名 / 要員', '案件', '金額', '操作'];
+        headers = [h('closing.detail.customerEngineer'), h('closing.detail.project'), h('closing.detail.amount'), h('closing.detail.action')];
         let html = `<h5>${SES.escapeHtml(SES.i18n.t(key))}</h5>`;
         s.unbilledConfirmed.forEach(g => {
-            html += `<h6>${SES.escapeHtml(g.customerName)} (小計: ¥${Number(g.subtotal || 0).toLocaleString()})</h6>`;
-            html += `<table class="table table-sm table-bordered"><thead><tr>`;
-            headers.forEach(h => html += `<th>${h}</th>`);
+            html += `<h6>${SES.escapeHtml(g.customerName)} (${SES.escapeHtml(h('closing.detail.subtotal'))}: ¥${Number(g.subtotal || 0).toLocaleString()})</h6>`;
+            html += `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr>`;
+            headers.forEach(hdr => html += `<th>${SES.escapeHtml(hdr)}</th>`);
             html += `</tr></thead><tbody>`;
             g.items.forEach(r => {
                 html += `<tr>
                     <td>${SES.escapeHtml(r.engineerName)}</td>
                     <td>${SES.escapeHtml(r.projectName)}</td>
                     <td>¥${Number(r.billingAmount || 0).toLocaleString()}</td>
-                    <td><a href="/invoice?month=${month}&customerId=${encodeURIComponent(g.customerId)}" class="btn btn-sm btn-outline-primary">請求作成</a></td>
+                    <td><a href="/invoice?month=${month}&customerId=${encodeURIComponent(g.customerId)}" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.createInvoice'))}</a></td>
                 </tr>`;
             });
-            html += `</tbody></table>`;
+            html += `</tbody></table></div>`;
         });
         document.getElementById('closingDetail').innerHTML = html;
         return;
     } else if (key === 'closing.item.unpaidBp') {
-        headers = ['要員', '案件', '金額', '操作'];
-        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, '¥' + Number(r.amount || 0).toLocaleString(), `<a href="/invoice?tab=bp-payment&month=${month}" class="btn btn-sm btn-outline-primary">支払画面</a>`]);
+        headers = [h('closing.detail.engineer'), h('closing.detail.project'), h('closing.detail.amount'), h('closing.detail.action')];
+        rows = s.unpaidBp.map(r => [r.engineerName, r.projectName, '¥' + Number(r.amount || 0).toLocaleString(), `<a href="/invoice?tab=bp-payment&month=${month}" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.openPayment'))}</a>`]);
     } else if (key === 'closing.item.overdue') {
-        headers = ['請求書番号', '顧客', '残高', '期限', '操作'];
-        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, '¥' + Number(r.balance || 0).toLocaleString(), r.dueDate, `<a href="/invoice?invoiceId=${encodeURIComponent(r.invoiceId)}" class="btn btn-sm btn-outline-primary">督促</a>`]);
+        headers = [h('closing.detail.invoiceNo'), h('closing.detail.customer'), h('closing.detail.balance'), h('closing.detail.dueDate'), h('closing.detail.action')];
+        rows = s.overdueInvoices.map(r => [r.invoiceNo, r.customerName, '¥' + Number(r.balance || 0).toLocaleString(), r.dueDate, `<a href="/invoice?invoiceId=${encodeURIComponent(r.invoiceId)}" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.remind'))}</a>`]);
     } else if (key === 'closing.item.compliance') {
         // 該当リスク列は最終列(操作)より前のため showClosingDetail の共通ループでエスケープされる。
         // 生HTML(<br>等)は差し込まずプレーンテキストで連結する。
-        headers = ['契約番号', '要員', '案件', '該当リスク', '操作'];
+        headers = [h('closing.detail.contractNo'), h('closing.detail.engineer'), h('closing.detail.project'), h('closing.detail.risk'), h('closing.detail.action')];
         rows = s.complianceFindings.map(r => [r.contractNo, r.engineerName, r.projectName,
             (r.findings || []).map(f => f.message).join(' / '),
-            `<a href="/compliance" class="btn btn-sm btn-outline-primary">詳細</a>`]);
+            `<a href="/compliance" class="btn btn-sm btn-outline-primary">${SES.escapeHtml(h('closing.detail.openDetail'))}</a>`]);
     }
-    let html = `<h5>${SES.escapeHtml(SES.i18n.t(key))}</h5><table class="table table-sm table-bordered"><thead><tr>`;
-    headers.forEach(h => html += `<th>${h}</th>`);
+    let html = `<h5>${SES.escapeHtml(SES.i18n.t(key))}</h5><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr>`;
+    headers.forEach(hdr => html += `<th>${SES.escapeHtml(hdr)}</th>`);
     html += '</tr></thead><tbody>';
     rows.forEach(r => {
         html += '<tr>';
@@ -134,7 +137,7 @@ function showClosingDetail(key) {
         }
         html += `<td>${r[r.length - 1]}</td></tr>`;
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     document.getElementById('closingDetail').innerHTML = html;
 }
 
@@ -148,9 +151,9 @@ function confirmClosing() {
         body: JSON.stringify({ month })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) { SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。')); loadClosing(); }
-        else alert(data.message);
+        else (window.Toast || SES.toast).error(data.message);
     }).catch(e => {
-        SES.toast.error("通信エラーが発生しました");
+        SES.toast.error(SES.i18n.t('closing.error.network', '通信エラーが発生しました'));
     }).finally(() => { if (button) button.disabled = false; });
 }
 
@@ -164,6 +167,6 @@ function reopenClosing() {
         body: JSON.stringify({ month })
     }).then(res => res.json()).then(data => {
         if (data.code === 200) loadClosing();
-        else alert(data.message);
-    });
+        else (window.Toast || SES.toast).error(data.message);
+    }).finally(() => { if (button) button.disabled = false; });
 }

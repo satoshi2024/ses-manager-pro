@@ -132,8 +132,9 @@
                     <p class="text-muted small mb-3" th:text="#{portalAdmin.sessions.guide}">ユーザーを選択すると有効sessionが表示されます。</p>
                     <div class="row g-2 mb-3">
                         <div class="col-md-4">
-                            <input type="number" class="form-control" id="sessionUserId"
-                                   placeholder="portal user ID" min="1" required>
+                            <select class="form-select" id="sessionUserId" required>
+                                <option value="" th:text="#{portalAdmin.sessions.selectUser}">ユーザーを選択...</option>
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <button class="btn btn-secondary w-100" id="sessionLoadButton"

@@ -59,7 +59,7 @@ class DashboardApiControllerTest {
     void testGetProfitAnalysis() throws Exception {
         ContractProfitDto dto = new ContractProfitDto();
         dto.setContractNo("C001");
-        dto.setGrossProfitAmount(400000);
+        dto.setGrossProfitAmount(400000L);
         
         when(dashboardService.getProfitAnalysis()).thenReturn(List.of(dto));
 

@@ -276,7 +276,7 @@
             <div class="card bg-card border-dark shadow-sm">
                 <div class="card-header bg-transparent border-dark px-4 py-3 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0 text-white fw-bold"><i class="bi bi-exclamation-triangle-fill me-2 text-accent-yellow"></i><span th:text="#{dashboard.list.retiring_soon}">退場予定リスト（30日以内）</span></h6>
-                    <a href="/engineer/list?status=退場予定" class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark" th:text="#{dashboard.list.view_all}">すべて見る</a>
+                    <a id="retiring-view-all" href="/contract/list?status=稼動中" class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark" th:text="#{dashboard.list.view_all}">すべて見る</a>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">

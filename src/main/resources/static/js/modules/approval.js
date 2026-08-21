@@ -3,9 +3,32 @@ $(function () {
     if ($('#approvalTable').length) {
         loadApprovalList(1);
         $('#approvalSearchForm').on('submit', function (e) { e.preventDefault(); loadApprovalList(1); });
+        loadApprovalCreateOptions();
     }
     if ($('#approvalDetailPage').length) loadApprovalDetail($('#approvalDetailPage').data('request-id'));
 });
+
+function loadApprovalCreateOptions() {
+    const targetSel = $('#approvalCreateForm [name=targetId]');
+    const orgSel = $('#approvalCreateForm [name=organizationId]');
+    if (!targetSel.length && !orgSel.length) return;
+    $.get('/api/contracts/options', function (res) {
+        if (res.code !== 200 || !targetSel.length) return;
+        const placeholder = targetSel.find('option[value=""]').first().prop('outerHTML')
+            || '<option value="">' + SES.escapeHtml(SES.i18n.t('approval.create.selectTarget', '対象を選択...')) + '</option>';
+        targetSel.html(placeholder + (res.data || []).map(function (c) {
+            return '<option value="' + c.id + '">' + SES.escapeHtml(c.name || '') + '</option>';
+        }).join(''));
+    });
+    $.get('/api/autocomplete/organizations', function (res) {
+        if (res.code !== 200 || !orgSel.length) return;
+        const placeholder = orgSel.find('option[value=""]').first().prop('outerHTML')
+            || '<option value="">' + SES.escapeHtml(SES.i18n.t('approval.create.selectOrganization', '組織を選択...')) + '</option>';
+        orgSel.html(placeholder + (res.data || []).map(function (o) {
+            return '<option value="' + o.id + '">' + SES.escapeHtml((o.code ? o.code + ' ' : '') + (o.name || '')) + '</option>';
+        }).join(''));
+    });
+}
 
 function approvalView() {
     const page = $('.approval-page').data('approval-view');

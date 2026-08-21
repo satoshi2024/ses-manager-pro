@@ -77,27 +77,60 @@ public class AttendanceServiceImpl implements AttendanceService {
     public AttendanceOverviewDto mine(String month) {
         YearMonth target = parseMonth(month);
         Long engineerId = currentEngineerId();
-        return buildOverview(target, List.of(engineerId), null);
+        // 本人は1名分のため日次を同梱する（my.html が days を直接描画する）。
+        return buildOverview(target, List.of(engineerId), null, 1L, 1L, true);
     }
 
     @Override
     @Transactional(readOnly = true)
     public AttendanceOverviewDto management(String month) {
+        return management(month, 1L, 50L);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AttendanceOverviewDto management(String month, Long current, Long size) {
         YearMonth target = parseMonth(month);
         requireManagementRole();
         String role = SecurityUtils.currentRole();
         if ("管理者".equals(role)) {
-            return buildOverview(target, null, null);
+            return buildOverview(target, null, null, current, size, false);
         }
         if ("HR".equals(role)) {
             Set<Long> allowedLegalEntities = attendanceScopeResolver.allowedHrLegalEntityIds(
                     SecurityUtils.currentUserId(), target.atEndOfMonth());
-            return buildOverview(target, null, allowedLegalEntities);
+            return buildOverview(target, null, allowedLegalEntities, current, size, false);
         }
         // organization scope無効時の空集合は「制限なし」。有効時の空集合だけが可視0件。
         Set<Long> allowed = organizationScopeService.hasFullAccess()
                 ? null : organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
-        return buildOverview(target, allowed == null ? null : new ArrayList<>(allowed), null);
+        return buildOverview(target, allowed == null ? null : new ArrayList<>(allowed), null,
+                current, size, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AttendanceDayDto> managementDays(Long engineerId, String month) {
+        YearMonth target = parseMonth(month);
+        requireManagementRole();
+        Long allowed = allowedEngineerId(engineerId, month);
+        if ("HR".equals(SecurityUtils.currentRole())) {
+            AttendanceMonth monthRow = attendanceMonthMapper.selectOne(new LambdaQueryWrapper<AttendanceMonth>()
+                    .eq(AttendanceMonth::getEngineerId, allowed)
+                    .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
+                    .last("LIMIT 1"));
+            if (monthRow == null) {
+                return List.of();
+            }
+            assertHrMonthSnapshotAllowed(monthRow, target);
+        }
+        List<EmployeeAttendance> days = employeeAttendanceMapper.selectList(
+                new LambdaQueryWrapper<EmployeeAttendance>()
+                        .eq(EmployeeAttendance::getEngineerId, allowed)
+                        .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
+                        .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
+                        .orderByAsc(EmployeeAttendance::getWorkDate));
+        return days.stream().map(this::toDayDto).toList();
     }
 
     @Override
@@ -243,12 +276,13 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     private AttendanceOverviewDto buildOverview(YearMonth target, List<Long> engineerIds,
-                                                Set<Long> legalEntityIds) {
+                                                Set<Long> legalEntityIds, Long current, Long size,
+                                                boolean includeDays) {
         if (engineerIds != null && engineerIds.isEmpty()) {
-            return overview(target, List.of());
+            return overview(target, List.of(), 0, current, size);
         }
         if (legalEntityIds != null && legalEntityIds.isEmpty()) {
-            return overview(target, List.of());
+            return overview(target, List.of(), 0, current, size);
         }
         LambdaQueryWrapper<AttendanceMonth> monthQuery = new LambdaQueryWrapper<AttendanceMonth>()
                 .eq(AttendanceMonth::getWorkMonth, target.atDay(1))
@@ -263,33 +297,54 @@ public class AttendanceServiceImpl implements AttendanceService {
             monthQuery.isNotNull(AttendanceMonth::getLegalEntityId)
                     .isNotNull(AttendanceMonth::getOrganizationId);
         }
-        List<AttendanceMonth> months = attendanceMonthMapper.selectList(monthQuery);
-        if (months.isEmpty()) {
-            return overview(target, List.of());
+
+        // 摘要は SQL 段階でページング。日次行は一覧のために物化しない。
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<AttendanceMonth> pageReq =
+                com.ses.common.util.PageUtils.safePage(
+                        current == null ? 1L : current,
+                        size == null ? 50L : size,
+                        50L,
+                        100L);
+        com.baomidou.mybatisplus.core.metadata.IPage<AttendanceMonth> pageResult =
+                attendanceMonthMapper.selectPage(pageReq, monthQuery);
+        if (pageResult == null || pageResult.getRecords() == null || pageResult.getRecords().isEmpty()) {
+            return overview(target, List.of(),
+                    pageResult == null ? 0 : pageResult.getTotal(),
+                    pageReq.getCurrent(), pageReq.getSize());
         }
 
+        List<AttendanceMonth> months = pageResult.getRecords();
         Set<Long> ids = months.stream().map(AttendanceMonth::getEngineerId).collect(Collectors.toSet());
         List<Engineer> engineers = engineerMapper.selectBatchIds(ids).stream()
                 .sorted(Comparator.comparing(Engineer::getId)).toList();
         Map<Long, String> names = engineers.stream().collect(Collectors.toMap(Engineer::getId,
                 e -> e.getFullName() == null ? "" : e.getFullName()));
-        LambdaQueryWrapper<EmployeeAttendance> dayQuery = new LambdaQueryWrapper<EmployeeAttendance>()
-                .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
-                .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
-                .orderByAsc(EmployeeAttendance::getWorkDate);
-        dayQuery.in(EmployeeAttendance::getEngineerId, ids);
-        Map<Long, List<EmployeeAttendance>> daysByEngineer = employeeAttendanceMapper.selectList(dayQuery)
-                .stream().collect(Collectors.groupingBy(EmployeeAttendance::getEngineerId));
 
+        Map<Long, List<EmployeeAttendance>> daysByEngineer = Map.of();
+        if (includeDays) {
+            LambdaQueryWrapper<EmployeeAttendance> dayQuery = new LambdaQueryWrapper<EmployeeAttendance>()
+                    .ge(EmployeeAttendance::getWorkDate, target.atDay(1))
+                    .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
+                    .orderByAsc(EmployeeAttendance::getWorkDate);
+            dayQuery.in(EmployeeAttendance::getEngineerId, ids);
+            daysByEngineer = employeeAttendanceMapper.selectList(dayQuery)
+                    .stream().collect(Collectors.groupingBy(EmployeeAttendance::getEngineerId));
+        }
+
+        Map<Long, List<EmployeeAttendance>> daysMap = daysByEngineer;
         List<AttendanceMonthDto> result = months.stream().map(month -> toMonthDto(month, names.get(month.getEngineerId()),
-                daysByEngineer.getOrDefault(month.getEngineerId(), List.of()))).toList();
-        return overview(target, result);
+                includeDays ? daysMap.getOrDefault(month.getEngineerId(), List.of()) : List.of())).toList();
+        return overview(target, result, pageResult.getTotal(), pageResult.getCurrent(), pageResult.getSize());
     }
 
-    private AttendanceOverviewDto overview(YearMonth target, List<AttendanceMonthDto> months) {
+    private AttendanceOverviewDto overview(YearMonth target, List<AttendanceMonthDto> months,
+                                           long total, long current, long size) {
         AttendanceOverviewDto dto = new AttendanceOverviewDto();
         dto.setMonth(target.toString());
         dto.setMonths(months);
+        dto.setTotal(total);
+        dto.setCurrent(current);
+        dto.setSize(size);
         return dto;
     }
 

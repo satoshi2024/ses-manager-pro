@@ -37,7 +37,9 @@ function render(rows) {
     body.querySelectorAll('button[data-id]').forEach(btn => btn.addEventListener('click', () => loadDetail(btn.dataset.id)));
     const pag = document.getElementById('requests-pagination');
     const totalPages = Math.max(1, Math.ceil(crPage.total / crPage.size));
-    pag.innerHTML = `<span>${SES.escapeHtml(SES.i18n.t('common.page.info', '{0} 件中 {1}-{2} 件目を表示').replace('{0}', crPage.total).replace('{1}', ((crPage.current - 1) * crPage.size + 1)).replace('{2}', Math.min(crPage.current * crPage.size, crPage.total)))}</span>
+    const crStart = crPage.total === 0 ? 0 : (crPage.current - 1) * crPage.size + 1;
+    const crEnd = Math.min(crPage.current * crPage.size, crPage.total);
+    pag.innerHTML = `<span>${SES.escapeHtml(SES.i18n.t('common.page.info', [crPage.total, crStart, crEnd]))}</span>
         <span>
           <button class="btn btn-sm btn-outline-secondary" ${crPage.current <= 1 ? 'disabled' : ''} data-page="${crPage.current - 1}">${SES.escapeHtml(SES.i18n.t('common.page.prev','前へ'))}</button>
           <button class="btn btn-sm btn-outline-secondary ms-1" ${crPage.current >= totalPages ? 'disabled' : ''} data-page="${crPage.current + 1}">${SES.escapeHtml(SES.i18n.t('common.page.next','次へ'))}</button>

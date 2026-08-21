@@ -4,17 +4,23 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Setter;
+import lombok.ToString;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 要員配置計画。
@@ -25,7 +31,8 @@ import java.time.LocalDate;
  * 過配賦例外は {@code exception_reason} + {@code approval_request_id} が必須（R2.2）。
  */
 @Data
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode(callSuper = true, exclude = "presentAlwaysFields")
+@ToString(callSuper = true, exclude = "presentAlwaysFields")
 @TableName("t_allocation_plan")
 public class AllocationPlan extends BaseEntity {
 
@@ -42,6 +49,7 @@ public class AllocationPlan extends BaseEntity {
     private Long engineerId;
 
     /** ポジションID（NULL=社内/待機） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Long positionId;
 
@@ -54,6 +62,7 @@ public class AllocationPlan extends BaseEntity {
     private LocalDate startDate;
 
     /** 終了日（inclusive・NULL=open end: 計画window末まで） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private LocalDate endDate;
 
@@ -68,16 +77,27 @@ public class AllocationPlan extends BaseEntity {
     private String status;
 
     /** 実契約ID（NOT NULL=actual。planと排他） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Long sourceContractId;
 
     /** 過配賦例外の理由（例外時必須） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private String exceptionReason;
 
     /** 過配賦例外の承認申請ID（例外時必須） */
+    @Setter(AccessLevel.NONE)
     @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Long approvalRequestId;
+
+    /**
+     * JSON に出現した ALWAYS フィールド名（CON-01）。
+     * setter 経由でキー出現を記録し、未出現はサービス側で既存値へ回填する。
+     */
+    @JsonIgnore
+    @TableField(exist = false)
+    private final Set<String> presentAlwaysFields = new HashSet<>();
 
     /** 楽観ロック */
     @Version
@@ -86,6 +106,31 @@ public class AllocationPlan extends BaseEntity {
     /** 作成者ID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    public void setPositionId(Long positionId) {
+        this.positionId = positionId;
+        presentAlwaysFields.add("positionId");
+    }
+
+    public void setEndDate(LocalDate endDate) {
+        this.endDate = endDate;
+        presentAlwaysFields.add("endDate");
+    }
+
+    public void setSourceContractId(Long sourceContractId) {
+        this.sourceContractId = sourceContractId;
+        presentAlwaysFields.add("sourceContractId");
+    }
+
+    public void setExceptionReason(String exceptionReason) {
+        this.exceptionReason = exceptionReason;
+        presentAlwaysFields.add("exceptionReason");
+    }
+
+    public void setApprovalRequestId(Long approvalRequestId) {
+        this.approvalRequestId = approvalRequestId;
+        presentAlwaysFields.add("approvalRequestId");
+    }
 
     @AssertTrue(message = "終了日は開始日以降を指定してください")
     public boolean isDateRangeValid() {

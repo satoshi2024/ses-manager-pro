@@ -89,7 +89,7 @@ function renderWorkRecordPagination(pageData) {
 
     $pagination.append(`
         <li class="page-item ${current === 1 ? 'disabled' : ''}">
-            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current - 1}); return false;">前へ</a>
+            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current - 1}); return false;">${SES.i18n.t('common.page.prev')}</a>
         </li>
     `);
 
@@ -107,7 +107,7 @@ function renderWorkRecordPagination(pageData) {
 
     $pagination.append(`
         <li class="page-item ${current === pages ? 'disabled' : ''}">
-            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current + 1}); return false;">次へ</a>
+            <a class="page-link bg-secondary text-white border-dark" href="#" onclick="loadWorkRecords(${current + 1}); return false;">${SES.i18n.t('common.page.next')}</a>
         </li>
     `);
 }
@@ -200,19 +200,19 @@ function renderWorkRecords(list) {
                     ${hoursInput}
                 </td>
                 <td class="py-3 text-accent-green fw-bold billing-amount-${item.contractId}">
-                    ${item.billingAmount ? '¥' + item.billingAmount.toLocaleString() : '-'}
+                    ${item.billingAmount != null ? '¥' + item.billingAmount.toLocaleString() : '-'}
                 </td>
                 <td class="py-3 text-white payment-amount-${item.contractId}">
-                    ${item.paymentAmount ? '¥' + item.paymentAmount.toLocaleString() : '-'}
+                    ${item.paymentAmount != null ? '¥' + item.paymentAmount.toLocaleString() : '-'}
                 </td>
                 <td class="py-3 status-cell-${item.contractId}">
                     ${getStatusBadge(item.status)}
                     ${item.status === '提出済' && item.workRecordId ? `
                         <div class="mt-1">
-                            <button class="btn btn-sm btn-success py-0 px-1" onclick="approveWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.approve','承認')}</button>
-                            <button class="btn btn-sm btn-warning py-0 px-1" onclick="rejectWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.reject','差戻し')}</button>
+                            <button class="btn btn-sm btn-success py-0 px-1" onclick="approveWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.approve')}</button>
+                            <button class="btn btn-sm btn-warning py-0 px-1" onclick="rejectWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.reject')}</button>
                         </div>` : ''}
-                    ${item.workRecordId ? `<div class="mt-1"><button class="btn btn-sm btn-outline-secondary py-0 px-1 me-1" onclick="showDaily(${item.workRecordId})">日次明細</button><a class="btn btn-sm btn-outline-info py-0 px-1" href="/api/work-records/${item.workRecordId}/report.pdf" target="_blank">PDF</a></div>` : ''}
+                    ${item.workRecordId ? `<div class="mt-1"><button class="btn btn-sm btn-outline-secondary py-0 px-1 me-1" onclick="showDaily(${item.workRecordId})">${SES.i18n.t('workRecord.btn.daily')}</button><a class="btn btn-sm btn-outline-info py-0 px-1" href="/api/work-records/${item.workRecordId}/report.pdf" target="_blank">PDF</a></div>` : ''}
                 </td>
                 <td class="px-4 py-3">
                     ${remarksInput}
@@ -278,8 +278,8 @@ function saveHours(element) {
         success: function(res) {
             if (res.code === 200 && res.data) {
                 const rec = res.data;
-                row.find('.billing-amount-' + contractId).text(rec.billingAmount ? '¥' + rec.billingAmount.toLocaleString() : '-');
-                row.find('.payment-amount-' + contractId).text(rec.paymentAmount ? '¥' + rec.paymentAmount.toLocaleString() : '-');
+                row.find('.billing-amount-' + contractId).text(rec.billingAmount != null ? '¥' + rec.billingAmount.toLocaleString() : '-');
+                row.find('.payment-amount-' + contractId).text(rec.paymentAmount != null ? '¥' + rec.paymentAmount.toLocaleString() : '-');
                 row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
                 if (rec.id != null) delete dailyCache[rec.id]; // 日次明細を再取得させ、古い内訳の表示を防ぐ
                 Toast.success(SES.i18n.t('common.msg.saveSuccess'));
@@ -353,17 +353,24 @@ function showDaily(id) {
 
 function renderDailyModal(list) {
     let rows = list.map(d => `<tr><td>${SES.escapeHtml(d.workDate||'')}</td><td>${d.startTime||''}</td><td>${d.endTime||''}</td><td>${d.breakMinutes||0}</td><td>${d.workedHours||0}</td><td>${SES.escapeHtml(d.remarks||'')}</td></tr>`).join('');
-    if (!rows) rows = '<tr><td colspan="6" class="text-center text-muted">明細なし</td></tr>';
-    const html = `<table class="table table-sm table-bordered text-start">
-        <thead class="table-dark"><tr><th>日付</th><th>開始</th><th>終了</th><th>休憩(分)</th><th>稼働(h)</th><th>備考</th></tr></thead>
+    if (!rows) rows = `<tr><td colspan="6" class="text-center text-muted">${SES.escapeHtml(SES.i18n.t('workRecord.daily.empty'))}</td></tr>`;
+    const html = `<div class="table-responsive"><table class="table table-sm table-bordered text-start">
+        <thead class="table-dark"><tr>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.date'))}</th>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.start'))}</th>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.end'))}</th>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.break'))}</th>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.hours'))}</th>
+            <th>${SES.escapeHtml(SES.i18n.t('workRecord.daily.remarks'))}</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
-    </table>`;
+    </table></div>`;
     Swal.fire({
-        title: '日次明細',
+        title: SES.i18n.t('workRecord.daily.title'),
         html: html,
-        width: '600px',
+        width: 'min(600px, 92vw)',
         showConfirmButton: true,
-        confirmButtonText: '閉じる',
-        confirmButtonColor: '#6c757d'
+        confirmButtonText: SES.i18n.t('common.close'),
+        ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
     });
 }

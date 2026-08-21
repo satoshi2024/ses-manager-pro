@@ -243,6 +243,10 @@ window.SES_staffing = (function () {
                 requiredCount: col.position.requiredCount,
                 filledCount: col.filledCount,
                 status: col.position.status,
+                startDate: col.position.startDate || '',
+                endDate: col.position.endDate || '',
+                location: col.position.location || '',
+                allocationPercent: col.position.allocationPercent != null ? col.position.allocationPercent : 100,
                 allocations: col.allocations || []
             };
         });
@@ -311,6 +315,7 @@ window.SES_staffing = (function () {
             .attr('data-end', alloc.endDate || '')
             .attr('data-percent', alloc.allocationPercent != null ? alloc.allocationPercent : 100)
             .attr('data-version', alloc.version != null ? alloc.version : 0)
+            .attr('data-exception-reason', alloc.exceptionReason || '')
             .append(
                 '<div class="d-flex justify-content-between align-items-start gap-1">' +
                 '  <div class="text-truncate">' +
@@ -354,19 +359,25 @@ window.SES_staffing = (function () {
             const fromColumn = $card.closest('.staff-drop-column');
             $(this).append($card);
             const engineerId = $card.data('engineer-id');
+            const dragPayload = {
+                id: Number(allocId),
+                allocationType: TYPE_PROJECT,
+                positionId: Number(targetPositionId),
+                startDate: $card.attr('data-start') || null,
+                endDate: $card.attr('data-end') || null,
+                allocationPercent: Number($card.attr('data-percent') || 100),
+                version: Number($card.attr('data-version') || 0)
+            };
+            // 空の exceptionReason はキーごと省略し、サーバ側 CON-01 回填に委ねる
+            const exceptionReason = $card.attr('data-exception-reason');
+            if (exceptionReason) {
+                dragPayload.exceptionReason = exceptionReason;
+            }
             $.ajax({
                 url: '/api/engineers/' + engineerId + '/allocations',
                 method: 'POST',
                 contentType: 'application/json',
-                data: JSON.stringify({
-                    id: Number(allocId),
-                    allocationType: TYPE_PROJECT,
-                    positionId: Number(targetPositionId),
-                    startDate: $card.attr('data-start') || null,
-                    endDate: $card.attr('data-end') || null,
-                    allocationPercent: Number($card.attr('data-percent') || 100),
-                    version: Number($card.attr('data-version') || 0)
-                }),
+                data: JSON.stringify(dragPayload),
                 success: function (res) {
                     if (res.code !== 200) {
                         rollbackCard($card, fromColumn);
@@ -442,10 +453,11 @@ window.SES_staffing = (function () {
         $('#sp-positionNo').val(column ? column.positionNo : '');
         $('#sp-roleName').val(column ? column.roleName : '');
         $('#sp-requiredCount').val(column ? column.requiredCount : 1);
-        $('#sp-startDate').val('');
-        $('#sp-endDate').val('');
-        $('#sp-location').val('');
-        $('#sp-percent').val(column ? 100 : 100);
+        // 編集時は既存の開始/終了日・勤務地・稼働率を埋める（空クリアで ALWAYS 列を NULL 上書きしない）
+        $('#sp-startDate').val(column ? (column.startDate || '') : '');
+        $('#sp-endDate').val(column ? (column.endDate || '') : '');
+        $('#sp-location').val(column ? (column.location || '') : '');
+        $('#sp-percent').val(column && column.allocationPercent != null ? column.allocationPercent : 100);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('staffingPositionModal')).show();
     }
 

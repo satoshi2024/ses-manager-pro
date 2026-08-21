@@ -64,6 +64,8 @@ public class PositionServiceImpl implements PositionService {
             throw BusinessException.of(404, "error.staffing.positionNotFound");
         }
         ProjectPosition existing = require(position.getId());
+        // CON-01: payload 未出現の ALWAYS 列は既存値へ回填。明示 null（setter 経由）のみクリア可。
+        restoreAbsentAlwaysFields(position, existing);
         position.setProjectId(existing.getProjectId());
         position.setStatus(existing.getStatus());
         int rows = positionMapper.updateById(position);
@@ -71,6 +73,17 @@ public class PositionServiceImpl implements PositionService {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         return positionMapper.selectById(position.getId());
+    }
+
+    /**
+     * payload に未出現の ALWAYS フィールドを既存行から回填する（CON-01）。
+     * {@code presentAlwaysFields} に含まれる列は明示指定（null クリア含む）として触らない。
+     */
+    private void restoreAbsentAlwaysFields(ProjectPosition incoming, ProjectPosition existing) {
+        Set<String> present = incoming.getPresentAlwaysFields();
+        if (present == null || !present.contains("endDate")) {
+            incoming.setEndDate(existing.getEndDate());
+        }
     }
 
     @Override

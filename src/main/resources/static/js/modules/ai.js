@@ -152,12 +152,12 @@ function typeWriterHtml(element, htmlContent, speed, callback) {
 
 function loadContextData() {
     // Load Engineers
-    $.get('/api/engineers?size=100', function(res) {
+    $.get('/api/engineers/options', function(res) {
         if (res.code === 200 && res.data) {
             const records = res.data.records || res.data;
             const select = $('#contextEngineer');
-            records.forEach(eng => {
-                select.append(`<option value="${eng.id}">${SES.escapeHtml(eng.fullName)} (${eng.expectedUnitPrice ? '¥' + Number(eng.expectedUnitPrice).toLocaleString() : '-'})</option>`);
+            (records || []).forEach(eng => {
+                select.append(`<option value="${eng.id}">${SES.escapeHtml(eng.name || eng.fullName || '')}</option>`);
             });
             const engId = new URLSearchParams(location.search).get('engineerId');
             if (engId) {
@@ -167,12 +167,12 @@ function loadContextData() {
     });
 
     // Load Projects
-    $.get('/api/projects?size=100', function(res) {
+    $.get('/api/projects/options', function(res) {
         if (res.code === 200 && res.data) {
             const records = res.data.records || res.data;
             const select = $('#contextProject');
-            records.forEach(proj => {
-                select.append(`<option value="${proj.id}">${SES.escapeHtml(proj.projectName)}</option>`);
+            (records || []).forEach(proj => {
+                select.append(`<option value="${proj.id}">${SES.escapeHtml(proj.name || proj.projectName || '')}</option>`);
             });
         }
     });

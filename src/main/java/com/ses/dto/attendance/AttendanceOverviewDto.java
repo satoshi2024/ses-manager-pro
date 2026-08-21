@@ -10,4 +10,8 @@ import java.util.List;
 public class AttendanceOverviewDto {
     private String month;
     private List<AttendanceMonthDto> months = new ArrayList<>();
+    /** 管理一覧の総件数（SQL ページング後）。本人一覧は 0〜1。 */
+    private long total;
+    private long current = 1;
+    private long size;
 }

@@ -7,9 +7,9 @@ public class ContractProfitDto {
     private String contractNo;
     private String engineerName;
     private String projectName;
-    private Integer sellingPrice;
-    private Integer costPrice;
-    private Integer grossProfitAmount;
+    private Long sellingPrice;
+    private Long costPrice;
+    private Long grossProfitAmount;
     private String grossProfitRate;
     private java.time.LocalDate startDate;
 }

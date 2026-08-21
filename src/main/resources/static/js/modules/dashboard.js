@@ -80,6 +80,7 @@ function loadDashboardData(year) {
                 renderKPIs(res.data.kpi);
                 renderCharts(res.data.charts);
                 renderRetiringList(res.data.retiring);
+                updateRetiringViewAll(res.data);
             } else {
                 Toast.error(res.message || SES.i18n.t('dashboard.error.fetch_failed'));
             }
@@ -414,6 +415,21 @@ function renderCashflowChart(monthsData, alertThreshold) {
             }
         }
     });
+}
+
+function updateRetiringViewAll(data) {
+    const link = document.getElementById('retiring-view-all');
+    if (!link || !data) return;
+    const from = data.retiringFrom;
+    const to = data.retiringTo;
+    if (!from || !to) return;
+    // 退場予定リストと同じ「今日〜+30日」の契約終了日フィルタへ誘導する。
+    link.href = '/contract/list?status=' + encodeURIComponent('稼動中')
+        + '&endDateFrom=' + encodeURIComponent(from)
+        + '&endDateTo=' + encodeURIComponent(to);
+    if (typeof data.retiringTotal === 'number' && data.retiringTotal > 10) {
+        link.title = SES.i18n.t('dashboard.list.view_all') + ' (' + data.retiringTotal + ')';
+    }
 }
 
 function renderRetiringList(list) {

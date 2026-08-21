@@ -4,20 +4,40 @@
     if (!month) return;
     const now = new Date();
     month.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    document.getElementById('managementReload').addEventListener('click', load);
+    let managementCurrent = 1;
+    const managementSize = 50;
+    document.getElementById('managementReload').addEventListener('click', () => { managementCurrent = 1; load(); });
+    month.addEventListener('change', () => { managementCurrent = 1; });
+    const prevBtn = document.getElementById('attendanceManagementPrev');
+    const nextBtn = document.getElementById('attendanceManagementNext');
+    if (prevBtn) prevBtn.addEventListener('click', () => { if (managementCurrent > 1) { managementCurrent--; load(); } });
+    if (nextBtn) nextBtn.addEventListener('click', () => { managementCurrent++; load(); });
     load();
     initSyncCard();
     initDiscrepancyCard();
 
     function load() {
-        fetch(`/api/work-records/attendance?month=${encodeURIComponent(month.value)}`).then(r => r.json()).then(data => {
+        const url = `/api/work-records/attendance?month=${encodeURIComponent(month.value)}`
+            + `&current=${managementCurrent}&size=${managementSize}`;
+        fetch(url).then(r => r.json()).then(data => {
             if (data.code !== 200) return showError(data.message);
             clearError();
+            const page = data.data || {};
+            const total = Number(page.total || 0);
+            const size = Number(page.size) || managementSize;
+            const current = Math.max(1, Number(page.current) || managementCurrent);
+            const pages = Math.max(1, Math.ceil(total / size) || 1);
+            if (total > 0 && current > pages) {
+                managementCurrent = pages;
+                load();
+                return;
+            }
+            managementCurrent = current;
             const flags = document.getElementById('attendanceRoleFlags').dataset;
             const canApprove = flags.canApprove === 'true';
             const canClose = flags.canClose === 'true';
             const canReopen = flags.canReopen === 'true';
-            document.getElementById('attendanceManagementBody').innerHTML = (data.data.months || []).map(row => {
+            document.getElementById('attendanceManagementBody').innerHTML = (page.months || []).map(row => {
                 const id = encodeURIComponent(row.engineerId);
                 const m = encodeURIComponent(month.value);
                 let actions = '';
@@ -27,6 +47,14 @@
                 return `<tr><td>${esc(row.engineerName || row.engineerId)}</td><td>${esc(row.status || '')}</td><td>${esc(row.workedMinutes || 0)}</td><td>${actions}</td></tr>`;
             }).join('');
             document.querySelectorAll('[data-attendance-action]').forEach(button => button.addEventListener('click', () => run(button)));
+            const start = total === 0 ? 0 : (current - 1) * size + 1;
+            const end = Math.min(current * size, total);
+            const info = document.getElementById('attendanceManagementPageInfo');
+            if (info) {
+                info.textContent = SES.i18n.t('common.page.info', [total, start, end]);
+            }
+            if (prevBtn) prevBtn.disabled = current <= 1;
+            if (nextBtn) nextBtn.disabled = current >= pages || total === 0;
         }).catch(showError);
     }
     function action(url, key, fallback, reopen) {

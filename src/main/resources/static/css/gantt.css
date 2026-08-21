@@ -27,7 +27,10 @@
     fill: rgba(0, 0, 0, 0.2) !important;
 }
 /* .big はバー幅が狭くラベルがバー外(ページ背景)に描画されるケース。
-   frappe-gantt.css 側の暗色ラベルをそのまま使うため、ここでは対象外にする。 */
+   ページ背景色に追従するようテーマの本文色を使う。 */
+.gantt .bar-label.big {
+    fill: var(--text-primary) !important;
+}
 .gantt .bar-label:not(.big) {
     fill: #ffffff !important;
     font-size: 12px;

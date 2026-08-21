@@ -295,8 +295,10 @@
                 <div class="modal-body">
                     <form id="generateForm">
                         <div class="mb-3">
-                            <label class="form-label" th:text="#{invoice.modal.customerId}">顧客ID</label>
-                            <input type="number" class="form-control" name="customerId" required>
+                            <label class="form-label" th:text="#{invoice.modal.customerId}">顧客</label>
+                            <select class="form-select" name="customerId" required>
+                                <option value="" th:text="#{contract.customer.select}">顧客を選択...</option>
+                            </select>
                         </div>
                         <div class="mb-3">
                             <label class="form-label" th:text="#{invoice.modal.billingMonth}">対象月(YYYY-MM)</label>

@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.DigitalInvoice;
 import com.ses.entity.Invoice;
@@ -12,11 +13,13 @@ import com.ses.service.PeppolParticipantService;
 import com.ses.service.invoice.InvoiceDeliveryDispatcher;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/digital-invoices")
 @RequiredArgsConstructor
@@ -92,8 +95,11 @@ public class DigitalInvoiceApiController {
         try {
             deliveryDispatcher.dispatch(invoiceId, invoice.getCustomerId(), specVersion);
             return ApiResult.success(null);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return ApiResult.error(e.getMessage());
+            log.warn("電子請求書の送信ディスパッチに失敗しました invoiceId={}", invoiceId, e);
+            return ApiResult.error("error.invoice.dispatchFailed");
         }
     }
 
@@ -153,8 +159,11 @@ public class DigitalInvoiceApiController {
         try {
             digitalInvoiceService.cancelInvoice(id);
             return ApiResult.success(null);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return ApiResult.error(e.getMessage());
+            log.warn("電子請求書の取消に失敗しました digitalInvoiceId={}", id, e);
+            return ApiResult.error("error.invoice.cancelFailed");
         }
     }
 

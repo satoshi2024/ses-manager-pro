@@ -4,8 +4,11 @@ document.addEventListener('DOMContentLoaded', function () {
     var btnFetch = document.getElementById('btnFetch');
     var fetchSummary = document.getElementById('fetchSummary');
     var tableBody = document.getElementById('pendingTableBody');
+    var invoiceOptionsHtml = '';
 
-    loadPending();
+    loadInvoiceOptions(function () {
+        loadPending();
+    });
 
     btnFetch.addEventListener('click', fetchDeposits);
 
@@ -18,18 +21,44 @@ document.addEventListener('DOMContentLoaded', function () {
         confirmAndApply(depositId, invoiceId, invoiceNo);
     });
 
-    // 手動入力（候補なし）からの消込ボタン
+    // 手動選択（候補なし）からの消込ボタン
     $(tableBody).on('click', '.btn-apply-manual', function () {
         var $btn = $(this);
         var depositId = $btn.data('deposit-id');
-        var $input = $('#manualInvoiceId-' + depositId);
-        var invoiceId = $.trim($input.val());
+        var $sel = $('#manualInvoiceId-' + depositId);
+        var invoiceId = $.trim($sel.val());
         if (!invoiceId) {
-            Toast.error('請求書IDを入力してください');
+            Toast.error(SES.i18n.t('reconciliation.invoiceRequired', '請求書を選択してください'));
             return;
         }
-        confirmAndApply(depositId, invoiceId, invoiceId);
+        var invoiceLabel = $sel.find('option:selected').text() || invoiceId;
+        confirmAndApply(depositId, invoiceId, invoiceLabel);
     });
+
+    function loadInvoiceOptions(done) {
+        $.ajax({
+            url: '/api/invoices',
+            type: 'GET',
+            data: { current: 1, size: 1000 },
+            success: function (res) {
+                var placeholder = '<option value="">' + escapeHtml(SES.i18n.t('reconciliation.selectInvoice', '請求書を選択...')) + '</option>';
+                if (res && res.code === 200) {
+                    var records = (res.data && res.data.records) || [];
+                    invoiceOptionsHtml = placeholder + records.map(function (inv) {
+                        var label = (inv.invoiceNo || ('#' + inv.id)) + (inv.billingMonth ? ' / ' + inv.billingMonth : '');
+                        return '<option value="' + escapeHtml(String(inv.id)) + '">' + escapeHtml(label) + '</option>';
+                    }).join('');
+                } else {
+                    invoiceOptionsHtml = placeholder;
+                }
+                if (done) done();
+            },
+            error: function () {
+                invoiceOptionsHtml = '<option value="">' + escapeHtml(SES.i18n.t('reconciliation.selectInvoice', '請求書を選択...')) + '</option>';
+                if (done) done();
+            }
+        });
+    }
 
     function fetchDeposits() {
         var body = {};
@@ -153,9 +182,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 }).join('') + '</div>';
             } else {
                 actionHtml = '' +
-                    '<div class="input-group input-group-sm" style="max-width: 260px;">' +
-                    '  <span class="input-group-text bg-dark text-light border-secondary">請求書ID</span>' +
-                    '  <input type="number" min="1" class="form-control bg-dark text-white border-secondary" id="manualInvoiceId-' + escapeHtml(String(deposit.depositId)) + '">' +
+                    '<div class="input-group input-group-sm" style="max-width: 320px;">' +
+                    '  <select class="form-select bg-dark text-white border-secondary" id="manualInvoiceId-' + escapeHtml(String(deposit.depositId)) + '">' +
+                    (invoiceOptionsHtml || ('<option value="">' + escapeHtml(SES.i18n.t('reconciliation.selectInvoice', '請求書を選択...')) + '</option>')) +
+                    '  </select>' +
                     '  <button type="button" class="btn btn-outline-light btn-apply-manual" data-deposit-id="' + escapeHtml(String(deposit.depositId)) + '">消込</button>' +
                     '</div>';
             }

@@ -192,26 +192,36 @@ function skillRow(s) {
     ).join('');
 
     const selectOrInput = (window._masterSkills && window._masterSkills.length > 0)
-        ? `<select class="form-select form-select-sm bg-dark border-secondary text-light skill-select" style="min-width:140px"><option value="">-- ${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキル選択'))} --</option>${skillOptions}</select>`
-        : `<input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-id" style="width:90px" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
+        ? `<select class="form-select form-select-sm skill-select"><option value="">-- ${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキル選択'))} --</option>${skillOptions}</select>`
+        : `<input type="number" class="form-control form-control-sm skill-id" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
 
-    return `<div class="d-flex gap-2 mb-1 skill-row align-items-center">
-        ${selectOrInput}
+    return `<div class="row g-2 mb-1 skill-row align-items-center">
+        <div class="col-12 col-sm-6">${selectOrInput}</div>
         <input type="hidden" class="skill-id" value="${SES.escapeHtml(String(s.skillId ?? ''))}">
-        <select class="form-select form-select-sm bg-dark border-secondary text-light skill-proficiency" style="width:110px">${opts}</select>
-        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-years" style="width:90px" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.skill.yearsPlaceholder', '年数'))}">
-        <button type="button" class="btn btn-sm btn-outline-danger skill-remove">-</button>
+        <div class="col-6 col-sm-3"><select class="form-select form-select-sm skill-proficiency">${opts}</select></div>
+        <div class="col-4 col-sm-2"><input type="number" class="form-control form-control-sm skill-years" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.skill.yearsPlaceholder', '年数'))}"></div>
+        <div class="col-2 col-sm-1"><button type="button" class="btn btn-sm btn-outline-danger skill-remove">-</button></div>
     </div>`;
 }
 
 function careerRow(c) {
     c = c || {};
-    const f = (k, ph, type) => `<input type="${type || 'text'}" class="form-control form-control-sm bg-dark border-secondary text-light career-${k}" value="${SES.escapeHtml(String(c[k] ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.' + k, ph))}">`;
+    const f = (k, ph, type, colClass) => `<div class="${colClass}"><input type="${type || 'text'}" class="form-control form-control-sm career-${k}" value="${SES.escapeHtml(String(c[k] ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.' + k, ph))}"></div>`;
     return `<div class="career-row border-bottom border-secondary py-2">
-        <div class="d-flex gap-2 mb-1">${f('periodFrom', '開始', 'date')} ${f('periodTo', '終了', 'date')} ${f('projectName', '案件名')}</div>
-        <div class="d-flex gap-2 mb-1">${f('clientIndustry', '業界')} ${f('role', '役割')} <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light career-teamSize" style="width:90px" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.teamSize', '規模'))}"></div>
-        ${f('techStack', '使用技術')}
-        <textarea class="form-control form-control-sm bg-dark border-secondary text-light career-description mt-1" rows="2" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.description', '業務概要'))}">${SES.escapeHtml(String(c.description ?? ''))}</textarea>
+        <div class="row g-2 mb-1 align-items-center">
+            ${f('periodFrom', '開始', 'date', 'col-6 col-sm-3')}
+            ${f('periodTo', '終了', 'date', 'col-6 col-sm-3')}
+            ${f('projectName', '案件名', 'text', 'col-12 col-sm-6')}
+        </div>
+        <div class="row g-2 mb-1 align-items-center">
+            ${f('clientIndustry', '業界', 'text', 'col-6 col-sm-4')}
+            ${f('role', '役割', 'text', 'col-6 col-sm-4')}
+            <div class="col-6 col-sm-4"><input type="number" class="form-control form-control-sm career-teamSize" value="${SES.escapeHtml(String(c.teamSize ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.teamSize', '規模'))}"></div>
+        </div>
+        <div class="row g-2 mb-1">
+            ${f('techStack', '使用技術', 'text', 'col-12')}
+        </div>
+        <textarea class="form-control form-control-sm career-description mt-1" rows="2" placeholder="${SES.escapeHtml(SES.i18n.t('my.changeRequest.career.description', '業務概要'))}">${SES.escapeHtml(String(c.description ?? ''))}</textarea>
         <button type="button" class="btn btn-sm btn-outline-danger mt-1 career-remove">- ${SES.escapeHtml(SES.i18n.t('common.delete', '削除'))}</button>
     </div>`;
 }

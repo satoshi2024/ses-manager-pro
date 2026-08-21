@@ -808,4 +808,74 @@ public class InvoiceServiceImplTest {
         assertTrue(setSql.contains("matched_invoice_id"), setSql);
         assertTrue(setSql.contains("matched_payment_id"), setSql);
     }
+
+    // ===== INV-01: 一括督促の短トランザクション / i18n キー返却 =====
+
+    @Test
+    void sendReminders_doesNotLeakExceptionMessageToClient() {
+        Invoice invoice = new Invoice();
+        invoice.setId(11L);
+        invoice.setStatus("送付済");
+        invoice.setCustomerId(5L);
+        invoice.setInvoiceNo("INV-R-1");
+        invoice.setBillingMonth("2026-07");
+        invoice.setTotal(new BigDecimal("110000"));
+        invoice.setDueDate(LocalDate.now().minusDays(3));
+        when(invoiceMapper.selectById(11L)).thenReturn(invoice);
+        when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
+                .companyName("客A").contactEmail("ap@example.com").build());
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+        when(mailService.sendWithTemplate(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("SMTP host secret leaked"));
+
+        var results = invoiceService.sendReminders(java.util.List.of(11L), 7L, LocalDate.now());
+
+        assertEquals(1, results.size());
+        assertEquals("FAILED", results.get(0).getStatus());
+        assertEquals("error.invoice.reminderFailed", results.get(0).getReason());
+        assertFalse(results.get(0).getReason().contains("SMTP"));
+        assertFalse(results.get(0).getReason().contains("secret"));
+    }
+
+    @Test
+    void sendReminders_returnsI18nKeysForBusinessSkipsAndDuplicates() {
+        Invoice paid = new Invoice();
+        paid.setId(1L);
+        paid.setStatus("入金済");
+        paid.setDueDate(LocalDate.now().minusDays(1));
+        Invoice overdue = new Invoice();
+        overdue.setId(2L);
+        overdue.setStatus("送付済");
+        overdue.setCustomerId(5L);
+        overdue.setInvoiceNo("INV-R-2");
+        overdue.setBillingMonth("2026-07");
+        overdue.setTotal(new BigDecimal("50000"));
+        overdue.setDueDate(LocalDate.now().minusDays(2));
+        when(invoiceMapper.selectById(1L)).thenReturn(paid);
+        when(invoiceMapper.selectById(2L)).thenReturn(overdue);
+        when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
+                .companyName("客B").contactEmail("b@example.com").build());
+        when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+        when(mailService.sendWithTemplate(any(), any(), any(), any()))
+                .thenReturn(new com.ses.dto.mail.MailDispatchResult(99L, "QUEUED"));
+
+        var results = invoiceService.sendReminders(java.util.List.of(1L, 2L, 2L), 7L, LocalDate.now());
+
+        assertEquals(3, results.size());
+        assertEquals("SKIPPED", results.get(0).getStatus());
+        assertEquals("error.invoice.reminderAlreadyPaid", results.get(0).getReason());
+        assertEquals("QUEUED", results.get(1).getStatus());
+        assertEquals("SKIPPED", results.get(2).getStatus());
+        assertEquals("error.invoice.reminderDuplicate", results.get(2).getReason());
+        verify(mailService, times(1)).sendWithTemplate(eq(7L), any(), eq("b@example.com"), eq(2L));
+    }
+
+    @Test
+    void reminderFailureReason_hidesNonErrorMessages() {
+        assertEquals("error.invoice.reminderFailed",
+                InvoiceServiceImpl.reminderFailureReason(new RuntimeException("db password=secret")));
+        assertEquals("error.invoice.notFound",
+                InvoiceServiceImpl.reminderFailureReason(BusinessException.of("error.invoice.notFound")));
+    }
 }
+

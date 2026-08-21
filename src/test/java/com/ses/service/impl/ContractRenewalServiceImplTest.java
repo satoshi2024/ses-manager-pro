@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.entity.Contract;
 import com.ses.mapper.ContractMapper;
+import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
@@ -10,15 +11,24 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
-import com.ses.service.ContractRenewalService;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 契約自動更新ドラフト生成サービスの単体テスト（P8フォローアップ・提案14）。
@@ -31,6 +41,7 @@ class ContractRenewalServiceImplTest {
     private SystemConfigService systemConfigService;
     @SuppressWarnings("unchecked")
     private final ObjectProvider<NotificationService> notificationServiceProvider = mock(ObjectProvider.class);
+    private NotificationService notificationService;
     private com.ses.service.EngineerSalesService engineerSalesService;
     private ApplicationContext applicationContext;
     private ContractRenewalServiceImpl service;
@@ -42,8 +53,15 @@ class ContractRenewalServiceImplTest {
         systemConfigService = mock(SystemConfigService.class);
         engineerSalesService = mock(com.ses.service.EngineerSalesService.class);
         applicationContext = mock(ApplicationContext.class);
-        service = new ContractRenewalServiceImpl(contractMapper, contractService, systemConfigService, notificationServiceProvider, engineerSalesService, applicationContext);
+        notificationService = mock(NotificationService.class);
+        service = new ContractRenewalServiceImpl(contractMapper, contractService, systemConfigService,
+                notificationServiceProvider, engineerSalesService, applicationContext);
         when(applicationContext.getBean(ContractRenewalService.class)).thenReturn(service);
+        doAnswer(invocation -> {
+            Consumer<NotificationService> consumer = invocation.getArgument(0);
+            consumer.accept(notificationService);
+            return null;
+        }).when(notificationServiceProvider).ifAvailable(any());
     }
 
     private Contract sourceContract(Long id, LocalDate endDate) {
@@ -68,7 +86,7 @@ class ContractRenewalServiceImplTest {
         when(systemConfigService.getInt("notice.contract-end-days", 30)).thenReturn(30);
         Contract original = sourceContract(1L, LocalDate.now().plusDays(10));
         when(contractMapper.selectList(any())).thenReturn(List.of(original));
-        when(contractMapper.selectCount(any())).thenReturn(0L);
+        when(contractMapper.countRenewedDraftsIncludingDeleted(1L)).thenReturn(0);
 
         int created = service.generateRenewalDrafts();
 
@@ -105,5 +123,29 @@ class ContractRenewalServiceImplTest {
 
         assertEquals(0, created);
         verify(contractService, never()).saveWithBusinessRules(any());
+    }
+
+    @Test
+    void generateRenewalDrafts_失敗時通知に例外原文を含めない() {
+        when(systemConfigService.getInt("notice.contract-end-days", 30)).thenReturn(30);
+        Contract original = sourceContract(1L, LocalDate.now().plusDays(10));
+        when(contractMapper.selectList(any())).thenReturn(List.of(original));
+        when(contractMapper.countRenewedDraftsIncludingDeleted(1L)).thenReturn(0);
+        doThrow(new RuntimeException("db password=secret")).when(contractService).saveWithBusinessRules(any());
+
+        int created = service.generateRenewalDrafts();
+
+        assertEquals(0, created);
+        ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+        verify(notificationService).publish(
+                eq("SYSTEM"),
+                eq("契約更新ドラフト作成エラー"),
+                messageCaptor.capture(),
+                isNull(),
+                isNull());
+        String message = messageCaptor.getValue();
+        assertEquals("契約 C-202607-0001 の自動更新でエラーが発生しました。", message);
+        assertFalse(message.contains("secret"));
+        assertFalse(message.contains("password"));
     }
 }

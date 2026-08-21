@@ -72,6 +72,9 @@
   
   /* Transitions */
   --transition-base: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ネイティブUI（スクロールバー・フォーム等）をダーク基調に揃える */
+  color-scheme: dark;
 }
 
 [data-bs-theme="light"] {
@@ -98,15 +101,26 @@
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
   --shadow-glow-blue: 0 4px 15px rgba(59, 130, 246, 0.4);
+
+  color-scheme: light;
 }
 
-/* Hardcoded Bootstrap Utility Overrides for Light Mode */
-[data-bs-theme="light"] .text-white,
-[data-bs-theme="light"] .text-white-50,
-[data-bs-theme="light"] .text-light {
+[data-bs-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Light mode: text-white / bg-dark の上書きは header・sidebar に限定する。
+   グローバルに .text-white を !important で書き換えると、バッジ等の白文字が消える。 */
+[data-bs-theme="light"] .top-header .text-white,
+[data-bs-theme="light"] .top-header .text-white-50,
+[data-bs-theme="light"] .top-header .text-light,
+[data-bs-theme="light"] .sidebar .text-white,
+[data-bs-theme="light"] .sidebar .text-white-50,
+[data-bs-theme="light"] .sidebar .text-light {
     color: var(--text-primary) !important;
 }
 
+/* ページ見出しの text-white はテーマ見出し色へ（バッジの白文字は触らない） */
 [data-bs-theme="light"] h1.text-light,
 [data-bs-theme="light"] h2.text-light,
 [data-bs-theme="light"] h3.text-light,
@@ -122,9 +136,9 @@
     color: var(--heading-color) !important;
 }
 
-[data-bs-theme="light"] .bg-dark,
-[data-bs-theme="light"] .bg-secondary {
-    background-color: #ffffff !important;
+[data-bs-theme="light"] .top-header .bg-dark,
+[data-bs-theme="light"] .sidebar .bg-dark {
+    background-color: var(--bg-tertiary) !important;
 }
 
 [data-bs-theme="light"] .border-dark,
@@ -232,8 +246,9 @@ a:hover {
 .rounded-md { border-radius: var(--radius-md) !important; }
 .rounded-lg { border-radius: var(--radius-lg) !important; }
 
-.bg-primary { background-color: var(--bg-primary) !important; }
-.bg-secondary { background-color: var(--bg-secondary) !important; }
+/* Bootstrap の .bg-primary / .bg-secondary は劫持しない（バッジ・ボタンの主色を維持）。
+   ページ背景・アプリ固有面は .bg-app / .bg-tertiary / .bg-card を使う。 */
+.bg-app { background-color: var(--bg-primary) !important; }
 .bg-tertiary { background-color: var(--bg-tertiary) !important; }
 .bg-card { background-color: var(--bg-card) !important; }
 
@@ -270,7 +285,7 @@ a:hover {
     min-height: 100dvh;
 }
 
-/* Sidebar */
+/* Sidebar（bg-secondary クラスに依存せずテーマ色を直接適用） */
 .sidebar {
     width: var(--sidebar-width);
     height: 100vh;
@@ -279,6 +294,7 @@ a:hover {
     top: 0;
     left: 0;
     z-index: 1030;
+    background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
     box-shadow: var(--shadow-md);
 }
@@ -319,7 +335,7 @@ a:hover {
 
 .sidebar .nav-link:hover:not(.active) {
     color: var(--text-primary);
-    background-color: rgba(255,255,255,0.02);
+    background-color: var(--bg-tertiary);
 }
 
 .sidebar .nav-link.active {
@@ -506,8 +522,10 @@ input[type="date"]::-webkit-datetime-edit-text {
 .modal.show .modal-dialog {
     transform: scale(1);
 }
-[data-bs-theme="light"] .modal-header .btn-close-white {
-    filter: none !important;
+/* 浅色 Modal/Toast: btn-close-white は白アイコンのままでは見えないため反転 */
+[data-bs-theme="light"] .modal-header .btn-close-white,
+[data-bs-theme="light"] .toast .btn-close-white {
+    filter: invert(1) grayscale(100%) brightness(200%);
 }
 
 /* ================== RESPONSIVE DESIGN ================== */
@@ -590,7 +608,8 @@ input[type="date"]::-webkit-datetime-edit-text {
     opacity: 0.6 !important;
 }
 
-@media (max-width: 992px) {
+/* Bootstrap lg 未満（d-lg-none と一致）。ちょうど 992px ではドロワー化しない */
+@media (max-width: 991.98px) {
     .sidebar {
         width: min(var(--sidebar-width), 86vw);
         transform: translateX(-100%);

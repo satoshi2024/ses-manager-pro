@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.Customer;
 import com.ses.entity.DigitalInvoice;
 import com.ses.entity.Invoice;
@@ -8,10 +9,13 @@ import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceService;
 import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
+import com.ses.service.invoice.InvoiceDeliveryDispatcher;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -21,8 +25,15 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -31,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Transactional
 class DigitalInvoiceApiControllerTest {
+
+    private static final String SECRET = "db password=secret";
 
     @Autowired
     private MockMvc mockMvc;
@@ -44,8 +57,11 @@ class DigitalInvoiceApiControllerTest {
     @Autowired
     private PeppolParticipantService peppolParticipantService;
 
-    @Autowired
+    @SpyBean
     private DigitalInvoiceService digitalInvoiceService;
+
+    @MockBean
+    private InvoiceDeliveryDispatcher deliveryDispatcher;
 
     @Test
     @WithMockUser(roles = "管理者")
@@ -151,6 +167,56 @@ class DigitalInvoiceApiControllerTest {
 
         mockMvc.perform(get("/api/digital-invoices/" + di.getId() + "/xml"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void dispatch_hidesRuntimeExceptionMessage() throws Exception {
+        Customer c = customer("Dispatch Leak Co", "PEPPOL");
+        Invoice inv = invoice(c, "INV-DISPATCH-LEAK");
+        doThrow(new RuntimeException(SECRET))
+                .when(deliveryDispatcher).dispatch(anyLong(), anyLong(), anyString());
+
+        mockMvc.perform(post("/api/digital-invoices/dispatch/" + inv.getId()).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message", is("error.invoice.dispatchFailed")))
+                .andExpect(jsonPath("$.message", not(containsString("secret"))));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void dispatch_rethrowsBusinessExceptionConflict() throws Exception {
+        Customer c = customer("Dispatch Conflict Co", "PEPPOL");
+        Invoice inv = invoice(c, "INV-DISPATCH-409");
+        doThrow(new BusinessException(409, "このインボイスはすでに送信されています（または送信キューにあります）。"))
+                .when(deliveryDispatcher).dispatch(anyLong(), anyLong(), anyString());
+
+        mockMvc.perform(post("/api/digital-invoices/dispatch/" + inv.getId()).with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is(409)))
+                .andExpect(jsonPath("$.message", containsString("すでに送信")));
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者")
+    void cancel_hidesRuntimeExceptionMessage() throws Exception {
+        Customer c = customer("Cancel Leak Co", "PDF");
+        Invoice inv = invoice(c, "INV-CANCEL-LEAK");
+        DigitalInvoice di = new DigitalInvoice();
+        di.setInvoiceId(inv.getId());
+        di.setDirection("SEND");
+        di.setProfile("Standard");
+        di.setSpecificationVersion("1.1.3");
+        di.setMessageId("MSG-CANCEL-LEAK-" + inv.getId());
+        di.setStatus("QUEUED");
+        digitalInvoiceService.save(di);
+
+        doThrow(new RuntimeException(SECRET)).when(digitalInvoiceService).cancelInvoice(di.getId());
+
+        mockMvc.perform(post("/api/digital-invoices/" + di.getId() + "/cancel").with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message", is("error.invoice.cancelFailed")))
+                .andExpect(jsonPath("$.message", not(containsString("secret"))));
     }
 
     private Customer customer(String name, String preference) {

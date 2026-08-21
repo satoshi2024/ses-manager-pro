@@ -159,4 +159,31 @@ class SystemConfigServiceImplTest {
         assertEquals("B", service.getString("company_name", ""),
                 "後続commitのキャッシュを先行rollbackで巻き戻してはいけない");
     }
+
+    @Test
+    void put_billingTaxRate_百分数10は拒否し小数0_10は受け入れる() {
+        seed();
+        when(mapper.selectById("billing.tax-rate")).thenReturn(null);
+
+        com.ses.common.exception.BusinessException rejected = assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> service.put("billing.tax-rate", "10", "消費税率"));
+        assertEquals(400, rejected.getCode());
+        assertEquals("error.config.invalidValue", rejected.getMessageKey());
+        verify(mapper, never()).insert(any(SystemConfig.class));
+
+        service.put("billing.tax-rate", "0.10", "消費税率");
+        verify(mapper).insert(any(SystemConfig.class));
+        assertEquals("0.10", service.getString("billing.tax-rate", ""));
+    }
+
+    @Test
+    void put_commissionRate_は百分数のまま受け入れる() {
+        seed();
+        when(mapper.selectById("commission.rate")).thenReturn(null);
+
+        service.put("commission.rate", "10", "歩合率");
+        verify(mapper).insert(any(SystemConfig.class));
+        assertEquals("10", service.getString("commission.rate", ""));
+    }
 }

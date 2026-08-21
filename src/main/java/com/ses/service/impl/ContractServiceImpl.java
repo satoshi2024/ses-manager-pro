@@ -226,11 +226,26 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract) {
+        // 画面 DTO 経由でない呼び出し向け。SAVE_PAYLOAD 列は出現済み、positionId/renewalDecision は回填。
+        return updateWithBusinessRules(contract, com.ses.dto.contract.ContractSaveDto.SAVE_PAYLOAD_ALWAYS_FIELDS);
+    }
+
+    /**
+     * ALWAYS 列の部分更新安全版。{@code presentAlwaysFields} に含まれない ALWAYS フィールドは
+     * 行ロック後の {@code old} から回填し、{@code updateById} による NULL 上書きを防ぐ。
+     * payload で明示 null（クリア）したい列だけを {@code presentAlwaysFields} に含めること。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(
+            Contract contract, Set<String> presentAlwaysFields) {
         // 行ロックで単価同期/改定と直列化する（R3R-29）。
         Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());
         if (old == null) {
             throw BusinessException.of("error.contract.notFound");
         }
+
+        restoreAbsentAlwaysFields(contract, old, presentAlwaysFields);
 
         java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ContractPriceHistory>()
@@ -300,6 +315,44 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private void invalidateScope() {
         if (scopeChangeInvalidator != null) {
             scopeChangeInvalidator.invalidate();
+        }
+    }
+
+    /**
+     * payload に未出現の ALWAYS フィールドを行ロック後の旧値で回填する（CON-01）。
+     * {@code presentAlwaysFields} に含まれる列は明示指定（null クリア含む）として触らない。
+     */
+    private void restoreAbsentAlwaysFields(Contract incoming, Contract old, Set<String> presentAlwaysFields) {
+        Set<String> present = presentAlwaysFields != null ? presentAlwaysFields : Set.of();
+        if (!present.contains("positionId")) {
+            incoming.setPositionId(old.getPositionId());
+        }
+        if (!present.contains("endDate")) {
+            incoming.setEndDate(old.getEndDate());
+        }
+        if (!present.contains("settlementHoursMin")) {
+            incoming.setSettlementHoursMin(old.getSettlementHoursMin());
+        }
+        if (!present.contains("settlementHoursMax")) {
+            incoming.setSettlementHoursMax(old.getSettlementHoursMax());
+        }
+        if (!present.contains("fractionRule")) {
+            incoming.setFractionRule(old.getFractionRule());
+        }
+        if (!present.contains("salesUserId")) {
+            incoming.setSalesUserId(old.getSalesUserId());
+        }
+        if (!present.contains("commissionBaseType")) {
+            incoming.setCommissionBaseType(old.getCommissionBaseType());
+        }
+        if (!present.contains("commissionRate")) {
+            incoming.setCommissionRate(old.getCommissionRate());
+        }
+        if (!present.contains("acceptanceExemptionReason")) {
+            incoming.setAcceptanceExemptionReason(old.getAcceptanceExemptionReason());
+        }
+        if (!present.contains("renewalDecision")) {
+            incoming.setRenewalDecision(old.getRenewalDecision());
         }
     }
 
