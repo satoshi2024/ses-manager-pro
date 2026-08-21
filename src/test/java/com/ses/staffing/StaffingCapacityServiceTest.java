@@ -118,20 +118,17 @@ class StaffingCapacityServiceTest {
 
     @Test
     void 更新済契約は終了日以降もactualとして供給される() {
+        // renewalDecision は DTO に無い ALWAYS 列のため、無引数 updateWithBusinessRules では
+        // old から回填され上書きできない。単列更新 API を使う。
         Contract contract = createContract(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 1, null);
-        contract = contractService.getById(contract.getId());
-        contract.setAutoRenew(1);
-        contract.setRenewalDecision("CONTINUE");
-        contractService.updateWithBusinessRules(contract);
+        contractService.updateRenewalDecision(contract.getId(), "CONTINUE");
 
         StaffingCapacityService.EngineerMonthSupply oct =
                 capacityService.supply(engineer, OCT, LocalDate.of(2026, 8, 1));
         assertEquals(0, new BigDecimal("100").compareTo(oct.actualFte()),
                 "更新継続（CONTINUE）は終了日以降もactualとして計上される");
 
-        contract = contractService.getById(contract.getId());
-        contract.setRenewalDecision("END");
-        contractService.updateWithBusinessRules(contract);
+        contractService.updateRenewalDecision(contract.getId(), "END");
         StaffingCapacityService.EngineerMonthSupply octEnd =
                 capacityService.supply(engineer, OCT, LocalDate.of(2026, 8, 1));
         assertEquals(0, new BigDecimal("0").compareTo(octEnd.actualFte()),
