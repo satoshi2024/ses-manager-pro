@@ -9,6 +9,7 @@ import com.ses.entity.FreeeEmployeeLink;
 import com.ses.entity.SysUser;
 import com.ses.mapper.FreeeEmployeeLinkMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.AuditLogService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.FreeeIntegrationService;
 import com.ses.service.security.BreakGlassService;
@@ -38,6 +39,7 @@ import java.util.concurrent.TimeUnit;
  *   <li>一覧は金額を一切返さず、詳細はsessionの再認証（payrollReauthAt）＋非break-glassのみ金額を返す（R2.2）</li>
  *   <li>全GETはCache-Control: no-store（FreeePayrollApiControllerと同様）</li>
  *   <li>freee従業員linkが無い要員は「未連携」として返す。0円と表示しない（design §6.1）</li>
+ *   <li>金額GET（/statement）はHFP-01 R09どおり固定URIで監査する（成否1 row、金額・氏名・IDを載せない）</li>
  * </ul>
  */
 @Slf4j
@@ -51,11 +53,14 @@ public class MyPayrollApiController {
     /** 再認証の有効時間（分）。 */
     static final int REAUTH_WINDOW_MINUTES = 10;
 
+    private static final String URI_STATEMENT = "/api/my/payroll/statement";
+
     private final EngineerAccountLinkService linkService;
     private final FreeeIntegrationService freeeService;
     private final FreeeEmployeeLinkMapper freeeEmployeeLinkMapper;
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AuditLogService auditLogService;
 
     /** 本人のengineerIdをlinkから解決する（未紐付けは403。MyTimesheetApiControllerと同じ）。 */
     private Long currentEngineerId() {
@@ -75,12 +80,10 @@ public class MyPayrollApiController {
         validatePeriod(year, month, type);
         Map<String, Object> resp = new LinkedHashMap<>();
         if (!hasFreeeLink(engineerId)) {
-            // freee従業員linkが無い場合は「未連携」として返す。金額0の明細を作らない（design §6.1）。
             resp.put("linked", false);
             resp.put("statements", List.of());
             return noStore(ApiResult.success(resp));
         }
-        // 外部取得境界で当該engineerIdのみを取得・materializeする（R1-P1-04）。
         PayrollStatementDto mine = fetchStatement(engineerId, year, month, type);
         resp.put("linked", true);
         if (mine != null) {
@@ -97,26 +100,35 @@ public class MyPayrollApiController {
             @RequestParam int month,
             @RequestParam(defaultValue = "salary") String type,
             HttpSession session) {
-        Long engineerId = currentEngineerId();
-        validatePeriod(year, month, type);
-        // 金額を返す前に再認証状態を必ず検証する（未実施・期限切れ・break-glassは403、R2.2）。
-        if (!reauthValid(session)) {
-            throw BusinessException.of(403, "error.my.payroll.reauthRequired");
+        // 機微GET: 監査記録が成功した場合だけ金額dataを返す。年月/typeはcodeへ、URIは固定。
+        String code = ("bonus".equals(type) ? "MY_PAYROLL_BONUS_VIEW_" : "MY_PAYROLL_SALARY_VIEW_")
+                + String.format("%04d%02d", year, month);
+        try {
+            Long engineerId = currentEngineerId();
+            validatePeriod(year, month, type);
+            if (!reauthValid(session)) {
+                throw BusinessException.of(403, "error.my.payroll.reauthRequired");
+            }
+            if (!hasFreeeLink(engineerId)) {
+                throw BusinessException.of(404, "error.my.payroll.notFound");
+            }
+            PayrollStatementDto mine = fetchStatement(engineerId, year, month, type);
+            if (mine == null) {
+                throw BusinessException.of(404, "error.my.payroll.notFound");
+            }
+            audit("GET", code, URI_STATEMENT, true, 200);
+            return noStore(ApiResult.success(mine));
+        } catch (BusinessException e) {
+            audit("GET", code, URI_STATEMENT, false, e.getCode());
+            throw e;
+        } catch (Exception e) {
+            audit("GET", code, URI_STATEMENT, false, 500);
+            throw e;
         }
-        // freee従業員linkが無い要員は明細が存在しない（providerを呼ばず404）。
-        if (!hasFreeeLink(engineerId)) {
-            throw BusinessException.of(404, "error.my.payroll.notFound");
-        }
-        PayrollStatementDto mine = fetchStatement(engineerId, year, month, type);
-        if (mine == null) {
-            throw BusinessException.of(404, "error.my.payroll.notFound");
-        }
-        return noStore(ApiResult.success(mine));
     }
 
     @PostMapping("/reauthenticate")
     public ApiResult<Map<String, Object>> reauthenticate(@RequestBody ReauthRequest req, HttpSession session) {
-        // 本人scopeが確立できない要員へ再認証時刻を与えない（未紐付けは403）。
         currentEngineerId();
         Long userId = SecurityUtils.currentUserId();
         SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
@@ -133,24 +145,22 @@ public class MyPayrollApiController {
         try {
             return freeeService.statementForEngineer(engineerId, year, month, type);
         } catch (RuntimeException e) {
-            log.warn("本人給与明細の取得に失敗しました: engineerId={}, year={}, month={}, type={}",
-                    engineerId, year, month, type, e);
+            // engineerId・金額・氏名はログへ載せない（HFP-01-BUG-06 / R09）
+            log.warn("本人給与明細の取得に失敗しました: year={}, month={}, type={}",
+                    year, month, type, e);
             throw BusinessException.of(503, "error.my.payroll.unavailable");
         }
     }
 
-    /** freee従業員linkの有無（soft delete済みはglobal logic deleteで除外される）。 */
     private boolean hasFreeeLink(Long engineerId) {
         return freeeEmployeeLinkMapper.selectCount(new LambdaQueryWrapper<FreeeEmployeeLink>()
                 .eq(FreeeEmployeeLink::getEngineerId, engineerId)) > 0;
     }
 
-    /** 再認証済みかつ10分以内かつbreak-glassでない場合だけtrue。 */
     private boolean reauthValid(HttpSession session) {
         if (session == null) {
             return false;
         }
-        // break-glass（非常時管理者session）はMFA相当の本人検証を経ていないため詳細を拒否する。
         if (session.getAttribute(BreakGlassService.INCIDENT_ID_ATTRIBUTE) != null) {
             return false;
         }
@@ -170,7 +180,6 @@ public class MyPayrollApiController {
         }
     }
 
-    /** 一覧用の非機微summary。金額フィールドは一切載せない（R2.2）。 */
     private Map<String, Object> toSummary(PayrollStatementDto s) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("type", s.getType());
@@ -178,6 +187,15 @@ public class MyPayrollApiController {
         m.put("payDate", s.getPayDate());
         m.put("calculationStatus", s.getCalculationStatus());
         return m;
+    }
+
+    private void audit(String method, String applicationCode, String fixedUri, boolean success, int status) {
+        String username = SecurityUtils.currentUsername();
+        if (success) {
+            auditLogService.recordRequired(username, method, fixedUri, status, applicationCode, true);
+        } else {
+            auditLogService.record(username, method, fixedUri, status, applicationCode, false);
+        }
     }
 
     private ResponseEntity<ApiResult<?>> noStore(ApiResult<?> body) {
@@ -188,7 +206,6 @@ public class MyPayrollApiController {
                 .body(body);
     }
 
-    /** 再認証リクエスト（body: {"password": "..."}）。 */
     public static class ReauthRequest {
         private String password;
 

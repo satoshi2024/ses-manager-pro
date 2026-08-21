@@ -26,7 +26,7 @@
         ALLOWANCE: '手当'
     };
 
-    /** 二重送信防止済みのfetch。CSRFヘッダー付き。 */
+    /** JSON成否で判定する接続解除。opaque 302を成功扱いしない（HFP-01-BUG-02）。 */
     async function disconnectFreee() {
         const confirmed = await Swal.fire({
             title: 'freee接続を解除しますか？',
@@ -40,21 +40,27 @@
             return;
         }
         try {
-            // 解除は /payroll への302で完了するため、redirect manualで成功を判定する。
-            const resp = await fetch('/integrations/freee', {
-                method: 'DELETE',
-                credentials: 'same-origin',
-                redirect: 'manual',
-                headers: SES.csrf.header()
-            });
-            if (resp.type === 'opaqueredirect' || resp.status === 302 || (resp.status >= 200 && resp.status < 300)) {
-                SES.toast.success('接続を解除しました');
-                await load();
-            } else {
-                SES.toast.error('接続解除に失敗しました。時間を置いて再実行してください');
-            }
+            await SES.api.delete('/integrations/freee');
+            SES.toast.success('接続を解除しました');
+            await load();
         } catch (e) {
-            SES.toast.error('接続解除に失敗しました。時間を置いて再実行してください');
+            // SES.apiが業務エラーをtoast済み。成功toastは出さない。
+        }
+    }
+
+    /**
+     * 接続ボタンの表示制御。HTML hidden属性は使わず、hiddenプロパティとdisplayを同期する
+     * （[hidden]{display:none!important} がjQuery .show()を無効化するため）。
+     */
+    function setBtnVisible($btn, visible) {
+        if (!$btn || !$btn.length) {
+            return;
+        }
+        $btn.prop('hidden', !visible);
+        if (visible) {
+            $btn.css('display', '');
+        } else {
+            $btn.css('display', 'none');
         }
     }
 
@@ -67,31 +73,31 @@
         const disconnectBtn = $('#disconnectBtn');
         const isAdmin = connectBtn.length > 0 || reconnectBtn.length > 0 || disconnectBtn.length > 0;
 
-        connectBtn.hide();
-        reconnectBtn.hide();
-        disconnectBtn.hide();
+        setBtnVisible(connectBtn, false);
+        setBtnVisible(reconnectBtn, false);
+        setBtnVisible(disconnectBtn, false);
         companyName.text(status.companyName || '');
         action.text(status.action || '');
 
         if (status.status === 'CONNECTED') {
             badge.removeClass('bg-secondary bg-warning bg-danger').addClass('bg-success').text('接続済み');
             if (isAdmin) {
-                disconnectBtn.show();
+                setBtnVisible(disconnectBtn, true);
             }
         } else if (status.status === 'REAUTH_REQUIRED') {
             badge.removeClass('bg-secondary bg-success bg-danger').addClass('bg-warning').text('再認可が必要');
             if (isAdmin) {
-                reconnectBtn.show();
+                setBtnVisible(reconnectBtn, true);
             }
         } else if (status.status === 'MISCONFIGURED') {
             badge.removeClass('bg-secondary bg-success bg-warning').addClass('bg-danger').text('設定不備');
             if (isAdmin) {
-                connectBtn.show();
+                setBtnVisible(connectBtn, true);
             }
         } else {
             badge.removeClass('bg-success bg-warning bg-danger').addClass('bg-secondary').text('未接続');
             if (isAdmin) {
-                connectBtn.show();
+                setBtnVisible(connectBtn, true);
             }
         }
     }
@@ -102,7 +108,15 @@
                 + (e.linkedEngineerName ? ' ' + esc(e.linkedEngineerName) : '');
         }
         if (e.linkState === 'RECONFIRM_REQUIRED') {
-            return '<span class="badge bg-warning-subtle text-warning-emphasis">要再確認</span>';
+            let html = '<span class="badge bg-warning-subtle text-warning-emphasis">要再確認</span>';
+            if (e.linkedEngineerName) {
+                html += ' ' + esc(e.linkedEngineerName);
+            }
+            if (e.linkedEngineerId) {
+                html += ' <button type="button" class="btn btn-outline-danger btn-sm py-0"'
+                    + ' data-unlink-engineer-id="' + esc(e.linkedEngineerId) + '">解除</button>';
+            }
+            return html;
         }
         return '<span class="badge bg-secondary-subtle text-secondary-emphasis">未対応</span>';
     }
@@ -130,6 +144,35 @@
             + '<thead><tr><th scope="col">従業員番号</th><th scope="col">表示名</th>'
             + '<th scope="col">在退職・対象</th><th scope="col">対応付け状態</th></tr></thead>'
             + '<tbody>' + rows + '</tbody></table>');
+        container.find('button[data-unlink-engineer-id]').on('click', async function () {
+            const engineerId = $(this).data('unlink-engineer-id');
+            await unlinkEngineer(engineerId);
+        });
+    }
+
+    async function unlinkEngineer(engineerId) {
+        if (!engineerId) {
+            SES.toast.warning('解除する内部要員を選択してください');
+            return;
+        }
+        const confirmed = await Swal.fire({
+            title: '対応付けを解除しますか？',
+            text: '選択した内部要員のfreee従業員対応付けを解除します。',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '解除する',
+            cancelButtonText: 'キャンセル'
+        });
+        if (!confirmed.value) {
+            return;
+        }
+        try {
+            await SES.api.delete('/api/payroll/links/' + encodeURIComponent(engineerId));
+            SES.toast.success('対応付けを解除しました');
+            await load();
+        } catch (err) {
+            // SES.apiがエラー内容をtoast済み
+        }
     }
 
     function fillCandidateSelect(candidates) {
@@ -234,7 +277,6 @@
             + '<th scope="col" class="text-end">差引支給額</th><th scope="col">操作</th></tr></thead>'
             + '<tbody>' + rows + '</tbody></table>');
 
-        // 明細buttonへdataを保持する（金額・氏名はconsoleへ出さない）
         container.find('button[data-statement-id]').on('click', function () {
             const id = $(this).data('statement-id');
             const found = list.find(x => x.employeeId === String(id));
@@ -269,29 +311,7 @@
         });
 
         $('#unlinkBtn').on('click', async () => {
-            const engineerId = $('#linkEngineerId').val();
-            if (!engineerId) {
-                SES.toast.warning('解除する内部要員を選択してください');
-                return;
-            }
-            const confirmed = await Swal.fire({
-                title: '対応付けを解除しますか？',
-                text: '選択した内部要員のfreee従業員対応付けを解除します。',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: '解除する',
-                cancelButtonText: 'キャンセル'
-            });
-            if (!confirmed.value) {
-                return;
-            }
-            try {
-                await SES.api.delete('/api/payroll/links/' + encodeURIComponent(engineerId));
-                SES.toast.success('対応付けを解除しました');
-                await load();
-            } catch (err) {
-                // SES.apiがエラー内容をtoast済み
-            }
+            await unlinkEngineer($('#linkEngineerId').val());
         });
 
         const now = new Date();
