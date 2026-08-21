@@ -375,11 +375,12 @@ function renderEngineers(records) {
         const kana = SES.escapeHtml(eng.fullNameKana || '');
         
         // Status Badge
-        let statusBadge = '';
-        if (eng.status === '稼動中') statusBadge = '<span class="status-badge status-success">稼動中</span>';
-        else if (eng.status === '提案中') statusBadge = '<span class="status-badge status-warning">提案中</span>';
-        else if (eng.status === '退場予定') statusBadge = '<span class="status-badge status-danger">退場予定</span>';
-        else statusBadge = '<span class="status-badge status-secondary">Bench</span>';
+        let statusClass = 'status-secondary';
+        if (eng.status === '稼動中') statusClass = 'status-success';
+        else if (eng.status === '提案中') statusClass = 'status-warning';
+        else if (eng.status === '退場予定') statusClass = 'status-danger';
+        const statusLabel = eng.status ? SES.i18n.e('engineerStatus', eng.status) : '-';
+        const statusBadge = `<span class="status-badge ${statusClass}">${SES.escapeHtml(statusLabel)}</span>`;
 
         const priceStr = eng.expectedUnitPrice ? eng.expectedUnitPrice.toLocaleString() + SES.i18n.t('engineer.expectedPrice.currency') : '-';
         const expStr = eng.experienceYears ? eng.experienceYears + SES.i18n.t('engineer.experience.unit') : '-';

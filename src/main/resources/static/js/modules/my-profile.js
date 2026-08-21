@@ -192,15 +192,15 @@ function skillRow(s) {
     ).join('');
 
     const selectOrInput = (window._masterSkills && window._masterSkills.length > 0)
-        ? `<select class="form-select form-select-sm bg-dark border-secondary text-light skill-select" style="min-width:140px"><option value="">-- ${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキル選択'))} --</option>${skillOptions}</select>`
-        : `<input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-id" style="width:90px" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
+        ? `<select class="form-select form-select-sm skill-select"><option value="">-- ${SES.escapeHtml(SES.i18n.t('my.changeRequest.addSkill', 'スキル選択'))} --</option>${skillOptions}</select>`
+        : `<input type="number" class="form-control form-control-sm skill-id" value="${SES.escapeHtml(String(s.skillId ?? ''))}" placeholder="Skill ID">`;
 
-    return `<div class="d-flex gap-2 mb-1 skill-row align-items-center">
-        ${selectOrInput}
+    return `<div class="row g-2 mb-1 skill-row align-items-center">
+        <div class="col-12 col-sm-6">${selectOrInput}</div>
         <input type="hidden" class="skill-id" value="${SES.escapeHtml(String(s.skillId ?? ''))}">
-        <select class="form-select form-select-sm bg-dark border-secondary text-light skill-proficiency" style="width:110px">${opts}</select>
-        <input type="number" class="form-control form-control-sm bg-dark border-secondary text-light skill-years" style="width:90px" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.skill.yearsPlaceholder', '年数'))}">
-        <button type="button" class="btn btn-sm btn-outline-danger skill-remove">-</button>
+        <div class="col-6 col-sm-3"><select class="form-select form-select-sm skill-proficiency">${opts}</select></div>
+        <div class="col-4 col-sm-2"><input type="number" class="form-control form-control-sm skill-years" value="${SES.escapeHtml(String(s.experienceYears ?? ''))}" placeholder="${SES.escapeHtml(SES.i18n.t('my.skill.yearsPlaceholder', '年数'))}"></div>
+        <div class="col-2 col-sm-1"><button type="button" class="btn btn-sm btn-outline-danger skill-remove">-</button></div>
     </div>`;
 }
 

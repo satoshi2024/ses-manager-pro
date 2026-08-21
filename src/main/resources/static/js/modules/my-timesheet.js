@@ -13,11 +13,17 @@ const myRowMap = new Map();
 
 function loadMyTimesheet() {
     myMonthValue = document.getElementById('myMonth').value;
-    fetch('/api/my/timesheet?month=' + encodeURIComponent(myMonthValue))
-        .then(res => res.json()).then(data => {
-            if (data.code !== 200) { renderMyError(data); return; }
-            renderMySummary(data.data.rows || []);
-            renderMy(data.data.rows || [], data.data.engineerName);
+    SES.api.get('/api/my/timesheet', { month: myMonthValue })
+        .then(data => {
+            const rows = (data && data.rows) || [];
+            renderMySummary(rows);
+            renderMy(rows, data && data.engineerName);
+        })
+        .catch(err => {
+            // 未紐付け(403)はトーストに加え、初日の行き止まりを避ける案内を画面にも出す。
+            if (err && err.message === 'Forbidden') {
+                renderMyError({ code: 403 });
+            }
         });
 }
 
@@ -101,7 +107,7 @@ function renderMyError(data) {
         box.appendChild(guide);
     } else {
         box.className = 'alert alert-danger';
-        box.textContent = data.message || '';
+        box.textContent = data.message || SES.i18n.t('error.general', 'エラーが発生しました。しばらくしてから再度お試しください');
     }
     container.appendChild(box);
 }
@@ -114,7 +120,9 @@ function renderMy(rows, engineerName) {
         container.innerHTML += `<h5 class="mb-3 text-light"><i class="bi bi-person me-2"></i>${SES.escapeHtml(engineerName)}</h5>`;
     }
     if (rows.length === 0) {
-        container.innerHTML += '<div class="alert alert-secondary">対象の契約がありません</div>';
+        container.innerHTML += '<div class="alert alert-secondary">'
+            + SES.escapeHtml(SES.i18n.t('my.timesheet.noContracts', '対象の契約がありません'))
+            + '</div>';
         return;
     }
     rows.forEach(row => {
@@ -142,6 +150,7 @@ function renderMy(rows, engineerName) {
             </div>
             <div class="card-body">
                 ${rejectBanner}
+                <div class="table-responsive">
                 <table class="table table-sm table-bordered">
                     <thead><tr>
                         <th>${SES.i18n.t('my.timesheet.date','日付')}</th>
@@ -154,6 +163,7 @@ function renderMy(rows, engineerName) {
                     </tr></thead>
                     <tbody>${dailyRows}</tbody>
                 </table>
+                </div>
                 ${editable ? dailyForm(row.contractId) : ''}
                 <div class="mt-2">${SES.i18n.t('my.timesheet.total','合計')}: <strong>${SES.escapeHtml(String(row.actualHours || 0))} h</strong></div>
                 ${editable ? `<button class="btn btn-primary mt-2" data-action="submit-month" data-contract-id="${SES.escapeHtml(String(row.contractId))}">${SES.i18n.t('my.timesheet.submit','提出')}</button>` : ''}
@@ -178,14 +188,15 @@ function wireMyHandlers(container) {
 }
 
 function dailyForm(contractId) {
+    // 日次入力は6列圧縮レイアウトを維持（col-12/col-6 + col-md）。ロールバックしない。
     return `
         <div class="row g-2 align-items-end" id="dailyForm-${contractId}">
             <div class="col-12 col-md"><input type="date" class="form-control form-control-sm" name="workDate"></div>
             <div class="col-6 col-md"><input type="time" class="form-control form-control-sm" name="startTime"></div>
             <div class="col-6 col-md"><input type="time" class="form-control form-control-sm" name="endTime"></div>
             <div class="col-6 col-md"><input type="number" class="form-control form-control-sm" name="breakMinutes" value="60"></div>
-            <div class="col-6 col-md"><input type="text" class="form-control form-control-sm" name="remarks" placeholder="備考"></div>
-            <div class="col-12 col-md-auto"><button class="btn btn-sm btn-success w-100" data-action="save-daily" data-contract-id="${SES.escapeHtml(String(contractId))}">追加</button></div>
+            <div class="col-6 col-md"><input type="text" class="form-control form-control-sm" name="remarks" placeholder="${SES.escapeHtml(SES.i18n.t('my.timesheet.remarks', '備考'))}"></div>
+            <div class="col-12 col-md-auto"><button class="btn btn-sm btn-success w-100" data-action="save-daily" data-contract-id="${SES.escapeHtml(String(contractId))}">${SES.escapeHtml(SES.i18n.t('my.timesheet.add', '追加'))}</button></div>
         </div>`;
 }
 
@@ -200,48 +211,62 @@ function saveMyDaily(contractId) {
         breakMinutes: parseInt(form.querySelector('[name=breakMinutes]').value, 10) || 0,
         remarks: form.querySelector('[name=remarks]').value || null
     };
-    if (!body.workDate) { alert('日付を入力してください'); return; }
-    fetch('/api/my/timesheet/daily', {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
-        body: JSON.stringify(body)
-    }).then(res => res.json()).then(data => {
-        if (data.code === 200) loadMyTimesheet();
-        else alert(data.message);
-    });
+    if (!body.workDate) {
+        SES.toast.error(SES.i18n.t('validation.required', SES.i18n.t('my.timesheet.date', '日付')));
+        return;
+    }
+    SES.api.post('/api/my/timesheet/daily', body)
+        .then(() => {
+            SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
+            loadMyTimesheet();
+        })
+        .catch(() => { /* SES.apiが共通トーストを表示 */ });
 }
 
 function deleteMyDaily(contractId, workDate) {
-    fetch(`/api/my/timesheet/daily?contractId=${encodeURIComponent(contractId)}&workMonth=${encodeURIComponent(myMonthValue)}&workDate=${encodeURIComponent(workDate)}`, {
-        method: 'DELETE', headers: SES.csrf.header()
-    }).then(res => res.json()).then(data => {
-        if (data.code === 200) loadMyTimesheet();
-        else alert(data.message);
+    Swal.fire({
+        title: SES.i18n.t('common.deleteConfirmTitle', '削除確認'),
+        text: SES.i18n.t('confirm.delete', '削除してもよろしいですか？この操作は取り消せません'),
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        confirmButtonText: SES.i18n.t('common.delete', '削除'),
+        cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+    }).then(result => {
+        if (!result.isConfirmed) return;
+        const url = '/api/my/timesheet/daily?contractId=' + encodeURIComponent(contractId)
+            + '&workMonth=' + encodeURIComponent(myMonthValue)
+            + '&workDate=' + encodeURIComponent(workDate);
+        SES.api.delete(url)
+            .then(() => {
+                SES.toast.success(SES.i18n.t('common.deleted', '削除しました'));
+                loadMyTimesheet();
+            })
+            .catch(() => { /* SES.apiが共通トーストを表示 */ });
     });
 }
 
 function submitMyByMonth(contractId) {
     const row = myRowMap.get(String(contractId)) || {};
-    // missing days calculation
     let missingDays = 0;
     let missingDates = [];
     if (myMonthValue) {
         let [y, m] = myMonthValue.split('-');
         let daysInMonth = new Date(y, m, 0).getDate();
         let enteredDates = new Set((row.dailies || []).map(d => d.workDate));
-        
+
         let cStart = row.contractStartDate ? new Date(row.contractStartDate) : null;
         let cEnd = row.contractEndDate ? new Date(row.contractEndDate) : null;
-        
+
         for (let i = 1; i <= daysInMonth; i++) {
             let d = new Date(y, m - 1, i);
             let dStr = y + '-' + m + '-' + String(i).padStart(2, '0');
-            
+
             if (d.getDay() !== 0 && d.getDay() !== 6) { // Weekdays only
                 let inContract = true;
                 if (cStart && dStr < row.contractStartDate) inContract = false;
                 if (cEnd && dStr > row.contractEndDate) inContract = false;
-                
+
                 if (inContract && !enteredDates.has(dStr)) {
                     missingDays++;
                     missingDates.push(dStr);
@@ -249,26 +274,51 @@ function submitMyByMonth(contractId) {
             }
         }
     }
-    
-    let msg = SES.i18n.t('my.timesheet.submit', '提出') + '?';
+
+    let html = SES.escapeHtml(SES.i18n.t('my.timesheet.submit.confirm', '提出しますか？'));
     if (missingDays > 0) {
-        msg += "\n\n未入力の平日が " + missingDays + " 日あります:\n" + missingDates.join(', ') + "\n\nこのまま提出しますか？";
+        html = SES.escapeHtml(SES.i18n.t(
+            'my.timesheet.submit.missingWeekdays',
+            [missingDays, missingDates.join(', ')],
+            '未入力の平日が {0} 日あります:\n{1}\n\nこのまま提出しますか？'
+        )).replace(/\n/g, '<br>');
     }
-    
-    if (!confirm(msg)) return;
-    
-    fetch(`/api/my/timesheet/submit-by-month?contractId=${encodeURIComponent(contractId)}&workMonth=${encodeURIComponent(myMonthValue)}`, { method: 'POST', headers: SES.csrf.header() })
-        .then(res => res.json()).then(data => {
-            if (data.code === 200) loadMyTimesheet();
-            else alert(data.message);
-        });
+
+    Swal.fire({
+        title: SES.i18n.t('my.timesheet.submit', '提出'),
+        html: html,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: SES.i18n.t('common.ok', 'OK'),
+        cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+    }).then(result => {
+        if (!result.isConfirmed) return;
+        const url = '/api/my/timesheet/submit-by-month?contractId=' + encodeURIComponent(contractId)
+            + '&workMonth=' + encodeURIComponent(myMonthValue);
+        SES.api.post(url, {})
+            .then(() => {
+                SES.toast.success(SES.i18n.t('my.timesheet.submitted', '提出しました'));
+                loadMyTimesheet();
+            })
+            .catch(() => { /* SES.apiが共通トーストを表示 */ });
+    });
 }
 
 function submitMy(workRecordId) {
-    if (!confirm(SES.i18n.t('my.timesheet.submit', '提出') + '?')) return;
-    fetch(`/api/my/timesheet/${workRecordId}/submit`, { method: 'POST', headers: SES.csrf.header() })
-        .then(res => res.json()).then(data => {
-            if (data.code === 200) loadMyTimesheet();
-            else alert(data.message);
-        });
+    Swal.fire({
+        title: SES.i18n.t('my.timesheet.submit', '提出'),
+        text: SES.i18n.t('my.timesheet.submit.confirm', '提出しますか？'),
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: SES.i18n.t('common.ok', 'OK'),
+        cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
+    }).then(result => {
+        if (!result.isConfirmed) return;
+        SES.api.post('/api/my/timesheet/' + encodeURIComponent(workRecordId) + '/submit', {})
+            .then(() => {
+                SES.toast.success(SES.i18n.t('my.timesheet.submitted', '提出しました'));
+                loadMyTimesheet();
+            })
+            .catch(() => { /* SES.apiが共通トーストを表示 */ });
+    });
 }

@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = document.getElementById('billingMonth');
         if (el) el.value = month;
     }
+    window.invoicePrefillCustomerId = urlParams.get('customerId') || '';
     
     // Pagination state
     window.invoiceCurrentPage = 1;
@@ -13,7 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
     loadInvoices();
     
     document.getElementById('btnGenerateInvoice').addEventListener('click', () => {
-        new bootstrap.Modal(document.getElementById('generateModal')).show();
+        loadGenerateCustomerOptions().then(() => {
+            new bootstrap.Modal(document.getElementById('generateModal')).show();
+        });
     });
 
     document.getElementById('btnSubmitGenerate').addEventListener('click', (e) => {
@@ -42,6 +45,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }).finally(() => { btn.disabled = false; });
     });
+
+    // URL に customerId がある場合は生成モーダルを開き顧客を事前選択
+    if (window.invoicePrefillCustomerId) {
+        const genMonth = document.querySelector('#generateForm [name="billingMonth"]');
+        if (genMonth && month) genMonth.value = month;
+        loadGenerateCustomerOptions().then(() => {
+            new bootstrap.Modal(document.getElementById('generateModal')).show();
+        });
+    }
 
     document.getElementById('billingMonth').addEventListener('change', loadInvoices);
     document.getElementById('filterOverdue').addEventListener('change', loadInvoices);
@@ -96,8 +108,8 @@ function loadInvoices(page = window.invoiceCurrentPage) {
                     <td>
                         <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
                         ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="openDigitalInvoiceModal(${inv.id})">請求書送付</button>` : ''}
-                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-info" onclick="viewDigitalInvoiceStatus(${inv.id})">送信状況</button> <button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory', '入金履歴') : SES.i18n.t('invoice.btn.payment', '入金')}</button>` : ''}
-                        ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder', '督促')}</button>` : ''}
+                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-info" onclick="viewDigitalInvoiceStatus(${inv.id})">送信状況</button> <button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory') : SES.i18n.t('invoice.btn.payment')}</button>` : ''}
+                        ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder')}</button>` : ''}
                         ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('approval.request', '取消を申請')}</button>` : ''}
                     </td>
                 `;
@@ -461,7 +473,7 @@ function showAgingDetail(customerId, bucket) {
         });
         html += '</tbody></table>';
         if (rows.length === 0) html = '<div class="text-muted">対象の請求書がありません</div>';
-        Swal.fire({ title: '請求明細', html: html, width: 640, background: '#1e1e2d', color: '#fff' });
+        Swal.fire({ title: '請求明細', html: html, width: 640, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
     }).catch(err => SES.toast.error(err.message));
 }
 
@@ -650,8 +662,28 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function getLocalDateString() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return SES.util.getLocalDateString();
+}
+
+function loadGenerateCustomerOptions() {
+    const sel = document.querySelector('#generateForm [name="customerId"]');
+    if (!sel) return Promise.resolve();
+    const preselect = window.invoicePrefillCustomerId || sel.value || '';
+    return fetch('/api/customers/options')
+        .then(res => res.json())
+        .then(data => {
+            if (data.code !== 200) return;
+            const list = data.data || [];
+            sel.innerHTML = '<option value="">' + SES.escapeHtml(SES.i18n.t('contract.customer.select')) + '</option>';
+            list.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name || '';
+                sel.appendChild(opt);
+            });
+            if (preselect) sel.value = String(preselect);
+        })
+        .catch(() => {});
 }
 
 function openDigitalInvoiceModal(invoiceId) {
@@ -659,7 +691,7 @@ function openDigitalInvoiceModal(invoiceId) {
         if (res.code === 200) {
             const data = res.data;
             if (data.alreadySent) {
-                Swal.fire({ icon: 'warning', title: '警告', text: data.reason, ...SES.swal.darkConfig });
+                Swal.fire({ icon: 'warning', title: '警告', text: data.reason, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
                 return;
             }
 
@@ -687,14 +719,14 @@ function openDigitalInvoiceModal(invoiceId) {
                 confirmButtonColor: '#3085d6',
                 cancelButtonColor: '#d33',
                 showConfirmButton: data.canSend,
-                ...SES.swal.darkConfig
+                ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
             }).then((result) => {
                 if (result.isConfirmed) {
                     dispatchDigitalInvoice(invoiceId);
                 }
             });
         } else {
-            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
+            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
         }
     });
 }
@@ -712,7 +744,7 @@ function dispatchDigitalInvoice(invoiceId) {
             }).then(() => loadInvoices());
 
         } else {
-            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
+            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
         }
     });
 }
@@ -722,7 +754,7 @@ function viewDigitalInvoiceStatus(invoiceId) {
         if (res.code === 200) {
             const data = res.data;
             if (!data.digitalInvoiceId) {
-                Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...SES.swal.darkConfig });
+                Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
                 return;
             }
 
@@ -747,7 +779,7 @@ function viewDigitalInvoiceStatus(invoiceId) {
                 title: 'デジタルインボイス送信状況',
                 html: html,
                 width: 600,
-                ...SES.swal.darkConfig
+                ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
             });
         }
     });

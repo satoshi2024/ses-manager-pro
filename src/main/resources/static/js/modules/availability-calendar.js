@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const filterEndingSoonBtn = document.getElementById('filterEndingSoonBtn');
     let chartInstance = null;
     let currentEngineers = [];
+    let lastFromStr = null;
+    let lastToStr = null;
 
     // Initialize dates (default: current month to next 5 months)
     const today = new Date();
@@ -13,6 +15,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     fromMonthInput.value = SES.util.getLocalDateString(fromDate).slice(0, 7);
     toMonthInput.value = SES.util.getLocalDateString(toDate).slice(0, 7);
+
+    document.addEventListener('ses:theme-changed', function() {
+        if (chartInstance) {
+            SES.theme.applyChartTheme(chartInstance);
+        }
+    });
 
     // Fetch initial data for selects
     fetch('/api/skill-tags').then(r => r.json()).then(res => {
@@ -71,6 +79,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         engineers = engineers.filter(e => e.endingSoon);
                     }
                     currentEngineers = engineers;
+                    lastFromStr = from;
+                    lastToStr = to;
                     renderChart(engineers, from, to);
                 } else {
                     console.error('Failed to load timeline data');
@@ -135,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 labels: labels,
                 datasets: [
                     {
-                        label: '稼動中',
+                        label: SES.i18n.t('availability.chart.contracted'),
                         data: dataContracted,
                         backgroundColor: 'rgba(54, 162, 235, 0.7)',
                         borderColor: 'rgba(54, 162, 235, 1)',
@@ -143,7 +153,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         borderSkipped: false
                     },
                     {
-                        label: '空き / 待機',
+                        label: SES.i18n.t('availability.chart.available'),
                         data: dataAvailable,
                         backgroundColor: 'rgba(255, 159, 64, 0.5)',
                         borderColor: 'rgba(255, 159, 64, 1)',
@@ -178,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             label: function(context) {
                                 const pt = context.raw;
                                 const start = new Date(pt.x[0]).toLocaleDateString();
-                                const end = pt.isIndefinite ? '継続中' : new Date(pt.x[1]).toLocaleDateString();
+                                const end = pt.isIndefinite ? SES.i18n.t('availability.chart.ongoing') : new Date(pt.x[1]).toLocaleDateString();
                                 return `${context.dataset.label}: ${start} 〜 ${end}`;
                             }
                         }
@@ -206,5 +216,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
+        if (SES.theme && typeof SES.theme.applyChartTheme === 'function') {
+            SES.theme.applyChartTheme(chartInstance);
+        }
     }
 });

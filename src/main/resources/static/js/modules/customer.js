@@ -191,7 +191,7 @@ function editCustomer(id) {
 function saveCustomer() {
     const companyName = $('#cust-companyName').val();
     if (!companyName) {
-        Swal.fire({ icon: 'error', title: 'エラー', text: '会社名は必須です。', ...SES.swal.darkConfig });
+        Swal.fire({ icon: 'error', title: 'エラー', text: '会社名は必須です。', ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
         return;
     }
     

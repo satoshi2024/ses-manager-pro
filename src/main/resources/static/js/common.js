@@ -214,13 +214,13 @@ const SES = {
             const borderClass = `border-${type}`;
             
             const html = `
-                <div id="${toastId}" class="toast align-items-center ${bgClass} ${borderClass} border text-white" role="alert" aria-live="assertive" aria-atomic="true" style="pointer-events: auto;">
+                <div id="${toastId}" class="toast align-items-center ${bgClass} ${borderClass} border" role="alert" aria-live="assertive" aria-atomic="true" style="pointer-events: auto;">
                     <div class="d-flex">
                         <div class="toast-body d-flex align-items-center">
                             <i class="bi ${iconClass} ${textClass} fs-5 me-2"></i>
                             <span>${SES.escapeHtml(message)}</span>
                         </div>
-                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
                     </div>
                 </div>
             `;
@@ -344,9 +344,9 @@ const SES = {
                 backdrop.addEventListener('click', closeSidebar);
             }
 
-            // モバイル/タブレット時の画面外クリックで閉じる（サイドバーのドロワー化は992px以下）
+            // モバイル/タブレット時の画面外クリックで閉じる（サイドバーのドロワー化は992px未満 = Bootstrap lg）
             document.addEventListener('click', (e) => {
-                if (window.innerWidth <= 992 && sidebar && sidebar.classList.contains('show')) {
+                if (window.innerWidth < 992 && sidebar && sidebar.classList.contains('show')) {
                     if (!sidebar.contains(e.target) && (!toggleBtn || !toggleBtn.contains(e.target))) {
                         closeSidebar();
                     }
@@ -355,14 +355,14 @@ const SES = {
 
             // デスクトップ幅に戻したときにドロワー状態(と背景オーバーレイ)を解除
             window.addEventListener('resize', () => {
-                if (window.innerWidth > 992) closeSidebar();
+                if (window.innerWidth >= 992) closeSidebar();
             });
 
             // ナビリンクをタップしたら自動で閉じる（モバイル/タブレット）
             if (sidebar) {
                 sidebar.querySelectorAll('.nav-link').forEach(link => {
                     link.addEventListener('click', () => {
-                        if (window.innerWidth <= 992) closeSidebar();
+                        if (window.innerWidth < 992) closeSidebar();
                     });
                 });
 
@@ -860,6 +860,7 @@ const SES = {
         },
         applyTheme: function(theme) {
             document.documentElement.setAttribute('data-bs-theme', theme);
+            document.documentElement.style.colorScheme = theme;
 
             const iconLight = document.getElementById('theme-icon-light');
             const iconDark = document.getElementById('theme-icon-dark');
@@ -909,6 +910,35 @@ const SES = {
                 if (scale.title) scale.title.color = colors.textColor;
             });
             chart.update();
+        }
+    },
+
+    /**
+     * SweetAlert2 テーマ配色。
+     * 使い方: Swal.fire({ ..., ...SES.swal.themeConfig() })
+     * darkConfig は互換用ゲッター（呼び出し時点の themeConfig() を返す）。
+     * 新規コードは themeConfig() を使うこと（Agent D がモジュール側の呼出を置換する）。
+     */
+    swal: {
+        themeConfig: function() {
+            const isLight = document.documentElement.getAttribute('data-bs-theme') === 'light';
+            if (isLight) {
+                return {
+                    background: '#ffffff',
+                    color: '#1e293b',
+                    confirmButtonColor: '#3b82f6',
+                    cancelButtonColor: '#6c757d'
+                };
+            }
+            return {
+                background: '#1a2332',
+                color: '#e8eaed',
+                confirmButtonColor: '#3b82f6',
+                cancelButtonColor: '#6c757d'
+            };
+        },
+        get darkConfig() {
+            return this.themeConfig();
         }
     }
 };

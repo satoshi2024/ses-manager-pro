@@ -107,7 +107,7 @@ async function presetFromQuotation(quotationId) {
         const form = document.getElementById('salesOrderForm');
         form.quotationId.value = quotationId;
         form.customerId.value = quotation.customerId;
-        form.orderDate.value = new Date().toISOString().slice(0, 10);
+        form.orderDate.value = SES.util.getLocalDateString();
         form.startDate.value = quotation.validUntil || '';
         // 顧客選択の連動を再実行してから明細を埋める
         await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, quotation.customerId);

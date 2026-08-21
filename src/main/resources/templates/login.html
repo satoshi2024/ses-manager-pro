@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org">
+<html th:lang="${#locale.toLanguageTag()}" data-bs-theme="light" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,6 +20,7 @@
             try {
                 var theme = localStorage.getItem('ses_theme') || 'light';
                 document.documentElement.setAttribute('data-bs-theme', theme);
+                document.documentElement.style.colorScheme = theme;
             } catch (e) {}
         })();
     </script>
@@ -38,6 +39,7 @@
         .login-card {
             background: var(--card-bg-glass);
             backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border: 1px solid var(--border-light);
             border-radius: var(--radius-lg);
             box-shadow: var(--shadow-lg);
@@ -47,6 +49,11 @@
             animation: fadeInUP 0.6s ease-out forwards;
             opacity: 0;
             transform: translateY(20px);
+        }
+
+        /* 言語切替のアクティブ表示（浅色でも読めるよう見出し色へ） */
+        [data-bs-theme="light"] a.text-white {
+            color: var(--heading-color) !important;
         }
         
         @keyframes fadeInUP {

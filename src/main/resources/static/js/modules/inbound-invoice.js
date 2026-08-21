@@ -51,7 +51,7 @@ function reviewInvoice(id, action) {
         showCancelButton: true,
         confirmButtonText: actionText + 'する',
         cancelButtonText: 'キャンセル',
-        ...SES.swal.darkConfig
+        ... (SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
     }).then(result => {
         if (result.isConfirmed) {
             SES.api.post(`/api/inbound-invoices/${id}/review?action=${action}`).then(res => {
@@ -59,7 +59,7 @@ function reviewInvoice(id, action) {
                     SES.toast.success(`${actionText}しました`);
                     loadInboundInvoices(1);
                 } else {
-                    Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...SES.swal.darkConfig });
+                    Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
                 }
             });
         }

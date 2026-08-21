@@ -32,7 +32,7 @@ function render(rows) {
     body.querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => openDetail(Number(b.dataset.id))));
     const totalPages = Math.max(1, Math.ceil(page.total / page.size));
     document.getElementById('oneonone-pagination').innerHTML =
-        `<span>${SES.escapeHtml(SES.i18n.t('common.page.info', '{0} 件中 {1}-{2} 件目を表示').replace('{0}', page.total).replace('{1}', (page.current - 1) * page.size + 1).replace('{2}', Math.min(page.current * page.size, page.total)))}</span>
+        `<span>${SES.escapeHtml(SES.i18n.t('common.page.info', [page.total, page.total === 0 ? 0 : (page.current - 1) * page.size + 1, Math.min(page.current * page.size, page.total)]))}</span>
         <span><button class="btn btn-sm btn-outline-secondary" ${page.current <= 1 ? 'disabled' : ''} data-p="${page.current - 1}">${SES.escapeHtml(SES.i18n.t('common.page.prev','前へ'))}</button>
         <button class="btn btn-sm btn-outline-secondary ms-1" ${page.current >= totalPages ? 'disabled' : ''} data-p="${page.current + 1}">${SES.escapeHtml(SES.i18n.t('common.page.next','次へ'))}</button></span>`;
     document.querySelectorAll('#oneonone-pagination button[data-p]').forEach(b => b.addEventListener('click', () => load(Number(b.dataset.p))));

@@ -14,8 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paramMonth && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(paramMonth)) {
         document.getElementById('acceptanceWorkMonth').value = paramMonth;
     } else {
-        const now = new Date();
-        document.getElementById('acceptanceWorkMonth').value = now.toISOString().slice(0, 7);
+        document.getElementById('acceptanceWorkMonth').value = SES.util.getLocalDateString().slice(0, 7);
     }
     loadAcceptances(1, targetAcceptanceId);
     document.getElementById('btnSearchAcceptance').addEventListener('click', () => loadAcceptances(1));

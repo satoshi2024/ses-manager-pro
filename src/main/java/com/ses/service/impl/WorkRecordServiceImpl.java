@@ -127,27 +127,22 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     @Override
     public com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> monthlyGridPage(String workMonth, Long current, Long size, String keyword, String status) {
-        List<WorkRecordGridDto> all = monthlyGrid(workMonth);
-        if (keyword != null && !keyword.isBlank()) {
-            String kw = keyword.toLowerCase().trim();
-            all = all.stream()
-                    .filter(g -> (g.getEngineerName() != null && g.getEngineerName().toLowerCase().contains(kw)) ||
-                            (g.getProjectName() != null && g.getProjectName().toLowerCase().contains(kw)) ||
-                            (g.getContractNo() != null && g.getContractNo().toLowerCase().contains(kw)))
-                    .collect(Collectors.toList());
+        // keyword / status / ページ境界を SQL へ下す。月次確定(confirmMonth)は別経路で全月を対象にする。
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> page =
+                com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 50L : size, 50L, 100L);
+        String keywordFilter = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+        String statusFilter = (status == null || status.isBlank()) ? null : status.trim();
+        String monthEnd = monthEndOf(workMonth);
+        if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
+            return baseMapper.selectMonthlyGridPage(page, workMonth, monthEnd, keywordFilter, statusFilter);
         }
-        if (status != null && !status.isBlank()) {
-            all = all.stream()
-                    .filter(g -> status.equals(g.getStatus()) || (g.getStatus() == null && "未入力".equals(status)))
-                    .collect(Collectors.toList());
-        }
-        com.baomidou.mybatisplus.extension.plugins.pagination.Page<WorkRecordGridDto> page = com.ses.common.util.PageUtils.safePage(current == null ? 1L : current, size == null ? 50L : size, 100L);
-        int total = all.size();
-        page.setTotal(total);
-        int from = (int) Math.min((page.getCurrent() - 1) * page.getSize(), total);
-        int to = (int) Math.min(from + page.getSize(), total);
-        page.setRecords(all.subList(from, to));
-        return page;
+        LocalDate asOf = com.ses.common.util.DateUtils.parseYearMonth(workMonth).atDay(1);
+        List<Long> dataScopeIds = isSalesDataScoped()
+                ? new java.util.ArrayList<>(dataScopeService.allowedContractIds()) : null;
+        return baseMapper.selectMonthlyGridScopedPage(page, workMonth, monthEnd, asOf, false,
+                new java.util.ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
+                new java.util.ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)),
+                dataScopeIds, keywordFilter, statusFilter);
     }
 
     /** テストおよび保守ツールからリフレクション経由で利用する互換エントリーポイント。 */

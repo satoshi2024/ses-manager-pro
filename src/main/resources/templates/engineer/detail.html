@@ -272,15 +272,13 @@
                 <!-- Chat Input Area -->
                 <div class="modal-footer border-dark bg-dark flex-column align-items-stretch p-3 gap-2">
                     <!-- Email Template Selector -->
-                    <div class="d-flex align-items-center gap-2 mb-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
                         <span class="badge bg-secondary text-light border border-dark"><i class="bi bi-envelope-paper me-1"></i><th:block th:text="#{ai.assistant.proposalMode}">提案文作成モード</th:block></span>
-                        <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark" id="chat-template-select" style="width: 250px;">
+                        <select class="form-select form-select-sm form-select-dark bg-secondary text-white border-dark flex-grow-1" id="chat-template-select" style="min-width: 0;">
                             <option value="" th:text="#{ai.assistant.selectTemplate}">(テンプレートを選択...)</option>
-                            <!-- JS will load templates -->
-                            <option value="1" th:text="#{ai.assistant.template.standard}">標準提案メール</option>
-                            <option value="2" th:text="#{ai.assistant.template.skill}">スキル強調テンプレート</option>
+                            <!-- API (/api/email-templates) が実テンプレートを埋める。固定 value=1/2 は誤送信になる -->
                         </select>
-                        <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark ms-auto" onclick="generateEmailDraft()">
+                        <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark ms-auto flex-shrink-0" id="chat-generate-template-btn" type="button" onclick="generateEmailDraft()" disabled>
                             <i class="bi bi-magic me-1"></i><th:block th:text="#{ai.assistant.createWithTemplate}">選択した雛形で作成</th:block>
                         </button>
                     </div>
@@ -593,6 +591,26 @@
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/engineer-detail.js}"></script>
     <script th:src="@{/js/modules/ai-matching.js}"></script>
+    <script>
+        // 雛形未ロード中は「選択した雛形で作成」を無効化。option が埋まったら有効化する。
+        (function () {
+            const select = document.getElementById('chat-template-select');
+            const btn = document.getElementById('chat-generate-template-btn');
+            if (!select || !btn) return;
+            const sync = function () {
+                let hasTemplate = false;
+                for (let i = 0; i < select.options.length; i++) {
+                    if (select.options[i].value) {
+                        hasTemplate = true;
+                        break;
+                    }
+                }
+                btn.disabled = !hasTemplate;
+            };
+            sync();
+            new MutationObserver(sync).observe(select, { childList: true });
+        })();
+    </script>
     <script th:src="@{/js/modules/ai-skillsheet.js}"></script>
     <script th:src="@{/js/modules/engineer-account-link.js}"></script>
     <script th:src="@{/js/modules/staffing.js}"></script>

@@ -6,6 +6,14 @@ $(document).ready(function () {
 
 let gateCapabilities = {};
 
+function localDateTimeString(d) {
+    const dt = d || new Date();
+    return SES.util.getLocalDateString(dt) + 'T'
+        + String(dt.getHours()).padStart(2, '0') + ':'
+        + String(dt.getMinutes()).padStart(2, '0') + ':'
+        + String(dt.getSeconds()).padStart(2, '0');
+}
+
 function loadCapabilities() {
     $.ajax({
         url: '/api/compliance-gate/capabilities',
@@ -474,7 +482,7 @@ function createAssignment() {
         url: '/api/compliance-gate/assignments',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ workplaceId: Number(workplaceId), userId: Number(userId), effectiveFrom: new Date().toISOString().slice(0, 19) }),
+        data: JSON.stringify({ workplaceId: Number(workplaceId), userId: Number(userId), effectiveFrom: localDateTimeString() }),
         success: function (res) {
             if (res.code === 200) {
                 Toast.success(SES.i18n.t('js.common.saveSuccess'));
@@ -639,8 +647,8 @@ function submitVerification() {
         authoritySourceName: $('#verSourceName').val().trim(),
         officialUrlReference: '',
         registrationIdentifier: $('#verRegId').val().trim() || null,
-        checkedAt: new Date().toISOString().slice(0, 19),
-        sourceDataAsOf: new Date().toISOString().slice(0, 19),
+        checkedAt: localDateTimeString(),
+        sourceDataAsOf: localDateTimeString(),
         maxAgeDays: 365,
         validUntil: null,
         evidenceDocumentId: Number($('#verEvDocId').val()),

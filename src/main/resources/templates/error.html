@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<html lang="ja" data-bs-theme="light" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,6 +20,7 @@
             try {
                 var theme = localStorage.getItem('ses_theme') || 'light';
                 document.documentElement.setAttribute('data-bs-theme', theme);
+                document.documentElement.style.colorScheme = theme;
             } catch (e) {}
         })();
     </script>

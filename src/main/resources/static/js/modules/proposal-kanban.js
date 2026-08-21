@@ -376,7 +376,7 @@ function executeStatusChange(proposalId, newStatus, itemEl, fromCol, oldIndex, i
                         }
                     });
                 } else {
-                    Toast.success(SES.i18n.t('js.kanban.status.update').replace('{0}', SES.i18n.e(newStatus)));
+                    Toast.success(SES.i18n.t('js.kanban.status.update').replace('{0}', SES.i18n.e('proposalStatus', newStatus)));
                 }
             } else {
                 Toast.error(res.message);

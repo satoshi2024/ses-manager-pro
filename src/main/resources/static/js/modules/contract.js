@@ -19,17 +19,31 @@ $(document).ready(function() {
 
     loadSelectOptions().then(() => {
         const urlParams = new URLSearchParams(window.location.search);
-        
+
         const customerId = urlParams.get('customerId');
         if (customerId) {
             $('#search-customerId').val(customerId);
         }
-        
+
         const salesUserId = urlParams.get('salesUserId');
         if (salesUserId) {
             $('#search-salesUserId').val(salesUserId);
         }
-        
+
+        // ダッシュボード「すべて見る」等からの期間・ステータス絞り込みを復元する
+        const status = urlParams.get('status');
+        if (status) {
+            $('#searchForm [name="status"]').val(status);
+        }
+        const endDateFrom = urlParams.get('endDateFrom');
+        if (endDateFrom) {
+            $('#searchForm [name="endDateFrom"]').val(endDateFrom);
+        }
+        const endDateTo = urlParams.get('endDateTo');
+        if (endDateTo) {
+            $('#searchForm [name="endDateTo"]').val(endDateTo);
+        }
+
         loadContracts();
     }).catch(err => {
         console.error("Failed to load options", err);

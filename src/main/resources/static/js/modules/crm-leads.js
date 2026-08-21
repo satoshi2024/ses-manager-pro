@@ -1,5 +1,4 @@
 $(function () { loadAssignees(); loadLeads(); });
-$(function () { loadAssignees(); loadLeads(); });
 
 function loadAssignees() {
     $.get('/api/crm/leads/assignees', res => {
@@ -26,7 +25,7 @@ function renderLeadPagination(page) {
     const total = page.total || 0;
     const start = total === 0 ? 0 : (page.current - 1) * page.size + 1;
     const end = Math.min(page.current * page.size, total);
-    let html = `<div class="text-muted small ps-2">全${total}件中 ${start}〜${end}件</div>`;
+    let html = `<div class="text-muted small ps-2">${SES.escapeHtml(SES.i18n.t('common.page.info', [total, start, end]))}</div>`;
     if (page.pages > 1) {
         html += `<nav aria-label="Page navigation"><ul class="pagination pagination-sm mb-0 pe-2">`;
         html += `<li class="page-item ${page.current <= 1 ? 'disabled' : ''}"><a class="page-link bg-dark border-secondary text-light" href="javascript:void(0)" onclick="loadLeads(${page.current - 1})">‹</a></li>`;

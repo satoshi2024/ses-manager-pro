@@ -96,6 +96,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     private org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
             portalNotificationServiceProvider;
 
+    @Autowired(required = false)
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     private void checkClosing(String month) {
         // 締め設定行をロックし confirm と直列化する（締め成立後の請求差分commit防止 / R3R-05）。
         monthlyClosingService.assertOpenForUpdate(month);
@@ -723,69 +726,104 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoiceIds == null || invoiceIds.isEmpty()) {
             return results;
         }
-        
-        List<Invoice> invoices = this.baseMapper.selectBatchIds(invoiceIds);
-        Map<Long, Invoice> invoiceMap = invoices.stream().collect(Collectors.toMap(Invoice::getId, i -> i));
-        
-        List<Long> customerIds = invoices.stream().map(Invoice::getCustomerId).filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
-        Map<Long, Customer> customerMap = customerIds.isEmpty() ? java.util.Collections.emptyMap() : customerMapper.selectBatchIds(customerIds).stream().collect(Collectors.toMap(Customer::getId, c -> c));
-        
-        List<InvoicePayment> allPayments = invoicePaymentMapper.selectList(new QueryWrapper<InvoicePayment>().in("invoice_id", invoiceIds));
-        Map<Long, List<InvoicePayment>> paymentsByInvoice = allPayments.stream().collect(Collectors.groupingBy(InvoicePayment::getInvoiceId));
 
+        // 同一リクエスト内の重複IDは冪等にSKIP。各請求は独立の短トランザクションで処理する。
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         for (Long id : invoiceIds) {
-            try {
-                Invoice invoice = invoiceMap.get(id);
-                if (invoice == null) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "請求書が存在しません", null));
-                    continue;
-                }
-                if ("入金済".equals(invoice.getStatus())) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "入金済のため対象外", null));
-                    continue;
-                }
-                if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), targetDate)) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "SKIPPED", "期限超過の督促対象ではありません", null));
-                    continue;
-                }
-                com.ses.entity.Customer customer = customerMap.get(invoice.getCustomerId());
-                if (customer == null) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客が存在しません", null));
-                    continue;
-                }
-                String to = customer.getContactEmail();
-                if (to == null || to.isBlank()) {
-                    results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "顧客メールアドレス未設定", null));
-                    continue;
-                }
-                
-                BigDecimal paidTotal = BigDecimal.ZERO;
-                List<InvoicePayment> payments = paymentsByInvoice.getOrDefault(id, java.util.Collections.emptyList());
-                for (InvoicePayment p : payments) {
-                    paidTotal = paidTotal.add(p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
-                                         .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
-                }
-                BigDecimal balance = invoice.getTotal().subtract(paidTotal);
-                
-                long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), targetDate);
-                java.util.Map<String, String> params = new java.util.HashMap<>();
-                params.put("invoiceNo", invoice.getInvoiceNo());
-                params.put("customerName", customer.getCompanyName());
-                params.put("billingMonth", invoice.getBillingMonth());
-                params.put("total", invoice.getTotal() != null ? invoice.getTotal().toPlainString() : "0");
-                params.put("balance", balance.toPlainString());
-                params.put("dueDate", invoice.getDueDate().toString());
-                params.put("overdueDays", String.valueOf(overdueDays));
-                
-                MailDispatchResult sent = mailService.sendWithTemplate(templateId, params, to, id);
-                results.add(new com.ses.dto.mail.BulkReminderRowResult(
-                        id, sent.getStatus(), null, sent.getDeliveryId()));
-            } catch (Exception e) {
-                log.warn("一括督促の送信に失敗しました invoiceId={}", id, e);
-                results.add(new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", e.getMessage(), null));
+            if (id == null) {
+                continue;
             }
+            if (!seen.add(id)) {
+                results.add(new com.ses.dto.mail.BulkReminderRowResult(
+                        id, "SKIPPED", "error.invoice.reminderDuplicate", null));
+                continue;
+            }
+            results.add(sendReminderInShortTx(id, templateId, targetDate));
         }
         return results;
+    }
+
+    /** 請求1件分を REQUIRES_NEW で実行し、長トランザクションでメール送信を抱え込まない。 */
+    private com.ses.dto.mail.BulkReminderRowResult sendReminderInShortTx(
+            Long invoiceId, Long templateId, java.time.LocalDate targetDate) {
+        if (transactionManager == null) {
+            return sendOneReminderRow(invoiceId, templateId, targetDate);
+        }
+        org.springframework.transaction.support.TransactionTemplate tx =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        tx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tx.execute(status -> sendOneReminderRow(invoiceId, templateId, targetDate));
+    }
+
+    private com.ses.dto.mail.BulkReminderRowResult sendOneReminderRow(
+            Long id, Long templateId, java.time.LocalDate targetDate) {
+        try {
+            Invoice invoice = this.baseMapper.selectById(id);
+            if (invoice == null) {
+                return new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "error.invoice.notFound", null);
+            }
+            if ("入金済".equals(invoice.getStatus())) {
+                return new com.ses.dto.mail.BulkReminderRowResult(
+                        id, "SKIPPED", "error.invoice.reminderAlreadyPaid", null);
+            }
+            if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), targetDate)) {
+                return new com.ses.dto.mail.BulkReminderRowResult(
+                        id, "SKIPPED", "error.invoice.reminderNotOverdue", null);
+            }
+            com.ses.entity.Customer customer = customerMapper.selectById(invoice.getCustomerId());
+            if (customer == null) {
+                return new com.ses.dto.mail.BulkReminderRowResult(
+                        id, "FAILED", "error.invoice.customerNotFound", null);
+            }
+            String to = customer.getContactEmail();
+            if (to == null || to.isBlank()) {
+                return new com.ses.dto.mail.BulkReminderRowResult(
+                        id, "FAILED", "error.invoice.customerEmailMissing", null);
+            }
+
+            BigDecimal paidTotal = BigDecimal.ZERO;
+            List<InvoicePayment> payments = invoicePaymentMapper.selectList(
+                    new QueryWrapper<InvoicePayment>().eq("invoice_id", id));
+            for (InvoicePayment p : payments) {
+                paidTotal = paidTotal.add(p.getAmount() != null ? p.getAmount() : BigDecimal.ZERO)
+                        .add(p.getFee() != null ? p.getFee() : BigDecimal.ZERO);
+            }
+            BigDecimal balance = invoice.getTotal().subtract(paidTotal);
+
+            long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), targetDate);
+            java.util.Map<String, String> params = new java.util.HashMap<>();
+            params.put("invoiceNo", invoice.getInvoiceNo());
+            params.put("customerName", customer.getCompanyName());
+            params.put("billingMonth", invoice.getBillingMonth());
+            params.put("total", invoice.getTotal() != null ? invoice.getTotal().toPlainString() : "0");
+            params.put("balance", balance.toPlainString());
+            params.put("dueDate", invoice.getDueDate().toString());
+            params.put("overdueDays", String.valueOf(overdueDays));
+
+            MailDispatchResult sent = mailService.sendWithTemplate(templateId, params, to, id);
+            return new com.ses.dto.mail.BulkReminderRowResult(
+                    id, sent.getStatus(), null, sent.getDeliveryId());
+        } catch (Exception e) {
+            log.warn("一括督促の送信に失敗しました invoiceId={}", id, e);
+            // 例外メッセージを画面へ返さない（業務コード / i18n キーのみ）。
+            return new com.ses.dto.mail.BulkReminderRowResult(
+                    id, "FAILED", reminderFailureReason(e), null);
+        }
+    }
+
+    /** 業務例外の messageKey（error.*）のみ通し、それ以外は汎用キーへ伏せる。 */
+    static String reminderFailureReason(Exception e) {
+        if (e instanceof BusinessException be) {
+            String key = be.getMessageKey();
+            if (key != null && key.startsWith("error.")) {
+                return key;
+            }
+            String message = be.getMessage();
+            if (message != null && message.startsWith("error.")) {
+                return message;
+            }
+        }
+        return "error.invoice.reminderFailed";
     }
 }
 

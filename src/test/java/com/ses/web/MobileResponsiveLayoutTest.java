@@ -270,4 +270,25 @@ class MobileResponsiveLayoutTest {
                 .as("契約番号などの長い連続文字列も通知枠内で折り返せること")
                 .containsPattern("(?s)#notification-list \\.notification-item-message\\s*\\{[^}]*overflow-wrap:\\s*anywhere");
     }
+
+    @Test
+    void サイドバードロワー化ブレークポイントはBootstrap_lgと一致する() throws Exception {
+        String commonCss = readCss("static/css/common.css");
+        String commonJs = readCss("static/js/common.js");
+
+        // ちょうど 992px で CSS(max-width:992) と d-lg-none が食い違い、
+        // ハンバーガーが消えたままサイドバーも隠れる穴を防ぐ。
+        assertThat(commonCss)
+                .as("common.css に max-width: 992px が残っていないこと（991.98px を使う）")
+                .doesNotContain("max-width: 992px");
+        assertThat(commonCss)
+                .as("ドロワー化は Bootstrap lg 未満 (= max-width: 991.98px) であること")
+                .contains("@media (max-width: 991.98px)");
+        assertThat(commonJs)
+                .as("JS のドロワー判定は innerWidth < 992 / >= 992 であること")
+                .contains("window.innerWidth < 992")
+                .contains("window.innerWidth >= 992")
+                .doesNotContain("window.innerWidth <= 992")
+                .doesNotContain("window.innerWidth > 992");
+    }
 }

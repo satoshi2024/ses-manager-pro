@@ -15,6 +15,12 @@ public class DashboardSummaryDto {
     private KpiDto kpi;
     private ChartsDto charts;
     private List<RetiringEngineerDto> retiring;
+    /** 退場予定の全件数（一覧は Top10、すべて見るは同一期間フィルタ用）。 */
+    private int retiringTotal;
+    /** 退場予定フィルタの開始日 (yyyy-MM-dd)。 */
+    private String retiringFrom;
+    /** 退場予定フィルタの終了日 (yyyy-MM-dd)。 */
+    private String retiringTo;
 
     @Data
     @Builder

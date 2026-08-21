@@ -331,6 +331,9 @@ public class DashboardServiceImpl implements DashboardService {
             Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() : projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
 
             List<EngineerSkillDetailDto> topSkills = engineerSkillMapper.selectTopSkillCandidates(engineerIds);
+            if (topSkills == null) {
+                topSkills = Collections.emptyList();
+            }
             Map<Long, String> topSkillMap = topSkills.stream()
                     .collect(Collectors.toMap(EngineerSkillDetailDto::getEngineerId, EngineerSkillDetailDto::getSkillName, (s1, s2) -> s1));
 
@@ -361,15 +364,21 @@ public class DashboardServiceImpl implements DashboardService {
                     retiringList.add(dto);
                 }
             }
-            if (retiringList.size() > 10) {
-                retiringList = new ArrayList<>(retiringList.subList(0, 10));
-            }
+        }
+
+        int retiringTotal = retiringList.size();
+        // 画面上の退場予定表は Top10。全件は retiringTotal と同一期間の「すべて見る」リンクへ。
+        if (retiringList.size() > 10) {
+            retiringList = new ArrayList<>(retiringList.subList(0, 10));
         }
 
         return DashboardSummaryDto.builder()
                 .kpi(kpi)
                 .charts(charts)
                 .retiring(retiringList)
+                .retiringTotal(retiringTotal)
+                .retiringFrom(now.toString())
+                .retiringTo(next30Days.toString())
                 .build();
     }
 
