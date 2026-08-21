@@ -56,6 +56,32 @@ class ScreenshotFollowupUiContractTest {
                 "スキルバッジに未定義だった bg-accent-blue を使わない");
     }
 
+    @Test
+    @DisplayName("提案カンバンの浅色列頭はカード面+見出し色")
+    void proposalKanban_lightHeadersUseHeadingColor() throws Exception {
+        String css = read("static/css/common.css");
+        int header = css.indexOf(".kanban-column-header.bg-dark");
+        assertTrue(header >= 0, "カンバン列頭ルールがあること");
+        String around = css.substring(header, Math.min(css.length(), header + 280));
+        assertTrue(around.contains("var(--heading-color)"), "列頭テキストは見出し色");
+        assertFalse(around.contains("#1e293b"), "浅色で濃色帯に固定しない");
+    }
+
+    @Test
+    @DisplayName("AI評価の sample inspection は日本語見出しと読みやすい行で出す")
+    void aiEvaluation_rendersReadableSamplesNotRawJson() throws Exception {
+        String html = read("templates/ai/evaluation.html");
+        String js = read("static/js/modules/ai-evaluation.js");
+        String ja = read("messages.properties");
+        assertTrue(html.contains("#{ai.evaluation.samples}"));
+        assertTrue(ja.contains("ai.evaluation.samples=サンプル確認"));
+        assertFalse(ja.contains("ai.evaluation.samples=sample inspection"));
+        assertFalse(js.contains("JSON.stringify"), "生JSONを出さない");
+        assertTrue(js.contains("renderSamples"), "サンプル専用描画があること");
+        assertTrue(js.contains("formatSampleValue"), "単価は円表記");
+        assertTrue(js.contains("runCount === 0"), "観測0件の提案行は 0.0% にしない");
+    }
+
     private String read(String relative) throws Exception {
         return Files.readString(RESOURCE_ROOT.resolve(relative), StandardCharsets.UTF_8);
     }

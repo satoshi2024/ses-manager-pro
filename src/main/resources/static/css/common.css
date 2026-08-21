@@ -170,6 +170,8 @@
     --bs-table-hover-bg: rgba(0,0,0,0.04);
     --bs-table-color: var(--text-primary);
     --bs-table-border-color: var(--border-color);
+    --bs-table-active-bg: #e2e8f0;
+    --bs-table-active-color: var(--text-primary);
     color: var(--text-primary);
     border-color: var(--border-color);
 }
@@ -254,14 +256,15 @@
     color: #ffffff !important;
 }
 
-/* カンバン列頭: 濃色帯のまま白字を維持 */
+/* カンバン列頭: 浅色ではカード面+見出し色。色帯は border-bottom のまま。 */
 [data-bs-theme="light"] .content-area .kanban-column-header.bg-dark {
-    background-color: #1e293b !important;
-    color: #ffffff !important;
+    background-color: var(--bg-card) !important;
+    color: var(--heading-color) !important;
+    border-color: var(--border-color) !important;
 }
 [data-bs-theme="light"] .content-area .kanban-column-header .text-white,
 [data-bs-theme="light"] .content-area .kanban-column-header .text-light {
-    color: #ffffff !important;
+    color: var(--heading-color) !important;
 }
 
 /* 廃棄済など意図的な badge.bg-dark は深底白字のまま */
@@ -276,6 +279,7 @@
 [data-bs-theme="light"] .content-area .form-select.bg-dark,
 [data-bs-theme="light"] .content-area .form-control-dark,
 [data-bs-theme="light"] .content-area .form-select-dark,
+[data-bs-theme="light"] .content-area .form-bg-dark,
 [data-bs-theme="light"] .content-area .form-control.bg-secondary,
 [data-bs-theme="light"] .content-area .form-select.bg-secondary,
 [data-bs-theme="light"] .content-area .input-group-text.bg-dark,
@@ -283,16 +287,19 @@
 [data-bs-theme="light"] .content-area .bg-input,
 [data-bs-theme="light"] .content-area textarea.bg-dark,
 [data-bs-theme="light"] .content-area textarea.form-control-dark,
+[data-bs-theme="light"] .content-area textarea.form-bg-dark,
 [data-bs-theme="light"] .modal .form-control.bg-dark,
 [data-bs-theme="light"] .modal .form-select.bg-dark,
 [data-bs-theme="light"] .modal .form-control-dark,
 [data-bs-theme="light"] .modal .form-select-dark,
+[data-bs-theme="light"] .modal .form-bg-dark,
 [data-bs-theme="light"] .modal .form-control.bg-secondary,
 [data-bs-theme="light"] .modal .form-select.bg-secondary,
 [data-bs-theme="light"] .modal .input-group-text.bg-dark,
 [data-bs-theme="light"] .modal .input-group-text.bg-secondary,
 [data-bs-theme="light"] .modal textarea.bg-dark,
-[data-bs-theme="light"] .modal textarea.form-control-dark {
+[data-bs-theme="light"] .modal textarea.form-control-dark,
+[data-bs-theme="light"] .modal textarea.form-bg-dark {
     background-color: #ffffff !important;
     color: var(--text-primary) !important;
     border-color: var(--border-color) !important;
@@ -317,10 +324,16 @@
 }
 
 /* --- 3) 表面（フッタ / モーダル / ページネーション / カード） --- */
-[data-bs-theme="light"] .content-area .card-footer.bg-secondary {
+[data-bs-theme="light"] .content-area .card-footer.bg-secondary,
+[data-bs-theme="light"] .content-area .card-footer.bg-dark {
     background-color: var(--bg-tertiary) !important;
     color: var(--text-secondary) !important;
     border-color: var(--border-color) !important;
+}
+/* フッタ内の text-muted は浅底上で読めるよう維持（深底のまま残ると消える） */
+[data-bs-theme="light"] .content-area .card-footer.bg-dark .text-muted,
+[data-bs-theme="light"] .content-area .card-footer.bg-secondary .text-muted {
+    color: var(--text-muted) !important;
 }
 [data-bs-theme="light"] .modal-content.bg-secondary,
 [data-bs-theme="light"] .modal-content.bg-dark {
@@ -601,17 +614,52 @@ a:hover {
     --bs-table-color: var(--text-primary);
     --bs-table-striped-color: var(--text-primary);
     --bs-table-hover-color: var(--text-primary);
+    /* active 行も浅底深字（未帰属行の table-active 対策） */
+    --bs-table-active-bg: #e2e8f0;
     --bs-table-active-color: var(--text-primary);
     color: var(--text-primary) !important;
+}
+/* thead.table-dark は Bootstrap が濃色変数を再設定するため、明示的に浅色へ */
+[data-bs-theme="light"] .table-dark > thead,
+[data-bs-theme="light"] thead.table-dark,
+[data-bs-theme="light"] .table-dark-header {
+    --bs-table-bg: #f1f5f9;
+    --bs-table-color: var(--heading-color);
+    --bs-table-accent-bg: transparent;
+    --bs-table-bg-type: unset;
+    --bs-table-bg-state: unset;
+    --bs-table-color-type: unset;
+    --bs-table-color-state: unset;
+    color: var(--heading-color) !important;
 }
 [data-bs-theme="light"] .table-dark th,
 [data-bs-theme="light"] .table-dark-header th,
 [data-bs-theme="light"] .table-dark-header {
     background-color: #f1f5f9 !important;
     color: var(--heading-color) !important;
+    box-shadow: none !important;
 }
 [data-bs-theme="light"] .table-dark td {
     color: var(--text-primary) !important;
+}
+/* 営業成績の未帰属行など table-active: 濃い帯＋深字で消えないようにする */
+[data-bs-theme="light"] .table-dark .table-active,
+[data-bs-theme="light"] .table-dark > :not(caption) > .table-active {
+    --bs-table-accent-bg: #e2e8f0;
+    --bs-table-bg-state: #e2e8f0;
+    --bs-table-color-state: var(--text-primary);
+    background-color: #e2e8f0 !important;
+    color: var(--text-primary) !important;
+}
+[data-bs-theme="light"] .table-dark .table-active > *,
+[data-bs-theme="light"] .table-dark .table-active td,
+[data-bs-theme="light"] .table-dark .table-active th {
+    background-color: #e2e8f0 !important;
+    color: var(--text-primary) !important;
+    box-shadow: none !important;
+}
+[data-bs-theme="light"] .table-dark .table-active a {
+    color: var(--accent-blue) !important;
 }
 
 .table-secondary {

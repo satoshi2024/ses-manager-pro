@@ -76,8 +76,9 @@
             <div id="attendanceDiscrepancyHint" class="small text-muted" th:text="#{attendance.discrepancy.hint}"></div>
         </div>
     </div>
+    <!-- Layout Dialect は content fragment 外の要素を捨てる。権限フラグは必ず内側に置く。 -->
+    <div id="attendanceRoleFlags" class="d-none" th:data-can-approve="${canApprove}" th:data-can-close="${canClose}" th:data-can-reopen="${canReopen}" th:data-can-sync="${canSync}"></div>
 </div>
-<div id="attendanceRoleFlags" class="d-none" th:data-can-approve="${canApprove}" th:data-can-close="${canClose}" th:data-can-reopen="${canReopen}" th:data-can-sync="${canSync}"></div>
 <th:block layout:fragment="page-js"><script src="/js/modules/attendance-management.js"></script></th:block>
 </body>
 </html>

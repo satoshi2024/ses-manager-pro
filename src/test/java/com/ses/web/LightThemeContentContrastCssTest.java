@@ -33,6 +33,10 @@ class LightThemeContentContrastCssTest {
                 "form-control.bg-dark の浅色上書きがあること");
         assertTrue(css.contains("[data-bs-theme=\"light\"] .content-area .card-footer.bg-secondary"),
                 "card-footer.bg-secondary の浅色上書きがあること");
+        assertTrue(css.contains("[data-bs-theme=\"light\"] .content-area .card-footer.bg-dark"),
+                "card-footer.bg-dark の浅色上書きがあること（BP会社一覧フッタ等）");
+        assertTrue(css.contains(".form-bg-dark"),
+                "BP会社の form-bg-dark も浅色入力へ上書きすること");
         assertTrue(css.contains("var(--heading-color)") && css.contains(".content-area .text-white"),
                 "正文白字は --heading-color へ");
     }
@@ -44,8 +48,8 @@ class LightThemeContentContrastCssTest {
 
         assertTrue(css.contains(".bg-primary .text-white") || css.contains(".badge.text-white"),
                 "彩色底 / バッジ内で白字を復元すること");
-        assertTrue(css.contains(".kanban-column-header") && css.contains("color: #ffffff"),
-                "カンバン列頭の白字を維持すること");
+        assertTrue(css.contains(".kanban-column-header.bg-dark") && css.contains("var(--heading-color)"),
+                "浅色カンバン列頭は見出し色へ（濃色帯のままにしない）");
         assertFalse(css.matches("(?s).*\\[data-bs-theme=\"light\"\\]\\s*\\.text-white\\s*\\{[^}]*color:[^}]*\\}.*"),
                 "除外なしのグローバル [data-bs-theme=light] .text-white 上書きを入れないこと");
     }

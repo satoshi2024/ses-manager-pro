@@ -386,10 +386,10 @@ public class LeaveServiceImpl implements LeaveService {
         if (candidates.isEmpty()) {
             return;
         }
-        Map<Long, ApprovalRequest> approvals = approvalRequestMapper.selectBatchIds(
-                        candidates.stream().map(LeaveRequest::getApprovalRequestId)
-                                .filter(java.util.Objects::nonNull).collect(Collectors.toSet()))
-                .stream().collect(Collectors.toMap(ApprovalRequest::getId, a -> a));
+        Map<Long, ApprovalRequest> approvals = loadApprovals(candidates.stream()
+                .map(LeaveRequest::getApprovalRequestId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet()));
         Set<LocalDate> mineDays = daysOf(leave);
         for (LeaveRequest candidate : candidates) {
             ApprovalRequest approval = candidate.getApprovalRequestId() == null
@@ -451,14 +451,21 @@ public class LeaveServiceImpl implements LeaveService {
     }
 
     private List<LeaveDto> toDtos(List<LeaveRequest> leaves) {
-        Map<Long, String> names = engineerMapper.selectBatchIds(leaves.stream()
-                        .map(LeaveRequest::getEngineerId).collect(Collectors.toSet())).stream()
+        if (leaves == null || leaves.isEmpty()) {
+            return List.of();
+        }
+        Set<Long> engineerIds = leaves.stream()
+                .map(LeaveRequest::getEngineerId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, String> names = engineerIds.isEmpty() ? Map.of()
+                : engineerMapper.selectBatchIds(engineerIds).stream()
                 .collect(Collectors.toMap(Engineer::getId,
                         e -> e.getFullName() == null ? "" : e.getFullName()));
-        Map<Long, ApprovalRequest> approvals = approvalRequestMapper.selectBatchIds(leaves.stream()
-                        .map(LeaveRequest::getApprovalRequestId)
-                        .filter(java.util.Objects::nonNull).collect(Collectors.toSet()))
-                .stream().collect(Collectors.toMap(ApprovalRequest::getId, a -> a));
+        Map<Long, ApprovalRequest> approvals = loadApprovals(leaves.stream()
+                .map(LeaveRequest::getApprovalRequestId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet()));
         return leaves.stream().sorted(Comparator.comparing(LeaveRequest::getStartDate).reversed())
                 .map(leave -> {
                     LeaveDto dto = new LeaveDto();
@@ -480,6 +487,18 @@ public class LeaveServiceImpl implements LeaveService {
                     dto.setApprovalStatus(approval == null ? null : approval.getStatus());
                     return dto;
                 }).toList();
+    }
+
+    /**
+     * BaseMapper.selectBatchIds は空集合で {@code IN ()} を発行し MySQL が構文エラーになる。
+     * シード休暇は approval_request_id が全て NULL なので、管理一覧のたびにここに入る。
+     */
+    private Map<Long, ApprovalRequest> loadApprovals(Set<Long> approvalIds) {
+        if (approvalIds == null || approvalIds.isEmpty()) {
+            return Map.of();
+        }
+        return approvalRequestMapper.selectBatchIds(approvalIds).stream()
+                .collect(Collectors.toMap(ApprovalRequest::getId, a -> a));
     }
 
     private LeaveRequest requireLeave(Long leaveId) {

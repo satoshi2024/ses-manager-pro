@@ -1,5 +1,7 @@
 let utilizationChartInstance = null;
 let allBenchList = [];
+let filteredBenchList = [];
+let benchPage = { current: 1, size: 10 };
 
 $(document).ready(function() {
     loadUtilizationTrend();
@@ -11,13 +13,7 @@ $(document).ready(function() {
     });
 
     $('#bench-sales-filter').on('change', function() {
-        const val = $(this).val();
-        if (!val) {
-            renderBenchTable(allBenchList);
-        } else {
-            const filtered = allBenchList.filter(item => item.primarySalesUserId == val);
-            renderBenchTable(filtered);
-        }
+        applyBenchFilter();
     });
 });
 
@@ -48,7 +44,7 @@ function loadBenchList() {
             if (res.code === 200 && res.data) {
                 allBenchList = res.data;
                 populateSalesFilter(allBenchList);
-                renderBenchTable(allBenchList);
+                applyBenchFilter();
             } else {
                 Toast.error(res.message || SES.i18n.t('analytics.msg.benchFetchFail'));
             }
@@ -58,6 +54,43 @@ function loadBenchList() {
             Toast.error(SES.i18n.t('common.msg.networkError'));
         }
     });
+}
+
+function applyBenchFilter() {
+    const val = $('#bench-sales-filter').val();
+    if (!val) {
+        filteredBenchList = allBenchList.slice();
+    } else {
+        filteredBenchList = allBenchList.filter(item => item.primarySalesUserId == val);
+    }
+    showBenchPage(1);
+}
+
+function showBenchPage(page) {
+    const total = filteredBenchList.length;
+    const pages = Math.max(1, Math.ceil(total / benchPage.size));
+    benchPage.current = Math.min(Math.max(1, page || 1), pages);
+
+    const startIdx = (benchPage.current - 1) * benchPage.size;
+    const pageRows = filteredBenchList.slice(startIdx, startIdx + benchPage.size);
+    renderBenchTable(pageRows);
+    renderBenchPagination(total, pages);
+}
+
+function renderBenchPagination(total, pages) {
+    const info = document.getElementById('bench-page-info');
+    if (info) {
+        if (total === 0) {
+            info.textContent = SES.i18n.t('common.page.totalZero');
+        } else {
+            const start = (benchPage.current - 1) * benchPage.size + 1;
+            const end = Math.min(benchPage.current * benchPage.size, total);
+            info.textContent = SES.i18n.t('common.page.info', [total, start, end]);
+        }
+    }
+    if (typeof SES !== 'undefined' && SES.pagination) {
+        SES.pagination.render('bench-pagination', benchPage.current, pages, showBenchPage);
+    }
 }
 
 function renderUtilizationChart(points) {

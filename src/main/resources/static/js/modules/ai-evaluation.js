@@ -2,6 +2,13 @@ $(document).ready(function() {
     loadDashboard();
 });
 
+const SAMPLE_YEN_FIELDS = {
+    'project.unitPriceMin': true,
+    'project.unitPriceMax': true,
+    'engineer.expectedUnitPrice': true,
+    'bp.unitPrice': true
+};
+
 function loadDashboard() {
     $.ajax({
         url: '/api/ai/evaluations/dashboard',
@@ -26,19 +33,20 @@ function renderDashboard(data) {
         $('.js-cost-col').hide();
     }
     (data.versions || []).forEach(function(row) {
+        const runCount = Number(row.runCount || 0);
         const costCell = data.costVisible
-            ? '<td>' + SES.escapeHtml(String(row.costJpy == null ? '-' : row.costJpy)) + '</td>'
+            ? '<td>' + formatCost(row.costJpy, runCount) + '</td>'
             : '';
         tbody.append(
             '<tr>'
-            + '<td>' + SES.escapeHtml((row.useCase || '') + ' / ' + (row.promptVersion || '')) + '</td>'
+            + '<td>' + SES.escapeHtml(formatUseCase(row.useCase) + ' / ' + (row.promptVersion || '')) + '</td>'
             + '<td>' + SES.escapeHtml(row.status || '') + '</td>'
-            + '<td>' + formatRate(row.adoptionRate) + '</td>'
-            + '<td>' + formatRate(row.interviewRate) + '</td>'
-            + '<td>' + formatRate(row.winRate) + '</td>'
-            + '<td>' + formatRate(row.precisionAt5) + '</td>'
-            + '<td>' + formatRate(row.precisionAt10) + '</td>'
-            + '<td>' + SES.escapeHtml(row.latencyP95 == null ? '-' : String(row.latencyP95)) + '</td>'
+            + '<td>' + formatRate(row.adoptionRate, runCount) + '</td>'
+            + '<td>' + formatRate(row.interviewRate, runCount) + '</td>'
+            + '<td>' + formatRate(row.winRate, runCount) + '</td>'
+            + '<td>' + formatRate(row.precisionAt5, runCount) + '</td>'
+            + '<td>' + formatRate(row.precisionAt10, runCount) + '</td>'
+            + '<td>' + SES.escapeHtml(row.latencyP95 == null || runCount === 0 ? '—' : String(row.latencyP95)) + '</td>'
             + costCell
             + '</tr>'
         );
@@ -63,20 +71,74 @@ function renderDashboard(data) {
                 + ' : ' + SES.escapeHtml(String(s.count)) + '</div>');
         });
     }
+    renderSamples(data.samples);
+}
+
+function renderSamples(list) {
     const samples = $('#aiEvalSamples');
     samples.empty();
-    (data.samples || []).forEach(function(s) {
+    if (!list || list.length === 0) {
+        samples.text(SES.i18n.t('ai.evaluation.empty'));
+        return;
+    }
+    list.forEach(function(s) {
+        const summary = s.summary || {};
+        const keys = Object.keys(summary);
+        let rows = '';
+        if (keys.length === 0) {
+            rows = '<div class="text-muted small">' + SES.escapeHtml(SES.i18n.t('ai.evaluation.empty')) + '</div>';
+        } else {
+            keys.forEach(function(key) {
+                rows += '<div class="d-flex justify-content-between align-items-start gap-2 py-1 border-bottom border-dark">'
+                    + '<span class="text-muted small flex-shrink-0">' + SES.escapeHtml(sampleFieldLabel(key)) + '</span>'
+                    + '<span class="small text-break text-end">' + SES.escapeHtml(formatSampleValue(key, summary[key])) + '</span>'
+                    + '</div>';
+            });
+        }
+        const useCase = s.useCase ? formatUseCase(s.useCase) : '';
         samples.append(
-            '<pre class="small bg-secondary text-white p-2 rounded">'
-            + SES.escapeHtml(JSON.stringify(s.summary || {}, null, 2))
-            + '</pre>'
+            '<div class="mb-3">'
+            + (useCase ? '<div class="badge bg-secondary mb-2">' + SES.escapeHtml(useCase) + '</div>' : '')
+            + rows
+            + '</div>'
         );
     });
 }
 
-function formatRate(value) {
-    if (value == null) {
-        return '-';
+function formatUseCase(useCase) {
+    if (!useCase) {
+        return '';
+    }
+    return SES.i18n.t('ai.evaluation.useCase.' + useCase, useCase);
+}
+
+function formatRate(value, runCount) {
+    if (runCount === 0 || value == null) {
+        return '—';
     }
     return SES.escapeHtml(Number(value).toFixed(1) + '%');
+}
+
+function formatCost(value, runCount) {
+    if (runCount === 0 || value == null) {
+        return '—';
+    }
+    return SES.escapeHtml(String(value));
+}
+
+function sampleFieldLabel(key) {
+    return SES.i18n.t('ai.evaluation.field.' + key, key.split('.').pop());
+}
+
+function formatSampleValue(key, value) {
+    if (value == null || value === '') {
+        return '—';
+    }
+    if (SAMPLE_YEN_FIELDS[key]) {
+        const n = Number(value);
+        if (!isNaN(n)) {
+            return '¥' + n.toLocaleString('ja-JP');
+        }
+    }
+    return String(value);
 }

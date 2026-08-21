@@ -60,5 +60,12 @@
     function t(key, fallback) { return SES.i18n.t(key, fallback); }
     function esc(value) { return SES.escapeHtml(String(value ?? '')); }
     function clearError() { document.getElementById('leaveError').classList.add('d-none'); }
-    function showError(error) { const el = document.getElementById('leaveError'); el.textContent = error || t('leave.error', '休暇の処理に失敗しました'); el.classList.remove('d-none'); }
+    function showError(error) {
+        const el = document.getElementById('leaveError');
+        const text = typeof error === 'string' && error.trim()
+            ? error
+            : t('leave.error', '休暇の処理に失敗しました');
+        el.textContent = text;
+        el.classList.remove('d-none');
+    }
 })();
