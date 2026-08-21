@@ -343,7 +343,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     @Override
     @Transactional(rollbackFor = Exception.class)
     public SalesOrder createDraftFromQuotation(Long quotationId) {
-        Quotation quotation = quotationMapper.selectById(quotationId);
+        // 同一見積の並行 create を直列化する（order_no 採番競合と二重 INSERT を防ぐ / S09-P1-01）。
+        Quotation quotation = quotationMapper.selectByIdForUpdate(quotationId);
         if (quotation == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -365,7 +366,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
         try {
             insertWithNoRetry(order);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            // uk_sales_order_quotation 競合: 先行txの勝者を返して冪等化する（S09-P1-01）。
+            // uk_sales_order_quotation 競合の最終防衛（ロック抜け時）: 先行txの勝者を返す。
             SalesOrder winner = findByQuotationId(quotationId);
             if (winner != null) {
                 return winner;
@@ -483,8 +484,10 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 this.baseMapper.insert(order);
                 return;
             } catch (DuplicateKeyException e) {
-                // quotation_id UNIQUE 競合は採番再試行の対象外。呼出元で既存行を返す。
-                if (order.getQuotationId() != null && findByQuotationId(order.getQuotationId()) != null) {
+                // 見積紐付け注文: order_no / quotation_id いずれの UNIQUE 競合でも採番再試行しない。
+                // 先行tx未コミットだと findByQuotationId が空のまま3回尽きて numberGenerateFailed になるため、
+                // 呼出元（createDraftFromQuotation）へ委譲して勝者行を返す（S09-P1-01）。
+                if (order.getQuotationId() != null) {
                     throw e;
                 }
                 // 同時採番の衝突。次のループで最新の最大値から再採番する
