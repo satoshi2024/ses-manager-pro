@@ -132,7 +132,9 @@ openssl genrsa -out priv2.pem 2048 2>/dev/null
 openssl rsa -in priv2.pem -pubout -out pub2.pem 2>/dev/null
 cp pub1.pem "$WORK_DIR/pubkeys/alice.pem"
 cp pub2.pem "$WORK_DIR/pubkeys/bob.pem"
-PLAN_SHA=$(sha256sum "$PLANS_DIR/$PLAN_ID.json" | awk '{print $1}')
+# claim は sidecar canonical SHA（created_at_utc 除外）に bind する。file sha256sum は不可。
+PLAN_SHA=$(tr -d ' \t\r\n' < "$PLANS_DIR/$PLAN_ID.json.sha256")
+[[ -n "$PLAN_SHA" ]] || fail "plan sidecar SHA を取得できません"
 FUTURE=$(date -u -d "now + 2 hours" +%Y-%m-%dT%H:%M:%SZ)
 for a in alice bob; do
   if [[ "$a" == alice ]]; then KEY=priv1.pem; else KEY=priv2.pem; fi
