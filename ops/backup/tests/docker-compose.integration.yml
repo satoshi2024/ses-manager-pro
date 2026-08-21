@@ -64,7 +64,7 @@ services:
   # quiesce protocol の scheduler 相当（stop 要求に ack を返すデーモン）
   scheduler:
     image: ses-backup-tool:integration
-    container_name: ses-bkup-int-scheduler
+    container_name: ses-bkup-int-schedule
     networks: [ses-bkup]
     volumes:
       - ${INTEGRATION_WORK_DIR:?INTEGRATION_WORK_DIR required}:/work:rw

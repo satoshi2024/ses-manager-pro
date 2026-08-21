@@ -83,6 +83,19 @@ run_suite "performance regression" "performance-tests" "$@"
 run_suite "browser demo (real Chrome, T093)" "browser-tests" "$@"
 
 echo
+echo "=== HFP-03: backup unit suite ==="
+if bash ops/backup/tests/run-unit-tests.sh; then
+  echo "backup unit suite: SUCCESS"
+  unit_status=0
+else
+  echo "backup unit suite: FAIL（CI と同じ判定で失敗扱い）" >&2
+  unit_status=1
+fi
+if [ "$unit_status" -ne 0 ]; then
+  exit 1
+fi
+
+echo
 echo "=== HFP-03-011: backup integration suite（実 MySQL PITR） ==="
 if [ "$docker_ok" -eq 1 ]; then
   echo "Docker あり -> integration suite を実行します（数分かかります）"

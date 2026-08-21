@@ -76,10 +76,15 @@ retention::build_report() { # -> report JSON
     "$RETENTION_WEEKLY_COUNT" "$RETENTION_MONTHLY_COUNT" "$now")
 
   # 各 checkpoint の PITR_AVAILABLE（チェーン完全性）
-  local rows chain avail="{}"
-  rows=$(printf '%s' "$graph" | jq -c --arg t "$now" \
-    '[.checkpoints[] | select(.status == "VALID") | . + {age_days: ((($t | fromdateiso8601) - (.consistency_time_utc | fromdateiso8601)) / 86400)}]')
-  local row
+  # age_days は dep::age_days（UTC）。fromdateiso8601 は使わない。
+  local rows="[]" chain avail="{}" row ts age
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    ts=$(printf '%s' "$row" | jq -r '.consistency_time_utc // empty')
+    age=$(dep::age_days "$now" "$ts") || continue
+    rows=$(printf '%s' "$rows" | jq -c --argjson r "$row" --argjson a "$age" \
+      '. + [$r + {age_days: $a}]')
+  done <<< "$(printf '%s' "$graph" | jq -c '.checkpoints[] | select(.status == "VALID")')"
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     local id

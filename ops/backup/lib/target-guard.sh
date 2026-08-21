@@ -24,17 +24,26 @@ target_guard::control_marker() { # target_uuid -> allowlist_ref plan_id
     --execute "SELECT allowlist_ref, plan_id FROM ses_recovery_control.targets WHERE uuid = '$1';" 2>/dev/null
 }
 
-# target DB の table 数（存在しない場合は -1 を出力）
-target_guard::table_count() { # db
+# target DB の object 数（tables + routines + events）。
+# COUNT 失敗・空出力・非整数は空文字を返し、呼び出し側で fail-closed する。
+# （旧実装の -1 = 空扱い fail-open は禁止）
+target_guard::object_count() { # db
   local out
   out=$("$MYSQL_CLIENT_BIN" "${TARGET_OPT_ARGS[@]}" -N -B \
-    --execute "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$1';" 2>/dev/null)
-  if [[ -z "$out" ]]; then
-    echo "-1"
-  else
-    echo "$out"
+    --execute "SELECT
+      (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$1')
+      + (SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = '$1')
+      + (SELECT COUNT(*) FROM information_schema.events WHERE event_schema = '$1');" 2>/dev/null) || out=""
+  if [[ -z "$out" || ! "$out" =~ ^[0-9]+$ ]]; then
+    echo ""
+    return 1
   fi
+  echo "$out"
+  return 0
 }
+
+# 互換エイリアス
+target_guard::table_count() { target_guard::object_count "$@"; }
 
 # 全 guard を実行（0=通過、それ以外=拒否）
 target_guard::run() { # plan_json target_db
@@ -46,10 +55,13 @@ target_guard::run() { # plan_json target_db
   common::require_env TARGET_PASSWORD_FILE
   common::require_env SOURCE_HOST
 
-  if [[ -z "$TARGET_HOST" || "$TARGET_HOST" == "localhost" ]]; then
-    target_guard::fail "TARGET_HOST が空または localhost です"
-    return 1
-  fi
+  # loopback / 空 / 未設定 fallback は拒否（同一 DB 機上の別 mysqld への誤適用防止）
+  case "$TARGET_HOST" in
+    ""|localhost|127.0.0.1|::1|"[::1]")
+      target_guard::fail "TARGET_HOST が空または loopback（localhost/127.0.0.1/::1）です"
+      return 1
+      ;;
+  esac
   if [[ -z "$TARGET_USER" || "$TARGET_USER" == "root" ]]; then
     target_guard::fail "TARGET_USER が空または root です（scoped account を指定）"
     return 1
@@ -108,10 +120,15 @@ target_guard::run() { # plan_json target_db
     return 1
   fi
 
+  # 非空検査は fail-closed: COUNT 失敗・非整数は拒否。
+  # 許容は「schema 不在（COUNT=0）または table+routine+event=0」のみ。
   local count
-  count=$(target_guard::table_count "$plan_db")
-  if [[ "$count" != "-1" ]] && (( count > 0 )); then
-    target_guard::fail "target DB が空ではありません（table=$count）: $plan_db"
+  if ! count=$(target_guard::object_count "$plan_db"); then
+    target_guard::fail "target DB の object COUNT に失敗しました（fail-closed）: $plan_db"
+    return 1
+  fi
+  if (( count > 0 )); then
+    target_guard::fail "target DB が空ではありません（objects=$count）: $plan_db"
     return 1
   fi
   return 0

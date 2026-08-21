@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# HFP-03 unit test ランナー（ツールイメージ内で実行される）
-# ops/backup/tests/*-test.sh を順に実行し、1 つでも失敗すれば非 0 で終了する。
+# HFP-03 unit test ランナー
+# Docker イメージ内でもホスト直実行でも動く。
 set -uo pipefail
 
-export PATH="/repo/ops/backup/tests/fixtures/bin:$PATH"
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+export PATH="$HERE/fixtures/bin:/usr/local/bin:$PATH"
+
 failed=0
-for t in /repo/ops/backup/tests/*-test.sh; do
+shopt -s nullglob
+tests=("$HERE"/*-test.sh)
+if ((${#tests[@]} == 0)); then
+  echo "ERROR: *-test.sh が見つかりません: $HERE" >&2
+  exit 1
+fi
+for t in "${tests[@]}"; do
   echo "== $(basename "$t") =="
   if ! bash "$t"; then
     echo "FAILED: $(basename "$t")" >&2

@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # HFP-03 unit test 用の restic wrapper。
 # argv を RESTIC_ARGV_LOG へ記録し、実 restic（RESTIC_REAL_BIN）へ委譲する。
+# FAKE_RESTIC_BACKUP_RC が設定されていれば backup サブコマンドを失敗させる。
 set -uo pipefail
 
 if [[ -n "${RESTIC_ARGV_LOG:-}" ]]; then
   printf '%s\n' "$*" >> "$RESTIC_ARGV_LOG"
+fi
+
+is_backup=0
+for a in "$@"; do
+  [[ "$a" == "backup" ]] && is_backup=1
+done
+if (( is_backup )) && [[ -n "${FAKE_RESTIC_BACKUP_RC:-}" ]]; then
+  exit "$FAKE_RESTIC_BACKUP_RC"
 fi
 
 exec "${RESTIC_REAL_BIN:-/usr/local/bin/restic}" "$@"

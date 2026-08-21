@@ -79,6 +79,8 @@ binlog_archive::source_logs() {
 }
 
 # 開始 file の決定: state の last file の次 / full coordinate / 現最新
+# 重要: source current（active）を complete 扱いして次へ飛ばさない。
+# last_file == source current なら同一 file から coordinate 継続する。
 binlog_archive::resolve_start() {
   local logs
   logs=$(binlog_archive::source_logs) || return 1
@@ -91,12 +93,11 @@ binlog_archive::resolve_start() {
     local s e
     s=$(binlog::suffix "$STATE_LAST_FILE")
     e=$(binlog::suffix "$current")
-    if [[ -n "$s" && -n "$e" && 10#$s -ge 10#$e ]]; then
+    if [[ -n "$s" && -n "$e" && 10#$s -gt 10#$e ]]; then
       echo "archive-binlog: state の last file が source より新しい: $STATE_LAST_FILE" >&2
       return 1
     fi
     if [[ -f "$BINLOG_RAW_DIR/$STATE_LAST_FILE" ]]; then
-      # 前回 file の size を source と照合（不完全なら取り直し）
       local want
       want=$(printf '%s\n' "$logs" | awk -v f="$STATE_LAST_FILE" '$1 == f {print $2; exit}')
       local have
@@ -105,16 +106,16 @@ binlog_archive::resolve_start() {
         echo "archive-binlog: 不完全な前回 file を取り直します: $STATE_LAST_FILE" >&2
         rm -f "$BINLOG_RAW_DIR/$STATE_LAST_FILE"
         start=$STATE_LAST_FILE
+      elif [[ "$STATE_LAST_FILE" == "$current" ]]; then
+        echo "archive-binlog: last_file は source current（active）のため同 file から継続: $STATE_LAST_FILE" >&2
+        start=$STATE_LAST_FILE
       else
-        start=$(printf 'binlog.%06d' $((10#$s + 1)))
+        start=$(binlog::next_file "$STATE_LAST_FILE") || return 1
       fi
     else
       start=$STATE_LAST_FILE
     fi
   else
-    # 初回起動は full coordinate（FULL_COORDINATE_FILE）から開始する。
-    # R1 P1-06: 未設定・欠落の場合は黙って現行から開始せず失敗する
-    # （先行 binlog が未アーカイブのまま健康状態が偽装されるのを防ぐ）。
     if [[ -z "${FULL_COORDINATE_FILE:-}" ]]; then
       echo "archive-binlog: 初回起動には FULL_COORDINATE_FILE が必要です（backup-full が書き込みます）" >&2
       return 1
@@ -167,17 +168,16 @@ binlog_archive::prune_incomplete_raw() {
   while IFS= read -r -d '' raw_file; do
     local rel
     rel=$(basename "$raw_file")
-    [[ "$rel" == binlog.* ]] || continue
     local want
     want=$(printf '%s\n' "$logs" | awk -v f="$rel" '$1 == f {print $2; exit}')
-    [[ -n "$want" ]] || continue   # source に無い file は触らない
+    [[ -n "$want" ]] || continue
     local have
     have=$(stat -c %s "$raw_file" 2>/dev/null || echo 0)
     if (( have < want )); then
       echo "archive-binlog: 不完全 file を取り直し対象にします: $rel (have=$have want=$want)" >&2
       rm -f "$raw_file"
     fi
-  done < <(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -name 'binlog.*' -print0 2>/dev/null)
+  done < <(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -print0 2>/dev/null)
   return 0
 }
 
@@ -226,7 +226,8 @@ main() {
   touch "$BINLOG_STATE.heartbeat" 2>/dev/null || true
   # state には実際に raw へ落ちた最後の file を記録する（source の current ではない）
   local last_downloaded=""
-  last_downloaded=$(find "$BINLOG_RAW_DIR" -maxdepth 1 -name 'binlog.*' -printf '%f\n' 2>/dev/null | sort | tail -n1)
+  last_downloaded=$(find "$BINLOG_RAW_DIR" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null \
+    | grep -E '\.[0-9]+$' | sort | tail -n1)
   binlog_archive::save_state "${last_downloaded:-$start}" 2>/dev/null || true
   exit "$rc"
 }

@@ -71,7 +71,7 @@ validate_db::counts() { # counts_json
 validate_db::markers() { # markers_json
   local markers=$1
   [[ -n "$markers" ]] || return 0
-  local table before after
+  local table before afte
   table=$(printf '%s' "$markers" | jq -r '.table // empty')
   before=$(printf '%s' "$markers" | jq -r '.before // empty')
   after=$(printf '%s' "$markers" | jq -r '.after // empty')

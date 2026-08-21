@@ -151,6 +151,18 @@ foreach ($suite in $suites) {
 }
 
 Write-Host ''
+Write-Host '=== HFP-03: backup unit suite ==='
+$unitStatus = 1
+& $bashExecutable ops/backup/tests/run-unit-tests.sh
+if ($LASTEXITCODE -eq 0) {
+    Write-Host 'backup unit suite: SUCCESS'
+    $unitStatus = 0
+} else {
+    Write-Host 'backup unit suite: FAIL（CI と同じ判定で失敗扱い）'
+}
+if ($unitStatus -ne 0) { exit 1 }
+
+Write-Host ''
 Write-Host '=== HFP-03-011: backup integration suite（実 MySQL PITR） ==='
 $integrationStatus = 1
 if ($dockerOk) {
