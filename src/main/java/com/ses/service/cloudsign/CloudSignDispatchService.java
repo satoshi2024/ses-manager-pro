@@ -6,9 +6,12 @@ import com.ses.common.enums.DispatchState;
 import com.ses.config.CloudSignProperties;
 import com.ses.dto.cloudsign.AddParticipantRequest;
 import com.ses.dto.cloudsign.CloudSignDocument;
+import com.ses.dto.cloudsign.ConfirmedSendRequest;
 import com.ses.dto.cloudsign.CreateDocumentRequest;
+import com.ses.entity.Contract;
 import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
+import com.ses.mapper.ContractMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -35,13 +38,15 @@ import java.util.Set;
 @Service
 public class CloudSignDispatchService {
 
-    /** work状態 → 次工程（claim先）の対応。 */
+    /**
+     * work状態 → 次工程（claim先）の対応。
+     * SENDING→SENDING は含めない（再claimでsend POST=reminderを防ぐ。HFP-02-BUG-01）。
+     */
     private static final Map<String, String> CLAIM_TO = Map.of(
             DispatchState.QUEUED.name(), DispatchState.CREATING.name(),
             DispatchState.DOCUMENT_CREATED.name(), DispatchState.UPLOADING.name(),
             DispatchState.FILE_UPLOADED.name(), DispatchState.ADDING_PARTICIPANT.name(),
-            DispatchState.READY_TO_SEND.name(), DispatchState.SENDING.name(),
-            DispatchState.SENDING.name(), DispatchState.SENDING.name());
+            DispatchState.READY_TO_SEND.name(), DispatchState.SENDING.name());
 
     /** work状態 → 429等で戻る親工程。 */
     private static final Map<String, String> RETRY_BACK_TO = Map.of(
@@ -52,6 +57,9 @@ public class CloudSignDispatchService {
 
     private static final Set<String> DUE_STATES = CLAIM_TO.keySet();
 
+    /** 確定済みlanguage_codeの照合候補（ConfirmedSendRequestと同じ集合）。 */
+    private static final List<String> LANGUAGE_CODES = List.of("ja", "en", "zh-CHS", "zh-CHT");
+
     /** claim中のwork状態（stale claim検出対象）。 */
     private static final Set<String> WORK_STATES = Set.of(
             DispatchState.CREATING.name(),
@@ -60,6 +68,7 @@ public class CloudSignDispatchService {
             DispatchState.SENDING.name());
 
     private final ContractDocumentMapper mapper;
+    private final ContractMapper contractMapper;
     private final CloudSignApiClient api;
     private final CloudSignRateLimiter rateLimiter;
     private final CloudSignProperties properties;
@@ -71,6 +80,7 @@ public class CloudSignDispatchService {
     private final String uploadBasePath;
 
     public CloudSignDispatchService(ContractDocumentMapper mapper,
+                                    ContractMapper contractMapper,
                                     CloudSignApiClient api,
                                     CloudSignRateLimiter rateLimiter,
                                     CloudSignProperties properties,
@@ -79,6 +89,7 @@ public class CloudSignDispatchService {
                                     TransactionTemplate transactionTemplate,
                                     @org.springframework.beans.factory.annotation.Value("${app.upload.base-path:./uploads}") String uploadBasePath) {
         this.mapper = mapper;
+        this.contractMapper = contractMapper;
         this.api = api;
         this.rateLimiter = rateLimiter;
         this.properties = properties;
@@ -148,14 +159,15 @@ public class CloudSignDispatchService {
     }
 
     private void doCreate(ContractDocument working) {
-        if (!payloadAndSourceStillValid(working)) {
+        ConfirmedSendRequest confirmed = payloadAndSourceStillValid(working);
+        if (confirmed == null) {
             return; // findingはpayloadAndSourceStillValid内で記録済み
         }
         assertNoTransaction();
         rateLimiter.acquire();
         try {
             CloudSignDocument created = api.createDocument(
-                    new CreateDocumentRequest(titleOf(working), "op:" + working.getOperationId(), null));
+                    new CreateDocumentRequest(confirmed.title(), "op:" + working.getOperationId(), null));
             checkpoint(working, DispatchState.CREATING.name(), DispatchState.DOCUMENT_CREATED.name(),
                     created.id(), null, null, created.status());
         } catch (CloudSignApiException e) {
@@ -164,7 +176,7 @@ public class CloudSignDispatchService {
     }
 
     private void doUpload(ContractDocument working) {
-        if (!payloadAndSourceStillValid(working)) {
+        if (payloadAndSourceStillValid(working) == null) {
             return;
         }
         assertNoTransaction();
@@ -188,15 +200,16 @@ public class CloudSignDispatchService {
     }
 
     private void doParticipant(ContractDocument working) {
-        if (!payloadAndSourceStillValid(working)) {
+        ConfirmedSendRequest confirmed = payloadAndSourceStillValid(working);
+        if (confirmed == null) {
             return;
         }
         assertNoTransaction();
         rateLimiter.acquire();
         try {
             CloudSignDocument after = api.addParticipant(working.getCloudsignDocumentId(),
-                    new AddParticipantRequest(working.getRecipientName(), working.getRecipientEmail(),
-                            null, "ja"));
+                    new AddParticipantRequest(confirmed.recipientName(), confirmed.recipientEmail(),
+                            null, confirmed.languageCode()));
             String participantId = after.participants() != null && !after.participants().isEmpty()
                     ? after.participants().get(after.participants().size() - 1).id() : null;
             if (participantId == null) {
@@ -373,18 +386,21 @@ public class CloudSignDispatchService {
                 working.getId(), finding, working.getDispatchState(), safeVersion(working));
     }
 
-    /** 送信原本PDFがqueue時と同一かを再検証（AC-03-01/AC-03-05）。 */
-    private boolean payloadAndSourceStillValid(ContractDocument working) {
+    /**
+     * 送信原本PDFと確定済みsend payload（title/language含む）がqueue時と同一かを再検証。
+     * 一致した確定payloadを返し、不一致時は RECONCILIATION_REQUIRED + PAYLOAD_CHANGED 等へ遷移してnull。
+     */
+    private ConfirmedSendRequest payloadAndSourceStillValid(ContractDocument working) {
         if (working.getPdfSha256() == null || working.getSendPayloadSha256() == null) {
             fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "PAYLOAD_INCOMPLETE");
-            return false;
+            return null;
         }
         Path pdf = normalizePath(working.getPdfPath());
         if (pdf == null || !Files.isRegularFile(pdf)) {
             fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "SOURCE_MISSING");
-            return false;
+            return null;
         }
         byte[] bytes;
         try {
@@ -392,20 +408,61 @@ public class CloudSignDispatchService {
         } catch (Exception e) {
             fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "SOURCE_UNREADABLE");
-            return false;
+            return null;
         }
         if (bytes.length > properties.getMaxPdfBytes() || !isPdfBytes(bytes)) {
             fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "SOURCE_INVALID");
-            return false;
+            return null;
         }
         String currentHash = sha256Hex(bytes);
         if (!currentHash.equals(working.getPdfSha256())) {
             fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "SOURCE_HASH_CHANGED");
-            return false;
+            return null;
         }
-        return true;
+        ConfirmedSendRequest confirmed = resolveConfirmedPayload(working);
+        if (confirmed == null) {
+            fail(working, working.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
+                    "PAYLOAD_CHANGED");
+            return null;
+        }
+        return confirmed;
+    }
+
+    /**
+     * 現行DBの宛先・契約番号とオンライン同一のtitle規則で ConfirmedSendRequest を再構築し、
+     * 保存済み send_payload_sha256 と一致する languageCode を特定する。
+     */
+    private ConfirmedSendRequest resolveConfirmedPayload(ContractDocument working) {
+        Contract contract = working.getContractId() == null ? null
+                : contractMapper.selectById(working.getContractId());
+        if (contract == null || contract.getContractNo() == null || contract.getContractNo().isBlank()) {
+            return null;
+        }
+        if (working.getTemplateVersion() == null
+                || working.getRecipientName() == null || working.getRecipientName().isBlank()
+                || working.getRecipientEmail() == null || working.getRecipientEmail().isBlank()) {
+            return null;
+        }
+        String title = titleOf(working);
+        for (String languageCode : LANGUAGE_CODES) {
+            try {
+                ConfirmedSendRequest candidate = new ConfirmedSendRequest(
+                        contract.getContractNo(),
+                        working.getTemplateVersion(),
+                        working.getRecipientName(),
+                        working.getRecipientEmail(),
+                        title,
+                        languageCode);
+                if (working.getSendPayloadSha256().equals(CloudSignPayloadHasher.hash(candidate))) {
+                    return candidate;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // 宛先不正等は候補不一致として次へ
+            }
+        }
+        return null;
     }
 
     byte[] readValidatedSourcePdf(ContractDocument working) {
@@ -443,7 +500,8 @@ public class CloudSignDispatchService {
         return p == null || p.getFileName() == null ? "document.pdf" : p.getFileName().toString();
     }
 
-    /** stale claim検出: claim保持のまま長時間経過したwork行は結果不明へ（自動未実行へ戻さない）。 */
+    /** stale claim検出: claim保持のまま長時間経過したwork行は結果不明へ（自動未実行へ戻さない）。
+     * SENDINGのみGET照合（verifyThenAdvance）。盲目のsend POST禁止（HFP-02-BUG-01）。 */
     void reconcileStaleClaims(LocalDateTime now) {
         LocalDateTime threshold = now.minusMinutes(Math.max(1, properties.getStaleClaimMinutes()));
         List<ContractDocument> stale = mapper.selectList(new LambdaQueryWrapper<ContractDocument>()
@@ -451,6 +509,13 @@ public class CloudSignDispatchService {
                 .isNotNull(ContractDocument::getClaimedAt)
                 .lt(ContractDocument::getClaimedAt, threshold));
         for (ContractDocument doc : stale) {
+            if (DispatchState.SENDING.name().equals(doc.getDispatchState())) {
+                log.warn("[契約書dispatch] stale SENDINGをGET照合: docId={} claimedAt={} owner={}",
+                        doc.getId(), doc.getClaimedAt(), maskedOwner(doc.getClaimOwner()));
+                reconciliation.verifyThenAdvance(doc, DispatchState.SENDING.name(),
+                        DispatchState.SENT.name());
+                continue;
+            }
             int updated = inTransaction(() -> mapper.casFail(doc.getId(), safeVersion(doc),
                     doc.getDispatchState(), DispatchState.RECONCILIATION_REQUIRED.name(),
                     "STALE_CLAIM"));

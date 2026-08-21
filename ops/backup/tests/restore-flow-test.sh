@@ -48,7 +48,7 @@ setup_restore() {
 # restic に full / checkpoint / binlog の snapshot を直接作成し、index と plan を生成する
 build_backup_fixture() {
 # 簡易 manifest（tmp へ書いてから mv する。直接 > すると find が空 manifest を見る）
-make_manifest() { # dir
+make_manifest() { # di
   local dir=$1
   jq -s '{schema_version:1, files: .}' \
     < <(cd "$dir" && find . -type f -not -name 'manifest.json*' | while read -r f; do
@@ -114,7 +114,7 @@ make_claims() {
   openssl rsa -in "$T/priv2.pem" -pubout -out "$T/pub2.pem" 2>/dev/null
   local plan_path="$T/plans/$PLAN_ID.json"
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  plan_sha=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   local future
   future=$(date -u -d "now + 2 hours" +%Y-%m-%dT%H:%M:%SZ)
   local i
@@ -264,6 +264,30 @@ case_restore_mid_binlog_failure() {
   fi
 }
 
+case_restore_mysql_pwd_rejected() {
+  setup_restore
+  build_backup_fixture
+  make_claims
+  export MYSQL_PWD="$FAKE_PW"
+  local out=""
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_eq 18 "$?" "MYSQL_PWD 使用検出で exit 18"
+  assert_contains "$out" "MYSQL_PWD" "理由"
+  unset MYSQL_PWD
+}
+
+case_restore_count_fail_closed() {
+  setup_restore
+  build_backup_fixture
+  make_claims
+  export FAKE_TABLE_COUNT_FAIL=1
+  local out=""
+  out=$("$RESTORE" --plan "$PLAN_ID" --approval "$T/claim-alice.json" --approval "$T/claim-bob.json" 2>&1)
+  assert_nonzero "$?" "COUNT 失敗は restore 拒否"
+  assert_contains "$out" "target-guard" "guard 理由"
+  unset FAKE_TABLE_COUNT_FAIL
+}
+
 run_case case_restore_normal_flow
 run_case case_restore_reset_master_fail
 run_case case_restore_tls_disabled_rejected
@@ -271,6 +295,8 @@ run_case case_restore_binlog_sha_mismatch
 run_case case_restore_guard_reject
 run_case case_restore_approval_missing
 run_case case_restore_mid_binlog_failure
+run_case case_restore_mysql_pwd_rejected
+run_case case_restore_count_fail_closed
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then
   test_fail "global-secret-scan" "TEST_LOG に秘密が残った"

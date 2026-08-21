@@ -215,7 +215,7 @@ case_approval_verify() {
   pid=$(plan_id_from_dir)
   local plan_path="$T/plans/$pid.json"
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  plan_sha=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   openssl genrsa -out "$T/priv1.pem" 2048 2>/dev/null
   openssl rsa -in "$T/priv1.pem" -pubout -out "$T/pub1.pem" 2>/dev/null
   openssl genrsa -out "$T/priv2.pem" 2048 2>/dev/null
@@ -245,6 +245,10 @@ case_approval_verify() {
 
   approval::collect_and_verify "$plan_path" target-uuid-001 "$T/claim-a.json" "$T/claim-b.json"
   assert_zero "$?" "2 名の正常 claim は成功"
+  # stdout の plan_sha256（canonical）でも承認できること
+  local stdout_sha
+  stdout_sha=$(printf '%s\n' "$PLAN_OUT" | sed -n 's/^plan_sha256=//p' | tail -n1)
+  assert_eq "$(tr -d ' \t\r\n' < "$plan_path.sha256")" "$stdout_sha" "stdout SHA == sidecar SHA"
   # 同一 actor
   approval::collect_and_verify "$plan_path" target-uuid-001 "$T/claim-a.json" "$T/claim-a.json"
   assert_nonzero "$?" "同一 actor は拒否"
@@ -274,6 +278,19 @@ case_approval_verify() {
   assert_nonzero "$?" "署名対象の改変は拒否"
 }
 
+case_plan_nondefault_basename() {
+  setup_plan
+  write_index_entry full 2026-08-14T10:00:00Z mysql-bin.000010 154
+  write_index_entry checkpoint 2026-08-14T10:15:00Z mysql-bin.000011 200
+  for f in mysql-bin.000010 mysql-bin.000011; do
+    write_binlog_index_entry "$f"
+  done
+  run_plan 2026-08-14T10:20:00Z
+  assert_zero "$PLAN_RC" "非デフォルト basename で plan 成功"
+  assert_contains "$PLAN_OUT" '"mysql-bin.000010"' "接頭辞保持 start"
+  assert_contains "$PLAN_OUT" '"mysql-bin.000011"' "接頭辞保持 end"
+}
+
 run_case case_plan_selects_before_target
 run_case case_plan_latest_full_after_target_not_selected
 run_case case_plan_timezone_independent
@@ -284,6 +301,7 @@ run_case case_plan_tamper_detected
 run_case case_plan_tamper_valid_until_detected
 run_case case_plan_expiry
 run_case case_plan_parser_rejects_bad_target
+run_case case_plan_nondefault_basename
 run_case case_approval_verify
 
 if grep -r "$FAKE_PW" "$TEST_LOG" > /dev/null 2>&1; then

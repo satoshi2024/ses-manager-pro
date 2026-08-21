@@ -42,7 +42,7 @@ setup_full() {
   export BACKUP_WORK_DIR="$T/work" UPLOADS_DIR="$T/uploads" UPLOADS_STAGING_PARENT="$T/staging"
   export REPLICA_HEARTBEAT_DIR="$T/replicas" SCHEDULER_ACK_DIR="$T/scheduler"
   export PREFLIGHT_MIN_FREE_BYTES=1 QUIESCE_DEADLINE_SECONDS=20 QUIESCE_STALE_SECONDS=60
-  export APP_COMMIT=test-commit-abc FLYWAY_VERSION=42 CRITICAL_TABLES=sys_user
+  export APP_COMMIT=test-commit-abc FLYWAY_VERSION=42 CRITICAL_TABLES=sys_use
   export BACKUP_TOOL_IMAGE_DIGEST=sha256:unit-test-digest
   # R1 P1-06: full coordinate は必須（archiver の初回起点）
   export FULL_COORDINATE_FILE="$T/full-coordinate"
@@ -272,7 +272,7 @@ case_backup_full_failure_releases_quiesce() {
   assert_nonzero "$code" "dump 失敗で backup-full は非 0"
   assert_no_file "$QUIESCE_STATE_DIR/ddl-session.pid" "失敗後も DDL session pid が残らない（quiesce 解放済み）"
   # R2 P2-04: trap 連結により option file（秘密）が残らないこと
-  local leftover
+  local leftove
   leftover=$(ls "$TMPDIR"/ses-backup-mysql.* 2>/dev/null | wc -l)
   assert_eq "0" "$leftover" "失敗後も option file が残らない（trap 連結）"
   unset QUIESCE_STATE_DIR FAKE_DUMP_RC

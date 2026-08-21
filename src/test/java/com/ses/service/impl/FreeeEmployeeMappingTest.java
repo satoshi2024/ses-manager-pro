@@ -322,6 +322,47 @@ class FreeeEmployeeMappingTest {
     }
 
     @Test
+    @DisplayName("employees: BPへ変更済みの現在company linkはRECONFIRM_REQUIRED（HFP-01-BUG-03）")
+    void bpChangedCurrentCompanyLinkIsReconfirmRequired() throws Exception {
+        seedConnected();
+        stubEmployeesPage();
+
+        FreeeEmployeeLink bpLink = new FreeeEmployeeLink();
+        bpLink.setEngineerId(7L);
+        bpLink.setFreeeEmployeeId("501");
+        bpLink.setFreeeCompanyId(123L);
+        when(linkMapper.selectList(any())).thenReturn(List.of(bpLink));
+        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer(7L, "BP")));
+
+        List<FreeeEmployeeDto> result = service.employees();
+        FreeeEmployeeDto e501 = result.stream().filter(e -> e.getId().equals("501")).findFirst().orElseThrow();
+        assertEquals("RECONFIRM_REQUIRED", e501.getLinkState());
+        assertEquals(7L, e501.getLinkedEngineerId());
+        assertEquals("テスト要員7", e501.getLinkedEngineerName());
+        verify(linkMapper, never()).deleteByEngineerIdHard(any());
+    }
+
+    @Test
+    @DisplayName("employees: 削除済み要員の現在company linkはRECONFIRM_REQUIRED（HFP-01-BUG-03）")
+    void softDeletedCurrentCompanyLinkIsReconfirmRequired() throws Exception {
+        seedConnected();
+        stubEmployeesPage();
+
+        FreeeEmployeeLink deletedLink = new FreeeEmployeeLink();
+        deletedLink.setEngineerId(7L);
+        deletedLink.setFreeeEmployeeId("501");
+        deletedLink.setFreeeCompanyId(123L);
+        when(linkMapper.selectList(any())).thenReturn(List.of(deletedLink));
+        when(engineerMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        List<FreeeEmployeeDto> result = service.employees();
+        FreeeEmployeeDto e501 = result.stream().filter(e -> e.getId().equals("501")).findFirst().orElseThrow();
+        assertEquals("RECONFIRM_REQUIRED", e501.getLinkState());
+        assertEquals(7L, e501.getLinkedEngineerId());
+        assertNull(e501.getLinkedEngineerName());
+    }
+
+    @Test
     @DisplayName("engineerCandidatesは非BP・未削除だけを返す（AC06）")
     void engineerCandidatesは非BPだけ返す() {
         when(engineerMapper.selectList(any())).thenReturn(List.of(

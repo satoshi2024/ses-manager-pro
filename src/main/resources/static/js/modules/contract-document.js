@@ -109,9 +109,9 @@ function renderRow(d) {
         dispatchHtml += `<div class="text-danger small mt-1">OP: ${SES.escapeHtml(d.operationId)}</div>`;
     }
 
-    // 操作ボタン（API認可が正。UIは表示制御のみ）
+    // 操作ボタン（API認可が正。UIは表示制御のみ。送信は下書き+NONEのみ。HFP-02-BUG-07）
     let actions = '';
-    if (CAN_SEND && d.dispatchState === 'NONE') {
+    if (CAN_SEND && d.dispatchState === 'NONE' && d.status === '下書き') {
         actions += `<button class="btn btn-sm btn-outline-success me-1" onclick="openSendConfirm(${d.id})"><i class="bi bi-send"></i> 送信</button>`;
     }
     if (CAN_SYNC && (d.dispatchState === 'SENT' || d.dispatchState === 'RECONCILIATION_REQUIRED')) {
@@ -169,12 +169,23 @@ function createDocument() {
         return;
     }
 
-    $.post(`/api/contract-documents?contractId=${cid}&templateId=${tid}&recipientName=${encodeURIComponent(rname)}&recipientEmail=${encodeURIComponent(remail)}`, function(res) {
-        if (res.code === 200) {
-            bootstrap.Modal.getInstance(document.getElementById('createDocModal')).hide();
-            SES.toast.success('契約書を作成しました');
-            $('#contractIdSelect').val(cid);
-            loadDocuments();
+    $.ajax({
+        url: '/api/contract-documents',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            contractId: Number(cid),
+            templateId: Number(tid),
+            recipientName: rname,
+            recipientEmail: remail
+        }),
+        success: function(res) {
+            if (res.code === 200) {
+                bootstrap.Modal.getInstance(document.getElementById('createDocModal')).hide();
+                SES.toast.success('契約書を作成しました');
+                $('#contractIdSelect').val(cid);
+                loadDocuments();
+            }
         }
     });
 }

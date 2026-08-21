@@ -49,13 +49,26 @@ exit "${OLD_SMOKE_RC:-0}"
 EOF
   chmod +x "$T/smoke-ok.sh" "$T/old-smoke-ok.sh"
   export APP_SMOKE_SCRIPT="$T/smoke-ok.sh" OLD_ENV_SMOKE_SCRIPT="$T/old-smoke-ok.sh"
-  # write-enable provider
+  # write-enable provider（argv / environ に秘密を載せないことを検証）
   cat > "$T/write-enable.sh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "argv:$*" >> "${WRITE_ENABLE_LOG:-/dev/null}"
+env | sort >> "${WRITE_ENABLE_ENV_LOG:-/dev/null}"
+if printf '%s' "$*" | grep -q -- '-p'; then
+  echo "write-enable: password on argv" >&2
+  exit 9
+fi
+if [[ -n "${TARGET_PASSWORD:-}" || -n "${MYSQL_PWD:-}" ]]; then
+  echo "write-enable: password in environ" >&2
+  exit 9
+fi
+[[ -n "${TARGET_PASSWORD_FILE:-}" ]] || { echo "TARGET_PASSWORD_FILE required" >&2; exit 1; }
 exit "${WRITE_RC:-0}"
 EOF
   chmod +x "$T/write-enable.sh"
   export WRITE_ENABLE_COMMAND="$T/write-enable.sh"
+  export WRITE_ENABLE_LOG="$T/we-argv.log" WRITE_ENABLE_ENV_LOG="$T/we-env.log"
+  : > "$WRITE_ENABLE_LOG" ; : > "$WRITE_ENABLE_ENV_LOG"
   # 承認鍵
   openssl genrsa -out "$T/priv1.pem" 2048 2>/dev/null
   openssl rsa -in "$T/priv1.pem" -pubout -out "$T/pub1.pem" 2>/dev/null
@@ -77,7 +90,7 @@ EOF
 make_claims() {
   local plan_path="$PLANS_DIR/$PLAN_ID.json"
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  plan_sha=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   local future
   future=$(date -u -d "now + 2 hours" +%Y-%m-%dT%H:%M:%SZ)
   local a
@@ -107,6 +120,26 @@ case_cutover_normal() {
   assert_zero "$RC" "正常 cutover 成功"
   assert_contains "$OUT" '"state": "write-enabled"' "write-enabled を返す"
   assert_eq "write-enabled" "$(state_now)" "state file が write-enabled"
+  if grep -q "$FAKE_PW" "$WRITE_ENABLE_LOG" "$WRITE_ENABLE_ENV_LOG" "$TEST_LOG" 2>/dev/null; then
+    test_fail "cutover-secret-scan" "write-enable 経路に秘密が露出"
+  else
+    test_assert "cutover-secret-scan"
+  fi
+  if grep -q 'TARGET_PASSWORD=' "$WRITE_ENABLE_ENV_LOG" 2>/dev/null; then
+    test_fail "cutover-no-target-password-env" "TARGET_PASSWORD が environ に残存"
+  else
+    test_assert "cutover-no-target-password-env"
+  fi
+}
+
+case_cutover_mysql_pwd_rejected() {
+  setup_cutover
+  make_claims
+  export MYSQL_PWD="$FAKE_PW" SMOKE_RC=0 WRITE_RC=0
+  run_cutover
+  assert_eq 18 "$RC" "MYSQL_PWD 使用検出で exit 18"
+  assert_contains "$OUT" "MYSQL_PWD" "MYSQL_PWD を拒否メッセージに含む"
+  unset MYSQL_PWD
 }
 
 case_cutover_smoke_fail_rollback() {
@@ -214,6 +247,7 @@ case_rollback_old_env_fail() {
 }
 
 run_case case_cutover_normal
+run_case case_cutover_mysql_pwd_rejected
 run_case case_cutover_smoke_fail_rollback
 run_case case_cutover_validation_not_ready
 run_case case_cutover_approval_missing

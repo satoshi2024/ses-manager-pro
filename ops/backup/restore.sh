@@ -27,6 +27,7 @@ LIB_DIR="$SCRIPT_DIR/lib"
 . "$LIB_DIR/target-guard.sh"
 . "$LIB_DIR/approval.sh"
 . "$LIB_DIR/safe-extract.sh"
+. "$LIB_DIR/mysql-options.sh"
 
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
 MYSQLBINLOG_BIN=${MYSQLBINLOG_BIN:-mysqlbinlog}
@@ -70,6 +71,13 @@ main() {
   common::require_env SOURCE_HOST
   TARGET_PORT=${TARGET_PORT:-3306}
 
+  # AC-008-01: MYSQL_PWD 禁止。秘密は option file のみ。
+  if [[ -n "${MYSQL_PWD:-}" ]]; then
+    echo "[restore] ERROR: MYSQL_PWD の使用は禁止です（TARGET_PASSWORD_FILE を使用してください）" >&2
+    exit 18
+  fi
+  unset MYSQL_PWD 2>/dev/null || true
+
   # R1 P1-05: 復元先への接続は VERIFY 系 TLS のみ許可（DISABLED/平文は拒否）
   case "${TARGET_TLS_MODE:-VERIFY_CA}" in
     VERIFY_IDENTITY|VERIFY_CA) TARGET_TLS_MODE_SAFE=${TARGET_TLS_MODE:-VERIFY_CA} ;;
@@ -89,19 +97,17 @@ main() {
   local plan_json
   plan_json=$(cat "$plan_path")
 
-  # target credential 用 option file（source の credential は mount しない）
-  target_optfile=$(mktemp)
-  {
-    echo '[client]'
-    echo "user=$TARGET_USER"
-    echo "port=$TARGET_PORT"
-    echo "password=$(head -n1 "$TARGET_PASSWORD_FILE")"
-    echo "ssl-mode=$TARGET_TLS_MODE_SAFE"
-    [[ -n "${TARGET_SSL_CAPATH:-}" ]] && echo "ssl-capath=$TARGET_SSL_CAPATH"
-  } > "$target_optfile"
-  chmod 600 "$target_optfile"
-  TARGET_OPT_ARGS=(--defaults-extra-file="$target_optfile" -h "$TARGET_HOST")
-  common::trap_add 'rm -f "$target_optfile"; restore::cleanup'
+  # target credential 用 option file（mysql_options::init を再利用）
+  # 注意: VAR=val func 形式は bash の local/pop_var_context 不具合を起こすため使わない
+  MYSQL_USER="$TARGET_USER"
+  MYSQL_PASSWORD_FILE="$TARGET_PASSWORD_FILE"
+  MYSQL_PORT="$TARGET_PORT"
+  MYSQL_SSL_CAPATH="${TARGET_SSL_CAPATH:-}"
+  MYSQL_TLS_MODE="$TARGET_TLS_MODE_SAFE"
+  mysql_options::init || restore::fail "mysql option file を作成できません（接続設定を確認してください）"
+  local target_optfile=$MYSQL_OPTFILE
+  TARGET_OPT_ARGS=("${MYSQL_OPT_ARGS[@]}" -h "$TARGET_HOST")
+  common::trap_add 'restore::cleanup'
 
   # target guard（plan・allowlist・marker・空 DB・default 拒否）
   target_guard::run "$plan_json" "$TARGET_DATABASE" || restore::fail "target guard に失敗しました"

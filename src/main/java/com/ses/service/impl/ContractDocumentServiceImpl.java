@@ -86,7 +86,8 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
             d.setPdfPath(pdf.toString());
             d.setPdfSha256(hex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(pdf))));
         } catch (Exception e) {
-            throw BusinessException.of("error.contract.document.pdfFailed", e.getMessage());
+            log.error("契約書PDF生成に失敗しました: contractId={}", contractId, e);
+            throw BusinessException.of("error.contract.document.pdfFailed");
         }
         
         save(d);
@@ -133,6 +134,10 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
         ContractDocument d = getById(id);
         if (d == null) {
             throw BusinessException.of("error.contract.document.notFound");
+        }
+        // 業務状態が下書き以外、または締結済artifactがある行は再送不可（HFP-02-BUG-07）
+        if (!"下書き".equals(d.getStatus()) || hasTerminalArtifact(d)) {
+            throw BusinessException.of("error.contract.document.invalidState");
         }
         // 確認済みpayloadが現在の書類/契約と一致することを検証（HFP-02-AC-03-04/05）
         Contract c = contracts.selectById(d.getContractId());
@@ -183,6 +188,14 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
 
     private static int safeVersion(ContractDocument doc) {
         return doc.getVersion() == null ? 0 : doc.getVersion();
+    }
+
+    /** 締結済artifact（hash/台帳ID）がある行は再queue不可。 */
+    private static boolean hasTerminalArtifact(ContractDocument d) {
+        return (d.getSignedPdfSha256() != null && !d.getSignedPdfSha256().isBlank())
+                || (d.getCertificateSha256() != null && !d.getCertificateSha256().isBlank())
+                || d.getSignedArchiveDocumentId() != null
+                || d.getCertificateArchiveDocumentId() != null;
     }
 
     /** 送信原本PDFの事前検証（存在・正規化path・PDF magic/EOF・size・保存hash一致）。 */

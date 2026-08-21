@@ -92,24 +92,22 @@ selector::base_full() { # entries_json checkpoint_epoch lineage
 }
 
 # binlog の連続性と snapshot 解決（binlog-index から）
+# start/end の接頭辞（binlog / mysql-bin 等）を保持して列挙する（ハードコードしない）
 selector::resolve_binlogs() { # binlog_index start_file end_file
   local index=$1 start=$2 end=$3
-  local s e
-  s=${start##*.}
-  e=${end##*.}
-  [[ "$s" =~ ^[0-9]+$ && "$e" =~ ^[0-9]+$ ]] || { echo "plan: binlog suffix を解釈できません: $start .. $end" >&2; return 1; }
-  local arr="[]"
-  local i
-  for ((i = 10#$s; i <= 10#$e; i++)); do
-    local f
-    f=$(printf 'binlog.%06d' "$i")
-    local entry
+  local arr="[]" f entry
+  if ! declare -F binlog::files_in_range >/dev/null 2>&1; then
+    # shellcheck disable=SC1091
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/binlog.sh"
+  fi
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
     entry=$(jq -c --arg f "$f" '.[] | select(.file == $f) | {file, snapshot_id, sha256, size}' "$index" 2>/dev/null | head -n1)
     if [[ -z "$entry" ]]; then
       echo "plan: 必要 binlog が repository にありません: $f" >&2
       return 1
     fi
     arr=$(printf '%s' "$arr" | jq -c --argjson e "$entry" '. + [$e]')
-  done
+  done < <(binlog::files_in_range "$start" "$end") || return 1
   printf '%s\n' "$arr"
 }

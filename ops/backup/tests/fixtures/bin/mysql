@@ -42,12 +42,35 @@ if [[ -z "${query:-}" ]]; then
 fi
 
 case "$query" in
+  # target guard の object 数（tables+routines+events 合算）
+  *COUNT*table_schema*routines*|*COUNT*routine_schema*|*COUNT*event_schema*)
+    if [[ "${FAKE_TABLE_COUNT_FAIL:-0}" == "1" ]]; then
+      exit 1
+    fi
+    if [[ -n "${FAKE_TABLE_COUNT_EMPTY:-}" ]]; then
+      exit 0
+    fi
+    printf '%s\n' "${FAKE_TABLE_COUNT:-0}"
+    exit 0
+    ;;
   # target guard の table 数: WHERE table_schema = '...' 形式（スペース付き =）
   *COUNT*table_schema*equal*)
+    if [[ "${FAKE_TABLE_COUNT_FAIL:-0}" == "1" ]]; then
+      exit 1
+    fi
+    if [[ -n "${FAKE_TABLE_COUNT_EMPTY:-}" ]]; then
+      exit 0
+    fi
     printf '%s\n' "${FAKE_TABLE_COUNT:-0}"
     exit 0
     ;;
   *COUNT*table_schema\ =\ *)
+    if [[ "${FAKE_TABLE_COUNT_FAIL:-0}" == "1" ]]; then
+      exit 1
+    fi
+    if [[ -n "${FAKE_TABLE_COUNT_EMPTY:-}" ]]; then
+      exit 0
+    fi
     printf '%s\n' "${FAKE_TABLE_COUNT:-0}"
     exit 0
     ;;
@@ -105,12 +128,15 @@ case "$query" in
     exit 0
     ;;
   *FLUSH*BINARY*LOGS*)
-    # rotation: state file に新しい binlog を追記する
+    # rotation: state file に新しい binlog を追記する（接頭辞を保持）
     local_state=${FAKE_BINLOG_STATE:-}
     if [[ -n "$local_state" && -f "$local_state" ]]; then
       last=$(tail -n1 "$local_state" | cut -f1)
-      n=$((10#${last##*.} + 1))
-      printf 'binlog.%06d\t157\n' "$n" >> "$local_state"
+      prefix=${last%.*}
+      suf=${last##*.}
+      width=${#suf}
+      n=$((10#$suf + 1))
+      printf "%s.%0${width}d\t157\n" "$prefix" "$n" >> "$local_state"
     fi
     exit "${FAKE_FLUSH_RC:-0}"
     ;;

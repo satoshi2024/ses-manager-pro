@@ -46,10 +46,16 @@ approval::resolve_pubkey() { # actor
 }
 
 # 2 名の claim を収集・検証（plan・target に bind、異なる actor、期限内）
+# plan SHA は sidecar（plan::content_for_sha の canonical）と同一値を使う。
+# sidecar が無い対象（例: retention report）は file SHA にフォールバックする。
 approval::collect_and_verify() { # plan_path target_uuid claim1 claim2
   local plan_path=$1 target_uuid=$2 claim1=$3 claim2=$4
   local plan_sha
-  plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  if [[ -f "${plan_path}.sha256" ]]; then
+    plan_sha=$(tr -d ' \t\r\n' < "${plan_path}.sha256")
+  else
+    plan_sha=$(sha256sum "$plan_path" | awk '{print $1}')
+  fi
   local KEY1=""
 
   local actor1="" actor2=""

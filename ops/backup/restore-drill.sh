@@ -2,20 +2,10 @@
 # ============================================================
 # HFP-03-012 restore drill（実復元の定期リハーサル）
 #
-# 本番相当の復元（plan -> integrity -> restore -> validate ->
-# read-only cutover リハーサル -> rollback）を実際に実行し、RPO / RTO
-# segment 時間・markers・evidence SHA を記録する。
-#
-# - 各 step は必ず実 script を実行する（`mysqladmin ping` のみの
-#   代替は受け付けない）
-# - いずれかの step が失敗・skip・evidence 欠如・目標超過なら非 0
-# - 本番の write 経路には触れない（write-enable は実施しない）
-#
-# usage: restore-drill.sh --target <utc> [--report-dir DIR]
-# 環境変数: INDEX_DIR, BINLOG_INDEX, PLANS_DIR, BACKUP_WORK_DIR,
-# BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, RESTIC_REPOSITORY,
-# TARGET_*（restore/validate と同一）, APPROVAL_*,
-# RTO_SECONDS（既定 14400 = 4h）, RPO_MAX_SECONDS（既定 900 = 15m）
+# - --target 必須。報告の target_utc / requested_target に bind する
+# - --plan 未指定時は plan-restore.sh --target を呼び出して計画を生成
+# - --plan 指定時は既存 plan を使い、requested_target と --target の
+#   不一致なら非 0（SUCCESS 報告を出さない）
 # ============================================================
 set -Eeuo pipefail
 umask 077
@@ -25,6 +15,8 @@ LIB_DIR="$SCRIPT_DIR/lib"
 [[ -d "$LIB_DIR" ]] || LIB_DIR=/usr/local/lib/ses-backup
 # shellcheck disable=SC1091
 . "$LIB_DIR/common.sh"
+# shellcheck disable=SC1091
+. "$LIB_DIR/plan.sh"
 
 RESTIC_BIN=${RESTIC_BIN:-restic}
 MYSQL_CLIENT_BIN=${MYSQL_CLIENT_BIN:-mysql}
@@ -33,7 +25,9 @@ RPO_MAX_SECONDS=${RPO_MAX_SECONDS:-900}
 
 usage() {
   cat <<'EOF'
-Usage: restore-drill.sh --target <utc> [--report-dir DIR]
+Usage: restore-drill.sh --target <utc> [--plan <plan-id>] [--report-dir DIR]
+  --target 必須（PITR 復旧点。plan.requested_target と一致必須）
+  --plan   任意。未指定なら plan-restore.sh --target を実行して生成
 環境変数: INDEX_DIR, BINLOG_INDEX, PLANS_DIR, BACKUP_WORK_DIR,
 BACKUP_REPOSITORY, RESTIC_PASSWORD_FILE, RESTIC_REPOSITORY,
 TARGET_HOST / TARGET_USER / TARGET_PASSWORD_FILE / TARGET_DATABASE,
@@ -44,22 +38,21 @@ EOF
 
 drill::fail() { echo "[drill] ERROR: $*" >&2; exit 1; }
 
-# step 実行 + segment 時間計測（start ラベルを記録）
-drill::segment_start() { # label
+drill::segment_start() {
   DRILL_CURRENT=$1
   DRILL_START_EPOCH=$(date +%s)
 }
 
-drill::segment_end() { # label
-  local end
+drill::segment_end() {
+  local end du
   end=$(date +%s)
-  local dur=$((end - DRILL_START_EPOCH))
+  dur=$((end - DRILL_START_EPOCH))
   echo "$DRILL_CURRENT|$dur" >> "$DRILL_SEGMENTS"
   echo "[drill] $DRILL_CURRENT: ${dur}s"
   DRILL_TOTAL_SECONDS=$((DRILL_TOTAL_SECONDS + dur))
 }
 
-drill::require_evidence() { # path label
+drill::require_evidence() {
   [[ -f "$1" && -s "$1" ]] || drill::fail "evidence がありません: $1（$2）"
 }
 
@@ -74,6 +67,7 @@ main() {
   common::require_env TARGET_ALLOWLIST_FILE
   common::require_env RESTIC_REPOSITORY
   common::require_env RESTIC_PASSWORD_FILE
+  [[ -n "$TARGET_TS" ]] || drill::fail "--target が必要です"
 
   local report_dir=${REPORT_DIR:-"$BACKUP_WORK_DIR/drill"}
   mkdir -p "$report_dir"
@@ -82,19 +76,40 @@ main() {
   DRILL_TOTAL_SECONDS=0
   DRILL_START_WALL=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  echo "== drill: plan（検証 + RPO 記録） =="
+  echo "== drill: plan（--target に bind） =="
   drill::segment_start plan
-  local plan_path="$PLANS_DIR/$PLAN_ID.json"
-  # shellcheck disable=SC1091
-  . "$LIB_DIR/plan.sh"
-  plan::verify "$plan_path" || drill::fail "plan の検証に失敗しました"
+  local plan_path plan_requested plan_out
+  if [[ -n "${PLAN_ID_ARG:-}" ]]; then
+    PLAN_ID=$PLAN_ID_ARG
+    plan_path="$PLANS_DIR/$PLAN_ID.json"
+    [[ -f "$plan_path" ]] || drill::fail "plan がありません: $plan_path"
+    plan::verify "$plan_path" || drill::fail "plan の検証に失敗しました"
+    plan_requested=$(jq -r '.requested_target // empty' "$plan_path")
+    if [[ "$plan_requested" != "$TARGET_TS" ]]; then
+      drill::fail "--target（$TARGET_TS）が plan.requested_target（$plan_requested）と一致しません"
+    fi
+  else
+    if ! plan_out=$("$SCRIPT_DIR/plan-restore.sh" --target "$TARGET_TS" 2>&1); then
+      echo "$plan_out" >&2
+      drill::fail "plan-restore.sh --target に失敗しました"
+    fi
+    printf '%s\n' "$plan_out" > "$report_dir/plan.log"
+    PLAN_ID=$(printf '%s\n' "$plan_out" | sed -n 's/^plan_id=//p' | tail -n1)
+    [[ -n "$PLAN_ID" ]] || PLAN_ID=$(ls "$PLANS_DIR"/*.json 2>/dev/null | head -1 | xargs -r basename | sed 's/\.json$//')
+    [[ -n "$PLAN_ID" ]] || drill::fail "plan_id を取得できません"
+    plan_path="$PLANS_DIR/$PLAN_ID.json"
+    plan::verify "$plan_path" || drill::fail "plan の検証に失敗しました"
+    plan_requested=$(jq -r '.requested_target // empty' "$plan_path")
+    [[ "$plan_requested" == "$TARGET_TS" ]] || \
+      drill::fail "plan.requested_target（$plan_requested）が --target（$TARGET_TS）と一致しません"
+  fi
   local pst
   pst=$(plan::status "$plan_path")
   [[ "$pst" == "APPLYABLE" ]] || drill::fail "plan は適用できません（status=$pst）"
-  PLAN_SHA=$(sha256sum "$plan_path" | awk '{print $1}')
+  PLAN_SHA=$(tr -d ' \t\r\n' < "$plan_path.sha256")
   RPO_SECONDS=$(jq -r '.rpo_seconds // -1' "$plan_path")
   drill::segment_end plan
-  echo "[drill] plan_id=$PLAN_ID rpo=${RPO_SECONDS}s"
+  echo "[drill] plan_id=$PLAN_ID requested_target=$plan_requested rpo=${RPO_SECONDS}s"
 
   echo "== drill: repository integrity + restore verify =="
   drill::segment_start integrity
@@ -156,8 +171,6 @@ main() {
     --approval "$DRILL_CLAIM1" --approval "$DRILL_CLAIM2" > "$report_dir/cutover.log" 2>&1 || true
   local cstate
   cstate=$(jq -r '.state // ""' "$cs" 2>/dev/null || echo "")
-  # ドリルは write-enable を実施しないため、smoke 通過後の rolled-back までは許容
-  # （rollback は read-only smoke が PASS した状態に戻すだけ）
   case "$cstate" in
     rolled-back) : ;;
     single-writer|write-enabled)
@@ -180,12 +193,14 @@ main() {
     --argjson rto_seconds "$RTO_SECONDS" \
     --argjson total_seconds "$DRILL_TOTAL_SECONDS" \
     --arg target "$TARGET_TS" \
+    --arg requested_target "$plan_requested" \
     --arg validate_state "$vstate" \
     --arg cutover_state "$cstate" \
     --rawfile segs_raw "$DRILL_SEGMENTS" \
     '{kind: "restore-drill", state: $state,
       run_started_at_utc: $run_started_at_utc,
-      target_utc: $target, plan_id: $plan_id, plan_sha256: $plan_sha256,
+      target_utc: $target, requested_target: $requested_target,
+      plan_id: $plan_id, plan_sha256: $plan_sha256,
       rpo_seconds: ($rpo_seconds|tonumber), rto_seconds: $rto_seconds,
       total_seconds: $total_seconds,
       rto_ok: ($total_seconds <= $rto_seconds),
@@ -196,9 +211,8 @@ main() {
   drill::require_evidence "$report" "drill report"
   cat "$report"
 
-  local rto_ok
+  local rto_ok rpo_ok
   rto_ok=$(jq -r '.rto_ok' "$report")
-  local rpo_ok
   rpo_ok=$(jq -r '.rpo_ok' "$report")
   [[ "$rto_ok" == "true" ]] || drill::fail "RTO 超過（total=${DRILL_TOTAL_SECONDS}s > ${RTO_SECONDS}s）"
   [[ "$rpo_ok" == "true" ]] || drill::fail "RPO 超過（rpo=${RPO_SECONDS}s > ${RPO_MAX_SECONDS}s）"
@@ -208,12 +222,13 @@ main() {
 DRILL_CLAIM1=""
 DRILL_CLAIM2=""
 PLAN_ID=""
+PLAN_ID_ARG=""
 TARGET_TS=""
 REPORT_DIR=""
 while (($#)); do
   case "$1" in
-    --plan) PLAN_ID=$2; shift 2 ;;
-    --plan=*) PLAN_ID=${1#--plan=}; shift ;;
+    --plan) PLAN_ID_ARG=$2; shift 2 ;;
+    --plan=*) PLAN_ID_ARG=${1#--plan=}; shift ;;
     --target) TARGET_TS=$2; shift 2 ;;
     --target=*) TARGET_TS=${1#--target=}; shift ;;
     --report-dir) REPORT_DIR=$2; shift 2 ;;
@@ -222,5 +237,6 @@ while (($#)); do
     *) echo "未知の引数: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-[[ -n "$PLAN_ID" ]] || { usage >&2; exit 2; }
+[[ -n "$TARGET_TS" ]] || { usage >&2; exit 2; }
+[[ -n "$DRILL_CLAIM1" && -n "$DRILL_CLAIM2" ]] || { usage >&2; exit 2; }
 main

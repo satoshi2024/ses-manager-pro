@@ -73,7 +73,7 @@ public class ContractDocumentBackfillRunner implements ApplicationRunner {
                 FileScanResult result = null;
                 if (scanner != null) {
                     try {
-                        result = scanner.scan(file, com.ses.common.enums.FileKind.SKILL_SHEET);
+                        result = scanner.scan(file, com.ses.common.enums.FileKind.CONTRACT_PDF);
                     } catch (RuntimeException e) {
                         result = FileScanResult.unavailable("scanner failed");
                     }

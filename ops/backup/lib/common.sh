@@ -23,7 +23,7 @@ common::require_env() { # var_name
 # 既存の trap（他 lib 由来）があれば初回に dispatcher へ移す。
 declare -a _COMMON_TRAP_HANDLERS=()
 _COMMON_TRAP_INIT=0
-common::trap_add() { # handler
+common::trap_add() { # handle
   local handler=$1
   if [[ "${_COMMON_TRAP_INIT:-0}" == "0" ]]; then
     local current

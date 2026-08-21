@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -312,8 +312,8 @@ class PayrollSecurityAuditTest {
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         long before = auditMaxId();
         mockMvc.perform(delete("/integrations/freee").with(csrf()))
-                .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/payroll"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
         List<java.util.Map<String, Object>> rows = auditRowsAfter(before);
         assertEquals(1, rows.size());
         assertEquals("FREEE_DISCONNECT", rows.get(0).get("application_code"));
@@ -374,8 +374,8 @@ class PayrollSecurityAuditTest {
         long before = auditMaxId();
         org.springframework.test.web.servlet.MvcResult failureResult = mockMvc.perform(
                         get("/api/payroll/statements").param("year", "2026").param("month", "7"))
-                // BusinessException(503)は既存GlobalExceptionHandlerがHTTP 500へ変換する
-                .andExpect(status().isInternalServerError())
+                // BusinessException(503) → HTTP 503（providerUnavailable）
+                .andExpect(status().isServiceUnavailable())
                 .andReturn();
         List<java.util.Map<String, Object>> rows = auditRowsAfter(before);
         assertEquals(1, rows.size(), "失敗時も1 request = 1 audit row");
@@ -397,11 +397,11 @@ class PayrollSecurityAuditTest {
         assertEquals(Boolean.FALSE, rows.get(0).get("success_flag"));
         jdbcTemplate.update("UPDATE t_engineer SET employment_type = '正社員' WHERE id = 90001");
 
-        // 3) disconnect: revoke 5xx
+        // 3) disconnect: revoke 5xx → JSON失敗（opaque 302成功扱いを廃止）
         before = auditMaxId();
         mockMvc.perform(delete("/integrations/freee").with(csrf()))
-                .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/payroll?error=disconnect"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
         rows = auditRowsAfter(before);
         assertEquals(1, rows.size(), "解除失敗時も1 row");
         assertEquals("FREEE_DISCONNECT", rows.get(0).get("application_code"));
@@ -409,6 +409,37 @@ class PayrollSecurityAuditTest {
         Long remaining = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_freee_connection WHERE company_id = 123", Long.class);
         assertEquals(1L, remaining, "一時障害ではlocal rowを削除しない（R03-5）");
+        server.verify();
+    }
+
+    @Test
+    @WithMockUser(roles = "管理者", username = "audit-admin")
+    @DisplayName("freee tokenErrorはHTTP 401を返さない（HFP-01-BUG-04）")
+    void tokenErrorDoesNotReturnHttp401() throws Exception {
+        seedLink();
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(),
+                requestTo(org.hamcrest.Matchers.startsWith(SALARY_URL)))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED)
+                        .body("{\"error\":\"access_denied\",\"code\":\"expired_access_token\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(),
+                requestTo(TOKEN_URL))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andRespond(withSuccess("{\"access_token\":\"fixture-access-token-2\","
+                        + "\"refresh_token\":\"fixture-refresh-token-2\",\"expires_in\":3600}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(org.springframework.test.web.client.ExpectedCount.once(),
+                requestTo(org.hamcrest.Matchers.startsWith(SALARY_URL)))
+                .andExpect(method(org.springframework.http.HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED)
+                        .body("{\"error\":\"access_denied\",\"code\":\"invalid_grant\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+
+        mockMvc.perform(get("/api/payroll/statements").param("year", "2026").param("month", "7"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("トークン")));
         server.verify();
     }
 

@@ -107,11 +107,15 @@ public class GlobalExceptionHandler {
     private HttpStatus toHttpStatus(int code) {
         return switch (code) {
             case 400 -> HttpStatus.BAD_REQUEST;
+            // 401はSpring Securityのセッション期限切れと衝突しやすい。
+            // freee tokenError等の業務コードは呼び出し側で400へ寄せる（HFP-01-BUG-04）。
             case 401 -> HttpStatus.UNAUTHORIZED;
             case 403 -> HttpStatus.FORBIDDEN;
             case 404 -> HttpStatus.NOT_FOUND;
             case 409 -> HttpStatus.CONFLICT;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
+            case 502 -> HttpStatus.BAD_GATEWAY;
+            case 503 -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
     }
