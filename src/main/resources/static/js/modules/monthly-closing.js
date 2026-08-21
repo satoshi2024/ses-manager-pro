@@ -153,7 +153,7 @@ function confirmClosing() {
         if (data.code === 200) { SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。')); loadClosing(); }
         else (window.Toast || SES.toast).error(data.message);
     }).catch(e => {
-        SES.toast.error("通信エラーが発生しました");
+        SES.toast.error(SES.i18n.t('closing.error.network', '通信エラーが発生しました'));
     }).finally(() => { if (button) button.disabled = false; });
 }
 

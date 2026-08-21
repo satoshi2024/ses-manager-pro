@@ -138,7 +138,8 @@ public class JpPintRenderer {
             taxId.setTextContent("S"); // S = Standard rate
             taxCategory.appendChild(taxId);
             org.w3c.dom.Element taxPercent = doc.createElement("cbc:Percent");
-            taxPercent.setTextContent("10"); // Defaults to 10% for basic JP PINT
+            // 明細の taxRate(百分数)と同一ソース。未設定時のみ標準税率10。
+            taxPercent.setTextContent(resolveDocumentTaxPercent(invoice));
             taxCategory.appendChild(taxPercent);
             
             org.w3c.dom.Element taxScheme = doc.createElement("cac:TaxScheme");
@@ -222,6 +223,21 @@ public class JpPintRenderer {
         } catch (Exception e) {
             log.error("XMLの生成に失敗しました。", e); throw new BusinessException("XMLの生成に失敗しました。");
         }
+    }
+
+    /**
+     * 文書レベルの税率パーセント。Canonical 明細の taxRate(百分数)を使い、無ければ標準10。
+     * 税額自体は再計算せず、既に格納された taxAmount / total を出力する。
+     */
+    private String resolveDocumentTaxPercent(CanonicalInvoice invoice) {
+        if (invoice.getItems() != null) {
+            for (CanonicalInvoice.CanonicalInvoiceItem item : invoice.getItems()) {
+                if (item.getTaxRate() != null) {
+                    return item.getTaxRate().toString();
+                }
+            }
+        }
+        return "10";
     }
 
     /**

@@ -226,8 +226,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(Contract contract) {
-        // 画面保存 DTO が運ぶ ALWAYS 列は「出現済み」とみなし明示 null でクリア可。
-        // DTO に無い positionId / renewalDecision は未出現として old から回填する（CON-01）。
+        // 画面 DTO 経由でない呼び出し向け。SAVE_PAYLOAD 列は出現済み、positionId/renewalDecision は回填。
         return updateWithBusinessRules(contract, com.ses.dto.contract.ContractSaveDto.SAVE_PAYLOAD_ALWAYS_FIELDS);
     }
 
@@ -236,6 +235,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
      * 行ロック後の {@code old} から回填し、{@code updateById} による NULL 上書きを防ぐ。
      * payload で明示 null（クリア）したい列だけを {@code presentAlwaysFields} に含めること。
      */
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public List<com.ses.dto.compliance.ComplianceFinding> updateWithBusinessRules(
             Contract contract, Set<String> presentAlwaysFields) {

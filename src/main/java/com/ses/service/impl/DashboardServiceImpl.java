@@ -98,7 +98,9 @@ public class DashboardServiceImpl implements DashboardService {
         ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
                 Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
-        LocalDate limitDate = currentMonth.atEndOfMonth().plusMonths(1);
+        // チャート対象月の末日までを上限にする(旧: 当月末+1ヶ月だと下々月開始契約がFY図から欠落する)。
+        // 月別の対象判定は MonthlyRevenueCalcService.isTargetInMonth に委ねる。
+        LocalDate limitDate = targetMonths.get(targetMonths.size() - 1).atEndOfMonth();
         // 売上・粗利もデータスコープに従う。稼働率や要員数だけを絞り込み、金額は全社値を返すと
         // 「自分の担当分の稼働率」と「全社の売上」が同じ画面に並び、担当範囲を限定されたロールに
         // 全社の財務数値が見えてしまう。同一画面の指標は同じ母集団で揃える。
@@ -519,9 +521,9 @@ public class DashboardServiceImpl implements DashboardService {
             Engineer e = c.getEngineerId() != null ? engineerMap.get(c.getEngineerId()) : null;
             Project p = c.getProjectId() != null ? projectMap.get(c.getProjectId()) : null;
 
-            int sell = c.getSellingPrice() != null ? c.getSellingPrice().intValue() : 0;
-            int cost = c.getCostPrice() != null ? c.getCostPrice().intValue() : 0;
-            int grossProfit = sell - cost;
+            long sell = c.getSellingPrice() != null ? c.getSellingPrice().longValue() : 0L;
+            long cost = c.getCostPrice() != null ? c.getCostPrice().longValue() : 0L;
+            long grossProfit = sell - cost;
             String rateStr = "N/A";
 
             if (sell > 0) {

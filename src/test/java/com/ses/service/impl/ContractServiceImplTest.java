@@ -922,6 +922,50 @@ class ContractServiceImplTest {
         assertEquals("CONTINUE", saved.getRenewalDecision(), "DTO 外の renewalDecision は維持");
     }
 
+    /**
+     * commission* / endDate を present に含めない場合は old を維持。明示 null の列だけクリア。
+     */
+    @Test
+    void updateWithBusinessRules_省略キーは維持し明示nullだけクリア() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setStatus("準備中");
+        old.setSalesUserId(10L);
+        old.setCommissionBaseType("粗利");
+        old.setCommissionRate(new BigDecimal("5"));
+        old.setEndDate(LocalDate.of(2026, 12, 31));
+        old.setPositionId(55L);
+        old.setRenewalDecision("CONTINUE");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+        when(priceHistoryMapper.selectList(any())).thenReturn(new java.util.ArrayList<>());
+        when(laborComplianceService.check(any())).thenReturn(java.util.List.of());
+        com.ses.entity.ProjectPosition position = new com.ses.entity.ProjectPosition();
+        position.setId(55L);
+        position.setProjectId(200L);
+        when(positionMapper.selectById(55L)).thenReturn(position);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setStartDate(LocalDate.of(2026, 7, 1));
+        update.setSellingPrice(new BigDecimal("600000"));
+        update.setCostPrice(new BigDecimal("400000"));
+        update.setSalesUserId(null); // 明示クリア
+        // commission* / endDate / positionId / renewalDecision は未設定（省略相当）
+
+        org.mockito.ArgumentCaptor<Contract> captor = org.mockito.ArgumentCaptor.forClass(Contract.class);
+        when(contractMapper.updateById(captor.capture())).thenReturn(1);
+
+        contractService.updateWithBusinessRules(update, java.util.Set.of("salesUserId"));
+
+        Contract saved = captor.getValue();
+        assertNull(saved.getSalesUserId(), "明示 null の salesUserId はクリア");
+        assertEquals("粗利", saved.getCommissionBaseType(), "省略した commissionBaseType は old 維持");
+        assertEquals(0, new BigDecimal("5").compareTo(saved.getCommissionRate()), "省略した commissionRate は old 維持");
+        assertEquals(LocalDate.of(2026, 12, 31), saved.getEndDate(), "省略した endDate は old 維持");
+        assertEquals(55L, saved.getPositionId());
+        assertEquals("CONTINUE", saved.getRenewalDecision());
+    }
+
     // ===== contract-renewal-calendar (FR-06) 更新判断の部分更新 =====
 
     /**

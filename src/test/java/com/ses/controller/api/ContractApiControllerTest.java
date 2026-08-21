@@ -215,7 +215,72 @@ class ContractApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         verify(contractService).updateWithBusinessRules(argThat(updated -> updated.getId().equals(10L)
-                && updated.getStatus() == null));
+                && updated.getStatus() == null), any());
+    }
+
+    /**
+     * CON-01: salesUserId / commission* / endDate を JSON から省略すると presentAlwaysFields に入らず、
+     * サービス側で old 回填される（ALWAYS の NULL 上書きを防ぐ）。
+     */
+    @Test
+    @WithMockUser
+    void update_省略したALWAYSキーはpresentに含めない() throws Exception {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("engineerId", 1);
+        body.put("projectId", 2);
+        body.put("customerId", 3);
+        body.put("startDate", "2026-07-01");
+        body.put("sellingPrice", 80);
+        body.put("costPrice", 60);
+        // salesUserId / commissionBaseType / commissionRate / endDate は意図的に省略
+
+        mockMvc.perform(put("/api/contracts/10").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(contractService).updateWithBusinessRules(
+                argThat(updated -> updated.getId().equals(10L)
+                        && updated.getSalesUserId() == null
+                        && updated.getCommissionBaseType() == null
+                        && updated.getCommissionRate() == null
+                        && updated.getEndDate() == null),
+                argThat(present -> present != null
+                        && !present.contains("salesUserId")
+                        && !present.contains("commissionBaseType")
+                        && !present.contains("commissionRate")
+                        && !present.contains("endDate")
+                        && !present.contains("positionId")
+                        && !present.contains("renewalDecision")));
+    }
+
+    /**
+     * CON-01: JSON で "salesUserId": null と明示した場合のみ present に入り、クリアが許可される。
+     */
+    @Test
+    @WithMockUser
+    void update_明示nullの担当営業はpresentに含める() throws Exception {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("engineerId", 1);
+        body.put("projectId", 2);
+        body.put("customerId", 3);
+        body.put("startDate", "2026-07-01");
+        body.put("sellingPrice", 80);
+        body.put("costPrice", 60);
+        body.put("salesUserId", null);
+
+        mockMvc.perform(put("/api/contracts/10").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        verify(contractService).updateWithBusinessRules(
+                argThat(updated -> updated.getId().equals(10L) && updated.getSalesUserId() == null),
+                argThat(present -> present != null && present.contains("salesUserId")
+                        && !present.contains("positionId")
+                        && !present.contains("renewalDecision")));
     }
 
     @Test

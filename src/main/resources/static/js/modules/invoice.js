@@ -716,8 +716,6 @@ function openDigitalInvoiceModal(invoiceId) {
                 showCancelButton: true,
                 confirmButtonText: '送付する',
                 cancelButtonText: 'キャンセル',
-                confirmButtonColor: '#3085d6',
-                cancelButtonColor: '#d33',
                 showConfirmButton: data.canSend,
                 ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
             }).then((result) => {
