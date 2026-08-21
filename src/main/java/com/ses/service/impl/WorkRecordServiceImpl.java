@@ -77,6 +77,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.AcceptanceMapper acceptanceMapper;
 
+    /** BP支払自動生成時の所属BP解決（任意依存。未配線時はID必須ルールにより生成失敗）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.BpCompanyMapper bpCompanyMapper;
+
     /**
      * 単価改定履歴のリゾルバ（任意依存）。本番では {@code ContractPriceResolverImpl}(@Service)が
      * 常に配線される。未配線は既存 {@code @InjectMocks} テストの全緑維持のための緩和であり、
@@ -470,6 +477,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     /**
      * BP要員の確定実績1件についてBP支払を生成または同期する（confirmMonth と approve の共通合流点）。
      * 未生成なら1階層目を作成、既存があれば syncRootBpAmount で金額同期する（二重実装禁止）。
+     * 新規生成は常に有効な bpCompanyId + 名称snapshot を必須とする（S06-P1-01）。
      */
     private void generateOrSyncBpFor(WorkRecord record) {
         if (record.getPaymentAmount() == null) {
@@ -478,10 +486,15 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         Long count = bpPaymentMapper.selectCount(new QueryWrapper<BpPayment>()
                 .eq("work_record_id", record.getId()));
         if (count == 0) {
+            ResolvedBpPayee payee = resolveBpPayeeForWorkRecord(record);
             BpPayment bp = new BpPayment();
             bp.setWorkRecordId(record.getId());
+            bp.setLayerOrder(1);
             bp.setAmount(record.getPaymentAmount());
             bp.setStatus("未払");
+            bp.setBpCompanyId(payee.bpCompanyId());
+            bp.setBpCompanyNameSnapshot(payee.nameSnapshot());
+            bp.setPayeeCompanyName(payee.nameSnapshot());
             bpPaymentMapper.insert(bp);
         } else {
             // 既存のBP支払がある(入力中段階で手動登録済み等)。1階層目(parent NULL)の金額が
@@ -489,6 +502,37 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             syncRootBpAmount(record);
         }
     }
+
+    /**
+     * 勤怠に紐づく契約要員の所属BPから支払先を解決する。
+     * 所属未設定・マスタ欠落は会社名自由入力へフォールバックせず拒否する。
+     */
+    private ResolvedBpPayee resolveBpPayeeForWorkRecord(WorkRecord record) {
+        if (record.getContractId() == null
+                || engineerBpAffiliationService == null
+                || bpCompanyMapper == null) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
+        }
+        Contract contract = contractMapper.selectById(record.getContractId());
+        if (contract == null || contract.getEngineerId() == null) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
+        }
+        LocalDate asOf = record.getWorkMonth() == null || record.getWorkMonth().isBlank()
+                ? LocalDate.now()
+                : com.ses.common.util.DateUtils.parseYearMonth(record.getWorkMonth()).atEndOfMonth();
+        com.ses.entity.EngineerBpAffiliation affiliation =
+                engineerBpAffiliationService.getActiveAffiliationAsOf(contract.getEngineerId(), asOf);
+        if (affiliation == null || affiliation.getBpCompanyId() == null) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
+        }
+        com.ses.entity.BpCompany company = bpCompanyMapper.selectById(affiliation.getBpCompanyId());
+        if (company == null || !org.springframework.util.StringUtils.hasText(company.getLegalName())) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyInvalid");
+        }
+        return new ResolvedBpPayee(company.getId(), company.getLegalName());
+    }
+
+    private record ResolvedBpPayee(Long bpCompanyId, String nameSnapshot) {}
 
     /**
      * 自動生成1階層目(parent_payment_id IS NULL)のBP支払金額を最新の payment_amount に同期する。

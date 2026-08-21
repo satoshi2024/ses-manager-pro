@@ -91,6 +91,11 @@ app:
       use-db-time: false
   upload:
     base-path: ./target/test-uploads
+  digital-invoice:
+    provider: mock
+    webhook-hmac-secret: test-digital-invoice-hmac-secret
+  batch:
+    token-secret: test-batch-token-hmac-secret
   security:
     oidc:
       enabled: false

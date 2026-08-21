@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.constant.StatusConstants;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.portal.PortalAcceptanceDto;
 import com.ses.dto.portal.PortalContractDto;
 import com.ses.dto.portal.PortalInvoiceDto;
@@ -72,10 +73,11 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
     @Override
     public Page<PortalQuotationDto> quotations(long current, long size, Long customerId) {
         if (customerId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalQuotationDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
         Page<Quotation> page = quotationMapper.selectPage(
-                new Page<>(current, Math.min(size, 1000)),
+                PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<Quotation>()
                         .eq(Quotation::getCustomerId, customerId)
                         .in(Quotation::getStatus, VISIBLE_QUOTATION_STATUSES)
@@ -112,11 +114,12 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
     @Override
     public Page<PortalSalesOrderDto> salesOrders(long current, long size, Long customerId) {
         if (customerId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalSalesOrderDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
         // field-inventory §3.1: 注文請は「注文請提出済み行」のみ公開（S13-R1-P2-03）
         Page<SalesOrder> page = salesOrderMapper.selectPage(
-                new Page<>(current, Math.min(size, 1000)),
+                PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<SalesOrder>()
                         .eq(SalesOrder::getCustomerId, customerId)
                         .in(SalesOrder::getStatus, VISIBLE_SALES_ORDER_STATUSES)
@@ -156,9 +159,10 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
     @Override
     public Page<PortalContractDto> contracts(long current, long size, Long customerId, String status) {
         if (customerId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalContractDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
-        return contractMapper.selectPortalPageDto(new Page<>(current, Math.min(size, 1000)), customerId, status);
+        return contractMapper.selectPortalPageDto(PageUtils.safePage(current, size), customerId, status);
     }
 
     @Override
@@ -234,10 +238,11 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
     @Override
     public Page<PortalInvoiceDto> invoices(long current, long size, Long customerId) {
         if (customerId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<PortalInvoiceDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
         Page<Invoice> page = invoiceMapper.selectPage(
-                new Page<>(current, Math.min(size, 1000)),
+                PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<Invoice>()
                         .eq(Invoice::getCustomerId, customerId)
                         .in(Invoice::getStatus, VISIBLE_INVOICE_STATUSES)

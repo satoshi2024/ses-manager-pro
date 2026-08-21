@@ -24,6 +24,7 @@ import com.ses.service.ai.AiPiiMasker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -63,10 +64,17 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
             actor = SecurityUtils.currentUserId();
         }
 
+        // G10: オンライン評価の既定観測窓は90日
+        final int onlineWindowDays = 90;
+        LocalDateTime since = LocalDateTime.now().minusDays(onlineWindowDays);
+
         List<AiArtifactVersion> versions = versionMapper.selectList(null);
-        List<AiRecommendationRun> runs = runMapper.selectList(actor == null
-                ? new LambdaQueryWrapper<>()
-                : new LambdaQueryWrapper<AiRecommendationRun>().eq(AiRecommendationRun::getActorUserId, actor));
+        LambdaQueryWrapper<AiRecommendationRun> runQw = new LambdaQueryWrapper<AiRecommendationRun>()
+                .ge(AiRecommendationRun::getCreatedAt, since);
+        if (actor != null) {
+            runQw.eq(AiRecommendationRun::getActorUserId, actor);
+        }
+        List<AiRecommendationRun> runs = runMapper.selectList(runQw);
         Map<Long, List<AiRecommendationRun>> runsByVersion = runs.stream()
                 .collect(Collectors.groupingBy(AiRecommendationRun::getArtifactVersionId));
         List<Long> runIds = runs.stream().map(AiRecommendationRun::getId).toList();

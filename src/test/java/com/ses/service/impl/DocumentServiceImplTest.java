@@ -24,7 +24,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -63,8 +62,10 @@ class DocumentServiceImplTest {
     @Mock ObjectProvider<FileScanner> fileScannerProvider;
     @Mock FileScanner fileScanner;
     @Mock com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
+    @Mock ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    @Mock ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
+    @Mock ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
 
-    @InjectMocks
     DocumentServiceImpl sut;
 
     @BeforeEach
@@ -84,6 +85,27 @@ class DocumentServiceImplTest {
 
         lenient().when(fileScannerProvider.getIfAvailable()).thenReturn(fileScanner);
         lenient().when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("test"));
+        lenient().when(authorizationServiceProvider.getIfAvailable()).thenReturn(null);
+        lenient().when(engineerAccountLinkServiceProvider.getIfAvailable()).thenReturn(null);
+        lenient().when(organizationScopeServiceProvider.getIfAvailable()).thenReturn(null);
+
+        // ObjectProvider は型消去で @InjectMocks が取り違えるため、コンストラクタで明示配線する
+        sut = new DocumentServiceImpl(
+                documentMapper,
+                documentVersionMapper,
+                documentLinkMapper,
+                documentAccessLogMapper,
+                documentDisposalRequestMapper,
+                documentTypeMapper,
+                dataScopeService,
+                documentStorage,
+                fileScannerProvider,
+                null,
+                null,
+                documentHashClaimMapper,
+                authorizationServiceProvider,
+                engineerAccountLinkServiceProvider,
+                organizationScopeServiceProvider);
     }
 
     @AfterEach
@@ -439,4 +461,87 @@ class DocumentServiceImplTest {
         assertEquals("STORAGE_MISSING", findings.get(0).getFindingType());
         assertEquals(51L, findings.get(0).getDocumentId());
     }
+
+    private void loginAsRole(String role) {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(99L);
+        user.setUsername("sales");
+        user.setRole(role);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(
+                user, List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + role)));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, "n/a", principal.getAuthorities()));
+    }
+
+    @Test
+    void placeLegalHold_outOfScope_throws403AndDoesNotUpdate() {
+        loginAsRole("営業");
+        Document doc = new Document();
+        doc.setId(70L);
+        doc.setDocumentType("CONTRACT");
+        doc.setLegalHoldFlag(0);
+        doc.setVersion(1L);
+        when(documentMapper.selectById(70L)).thenReturn(doc);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+
+        var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(70L, true, "訴訟"));
+        assertEquals(403, ex.getCode());
+        verify(documentMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void requestDisposal_outOfScope_throws403AndDoesNotInsert() {
+        loginAsRole("営業");
+        Document doc = new Document();
+        doc.setId(71L);
+        doc.setDocumentType("CONTRACT");
+        doc.setLegalHoldFlag(0);
+        doc.setRetentionUntil(LocalDate.now().plusYears(1));
+        doc.setStatus("CONFIRMED");
+        when(documentMapper.selectById(71L)).thenReturn(doc);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+
+        var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(71L, "廃棄"));
+        assertEquals(403, ex.getCode());
+        verify(documentDisposalRequestMapper, never()).insert(any(DocumentDisposalRequest.class));
+    }
+
+    @Test
+    void assertDocumentAccessAllowed_receiptDeniedForSales() {
+        loginAsRole("営業");
+        Document doc = new Document();
+        doc.setId(80L);
+        doc.setDocumentType("RECEIPT");
+        DocumentLink engLink = new DocumentLink();
+        engLink.setDocumentId(80L);
+        engLink.setTargetType("ENGINEER");
+        engLink.setTargetId(5L);
+        when(documentLinkMapper.selectOne(any())).thenReturn(engLink);
+
+        var ex = assertThrows(BusinessException.class, () -> sut.assertDocumentAccessAllowed(doc));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void applyDataScopeFilter_excludesReceiptForSales() {
+        loginAsRole("営業");
+        when(dataScopeService.isScoped()).thenReturn(false);
+
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
+        sut.applyDataScopeFilter(wrapper);
+
+        String segment = wrapper.getSqlSegment();
+        assertTrue(segment != null && segment.contains("document_type"),
+                () -> "RECEIPT除外の document_type 条件が必要: " + segment);
+    }
+
+    @Test
+    void getVersionStorageKey_returnsDbKey() {
+        DocumentVersion v = new DocumentVersion();
+        v.setStorageKey("real-db-key");
+        when(documentVersionMapper.selectOne(any())).thenReturn(v);
+
+        assertEquals("real-db-key", sut.getVersionStorageKey(1L, 1));
+    }
+
 }

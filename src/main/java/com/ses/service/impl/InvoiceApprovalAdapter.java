@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Invoice;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.service.InvoiceService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -17,8 +18,18 @@ import java.util.Set;
 /** 請求送付/取消を承認engineへ接続するadapter。 */
 @Component
 public class InvoiceApprovalAdapter implements ApprovalTargetAdapter {
-    private final InvoiceMapper mapper; private final InvoiceService service; private final ObjectMapper objectMapper;
-    public InvoiceApprovalAdapter(InvoiceMapper mapper, InvoiceService service, ObjectMapper objectMapper) { this.mapper = mapper; this.service = service; this.objectMapper = objectMapper; }
+    private final InvoiceMapper mapper;
+    private final InvoiceService service;
+    private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
+
+    public InvoiceApprovalAdapter(InvoiceMapper mapper, InvoiceService service, ObjectMapper objectMapper,
+                                  ApprovalOrganizationResolver organizationResolver) {
+        this.mapper = mapper;
+        this.service = service;
+        this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
+    }
     @Override public String requestType() { return "invoice.send"; }
     @Override public Set<String> supportedRequestTypes() { return Set.of("invoice.send", "invoice.void", "invoice.status"); }
     @Override public ApprovalSnapshot snapshot(Long targetId, Map<String, Object> command) {
@@ -33,7 +44,7 @@ public class InvoiceApprovalAdapter implements ApprovalTargetAdapter {
         statusDiff.put("before", i.getStatus() == null ? "" : i.getStatus());
         statusDiff.put("after", nextStatus);
         diff.put("status", statusDiff);
-        return new ApprovalSnapshot(version(i.getVersion()), i.getTotal(), null, payload, diff);
+        return new ApprovalSnapshot(version(i.getVersion()), i.getTotal(), organizationResolver.forInvoice(i), payload, diff);
     }
     @Override
     public long currentVersion(Long targetId) {

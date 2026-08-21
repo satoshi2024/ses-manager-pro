@@ -368,13 +368,21 @@ public class LeaveServiceImpl implements LeaveService {
         }
     }
 
-    /** 期間重複の拒否。却下・取下げ済みの承認requestは占有と見なさない。 */
+    /**
+     * 期間重複の拒否。却下・取下げ済みの承認requestは占有と見なさない。
+     * 申請前に要員行をFOR UPDATEでロックし、並行する重複「申請中」insertを防ぐ（S11-P2-01）。
+     */
     private void assertNoOverlap(Long engineerId, LeaveRequest leave) {
+        Engineer locked = engineerMapper.selectByIdForUpdate(engineerId);
+        if (locked == null) {
+            throw BusinessException.of(404, "error.leave.notFound");
+        }
         List<LeaveRequest> candidates = leaveRequestMapper.selectList(new LambdaQueryWrapper<LeaveRequest>()
                 .eq(LeaveRequest::getEngineerId, engineerId)
                 .in(LeaveRequest::getStatus, List.of(APPLIED, RETURNED, APPROVED))
                 .le(LeaveRequest::getStartDate, leave.getEndDate())
-                .ge(LeaveRequest::getEndDate, leave.getStartDate()));
+                .ge(LeaveRequest::getEndDate, leave.getStartDate())
+                .last("FOR UPDATE"));
         if (candidates.isEmpty()) {
             return;
         }

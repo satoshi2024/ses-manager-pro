@@ -53,6 +53,14 @@ app:
       enabled: ${PERSISTENT_SESSION_ENABLED:true}
       allow-untracked-sessions: ${ALLOW_UNTRACKED_SESSIONS:false}
       hash-key: ${SESSION_HASH_KEY:}
+  # 一括操作 preview token HMAC（未設定は起動 fail-fast）
+  batch:
+    token-secret: ${BATCH_TOKEN_SECRET:}
+  # デジタルインボイス（JP PINT / Peppol。sandbox 未取得時は none で fail-closed）
+  digital-invoice:
+    # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
+    provider: ${DIGITAL_INVOICE_PROVIDER:none}
+    webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:}
 
 # ===== freee連携（HFP-01） =====
 # 本番はFREEE_CLIENT_ID/SECRET/REDIRECT_URI/TOKEN_ENCRYPTION_KEYをsecret storeから供給する。

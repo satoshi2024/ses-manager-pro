@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SalesOrder;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.SalesOrderService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.impl.SalesOrderApprovalAdapter;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,13 +33,14 @@ class SalesOrderApprovalAdapterTest {
 
     @Mock private SalesOrderMapper mapper;
     @Mock private SalesOrderService service;
+    @Mock private ApprovalOrganizationResolver organizationResolver;
 
     private SalesOrderApprovalAdapter adapter;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        adapter = new SalesOrderApprovalAdapter(mapper, service, objectMapper);
+        adapter = new SalesOrderApprovalAdapter(mapper, service, objectMapper, organizationResolver);
     }
 
     private SalesOrder order(Long id) {

@@ -277,6 +277,16 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
+    public List<IntegrationJob> listStaleRunningJobs(int leaseMinutes) {
+        LocalDateTime threshold = LocalDateTime.now().minusMinutes(Math.max(1, leaseMinutes));
+        return baseMapper.selectList(new LambdaQueryWrapper<IntegrationJob>()
+                .eq(IntegrationJob::getStatus, "RUNNING")
+                .lt(IntegrationJob::getUpdatedAt, threshold)
+                .eq(IntegrationJob::getDeletedFlag, 0)
+                .orderByAsc(IntegrationJob::getId));
+    }
+
+    @Override
     public void recordJobEvent(Long jobId, String eventType, String detail, String reasonCode) {
         String msg = (reasonCode != null && !reasonCode.isBlank()) ? "[" + reasonCode + "] " + detail : detail;
         recordEvent(jobId, null, eventType, msg);

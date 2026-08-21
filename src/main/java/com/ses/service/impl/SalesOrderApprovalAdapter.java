@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.SalesOrder;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.SalesOrderService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -27,11 +28,14 @@ public class SalesOrderApprovalAdapter implements ApprovalTargetAdapter {
     private final SalesOrderMapper mapper;
     private final SalesOrderService service;
     private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
 
-    public SalesOrderApprovalAdapter(SalesOrderMapper mapper, SalesOrderService service, ObjectMapper objectMapper) {
+    public SalesOrderApprovalAdapter(SalesOrderMapper mapper, SalesOrderService service, ObjectMapper objectMapper,
+                                     ApprovalOrganizationResolver organizationResolver) {
         this.mapper = mapper;
         this.service = service;
         this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
     }
 
     @Override
@@ -79,7 +83,7 @@ public class SalesOrderApprovalAdapter implements ApprovalTargetAdapter {
         diff.put("operation", Map.of("label", "注文操作", "before",
                 order.getStatus() == null ? "" : order.getStatus(),
                 "after", operation.equals("cancel") ? "取消" : "条件差分承認"));
-        return new ApprovalSnapshot(version(order.getVersion()), amount, null, payload, diff);
+        return new ApprovalSnapshot(version(order.getVersion()), amount, organizationResolver.forSalesOrder(order), payload, diff);
     }
 
     @Override

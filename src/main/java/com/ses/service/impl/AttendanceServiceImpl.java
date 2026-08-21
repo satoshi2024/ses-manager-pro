@@ -25,6 +25,7 @@ import com.ses.service.attendance.AttendanceCalculation;
 import com.ses.service.attendance.AttendanceCalculator;
 import com.ses.service.attendance.AttendanceScopeResolver;
 import com.ses.service.attendance.AttendanceScopeSnapshot;
+import com.ses.service.attendance.overtime.OvertimeComplianceService;
 import com.ses.service.AttendanceService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.security.OrganizationScopeService;
@@ -69,6 +70,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final AttendanceScopeResolver attendanceScopeResolver;
     private final ApprovalEngineService approvalEngineService;
     private final WorkCalendarDayMapper workCalendarDayMapper;
+    private final OvertimeComplianceService overtimeComplianceService;
 
     @Override
     @Transactional(readOnly = true)
@@ -213,6 +215,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         assertHrMonthSnapshotAllowed(current, target);
         transition(current, APPROVED, CLOSED,
                 SecurityUtils.currentUserId());
+        // 月次締め後に36協定判定→followup UPSERT＋段階通知（S11-P0-01）
+        overtimeComplianceService.evaluateAndPersist(engineerId, target);
     }
 
     @Override

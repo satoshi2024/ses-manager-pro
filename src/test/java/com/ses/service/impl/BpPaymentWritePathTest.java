@@ -12,6 +12,8 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.BpCompanyService;
 import com.ses.service.BpPaymentService;
+import com.ses.service.EngineerBpAffiliationService;
+import com.ses.service.WorkRecordService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -45,6 +49,12 @@ class BpPaymentWritePathTest {
 
     @Autowired
     private EngineerMapper engineerMapper;
+
+    @Autowired
+    private EngineerBpAffiliationService engineerBpAffiliationService;
+
+    @Autowired
+    private WorkRecordService workRecordService;
 
     /**
      * 勤怠のスコープ判定は契約→要員をINNER JOINするため、勤怠には実在する契約が必要。
@@ -79,6 +89,12 @@ class BpPaymentWritePathTest {
         freeText.setAmount(new BigDecimal("100000"));
         assertThrows(BusinessException.class, () -> bpPaymentService.addLayer(freeText));
 
+        BpPayment withoutId = new BpPayment();
+        withoutId.setAmount(new BigDecimal("100000"));
+        BusinessException missingId = assertThrows(BusinessException.class,
+                () -> bpPaymentService.addLayer(withoutId));
+        assertEquals("error.bpPayment.bpCompanyRequired", missingId.getMessage());
+
         BpCompany company = BpCompany.builder()
                 .legalName("株式会社BPマスタ")
                 .entityType("CORPORATE")
@@ -102,5 +118,53 @@ class BpPaymentWritePathTest {
                 "マスタ会社名のsnapshotが自動設定されること");
         BpPayment persisted = bpPaymentMapper.selectById(saved.getId());
         assertEquals(company.getId(), persisted.getBpCompanyId());
+    }
+
+    @Test
+    @DisplayName("勤怠確定のBP自動生成もbpCompanyIdと名称snapshotを必須にする")
+    void confirmAutoGenerateRequiresBpCompanyIdAndSnapshot() {
+        BpCompany company = BpCompany.builder()
+                .legalName("株式会社自動生成BP")
+                .entityType("CORPORATE")
+                .build();
+        bpCompanyService.createBpCompany(company);
+
+        Engineer engineer = new Engineer();
+        engineer.setFullName("自動生成テスト要員");
+        engineer.setEmploymentType("BP");
+        engineer.setStatus("稼動中");
+        engineerMapper.insert(engineer);
+        engineerBpAffiliationService.assignBpAffiliation(
+                engineer.getId(), company.getId(), LocalDate.of(2026, 1, 1), null);
+
+        Contract contract = new Contract();
+        contract.setEngineerId(engineer.getId());
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setStartDate(LocalDate.of(2026, 5, 1));
+        contract.setSellingPrice(new BigDecimal("700000"));
+        contract.setCostPrice(new BigDecimal("600000"));
+        contract.setStatus("稼動中");
+        contractMapper.insert(contract);
+
+        // H2 test schema (V5) の status ENUM は 入力中/確定 のみ（V32の提出済は未適用）
+        WorkRecord record = new WorkRecord();
+        record.setWorkMonth("2026-05");
+        record.setContractId(contract.getId());
+        record.setActualHours(new BigDecimal("160.0"));
+        record.setPaymentAmount(new BigDecimal("600000"));
+        record.setStatus("入力中");
+        workRecordMapper.insert(record);
+
+        workRecordService.confirmMonth("2026-05");
+
+        List<BpPayment> payments = bpPaymentMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<BpPayment>()
+                        .eq("work_record_id", record.getId()));
+        assertEquals(1, payments.size());
+        BpPayment generated = payments.get(0);
+        assertEquals(company.getId(), generated.getBpCompanyId());
+        assertEquals("株式会社自動生成BP", generated.getBpCompanyNameSnapshot());
+        assertNotNull(generated.getBpCompanyId());
     }
 }

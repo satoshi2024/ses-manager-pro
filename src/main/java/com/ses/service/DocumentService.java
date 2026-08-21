@@ -142,6 +142,15 @@ public interface DocumentService {
      * @return 入力ストリーム
      */
     InputStream download(Long documentId, Integer versionNo);
+
+    /**
+     * 指定版の storage_key を DB から返す（APIレスポンスでは null 化するが、
+     * FileScope の assertDownloadAllowed には実キーが必要）。
+     *
+     * @return 版が無ければ null
+     */
+    String getVersionStorageKey(Long documentId, Integer versionNo);
+
     /**
      * DataScope フィルタをクエリラッパーに適用する。
      */

@@ -9,10 +9,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 接続状態をREAUTH_REQUIREDへ更新する独立トランザクション。
  *
- * <p>HFP-01-REV-002: {@code refreshInternal}（REQUIRES_NEW）内で直接状態を更新すると、
- * 続けて投げるBusinessExceptionによるrollbackで更新が消えるため、
- * 外側トランザクションの完了後（afterCompletion）に、このbeanのREQUIRES_NEWトランザクションで
- * 独立に永続化する。同じ行を二重にロックしないよう、呼び出しは必ず外側tx終了後に行うこと。</p>
+ * <p>HFP-01-REV-002: refresh HTTP は DB transaction 外で実行する（S15-P1-01）。
+ * invalid_grant 等で REAUTH_REQUIRED が必要なときは、この bean の REQUIRES_NEW
+ * トランザクションで独立に永続化する。unit test（reauthMarker 無し）は呼び出し側が
+ * mapper 直接更新へフォールバックする。</p>
  */
 @Component
 public class FreeeReauthMarker {

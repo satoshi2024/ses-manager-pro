@@ -130,6 +130,9 @@ class PortalScopeMatrixTest extends PortalTestSupport {
         mockMvc.perform(get("/portal").cookie(m.userBp().sessionCookie()))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl("/portal/bp"));
+        // BP画面マッピングが存在し、ログイン済みBPユーザーは200で到達できる（S13-P1-03）
+        mockMvc.perform(get("/portal/bp").cookie(m.userBp().sessionCookie()))
+                .andExpect(status().isOk());
         // BPの顧客画面は403（org typeが違う）
         mockMvc.perform(get("/api/portal/customer/quotations").cookie(m.userBp().sessionCookie()))
                 .andExpect(status().isForbidden());

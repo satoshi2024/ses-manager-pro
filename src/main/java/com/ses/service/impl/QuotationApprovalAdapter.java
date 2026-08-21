@@ -6,6 +6,7 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.Quotation;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.QuotationService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -21,11 +22,14 @@ public class QuotationApprovalAdapter implements ApprovalTargetAdapter {
     private final QuotationMapper mapper;
     private final QuotationService service;
     private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
 
-    public QuotationApprovalAdapter(QuotationMapper mapper, QuotationService service, ObjectMapper objectMapper) {
+    public QuotationApprovalAdapter(QuotationMapper mapper, QuotationService service, ObjectMapper objectMapper,
+                                    ApprovalOrganizationResolver organizationResolver) {
         this.mapper = mapper;
         this.service = service;
         this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
     }
 
     @Override public String requestType() { return "quotation.submit"; }
@@ -41,7 +45,9 @@ public class QuotationApprovalAdapter implements ApprovalTargetAdapter {
         payload.put("createDraft", Boolean.TRUE.equals(command.get("createDraft")));
         Map<String, Object> diff = new java.util.LinkedHashMap<>();
         diff.put("status", Map.of("label", "見積ステータス", "before", q.getStatus() == null ? "" : q.getStatus(), "after", status == null ? "" : status));
-        return new ApprovalSnapshot(version(q.getVersion()), q.getUnitPrice(), null, payload, diff);
+        // SES見積は単一行モデル（明細テーブル無し）。金額帯は単価(=唯一の行金額)を正とする（S07-AMT-01）。
+        BigDecimal amount = q.getUnitPrice();
+        return new ApprovalSnapshot(version(q.getVersion()), amount, organizationResolver.forQuotation(q), payload, diff);
     }
 
     @Override

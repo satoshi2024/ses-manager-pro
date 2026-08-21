@@ -1,5 +1,6 @@
 package com.ses.config.portal;
 
+import com.ses.common.util.ClientIpResolver;
 import com.ses.config.PortalSecurityProperties;
 import com.ses.service.portal.PortalRateLimiter;
 import com.ses.portal.PortalLoginUser;
@@ -11,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -21,16 +21,20 @@ import java.util.regex.Pattern;
 /**
  * portal APIのrate limit適用フィルタ（R4.5）。
  * login/招待はIP単位、download/upload/検収はuser単位（未認証は対象APIに到達できない）。
+ * IPは {@link ClientIpResolver}（信頼プロキシ時のみ XFF）で解決する（S13-XFF-01）。
  */
 @RequiredArgsConstructor
 public class PortalRateLimitFilter extends OncePerRequestFilter {
 
     private static final Pattern DOWNLOAD = Pattern.compile("^/api/portal/.*/download$");
     private static final Pattern UPLOAD = Pattern.compile("^/api/portal/.*/(attachments|files)$");
+    /** BP提出物アップロード。実パスは .../payments/{id}/submissions（末尾スラッシュ無し。S13-P2-02） */
+    private static final Pattern SUBMISSION_UPLOAD = Pattern.compile("^/api/portal/.*/submissions$");
     private static final Pattern ACCEPTANCE = Pattern.compile("^/api/portal/customer/acceptances/[^/]+/(accept|reject)$");
 
     private final PortalRateLimiter rateLimiter;
     private final PortalSecurityProperties properties;
+    private final ClientIpResolver clientIpResolver;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -49,7 +53,8 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
         } else if ("GET".equals(method) && DOWNLOAD.matcher(uri).matches()) {
             key = "download:" + currentUserId();
             perMinute = properties.getRateLimit().getDownloadPerMinute();
-        } else if ("POST".equals(method) && (UPLOAD.matcher(uri).matches() || uri.contains("/submissions/"))) {
+        } else if ("POST".equals(method)
+                && (UPLOAD.matcher(uri).matches() || SUBMISSION_UPLOAD.matcher(uri).matches())) {
             key = "upload:" + currentUserId();
             perMinute = properties.getRateLimit().getUploadPerMinute();
         } else if ("POST".equals(method) && ACCEPTANCE.matcher(uri).matches()) {
@@ -68,11 +73,7 @@ public class PortalRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 
     private String currentUserId() {

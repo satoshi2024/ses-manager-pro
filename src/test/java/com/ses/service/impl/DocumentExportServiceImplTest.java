@@ -55,6 +55,7 @@ class DocumentExportServiceImplTest {
         version.setStorageKey("key-100");
         version.setOriginalName("contract.pdf");
         version.setSha256("sha256-dummy-hash");
+        version.setScanStatus("CLEAN");
 
         when(documentMapper.selectList(any())).thenReturn(List.of(doc));
         when(documentVersionMapper.findByDocumentId(100L)).thenReturn(List.of(version));
@@ -85,6 +86,41 @@ class DocumentExportServiceImplTest {
 
         String fileContent = new String(zis.readAllBytes());
         assertEquals("PDF content", fileContent);
+    }
+
+    @Test
+    void exportTaxZip_nonCleanVersion_manifestSkippedAndNoBinary() throws Exception {
+        Document doc = new Document();
+        doc.setId(200L);
+        doc.setDocumentType("CONTRACT");
+        doc.setDocumentNo("CNT-200");
+        doc.setTitle("未スキャン文書");
+
+        DocumentVersion dirty = new DocumentVersion();
+        dirty.setDocumentId(200L);
+        dirty.setVersionNo(1);
+        dirty.setStorageKey("key-dirty");
+        dirty.setOriginalName("dirty.pdf");
+        dirty.setSha256("sha-dirty");
+        dirty.setScanStatus("PENDING");
+
+        when(documentMapper.selectList(any())).thenReturn(List.of(doc));
+        when(documentVersionMapper.findByDocumentId(200L)).thenReturn(List.of(dirty));
+        org.mockito.Mockito.doNothing().when(documentService).applyDataScopeFilter(any());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        exportService.exportTaxZip(new DocumentSearchQuery(), baos);
+
+        ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(baos.toByteArray()));
+        ZipEntry manifest = zis.getNextEntry();
+        assertNotNull(manifest);
+        assertEquals("manifest.csv", manifest.getName());
+        String manifestContent = new String(zis.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(manifestContent.contains("SKIPPED"));
+        assertFalse(manifestContent.contains("MATCH"));
+
+        assertNull(zis.getNextEntry(), "非CLEAN版のバイナリは ZIP に含めない");
+        org.mockito.Mockito.verify(documentStorage, org.mockito.Mockito.never()).open(any());
     }
 
     @Test

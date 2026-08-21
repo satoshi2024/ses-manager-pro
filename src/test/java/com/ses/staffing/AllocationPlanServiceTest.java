@@ -42,6 +42,7 @@ import static com.ses.entity.AllocationPlan.TYPE_INTERNAL;
 import static com.ses.entity.AllocationPlan.TYPE_PROJECT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -404,6 +405,19 @@ class AllocationPlanServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> allocationService.saveDraft(plan(percent(50), SEP30, SEPT)));
         assertEquals("error.staffing.invalidPeriod", ex.getMessageKey());
+    }
+
+    @Test
+    void 下書き作成時はクライアントのsourceContractIdとapprovalRequestIdを無視する() {
+        AllocationPlan draft = plan(percent(40), SEPT, SEP30);
+        draft.setSourceContractId(999L);
+        draft.setApprovalRequestId(888L);
+        AllocationPlan saved = allocationService.saveDraft(draft);
+        assertNull(saved.getSourceContractId());
+        assertNull(saved.getApprovalRequestId());
+        AllocationPlan reloaded = allocationMapper.selectById(saved.getId());
+        assertNull(reloaded.getSourceContractId());
+        assertNull(reloaded.getApprovalRequestId());
     }
 
     // ---------------------------------------------------------------

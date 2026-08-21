@@ -287,10 +287,6 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         if (!Objects.equals(request.getApplicantId(), applicantId)) {
             throw BusinessException.of(403, "error.approval.notApprover");
         }
-        RouteSnapshot snapshot = readJson(request.getRouteSnapshotJson(), RouteSnapshot.class);
-        RouteStepGroup firstStep = snapshot.steps().stream()
-                .min(Comparator.comparingInt(RouteStepGroup::stepNo))
-                .orElseThrow(() -> BusinessException.of("error.approval.approverUnresolved"));
 
         boolean conflict = STATUS_CONFLICT.equals(request.getStatus());
         Map<String, Object> payload = updatedPayload;
@@ -313,17 +309,31 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
             targetVersion = refreshed.targetVersion();
         }
 
+        // 金額変更で帯を跨いだ場合に旧routeの承認者で高額を承認させない。
+        // 再申請roundでは金額帯に合わせてrouteを再解決し、snapshotを書き換える。
+        BigDecimal amountForRoute = amount != null ? amount : request.getAmountSnapshot();
+        ResolvedRoute resolved = routeResolverService.resolve(
+                request.getRequestType(), request.getOrganizationId(),
+                amountForRoute, applicantId, LocalDate.now());
+        RouteSnapshot snapshot = new RouteSnapshot(resolved.routeId(), resolved.versionNo(),
+                resolved.organizationId(), resolved.steps());
+        RouteStepGroup firstStep = snapshot.steps().stream()
+                .min(Comparator.comparingInt(RouteStepGroup::stepNo))
+                .orElseThrow(() -> BusinessException.of("error.approval.approverUnresolved"));
+
         int nextRound = roundNo(request) + 1;
         final Map<String, Object> finalPayload = payload;
         final Map<String, Object> finalDiff = diff;
         final BigDecimal finalAmount = amount;
         final Long finalTargetVersion = targetVersion;
+        final String routeSnapshotJson = writeJson(snapshot);
         boolean updated = casUpdate(request, w -> {
             w.set("status", STATUS_IN_REVIEW)
                     .set("current_step", firstStep.stepNo())
                     .set("round_no", nextRound)
                     .set("current_step_started_at", LocalDateTime.now())
-                    .set("requested_at", LocalDateTime.now());
+                    .set("requested_at", LocalDateTime.now())
+                    .set("route_snapshot_json", routeSnapshotJson);
             if (conflict) {
                 // conflict再申請はadapterが現在値から再生成したsnapshotを完全置換する。
                 // 金額なし業務ではnullも意味のある値なので、条件付きsetで旧値を残さない。
@@ -354,6 +364,7 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
         request.setCurrentStep(firstStep.stepNo());
         request.setRoundNo(nextRound);
         request.setCurrentStepStartedAt(LocalDateTime.now());
+        request.setRouteSnapshotJson(routeSnapshotJson);
         if (conflict) {
             request.setTargetVersion(finalTargetVersion);
             request.setPayloadJson(writeJson(finalPayload == null ? Map.of() : finalPayload));
@@ -436,6 +447,12 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
      */
     private ApproverResolution authorizeActor(ApprovalRequest request, RouteStepGroup step,
                                               Long actingUserId, String requestType) {
+        // 職務分離(R1.4): 申請者本人の承認は、slot所有者一致・代理経由を含め常に禁止する。
+        // 代理作成時の from==to チェックだけでは to=申請者 の経路を止められない。
+        if (Objects.equals(actingUserId, request.getApplicantId())) {
+            throw BusinessException.of(403, "error.approval.selfApproveForbidden");
+        }
+
         List<ApprovalAction> actions = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
                 .eq(ApprovalAction::getRequestId, request.getId())
                 .eq(ApprovalAction::getRoundNo, roundNo(request))

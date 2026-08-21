@@ -2,10 +2,12 @@ package com.ses.controller.api.portaladmin;
 
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.portal.PortalInvitationAdminDto;
+import com.ses.dto.portal.PortalSessionAdminDto;
+import com.ses.dto.portal.PortalUserAdminDto;
 import com.ses.entity.PortalAccessLog;
 import com.ses.entity.PortalInvitation;
 import com.ses.entity.PortalOrganization;
-import com.ses.entity.PortalSession;
 import com.ses.entity.PortalUser;
 import com.ses.service.portal.PortalAdminService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -94,12 +96,16 @@ public class PortalAdminApiController {
     // ===== user（停止/再開・org-adminは管理者のみ。営業は参照のみ: design §6.2） =====
 
     @GetMapping("/orgs/{orgId}/users")
-    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalUser>> users(
+    public ApiResult<com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalUserAdminDto>> users(
             @PathVariable Long orgId,
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "20") long size) {
         assertOrgVisible(orgId);
-        return ApiResult.success(adminService.users(current, size, orgId));
+        var page = adminService.users(current, size, orgId);
+        var dtoPage = new com.baomidou.mybatisplus.extension.plugins.pagination.Page<PortalUserAdminDto>(
+                page.getCurrent(), page.getSize(), page.getTotal());
+        dtoPage.setRecords(page.getRecords().stream().map(PortalUserAdminDto::from).toList());
+        return ApiResult.success(dtoPage);
     }
 
     @PutMapping("/users/{id}/status")
@@ -128,13 +134,13 @@ public class PortalAdminApiController {
     // ===== 招待（発行は管理者のみ。営業は自担当顧客の一覧参照のみ: design §6.2） =====
 
     @PostMapping("/orgs/{orgId}/invitations")
-    public ApiResult<PortalInvitation> createInvitation(@PathVariable Long orgId,
-                                                        @RequestBody Map<String, Object> body,
-                                                        HttpServletRequest request) {
+    public ApiResult<PortalInvitationAdminDto> createInvitation(@PathVariable Long orgId,
+                                                                @RequestBody Map<String, Object> body,
+                                                                HttpServletRequest request) {
         requireAdmin();
         assertOrgVisible(orgId);
-        return ApiResult.success(adminService.createInvitation(orgId,
-                (String) body.get("email"), (String) body.get("role"), request));
+        return ApiResult.success(PortalInvitationAdminDto.from(adminService.createInvitation(orgId,
+                (String) body.get("email"), (String) body.get("role"), request)));
     }
 
     @GetMapping("/invitations")
@@ -151,9 +157,11 @@ public class PortalAdminApiController {
     // ===== session（失効は管理者のみ） =====
 
     @GetMapping("/users/{id}/sessions")
-    public ApiResult<List<PortalSession>> sessions(@PathVariable Long id) {
+    public ApiResult<List<PortalSessionAdminDto>> sessions(@PathVariable Long id) {
         assertUserVisible(id);
-        return ApiResult.success(adminService.sessions(id));
+        return ApiResult.success(adminService.sessions(id).stream()
+                .map(PortalSessionAdminDto::from)
+                .toList());
     }
 
     @PostMapping("/users/{id}/sessions/revoke")

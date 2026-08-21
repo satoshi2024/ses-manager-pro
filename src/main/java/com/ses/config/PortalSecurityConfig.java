@@ -50,11 +50,12 @@ public class PortalSecurityConfig {
     @Order(1)
     public SecurityFilterChain portalSecurityFilterChain(HttpSecurity http,
                                                          com.ses.service.portal.PortalSessionService portalSessionService,
-                                                         PortalRateLimiter portalRateLimiter) throws Exception {
+                                                         PortalRateLimiter portalRateLimiter,
+                                                         com.ses.common.util.ClientIpResolver clientIpResolver) throws Exception {
         PortalSessionFilter portalSessionFilter =
                 new PortalSessionFilter(portalSessionService, portalSecurityProperties);
         PortalRateLimitFilter portalRateLimitFilter =
-                new PortalRateLimitFilter(portalRateLimiter, portalSecurityProperties);
+                new PortalRateLimitFilter(portalRateLimiter, portalSecurityProperties, clientIpResolver);
 
         http
             .securityMatcher("/portal/**", "/api/portal/**")

@@ -213,6 +213,33 @@ class SalesOrderServiceImplTest {
                 .isInstanceOf(BusinessException.class);
     }
 
+    @Test
+    @DisplayName("S09-P1-01: quotation_id UNIQUE競合時は既存注文を返す")
+    void createDraftFromQuotation_returnsExistingOnDuplicateKey() {
+        com.ses.entity.Quotation quotation = new com.ses.entity.Quotation();
+        quotation.setId(99L);
+        quotation.setCustomerId(10L);
+        quotation.setEngineerId(20L);
+        quotation.setProjectId(30L);
+        quotation.setUnitPrice(new BigDecimal("600000"));
+        when(quotationMapper.selectByIdForUpdate(99L)).thenReturn(quotation);
+
+        SalesOrder winner = new SalesOrder();
+        winner.setId(7L);
+        winner.setQuotationId(99L);
+        winner.setStatus(StatusConstants.ORDER_DRAFT);
+
+        // 1回目=未存在、insert競合後の再取得、insertWithNoRetry内の再取得
+        when(salesOrderMapper.selectOne(any())).thenReturn(null, winner, winner);
+        when(salesOrderMapper.selectMaxOrderNo(any())).thenReturn(null);
+        when(salesOrderMapper.insert(any(SalesOrder.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("uk_sales_order_quotation"));
+
+        SalesOrder result = service.createDraftFromQuotation(99L);
+        assertThat(result.getId()).isEqualTo(7L);
+        org.mockito.Mockito.verify(lineMapper, org.mockito.Mockito.never()).insert(any(SalesOrderLine.class));
+    }
+
     private SalesOrderLine line(Long id, String amount) {
         SalesOrderLine line = new SalesOrderLine();
         line.setId(id);

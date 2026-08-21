@@ -34,13 +34,13 @@ public interface FreeeIntegrationService {
     /** 本人専用の給与明細取得。外部取得境界で当該engineerIdのみを取得・materializeする（R1-P1-04）。 */
     PayrollStatementDto statementForEngineer(Long engineerId, int year, int month, String type);
     /**
-     * 期限ベースのrefresh。row-lock後に再読込し、別threadが既に更新して有効期限に余裕がある場合は
-     * 外部refreshせずreturnする（HFP-01-R03-3）。
+     * 期限ベースのrefresh。短TXでrow-lock後に再確認し、別threadが既に更新して有効期限に余裕がある場合は
+     * 外部refreshせずreturnする。HTTPはTX外（S15-P1-01 / HFP-01-R03-3）。
      */
     void refresh();
     /**
      * 401でaccess tokenが拒否された場合のrefresh。ローカル期限に依らず必ず外部refreshを1回行う。
-     * row-lock＋再読込により、同一refresh tokenを並行・再試行で二度使わない（HFP-01-R03-3/AC04）。
+     * 短TX lock → HTTP外 → 短TX CAS により、同一refresh tokenを並行・再試行で二度使わない（HFP-01-R03-3/AC04）。
      */
     void refreshForced();
     /** 銀行入金明細（freee会計の入金取引）を期間指定で取得する（入金消込 / FR-09）。 */

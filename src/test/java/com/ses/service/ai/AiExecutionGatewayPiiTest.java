@@ -111,4 +111,41 @@ class AiExecutionGatewayPiiTest {
             aiConfig.setProvider("mock");
         }
     }
+
+    @Test
+    void executeメソッドはTransactionalではない() throws Exception {
+        // S17-P2-01: provider HTTP を TX 外に出すため、execute 全体の @Transactional を外す
+        assertNull(org.springframework.core.annotation.AnnotationUtils.findAnnotation(
+                AiExecutionGateway.class.getMethod("execute", AiGatewayRequest.class),
+                org.springframework.transaction.annotation.Transactional.class));
+        assertNull(org.springframework.core.annotation.AnnotationUtils.findAnnotation(
+                com.ses.service.ai.impl.AiExecutionGatewayImpl.class.getMethod(
+                        "execute", AiGatewayRequest.class),
+                org.springframework.transaction.annotation.Transactional.class));
+    }
+
+    @Test
+    void provider呼び出し中はトランザクションがアクティブでない() {
+        AiTextService recording = prompt -> {
+            assertFalse(
+                    org.springframework.transaction.support.TransactionSynchronizationManager
+                            .isActualTransactionActive(),
+                    "provider呼び出し中に Spring TX が開いていてはいけない");
+            return "{\"ok\":true}";
+        };
+        AiTextService original = (AiTextService) org.springframework.test.util.ReflectionTestUtils
+                .getField(gateway, "aiTextService");
+        try {
+            org.springframework.test.util.ReflectionTestUtils.setField(gateway, "aiTextService", recording);
+            aiConfig.setProvider("mock");
+            gateway.execute(AiGatewayRequest.builder()
+                    .useCase(AiGatewayRequest.USE_CHAT)
+                    .trustedInstruction("ping")
+                    .persistRun(false)
+                    .requireJson(false)
+                    .build());
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(gateway, "aiTextService", original);
+        }
+    }
 }

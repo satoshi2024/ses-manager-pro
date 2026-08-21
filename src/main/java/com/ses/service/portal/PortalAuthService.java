@@ -20,8 +20,9 @@ public interface PortalAuthService {
 
     /**
      * MFA有効化（loginでMFA_SETUPを受けた後の続き）。成功時にrecovery codeを返しsessionを発行する。
+     * password または login時に発行した短命setup ticket（cookie）のいずれかが必須（S13-P1-02）。
      */
-    com.ses.dto.portal.PortalMfaCompleteDto completeMfa(String email, String code,
+    com.ses.dto.portal.PortalMfaCompleteDto completeMfa(String email, String code, String password,
                                                         HttpServletRequest httpRequest,
                                                         HttpServletResponse httpResponse);
 

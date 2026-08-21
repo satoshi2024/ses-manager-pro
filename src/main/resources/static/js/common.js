@@ -13,8 +13,12 @@ const SES = {
         t: function(key, ...args) {
             let msg = (window.SES_MESSAGES && window.SES_MESSAGES[key]) ? window.SES_MESSAGES[key] : null;
             let fallback = null;
-            if (args.length > 1 && typeof args[args.length - 1] === 'string') {
-                fallback = args.pop();
+            // trailing string: メッセージに {0}/{name} が無ければ fallback（2引数の欠key時を含む）
+            if (args.length >= 1 && typeof args[args.length - 1] === 'string') {
+                var hasPlaceholder = msg && /\{(\d+|[a-zA-Z_][a-zA-Z0-9_]*)\}/.test(msg);
+                if (!hasPlaceholder) {
+                    fallback = args.pop();
+                }
             }
             if (!msg) msg = fallback || key;
             if (args.length === 0) return msg;

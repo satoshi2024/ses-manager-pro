@@ -43,5 +43,12 @@ public class DigitalInvoice {
 
     @TableLogic
     private Integer deletedFlag;
+
+    /**
+     * MySQL 生成列 send_active_slot（V108.3）。INSERT/UPDATE から除外する。
+     * 有効 SEND の UNIQUE(invoice_id, direction, profile, specification_version) 用スロット。
+     */
+    @TableField(exist = false)
+    private Integer sendActiveSlot;
 }
 

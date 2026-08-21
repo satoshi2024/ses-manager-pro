@@ -21,8 +21,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.client.ExpectedCount;
+import org.springframework.core.env.Environment;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
@@ -53,6 +55,9 @@ class FreeeAccountingProviderTest {
     @Autowired
     private CsvAccountingExportProvider csvProvider;
 
+    @Autowired
+    private Environment environment;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection testConnection;
 
@@ -68,6 +73,18 @@ class FreeeAccountingProviderTest {
                 .expiresIn(3600L)
                 .build();
         connectionService.saveTokens(testConnection.getId(), tokens, 99999L, "テスト事業所", 1L);
+    }
+
+    @Test
+    @DisplayName("S15-P0-02: client-id/secret は freee.client-id 系に束縛され dummy 既定ではない")
+    void clientCredentials_bindToYamlKeys_notDummyOauthDefaults() {
+        String boundId = (String) ReflectionTestUtils.getField(freeeProvider, "clientId");
+        String boundSecret = (String) ReflectionTestUtils.getField(freeeProvider, "clientSecret");
+        assertThat(boundId).isNotEqualTo("dummy-client-id");
+        assertThat(boundSecret).isNotEqualTo("dummy-client-secret");
+        assertThat(boundId).isEqualTo(environment.getProperty("freee.client-id", ""));
+        assertThat(boundSecret).isEqualTo(environment.getProperty("freee.client-secret", ""));
+        assertThat(environment.getProperty("freee.oauth.client-id")).isNull();
     }
 
     @Test
@@ -1014,5 +1031,41 @@ class FreeeAccountingProviderTest {
         } finally {
             logger.detachAppender(listAppender);
         }
+    }
+
+    @Test
+    @DisplayName("S15-P1-02: token応答にrefresh_tokenが無い場合は旧tokenへフォールバックせずREAUTH")
+    void refreshTokenMissing_failClosedReauth() {
+        CanonicalSalesInvoice invoice = CanonicalSalesInvoice.builder()
+                .invoiceId(777L)
+                .invoiceNo("INV-NO-REFRESH")
+                .total(new BigDecimal("100000"))
+                .build();
+
+        mockServer.reset();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                        .body("{\"message\": \"Invalid token\"}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        // access_tokenのみ・refresh_token欠落（旧token再利用禁止）
+        mockServer.expect(requestTo("https://accounts.secure.freee.co.jp/public_api/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess(
+                        "{\"access_token\": \"access-new-only\", \"expires_in\": 3600}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getErrorCode()).isEqualTo("UNAUTHORIZED");
+
+        IntegrationConnection after = connectionService.getById(testConnection.getId());
+        assertThat(after.getStatus()).isEqualTo("REAUTH_REQUIRED");
+
+        var snapshot = connectionService.getTokenSnapshot(testConnection.getId());
+        assertThat(snapshot.getRefreshToken()).isEqualTo("secret-refresh-987654321");
+        assertThat(snapshot.getAccessToken()).isEqualTo("secret-token-abcdef123456");
     }
 }

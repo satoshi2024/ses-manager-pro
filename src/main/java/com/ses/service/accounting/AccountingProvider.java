@@ -57,4 +57,12 @@ public interface AccountingProvider {
      * 外部マスタ (取引先、勘定科目、税区分、部門) の存在・整合性を検証する (P1-05)。
      */
     boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode);
+
+    /**
+     * ref_number で既存取引を照合する（stale RUNNING 回収時の再POST抑止）。
+     * 見つからない/曖昧/障害時は empty。
+     */
+    default java.util.Optional<String> findDealIdByRefNumber(IntegrationConnection connection, String refNumber) {
+        return java.util.Optional.empty();
+    }
 }

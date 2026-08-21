@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.AttendanceMonth;
+import com.ses.entity.Engineer;
 import com.ses.entity.LeaveLedger;
 import com.ses.entity.LeaveRequest;
 import com.ses.mapper.AttendanceMonthMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.LeaveLedgerMapper;
 import com.ses.mapper.LeaveRequestMapper;
 import com.ses.service.NotificationService;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -44,6 +47,7 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
     private final LeaveRequestMapper leaveRequestMapper;
     private final LeaveLedgerMapper leaveLedgerMapper;
     private final AttendanceMonthMapper attendanceMonthMapper;
+    private final EngineerMapper engineerMapper;
     private final EngineerSalesService engineerSalesService;
     private final NotificationService notificationService;
     private final SystemConfigService systemConfigService;
@@ -122,7 +126,10 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
         applyMonths(leave, false);
     }
 
-    /** 承認時点でも残数CASを再検証する（申請〜承認の間に残数が減った場合をfail-closedにする）。 */
+    /**
+     * 承認時点でも残数を再検証する（申請〜承認の間に残数が減った場合をfail-closedにする）。
+     * engineer×leaveTypeの台帳行をFOR UPDATEでロックし、unlocked check-then-insertを禁止する（S11-P1-01）。
+     */
     private void assertBalanceAtApproval(LeaveRequest leave) {
         String mode = systemConfigService.getString("leave.balance.source", null);
         if (mode == null || mode.isBlank()) {
@@ -134,7 +141,7 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
         if (!isBalanceManaged(leave.getLeaveType())) {
             return;
         }
-        int balance = balanceMinutes(leave.getEngineerId(), leave.getLeaveType());
+        int balance = lockAndBalanceMinutes(leave.getEngineerId(), leave.getLeaveType());
         if (leave.getRequestedMinutes() == null || leave.getRequestedMinutes() > balance) {
             throw BusinessException.of(400, "error.leave.balanceInsufficient", balance, leave.getRequestedMinutes());
         }
@@ -152,6 +159,26 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
                 .source("system")
                 .version(0)
                 .build());
+    }
+
+    /**
+     * engineer×leaveTypeの残数を、要員行のFOR UPDATEで直列化してから算出する（S11-P1-01）。
+     * 台帳行だけのロックだとH2等で空集合時に競合を防げないため、sentinelは要員行に固定する。
+     */
+    private int lockAndBalanceMinutes(Long engineerId, String leaveType) {
+        Engineer locked = engineerMapper.selectByIdForUpdate(engineerId);
+        if (locked == null) {
+            throw BusinessException.of(404, "error.leave.notFound");
+        }
+        // 要員ロック保持中に台帳を再読込（他txのCONSUME確定後の残高を見る）
+        List<LeaveLedger> rows = leaveLedgerMapper.selectList(new LambdaQueryWrapper<LeaveLedger>()
+                .eq(LeaveLedger::getEngineerId, engineerId)
+                .eq(LeaveLedger::getLeaveType, leaveType)
+                .orderByAsc(LeaveLedger::getId));
+        return rows.stream()
+                .mapToInt(row -> "GRANT".equals(row.getLedgerType())
+                        ? value(row.getAmountMinutes()) : -value(row.getAmountMinutes()))
+                .sum();
     }
 
     /**
@@ -230,16 +257,6 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
     private boolean isBalanceManaged(String leaveType) {
         String types = systemConfigService.getString("leave.balance.types", "有給,半休,時間休,代休,特別休暇");
         return types != null && Arrays.asList(types.split(",")).contains(leaveType);
-    }
-
-    private int balanceMinutes(Long engineerId, String leaveType) {
-        return leaveLedgerMapper.selectList(new LambdaQueryWrapper<LeaveLedger>()
-                        .eq(LeaveLedger::getEngineerId, engineerId)
-                        .eq(LeaveLedger::getLeaveType, leaveType))
-                .stream()
-                .mapToInt(row -> "GRANT".equals(row.getLedgerType())
-                        ? value(row.getAmountMinutes()) : -value(row.getAmountMinutes()))
-                .sum();
     }
 
     private LeaveRequest leave(Long targetId) {

@@ -43,8 +43,9 @@ class FlywayJpPintDigitalInvoiceSchemaSmokeTest {
             assertIndexExists(statement, "t_peppol_participant", "uk_peppol_participant_owner");
             assertIndexExists(statement, "t_digital_invoice", "uk_digital_invoice_message");
             assertIndexExists(statement, "t_digital_invoice_event", "uk_digital_invoice_event_provider");
-            assertIndexDoesNotExist(statement, "t_digital_invoice", "uk_digital_invoice_send");
-            
+            // V107_2 で DROP → V108.3 で profile 付き・有効スロット付き UNIQUE を再導入
+            assertIndexExists(statement, "t_digital_invoice", "uk_digital_invoice_send");
+            assertColumnExists(statement, "t_digital_invoice", "send_active_slot");
             // Inbound Columns
             assertColumnExists(statement, "t_digital_invoice", "supplier_company_id");
             assertColumnExists(statement, "t_digital_invoice", "match_status");

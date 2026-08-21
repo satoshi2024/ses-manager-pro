@@ -1,7 +1,9 @@
 package com.ses.service.portal.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
+import com.ses.config.PortalSecurityProperties;
 import com.ses.dto.portal.PortalAcceptInvitationRequest;
 import com.ses.dto.portal.PortalLoginRequest;
 import com.ses.dto.portal.PortalLoginResponse;
@@ -18,19 +20,27 @@ import com.ses.mapper.PortalUserMapper;
 import com.ses.service.SystemConfigService;
 import com.ses.service.portal.PortalAuthService;
 import com.ses.service.portal.PortalMfaService;
+import com.ses.service.portal.PortalRateLimiter;
 import com.ses.service.portal.PortalSessionService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * portal認証実装。招待tokenの一回性はDB CAS（WHERE used_at IS NULL）で保証する（design §6.3）。
@@ -42,6 +52,9 @@ import java.time.LocalDateTime;
 public class PortalAuthServiceImpl implements PortalAuthService {
 
     private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
+    /** MFA設定完了までの短命ticket cookie（login MFA_SETUP時に発行。S13-P1-02） */
+    static final String MFA_SETUP_COOKIE = "PORTAL_MFA_SETUP";
+    private static final long MFA_SETUP_TICKET_TTL_MILLIS = 10 * 60_000L;
 
     private final PortalUserMapper userMapper;
     private final PortalOrganizationMapper organizationMapper;
@@ -50,17 +63,39 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private final PortalMfaService mfaService;
     private final PortalSessionService sessionService;
     private final SystemConfigService systemConfigService;
+    private final PortalRateLimiter rateLimiter;
+    private final PortalSecurityProperties portalSecurityProperties;
+    private final ClientIpResolver clientIpResolver;
     private final Clock clock;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    /** setup ticket hash → (userId, expiresAtEpochMs)。単一インスタンス運用向けインメモリ。 */
+    private final Map<String, MfaSetupTicket> setupTickets = new ConcurrentHashMap<>();
+    /** email → login失敗ガード（単一インスタンス。S13-XFF-01） */
+    private final Map<String, LoginFailureGuard> loginFailureGuards = new ConcurrentHashMap<>();
+
+    @Value("${app.security.require-https:false}")
+    private boolean requireHttps;
+
+    private record MfaSetupTicket(long userId, long expiresAtEpochMs) {
+    }
+
+    private record LoginFailureGuard(int failedCount, long lockedUntilEpochMs) {
+    }
 
     @Override
     @Transactional
     public PortalLoginResponse login(PortalLoginRequest request, HttpServletRequest httpRequest,
                                      HttpServletResponse httpResponse) {
-        PortalUser user = userMapper.selectByEmail(normalizeEmail(request.getEmail()));
+        String email = normalizeEmail(request.getEmail());
+        assertLoginNotLocked(email);
+        PortalUser user = userMapper.selectByEmail(email);
         if (user == null || !StringUtils.hasText(user.getPasswordHash())
                 || !PASSWORD_ENCODER.matches(request.getPassword(), user.getPasswordHash())) {
+            recordLoginFailure(email);
             throw BusinessException.of(401, "error.portal.login.invalid");
         }
+        clearLoginFailures(email);
         if (!"ACTIVE".equals(user.getStatus())) {
             throw BusinessException.of(403, "error.portal.user.suspended");
         }
@@ -70,6 +105,7 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         }
         if (user.getMfaEnabledAt() == null) {
             PortalMfaSetupDto setup = mfaService.setup(user.getId());
+            issueMfaSetupTicket(user.getId(), httpResponse);
             return PortalLoginResponse.builder().status("MFA_SETUP").mfaSetup(setup).build();
         }
         if (!StringUtils.hasText(request.getMfaCode())) {
@@ -87,13 +123,33 @@ public class PortalAuthServiceImpl implements PortalAuthService {
 
     @Override
     @Transactional
-    public PortalMfaCompleteDto completeMfa(String email, String code, HttpServletRequest httpRequest,
+    public PortalMfaCompleteDto completeMfa(String email, String code, String password,
+                                            HttpServletRequest httpRequest,
                                             HttpServletResponse httpResponse) {
-        PortalUser user = userMapper.selectByEmail(normalizeEmail(email));
+        String normalizedEmail = normalizeEmail(email);
+        // IP+email rate limit（S13-P1-02）。email未指定でもIP単位で消費する
+        String rateKey = "mfa-complete:" + clientIp(httpRequest) + ":"
+                + (normalizedEmail == null ? "" : normalizedEmail);
+        int perMinute = portalSecurityProperties.getRateLimit().getMfaCompletePerMinute();
+        if (perMinute > 0 && !rateLimiter.tryAcquire(rateKey, perMinute)) {
+            throw BusinessException.of(429, "error.portal.mfa.rateLimited");
+        }
+        if (!StringUtils.hasText(normalizedEmail)) {
+            throw BusinessException.of(401, "error.portal.login.invalid");
+        }
+        PortalUser user = userMapper.selectByEmail(normalizedEmail);
         if (user == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        boolean passwordOk = StringUtils.hasText(password)
+                && StringUtils.hasText(user.getPasswordHash())
+                && PASSWORD_ENCODER.matches(password, user.getPasswordHash());
+        boolean ticketOk = validateMfaSetupTicket(httpRequest, user.getId());
+        if (!passwordOk && !ticketOk) {
+            throw BusinessException.of(401, "error.portal.mfa.setupAuthRequired");
+        }
         PortalMfaCompleteDto completed = mfaService.enable(user.getId(), code);
+        consumeMfaSetupTicket(httpRequest, httpResponse, user.getId());
         userMapper.updateLastLogin(user.getId(), LocalDateTime.now(clock));
         sessionService.issue(httpRequest, httpResponse, user.getId());
         return completed;
@@ -230,15 +286,126 @@ public class PortalAuthServiceImpl implements PortalAuthService {
         return userMapper.selectById(existing.getId());
     }
 
+    private void issueMfaSetupTicket(Long userId, HttpServletResponse response) {
+        purgeExpiredSetupTickets();
+        byte[] bytes = new byte[32];
+        secureRandom.nextBytes(bytes);
+        String raw = HexFormat.of().formatHex(bytes);
+        String hash = SecurityHashUtil.sha256(raw);
+        long expiresAt = System.currentTimeMillis() + MFA_SETUP_TICKET_TTL_MILLIS;
+        setupTickets.put(hash, new MfaSetupTicket(userId, expiresAt));
+        Cookie cookie = new Cookie(MFA_SETUP_COOKIE, raw);
+        cookie.setHttpOnly(true);
+        cookie.setPath("/");
+        cookie.setSecure(requireHttps);
+        cookie.setMaxAge((int) (MFA_SETUP_TICKET_TTL_MILLIS / 1000L));
+        cookie.setAttribute("SameSite", "Lax");
+        response.addCookie(cookie);
+    }
+
+    /** ticketの妥当性のみ確認（失敗リトライ用に消費しない）。 */
+    private boolean validateMfaSetupTicket(HttpServletRequest request, Long userId) {
+        String raw = readCookie(request, MFA_SETUP_COOKIE);
+        if (!StringUtils.hasText(raw) || userId == null) {
+            return false;
+        }
+        String hash = SecurityHashUtil.sha256(raw);
+        MfaSetupTicket ticket = setupTickets.get(hash);
+        if (ticket == null) {
+            return false;
+        }
+        if (ticket.expiresAtEpochMs() < System.currentTimeMillis()) {
+            setupTickets.remove(hash);
+            return false;
+        }
+        return ticket.userId() == userId;
+    }
+
+    private void consumeMfaSetupTicket(HttpServletRequest request, HttpServletResponse response, Long userId) {
+        String raw = readCookie(request, MFA_SETUP_COOKIE);
+        if (StringUtils.hasText(raw)) {
+            setupTickets.remove(SecurityHashUtil.sha256(raw));
+        }
+        Cookie cleared = new Cookie(MFA_SETUP_COOKIE, "");
+        cleared.setHttpOnly(true);
+        cleared.setPath("/");
+        cleared.setSecure(requireHttps);
+        cleared.setMaxAge(0);
+        cleared.setAttribute("SameSite", "Lax");
+        response.addCookie(cleared);
+    }
+
+    private void purgeExpiredSetupTickets() {
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<String, MfaSetupTicket>> it = setupTickets.entrySet().iterator();
+        while (it.hasNext()) {
+            if (it.next().getValue().expiresAtEpochMs() < now) {
+                it.remove();
+            }
+        }
+    }
+
+    private String readCookie(HttpServletRequest request, String name) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (name.equals(cookie.getName()) && StringUtils.hasText(cookie.getValue())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
+    }
+
     private String normalizeEmail(String email) {
         return email == null ? null : email.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
-    private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
+    private void assertLoginNotLocked(String email) {
+        if (email == null) {
+            return;
         }
-        return request.getRemoteAddr();
+        int threshold = portalSecurityProperties.getRateLimit().getLoginFailureLockThreshold();
+        if (threshold <= 0) {
+            return;
+        }
+        LoginFailureGuard guard = loginFailureGuards.get(email);
+        if (guard != null && guard.lockedUntilEpochMs() > System.currentTimeMillis()) {
+            throw BusinessException.of(429, "error.portal.login.locked");
+        }
+    }
+
+    private void recordLoginFailure(String email) {
+        if (email == null) {
+            return;
+        }
+        int threshold = portalSecurityProperties.getRateLimit().getLoginFailureLockThreshold();
+        if (threshold <= 0) {
+            return;
+        }
+        int lockMinutes = Math.max(1, portalSecurityProperties.getRateLimit().getLoginFailureLockMinutes());
+        loginFailureGuards.compute(email, (key, prev) -> {
+            long now = System.currentTimeMillis();
+            if (prev != null && prev.lockedUntilEpochMs() > now) {
+                return prev;
+            }
+            int next = (prev == null || prev.lockedUntilEpochMs() > 0 && prev.lockedUntilEpochMs() <= now)
+                    ? 1 : prev.failedCount() + 1;
+            if (next >= threshold) {
+                return new LoginFailureGuard(next, now + lockMinutes * 60_000L);
+            }
+            return new LoginFailureGuard(next, 0L);
+        });
+    }
+
+    private void clearLoginFailures(String email) {
+        if (email != null) {
+            loginFailureGuards.remove(email);
+        }
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        return clientIpResolver.resolve(request);
     }
 }

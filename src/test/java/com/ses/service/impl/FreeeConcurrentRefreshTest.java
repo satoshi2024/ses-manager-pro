@@ -31,9 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * HFP-01-REV-004: 並行refreshの自動test（実MySQL + 実HTTP）。
  *
- * <p>2 threadが同時に{@code refresh()}（REQUIRES_NEW + SELECT FOR UPDATE）を実行しても、
+ * <p>2 threadが同時に{@code refresh()}（短TX lock → HTTP外 → 短TX CAS、同一JVMは ReentrantLock 直列化）を実行しても、
  * 同一refresh tokenの外部使用（token endpoint POST）は1回だけであり、
- * 新refresh tokenがDBへrotation保存されることを検証する（R12-2 / AC04）。</p>
+ * 新refresh tokenがDBへrotation保存されることを検証する（R12-2 / AC04 / S15-P1-01）。</p>
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)

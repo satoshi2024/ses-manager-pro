@@ -169,6 +169,8 @@ app:
     dashboard-max-size: ${DASHBOARD_CACHE_MAX:500}
   security:
     require-https: false
+    # X-Forwarded-For を読むのは remoteAddr がこのリストに含まれるときだけ（CIDR可。空=常に remoteAddr）
+    trusted-proxies: ${TRUSTED_PROXIES:}
     oidc:
       enabled: ${OIDC_ENABLED:false}
       local-login-enabled: ${LOCAL_LOGIN_ENABLED:true}
@@ -211,6 +213,14 @@ app:
   # メール差出人
   mail:
     from: ${MAIL_FROM:noreply@example.com}
+  # ===== 一括操作 preview token HMAC（S05-P1-01） =====
+  # 本番は BATCH_TOKEN_SECRET を secret store から注入すること。prod 未設定は起動 fail-fast。
+  batch:
+    token-secret: ${BATCH_TOKEN_SECRET:dev-only-change-this-batch-token-secret}
+  # ===== デジタルインボイス（JP PINT。dev/test 既定は mock。prod は application-prod.yml） =====
+  digital-invoice:
+    provider: ${DIGITAL_INVOICE_PROVIDER:mock}
+    webhook-hmac-secret: ${DIGITAL_INVOICE_WEBHOOK_HMAC_SECRET:dev-only-change-this-digital-invoice-hmac}
   # ===== 外部顧客/BPポータル（S13。内部管理画面と分離したchain/session/rate limit: G3） =====
   portal:
     # portal session cookie名（内部JSESSIONIDと分離）
@@ -232,6 +242,11 @@ app:
       upload-per-minute: ${PORTAL_RATE_UPLOAD:20}
       # 検収API（userあたり/分）
       acceptance-per-minute: ${PORTAL_RATE_ACCEPTANCE:20}
+      # MFA有効化API（IP+emailあたり/分。S13-P1-02）
+      mfa-complete-per-minute: ${PORTAL_RATE_MFA_COMPLETE:10}
+      # login失敗のアカウントロック（同一email。S13-XFF-01）
+      login-failure-lock-threshold: ${PORTAL_LOGIN_LOCK_THRESHOLD:5}
+      login-failure-lock-minutes: ${PORTAL_LOGIN_LOCK_MINUTES:15}
   # ===== PDF設定 =====
   pdf:
     # PDF出力用のCJKフォントパス（明示指定用）。

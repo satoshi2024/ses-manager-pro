@@ -90,4 +90,9 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
      * @return 回収件数
      */
     int recoverStaleRunningJobs(int leaseMinutes);
+
+    /**
+     * lease timeout を超えた RUNNING ジョブ一覧（回収前の照合用）。
+     */
+    List<IntegrationJob> listStaleRunningJobs(int leaseMinutes);
 }

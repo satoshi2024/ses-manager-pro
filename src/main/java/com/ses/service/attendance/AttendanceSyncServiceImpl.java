@@ -25,6 +25,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -87,6 +88,10 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
     private final com.ses.mapper.SystemConfigMapper systemConfigMapper;
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
+
+    /** CSV出力の最大行数（黙って切り捨てず、超過時は BusinessException）。 */
+    @Value("${app.export.max-rows:50000}")
+    private int configuredMaxRows;
 
     @Override
     public AttendanceSyncResultDto syncPush(String month) {
@@ -481,6 +486,10 @@ public class AttendanceSyncServiceImpl implements AttendanceSyncService {
                         .le(EmployeeAttendance::getWorkDate, target.atEndOfMonth())
                         .orderByAsc(EmployeeAttendance::getEngineerId)
                         .orderByAsc(EmployeeAttendance::getWorkDate));
+        int maxRows = configuredMaxRows > 0 ? configuredMaxRows : 50000;
+        if (days.size() > maxRows) {
+            throw BusinessException.of("error.export.maxRows", maxRows);
+        }
         try {
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
             writer.write(CsvUtils.UTF8_BOM);

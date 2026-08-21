@@ -24,6 +24,7 @@ import com.ses.service.invoice.provider.DigitalInvoiceProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.NodeList;
@@ -111,17 +112,25 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 .notIn(DigitalInvoice::getStatus, "CANCELLED", "REVOKED")
                 .count();
         if (count > 0) {
-            throw new BusinessException("このインボイスはすでに送信されています（または送信キューにあります）。");
+            throw new BusinessException(409, "このインボイスはすでに送信されています（または送信キューにあります）。");
         }
+
+        long generation = countSendGenerations(invoiceId, PROFILE_STANDARD, specVersion);
+        String idempotencyKey = buildSendIdempotencyKey(invoiceId, PROFILE_STANDARD, specVersion, generation);
 
         DigitalInvoice di = new DigitalInvoice();
         di.setInvoiceId(invoiceId);
         di.setDirection("SEND");
         di.setProfile(PROFILE_STANDARD);
         di.setSpecificationVersion(specVersion);
-        di.setMessageId("MSG-" + UUID.randomUUID());
+        // Peppol messageId は世代付きで一意。job 冪等キーは invoiceId+profile+spec(+世代) で UUID に依存しない
+        di.setMessageId("MSG-SEND-" + invoiceId + "-" + specVersion + "-g" + generation);
         di.setStatus("QUEUED");
-        save(di);
+        try {
+            save(di);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(409, "このインボイスはすでに送信されています（または送信キューにあります）。");
+        }
 
         String payload = "{\"digitalInvoiceId\":" + di.getId() + "}";
         integrationJobService.createJob(
@@ -129,7 +138,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 JOB_SEND,
                 "t_digital_invoice",
                 di.getId(),
-                "digital_invoice_send_" + di.getMessageId(),
+                idempotencyKey,
                 DigestUtils.sha256Hex(payload)
         );
         return di;
@@ -279,14 +288,22 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             throw new BusinessException("Concurrent modification");
         }
 
+        long generation = countSendGenerations(di.getInvoiceId(), PROFILE_CREDIT_NOTE, di.getSpecificationVersion());
+        String idempotencyKey = buildSendIdempotencyKey(
+                di.getInvoiceId(), PROFILE_CREDIT_NOTE, di.getSpecificationVersion(), generation);
+
         DigitalInvoice cn = new DigitalInvoice();
         cn.setInvoiceId(di.getInvoiceId());
         cn.setDirection("SEND");
         cn.setProfile(PROFILE_CREDIT_NOTE);
         cn.setSpecificationVersion(di.getSpecificationVersion());
-        cn.setMessageId("MSG-CN-" + UUID.randomUUID());
+        cn.setMessageId("MSG-CN-" + di.getInvoiceId() + "-" + di.getSpecificationVersion() + "-g" + generation);
         cn.setStatus("QUEUED");
-        save(cn);
+        try {
+            save(cn);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(409, "打消し電文はすでに送信キューにあります。");
+        }
 
         String payload = "{\"digitalInvoiceId\":" + cn.getId() + "}";
         integrationJobService.createJob(
@@ -294,9 +311,24 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 JOB_CREDIT_NOTE,
                 "t_digital_invoice",
                 cn.getId(),
-                "digital_invoice_credit_note_" + cn.getMessageId(),
+                idempotencyKey,
                 DigestUtils.sha256Hex(payload)
         );
+    }
+
+    /** 同一 invoice×profile×spec の既存 SEND 件数 = 次世代番号（再 Queue 用。ランダム UUID 禁止）。 */
+    private long countSendGenerations(Long invoiceId, String profile, String specVersion) {
+        return lambdaQuery()
+                .eq(DigitalInvoice::getInvoiceId, invoiceId)
+                .eq(DigitalInvoice::getDirection, "SEND")
+                .eq(DigitalInvoice::getProfile, profile)
+                .eq(DigitalInvoice::getSpecificationVersion, specVersion)
+                .count();
+    }
+
+    /** job 冪等キー = invoiceId + profile + spec（+ 世代）。ランダム UUID を含めない。 */
+    private static String buildSendIdempotencyKey(Long invoiceId, String profile, String specVersion, long generation) {
+        return "digital_invoice_send_" + invoiceId + "_" + profile + "_" + specVersion + "_g" + generation;
     }
 
     @Override

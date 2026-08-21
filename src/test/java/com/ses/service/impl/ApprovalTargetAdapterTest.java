@@ -43,9 +43,33 @@ class ApprovalTargetAdapterTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void quotationAdapterのsnapshotは単価を金額帯とし作成者組織を載せる() {
+        QuotationMapper mapper = mock(QuotationMapper.class);
+        com.ses.service.approval.ApprovalOrganizationResolver orgResolver =
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class);
+        Quotation q = new Quotation();
+        q.setId(1L);
+        q.setStatus("下書き");
+        q.setUnitPrice(new BigDecimal("600000"));
+        q.setVersion(2);
+        q.setCreatedBy(7L);
+        when(mapper.selectById(1L)).thenReturn(q);
+        when(orgResolver.forQuotation(q)).thenReturn(42L);
+        QuotationApprovalAdapter adapter = new QuotationApprovalAdapter(mapper, mock(QuotationService.class),
+                objectMapper, orgResolver);
+
+        ApprovalSnapshot snapshot = adapter.snapshot(1L, Map.of("status", "提出済"));
+
+        assertEquals(new BigDecimal("600000"), snapshot.amountSnapshot());
+        assertEquals(42L, snapshot.organizationId());
+        assertEquals(2L, snapshot.targetVersion());
+    }
+
+    @Test
     void quotationAdapterは承認後に既存の状態変更とdraft化へ委譲する() throws Exception {
         QuotationService service = mock(QuotationService.class);
-        QuotationApprovalAdapter adapter = new QuotationApprovalAdapter(mock(QuotationMapper.class), service, objectMapper);
+        QuotationApprovalAdapter adapter = new QuotationApprovalAdapter(mock(QuotationMapper.class), service, objectMapper,
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class));
         ApprovalRequest request = request(10L, Map.of("status", "受注", "createDraft", true));
 
         adapter.applyApproved(request);
@@ -57,7 +81,8 @@ class ApprovalTargetAdapterTest {
     @Test
     void contractAdapterは稼動化を既存状態機械へ一度だけ委譲する() throws Exception {
         ContractService service = mock(ContractService.class);
-        ContractApprovalAdapter adapter = new ContractApprovalAdapter(mock(ContractMapper.class), service, objectMapper);
+        ContractApprovalAdapter adapter = new ContractApprovalAdapter(mock(ContractMapper.class), service, objectMapper,
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class));
         ApprovalRequest request = request(11L, Map.of("operation", "status", "status", "稼動中", "cancelDate", ""));
 
         adapter.applyApproved(request);
@@ -68,7 +93,8 @@ class ApprovalTargetAdapterTest {
     @Test
     void contractAdapterは単価改定を既存の単価改定へ一度だけ委譲する() throws Exception {
         ContractService service = mock(ContractService.class);
-        ContractApprovalAdapter adapter = new ContractApprovalAdapter(mock(ContractMapper.class), service, objectMapper);
+        ContractApprovalAdapter adapter = new ContractApprovalAdapter(mock(ContractMapper.class), service, objectMapper,
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class));
         ApprovalRequest request = request(12L, Map.of("operation", "revisePrice", "applyFromMonth", "2026-08",
                 "sellingPrice", 900000, "costPrice", 600000, "reason", "改定"));
 
@@ -81,7 +107,8 @@ class ApprovalTargetAdapterTest {
     @Test
     void invoiceAdapterは送付と取消を既存serviceへ委譲する() throws Exception {
         InvoiceService service = mock(InvoiceService.class);
-        InvoiceApprovalAdapter adapter = new InvoiceApprovalAdapter(mock(InvoiceMapper.class), service, objectMapper);
+        InvoiceApprovalAdapter adapter = new InvoiceApprovalAdapter(mock(InvoiceMapper.class), service, objectMapper,
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class));
 
         adapter.applyApproved(request(13L, Map.of("operation", "send", "status", "送付済", "paidDate", "2026-08-01")));
         verify(service).changeStatus(13L, "送付済", LocalDate.of(2026, 8, 1));
@@ -93,7 +120,8 @@ class ApprovalTargetAdapterTest {
     @Test
     void bpPaymentAdapterは支払確定を既存serviceへ委譲する() throws Exception {
         InvoiceService service = mock(InvoiceService.class);
-        BpPaymentApprovalAdapter adapter = new BpPaymentApprovalAdapter(mock(BpPaymentMapper.class), service, objectMapper);
+        BpPaymentApprovalAdapter adapter = new BpPaymentApprovalAdapter(mock(BpPaymentMapper.class), service, objectMapper,
+                mock(com.ses.service.approval.ApprovalOrganizationResolver.class));
         ApprovalRequest request = request(15L, Map.of("status", "支払済", "paidDate", "2026-08-02"));
 
         adapter.applyApproved(request);

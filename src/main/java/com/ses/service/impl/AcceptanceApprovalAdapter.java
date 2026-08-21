@@ -6,6 +6,7 @@ import com.ses.entity.Acceptance;
 import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.AcceptanceMapper;
 import com.ses.service.AcceptanceService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
@@ -25,11 +26,14 @@ public class AcceptanceApprovalAdapter implements ApprovalTargetAdapter {
     private final AcceptanceMapper mapper;
     private final AcceptanceService service;
     private final ObjectMapper objectMapper;
+    private final ApprovalOrganizationResolver organizationResolver;
 
-    public AcceptanceApprovalAdapter(AcceptanceMapper mapper, AcceptanceService service, ObjectMapper objectMapper) {
+    public AcceptanceApprovalAdapter(AcceptanceMapper mapper, AcceptanceService service, ObjectMapper objectMapper,
+                                     ApprovalOrganizationResolver organizationResolver) {
         this.mapper = mapper;
         this.service = service;
         this.objectMapper = objectMapper;
+        this.organizationResolver = organizationResolver;
     }
 
     @Override
@@ -60,7 +64,8 @@ public class AcceptanceApprovalAdapter implements ApprovalTargetAdapter {
         Map<String, Object> diff = new java.util.LinkedHashMap<>();
         diff.put("status", Map.of("label", "検収状態", "before",
                 acceptance.getStatus() == null ? "" : acceptance.getStatus(), "after", "取消（差戻し）"));
-        return new ApprovalSnapshot(version(acceptance.getVersion()), amount, null, payload, diff);
+        return new ApprovalSnapshot(version(acceptance.getVersion()), amount,
+                organizationResolver.forAcceptance(acceptance), payload, diff);
     }
 
     @Override

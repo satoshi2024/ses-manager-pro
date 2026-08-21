@@ -68,10 +68,16 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     private final com.ses.mapper.AcceptanceMapper acceptanceMapper;
     private final com.ses.mapper.DocumentHashClaimMapper documentHashClaimMapper;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    /** FileScope の RECEIPT/CRA 規則を list/detail で再利用（規則自体は広げない）。 */
+    private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
+    private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
 
     private static final String DEFAULT_TENANT_ID = "default";
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
             "ORDER_RECEIVED", "ORDER_ACKNOWLEDGEMENT", "ACCEPTANCE");
+    /** FileScopeValidationService と同一の専用ACL文書種別（decision table §6.2）。 */
+    private static final Set<String> FILE_SCOPE_SPECIAL_DOCUMENT_TYPES = Set.of(
+            "PRIVATE_NOTE", "RECEIPT", "CHANGE_REQUEST_ATTACHMENT");
 
     // ----------------------------------------------------------------
     // 登録
@@ -318,6 +324,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional
     public void placeLegalHold(Long documentId, boolean hold, String reason) {
         Document doc = getDocumentOrThrow(documentId);
+        assertDocumentAccessAllowed(doc);
         int newFlag = hold ? 1 : 0;
         if (doc.getLegalHoldFlag() == newFlag) {
             return;
@@ -338,6 +345,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     @Transactional
     public DocumentDisposalRequest requestDisposal(Long documentId, String reason) {
         Document doc = getDocumentOrThrow(documentId);
+        assertDocumentAccessAllowed(doc);
 
         if (doc.getLegalHoldFlag() != null && doc.getLegalHoldFlag() == 1) {
             throw BusinessException.of(400, "error.document.legalHoldActive");
@@ -563,14 +571,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     @Override
     public InputStream download(Long documentId, Integer versionNo) {
-        DocumentVersion version;
-        if (versionNo == null) {
-            version = documentVersionMapper.findLatestByDocumentId(documentId);
-        } else {
-            version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
-                    .eq(DocumentVersion::getDocumentId, documentId)
-                    .eq(DocumentVersion::getVersionNo, versionNo));
-        }
+        DocumentVersion version = findVersion(documentId, versionNo);
         if (version == null) {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
@@ -581,6 +582,21 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
         recordAccessLog(documentId, version.getId(), "DOWNLOAD");
         return documentStorage.open(version.getStorageKey());
+    }
+
+    @Override
+    public String getVersionStorageKey(Long documentId, Integer versionNo) {
+        DocumentVersion version = findVersion(documentId, versionNo);
+        return version != null ? version.getStorageKey() : null;
+    }
+
+    private DocumentVersion findVersion(Long documentId, Integer versionNo) {
+        if (versionNo == null) {
+            return documentVersionMapper.findLatestByDocumentId(documentId);
+        }
+        return documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getDocumentId, documentId)
+                .eq(DocumentVersion::getVersionNo, versionNo));
     }
 
     // ----------------------------------------------------------------
@@ -871,13 +887,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     public void assertDocumentAccessAllowed(Document doc) {
-        // R1-P1-07: PRIVATE_NOTE（1on1 confidential相談）はHR/明示権限割当管理者のみ。
-        // 一般管理者を含むその他はタイトル・version・storage metadataへ到達させない（fail-closed）。
-        // リンク非依存の文書（1on1相談メモ）のため、許可者はここで即時returnする。
-        if (doc != null && "PRIVATE_NOTE".equals(doc.getDocumentType())) {
-            if (!canAccessPrivateNote()) {
-                throw BusinessException.of(403, "error.forbidden");
-            }
+        // FileScopeValidationService と同一の専用種別ACL（RECEIPT/CRA/PRIVATE_NOTE）。
+        // リンク DataScope より先に適用し、営業が ENGINEER リンク経由で領収書へ到達できないようにする。
+        if (doc != null && doc.getDocumentType() != null
+                && FILE_SCOPE_SPECIAL_DOCUMENT_TYPES.contains(doc.getDocumentType())) {
+            assertFileScopeSpecialDocumentAccess(doc);
             return;
         }
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
@@ -987,6 +1001,15 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         boolean isAdmin = auth != null && auth.getAuthorities().stream().anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
         if (isAdmin) {
             return;
+        }
+
+        // FileScope と同一: RECEIPTは営業・HR不可視、CHANGE_REQUEST_ATTACHMENTは営業不可視
+        String role = SecurityUtils.currentRole();
+        if ("営業".equals(role) || "HR".equals(role)) {
+            wrapper.ne(Document::getDocumentType, "RECEIPT");
+        }
+        if ("営業".equals(role)) {
+            wrapper.ne(Document::getDocumentType, "CHANGE_REQUEST_ATTACHMENT");
         }
 
         boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();
@@ -1117,5 +1140,85 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         org.springframework.security.core.Authentication auth =
                 org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         return authorizationService.isAllowed(auth, "one-on-one.confidential");
+    }
+
+    /**
+     * FileScopeValidationService の専用種別規則をメタデータ境界でも再利用する（規則は広げない）。
+     */
+    private void assertFileScopeSpecialDocumentAccess(Document doc) {
+        String documentType = doc.getDocumentType();
+        if ("PRIVATE_NOTE".equals(documentType)) {
+            if (!canAccessPrivateNote()) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            return;
+        }
+        if ("RECEIPT".equals(documentType)) {
+            Long engineerId = linkedEngineerId(doc.getId());
+            if (engineerId == null || !canViewReceipt(engineerId)) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            return;
+        }
+        if ("CHANGE_REQUEST_ATTACHMENT".equals(documentType)) {
+            String role = SecurityUtils.currentRole();
+            if ("HR".equals(role) || "管理者".equals(role)) {
+                return;
+            }
+            Long fileEngineerId = linkedEngineerId(doc.getId());
+            if ("マネージャー".equals(role)) {
+                if (fileEngineerId != null && isEngineerInManagerScope(fileEngineerId)) {
+                    return;
+                }
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            if ("要員".equals(role)) {
+                com.ses.service.EngineerAccountLinkService linkService =
+                        engineerAccountLinkServiceProvider.getIfAvailable();
+                Long ownEngineerId = linkService == null
+                        ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+                if (fileEngineerId != null && fileEngineerId.equals(ownEngineerId)) {
+                    return;
+                }
+            }
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        throw BusinessException.of(403, "error.forbidden");
+    }
+
+    private Long linkedEngineerId(Long documentId) {
+        DocumentLink link = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
+                .eq(DocumentLink::getDocumentId, documentId)
+                .eq(DocumentLink::getTargetType, "ENGINEER")
+                .last("LIMIT 1"));
+        return link != null ? link.getTargetId() : null;
+    }
+
+    private boolean canViewReceipt(Long engineerId) {
+        String role = SecurityUtils.currentRole();
+        if ("管理者".equals(role)) {
+            return true;
+        }
+        if ("要員".equals(role)) {
+            com.ses.service.EngineerAccountLinkService linkService = engineerAccountLinkServiceProvider.getIfAvailable();
+            Long ownEngineerId = linkService == null ? null : linkService.findEngineerIdByUserId(SecurityUtils.currentUserId());
+            return engineerId.equals(ownEngineerId);
+        }
+        if ("マネージャー".equals(role)) {
+            return isEngineerInManagerScope(engineerId);
+        }
+        return false;
+    }
+
+    private boolean isEngineerInManagerScope(Long engineerId) {
+        com.ses.service.security.OrganizationScopeService scopeService = organizationScopeServiceProvider.getIfAvailable();
+        if (scopeService == null) {
+            return false;
+        }
+        if (scopeService.hasFullAccess()) {
+            return true;
+        }
+        Set<Long> allowed = scopeService.allowedEngineerIds(LocalDate.now());
+        return allowed != null && allowed.contains(engineerId);
     }
 }

@@ -18,7 +18,8 @@ import com.ses.service.ai.AiTextService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -37,9 +38,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     private final ObjectMapper objectMapper;
     private final AiArtifactVersionMapper versionMapper;
     private final AiRecommendationRunMapper runMapper;
+    private final PlatformTransactionManager transactionManager;
 
+    /**
+     * Provider HTTP はトランザクション外。persist のみ短トランザクション（S17-P2-01）。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public AiGatewayResult execute(AiGatewayRequest request) {
         if (request == null || request.getUseCase() == null) {
             throw new BusinessException("AI use case が指定されていません");
@@ -62,6 +66,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         String status = "SUCCEEDED";
         String error = null;
         try {
+            // HTTP / provider 呼び出しは TX 外（接続プール占有を避ける）
             text = AiPiiMasker.stripHtml(callProvider(prompt));
             if (request.isRequireJson()) {
                 assertJson(text);
@@ -98,7 +103,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (!request.isPersistRun()) {
             return;
         }
-        persistRun(request, masked, status, error, (int) ((System.nanoTime() - startedNanos) / 1_000_000L));
+        int latencyMs = (int) ((System.nanoTime() - startedNanos) / 1_000_000L);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(statusObj -> persistRun(request, masked, status, error, latencyMs));
     }
 
     private boolean isExternalFacing(String useCase) {

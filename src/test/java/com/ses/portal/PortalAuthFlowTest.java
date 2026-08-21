@@ -81,25 +81,34 @@ class PortalAuthFlowTest extends PortalTestSupport {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(401));
 
-        // 正しいパスワード → MFA_SETUP + secret
+        // 正しいパスワード → MFA_SETUP + secret + setup ticket cookie
         MvcResult setupResult = mockMvc.perform(portalPost("/api/portal/auth/login", csrf)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + user.getEmail() + "\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("MFA_SETUP"))
+                .andExpect(cookie().exists("PORTAL_MFA_SETUP"))
                 .andReturn();
         JsonNode setup = objectMapper.readTree(setupResult.getResponse().getContentAsString()).path("data");
         String secret = setup.path("mfaSetup").path("secret").asText();
         assertTrue(secret.length() >= 16, "TOTP secretが返るはず");
+        MockCookie setupTicket = new MockCookie("PORTAL_MFA_SETUP",
+                setupResult.getResponse().getCookie("PORTAL_MFA_SETUP").getValue());
 
-        // 不正コードは拒否
+        // setup ticketもpasswordも無し → 401（S13-P1-02）
         mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + user.getEmail() + "\",\"code\":\"000000\"}"))
+                .andExpect(status().isUnauthorized());
+
+        // 不正コードは拒否（setup ticketあり）
+        mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf).cookie(setupTicket)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + user.getEmail() + "\",\"code\":\"000000\"}"))
                 .andExpect(status().isUnauthorized());
 
         // 正しいコード → recovery code + session cookie
         String code = TotpUtil.code(secret, Instant.now().getEpochSecond() / 30, 6);
-        MvcResult completeResult = mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf)
+        MvcResult completeResult = mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf).cookie(setupTicket)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + user.getEmail() + "\",\"code\":\"" + code + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(cookie().exists("PORTAL_SESSION"))
@@ -110,9 +119,11 @@ class PortalAuthFlowTest extends PortalTestSupport {
         MockCookie session = new MockCookie("PORTAL_SESSION",
                 completeResult.getResponse().getCookie("PORTAL_SESSION").getValue());
 
-        // 有効化済みに対する再完了は409（alreadyEnabled）
+        // 有効化済みに対する再完了は409（passwordで再認証。alreadyEnabled）
         mockMvc.perform(portalPost("/api/portal/auth/mfa/complete", csrf)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + user.getEmail() + "\",\"code\":\"" + code + "\"}"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + user.getEmail() + "\",\"code\":\"" + code
+                                + "\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isConflict());
 
         // session有効・規約未同意（termsPending=true）の間はindexへ行けない

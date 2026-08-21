@@ -154,7 +154,9 @@ class PortalAdminApiTest extends PortalTestSupport {
         mockMvc.perform(post("/api/portal-admin/orgs/" + orgId + "/invitations").with(adminUser()).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\",\"role\":\"MEMBER\"}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tokenHash").doesNotExist())
+                .andExpect(jsonPath("$.data.email").value(email));
 
         // tokenはhashのみ保存
         String tokenHash = jdbcTemplate.queryForObject(
@@ -442,6 +444,36 @@ class PortalAdminApiTest extends PortalTestSupport {
             transactionTemplate.executeWithoutResult(status ->
                     systemConfigService.put("scope.sales-own-data-only", "false", "test"));
         }
+    }
+
+    @Test
+    void user一覧とsessionは秘匿フィールドを返さない() throws Exception {
+        long orgId = insertCustomerOrg();
+        PortalUser user = createUser(organizationMapper.selectById(orgId), "strip-" + unique() + "@example.com");
+        String secret = uniqueSecret();
+        enableMfa(user, secret);
+        consentTerms(user);
+        issueSession(user);
+
+        mockMvc.perform(get("/api/portal-admin/orgs/" + orgId + "/users").with(adminUser()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.records[0].email").value(user.getEmail()))
+                .andExpect(jsonPath("$.data.records[0].passwordHash").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].totpSecretEncrypted").doesNotExist())
+                .andExpect(jsonPath("$.data.records[0].recoveryCodeHash").doesNotExist());
+
+        mockMvc.perform(get("/api/portal-admin/users/" + user.getId() + "/sessions").with(adminUser()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").exists())
+                .andExpect(jsonPath("$.data[0].tokenHash").doesNotExist())
+                .andExpect(jsonPath("$.data[0].ipHash").doesNotExist());
+
+        // 不可視組織は404、要員は403
+        long bpOrgId = insertBpOrg();
+        mockMvc.perform(get("/api/portal-admin/orgs/" + bpOrgId + "/users").with(salesUser()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/portal-admin/orgs/" + orgId + "/users").with(user("member").roles("要員")))
+                .andExpect(status().isForbidden());
     }
 
     private long insertEngineer() {

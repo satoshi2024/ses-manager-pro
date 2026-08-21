@@ -68,4 +68,9 @@ public class PortalPageController {
     public String customer() {
         return "portal/customer/index";
     }
+
+    @GetMapping("/portal/bp")
+    public String bp() {
+        return "portal/bp/index";
+    }
 }

@@ -89,6 +89,7 @@
   - **Demo**: 抵触日alert→対応→解消。90日ちょうどと89日で通知段階が変わることを確認。
 
 - [ ] M. 法務受入/回帰（T066実装・L4全量実行済み・G2 gate未達のためPASS条件未達）
+  - **Note**: technical PASS / production B gate 未達 — 人間証跡（Phase B・実在actor/evidence）不足を「コード未完了」と混同しないこと。T066は未完了のままとする。
   - **Objective**: 法務fixtureの3契約について台帳とfindingが期待どおりで、
     既存のcompliance機能・契約機能が壊れていない。
   - **テスト要件**: R10がdecision deltaを`ACCEPTED_FOR_IMPLEMENTATION`とした後、L1〜L3で

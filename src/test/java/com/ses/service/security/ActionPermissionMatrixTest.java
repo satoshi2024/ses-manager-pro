@@ -121,6 +121,21 @@ class ActionPermissionMatrixTest {
         assertEquals("crm.view", ActionPermissionResolver.resolve("GET", "/api/customers/1/contacts"));
     }
 
+    /**
+     * CROSS-P1-01: bp-affiliations / bp-migrations が未登録だと管理者も含めfilter 403になる。
+     * affiliationsは既存のbp-company権限、migrationsは管理者到達可能な専用resourceへ解決する。
+     */
+    @Test
+    void bpAffiliationsとbpMigrationsのURIがaction_keyへ解決され管理者は実行できる() {
+        assertEquals("bp-company.view",
+                ActionPermissionResolver.resolve("GET", "/api/bp-affiliations/engineer/1"));
+        assertEquals("bp-migration.view",
+                ActionPermissionResolver.resolve("GET", "/api/bp-migrations/exceptions"));
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), "bp-company.view"));
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), "bp-migration.view"));
+        assertTrue(authorizationService.isAllowed(authenticate(9001L, "営業"), "bp-company.view"));
+    }
+
     @Test
     void HRの既存活動導線はcustomer権限で維持されCRM専用導線だけ拒否される() {
         Authentication hr = authenticate(9002L, "HR");

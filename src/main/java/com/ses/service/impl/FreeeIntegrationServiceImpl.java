@@ -29,10 +29,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -52,6 +48,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -63,7 +60,7 @@ import java.util.stream.Collectors;
  *   <li>token responseのcompany_idを保存し、{@code /api/v1/users/me}で事業所名と
  *       {@code company_admin}を検証してから接続を確定（R02-4）</li>
  *   <li>接続状態はDISCONNECTED/CONNECTED/REAUTH_REQUIRED/MISCONFIGUREDを区別（R03-1/2）</li>
- *   <li>refreshはrow-lock後再確認・refresh token必須rotation・invalid_grant→REAUTH_REQUIRED（R03-3/4）</li>
+ *   <li>refreshは短TXでlock取得→HTTPはTX外→短TXでCAS書戻し、refresh token必須rotation・invalid_grant→REAUTH_REQUIRED（R03-3/4 / S15-P1-01）</li>
  *   <li>解除は公式revoke endpointの成功/既失効を確認してからlocal削除（R03-5）</li>
  * </ul>
  */
@@ -104,8 +101,8 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     /**
-     * REAUTH_REQUIREDを独立REQUIRES_NEW txで永続化するbean（REV-002）。
-     * unit test（proxy無し）ではnullのまま、現在txの更新を直接試みる。
+     * REAUTH_REQUIREDを独立REQUIRES_NEW txで永続化するbean（REV-002 / S15-P1-01）。
+     * unit test（proxy無し）ではnullのまま、mapperのtargeted UPDATEへフォールバックする。
      */
     private FreeeReauthMarker reauthMarker;
 
@@ -117,10 +114,13 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
     }
 
     /**
-     * 外部HTTP呼出しをDB transaction外で行い、保存だけをtxで囲むためのseam（REV-005）。
+     * 外部HTTP呼出しをDB transaction外で行い、保存だけをtxで囲むためのseam（REV-005 / S15-P1-01）。
      * unit test（bean無し）ではnullのまま、txなしで実行する。
      */
     private TransactionTemplate transactionTemplate;
+
+    /** 同一JVM内の並行refreshを直列化する（会計側 connectionLocks と同趣旨）。 */
+    private final ReentrantLock refreshLock = new ReentrantLock();
 
     @Autowired(required = false)
     public void setTransactionTemplate(
@@ -136,6 +136,10 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
             return action.get();
         }
         return transactionTemplate.execute(status -> action.get());
+    }
+
+    /** refresh開始時に短TXで確定するスナップショット（HTTPはTX外）。 */
+    private record RefreshClaim(Long connectionId, String observedRefreshEncrypted, String plainRefreshToken) {
     }
 
     /** testで実sleepさせないためのseam（design §11）。 */
@@ -1307,97 +1311,131 @@ public class FreeeIntegrationServiceImpl extends ServiceImpl<FreeeConnectionMapp
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Override
     public void refresh() {
         refreshInternal(false);
     }
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void refreshForced() {
         refreshInternal(true);
     }
 
+    /**
+     * S15-P1-01: 会計連携と同型の refresh 手順。
+     * <ol>
+     *   <li>短TX: SELECT FOR UPDATE で要否判定と refresh token スナップショット取得</li>
+     *   <li>TX外: tokenEndpointPost（ロックをHTTP中に保持しない）</li>
+     *   <li>短TX: 観測した refresh ciphertext が変わっていなければ CAS 書戻し</li>
+     * </ol>
+     * S15-P1-02: 応答に refresh_token が無い場合は旧tokenへフォールバックせず REAUTH。
+     */
     private void refreshInternal(boolean force) {
-        FreeeConnection c = connectionMapper.selectLatestForUpdate();
-        if (c == null) {
-            throw BusinessException.of("error.payroll.notConnected");
-        }
-        // lock取得後にDBを再読込（selectLatestForUpdateの結果が最新）。別threadが更新済みで
-        // 有効期限に余裕があれば外部refreshしない。401経路（force）はローカル期限に依らず必ず行う。
-        if (!force && c.getTokenExpiresAt() != null
-                && c.getTokenExpiresAt().isAfter(LocalDateTime.now().plusMinutes(1))) {
-            return;
-        }
+        refreshLock.lock();
         try {
-            MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
-            form.add("grant_type", "refresh_token");
-            form.add("refresh_token", decrypt(c.getRefreshTokenEncrypted()));
-            form.add("client_id", clientId);
-            form.add("client_secret", clientSecret);
+            RefreshClaim claim = inTransaction(() -> {
+                FreeeConnection c = connectionMapper.selectLatestForUpdate();
+                if (c == null) {
+                    throw BusinessException.of("error.payroll.notConnected");
+                }
+                // lock取得後にDBを再確認。別threadが更新済みで有効期限に余裕があれば外部refreshしない。
+                // 401経路（force）はローカル期限に依らず必ず行う。
+                if (!force && c.getTokenExpiresAt() != null
+                        && c.getTokenExpiresAt().isAfter(LocalDateTime.now().plusMinutes(1))) {
+                    return null;
+                }
+                if (isBlank(c.getRefreshTokenEncrypted())) {
+                    throw BusinessException.of("error.payroll.notConnected");
+                }
+                return new RefreshClaim(c.getId(), c.getRefreshTokenEncrypted(),
+                        decrypt(c.getRefreshTokenEncrypted()));
+            });
+            if (claim == null) {
+                return;
+            }
 
             JsonNode n;
             try {
+                MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+                form.add("grant_type", "refresh_token");
+                form.add("refresh_token", claim.plainRefreshToken());
+                form.add("client_id", clientId);
+                form.add("client_secret", clientSecret);
                 n = tokenEndpointPost(OAUTH_TOKEN, form, null);
             } catch (HttpClientErrorException ex) {
                 String code = errorCode(ex.getResponseBodyAsByteArray());
                 if ("invalid_grant".equals(code) || "re_authorization_required".equals(code)) {
                     // 失効はREAUTH_REQUIREDへ記録し、無限refreshしない（R03-4）。
-                    // このREQUIRES_NEW txは続けて投げる例外でrollbackされるため、
-                    // REAUTH_REQUIREDはtx完了後（afterCompletion）に独立txで永続化する（REV-002）。
-                    persistReauthAfterCompletion(c);
+                    // HTTPはTX外のため、ここでの更新はrollbackされない（S15-P1-01）。
+                    persistReauthRequired(claim.connectionId());
                     throw BusinessException.of("error.payroll.reauthRequired");
                 }
                 throw BusinessException.of("error.payroll.oauthFailed");
+            } catch (BusinessException ex) {
+                throw ex;
+            } catch (Exception e) {
+                throw BusinessException.of("error.payroll.tokenError");
             }
+
             String accessToken = requiredToken(n, "access_token");
-            // refresh tokenの新値は必須。欠落時に旧tokenを再利用しない（R03-3）。
-            String newRefreshToken = requiredToken(n, "refresh_token");
+            // refresh tokenの新値は必須。欠落時に旧tokenを再利用しない（R03-3 / S15-P1-02）。
+            String newRefreshToken = n == null ? "" : n.path("refresh_token").asText("");
+            if (newRefreshToken.isBlank()) {
+                persistReauthRequired(claim.connectionId());
+                throw BusinessException.of("error.payroll.reauthRequired");
+            }
             long expiresIn = n.path("expires_in").asLong(0);
             if (expiresIn <= 0) {
                 throw BusinessException.of("error.payroll.oauthFailed");
             }
 
-            c.setAccessTokenEncrypted(encrypt(accessToken));
-            c.setRefreshTokenEncrypted(encrypt(newRefreshToken));
-            c.setTokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn));
-            c.setConnectionStatus(STATUS_CONNECTED);
-            connectionMapper.updateById(c);
-        } catch (BusinessException ex) {
-            throw ex;
-        } catch (Exception e) {
-            throw BusinessException.of("error.payroll.tokenError");
+            String accessEnc = encrypt(accessToken);
+            String refreshEnc = encrypt(newRefreshToken);
+            LocalDateTime expiresAt = LocalDateTime.now().plusSeconds(expiresIn);
+
+            inTransaction(() -> {
+                FreeeConnection c = connectionMapper.selectLatestForUpdate();
+                if (c == null || !Objects.equals(c.getId(), claim.connectionId())) {
+                    return null;
+                }
+                // CAS: 観測した refresh ciphertext と一致するときだけ書戻し（他者が先にrotation済みなら破棄）
+                if (!Objects.equals(c.getRefreshTokenEncrypted(), claim.observedRefreshEncrypted())) {
+                    return null;
+                }
+                c.setAccessTokenEncrypted(accessEnc);
+                c.setRefreshTokenEncrypted(refreshEnc);
+                c.setTokenExpiresAt(expiresAt);
+                c.setConnectionStatus(STATUS_CONNECTED);
+                connectionMapper.updateById(c);
+                return null;
+            });
+        } finally {
+            refreshLock.unlock();
         }
     }
 
     /**
-     * REAUTH_REQUIREDの永続化（REV-002）。
-     * 現在のREQUIRES_NEW txがrollbackされた後（afterCompletion）に、
-     * {@link FreeeReauthMarker}の独立REQUIRES_NEW txでコミットする。
-     * unit test（proxy無し・reauthMarker null）では現在txの更新を直接試みる（mock環境では検証対象外）。
+     * REAUTH_REQUIREDの永続化（REV-002 / S15-P1-01）。
+     * refresh HTTPはTX外のため、独立REQUIRES_NEW（{@link FreeeReauthMarker}）または
+     * unit test用の直接UPDATEで即コミットする。afterCompletionは不要。
      */
-    private void persistReauthAfterCompletion(FreeeConnection c) {
-        if (reauthMarker == null || !TransactionSynchronizationManager.isSynchronizationActive()) {
-            markReauthRequired(c);
+    private void persistReauthRequired(Long connectionId) {
+        if (connectionId == null) {
             return;
         }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                try {
-                    reauthMarker.markReauthRequired(c);
-                } catch (RuntimeException ex) {
-                    // 状態記録の失敗は次回アクセスで再検出される。秘密はログへ出さない。
-                    log.warn("failed to persist REAUTH_REQUIRED: {}", ex.getMessage());
-                }
-            }
-        });
+        FreeeConnection stub = new FreeeConnection();
+        stub.setId(connectionId);
+        if (reauthMarker != null) {
+            reauthMarker.markReauthRequired(stub);
+            return;
+        }
+        // unit test（proxy無し・reauthMarker null）のフォールバック
+        markReauthRequired(stub);
     }
 
     /**
      * unit test（proxy無し・reauthMarker null）のフォールバック専用の状態更新。
-     * production経路は{@link #persistReauthAfterCompletion(FreeeConnection)}か
-     * {@code updateConnectionStatus}のtargeted UPDATEを使う（REV-008/009）。
+     * production経路は{@link #persistReauthRequired(Long)}経由のtargeted UPDATEを使う（REV-008/009）。
      */
     private void markReauthRequired(FreeeConnection c) {
         c.setConnectionStatus(STATUS_REAUTH_REQUIRED);

@@ -106,9 +106,14 @@ class ApprovalEngineServiceTest {
 
     /** 各stepを承認者id一覧として渡す（同一step内の複数idは並列group）。 */
     private void insertRoute(String requestType, List<List<Long>> steps) {
+        insertRouteWithAmount(requestType, null, null, steps);
+    }
+
+    private Long insertRouteWithAmount(String requestType, BigDecimal minAmount, BigDecimal maxAmount,
+                                        List<List<Long>> steps) {
         ApprovalRoute route = ApprovalRoute.builder()
                 .tenantId(1L).requestType(requestType).organizationId(null)
-                .minAmount(null).maxAmount(null).versionNo(1)
+                .minAmount(minAmount).maxAmount(maxAmount).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
         for (int i = 0; i < steps.size(); i++) {
@@ -120,6 +125,7 @@ class ApprovalEngineServiceTest {
                 approvalRouteStepMapper.insert(step);
             }
         }
+        return route.getId();
     }
 
     private Long insertOrganization(String prefix) {
@@ -367,9 +373,27 @@ class ApprovalEngineServiceTest {
     }
 
     @Test
-    void 差戻し後の再申請はroundを増分し前roundのactionを残す() {
+    void 代理先が申請者の場合は自己承認として拒否される() {
+        insertRoute("engine.delegate-to-applicant", List.of(List.of(approver1Id)));
+        approvalDelegationMapper.insert(ApprovalDelegation.builder()
+                .fromUserId(approver1Id).toUserId(applicantId)
+                .validFrom(LocalDate.now().minusDays(1)).validTo(LocalDate.now().plusDays(1))
+                .build());
+
+        ApprovalRequest req = request("engine.delegate-to-applicant");
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> approvalEngineService.approve(req.getId(), applicantId, "自己承認 bypass"));
+        assertEquals(403, ex.getCode());
+        assertEquals("error.approval.selfApproveForbidden", ex.getMessageKey());
+        assertEquals(0, approvalActionMapper.selectCount(new LambdaQueryWrapper<ApprovalAction>()
+                .eq(ApprovalAction::getRequestId, req.getId())));
+        assertEquals("in_review", approvalRequestMapper.selectById(req.getId()).getStatus());
+    }
+
+    @Test
+    void 差戻し後の再申請はroundを増分し前roundのactionを残す() throws Exception {
         String type = "engine.resubmit-round";
-        insertRoute(type, List.of(List.of(approver1Id)));
+        Long routeId = insertRouteWithAmount(type, null, null, List.of(List.of(approver1Id)));
         String key = "engine-resubmit-key-" + System.nanoTime();
         ApprovalRequest first = request(type, key);
 
@@ -382,6 +406,9 @@ class ApprovalEngineServiceTest {
         assertEquals("in_review", resubmitted.getStatus());
         assertEquals(2, resubmitted.getRoundNo());
         assertEquals(BigDecimal.valueOf(2000), resubmitted.getAmountSnapshot());
+        RouteSnapshot afterResubmit = objectMapper.readValue(resubmitted.getRouteSnapshotJson(), RouteSnapshot.class);
+        assertEquals(routeId, afterResubmit.routeId(),
+                "金額帯なしrouteでは再申請後も同一routeを維持する");
 
         approvalEngineService.approve(first.getId(), approver1Id, "再承認");
         ApprovalRequest completed = approvalRequestMapper.selectById(first.getId());
@@ -392,6 +419,37 @@ class ApprovalEngineServiceTest {
                 new LambdaQueryWrapper<ApprovalAction>().eq(ApprovalAction::getRequestId, first.getId()));
         assertEquals(2, actions.size());
         assertEquals(List.of(1, 2), actions.stream().map(ApprovalAction::getRoundNo).sorted().toList());
+    }
+
+    @Test
+    void 差戻し再申請で金額帯を跨ぐとrouteSnapshotが再解決される() throws Exception {
+        String type = "engine.resubmit-cross-band." + System.nanoTime();
+        Long lowRouteId = insertRouteWithAmount(type, null, BigDecimal.valueOf(1000),
+                List.of(List.of(approver1Id)));
+        Long highRouteId = insertRouteWithAmount(type, BigDecimal.valueOf(1001), null,
+                List.of(List.of(approver2Id)));
+
+        ApprovalRequest first = approvalEngineService.request(new ApprovalRequestCommand(
+                type, "TEST", 1L, 1L, applicantId, null, BigDecimal.valueOf(1000),
+                Map.of("k", "v"), null, null));
+        RouteSnapshot before = objectMapper.readValue(first.getRouteSnapshotJson(), RouteSnapshot.class);
+        assertEquals(lowRouteId, before.routeId());
+
+        approvalEngineService.returnForRevision(first.getId(), approver1Id, "金額を見直してください");
+        ApprovalRequest resubmitted = approvalEngineService.resubmit(first.getId(), applicantId,
+                Map.of("k", "higher"), null, BigDecimal.valueOf(2000));
+
+        RouteSnapshot after = objectMapper.readValue(resubmitted.getRouteSnapshotJson(), RouteSnapshot.class);
+        assertEquals(highRouteId, after.routeId());
+        assertNotEquals(lowRouteId, after.routeId());
+        assertTrue(after.steps().get(0).approverUserIds().contains(approver2Id));
+        assertTrue(!after.steps().get(0).approverUserIds().contains(approver1Id));
+
+        BusinessException lowBandApprover = assertThrows(BusinessException.class,
+                () -> approvalEngineService.approve(first.getId(), approver1Id, "旧帯の承認者"));
+        assertEquals(403, lowBandApprover.getCode());
+        approvalEngineService.approve(first.getId(), approver2Id, "新帯の承認者");
+        assertEquals("approved", approvalRequestMapper.selectById(first.getId()).getStatus());
     }
 
     @Test

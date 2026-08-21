@@ -8,6 +8,7 @@ import com.ses.entity.DigitalInvoiceEvent;
 import com.ses.service.DigitalInvoiceService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,9 +31,9 @@ public class DigitalInvoiceWebhookApiController {
         try {
             boolean isValid = provider.verifyWebhookSignature(rawBody, signature);
             if (!isValid) {
-                // P0-02: すべての event type で raw body 署名が false なら状態も受信行も作らない。
-                // provider_event_id UNIQUE に無効署名を載せない
-                return ResponseEntity.ok("Invalid signature recorded");
+                // S16-P1-01: 署名不正は状態もイベントも作らない（fail-closed）。
+                // 「recorded」と偽らない。401 で再送抑止ではなく拒否を明示する。
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid signature");
             }
 
             JsonNode root = objectMapper.readTree(rawBody);

@@ -30,6 +30,7 @@ public class AiEvaluationApiController {
     private final AiArtifactVersionService artifactVersionService;
 
     @GetMapping
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<List<AiEvaluation>> list() {
         return ApiResult.success(queryService.listEvaluations());
     }
@@ -40,6 +41,7 @@ public class AiEvaluationApiController {
     }
 
     @PostMapping("/run")
+    @PreAuthorize("hasRole('管理者')")
     public ApiResult<AiEvaluation> run(@RequestBody RunRequest request) {
         return ApiResult.success(offlineEvaluationService.evaluate(
                 request.getCandidateVersionId(), request.getBaselineVersionId()));

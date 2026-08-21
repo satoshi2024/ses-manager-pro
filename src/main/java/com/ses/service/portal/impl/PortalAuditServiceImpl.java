@@ -1,5 +1,6 @@
 package com.ses.service.portal.impl;
 
+import com.ses.common.util.ClientIpResolver;
 import com.ses.common.util.SecurityHashUtil;
 import com.ses.entity.PortalAccessLog;
 import com.ses.mapper.PortalAccessLogMapper;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 public class PortalAuditServiceImpl implements PortalAuditService {
 
     private final PortalAccessLogMapper accessLogMapper;
+    private final ClientIpResolver clientIpResolver;
     private final Clock clock;
 
     @Override
@@ -51,14 +53,7 @@ public class PortalAuditServiceImpl implements PortalAuditService {
     }
 
     private String clientIp(HttpServletRequest request) {
-        if (request == null) {
-            return "unknown";
-        }
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwarded)) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return clientIpResolver.resolve(request);
     }
 
     private String truncate(String value, int max) {

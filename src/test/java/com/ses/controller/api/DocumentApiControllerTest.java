@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.dto.document.DocumentDetailDTO;
 import com.ses.dto.document.DocumentListDTO;
+import com.ses.dto.document.DocumentVersionDTO;
 import com.ses.service.DocumentService;
 import com.ses.service.security.impl.FileScopeValidationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,10 +17,12 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -105,4 +108,27 @@ class DocumentApiControllerTest {
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/documents/disposal/100/execute"))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void download_usesDbStorageKeyForFileScope() throws Exception {
+        DocumentDetailDTO detail = DocumentDetailDTO.builder()
+                .id(1L)
+                .title("領収書")
+                .documentType("RECEIPT")
+                .versions(List.of(DocumentVersionDTO.builder()
+                        .versionNo(1)
+                        .storageKey(null)
+                        .originalName("receipt.pdf")
+                        .build()))
+                .build();
+        when(documentService.getDocumentDetail(eq(1L))).thenReturn(detail);
+        when(documentService.getVersionStorageKey(eq(1L), eq(1))).thenReturn("db-storage-key-receipt");
+        when(documentService.download(eq(1L), eq(1))).thenReturn(new ByteArrayInputStream("pdf".getBytes()));
+
+        mockMvc.perform(get("/api/documents/1/versions/1/download"))
+                .andExpect(status().isOk());
+
+        verify(fileScopeValidationService).assertDownloadAllowed("db-storage-key-receipt");
+    }
+
 }

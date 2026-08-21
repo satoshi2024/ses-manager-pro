@@ -107,8 +107,11 @@ class AccountingIntegrationBrowserDemoTest {
     @DynamicPropertySource
     static void freeeStub(DynamicPropertyRegistry registry) {
         int port = stubServer.getAddress().getPort();
+        // FreeeAccountingProvider: api は freee.api.base-url、OAuth は freee.oauth-base-url + "/token"
         registry.add("freee.api.base-url", () -> "http://localhost:" + port);
-        registry.add("freee.oauth.token-url", () -> "http://localhost:" + port + "/oauth/token");
+        registry.add("freee.oauth-base-url", () -> "http://localhost:" + port + "/oauth");
+        registry.add("freee.client-id", () -> "demo-client-id");
+        registry.add("freee.client-secret", () -> "demo-client-secret");
     }
 
     @AfterAll
@@ -384,8 +387,12 @@ class AccountingIntegrationBrowserDemoTest {
             safeWriteFile(previewPng, browser.screenshot());
 
             // Reconciliation タブ: 4母集団 MATCHED + 締可 badge (初回は 401 -> 自動復旧 -> 200)
+            // 「締」だけだと「要確認 (締不可)」にもマッチするため、締可確定まで待つ。
             browser.evaluate("document.querySelector('#reconciliation-tab') && document.querySelector('#reconciliation-tab').click()");
-            browser.waitFor("document.querySelector('#summaryClosingBadge') !== null && document.querySelector('#summaryClosingBadge').textContent.includes('締')", java.time.Duration.ofSeconds(30));
+            assertTrue(browser.waitFor(
+                            "document.querySelector('#summaryClosingBadge') !== null && document.querySelector('#summaryClosingBadge').textContent.includes('締可')",
+                            java.time.Duration.ofSeconds(30)),
+                    "[" + viewport + "] 月次照合が締可になるまで待機できること");
             String closingBadge = browser.evaluate("document.querySelector('#summaryClosingBadge').textContent").asText("");
             assertTrue(closingBadge.contains("締可"), "[" + viewport + "] 月次照合が4母集団完全一致で締可表示になること (badge=" + closingBadge + ")");
             int reconRows = browser.evaluate("document.querySelectorAll('#reconcileTbody tr').length").asInt(-1);

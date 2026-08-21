@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.constant.StatusConstants;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.PageUtils;
 import com.ses.dto.acceptance.AcceptanceGridDto;
 import com.ses.entity.Acceptance;
 import com.ses.entity.Contract;
@@ -55,7 +56,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         }
         // 検収一覧は対象月時点の契約母集団で評価する（異動前後の過去月でも集合を一致。R09-P1-04）
         List<Long> contractIds = scopedContractIds(monthEnd(workMonth));
-        return baseMapper.selectGridPage(new Page<>(current, Math.min(size, 1000)),
+        return baseMapper.selectGridPage(PageUtils.safePage(current, size),
                 workMonth, status, customerId, engineerId, acceptanceId, contractIds);
     }
 
@@ -195,7 +196,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     @Override
     @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.Acceptance uploadDocument(Long acceptanceId, org.springframework.web.multipart.MultipartFile file) {
-        Acceptance acceptance = require(acceptanceId);
+        // 行ロック + document_id IS NULL の条件更新で二重アップロードを防ぐ（S09-P2-01）。
+        Acceptance acceptance = requireForUpdate(acceptanceId);
         assertAllowedAcceptance(acceptanceId);
         // 検収書原本は検収済レコードに対してのみ登録可能（R09 NOTE対応。UIは検収済行のみにボタン表示）
         if (!StatusConstants.ACCEPTANCE_ACCEPTED.equals(acceptance.getStatus())) {
@@ -247,9 +249,14 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
             throw BusinessException.of(500, "error.acceptance.documentSaveFailed");
         }
         documentService.confirm(doc.getId());
-        this.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Acceptance>()
-                .eq("id", acceptanceId)
-                .set("document_id", doc.getId()));
+        int updated = this.baseMapper.update(null,
+                new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<Acceptance>()
+                        .eq("id", acceptanceId)
+                        .isNull("document_id")
+                        .set("document_id", doc.getId()));
+        if (updated != 1) {
+            throw BusinessException.of(409, "error.acceptance.documentAlreadyRegistered");
+        }
         return require(acceptanceId);
     }
 
@@ -280,9 +287,10 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     public Page<com.ses.dto.portal.PortalAcceptanceDto> portalPage(long current, long size, Long customerId,
                                                                    String workMonth, String status) {
         if (customerId == null) {
-            return new Page<>(current, Math.min(size, 1000), 0);
+            Page<com.ses.dto.portal.PortalAcceptanceDto> empty = PageUtils.safePage(current, size);
+            return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
-        return baseMapper.selectPortalPageDto(new Page<>(current, Math.min(size, 1000)),
+        return baseMapper.selectPortalPageDto(PageUtils.safePage(current, size),
                 customerId, workMonth, status);
     }
 

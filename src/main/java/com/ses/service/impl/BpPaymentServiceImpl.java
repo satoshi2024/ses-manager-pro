@@ -110,18 +110,17 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     @Override
     @Transactional
     public BpPayment addLayer(BpPayment bpPayment) {
-        // 会社名の自由入力廃止（R2.4）: 支払先名を文字列で新規登録する場合はBP IDが必須
-        if (org.springframework.util.StringUtils.hasText(bpPayment.getPayeeCompanyName())
-                && bpPayment.getBpCompanyId() == null) {
+        // 会社名の自由入力廃止（R2.4 / S06-P1-01）: 全write経路でBP会社ID必須。名称はマスタsnapshotのみ。
+        if (bpPayment.getBpCompanyId() == null) {
             throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
         }
-        if (bpPayment.getBpCompanyId() != null
-                && !org.springframework.util.StringUtils.hasText(bpPayment.getBpCompanyNameSnapshot())) {
-            BpCompany company = bpCompanyMapper.selectById(bpPayment.getBpCompanyId());
-            if (company == null) {
-                throw BusinessException.of(400, "error.bpPayment.bpCompanyInvalid");
-            }
-            bpPayment.setBpCompanyNameSnapshot(company.getLegalName());
+        BpCompany company = bpCompanyMapper.selectById(bpPayment.getBpCompanyId());
+        if (company == null) {
+            throw BusinessException.of(400, "error.bpPayment.bpCompanyInvalid");
+        }
+        bpPayment.setBpCompanyNameSnapshot(company.getLegalName());
+        if (!org.springframework.util.StringUtils.hasText(bpPayment.getPayeeCompanyName())) {
+            bpPayment.setPayeeCompanyName(company.getLegalName());
         }
         if (bpPayment.getWorkRecordId() != null) {
             assertWorkRecordAllowed(bpPayment.getWorkRecordId());

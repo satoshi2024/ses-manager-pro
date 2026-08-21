@@ -202,10 +202,36 @@ function openBpPaymentLayerModal(workRecordId, parentPaymentId, nextLayerOrder) 
     document.querySelector('#bpPaymentLayerForm [name="workRecordId"]').value = workRecordId;
     document.querySelector('#bpPaymentLayerForm [name="parentPaymentId"]').value = parentPaymentId;
     document.querySelector('#bpPaymentLayerForm [name="layerOrder"]').value = nextLayerOrder;
-    document.querySelector('#bpPaymentLayerForm [name="payeeCompanyName"]').value = '';
     document.querySelector('#bpPaymentLayerForm [name="amount"]').value = '';
     document.querySelector('#bpPaymentLayerForm [name="remarks"]').value = '';
-    new bootstrap.Modal(document.getElementById('bpPaymentLayerModal')).show();
+    loadBpCompanySelector().then(() => {
+        new bootstrap.Modal(document.getElementById('bpPaymentLayerModal')).show();
+    });
+}
+
+/** BPマスタから支払先セレクタを構築する（会社名自由入力は禁止）。 */
+function loadBpCompanySelector() {
+    const select = document.getElementById('bpPaymentBpCompanyId');
+    if (!select) {
+        return Promise.resolve();
+    }
+    select.innerHTML = '<option value="">選択してください</option>';
+    return fetch('/api/bp-companies?status=ACTIVE&page=1&size=500')
+        .then(res => res.json())
+        .then(resData => {
+            if (resData.code !== 200 || !resData.data || !resData.data.records) {
+                return;
+            }
+            resData.data.records.forEach(company => {
+                const opt = document.createElement('option');
+                opt.value = company.id;
+                opt.textContent = company.legalName || ('BP#' + company.id);
+                select.appendChild(opt);
+            });
+        })
+        .catch(() => {
+            /* 選択肢取得失敗時は空のまま。submit側でID必須を再検証する */
+        });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -215,10 +241,17 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSubmitLayer.addEventListener('click', () => {
             const form = document.getElementById('bpPaymentLayerForm');
             const workRecordId = form.querySelector('[name="workRecordId"]').value;
+            const bpCompanyIdRaw = form.querySelector('[name="bpCompanyId"]').value;
+            const bpCompanyId = bpCompanyIdRaw ? Number(bpCompanyIdRaw) : null;
+            if (!bpCompanyId) {
+                alert(SES.i18n.t('error.bpPayment.bpCompanyRequired',
+                    '支払先はBP会社IDで指定してください（会社名の自由入力は廃止されています）'));
+                return;
+            }
             const data = {
                 parentPaymentId: form.querySelector('[name="parentPaymentId"]').value,
                 layerOrder: parseInt(form.querySelector('[name="layerOrder"]').value, 10),
-                payeeCompanyName: form.querySelector('[name="payeeCompanyName"]').value,
+                bpCompanyId: bpCompanyId,
                 amount: parseFloat(form.querySelector('[name="amount"]').value),
                 remarks: form.querySelector('[name="remarks"]').value,
                 status: '未払'

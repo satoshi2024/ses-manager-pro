@@ -2,17 +2,14 @@ package com.ses.service.ai.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ses.common.util.SecurityUtils;
 import com.ses.dto.ai.MatchResultDto;
 import com.ses.dto.ai.MatchScore;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
-import com.ses.entity.AiLog;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.ProjectSkill;
 import com.ses.entity.EngineerSkill;
 import com.ses.entity.SkillTag;
-import com.ses.mapper.AiLogMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProjectMapper;
@@ -42,7 +39,6 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
     private final EngineerSkillMapper engineerSkillMapper;
     private final ProjectSkillMapper projectSkillMapper;
     private final SkillTagMapper skillTagMapper;
-    private final AiLogMapper aiLogMapper;
     private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
@@ -115,8 +111,7 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         results.sort((a, b) -> Integer.compare(b.getScore(), a.getScore()));
         if (results.size() > 10) results = results.subList(0, 10);
 
-        logAiMatch("マッチング", Map.of("engineerId", engineerId));
-
+        // S17-P2-04: t_ai_log.request_params へのエンティティID書き込みを停止
         return results;
     }
 
@@ -236,8 +231,7 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         results.sort((a, b) -> Integer.compare(b.getScore(), a.getScore()));
         if (results.size() > 10) results = results.subList(0, 10);
 
-        logAiMatch("要員推薦", Map.of("projectId", projectId));
-
+        // S17-P2-04: t_ai_log.request_params へのエンティティID書き込みを停止
         return results;
     }
 
@@ -287,25 +281,4 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
                 .collect(Collectors.joining(", "));
     }
 
-    private void logAiMatch(String type, Map<String, Object> params) {
-        try {
-            AiLog log = new AiLog();
-            log.setRequestType(type);
-            log.setRequestParams(objectMapper.writeValueAsString(params));
-            log.setTokensUsed(0);
-            log.setCostJpy(BigDecimal.ZERO);
-            
-            Long userId = null;
-            try {
-                userId = SecurityUtils.currentUserId();
-            } catch (Exception e) {
-                // Ignore in testing or no-auth context
-            }
-            log.setCreatedBy(userId);
-            
-            aiLogMapper.insert(log);
-        } catch (Exception e) {
-            log.error("Failed to insert AI log", e);
-        }
-    }
 }

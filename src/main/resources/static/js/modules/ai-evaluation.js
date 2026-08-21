@@ -53,6 +53,16 @@ function renderDashboard(data) {
                 + ' : ' + SES.escapeHtml(String(r.count)) + '</div>');
         });
     }
+    const segments = $('#aiEvalSegments');
+    segments.empty();
+    if (!data.segments || data.segments.length === 0) {
+        segments.text(SES.i18n.t('ai.evaluation.empty'));
+    } else {
+        data.segments.forEach(function(s) {
+            segments.append('<div class="mb-1">' + SES.escapeHtml(s.segment || '')
+                + ' : ' + SES.escapeHtml(String(s.count)) + '</div>');
+        });
+    }
     const samples = $('#aiEvalSamples');
     samples.empty();
     (data.samples || []).forEach(function(s) {

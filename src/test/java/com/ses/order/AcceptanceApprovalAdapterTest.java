@@ -6,6 +6,7 @@ import com.ses.entity.Acceptance;
 import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.AcceptanceMapper;
 import com.ses.service.AcceptanceService;
+import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.impl.AcceptanceApprovalAdapter;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,13 +32,14 @@ class AcceptanceApprovalAdapterTest {
 
     @Mock private AcceptanceMapper mapper;
     @Mock private AcceptanceService service;
+    @Mock private ApprovalOrganizationResolver organizationResolver;
 
     private AcceptanceApprovalAdapter adapter;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        adapter = new AcceptanceApprovalAdapter(mapper, service, objectMapper);
+        adapter = new AcceptanceApprovalAdapter(mapper, service, objectMapper, organizationResolver);
     }
 
     private Acceptance acceptance(Long id) {

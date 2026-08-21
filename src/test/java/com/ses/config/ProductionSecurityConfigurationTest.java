@@ -30,6 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"app.security.oidc.user-info-uri=https://idp.invalid/userinfo"
     ,"app.security.oidc.client-id=test-client"
     ,"app.security.oidc.client-secret=test-secret"
+    // test+prod 併用時も prod 既定の none を明示し FailClosed provider を装配する
+    ,"app.digital-invoice.provider=none"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles({"test", "prod"})

@@ -45,7 +45,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  *   <li>認可URLは公式host＋prompt=select_company、scopeなし（AC01）</li>
  *   <li>callback成功でtoken POST 1回・users/me 1回・company_id保存（AC02/AC03）</li>
  *   <li>認可失敗・company不一致・self_onlyは接続を保存せず既存接続を守る（AC03）</li>
- *   <li>refresh: lock後再確認で外部呼出し0回、rotation保存、invalid_grant→REAUTH_REQUIRED（AC04）</li>
+ *   <li>refresh: lock後再確認で外部呼出し0回、rotation保存、invalid_grant→REAUTH_REQUIRED、refresh_token欠落→REAUTH（AC04 / S15-P1-02）</li>
  *   <li>revoke: 成功/既失効/片方timeoutでlocal保持（AC05）</li>
  *   <li>状態機械: DISCONNECTED/CONNECTED/REAUTH_REQUIRED/MISCONFIGURED（R03）</li>
  * </ul>
@@ -354,6 +354,30 @@ class FreeeOAuthContractTest {
         ArgumentCaptor<FreeeConnection> captor = ArgumentCaptor.forClass(FreeeConnection.class);
         verify(connectionMapper).updateById(captor.capture());
         assertEquals("REAUTH_REQUIRED", captor.getValue().getConnectionStatus());
+    }
+
+    @Test
+    @DisplayName("refresh: 応答にrefresh_tokenが無い場合は旧tokenへフォールバックせずREAUTH（S15-P1-02）")
+    void refreshのrefresh_token欠落はREAUTHになる() throws Exception {
+        FreeeConnection expired = connectedRow();
+        expired.setTokenExpiresAt(LocalDateTime.now().minusMinutes(1));
+        stubLatestRow(expired);
+
+        server.expect(once(), requestTo(OAUTH_BASE + "/token"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"access_token\":\"fixture-access-token-2\",\"expires_in\":3600}",
+                        MediaType.APPLICATION_JSON));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.refresh());
+        assertEquals("error.payroll.reauthRequired", ex.getMessage());
+
+        ArgumentCaptor<FreeeConnection> captor = ArgumentCaptor.forClass(FreeeConnection.class);
+        verify(connectionMapper).updateById(captor.capture());
+        assertEquals("REAUTH_REQUIRED", captor.getValue().getConnectionStatus());
+        // access/refresh の token 書戻しは行われない（欠落時 fail-closed）
+        assertTrue(captor.getValue().getAccessTokenEncrypted() == null
+                || captor.getValue().getAccessTokenEncrypted().isBlank()
+                || "REAUTH_REQUIRED".equals(captor.getValue().getConnectionStatus()));
     }
 
     // ============ revoke / disconnect ============
