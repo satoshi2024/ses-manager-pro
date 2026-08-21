@@ -24,9 +24,11 @@ fi
 
 WINROOT=$(cygpath -w "$ROOT" 2>/dev/null || echo "$ROOT")
 
+# :ro だとコンテナ内で chmod +x できない。Windows checkout は filemode を落とすことが
+# あり、Linux CI では Permission denied (exit 126) になるため rw でマウントする。
 echo "== unit tests (in $IMAGE_TAG) =="
 MSYS_NO_PATHCONV=1 docker run --rm \
   -e TEST_FILTER="${TEST_FILTER:-}" \
-  -v "$WINROOT:/repo:ro" \
+  -v "$WINROOT:/repo" \
   -w /repo \
   "$IMAGE_TAG" bash /repo/ops/backup/tests/run-all-unit-tests.sh

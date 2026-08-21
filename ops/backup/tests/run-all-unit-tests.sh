@@ -4,7 +4,11 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BACKUP_ROOT=$(cd "$HERE/.." && pwd)
 export PATH="$HERE/fixtures/bin:/usr/local/bin:$PATH"
+
+# Git on Windows / 一部 bind mount では +x が落ちる。テストは "$SCRIPT" を直接実行するため必須。
+find "$BACKUP_ROOT" -type f \( -name '*.sh' -o -path '*/fixtures/bin/*' \) -exec chmod +x {} + 2>/dev/null || true
 
 failed=0
 shopt -s nullglob
