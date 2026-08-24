@@ -6,6 +6,24 @@
     /** DB・API・Javaとも金額は円。表示だけ桁区切りする（万円へ変換しない）。 */
     function yen(value) { return '¥' + Number(value || 0).toLocaleString('ja-JP'); }
 
+    /**
+     * 予算差は符号を通貨記号の前に置く（+¥1,000 / -¥1,000）。
+     * Number#toLocaleString は負数を「-1,000」にするため、'¥' + n だと ¥-1,000 になり符号位置が崩れる。
+     */
+    function signedYen(value) {
+        var amount = Number(value || 0);
+        var abs = Math.abs(amount).toLocaleString('ja-JP');
+        if (amount > 0) { return '+¥' + abs; }
+        if (amount < 0) { return '-¥' + abs; }
+        return '¥0';
+    }
+
+    function varianceClass(amount) {
+        if (amount < 0) { return 'text-danger'; }
+        if (amount > 0) { return 'text-success'; }
+        return '';
+    }
+
     // APIが受け付ける全次元を送る。UIで送らない次元があると、その軸では絞り込めない。
     function params() {
         return {
@@ -67,8 +85,8 @@
             var data = res.data || {};
             $('#accountingRevenue').text(yen(data.totalRevenue));
             $('#accountingGrossProfit').text(yen(data.totalGrossProfit));
-            $('#accountingRevenueVariance').text(yen(data.revenueVariance));
-            $('#accountingGrossProfitVariance').text(yen(data.grossProfitVariance));
+            applyVarianceKpi('#accountingRevenueVariance', data.revenueVariance);
+            applyVarianceKpi('#accountingGrossProfitVariance', data.grossProfitVariance);
 
             // 予実行は「組織 × 原価部門」粒度。予算はこの粒度でしか存在しないため、
             // ここより細かい行に予算差を出してはいけない（内訳表には予算列を置かない）。
@@ -94,12 +112,20 @@
         });
     }
 
-    /** 予算差は色だけで良し悪しを示さない。符号を必ず文字で添える。 */
+    /** KPI カードの予算差。text-light が浅色で !important されるため外してから色クラスを付ける。 */
+    function applyVarianceKpi(selector, value) {
+        var amount = Number(value || 0);
+        $(selector).removeClass('text-light text-warning text-success text-danger')
+            .addClass(varianceClass(amount))
+            .text(signedYen(amount));
+    }
+
+    /** 予算差は色だけで良し悪しを示さない。符号を必ず文字で添える（+¥ / -¥）。 */
     function variance(value) {
         var amount = Number(value || 0);
-        var sign = amount > 0 ? '+' : '';
-        var cls = amount < 0 ? 'text-warning' : 'text-light';
-        return '<span class="' + cls + '">' + sign + yen(amount) + '</span>';
+        var cls = varianceClass(amount);
+        var attr = cls ? ' class="' + cls + '"' : '';
+        return '<span' + attr + '>' + signedYen(amount) + '</span>';
     }
 
     function exportManagementAccounting() {

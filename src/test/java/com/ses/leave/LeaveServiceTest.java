@@ -236,6 +236,20 @@ class LeaveServiceTest {
     }
 
     @Test
+    void 管理一覧は空月でも承認IDなし申請でも500にしない() {
+        authenticate(1L, "管理者");
+        assertTrue(leaveService.management("2099-01").isEmpty());
+
+        authenticate(USER_ID, "要員");
+        assertTrue(leaveService.mine().isEmpty());
+        leaveService.apply(request("有給", LocalDate.of(2026, 8, 3), LocalDate.of(2026, 8, 3), null, null));
+
+        authenticate(1L, "管理者");
+        assertTrue(leaveService.management("2026-08").stream()
+                .anyMatch(row -> row.getEngineerId() != null && row.getEngineerId() == engineerId));
+    }
+
+    @Test
     void HRは担当法人外の要員への付与を拒否し担当内は許可する() {
         long engineerB = engineerInOtherLegalEntity();
         authenticate(92023L, "HR");

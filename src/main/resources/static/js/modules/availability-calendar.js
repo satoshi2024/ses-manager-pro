@@ -139,6 +139,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
 
+        const chartColors = (window.SES && SES.theme && SES.theme.chartColors)
+            ? SES.theme.chartColors()
+            : { textColor: '#475569', gridColor: 'rgba(0, 0, 0, 0.1)' };
+
         chartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -176,10 +180,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         },
                         min: new Date(fromStr + '-01').getTime(),
-                        max: new Date(new Date(toStr + '-01').getFullYear(), new Date(toStr + '-01').getMonth() + 1, 0).getTime()
+                        max: new Date(new Date(toStr + '-01').getFullYear(), new Date(toStr + '-01').getMonth() + 1, 0).getTime(),
+                        ticks: { color: chartColors.textColor },
+                        grid: { color: chartColors.gridColor }
                     },
                     y: {
-                        stacked: true
+                        stacked: true,
+                        ticks: { color: chartColors.textColor },
+                        grid: { color: chartColors.gridColor }
                     }
                 },
                 plugins: {

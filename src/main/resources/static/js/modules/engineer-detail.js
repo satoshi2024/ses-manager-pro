@@ -240,13 +240,21 @@ function renderSkills(skills) {
     
     let html = '';
     skills.forEach(skill => {
+        const name = (skill.skillName || '').trim();
+        if (!name) {
+            return;
+        }
         let badgeClass = 'bg-secondary';
-        if (skill.proficiency === '上級') badgeClass = 'bg-accent-blue';
+        if (skill.proficiency === '上級') badgeClass = 'bg-info';
         if (skill.proficiency === '中級') badgeClass = 'bg-primary';
         
         let expText = skill.experienceYears ? ` (${skill.experienceYears}${SES.i18n.t('engineer.experience.unit')})` : '';
-        html += `<span class="badge ${badgeClass} border border-dark text-light">${SES.escapeHtml(skill.skillName)}${expText}</span> `;
+        html += `<span class="badge ${badgeClass} border border-dark text-white">${SES.escapeHtml(name)}${expText}</span> `;
     });
+    if (!html) {
+        $('#det-skills').html('<span class="badge bg-secondary border border-dark text-light">' + SES.i18n.t('common.notRegistered') + '</span>');
+        return;
+    }
     $('#det-skills').html(html);
 }
 

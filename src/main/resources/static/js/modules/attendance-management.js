@@ -33,7 +33,8 @@
                 return;
             }
             managementCurrent = current;
-            const flags = document.getElementById('attendanceRoleFlags').dataset;
+            const flagsEl = document.getElementById('attendanceRoleFlags');
+            const flags = flagsEl ? flagsEl.dataset : {};
             const canApprove = flags.canApprove === 'true';
             const canClose = flags.canClose === 'true';
             const canReopen = flags.canReopen === 'true';
@@ -73,7 +74,14 @@
         fetch(url, options).then(r => r.json()).then(data => { if (data.code !== 200) return showError(data.message); load(); }).catch(showError);
     }
     function esc(value) { return SES.escapeHtml(String(value ?? '')); }
-    function showError(error) { const el = document.getElementById('managementError'); el.textContent = error || SES.i18n.t('attendance.error', '勤怠の処理に失敗しました'); el.classList.remove('d-none'); }
+    function showError(error) {
+        const el = document.getElementById('managementError');
+        const text = typeof error === 'string' && error.trim()
+            ? error
+            : SES.i18n.t('attendance.error', '勤怠の処理に失敗しました');
+        el.textContent = text;
+        el.classList.remove('d-none');
+    }
     function clearError() { document.getElementById('managementError').classList.add('d-none'); }
 
     // ===== T072: 外部勤怠同期カード =====
