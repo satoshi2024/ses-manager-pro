@@ -1,5 +1,7 @@
 package com.ses.config;
 
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserMfaMapper;
@@ -27,12 +29,17 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
     private static final String DEFAULT_SESSION_KEY = "dev-only-change-this-session-key";
     private static final String ADMIN_ROLE = "管理者";
 
+    /** Gemini APIの許可ホスト（GeminiTextServiceImplと同一のallowlist） */
+    private static final Set<String> ALLOWED_AI_HOSTS = Set.of("generativelanguage.googleapis.com");
+
     private final OidcSecurityProperties oidcProperties;
     private final MfaSecurityProperties mfaProperties;
     private final PersistentSessionProperties sessionProperties;
     private final SysUserMapper sysUserMapper;
     private final UserMfaMapper userMfaMapper;
     private final com.ses.mapper.PermissionGroupMapper permissionGroupMapper;
+    private final AiConfig aiConfig;
+    private final OutboundUrlGuard outboundUrlGuard;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -64,9 +71,30 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
         }
         validateMfaKeyring(errors);
         validateSecret(errors, sessionProperties.getHashKey(), DEFAULT_SESSION_KEY, "session hash key");
+        validateAiApiUrl(errors);
         if (!errors.isEmpty()) {
             throw new IllegalStateException("本番security configurationが安全な既定値を満たしません: "
                     + String.join("; ", errors));
+        }
+    }
+
+    /**
+     * ai.provider=gemini かつ ai.api-url が指定されている場合、
+     * 本番起動時にallowlist（HTTPS/ホスト完全一致/443）へ適合するか検証する（送信時と同一規則でfail-closed）。
+     */
+    private void validateAiApiUrl(List<String> errors) {
+        if (aiConfig == null || !"gemini".equalsIgnoreCase(aiConfig.getProvider())) {
+            return;
+        }
+        String apiUrl = aiConfig.getApiUrl();
+        if (!StringUtils.hasText(apiUrl)) {
+            // 未指定なら既定のGeminiエンドポイントを使うため検証不要。
+            return;
+        }
+        try {
+            outboundUrlGuard.validateExactHostHttpsUrl(apiUrl, ALLOWED_AI_HOSTS);
+        } catch (OutboundUrlException e) {
+            errors.add("ai.api-urlは許可されたGeminiエンドポイントでなければなりません: " + e.getMessage());
         }
     }
 

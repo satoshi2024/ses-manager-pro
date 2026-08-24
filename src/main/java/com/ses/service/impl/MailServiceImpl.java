@@ -134,7 +134,10 @@ public class MailServiceImpl implements MailService {
             delivery.setStatus("DRY_RUN");
             delivery.setAttemptCount(1);
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
-            log.info("【メールドライラン】from={} to={} subject={}\n{}", from, delivery.getRecipient(), delivery.getSubject(), delivery.getBody());
+            // 本文・件名・宛先アドレス・招待トークン等の機密情報はログに残さない（ACC-SEC-P1-006）。
+            // 配信ID・状態・宛先ドメインのみ記録する。
+            log.info("【メールドライラン】deliveryId={} recipientDomain={} status=DRY_RUN",
+                    delivery.getId(), recipientDomain(delivery.getRecipient()));
             return;
         }
         try {
@@ -152,17 +155,38 @@ public class MailServiceImpl implements MailService {
             delivery.setStatus("SENT");
             delivery.setSentAt(java.time.LocalDateTime.now());
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
-            log.info("メールを送信しました: to={} subject={}", delivery.getRecipient(), delivery.getSubject());
+            // 宛先アドレス・件名・本文はログに残さない（ACC-SEC-P1-006）。
+            log.info("メールを送信しました: deliveryId={} recipientDomain={} status=SENT",
+                    delivery.getId(), recipientDomain(delivery.getRecipient()));
         } catch (Exception e) {
             delivery.setStatus("FAILED");
             delivery.setFailedAt(java.time.LocalDateTime.now());
-            delivery.setErrorMessage(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            delivery.setErrorMessage(safeErrorMessage(e));
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
-            log.error("メール送信に失敗しました: to={} subject={}", delivery.getRecipient(), delivery.getSubject(), e);
+            // 例外メッセージやスタックトレースには本文・トークンが混入し得るため、例外の型のみを記録する。
+            // 宛先アドレス・件名・本文は残さない（ACC-SEC-P1-006）。
+            log.error("メール送信に失敗しました: deliveryId={} recipientDomain={} status=FAILED errorType={}",
+                    delivery.getId(), recipientDomain(delivery.getRecipient()), e.getClass().getName());
             notificationServiceProvider.ifAvailable(ns ->
                     ns.publish("MAIL_FAILED", "メール送信失敗", maskEmail(delivery.getRecipient()) + " 宛のメール送信に失敗しました",
-                            null, "MAIL_FAILED:" + delivery.getRecipient() + ":" + System.currentTimeMillis()));
+                            null, "MAIL_FAILED:" + delivery.getId() + ":" + System.currentTimeMillis()));
         }
+    }
+
+    /** 宛先アドレスのドメイン部分のみを返す（ローカルパートは記録しない）。 */
+    private String recipientDomain(String email) {
+        if (email == null) return "***";
+        int atIdx = email.lastIndexOf("@");
+        if (atIdx < 0 || atIdx == email.length() - 1) return "***";
+        return email.substring(atIdx + 1);
+    }
+
+    /**
+     * DB保存用のエラー要約。例外の型名のみを保持し、本文・トークン等が混入し得る
+     * 例外メッセージ本体は保存しない（ACC-SEC-P1-006）。
+     */
+    private String safeErrorMessage(Throwable e) {
+        return e == null ? "UNKNOWN" : e.getClass().getName();
     }
 
     private String maskEmail(String email) {

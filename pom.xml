@@ -63,6 +63,14 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
+        <!-- ========== Actuator（監視: health + K8s liveness/readiness プローブのみ） ==========
+             ACC-OPS-P0-001: 公開するのは health のみ。env/beans/configprops/heapdump/mappings は
+             application.yml の exposure で公開しない。バージョンは spring-boot-starter-parent(3.3.5)管理。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- Thymeleaf + Security 連携 -->
         <dependency>
             <groupId>org.thymeleaf.extras</groupId>
@@ -244,6 +252,11 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <mainClass>com.ses.SesManagerApplication</mainClass>
+                    <!-- ローカル開発起動は dev プロファイルを明示付与する（application.yml に既定profileを置かないため）。
+                         本番は SPRING_PROFILES_ACTIVE=prod を環境変数で指定すること（ACC-SEC-P1-007）。 -->
+                    <profiles>
+                        <profile>dev</profile>
+                    </profiles>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

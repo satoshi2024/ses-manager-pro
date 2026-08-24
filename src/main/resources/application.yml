@@ -29,6 +29,31 @@ server:
     include-stacktrace: never
     include-exception: false
 
+# ===== Actuator（監視エンドポイント） ACC-OPS-P0-001 =====
+# 公開するのは health（と有効化した liveness/readiness プローブ）のみ。
+# env / beans / configprops / heapdump / mappings 等の内部情報は「一切公開しない」。
+#   - exposure.include に health 以外を絶対に追加しないこと（追加＝内部情報漏洩）。
+#   - 匿名アクセスは SecurityConfig で /actuator/health, /actuator/health/liveness,
+#     /actuator/health/readiness の3パスのみ permitAll する。それ以外は認可対象。
+#   - show-details/show-components は never 固定。匿名でも DB 接続先・ディスク・ホスト名・
+#     資格情報など内部の詳細を返さない（health は status のみ）。
+# 実 K8s への配線（Deployment の probe 設定・別 management port・network policy 等）は
+# 本タスク範囲外で BLOCKED のまま。ここではアプリ側のエンドポイント公開制御のみを行う。
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health
+  endpoint:
+    health:
+      # K8s liveness/readiness プローブ（/actuator/health/{liveness,readiness}）を有効化する。
+      probes:
+        enabled: true
+      # 匿名アクセスでも内部詳細（component 状態・接続先など）を返さない。
+      show-details: never
+      show-components: never
+
 # 組織スコープ(R3)。V60が既存ユーザーと既存要員をLEGACY組織へbackfillするため、
 # 適用直後でも誰も空scopeにならない。したがって既定で有効にする。
 # 段階導入したい場合のみ ORGANIZATION_SCOPE_ENABLED=false で無効化できる。
@@ -38,8 +63,13 @@ organization:
     enabled: ${ORGANIZATION_SCOPE_ENABLED:true}
 
 spring:
-  profiles:
-    active: dev
+  # ===== プロファイルは明示指定を必須とする（ACC-SEC-P1-007 / fail-closed） =====
+  # 以前はここで `profiles.active: dev` を既定にしていたが、本番で SPRING_PROFILES_ACTIVE=prod を
+  # 付け忘れると平文(NoOp)エンコーダーのまま静かに起動する事故につながるため、既定値は置かない。
+  #   - 本番: SPRING_PROFILES_ACTIVE=prod（BCrypt）
+  #   - ローカル開発: dev（`mvn spring-boot:run` は spring-boot-maven-plugin が dev を付与）
+  #   - テスト: test（@ActiveProfiles("test") / application-test.yml）
+  # prod / dev / test のいずれも有効でない場合は PasswordEncoderConfig が起動を失敗させる。
 
   # ===== マルチパート（ファイルアップロード）上限 =====
   # 個別ファイルはFileKindでさらに厳格に検証する（スキルシート10MB/写真2MB）

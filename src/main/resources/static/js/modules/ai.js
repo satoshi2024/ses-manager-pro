@@ -1,31 +1,12 @@
 $(document).ready(function() {
-    // Load API Key from sessionStorage (not stored permanently in localStorage)
-    const savedApiKey = sessionStorage.getItem('geminiApiKey');
-    if (savedApiKey) {
-        $('#geminiApiKey').val(savedApiKey);
-    } else {
-        // If no API key, open settings panel automatically
-        $('#settingsPanel').collapse('show');
-    }
+    // AIのキーはサーバー側設定(ai.api-key)のみを使用する。
+    // ブラウザでの入力・保存(ブラウザストレージ)・送信は廃止した（ACC-SEC-P1-004）。
 
     // Load contexts (engineers and projects)
     loadContextData();
 
     // Welcome message typing animation
     startWelcomeAnimation();
-
-    // Save settings
-    $('#saveSettingsBtn').click(function() {
-        const key = $('#geminiApiKey').val().trim();
-        if (key) {
-            sessionStorage.setItem('geminiApiKey', key);
-            Toast.success('APIキーを設定しました（セッション保持）');
-            $('#settingsPanel').collapse('hide');
-        } else {
-            sessionStorage.removeItem('geminiApiKey');
-            Toast.warning('APIキーがクリアされました');
-        }
-    });
 
     // Enter key to send
     $('#chatInput').on('keypress', function(e) {
@@ -44,7 +25,7 @@ $(document).ready(function() {
 // --- Typing Animation Functions ---
 
 function startWelcomeAnimation() {
-    const welcomeText = 'こんにちは！SES Manager ProのAIアシスタントです。\n要員と案件のマッチング分析や、提案メールの作成、スキルシートの要約などをサポートします。\n右上の「設定」から Gemini API Key を入力してからご質問ください。';
+    const welcomeText = 'こんにちは！SES Manager ProのAIアシスタントです。\n要員と案件のマッチング分析や、提案メールの作成、スキルシートの要約などをサポートします。\n右上の「設定」から対象の要員・案件を選び、ご質問ください。';
 
     // Show typing dots for 2 seconds, then start typewriter
     setTimeout(function() {
@@ -180,15 +161,8 @@ function loadContextData() {
 
 function sendMessage() {
     const prompt = $('#chatInput').val().trim();
-    const apiKey = $('#geminiApiKey').val().trim();
-    
+
     if (!prompt) return;
-    
-    if (!apiKey) {
-        Toast.error('Gemini API Key を設定画面から入力してください。');
-        $('#settingsPanel').collapse('show');
-        return;
-    }
 
     // Add user message to UI
     appendMessage('user', prompt);
@@ -216,8 +190,8 @@ function sendMessage() {
     $('#chatBox').append(thinkingHtml);
     $('#chatBox').scrollTop($('#chatBox')[0].scrollHeight);
 
+    // APIキーは送らない。サーバーが ai.api-key 設定のみを使用する（ACC-SEC-P1-004）。
     const data = {
-        apiKey: apiKey,
         prompt: prompt,
         engineerId: $('#contextEngineer').val() || null,
         projectId: $('#contextProject').val() || null

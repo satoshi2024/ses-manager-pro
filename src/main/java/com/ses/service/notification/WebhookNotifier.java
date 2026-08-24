@@ -1,9 +1,11 @@
 package com.ses.service.notification;
 
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -28,7 +30,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class WebhookNotifier {
 
     private static final String KEY_WEBHOOK_URL = "notification.webhook-url";
@@ -36,6 +37,15 @@ public class WebhookNotifier {
 
     private final SystemConfigService systemConfigService;
     private final RestTemplate restTemplate;
+    private final OutboundUrlGuard outboundUrlGuard;
+
+    public WebhookNotifier(SystemConfigService systemConfigService,
+                           @Qualifier("webhookRestTemplate") RestTemplate restTemplate,
+                           OutboundUrlGuard outboundUrlGuard) {
+        this.systemConfigService = systemConfigService;
+        this.restTemplate = restTemplate;
+        this.outboundUrlGuard = outboundUrlGuard;
+    }
 
     /**
      * 通知をWebhookへ非同期送信する。対象種別が有効化されていない場合、
@@ -55,6 +65,16 @@ public class WebhookNotifier {
         }
         if (notification == null || !isTargetType(notification.getType())) {
             return true;
+        }
+        try {
+            // SSRF対策: 送信直前に宛先URLを再検証する（DNSリバインディング対策）。
+            // 検証失敗時は「配信失敗」として false を返し、成功扱いにはしない。
+            outboundUrlGuard.validatePublicHttpsUrl(url);
+        } catch (OutboundUrlException e) {
+            // 宛先や認証情報などの機微情報を出力しないよう、理由メッセージのみ記録する。
+            log.warn("Webhook宛先URLの検証に失敗したため送信を中止しました: type={} reason={}",
+                    notification.getType(), e.getMessage());
+            return false;
         }
         try {
             Map<String, String> payload = new HashMap<>();

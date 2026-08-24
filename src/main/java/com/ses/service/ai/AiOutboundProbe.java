@@ -19,4 +19,9 @@ public class AiOutboundProbe {
     public String lastOutbound() {
         return lastOutbound.get();
     }
+
+    /** テスト用: 直近の outbound 記録を消す。 */
+    public void clear() {
+        lastOutbound.set(null);
+    }
 }

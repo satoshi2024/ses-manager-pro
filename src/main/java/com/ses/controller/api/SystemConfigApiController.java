@@ -2,6 +2,8 @@ package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.SystemConfig;
 import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,9 @@ public class SystemConfigApiController {
     /** マスキング済みであることを示すプレースホルダー値。保存時にこの値のまま送られてきた項目は更新しない。 */
     private static final String MASK_PLACEHOLDER = "********";
 
+    /** Webhook URLの設定キー（保存時にSSRF観点で宛先を検証する対象） */
+    private static final String KEY_WEBHOOK_URL = "notification.webhook-url";
+
     /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
     private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
             "attendance.sync.freee.cursor", "attendance.sync.last-result",
@@ -41,6 +46,7 @@ public class SystemConfigApiController {
     }
 
     private final SystemConfigService systemConfigService;
+    private final OutboundUrlGuard outboundUrlGuard;
 
     /** scope設定変更時のDashboardキャッシュ世代更新。テストスライスでは未配置でも動作させる。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -77,6 +83,15 @@ public class SystemConfigApiController {
                 if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
                     // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
                     continue;
+                }
+                // Webhook URLはSSRF観点で保存時にも検証する（送信時にも再検証するが、
+                // 不正値の混入を早期に拒否する）。空文字は「未設定へ戻す」操作として許容する。
+                if (KEY_WEBHOOK_URL.equals(c.getConfigKey()) && StringUtils.hasText(c.getConfigValue())) {
+                    try {
+                        outboundUrlGuard.validatePublicHttpsUrl(c.getConfigValue());
+                    } catch (OutboundUrlException e) {
+                        throw BusinessException.of(400, "error.config.webhookUrl");
+                    }
                 }
                 if ("scope.sales-own-data-only".equals(c.getConfigKey())) {
                     finalScopeValue = c.getConfigValue();

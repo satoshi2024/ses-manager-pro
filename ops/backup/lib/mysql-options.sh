@@ -24,6 +24,15 @@ _mysql_options::cleanup() {
 
 # 事前チェック: MYSQL_PWD の使用は禁止、TLS 設定は必須
 mysql_options::init() {
+  # ACC-OPS-P2-001 fail-closed: 依存 lib（common.sh）が未 source だと common::trap_add が
+  # 未定義になり、option file cleanup trap を連結できない。従来はこの状態でも
+  # 「command not found を出しつつ末尾の return 0 で成功扱い」になる false-green だった。
+  # ここで明示的に検出し非 0 で返すことで、依存未ロードを必ず失敗として顕在化させる。
+  # （option file はまだ作成していないため秘密の残置も無い）
+  if ! declare -F common::trap_add > /dev/null 2>&1; then
+    echo "mysql-options: common.sh が未ロードです（common::trap_add が未定義）。先に common.sh を source してください" >&2
+    return 19
+  fi
   [[ -z "${MYSQL_PWD:-}" ]] || {
     echo "mysql-options: MYSQL_PWD の使用は禁止です（MYSQL_PASSWORD_FILE を使用してください）" >&2
     return 18

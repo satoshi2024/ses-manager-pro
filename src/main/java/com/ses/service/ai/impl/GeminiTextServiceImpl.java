@@ -3,6 +3,8 @@ package com.ses.service.ai.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.config.AiConfig;
 import com.ses.service.ai.AiTextService;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +22,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Gemini API を使ったAIテキスト生成サービス実装。
@@ -34,16 +37,25 @@ public class GeminiTextServiceImpl implements AiTextService {
     private static final String DEFAULT_API_URL =
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
+    /**
+     * Gemini APIの許可ホスト（完全一致allowlist）。
+     * サブドメイン詐称・別名・IPリテラル・任意ホストは全て拒否する。
+     */
+    static final Set<String> ALLOWED_HOSTS = Set.of("generativelanguage.googleapis.com");
+
     private final AiConfig aiConfig;
     private final RestTemplate aiRestTemplate;
     private final ObjectMapper objectMapper;
+    private final OutboundUrlGuard outboundUrlGuard;
 
     public GeminiTextServiceImpl(AiConfig aiConfig,
                                   @Qualifier("aiRestTemplate") RestTemplate aiRestTemplate,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  OutboundUrlGuard outboundUrlGuard) {
         this.aiConfig = aiConfig;
         this.aiRestTemplate = aiRestTemplate;
         this.objectMapper = objectMapper;
+        this.outboundUrlGuard = outboundUrlGuard;
     }
 
     @Override
@@ -65,6 +77,15 @@ public class GeminiTextServiceImpl implements AiTextService {
             apiUrl = model != null && !model.isBlank()
                     ? "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"
                     : DEFAULT_API_URL;
+        }
+
+        // SSRF対策: 送信直前に宛先URLをallowlistで検証する（HTTPS/ホスト完全一致/443のみ）。
+        // 設定で ai.api-url を差し替えられても、既知ホスト以外へは送信しない（fail-closed）。
+        try {
+            outboundUrlGuard.validateExactHostHttpsUrl(apiUrl, ALLOWED_HOSTS);
+        } catch (OutboundUrlException e) {
+            log.error("AIエンドポイントURLが許可allowlistに適合しません: reason={}", e.getMessage());
+            throw BusinessException.of(500, "error.ai.endpointNotAllowed");
         }
 
         // リクエストボディ構築

@@ -2,12 +2,8 @@ package com.ses.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
@@ -137,7 +133,13 @@ public class SecurityConfig {
                     "/api/auth/**",
                     "/oauth2/**",
                     "/login/oauth2/**",
-                    "/api/webhooks/**"
+                    "/api/webhooks/**",
+                    // ===== Actuator: 監視/K8sプローブの3パスのみ匿名許可（ACC-OPS-P0-001） =====
+                    // health と liveness/readiness プローブに限定する。/actuator/env 等は
+                    // exposure で未公開かつここでも許可しないため、匿名では到達できない。
+                    "/actuator/health",
+                    "/actuator/health/liveness",
+                    "/actuator/health/readiness"
                 ).permitAll()
                 // ユーザー管理・identity-provider・権限設定・監査・システム設定は管理者のみアクセス可能
                 .requestMatchers(
@@ -299,30 +301,9 @@ public class SecurityConfig {
         return repository;
     }
 
-    /**
-     * パスワードエンコーダーの設定（開発環境）
-     * 開発中は平文のまま比較する（既存の平文シードデータと整合させるため）
-     *
-     * @return PasswordEncoder 平文エンコーダー
-     */
-    @Bean
-    @Profile("!prod")
-    @SuppressWarnings("deprecation") // 開発・テスト用の平文シードとの互換性を維持する。
-    public PasswordEncoder passwordEncoder() {
-        return NoOpPasswordEncoder.getInstance();
-    }
-
-    /**
-     * パスワードエンコーダーの設定（本番環境）
-     * 本番環境ではBCrypt方式でパスワードをハッシュ化する
-     *
-     * @return PasswordEncoder BCryptパスワードエンコーダー
-     */
-    @Bean
-    @Profile("prod")
-    public PasswordEncoder prodPasswordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+    // PasswordEncoder の定義は PasswordEncoderConfig に集約した（ACC-SEC-P1-007）。
+    // 明示的な dev/test プロファイルでのみ平文(NoOp)を許可し、prod は BCrypt、
+    // プロファイル未指定・不明な場合は起動を fail-closed で失敗させる。
 
     /**
      * CSRFトークンを解決してCookie(XSRF-TOKEN)を確実に発行するためのフィルター。
