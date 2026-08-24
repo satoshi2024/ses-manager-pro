@@ -137,7 +137,7 @@ public class ManagementAccountingApiController {
      * ヘッダー: organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version
      */
     @PostMapping(value = "/budgets/csv", consumes = "multipart/form-data")
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ApiResult<Integer> importBudgetCsv(@RequestPart("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw BusinessException.of("error.organization.budget.csvInvalid");

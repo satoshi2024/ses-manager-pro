@@ -134,7 +134,8 @@ public class MailServiceImpl implements MailService {
             delivery.setStatus("DRY_RUN");
             delivery.setAttemptCount(1);
             if (mailDeliveryMapper != null) mailDeliveryMapper.updateById(delivery);
-            log.info("【メールドライラン】from={} to={} subject={}\n{}", from, delivery.getRecipient(), delivery.getSubject(), delivery.getBody());
+            log.info("【メールドライラン】deliveryId={} from={} to={} subject={}", delivery.getId(), from, maskEmail(delivery.getRecipient()), delivery.getSubject());
+            log.debug("【メールドライラン本文】{}", delivery.getBody());
             return;
         }
         try {

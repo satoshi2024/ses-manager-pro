@@ -73,7 +73,7 @@ class StaffingBrowserMTest {
         assertNotNull(chrome, "Chrome実行ファイルが見つかりません");
         DemoData demo = seedDemoData();
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of(".kiro", "specs", "staffing-capacity-planning", "evidence", "browser-m");
+        Path evidenceDir = Path.of("target", "browser-evidence", "staffing-capacity-planning");
         Files.createDirectories(evidenceDir);
         String runId = "browser-m-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\n");

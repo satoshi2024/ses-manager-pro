@@ -60,7 +60,6 @@ public class SystemConfigApiController {
     }
 
     @PutMapping
-    @Transactional
     public ApiResult<Boolean> update(@RequestBody List<SystemConfig> configs) {
         String previousScopeValue = systemConfigService.all().stream()
                 .filter(c -> "scope.sales-own-data-only".equals(c.getConfigKey()))

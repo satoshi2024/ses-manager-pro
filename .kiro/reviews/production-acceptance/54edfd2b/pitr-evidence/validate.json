@@ -1,0 +1,17 @@
+{
+  "state": "READY_FOR_CUTOVER",
+  "plan_id": "7e499d7b5da78f38",
+  "target_database": "ses_manager_db",
+  "checks": {
+    "flyway": "PASS",
+    "check_table": "PASS",
+    "counts": "PASS",
+    "markers": "PASS",
+    "uploads_hash": "PASS",
+    "uploads_references": "PASS",
+    "orphan_files": [
+      "published/marker-before.txt"
+    ],
+    "app_smoke": "PASS"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "state": "SUCCESS",
+  "plan_id": "7e499d7b5da78f38",
+  "validation": "READY_FOR_CUTOVER",
+  "target_ts": "2026-08-24T04:34:27Z",
+  "target_db": {
+    "before_marker": 1,
+    "mid_dml_replayed": 1,
+    "after_marker": 0
+  },
+  "uploads_staging": {
+    "before_marker": 1,
+    "after_marker": 0
+  }
+}

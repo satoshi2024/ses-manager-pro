@@ -124,7 +124,7 @@ public class SecurityConfig {
             .addFilterAfter(persistentSessionFilter, MfaEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth
-                // 認証不要のパス（ログインページ、静的リソース、認証API）
+                // 認証不要のパス（ログインページ、静的リソース、認証API、Actuatorヘルスチェック）
                 .requestMatchers(
                     "/login",
                     "/error",
@@ -137,23 +137,29 @@ public class SecurityConfig {
                     "/api/auth/**",
                     "/oauth2/**",
                     "/login/oauth2/**",
-                    "/api/webhooks/**"
+                    "/api/webhooks/**",
+                    "/actuator/health",
+                    "/actuator/health/**",
+                    "/actuator/info"
                 ).permitAll()
-                // ユーザー管理・ロール権限設定は管理者のみアクセス可能
+                // ユーザー管理・ロール権限・OIDCプロバイダ・システム設定・監査ログは管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",
                     "/api/users/**",
-                     "/api/identity-providers/**",
+                    "/api/identity-providers/**",
                     "/api/permission-groups/**",
                     "/api/files/*/rescan",
                     "/api/role-menus/**",
-                    "/api/notifications/generate",
                     "/system-config/**",
                     "/api/system-configs/**",
+                    "/audit-log/**",
+                    "/api/audit-logs/**"
+                ).hasRole("管理者")
+                // 管理者・HR・マネージャーの共有管理操作
+                .requestMatchers(
+                    "/api/notifications/generate",
                     "/api/work-records/confirm",
                     "/api/work-records/reopen",
-                    "/audit-log/**",
-                    "/api/audit-logs/**",
                     "/api/contracts/generate-renewals",
                     "/api/autocomplete/users",
                     // G2 gate approval（R23-P1-01 §5・P0-2）: 管理者・HR・マネージャーはapproval画面へ入れる。

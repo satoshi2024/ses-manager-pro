@@ -1,13 +1,4 @@
 $(document).ready(function() {
-    // Load API Key from sessionStorage (not stored permanently in localStorage)
-    const savedApiKey = sessionStorage.getItem('geminiApiKey');
-    if (savedApiKey) {
-        $('#geminiApiKey').val(savedApiKey);
-    } else {
-        // If no API key, open settings panel automatically
-        $('#settingsPanel').collapse('show');
-    }
-
     // Load contexts (engineers and projects)
     loadContextData();
 
@@ -16,15 +7,8 @@ $(document).ready(function() {
 
     // Save settings
     $('#saveSettingsBtn').click(function() {
-        const key = $('#geminiApiKey').val().trim();
-        if (key) {
-            sessionStorage.setItem('geminiApiKey', key);
-            Toast.success('APIキーを設定しました（セッション保持）');
-            $('#settingsPanel').collapse('hide');
-        } else {
-            sessionStorage.removeItem('geminiApiKey');
-            Toast.warning('APIキーがクリアされました');
-        }
+        Toast.success('コンテキスト設定を更新しました');
+        $('#settingsPanel').collapse('hide');
     });
 
     // Enter key to send
@@ -180,15 +164,7 @@ function loadContextData() {
 
 function sendMessage() {
     const prompt = $('#chatInput').val().trim();
-    const apiKey = $('#geminiApiKey').val().trim();
-    
     if (!prompt) return;
-    
-    if (!apiKey) {
-        Toast.error('Gemini API Key を設定画面から入力してください。');
-        $('#settingsPanel').collapse('show');
-        return;
-    }
 
     // Add user message to UI
     appendMessage('user', prompt);
@@ -217,7 +193,6 @@ function sendMessage() {
     $('#chatBox').scrollTop($('#chatBox')[0].scrollHeight);
 
     const data = {
-        apiKey: apiKey,
         prompt: prompt,
         engineerId: $('#contextEngineer').val() || null,
         projectId: $('#contextProject').val() || null
