@@ -19,6 +19,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/role-menus")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class RoleMenuApiController {
 
     private final RoleMenuService roleMenuService;

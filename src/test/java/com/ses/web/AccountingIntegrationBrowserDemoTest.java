@@ -308,7 +308,7 @@ class AccountingIntegrationBrowserDemoTest {
         managerJobId = job2.getId();
 
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of(".kiro", "specs", "accounting-payment-integration", "evidence", "browser");
+        Path evidenceDir = Path.of("target", "browser-evidence", "accounting-payment-integration");
         Files.createDirectories(evidenceDir);
         String runId = "browser-demo-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\n");

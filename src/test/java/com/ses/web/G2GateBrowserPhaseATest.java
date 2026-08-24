@@ -40,7 +40,7 @@ class G2GateBrowserPhaseATest {
         Path chrome = CdpBrowser.chromeExecutable();
         assertNotNull(chrome, "Chrome実行ファイルが見つかりません");
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of(".kiro", "specs", "dispatch-outsourcing-compliance-ledger", "evidence", "browser-g2");
+        Path evidenceDir = Path.of("target", "browser-g2-evidence", "dispatch-outsourcing-compliance-ledger");
         Files.createDirectories(evidenceDir);
         String runId = "browser-g2-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\n");

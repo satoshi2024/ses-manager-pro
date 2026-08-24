@@ -72,7 +72,7 @@ class UserApiControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void page_一覧は200() throws Exception {
         when(sysUserService.page(any(), any())).thenReturn(new Page<>());
         mockMvc.perform(get("/api/users"))
@@ -87,7 +87,7 @@ class UserApiControllerTest {
      * 不要な警告バッジが並ぶ。
      */
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void page_要員ロールだけ紐付け有無を返す() throws Exception {
         SysUser engineerUser = SysUser.builder().username("eng1").role("要員").status(1).build();
         engineerUser.setId(10L);
@@ -106,7 +106,7 @@ class UserApiControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void page_紐付け済みの要員はtrueを返す() throws Exception {
         SysUser engineerUser = SysUser.builder().username("eng1").role("要員").status(1).build();
         engineerUser.setId(10L);
@@ -124,7 +124,7 @@ class UserApiControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void save_正常は200() throws Exception {
         when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(passwordEncoder.encode(anyString())).thenReturn("ENC");
@@ -147,7 +147,7 @@ class UserApiControllerTest {
      * なり、permission group画面で権限を編集しても効かないユーザーが増える。
      */
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void save_新規ユーザーへdefaultPermissionGroupを割当てる() throws Exception {
         when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         when(passwordEncoder.encode(anyString())).thenReturn("ENC");
@@ -169,7 +169,7 @@ class UserApiControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void save_ユーザー名が短いと400() throws Exception {
         Map<String, Object> body = Map.of("username", "ab", "password", "pass1234", "role", "営業");
         mockMvc.perform(post("/api/users").with(csrf())
@@ -180,7 +180,7 @@ class UserApiControllerTest {
     }
 
     @Test
-    @WithMockUser
+    @WithMockUser(roles = "管理者")
     void save_弱いパスワードは業務エラー() throws Exception {
         when(sysUserMapper.countUsernameIncludingDeleted(any(), any())).thenReturn(0L);
         // 数字なし・8文字未満のパスワード → パスワードポリシー違反(BusinessException=500)

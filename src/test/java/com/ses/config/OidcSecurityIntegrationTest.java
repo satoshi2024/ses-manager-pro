@@ -44,6 +44,26 @@ class OidcSecurityIntegrationTest {
     }
 
     @Test
+    @WithMockUser(roles = "HR")
+    void 外部identity承認APIはHRを拒否する() throws Exception {
+        mockMvc.perform(post("/api/identity-providers/10/external-identities")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":1,\"subject\":\"sub-admin\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void 外部identity承認APIはマネージャーを拒否する() throws Exception {
+        mockMvc.perform(post("/api/identity-providers/10/external-identities")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":1,\"subject\":\"sub-admin\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @WithMockUser(roles = "管理者")
     void 外部identity承認APIはCSRFなしを拒否する() throws Exception {
         mockMvc.perform(post("/api/identity-providers/10/external-identities")
@@ -68,6 +88,26 @@ class OidcSecurityIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userId\":99,\"subject\":\"sub-1\"}"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(roles = "HR")
+    void HRは管理者専用画面とAPIへ到達できない() throws Exception {
+        mockMvc.perform(get("/user/list")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/system-config")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/role-menus")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/system-configs")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/users")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void マネージャーは管理者専用画面とAPIへ到達できない() throws Exception {
+        mockMvc.perform(get("/user/list")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/system-config")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/role-menus")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/system-configs")).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/users")).andExpect(status().isForbidden());
     }
 
     @Test

@@ -59,6 +59,10 @@ class AuthorizationServiceImplTest {
 
         assertFalse(service().isAllowed(
                 SecurityContextHolder.getContext().getAuthentication(), "mfa.reset"));
+        assertFalse(service().isAllowed(
+                SecurityContextHolder.getContext().getAuthentication(), "identity-provider.create"));
+        assertFalse(service().isAllowed(
+                SecurityContextHolder.getContext().getAuthentication(), "system-config.view"));
         verifyNoInteractions(userPermissionGroupMapper, permissionGroupActionMapper, permissionGroupMapper);
     }
 
@@ -92,6 +96,8 @@ class AuthorizationServiceImplTest {
     void 管理者はaction設定による自己lockoutを受けない() {
         authenticate(1L, "管理者");
         assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "user.delete"));
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "identity-provider.create"));
+        assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "system-config.view"));
         assertTrue(service().isAllowed(SecurityContextHolder.getContext().getAuthentication(), "mfa.reset"));
     }
 

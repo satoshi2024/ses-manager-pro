@@ -1,11 +1,16 @@
 package com.ses.controller.api;
 
 import com.ses.entity.SystemConfig;
+import com.ses.entity.SysUser;
 import com.ses.mapper.SystemConfigMapper;
+import com.ses.config.LoginUser;
 import com.ses.service.security.ScopeVersionRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,6 +38,19 @@ class SystemConfigScopeInvalidationTest {
     private PlatformTransactionManager transactionManager;
 
     @BeforeEach
+    void authenticateAdmin() {
+        SysUser admin = new SysUser();
+        admin.setId(1L);
+        admin.setUsername("admin");
+        admin.setRole("管理者");
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        new LoginUser(admin, List.of()),
+                        null,
+                        List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_管理者"))));
+    }
+
+    @BeforeEach
     void resetToFalse() {
         new TransactionTemplate(transactionManager).execute(status -> {
             SystemConfig current = systemConfigMapper.selectById("scope.sales-own-data-only");
@@ -41,6 +59,11 @@ class SystemConfigScopeInvalidationTest {
             }
             return null;
         });
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test

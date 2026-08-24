@@ -32,11 +32,11 @@ CROSS JOIN (VALUES
   ('ai.*'), ('analytics.*'), ('autocomplete.*'), ('bp-availability.*'),
   ('bp-availability-ingestion.*'), ('candidate.*'), ('cashflow.*'), ('compliance.*'),
   ('contract-document.*'), ('contract.*'), ('customer.*'), ('dashboard.*'), ('email.*'),
-  ('engineer.*'), ('file.*'), ('identity-provider.*'), ('invoice.*'),
+  ('engineer.*'), ('file.*'), ('invoice.*'),
   ('management-accounting.*'), ('monthly-closing.*'), ('my.*'), ('notifications.*'), ('organization.*'),
   ('payroll.*'), ('profile.*'), ('project-ingestion.*'), ('project.*'), ('proposal.*'),
   ('quotation.*'), ('reconciliation.*'), ('resume-ingestion.*'), ('sales-performance.*'),
-  ('skill-tag.*'), ('skillsheet-template.*'), ('system-config.*'), ('work-record.*'),
+  ('skill-tag.*'), ('skillsheet-template.*'), ('work-record.*'),
   ('export.execute'), ('document.*'), ('document-archive.*')
 ) a(action_key)
 WHERE NOT EXISTS (
@@ -77,16 +77,22 @@ INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_fla
   ('default', 2, 'audit.security.view', 1, 0),
   ('default', 2, 'file.scan.retry', 1, 0),
   ('default', 2, 'payroll.view', 1, 0),
+  ('default', 2, 'identity-provider.*', 1, 0),
+  ('default', 2, 'system-config.*', 1, 0),
   ('default', 3, 'user.*', 1, 0),
   ('default', 3, 'permission.manage', 1, 0),
   ('default', 3, 'audit.security.view', 1, 0),
   ('default', 3, 'file.scan.retry', 1, 0),
   ('default', 3, 'contract.cost.view', 1, 0),
+  ('default', 3, 'identity-provider.*', 1, 0),
+  ('default', 3, 'system-config.*', 1, 0),
   ('default', 4, 'user.*', 1, 0),
   ('default', 4, 'permission.manage', 1, 0),
   ('default', 4, 'audit.security.view', 1, 0),
   ('default', 4, 'file.scan.retry', 1, 0),
   ('default', 4, 'payroll.view', 1, 0),
+  ('default', 4, 'identity-provider.*', 1, 0),
+  ('default', 4, 'system-config.*', 1, 0),
   -- V78: 承認画面の口座fieldは専用actionで明示拒否する。BP会社マスタのbp-company.*は維持。
   ('default', 2, 'bp-company.bank-account.view', 1, 0),
   ('default', 4, 'bp-company.bank-account.view', 1, 0);

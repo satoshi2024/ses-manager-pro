@@ -11,6 +11,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerSalesMapper;
 import com.ses.service.SysUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
@@ -26,6 +27,7 @@ import com.ses.common.util.PasswordPolicyValidator;
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('管理者')")
 public class UserApiController {
 
     private final SysUserService sysUserService;

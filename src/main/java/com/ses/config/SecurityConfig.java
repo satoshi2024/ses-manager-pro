@@ -139,23 +139,26 @@ public class SecurityConfig {
                     "/login/oauth2/**",
                     "/api/webhooks/**"
                 ).permitAll()
-                // ユーザー管理・ロール権限設定は管理者のみアクセス可能
+                // ユーザー管理・identity-provider・権限設定・監査・システム設定は管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",
                     "/api/users/**",
-                     "/api/identity-providers/**",
+                    "/api/identity-providers/**",
                     "/api/permission-groups/**",
                     "/api/files/*/rescan",
                     "/api/role-menus/**",
                     "/api/notifications/generate",
                     "/system-config/**",
                     "/api/system-configs/**",
-                    "/api/work-records/confirm",
-                    "/api/work-records/reopen",
                     "/audit-log/**",
                     "/api/audit-logs/**",
+                    "/api/autocomplete/users"
+                ).hasRole("管理者")
+                // HR/マネージャーに開放済みの運用導線。管理者境界とは分離して定義する。
+                .requestMatchers(
+                    "/api/work-records/confirm",
+                    "/api/work-records/reopen",
                     "/api/contracts/generate-renewals",
-                    "/api/autocomplete/users",
                     // G2 gate approval（R23-P1-01 §5・P0-2）: 管理者・HR・マネージャーはapproval画面へ入れる。
                     // ただしserviceでcurrent assignment.user_id == currentUserIdを必須にする（§5）。
                     // 具体的パターンを先にマッチさせる（/** 管理者限定より前に置かないと到達不能）。

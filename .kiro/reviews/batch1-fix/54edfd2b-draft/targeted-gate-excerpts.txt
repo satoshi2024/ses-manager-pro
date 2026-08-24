@@ -1,0 +1,34 @@
+﻿# Targeted test lines from verify-like-ci-java21.log
+# Note: each verify suite runs 'mvn clean test', so target/surefire-reports only retains the LAST suite (browser).
+
+[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.032 s -- in com.ses.service.ExternalIdentityProvisioningServiceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.502 s -- in com.ses.service.ExternalIdentityProvisioningTransactionTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 42.30 s -- in com.ses.service.impl.ExternalIdentityConcurrentApprovalMySqlTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 49.30 s -- in com.ses.migration.FlywayV109AdminBoundaryUpgradeSmokeTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.163 s -- in com.ses.migration.MySqlTestShardInventoryTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.355 s -- in com.ses.config.OidcSecurityIntegrationTest
+[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.723 s -- in com.ses.service.security.ActionPermissionMatrixTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.398 s -- in com.ses.service.security.AuthorizationServiceImplTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in com.ses.migration.EnterpriseIdentitySchemaTest
+
+# Gate markers
+1: === 前提ツールの確認（CIとの差分） ===
+22: === fast tests (H2 / unit / MVC) ===
+8098: [INFO] BUILD SUCCESS
+8103: skipされたテストはありません
+8105: === MySQL integration / Flyway ===
+24999: [INFO] BUILD SUCCESS
+25004: skipされたテストはありません
+25006: === performance regression ===
+25095: [INFO] BUILD SUCCESS
+25100: skipされたテストはありません
+25102: === browser demo (real Chrome, T093) ===
+25227: [INFO] BUILD SUCCESS
+25232: skipされたテストはありません
+25234: === HFP-03: backup unit suite ===
+25335: /repo/ops/backup/lib/mysql-options.sh: line 77: common::trap_add: command not found
+25359: parse error: Invalid numeric literal at line 2, column 3
+25371: backup unit suite: SUCCESS
+25373: === HFP-03-011: backup integration suite（実 MySQL PITR） ===
+25625: integration suite: SUCCESS
+25626: VERIFY_EXIT=0

@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS m_permission_group;
 DROP TABLE IF EXISTS t_user_session;
 DROP TABLE IF EXISTS t_mfa_recovery_code;
 DROP TABLE IF EXISTS t_user_mfa;
+DROP TABLE IF EXISTS t_oidc_binding_review_inventory;
 DROP TABLE IF EXISTS t_user_external_identity;
 DROP TABLE IF EXISTS m_identity_provider;
 
@@ -34,10 +35,32 @@ CREATE TABLE t_user_external_identity (
   subject VARCHAR(255) NOT NULL,
   email_snapshot VARCHAR(255),
   linked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  review_status VARCHAR(32) NOT NULL DEFAULT 'QUARANTINED',
+  reviewed_at TIMESTAMP,
+  reviewed_by BIGINT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   deleted_flag TINYINT NOT NULL DEFAULT 0,
-  CONSTRAINT uk_external_identity_subject UNIQUE (tenant_id, provider_id, subject)
+  CONSTRAINT uk_external_identity_subject UNIQUE (tenant_id, provider_id, subject),
+  CONSTRAINT chk_external_identity_approved_reviewer CHECK (
+    review_status <> 'APPROVED' OR (reviewed_at IS NOT NULL AND reviewed_by IS NOT NULL)
+  )
+);
+
+CREATE TABLE t_oidc_binding_review_inventory (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  binding_id BIGINT NOT NULL,
+  tenant_id VARCHAR(100) NOT NULL,
+  provider_id BIGINT NOT NULL,
+  subject_sha256 CHAR(64) NOT NULL,
+  user_id BIGINT NOT NULL,
+  user_role VARCHAR(50),
+  linked_at TIMESTAMP,
+  deleted_flag TINYINT NOT NULL DEFAULT 0,
+  review_status VARCHAR(32) NOT NULL,
+  inventory_reason VARCHAR(64) NOT NULL DEFAULT 'V109_PREPATCH_QUARANTINE',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uk_oidc_binding_review_inventory UNIQUE (binding_id)
 );
 
 CREATE TABLE t_user_mfa (

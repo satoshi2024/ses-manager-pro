@@ -19,6 +19,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/api/system-configs")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class SystemConfigApiController {
 
     /** マスキング表示対象キー（Webhook URLは漏洩すると第三者が投稿可能になる機微情報のため） */

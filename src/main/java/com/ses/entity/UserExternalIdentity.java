@@ -18,4 +18,8 @@ public class UserExternalIdentity extends BaseEntity {
     private String subject;
     private String emailSnapshot;
     private LocalDateTime linkedAt;
+    /** APPROVED 以外はOIDCログインを拒否する。パッチ前行はQUARANTINED。 */
+    private String reviewStatus;
+    private LocalDateTime reviewedAt;
+    private Long reviewedBy;
 }

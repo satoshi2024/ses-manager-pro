@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
  */
 @Controller
 @RequestMapping("/audit-log")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class AuditLogPageController {
 
     @GetMapping

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
  */
 @Controller
 @RequestMapping("/user")
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class UserPageController {
 
     /**

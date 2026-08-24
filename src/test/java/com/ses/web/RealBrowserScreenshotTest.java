@@ -139,7 +139,7 @@ class RealBrowserScreenshotTest {
         assertNotNull(acceptanceId, "動的acceptance IDが採番されること");
 
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of(".kiro", "specs", "order-acceptance-workflow", "evidence", "browser-r8");
+        Path evidenceDir = Path.of("target", "browser-r8-evidence", "order-acceptance-workflow");
         Files.createDirectories(evidenceDir);
         String runId = "browser-r8-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\nacceptanceId=" + acceptanceId + "\n");
