@@ -24,4 +24,13 @@ public interface RoleMenuService extends IService<RoleMenu> {
      * @return 全メニューキー一覧
      */
     List<String> getAllMenuKeys();
+
+    /**
+     * 指定ロールのメニュー許可を全削除→再登録で置き換える。
+     * 途中失敗時に権限が消えたままにならないよう1トランザクションで実行する。
+     *
+     * @param role    対象ロール
+     * @param menuIds 許可するメニューID一覧
+     */
+    void replaceMenus(String role, List<Long> menuIds);
 }

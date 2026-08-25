@@ -24,7 +24,7 @@ public class SalesInvoiceTransactionCoordinator {
 
     private final IntegrationJobService jobService;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void handleSalesInvoiceResult(Long jobId, IntegrationJob job, IntegrationConnection conn, CanonicalDealResult result) {
         IntegrationJob currentJob = jobService.getById(jobId);
         if (currentJob == null) return;

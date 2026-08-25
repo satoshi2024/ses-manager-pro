@@ -49,7 +49,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void assign(Long engineerId, Long salesUserId, boolean primaryFlag, String remarks) {
         SysUser user = sysUserMapper.selectById(salesUserId);
         if (user == null || !StatusConstants.ROLE_SALES.equals(user.getRole())
@@ -84,7 +84,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void setPrimary(Long engineerId, Long assignmentId) {
         EngineerSales target = getActiveAssignment(engineerId, assignmentId);
         if (target.getPrimaryFlag() != null && target.getPrimaryFlag() == 1) {
@@ -97,7 +97,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void release(Long engineerId, Long assignmentId) {
         EngineerSales target = getActiveAssignment(engineerId, assignmentId);
         List<EngineerSales> actives = listActiveEntities(engineerId);
@@ -136,7 +136,7 @@ public class EngineerSalesServiceImpl extends ServiceImpl<EngineerSalesMapper, E
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void releaseAllByEngineerId(Long engineerId) {
         if (engineerId == null) {
             return;

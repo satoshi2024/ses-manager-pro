@@ -60,7 +60,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SalesActivity create(Long customerId, SalesActivityCreateRequest request) {
         assertCustomerScope(customerId);
         assertCustomerExists(customerId);
@@ -79,7 +79,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SalesActivity update(Long customerId, Long activityId, SalesActivityUpdateRequest request) {
         assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
@@ -117,7 +117,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void complete(Long customerId, Long activityId, Integer version) {
         assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);
@@ -131,7 +131,7 @@ public class SalesActivityServiceImpl extends ServiceImpl<SalesActivityMapper, S
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long customerId, Long activityId, Integer version) {
         assertCustomerScope(customerId);
         SalesActivity activity = getOwnedOrThrow(customerId, activityId);

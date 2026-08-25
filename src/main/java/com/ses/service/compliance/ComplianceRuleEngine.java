@@ -74,7 +74,7 @@ public class ComplianceRuleEngine {
     }
 
     /** 全active契約に対してruleを実行し、findingをupsertする。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public RunResult runActiveContracts() {
         List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getStatus, ACTIVE_CONTRACT_STATUSES)
@@ -95,7 +95,7 @@ public class ComplianceRuleEngine {
     }
 
     /** 指定契約に対してruleを実行し、findingをupsertする。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceFindingStore.SyncResult runForContract(Long contractId) {
         Contract contract = contractMapper.selectById(contractId);
         if (contract == null) {

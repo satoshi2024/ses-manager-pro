@@ -1,6 +1,5 @@
 package com.ses.leave;
 
-import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.LeaveLedger;
 import com.ses.entity.LeaveRequest;
@@ -10,16 +9,22 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.leave.LeaveApprovalAdapter;
+import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -39,10 +44,30 @@ import static org.mockito.Mockito.when;
 
 /**
  * S11-P1-01: 残数480分に対する並行承認はちょうど1件成功し、残高は負にならない。
+ * 実DB(MySQL Testcontainers)でロックの実効性を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
+@Testcontainers(disabledWithoutDocker = true)
 class LeaveApprovalConcurrentTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_db")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     @Autowired
     private LeaveApprovalAdapter adapter;

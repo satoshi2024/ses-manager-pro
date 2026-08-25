@@ -110,7 +110,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceDocumentDeliveryDto generate(Long contractId, ComplianceDocumentGenerateRequest request) {
         Contract contract = requireVisibleContract(contractId);
         requireComplianceAccess();
@@ -370,7 +370,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceDocumentDeliveryDto confirm(Long contractId, Long deliveryId, String note) {
         Contract contract = requireVisibleContract(contractId);
         requireComplianceAccess();

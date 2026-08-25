@@ -128,6 +128,9 @@ public class GeminiTextServiceImpl implements AiTextService {
             log.error("Gemini API 呼び出し失敗（ネットワーク）: category={} errorType={}",
                     "NETWORK_ERROR", e.getClass().getName());
             throw BusinessException.of(503, "error.ai.networkError");
+        } catch (BusinessException e) {
+            // parseGeminiResponse 等で既に分類・ログ済みの業務例外は再ラップしない（REV-B2.3-P2-001）
+            throw e;
         } catch (Exception e) {
             log.error("Gemini API 呼び出し失敗（予期しないエラー）: category={} errorType={}",
                     "UNEXPECTED_ERROR", e.getClass().getName());

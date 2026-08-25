@@ -6,15 +6,21 @@ import com.ses.entity.ProjectPosition;
 import com.ses.mapper.AllocationPlanMapper;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.AllocationPlanService;
+import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -35,11 +41,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>確定transaction内で {@code t_engineer} を FOR UPDATE ロック（S12-P1-01）し、
  * 続けて期間行をロックして再検証する（design §5.4）。REQUIRES_NEWで2txを並行実行し、
- * 「成功1件・失敗1件」の不変条件を確認する（H2のロックタイムアウト等も失敗側として許容）。
+ * 「成功1件・失敗1件」の不変条件を確認する（ロック待ちタイムアウト等も失敗側として許容）。
+ * 実DB(MySQL Testcontainers)でロックの実効性を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
+@Testcontainers(disabledWithoutDocker = true)
 class AllocationConcurrentConfirmTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_db")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     @Autowired
     private AllocationPlanService allocationService;
@@ -199,7 +225,7 @@ class AllocationConcurrentConfirmTest {
                     } catch (BusinessException e) {
                         return false;
                     } catch (Exception e) {
-                        // H2のロックタイムアウト等も「失敗側」として扱う
+                        // ロック待ちタイムアウト等も「失敗側」として扱う
                         return false;
                     }
                 }));

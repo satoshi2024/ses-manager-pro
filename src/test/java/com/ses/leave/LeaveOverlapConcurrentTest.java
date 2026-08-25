@@ -1,6 +1,5 @@
 package com.ses.leave;
 
-import com.ses.common.exception.BusinessException;
 import com.ses.dto.leave.LeaveApplyRequest;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.EngineerAccountLink;
@@ -10,8 +9,10 @@ import com.ses.service.LeaveService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalRequestCommand;
+import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,9 +22,13 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -43,10 +48,30 @@ import static org.mockito.Mockito.when;
 
 /**
  * S11-P2-01: 同一日の重なる休暇申請を並行しても「申請中」が二重挿入されない。
+ * 実DB(MySQL Testcontainers)でロック／一意制約の実効性を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
+@Testcontainers(disabledWithoutDocker = true)
 class LeaveOverlapConcurrentTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_db")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     private static final long USER_ID = 92042L;
 
@@ -93,6 +118,11 @@ class LeaveOverlapConcurrentTest {
                 + "VALUES (?, '2026-08-10', '通常', 480)", calendarId);
         jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?",
                 USER_ID, engineerId);
+        // MySQL は t_engineer_account_link.sys_user_id → sys_user の FK を強制する
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
+        jdbcTemplate.update("INSERT INTO sys_user (id, username, password, real_name, role, status) "
+                + "VALUES (?, ?, 'x', 'leave-ov-user', '要員', 1)",
+                USER_ID, "leave-ov-" + suffix);
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
@@ -114,6 +144,7 @@ class LeaveOverlapConcurrentTest {
         SecurityContextHolder.clearContext();
         jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE sys_user_id = ? OR engineer_id = ?",
                 USER_ID, engineerId);
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
     }
 
     @Test

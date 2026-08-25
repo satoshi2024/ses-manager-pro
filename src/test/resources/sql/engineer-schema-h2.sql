@@ -35,7 +35,8 @@ CREATE TABLE m_customer (
   remarks           TEXT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag      TINYINT DEFAULT 0
+  deleted_flag      TINYINT DEFAULT 0,
+  version           INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_engineer CASCADE;
@@ -67,7 +68,8 @@ CREATE TABLE t_engineer (
   created_by          BIGINT,
   created_at          DATETIME,
   updated_at          DATETIME,
-  deleted_flag        TINYINT DEFAULT 0
+  deleted_flag        TINYINT DEFAULT 0,
+  version             INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS m_skill_tag CASCADE;
@@ -385,6 +387,7 @@ CREATE TABLE t_work_record (
   created_by     BIGINT,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  version        INT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_work_record (contract_id, work_month)
 );
 

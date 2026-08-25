@@ -58,7 +58,7 @@ public class IntegrationConnectionServiceImpl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationConnection getOrCreateConnection(String tenantId, Long legalEntityId, String provider, String product) {
         IntegrationConnection existing = getConnection(tenantId, legalEntityId, provider, product);
         if (existing != null) {
@@ -78,7 +78,7 @@ public class IntegrationConnectionServiceImpl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveTokens(Long connectionId, IntegrationTokensDto tokens, Long companyId, String companyName, Long connectedBy) {
         IntegrationConnection conn = getById(connectionId);
         if (conn == null) {
@@ -356,7 +356,7 @@ public class IntegrationConnectionServiceImpl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateStatus(Long connectionId, String status) {
         IntegrationConnection conn = getById(connectionId);
         if (conn != null) {

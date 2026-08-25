@@ -34,6 +34,8 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
     private final ContractService contractService;
     private final NotificationService notificationService;
     private final com.ses.mapper.ProjectPositionMapper positionMapper;
+    private final com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
+    private final com.ses.service.FileStorageService fileStorageService;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -217,6 +219,42 @@ public class ProposalServiceImpl extends ServiceImpl<ProposalMapper, Proposal> i
             }
         }
         return this.baseMapper.selectProposalHistory(engineerId, allowedCustomerIds);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String exportAndSaveSkillSheet(Long proposalId, boolean anonymize, String template, String format) {
+        Proposal proposal = getById(proposalId);
+        if (proposal == null) {
+            throw BusinessException.of(404, "error.proposal.notFound");
+        }
+        if (proposal.getEngineerId() == null) {
+            throw BusinessException.of(400, "error.proposal.noEngineer");
+        }
+
+        com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions();
+        options.setAnonymize(anonymize);
+        if (template != null) {
+            options.setTemplate(template);
+        }
+
+        byte[] data;
+        String ext;
+        if ("EXCEL".equalsIgnoreCase(format)) {
+            data = skillSheetGenerator.generateExcel(proposal.getEngineerId(), options);
+            ext = "xlsx";
+        } else {
+            data = skillSheetGenerator.generatePdf(proposal.getEngineerId(), options);
+            ext = "pdf";
+        }
+
+        String originalName = "skillsheet-" + proposal.getEngineerId() + "." + ext;
+        com.ses.dto.file.StoredFile storedFile = fileStorageService.store(
+                data, originalName, com.ses.common.enums.FileKind.SKILL_SHEET);
+
+        proposal.setSkillSheetPath(storedFile.getStoredName());
+        updateById(proposal);
+        return storedFile.getStoredName();
     }
 }
 

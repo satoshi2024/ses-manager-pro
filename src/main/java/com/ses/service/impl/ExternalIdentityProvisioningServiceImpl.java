@@ -38,7 +38,7 @@ public class ExternalIdentityProvisioningServiceImpl implements ExternalIdentity
     private final AuditLogService auditLogService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public UserExternalIdentity provision(Long providerId, ExternalIdentityProvisionRequest request) {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.forbidden");

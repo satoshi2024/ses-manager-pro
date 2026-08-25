@@ -108,7 +108,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpPayment addLayer(BpPayment bpPayment) {
         // 会社名の自由入力廃止（R2.4 / S06-P1-01）: 全write経路でBP会社ID必須。名称はマスタsnapshotのみ。
         if (bpPayment.getBpCompanyId() == null) {
@@ -159,7 +159,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpPayment updateLayer(Long id, BpPayment bpPayment) {
         BpPayment existing = bpPaymentMapper.selectById(id);
         if (existing == null) {
@@ -201,7 +201,7 @@ public class BpPaymentServiceImpl implements BpPaymentService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteLayer(Long id) {
         BpPayment existing = bpPaymentMapper.selectById(id);
         if (existing == null) {

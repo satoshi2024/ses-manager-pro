@@ -1,15 +1,21 @@
 package com.ses.service.impl;
 
+import com.ses.common.exception.BusinessException;
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.SystemConfig;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -22,8 +28,34 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SystemConfigServiceImpl implements SystemConfigService {
 
     private final SystemConfigMapper systemConfigMapper;
+    private final OutboundUrlGuard outboundUrlGuard;
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
     private volatile boolean loaded = false;
+
+    /** scope設定変更時のDashboardキャッシュ世代更新。テストスライスでは未配置でも動作させる。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
+
+    /** マスキング表示対象キー（Webhook URLは漏洩すると第三者が投稿可能になる機微情報のため） */
+    private static final Set<String> MASKED_KEYS = Set.of("notification.webhook-url");
+
+    /** マスキング済みであることを示すプレースホルダー値。保存時にこの値のまま送られてきた項目は更新しない。 */
+    private static final String MASK_PLACEHOLDER = "********";
+
+    /** Webhook URLの設定キー（保存時にSSRF観点で宛先を検証する対象） */
+    private static final String KEY_WEBHOOK_URL = "notification.webhook-url";
+
+    /** システム管理キー（画面からの直接編集・閲覧を禁止するキー） */
+    private static final Set<String> SYSTEM_MANAGED_KEYS = Set.of("closing.confirmed-months",
+            "attendance.sync.freee.cursor", "attendance.sync.last-result",
+            "attendance.discrepancy.confirmed");
+
+    /** 法人別cursor等、動的システム管理キーのprefix（R5-P2-03） */
+    private static final String SYSTEM_MANAGED_PREFIX = "attendance.sync.freee.cursor.le.";
+
+    private boolean isSystemManagedKey(String key) {
+        return SYSTEM_MANAGED_KEYS.contains(key) || key.startsWith(SYSTEM_MANAGED_PREFIX);
+    }
 
     private enum ConfigType { STRING, INT, DECIMAL, BOOLEAN, ENUM }
 
@@ -231,5 +263,44 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     @Override
     public List<SystemConfig> all() {
         return systemConfigMapper.selectList(null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateAll(List<SystemConfig> configs) {
+        String previousScopeValue = all().stream()
+                .filter(c -> "scope.sales-own-data-only".equals(c.getConfigKey()))
+                .map(SystemConfig::getConfigValue)
+                .findFirst()
+                .orElse(null);
+        String finalScopeValue = previousScopeValue;
+        if (configs != null) {
+            for (SystemConfig c : configs) {
+                if (isSystemManagedKey(c.getConfigKey())) {
+                    throw BusinessException.of(400, "error.config.systemKey");
+                }
+                if (MASKED_KEYS.contains(c.getConfigKey()) && MASK_PLACEHOLDER.equals(c.getConfigValue())) {
+                    // 画面上で変更されていない（マスキング表示のまま）ので既存値を維持する
+                    continue;
+                }
+                // Webhook URLはSSRF観点で保存時にも検証する（送信時にも再検証するが、
+                // 不正値の混入を早期に拒否する）。空文字は「未設定へ戻す」操作として許容する。
+                if (KEY_WEBHOOK_URL.equals(c.getConfigKey()) && StringUtils.hasText(c.getConfigValue())) {
+                    try {
+                        outboundUrlGuard.validatePublicHttpsUrl(c.getConfigValue());
+                    } catch (OutboundUrlException e) {
+                        throw BusinessException.of(400, "error.config.webhookUrl");
+                    }
+                }
+                if ("scope.sales-own-data-only".equals(c.getConfigKey())) {
+                    finalScopeValue = c.getConfigValue();
+                }
+                put(c.getConfigKey(), c.getConfigValue(), c.getDescription());
+            }
+        }
+        if (!Objects.equals(previousScopeValue, finalScopeValue) && scopeChangeInvalidator != null) {
+            // ScopeChangeInvalidatorはトランザクションのafterCommitでのみ世代を進める。
+            scopeChangeInvalidator.invalidate();
+        }
     }
 }

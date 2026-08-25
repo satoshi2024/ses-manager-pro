@@ -21,7 +21,7 @@ public class SavedViewServiceImpl extends ServiceImpl<SavedViewMapper, SavedView
     private SavedViewSchemaRegistry schemaRegistry;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SavedView createView(SavedView view, Long currentUserId, boolean isAdmin) {
         validateViewInput(view);
 
@@ -43,7 +43,7 @@ public class SavedViewServiceImpl extends ServiceImpl<SavedViewMapper, SavedView
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SavedView updateView(SavedView view, Long currentUserId, boolean isAdmin) {
         if (view.getId() == null) {
             throw new BusinessException(400, "更新対象のIDが指定されていません");
@@ -89,7 +89,7 @@ public class SavedViewServiceImpl extends ServiceImpl<SavedViewMapper, SavedView
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteView(Long viewId, Long currentUserId, boolean isAdmin) {
         SavedView existing = getById(viewId);
         if (existing == null) {

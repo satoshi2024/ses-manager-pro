@@ -53,7 +53,7 @@ public class ComplianceSnapshotWriter {
      * 最新snapshotのhashが現在profileの内容hashと一致すれば再利用（冪等）、
      * 異なれば新versionを作成してcurrent pointerをCASで進める。
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ContractComplianceSnapshot ensureSnapshot(Contract contract, ContractComplianceProfile profile) {
         String hash = profileHash(profile);
         ContractComplianceSnapshot latest = latestSnapshot(contract.getId());

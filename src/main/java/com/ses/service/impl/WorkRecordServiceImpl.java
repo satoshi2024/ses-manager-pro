@@ -300,7 +300,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks) {
         checkClosing(workMonth);
         return saveHoursInternal(contractId, workMonth, actualHours, remarks, false);
@@ -420,7 +420,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void confirmMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
@@ -616,7 +616,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reopenMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
@@ -704,7 +704,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     // ===== 要員セルフサービス勤怠（engineer-self-service-timesheet / P1） =====
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
         checkClosing(workMonth);
         if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
@@ -776,7 +776,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
         checkClosing(workMonth);
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
@@ -850,7 +850,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submitByMonth(Long contractId, String workMonth) {
         checkClosing(workMonth);
         WorkRecord w = baseMapper.selectOne(new QueryWrapper<WorkRecord>()
@@ -864,7 +864,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submit(Long workRecordId) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
@@ -914,7 +914,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void approve(Long workRecordId) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
@@ -954,7 +954,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reject(Long workRecordId, String comment) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);

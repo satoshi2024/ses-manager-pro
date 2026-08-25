@@ -137,10 +137,13 @@ public class SecurityConfig {
                     // ===== Actuator: 監視/K8sプローブの3パスのみ匿名許可（ACC-OPS-P0-001） =====
                     // health と liveness/readiness プローブに限定する。/actuator/env 等は
                     // exposure で未公開かつここでも許可しないため、匿名では到達できない。
+                    // /actuator/prometheus はここに含めない（ACC-OPS-P1-002: 認証必須）。
                     "/actuator/health",
                     "/actuator/health/liveness",
                     "/actuator/health/readiness"
                 ).permitAll()
+                // Prometheus スクレイプは管理者/マネージャーのみ（匿名・営業・HR は拒否）
+                .requestMatchers("/actuator/prometheus").hasAnyRole("管理者", "マネージャー")
                 // ユーザー管理・identity-provider・権限設定・監査・システム設定は管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",

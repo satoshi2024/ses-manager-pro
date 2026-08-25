@@ -40,7 +40,7 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveOrUpdateMapping(ExternalMapping mapping) {
         if (mapping.getConnectionId() == null || mapping.getObjectType() == null || mapping.getInternalCode() == null) {
             throw new BusinessException(400, "マッピングの必須項目(connectionId, objectType, internalCode)が不足しています");
@@ -64,7 +64,7 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void verifyMapping(Long mappingId, String payloadSnapshot) {
         ExternalMapping mapping = getById(mappingId);
         if (mapping == null) {
@@ -76,7 +76,7 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean verifyAndSnapshotMapping(Long mappingId) {
         ExternalMapping mapping = getById(mappingId);
         if (mapping == null) {
@@ -104,7 +104,7 @@ public class ExternalMappingServiceImpl extends ServiceImpl<ExternalMappingMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean verifyAndSnapshotMappingScoped(Long mappingId, String tenantId) {
         String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
         // R4-R3: mapping取得時点でconnection.tenant_idをJOINし、取得後のJava側filterに依存しない。

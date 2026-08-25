@@ -88,7 +88,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto createDraft(Long engineerId, ExpenseDraftCommand command) {
         validateDraft(command);
         ExpenseRequest expense = ExpenseRequest.builder()
@@ -107,7 +107,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto updateDraft(Long engineerId, Long id, ExpenseDraftCommand command) {
         validateDraft(command);
         ExpenseRequest expense = requireOwned(engineerId, id);
@@ -134,7 +134,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDraft(Long engineerId, Long id) {
         ExpenseRequest expense = requireOwned(engineerId, id);
         if (!STATUS_DRAFT.equals(expense.getStatus())) {
@@ -145,7 +145,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto submit(Long engineerId, Long id) {
         ExpenseRequest expense = requireOwned(engineerId, id);
         if (!STATUS_DRAFT.equals(expense.getStatus())) {
@@ -187,7 +187,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto resubmit(Long engineerId, Long id) {
         ExpenseRequest expense = requireOwned(engineerId, id);
         if (!STATUS_APPLIED.equals(expense.getStatus())) {
@@ -206,7 +206,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto attachReceipt(Long engineerId, Long id, String originalName, String contentType,
                                            InputStream content) {
         ExpenseRequest expense = requireOwned(engineerId, id);
@@ -340,7 +340,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto markPaid(Long id) {
         ExpenseRequest expense = require(id);
         assertManagementScope(expense.getEngineerId());

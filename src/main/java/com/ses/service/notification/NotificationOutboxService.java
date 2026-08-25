@@ -20,7 +20,7 @@ public class NotificationOutboxService {
     private final NotificationOutboxDispatcher dispatcher;
 
     /** 通知生成transaction内で外部配信イベントを保存する。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Long enqueue(Notification notification) {
         if (notification == null || notification.getDedupeKey() == null) {
             return null;

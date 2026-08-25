@@ -23,6 +23,7 @@ public class OvertimeEvaluator {
         @Override public BigDecimal getDecimal(String key, BigDecimal defaultValue) { return defaultValue; }
         @Override public void put(String key, String value, String description) {}
         @Override public List<SystemConfig> all() { return List.of(); }
+        @Override public void updateAll(List<SystemConfig> configs) {}
     };
     private static final OvertimeComplianceCalculator CALCULATOR = new OvertimeComplianceCalculator(CONFIG);
     private static final YearMonth TARGET = YearMonth.of(2026, 8);

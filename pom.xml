@@ -63,12 +63,17 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
-        <!-- ========== Actuator（監視: health + K8s liveness/readiness プローブのみ） ==========
-             ACC-OPS-P0-001: 公開するのは health のみ。env/beans/configprops/heapdump/mappings は
-             application.yml の exposure で公開しない。バージョンは spring-boot-starter-parent(3.3.5)管理。 -->
+        <!-- ========== Actuator（監視: health + Prometheus + K8s liveness/readiness） ==========
+             ACC-OPS-P0-001 / ACC-OPS-P1-002: exposure は health と prometheus のみ。
+             env/beans/configprops/heapdump/mappings は公開しない。prometheus は SecurityConfig で
+             認証必須（匿名 permitAll にしない）。バージョンは spring-boot-starter-parent 管理。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
         <!-- Webhook IPピン留め用（Host/SNIは元ホストのまま、DNSだけ検証済みIPへ固定）。
@@ -226,14 +231,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- ローカルとCIで結果を一致させるための固定設定。詳細は CLAUDE.md
-                         「ローカルとCIの差分」を参照。ここを緩めると"ローカルは通るのにCIで落ちる"が再発する。
-
-                         runOrder: 既定の filesystem はディレクトリ列挙順に依存するため、
-                         Windows(ローカル)とLinux(CI)でテストクラスの実行順が変わる。
-                         テストは同一JVM内で1つのH2(jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1)を共有するので、
-                         順序が変わると先行テストが残したデータの有無で結果が変わってしまう。 -->
-                    <runOrder>alphabetical</runOrder>
+                    <!-- ACC-TEST-P1-004: alphabetical 固定は共有 H2 汚染を隠すため廃止。
+                         並行更新・順序依存の検証は @Tag("mysql") の Testcontainers へ寄せる。
+                         H2 上の業務テストは @Transactional ロールバックまたは明示クリーンアップを前提とする。
+                         filesystem 順は OS で差が出うるが、汚染依存を許容しない契約にする。 -->
+                    <runOrder>filesystem</runOrder>
                     <!-- タイムゾーン/ロケール/文字コードを本番設定(application.ymlのAsia/Tokyo・日本語)へ固定する。
                          未固定だとローカル(JST・ja_JP・環境依存のfile.encoding)とCI(UTC・en_US)で
                          日付境界やメッセージ解決が食い違う。@{jacocoArgLine}はカバレッジ計測用エージェント。 -->
@@ -296,8 +298,6 @@
                     <excludes>
                         <exclude>com/ses/dto/**</exclude>
                         <exclude>com/ses/entity/**</exclude>
-                        <exclude>com/ses/config/**</exclude>
-                        <exclude>com/ses/mapper/**</exclude>
                         <exclude>com/ses/*Application.class</exclude>
                     </excludes>
                 </configuration>

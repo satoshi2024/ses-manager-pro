@@ -250,7 +250,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         return dto;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     @Override
     public void confirmClosing(String month, Long userId, String role) {
         validateMonth(month);
@@ -277,7 +277,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         saveRecordsToJson(records, config);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     @Override
     public void reopenClosing(String month, Long userId, String role) {
         validateMonth(month);
@@ -296,7 +296,7 @@ public class MonthlyClosingServiceImpl implements MonthlyClosingService {
         return findRecord(month) != null;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     @Override
     public void assertOpenForUpdate(String month) {
         validateMonth(month);

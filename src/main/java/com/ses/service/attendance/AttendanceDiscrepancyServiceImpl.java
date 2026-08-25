@@ -158,7 +158,7 @@ public class AttendanceDiscrepancyServiceImpl implements AttendanceDiscrepancySe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void confirm(Long engineerId, String month, String reason) {
         YearMonth target = parseMonth(month);
         if (engineerId == null) {

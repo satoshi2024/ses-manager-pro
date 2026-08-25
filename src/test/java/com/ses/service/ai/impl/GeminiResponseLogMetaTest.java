@@ -122,10 +122,16 @@ class GeminiResponseLogMetaTest {
         when(rest.postForObject(anyString(), any(), eq(String.class))).thenReturn(badJson);
 
         assertThatThrownBy(() -> service(rest).generate("ping"))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> {
+                    BusinessException be = (BusinessException) ex;
+                    assertThat(be.getMessageKey()).isEqualTo("error.ai.parseError");
+                    assertThat(be.getMessageKey()).doesNotContain("unexpected");
+                });
 
         String logs = joinedLogs();
         assertThat(logs).contains("category=PARSE_ERROR");
+        assertThat(logs).doesNotContain("UNEXPECTED_ERROR");
         assertThat(logs).doesNotContain(CANARY);
         assertThat(logs).doesNotContain(EMAIL);
         assertThat(logs).doesNotContain(API_KEY);

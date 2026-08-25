@@ -47,7 +47,7 @@ public class PositionServiceImpl implements PositionService {
     private final ProjectMapper projectMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ProjectPosition create(ProjectPosition position) {
         requireProject(position.getProjectId());
         position.setId(null);
@@ -58,7 +58,7 @@ public class PositionServiceImpl implements PositionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ProjectPosition update(ProjectPosition position) {
         if (position.getId() == null) {
             throw BusinessException.of(404, "error.staffing.positionNotFound");
@@ -87,7 +87,7 @@ public class PositionServiceImpl implements PositionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ProjectPosition changeStatus(Long id, String toStatus) {
         ProjectPosition existing = require(id);
         Set<String> allowed = TRANSITIONS.getOrDefault(existing.getStatus(), Set.of());
@@ -110,7 +110,7 @@ public class PositionServiceImpl implements PositionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
         ProjectPosition existing = require(id);
         if (STATUS_FILLED.equals(existing.getStatus())) {

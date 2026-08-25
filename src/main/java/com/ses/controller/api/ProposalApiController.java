@@ -42,8 +42,6 @@ public class ProposalApiController {
     private final com.ses.service.security.DataScopeService dataScopeService;
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.security.CrmScopeService crmScopeService;
-    private final com.ses.service.skillsheet.SkillSheetGenerator skillSheetGenerator;
-    private final com.ses.service.FileStorageService fileStorageService;
 
     @lombok.Data
     public static class SkillSheetExportRequest {
@@ -169,7 +167,6 @@ public class ProposalApiController {
     /**
      * スキルシート出力・保存
      */
-    @org.springframework.transaction.annotation.Transactional
     @PostMapping("/{id}/skill-sheet/export")
     public ApiResult<String> exportSkillSheet(@PathVariable Long id, @RequestBody SkillSheetExportRequest req) {
         if (dataScopeService.isScoped() && !dataScopeService.allowedProposalIds().contains(id)) {
@@ -184,29 +181,9 @@ public class ProposalApiController {
         }
         assertEngineerVisible(proposal.getEngineerId());
 
-        com.ses.dto.skillsheet.SkillSheetOptions options = new com.ses.dto.skillsheet.SkillSheetOptions();
-        options.setAnonymize(req.isAnonymize());
-        if (req.getTemplate() != null) {
-            options.setTemplate(req.getTemplate());
-        }
-
-        byte[] data;
-        String ext;
-        if ("EXCEL".equalsIgnoreCase(req.getFormat())) {
-            data = skillSheetGenerator.generateExcel(proposal.getEngineerId(), options);
-            ext = "xlsx";
-        } else {
-            data = skillSheetGenerator.generatePdf(proposal.getEngineerId(), options);
-            ext = "pdf";
-        }
-
-        String originalName = "skillsheet-" + proposal.getEngineerId() + "." + ext;
-        com.ses.dto.file.StoredFile storedFile = fileStorageService.store(data, originalName, com.ses.common.enums.FileKind.SKILL_SHEET);
-        
-        proposal.setSkillSheetPath(storedFile.getStoredName());
-        proposalService.updateById(proposal);
-
-        return ApiResult.success(storedFile.getStoredName());
+        String storedName = proposalService.exportAndSaveSkillSheet(
+                id, req.isAnonymize(), req.getTemplate(), req.getFormat());
+        return ApiResult.success(storedName);
     }
 
     private void validateSourceOpportunity(Proposal proposal) {

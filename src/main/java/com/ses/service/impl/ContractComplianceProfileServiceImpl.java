@@ -117,7 +117,7 @@ public class ContractComplianceProfileServiceImpl implements ContractComplianceP
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ContractComplianceProfileDetailDto save(Long contractId, String rawBody) {
         Contract contract = requireVisibleContract(contractId);
         String role = SecurityUtils.currentRole();

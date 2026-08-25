@@ -64,7 +64,7 @@ public class MfaServiceImpl implements MfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public MfaSetupResponse setup(Long userId) {
         requireActiveUser(userId);
         String secret = TotpUtil.generateSecret();
@@ -87,7 +87,7 @@ public class MfaServiceImpl implements MfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public MfaSetupResponse enable(Long userId, String code) {
         UserMfa mfa = findMfa(userId);
         if (mfa == null || !StringUtils.hasText(mfa.getEncryptedTotpSecret())) {
@@ -105,7 +105,7 @@ public class MfaServiceImpl implements MfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean verify(Long userId, String code) {
         UserMfa mfa = findMfa(userId);
         if (mfa == null || mfa.getEnabledAt() == null) {
@@ -128,7 +128,7 @@ public class MfaServiceImpl implements MfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reset(Long userId, String reason) {
         UserMfa mfa = findMfa(userId);
         if (mfa != null) {

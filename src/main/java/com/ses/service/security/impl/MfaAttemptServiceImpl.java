@@ -31,7 +31,7 @@ public class MfaAttemptServiceImpl implements MfaAttemptService {
     private final Clock clock;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void assertAllowed(Long userId, HttpServletRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         for (Scope scope : scopes(request)) {
@@ -43,7 +43,7 @@ public class MfaAttemptServiceImpl implements MfaAttemptService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void recordFailure(Long userId, HttpServletRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         for (Scope scope : scopes(request)) {
@@ -84,7 +84,7 @@ public class MfaAttemptServiceImpl implements MfaAttemptService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void recordSuccess(Long userId, HttpServletRequest request) {
         for (Scope scope : scopes(request)) {
             MfaAttemptGuard guard = select(userId, scope);

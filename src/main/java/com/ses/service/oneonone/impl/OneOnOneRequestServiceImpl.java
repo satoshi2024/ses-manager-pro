@@ -91,7 +91,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto create(Long engineerId, Long counterpartUserId, List<LocalDate> candidateDates) {
         if (counterpartUserId == null) {
             throw BusinessException.of(400, "error.oneOnOne.counterpartRequired");
@@ -166,7 +166,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto cancelOwn(Long engineerId, Long id) {
         OneOnOneRequest request = requireOwned(engineerId, id);
         if (!STATUS_REQUESTED.equals(request.getStatus())) {
@@ -225,7 +225,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto schedule(Long id, LocalDate scheduledAt) {
         OneOnOneRequest request = require(id);
         assertManagementAction(request);
@@ -244,7 +244,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto complete(Long id, String employeeVisibleNote) {
         OneOnOneRequest request = require(id);
         assertManagementAction(request);
@@ -267,7 +267,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto cancel(Long id, String reason) {
         OneOnOneRequest request = require(id);
         assertManagementAction(request);
@@ -280,7 +280,7 @@ public class OneOnOneRequestServiceImpl implements OneOnOneRequestService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public OneOnOneDto savePrivateNote(Long id, String note) {
         OneOnOneRequest request = require(id);
         if (!canAccessPrivateNote()) {

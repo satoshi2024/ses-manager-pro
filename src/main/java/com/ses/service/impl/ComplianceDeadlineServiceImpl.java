@@ -49,7 +49,7 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
     private final NotificationService notificationService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int process(LocalDateTime asOf) {
         int notified = 0;
         notified += expireExceptions(asOf);

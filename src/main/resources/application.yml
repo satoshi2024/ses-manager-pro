@@ -29,12 +29,13 @@ server:
     include-stacktrace: never
     include-exception: false
 
-# ===== Actuator（監視エンドポイント） ACC-OPS-P0-001 =====
-# 公開するのは health（と有効化した liveness/readiness プローブ）のみ。
+# ===== Actuator（監視エンドポイント） ACC-OPS-P0-001 / ACC-OPS-P1-002 =====
+# 公開するのは health（+ liveness/readiness）と prometheus のみ。
 # env / beans / configprops / heapdump / mappings 等の内部情報は「一切公開しない」。
-#   - exposure.include に health 以外を絶対に追加しないこと（追加＝内部情報漏洩）。
+#   - exposure.include は health,prometheus に限定する（それ以外の追加＝内部情報漏洩）。
 #   - 匿名アクセスは SecurityConfig で /actuator/health, /actuator/health/liveness,
-#     /actuator/health/readiness の3パスのみ permitAll する。それ以外は認可対象。
+#     /actuator/health/readiness の3パスのみ permitAll する。
+#   - /actuator/prometheus は permitAll にしない。管理者/マネージャーのみ（認証必須）。
 #   - show-details/show-components は never 固定。匿名でも DB 接続先・ディスク・ホスト名・
 #     資格情報など内部の詳細を返さない（health は status のみ）。
 # 実 K8s への配線（Deployment の probe 設定・別 management port・network policy 等）は
@@ -44,7 +45,9 @@ management:
     web:
       base-path: /actuator
       exposure:
-        include: health
+        include:
+          - health
+          - prometheus
   endpoint:
     health:
       # K8s liveness/readiness プローブ（/actuator/health/{liveness,readiness}）を有効化する。
@@ -53,6 +56,12 @@ management:
       # 匿名アクセスでも内部詳細（component 状態・接続先など）を返さない。
       show-details: never
       show-components: never
+    prometheus:
+      enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 # 組織スコープ(R3)。V60が既存ユーザーと既存要員をLEGACY組織へbackfillするため、
 # 適用直後でも誰も空scopeにならない。したがって既定で有効にする。

@@ -52,7 +52,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     private final ObjectMapper objectMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerSalesSync(Long invoiceId, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {
@@ -123,7 +123,7 @@ public class SalesInvoiceIntegrationServiceImpl implements SalesInvoiceIntegrati
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerSalesCancel(Long invoiceId, String cancelReason, Long triggeredByUserId) {
         Invoice invoice = invoiceService.getById(invoiceId);
         if (invoice == null) {

@@ -30,7 +30,7 @@ public class FreeeReauthMarker {
      * エンティティ全体のupdateByIdは、afterCompletion経路で別threadの成功refresh/再接続が
      * 保存したtoken等をstale値で上書きする余地があるため使わない。
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void markReauthRequired(FreeeConnection connection) {
         connectionMapper.updateConnectionStatus(connection.getId(), STATUS_REAUTH_REQUIRED);
     }

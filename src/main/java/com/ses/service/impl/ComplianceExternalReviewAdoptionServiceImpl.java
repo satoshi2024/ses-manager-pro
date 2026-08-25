@@ -63,7 +63,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewAdoptionEvent approve(
             Long submittedReviewEventId,
             Long identityVerificationEventId,
@@ -162,7 +162,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewAdoptionEvent reject(Long submittedReviewEventId, String reason, String idempotencyKey) {
         if (submittedReviewEventId == null || !StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "compliance.gate.invalidAdoption");
@@ -199,7 +199,7 @@ public class ComplianceExternalReviewAdoptionServiceImpl implements ComplianceEx
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewAdoptionEvent revoke(Long targetAdoptionEventId, String reason, String idempotencyKey) {
         if (targetAdoptionEventId == null || !StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "compliance.gate.invalidAdoption");

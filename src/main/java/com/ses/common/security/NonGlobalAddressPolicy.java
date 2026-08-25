@@ -6,16 +6,20 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
  * Webhook 等の外向き HTTPS 向け: グローバルにルーティング可能なアドレス以外を拒否する
- * 集中メンテナンスの special-use / non-global CIDR 一覧（REV-B2.2-P1-001）。
+ * 集中メンテナンスの special-use / non-global CIDR 一覧（REV-B2.2-P1-001 / REV-B2.3-P3-001）。
  * <p>
  * IANA IPv4/IPv6 Special-Purpose Address Registry スナップショット日付: <b>2025-10-09</b>
  * （Globally Reachable=False / N/A、Destination=False、Deprecated、マルチキャスト、リンクローカルを拒否）。
  * {@code 64:ff9b::/96} は Registry 上 Globally Reachable=True だが、埋め込み IPv4 への SSRF を
  * fail-closed で塞ぐため拒否する（::ffff:0:0/96 と同様の二重防衛方針）。
+ * <p>
+ * {@code 2001::/23}（IETF Protocol Assignments）は <b>fail-closed</b>：当該 /23 内は原則拒否し、
+ * IANA 上 Globally Reachable=True の carve-out のみ最長一致で許可する（REV-B2.3-P3-001）。
  * 未知のアドレス長は fail-closed。
  */
 public final class NonGlobalAddressPolicy {
@@ -25,6 +29,13 @@ public final class NonGlobalAddressPolicy {
 
     private static final List<Cidr> IPV4_BLOCKS;
     private static final List<Cidr> IPV6_BLOCKS;
+    /** 2001::/23 親プレフィックス（deny 後の carve-out 判定に使用）。 */
+    private static final Cidr IETF_PROTOCOL_ASSIGNMENTS_2001;
+    /**
+     * 2001::/23 内の Globally Reachable=True carve-out（IANA 2025-10-09）。
+     * 最長プレフィックス一致で判定するため prefixLength 降順に保持する。
+     */
+    private static final List<Cidr> IPV6_ALLOW_WITHIN_2001_SLASH23;
 
     static {
         List<Cidr> v4 = new ArrayList<>();
@@ -56,7 +67,9 @@ public final class NonGlobalAddressPolicy {
         v6.add(Cidr.parse("64:ff9b:1::/48"));   // NAT64 local-use
         v6.add(Cidr.parse("100::/64"));         // Discard-Only
         v6.add(Cidr.parse("100:0:0:1::/64"));   // Dummy IPv6 Prefix (RFC9780)
-        v6.add(Cidr.parse("2001::/23"));        // IETF Protocol Assignments（Teredo N/A・Benchmarking 等を包含）
+        // 2001::/23: fail-closed（Teredo N/A・Benchmarking False・deprecated ORCHID 等を包含）。
+        // Globally Reachable=True の例外のみ IPV6_ALLOW_WITHIN_2001_SLASH23 で許可する。
+        v6.add(Cidr.parse("2001::/23"));
         v6.add(Cidr.parse("2001:db8::/32"));    // Documentation（/23 外）
         v6.add(Cidr.parse("2002::/16"));        // 6to4（Globally Reachable N/A）
         v6.add(Cidr.parse("3fff::/20"));        // Documentation (RFC9637)
@@ -65,6 +78,21 @@ public final class NonGlobalAddressPolicy {
         v6.add(Cidr.parse("fe80::/10"));        // Link-Local Unicast
         v6.add(Cidr.parse("ff00::/8"));         // Multicast（Registry 外）
         IPV6_BLOCKS = Collections.unmodifiableList(v6);
+
+        IETF_PROTOCOL_ASSIGNMENTS_2001 = Cidr.parse("2001::/23");
+
+        // IANA 2025-10-09: 2001::/23 内の Globally Reachable=True carve-out
+        List<Cidr> allow = new ArrayList<>();
+        allow.add(Cidr.parse("2001:1::1/128"));   // Port Control Protocol Anycast
+        allow.add(Cidr.parse("2001:1::2/128"));   // TURN Anycast
+        allow.add(Cidr.parse("2001:1::3/128"));   // DNS-SD SRP Anycast
+        allow.add(Cidr.parse("2001:3::/32"));     // AMT
+        allow.add(Cidr.parse("2001:4:112::/48")); // AS112-v6
+        allow.add(Cidr.parse("2001:20::/28"));    // ORCHIDv2（True）
+        allow.add(Cidr.parse("2001:30::/28"));    // Drone Remote ID（True）
+        // 最長一致: より具体的なプレフィックスを先に評価する
+        allow.sort(Comparator.comparingInt(Cidr::prefixLength).reversed());
+        IPV6_ALLOW_WITHIN_2001_SLASH23 = Collections.unmodifiableList(allow);
     }
 
     private NonGlobalAddressPolicy() {
@@ -85,6 +113,11 @@ public final class NonGlobalAddressPolicy {
                 return true;
             }
             if (matchesAny(IPV6_BLOCKS, raw)) {
+                // 2001::/23 は fail-closed。列挙した Globally Reachable=True carve-out のみ許可。
+                if (IETF_PROTOCOL_ASSIGNMENTS_2001.contains(raw)
+                        && matchesAllowWithin2001Slash23(raw)) {
+                    return false;
+                }
                 return true;
             }
             // IPv4-mapped: 埋め込み IPv4 も同じポリシーで再判定（二重防衛）
@@ -112,6 +145,16 @@ public final class NonGlobalAddressPolicy {
     private static boolean matchesAny(List<Cidr> blocks, byte[] address) {
         for (Cidr block : blocks) {
             if (block.contains(address)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 2001::/23 内 carve-out を最長プレフィックス一致で判定する。 */
+    private static boolean matchesAllowWithin2001Slash23(byte[] address) {
+        for (Cidr allow : IPV6_ALLOW_WITHIN_2001_SLASH23) {
+            if (allow.contains(address)) {
                 return true;
             }
         }

@@ -83,7 +83,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public TemplateDto createTemplate(String templateKey, String title, String description,
                                       List<QuestionDef> questions) {
         requireManagementRole();
@@ -102,7 +102,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public TemplateDto updateTemplate(Long id, String title, String description, List<QuestionDef> questions) {
         requireManagementRole();
         SurveyTemplate template = requireTemplate(id);
@@ -142,7 +142,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public CampaignDto createCampaign(Long templateId, String title, LocalDate periodFrom, LocalDate periodTo) {
         requireManagementRole();
         SurveyTemplate template = requireTemplate(templateId);
@@ -170,7 +170,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public CampaignDto activateCampaign(Long id) {
         requireManagementRole();
         SurveyCampaign campaign = requireCampaign(id);
@@ -193,7 +193,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public CampaignDto closeCampaign(Long id) {
         requireManagementRole();
         SurveyCampaign campaign = requireCampaign(id);
@@ -262,7 +262,7 @@ public class SurveyServiceImpl implements SurveyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submitAnswers(Long engineerId, Long campaignId, boolean consent, List<AnswerInput> answers) {
         SurveyCampaign campaign = requireCampaign(campaignId);
         if (!"ACTIVE".equals(campaign.getStatus())) {

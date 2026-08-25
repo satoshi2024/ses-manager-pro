@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Arrays;
 
 @Service
-@Transactional
+@Transactional(rollbackFor = Exception.class)
 public class EngineerStatusServiceImpl implements EngineerStatusService {
 
     private final EngineerMapper engineerMapper;

@@ -56,7 +56,7 @@ public class ComplianceApprovalServiceImpl implements ComplianceApprovalService 
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceMappingApprovalEvent approve(Long mappingId, Long workplaceId, String reason,
                                                   Long evidenceDocumentId, Long evidenceDocumentVersionId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);

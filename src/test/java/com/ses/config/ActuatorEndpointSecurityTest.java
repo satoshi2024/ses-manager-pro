@@ -66,7 +66,7 @@ class ActuatorEndpointSecurityTest {
     @Test
     @WithMockUser(roles = "管理者")
     void env_管理者でも公開されない() throws Exception {
-        // exposure.include=health のみのため /actuator/env は未マッピング（404）
+        // exposure.include は health,prometheus のため /actuator/env は未マッピング（404）
         mockMvc.perform(get("/actuator/env"))
                 .andExpect(status().isNotFound());
     }

@@ -1,3 +1,4 @@
+AllocationConcurrentConfirmTest
 ConcurrentUpdateTest
 ExternalIdentityConcurrentApprovalMySqlTest
 FlywayEnvironmentEvidenceTest
@@ -11,3 +12,4 @@ FlywayV80RepairSmokeTest
 FlywayV84PostApplyRollbackSmokeTest
 FreeeConcurrentRefreshTest
 OperationalBoundaryMySqlIntegrationTest
+OptimisticLockCoreEntitiesMySqlTest

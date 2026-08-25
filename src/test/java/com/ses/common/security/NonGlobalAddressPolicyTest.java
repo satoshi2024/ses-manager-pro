@@ -13,8 +13,11 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * REV-B2.2-P1-001: IANA Special-Purpose（スナップショット {@link NonGlobalAddressPolicy#IANA_REGISTRY_SNAPSHOT_DATE}）
- * に基づく non-global 拒否。独立レジストリ表とポリシー表の突き合わせで漏れを検出する（自己循環禁止）。
+ * REV-B2.2-P1-001 / REV-B2.3-P3-001: IANA Special-Purpose（スナップショット
+ * {@link NonGlobalAddressPolicy#IANA_REGISTRY_SNAPSHOT_DATE}）に基づく non-global 拒否。
+ * 独立レジストリ表とポリシー表の突き合わせで漏れを検出する（自己循環禁止）。
+ * <p>
+ * 2001::/23 内の Globally Reachable=True carve-out は独立拒否表に含めない（許可側で別検証）。
  */
 class NonGlobalAddressPolicyTest {
 
@@ -24,6 +27,9 @@ class NonGlobalAddressPolicyTest {
      * <p>
      * 条件: Globally Reachable=False / N/A、Destination=False、Deprecated、加えてマルチキャスト。
      * 欠落検知用に 100:0:0:1::/64・3fff::/20・5f00::/16 の代表を必ず含む。
+     * <p>
+     * 2001::/23 内の Globally Reachable=True carve-out（PCP/TURN/DNS-SD/AMT/AS112/ORCHIDv2/Drone RID）
+     * はここに含めない（拒否を要求しない）。
      */
     private static final String[] IANA_INDEPENDENT_MUST_REJECT = {
             // IPv4
@@ -51,10 +57,10 @@ class NonGlobalAddressPolicyTest {
             "64:ff9b:1::1",
             "100::1",
             "100:0:0:1::1",       // Dummy IPv6 Prefix RFC9780
-            "2001::1",            // Teredo / IETF assignments parent
-            "2001:2::1",
-            "2001:10::1",
-            "2001:db8::1",
+            "2001::1",            // Teredo / IETF assignments parent（carve-out 外）
+            "2001:2::1",          // Benchmarking
+            "2001:10::1",         // Deprecated ORCHID
+            "2001:db8::1",        // Documentation（/23 外）
             "2002:cb00:7100::",
             "3fff::1",            // Documentation RFC9637
             "5f00::1",            // SRv6 SIDs RFC9602
@@ -99,10 +105,29 @@ class NonGlobalAddressPolicyTest {
             "2606:4700:4700::1111",
             "2404:6800:4004:800::200e",
             "192.31.196.1",   // AS112-v4 Globally Reachable=True
-            "192.52.193.1"    // AMT Globally Reachable=True
+            "192.52.193.1",   // AMT Globally Reachable=True
+            // REV-B2.3-P3-001: 2001::/23 内 Globally Reachable=True carve-out
+            "2001:1::1",      // PCP Anycast
+            "2001:1::2",      // TURN Anycast
+            "2001:1::3",      // DNS-SD SRP Anycast
+            "2001:3::1",      // AMT
+            "2001:4:112::1",  // AS112-v6
+            "2001:20::1",     // ORCHIDv2
+            "2001:30::1"      // Drone Remote ID
     })
     void グローバル可ルーティングは許可される(String host) throws Exception {
         assertThat(NonGlobalAddressPolicy.isNonGlobal(InetAddress.getByName(host))).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "2001::1",        // Teredo
+            "2001:2::1",      // Benchmarking
+            "2001:10::1",     // Deprecated ORCHID
+            "2001:db8::1"     // Documentation（/23 外）
+    })
+    void slash23内の非carveOutは拒否される(String host) throws Exception {
+        assertThat(NonGlobalAddressPolicy.isNonGlobal(InetAddress.getByName(host))).isTrue();
     }
 
     @Test
