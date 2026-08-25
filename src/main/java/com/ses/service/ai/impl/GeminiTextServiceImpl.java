@@ -113,17 +113,16 @@ public class GeminiTextServiceImpl implements AiTextService {
             String jsonResponse = aiRestTemplate.postForObject(apiUrl, entity, String.class);
             return parseGeminiResponse(jsonResponse);
         } catch (HttpClientErrorException e) {
-            // provider 応答本文は一切出さない（REV-B2.1-P2-001）。
-            log.error("Gemini API クライアントエラー: status={} category={} responseBytes={} responseSha256={}",
-                    e.getStatusCode(), "CLIENT_ERROR",
-                    responseByteLength(e.getResponseBodyAsString()),
-                    responseSha256(e.getResponseBodyAsString()));
+            // provider 応答本文・例外メッセージは一切出さない（REV-B2.2-P2-002）。
+            // responseSha256 は機微応答の安定指紋になるため記録しない。
+            log.error("Gemini API クライアントエラー: status={} category={} responseBytes={}",
+                    e.getStatusCode().value(), "CLIENT_ERROR",
+                    responseByteLength(e.getResponseBodyAsString()));
             throw BusinessException.of(e.getStatusCode().value(), "error.ai.clientError");
         } catch (HttpServerErrorException e) {
-            log.error("Gemini API サーバーエラー: status={} category={} responseBytes={} responseSha256={}",
-                    e.getStatusCode(), "SERVER_ERROR",
-                    responseByteLength(e.getResponseBodyAsString()),
-                    responseSha256(e.getResponseBodyAsString()));
+            log.error("Gemini API サーバーエラー: status={} category={} responseBytes={}",
+                    e.getStatusCode().value(), "SERVER_ERROR",
+                    responseByteLength(e.getResponseBodyAsString()));
             throw BusinessException.of(503, "error.ai.serverError");
         } catch (RestClientException e) {
             log.error("Gemini API 呼び出し失敗（ネットワーク）: category={} errorType={}",
@@ -160,17 +159,5 @@ public class GeminiTextServiceImpl implements AiTextService {
             return 0;
         }
         return body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-    }
-
-    /** 応答本文の不可逆 SHA-256（hex）。本文そのものは返さない。 */
-    static String responseSha256(String body) {
-        try {
-            byte[] raw = body == null ? new byte[0] : body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(raw);
-            return java.util.HexFormat.of().formatHex(digest);
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return "unavailable";
-        }
     }
 }

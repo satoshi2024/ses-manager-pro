@@ -10,51 +10,60 @@ import java.util.List;
 
 /**
  * Webhook 等の外向き HTTPS 向け: グローバルにルーティング可能なアドレス以外を拒否する
- * 集中メンテナンスの special-use / non-global CIDR 一覧（REV-B2.1-P1-001）。
+ * 集中メンテナンスの special-use / non-global CIDR 一覧（REV-B2.2-P1-001）。
  * <p>
- * IANA special-purpose / RFC 6890 系および明示指定の IPv6 予約プレフィックスを網羅する。
+ * IANA IPv4/IPv6 Special-Purpose Address Registry スナップショット日付: <b>2025-10-09</b>
+ * （Globally Reachable=False / N/A、Destination=False、Deprecated、マルチキャスト、リンクローカルを拒否）。
+ * {@code 64:ff9b::/96} は Registry 上 Globally Reachable=True だが、埋め込み IPv4 への SSRF を
+ * fail-closed で塞ぐため拒否する（::ffff:0:0/96 と同様の二重防衛方針）。
  * 未知のアドレス長は fail-closed。
  */
 public final class NonGlobalAddressPolicy {
+
+    /** 本ポリシーが参照した IANA Special-Purpose Registry の最終更新日（コメントとテストで共有）。 */
+    public static final String IANA_REGISTRY_SNAPSHOT_DATE = "2025-10-09";
 
     private static final List<Cidr> IPV4_BLOCKS;
     private static final List<Cidr> IPV6_BLOCKS;
 
     static {
         List<Cidr> v4 = new ArrayList<>();
-        // RFC 6890 / IANA IPv4 Special-Purpose
-        v4.add(Cidr.parse("0.0.0.0/8"));          // this network
-        v4.add(Cidr.parse("10.0.0.0/8"));         // private
-        v4.add(Cidr.parse("100.64.0.0/10"));      // CGNAT
-        v4.add(Cidr.parse("127.0.0.0/8"));        // loopback
-        v4.add(Cidr.parse("169.254.0.0/16"));     // link-local
-        v4.add(Cidr.parse("172.16.0.0/12"));      // private
-        v4.add(Cidr.parse("192.0.0.0/24"));       // IETF Protocol Assignments
+        // --- IANA IPv4 Special-Purpose (snapshot 2025-10-09): Globally Reachable False / Destination False ---
+        v4.add(Cidr.parse("0.0.0.0/8"));          // This network
+        v4.add(Cidr.parse("10.0.0.0/8"));         // Private-Use
+        v4.add(Cidr.parse("100.64.0.0/10"));      // Shared Address Space (CGNAT)
+        v4.add(Cidr.parse("127.0.0.0/8"));        // Loopback
+        v4.add(Cidr.parse("169.254.0.0/16"));     // Link Local
+        v4.add(Cidr.parse("172.16.0.0/12"));      // Private-Use
+        v4.add(Cidr.parse("192.0.0.0/24"));       // IETF Protocol Assignments（より具体的な True も fail-closed で包含）
         v4.add(Cidr.parse("192.0.2.0/24"));       // TEST-NET-1
-        v4.add(Cidr.parse("192.88.99.0/24"));     // 6to4 relay anycast (deprecated)
-        v4.add(Cidr.parse("192.168.0.0/16"));     // private
-        v4.add(Cidr.parse("198.18.0.0/15"));      // benchmarking
+        v4.add(Cidr.parse("192.88.99.0/24"));     // Deprecated 6to4 Relay Anycast
+        v4.add(Cidr.parse("192.168.0.0/16"));     // Private-Use
+        v4.add(Cidr.parse("198.18.0.0/15"));      // Benchmarking
         v4.add(Cidr.parse("198.51.100.0/24"));    // TEST-NET-2
         v4.add(Cidr.parse("203.0.113.0/24"));     // TEST-NET-3
-        v4.add(Cidr.parse("224.0.0.0/4"));        // multicast
-        v4.add(Cidr.parse("240.0.0.0/4"));        // reserved / limited broadcast
+        v4.add(Cidr.parse("240.0.0.0/4"));        // Reserved（Limited Broadcast 含む）
+        // Registry 外だが非グローバル: マルチキャスト
+        v4.add(Cidr.parse("224.0.0.0/4"));
         IPV4_BLOCKS = Collections.unmodifiableList(v4);
 
         List<Cidr> v6 = new ArrayList<>();
-        v6.add(Cidr.parse("::/128"));            // unspecified
-        v6.add(Cidr.parse("::1/128"));           // loopback
-        v6.add(Cidr.parse("::ffff:0:0/96"));    // IPv4-mapped
-        v6.add(Cidr.parse("64:ff9b::/96"));     // NAT64 well-known prefix
-        v6.add(Cidr.parse("64:ff9b:1::/48"));   // NAT64 local-use (discard-adjacent)
-        v6.add(Cidr.parse("100::/64"));         // Discard-Only Address Block
-        v6.add(Cidr.parse("2001::/23"));        // IETF Protocol Assignments (covers Teredo 2001::/32)
-        v6.add(Cidr.parse("2001:2::/48"));      // benchmarking
-        v6.add(Cidr.parse("2001:10::/28"));     // ORCHID
-        v6.add(Cidr.parse("2001:db8::/32"));    // documentation
-        v6.add(Cidr.parse("2002::/16"));        // 6to4
-        v6.add(Cidr.parse("fc00::/7"));         // ULA
-        v6.add(Cidr.parse("fe80::/10"));        // link-local
-        v6.add(Cidr.parse("ff00::/8"));         // multicast
+        // --- IANA IPv6 Special-Purpose (snapshot 2025-10-09) ---
+        v6.add(Cidr.parse("::/128"));            // Unspecified
+        v6.add(Cidr.parse("::1/128"));           // Loopback
+        v6.add(Cidr.parse("::ffff:0:0/96"));    // IPv4-mapped（埋め込み IPv4 は再判定）
+        v6.add(Cidr.parse("64:ff9b::/96"));     // NAT64 WKP（SSRF harden）
+        v6.add(Cidr.parse("64:ff9b:1::/48"));   // NAT64 local-use
+        v6.add(Cidr.parse("100::/64"));         // Discard-Only
+        v6.add(Cidr.parse("100:0:0:1::/64"));   // Dummy IPv6 Prefix (RFC9780)
+        v6.add(Cidr.parse("2001::/23"));        // IETF Protocol Assignments（Teredo N/A・Benchmarking 等を包含）
+        v6.add(Cidr.parse("2001:db8::/32"));    // Documentation（/23 外）
+        v6.add(Cidr.parse("2002::/16"));        // 6to4（Globally Reachable N/A）
+        v6.add(Cidr.parse("3fff::/20"));        // Documentation (RFC9637)
+        v6.add(Cidr.parse("5f00::/16"));        // SRv6 SIDs (RFC9602)
+        v6.add(Cidr.parse("fc00::/7"));         // Unique-Local
+        v6.add(Cidr.parse("fe80::/10"));        // Link-Local Unicast
+        v6.add(Cidr.parse("ff00::/8"));         // Multicast（Registry 外）
         IPV6_BLOCKS = Collections.unmodifiableList(v6);
     }
 
@@ -125,10 +134,12 @@ public final class NonGlobalAddressPolicy {
     static final class Cidr {
         private final byte[] network;
         private final int prefixLength;
+        private final String literal;
 
-        private Cidr(byte[] network, int prefixLength) {
+        private Cidr(byte[] network, int prefixLength, String literal) {
             this.network = network;
             this.prefixLength = prefixLength;
+            this.literal = literal;
         }
 
         static Cidr parse(String cidr) {
@@ -141,9 +152,8 @@ public final class NonGlobalAddressPolicy {
                 int prefix = Integer.parseInt(parts[1]);
                 byte[] network;
                 if (host.indexOf(':') >= 0) {
-                    // IPv6 リテラル。JDK が IPv4-mapped を Inet4Address に縮約する場合があるため 16 バイトへ正規化する。
                     InetAddress addr = InetAddress.getByName(host);
-                    if (addr instanceof java.net.Inet4Address) {
+                    if (addr instanceof Inet4Address) {
                         byte[] v4 = addr.getAddress();
                         network = new byte[16];
                         network[10] = (byte) 0xff;
@@ -159,10 +169,24 @@ public final class NonGlobalAddressPolicy {
                 if (prefix < 0 || prefix > max) {
                     throw new IllegalArgumentException("invalid prefix: " + cidr);
                 }
-                return new Cidr(network, prefix);
+                return new Cidr(maskNetwork(network, prefix), prefix, cidr);
             } catch (UnknownHostException e) {
                 throw new IllegalArgumentException("invalid CIDR host: " + cidr, e);
             }
+        }
+
+        private static byte[] maskNetwork(byte[] address, int prefixLength) {
+            byte[] network = address.clone();
+            int fullBytes = prefixLength / 8;
+            int remBits = prefixLength % 8;
+            for (int i = fullBytes + (remBits > 0 ? 1 : 0); i < network.length; i++) {
+                network[i] = 0;
+            }
+            if (remBits > 0 && fullBytes < network.length) {
+                int mask = (0xff << (8 - remBits)) & 0xff;
+                network[fullBytes] = (byte) (network[fullBytes] & mask);
+            }
+            return network;
         }
 
         boolean contains(byte[] address) {
@@ -191,29 +215,60 @@ public final class NonGlobalAddressPolicy {
             return network.clone();
         }
 
-        /** プレフィックス境界の先頭アドレス（ネットワークアドレス）。 */
+        String literal() {
+            return literal;
+        }
+
         InetAddress networkAddress() throws UnknownHostException {
             return InetAddress.getByAddress(network.clone());
         }
 
-        /** プレフィックス直下の次ネットワーク先頭（境界の外側）。IPv4/v6 両対応の単純加算。 */
-        InetAddress addressJustOutside() throws UnknownHostException {
-            byte[] outside = network.clone();
-            int bitIndex = prefixLength;
-            if (bitIndex >= outside.length * 8) {
-                // /32 や /128 は「外側」を同長で表現できないため、最終オクテット+1 を試みる
-                for (int i = outside.length - 1; i >= 0; i--) {
-                    int v = (outside[i] & 0xff) + 1;
-                    outside[i] = (byte) v;
-                    if (v <= 0xff) {
-                        return InetAddress.getByAddress(outside);
+        InetAddress lastAddress() throws UnknownHostException {
+            byte[] end = network.clone();
+            int fullBytes = prefixLength / 8;
+            int remBits = prefixLength % 8;
+            if (remBits > 0 && fullBytes < end.length) {
+                int hostMask = (0xff >>> remBits);
+                end[fullBytes] = (byte) (end[fullBytes] | hostMask);
+                fullBytes++;
+            }
+            for (int i = fullBytes; i < end.length; i++) {
+                end[i] = (byte) 0xff;
+            }
+            return InetAddress.getByAddress(end);
+        }
+
+        InetAddress representativeAddress() throws UnknownHostException {
+            byte[] rep = network.clone();
+            for (int i = rep.length - 1; i >= 0; i--) {
+                int bitPos = i * 8;
+                if (bitPos + 7 >= prefixLength) {
+                    int localBit = Math.min(7, bitPos + 7 - prefixLength);
+                    if (localBit >= 0) {
+                        rep[i] = (byte) (rep[i] | 1);
+                        return InetAddress.getByAddress(rep);
                     }
                 }
+            }
+            return InetAddress.getByAddress(rep);
+        }
+
+        /** プレフィックス直下の次ネットワーク先頭（境界の外側）。ネットワーク番号に 1 を加算する。 */
+        InetAddress addressJustOutside() throws UnknownHostException {
+            byte[] outside = network.clone();
+            if (prefixLength <= 0) {
                 return InetAddress.getByAddress(outside);
             }
-            int byteIndex = bitIndex / 8;
-            int bitInByte = 7 - (bitIndex % 8);
-            outside[byteIndex] = (byte) (outside[byteIndex] | (1 << bitInByte));
+            for (int bit = prefixLength - 1; bit >= 0; bit--) {
+                int byteIndex = bit / 8;
+                int bitInByte = 7 - (bit % 8);
+                int mask = 1 << bitInByte;
+                if ((outside[byteIndex] & mask) == 0) {
+                    outside[byteIndex] = (byte) (outside[byteIndex] | mask);
+                    return InetAddress.getByAddress(outside);
+                }
+                outside[byteIndex] = (byte) (outside[byteIndex] & ~mask);
+            }
             return InetAddress.getByAddress(outside);
         }
     }

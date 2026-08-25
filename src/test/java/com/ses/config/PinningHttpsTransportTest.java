@@ -3,6 +3,8 @@ package com.ses.config;
 import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsExchange;
+import com.sun.net.httpserver.HttpsParameters;
 import com.sun.net.httpserver.HttpsServer;
 import org.apache.hc.client5.http.ssl.DefaultHostnameVerifier;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
@@ -14,8 +16,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import javax.net.ssl.ExtendedSSLSession;
 import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SNIMatcher;
+import javax.net.ssl.SNIServerName;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.StandardConstants;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -34,10 +43,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * REV-B2-P1-002: IPピン留めでも Host/SNI/証明書ホスト検証が元ホスト名のままであること、
- * およびリダイレクト非追跡をローカル TLS/vhost で検証する。
+ * REV-B2.2-P2-001: IPピン留めでも Host / 実 ClientHello SNI / 証明書ホスト検証が元ホスト名のままであること。
+ * SNI は HostnameVerifier の hostname 引数ではなく、TLS サーバの
+ * {@link ExtendedSSLSession#getRequestedServerNames()} で読み取る。
+ * SNI が {@code webhook.test.local} でない接続は KeyManager / SNIMatcher で拒否する。
  */
 class PinningHttpsTransportTest {
 
@@ -48,7 +60,7 @@ class PinningHttpsTransportTest {
     private static HttpsServer httpsServer;
     private static int port;
     private static final AtomicReference<String> lastHostHeader = new AtomicReference<>();
-    private static final AtomicReference<String> lastSni = new AtomicReference<>();
+    private static final AtomicReference<String> lastClientHelloSni = new AtomicReference<>();
     private static final AtomicInteger hookHits = new AtomicInteger();
     private static final AtomicInteger internalHits = new AtomicInteger();
 
@@ -77,14 +89,41 @@ class PinningHttpsTransportTest {
         }
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         kmf.init(ks, STORE_PASS.toCharArray());
+        javax.net.ssl.X509ExtendedKeyManager baseKm = null;
+        for (javax.net.ssl.KeyManager km : kmf.getKeyManagers()) {
+            if (km instanceof javax.net.ssl.X509ExtendedKeyManager extended) {
+                baseKm = extended;
+                break;
+            }
+        }
+        if (baseKm == null) {
+            throw new IllegalStateException("X509ExtendedKeyManager が必要");
+        }
+        javax.net.ssl.X509ExtendedKeyManager sniOnlyKm = new SniRequiringKeyManager(baseKm, VHOST);
         SSLContext serverSsl = SSLContext.getInstance("TLS");
-        serverSsl.init(kmf.getKeyManagers(), null, null);
+        serverSsl.init(new javax.net.ssl.KeyManager[]{sniOnlyKm}, null, null);
 
         httpsServer = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        httpsServer.setHttpsConfigurator(new HttpsConfigurator(serverSsl));
+        httpsServer.setHttpsConfigurator(new HttpsConfigurator(serverSsl) {
+            @Override
+            public void configure(HttpsParameters params) {
+                SSLParameters sslParams = getSSLContext().getDefaultSSLParameters();
+                sslParams.setSNIMatchers(Collections.singletonList(new SNIMatcher(StandardConstants.SNI_HOST_NAME) {
+                    @Override
+                    public boolean matches(SNIServerName serverName) {
+                        if (!(serverName instanceof SNIHostName hostName)) {
+                            return false;
+                        }
+                        return VHOST.equalsIgnoreCase(hostName.getAsciiName());
+                    }
+                }));
+                params.setSSLParameters(sslParams);
+            }
+        });
         httpsServer.createContext("/hook", exchange -> {
             hookHits.incrementAndGet();
             lastHostHeader.set(exchange.getRequestHeaders().getFirst("Host"));
+            lastClientHelloSni.set(readClientHelloSni(exchange));
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream os = exchange.getResponseBody()) {
@@ -94,6 +133,7 @@ class PinningHttpsTransportTest {
         httpsServer.createContext("/redirect", exchange -> {
             hookHits.incrementAndGet();
             lastHostHeader.set(exchange.getRequestHeaders().getFirst("Host"));
+            lastClientHelloSni.set(readClientHelloSni(exchange));
             exchange.getResponseHeaders().add("Location",
                     "https://127.0.0.1:" + httpsServer.getAddress().getPort() + "/internal");
             exchange.sendResponseHeaders(302, -1);
@@ -119,10 +159,10 @@ class PinningHttpsTransportTest {
     }
 
     @Test
-    void ピン留め接続はHostとSNIに元ホストを使い証明書検証も通る() throws Exception {
+    void ピン留め接続はHostと実ClientHello_SNIに元ホストを使い証明書検証も通る() throws Exception {
         hookHits.set(0);
         lastHostHeader.set(null);
-        lastSni.set(null);
+        lastClientHelloSni.set(null);
         RestTemplate rest = new RestTemplate(newFactory(testGuard()));
         ResponseEntity<String> response = rest.postForEntity(
                 "https://" + VHOST + ":" + port + "/hook",
@@ -132,7 +172,38 @@ class PinningHttpsTransportTest {
         assertEquals(1, hookHits.get());
         assertEquals(VHOST + ":" + port, lastHostHeader.get(),
                 "Host ヘッダは host:port の正確一致であること");
-        assertEquals(VHOST, lastSni.get(), "SNI は元ホスト名の正確一致であること");
+        assertEquals(VHOST, lastClientHelloSni.get(),
+                "サーバが ExtendedSSLSession から読んだ ClientHello SNI が正確一致であること");
+    }
+
+    @Test
+    void 誤SNIの接続はサーバSNIMatcherにより失敗する() throws Exception {
+        SSLContext clientCtx = SSLContexts.custom()
+                .loadTrustMaterial(null, new TrustSelfSignedStrategy())
+                .build();
+        try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket) clientCtx.getSocketFactory()
+                .createSocket("127.0.0.1", port)) {
+            socket.setSoTimeout(3000);
+            SSLParameters p = socket.getSSLParameters();
+            p.setServerNames(List.of(new SNIHostName("wrong.test.local")));
+            socket.setSSLParameters(p);
+            assertThrows(Exception.class, socket::startHandshake);
+        }
+    }
+
+    @Test
+    void SNI無しの接続はサーバSNIMatcherにより失敗する() throws Exception {
+        SSLContext clientCtx = SSLContexts.custom()
+                .loadTrustMaterial(null, new TrustSelfSignedStrategy())
+                .build();
+        try (javax.net.ssl.SSLSocket socket = (javax.net.ssl.SSLSocket) clientCtx.getSocketFactory()
+                .createSocket("127.0.0.1", port)) {
+            socket.setSoTimeout(3000);
+            SSLParameters p = socket.getSSLParameters();
+            p.setServerNames(Collections.emptyList());
+            socket.setSSLParameters(p);
+            assertThrows(Exception.class, socket::startHandshake);
+        }
     }
 
     @Test
@@ -149,14 +220,35 @@ class PinningHttpsTransportTest {
         assertEquals(0, internalHits.get(), "リダイレクト先 /internal は叩かれないこと");
     }
 
+    private static String readClientHelloSni(com.sun.net.httpserver.HttpExchange exchange) {
+        if (!(exchange instanceof HttpsExchange httpsExchange)) {
+            return null;
+        }
+        SSLSession session = httpsExchange.getSSLSession();
+        if (!(session instanceof ExtendedSSLSession extended)) {
+            return null;
+        }
+        List<SNIServerName> names = extended.getRequestedServerNames();
+        if (names == null || names.isEmpty()) {
+            return null;
+        }
+        for (SNIServerName name : names) {
+            if (name instanceof SNIHostName hostName) {
+                return hostName.getAsciiName();
+            }
+        }
+        return null;
+    }
+
     private static PinningNoRedirectClientHttpRequestFactory newFactory(OutboundUrlGuard guard) throws Exception {
-        DefaultHostnameVerifier defaultVerifier = new DefaultHostnameVerifier();
         SSLConnectionSocketFactory ssl = new SSLConnectionSocketFactory(
                 SSLContexts.custom().loadTrustMaterial(null, new TrustSelfSignedStrategy()).build(),
-                (hostname, session) -> {
-                    lastSni.set(hostname);
-                    return defaultVerifier.verify(hostname, session);
-                });
+                new DefaultHostnameVerifier());
+        return factoryWithSsl(guard, ssl);
+    }
+
+    private static PinningNoRedirectClientHttpRequestFactory factoryWithSsl(
+            OutboundUrlGuard guard, SSLConnectionSocketFactory ssl) {
         return new PinningNoRedirectClientHttpRequestFactory(guard) {
             @Override
             public org.springframework.http.client.ClientHttpRequest createRequest(
@@ -209,5 +301,83 @@ class PinningHttpsTransportTest {
             return unix.toString();
         }
         return "keytool";
+    }
+
+    /**
+     * ClientHello SNI が期待ホストのときだけサーバ証明書を選ぶ。
+     * SNI 欠落・不一致では alias を返さず握手を失敗させる（偽グリーン防止）。
+     */
+    private static final class SniRequiringKeyManager extends javax.net.ssl.X509ExtendedKeyManager {
+        private final javax.net.ssl.X509ExtendedKeyManager delegate;
+        private final String requiredHost;
+
+        private SniRequiringKeyManager(javax.net.ssl.X509ExtendedKeyManager delegate, String requiredHost) {
+            this.delegate = delegate;
+            this.requiredHost = requiredHost;
+        }
+
+        private boolean sniMatches(SSLSession handshakeSession) {
+            if (!(handshakeSession instanceof ExtendedSSLSession extended)) {
+                return false;
+            }
+            List<SNIServerName> names = extended.getRequestedServerNames();
+            if (names == null || names.isEmpty()) {
+                return false;
+            }
+            for (SNIServerName name : names) {
+                if (name instanceof SNIHostName hostName
+                        && requiredHost.equalsIgnoreCase(hostName.getAsciiName())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public String[] getClientAliases(String keyType, java.security.Principal[] issuers) {
+            return delegate.getClientAliases(keyType, issuers);
+        }
+
+        @Override
+        public String chooseClientAlias(String[] keyType, java.security.Principal[] issuers, java.net.Socket socket) {
+            return delegate.chooseClientAlias(keyType, issuers, socket);
+        }
+
+        @Override
+        public String[] getServerAliases(String keyType, java.security.Principal[] issuers) {
+            return delegate.getServerAliases(keyType, issuers);
+        }
+
+        @Override
+        public String chooseServerAlias(String keyType, java.security.Principal[] issuers, java.net.Socket socket) {
+            if (socket instanceof javax.net.ssl.SSLSocket sslSocket) {
+                SSLSession hs = sslSocket.getHandshakeSession();
+                if (!sniMatches(hs)) {
+                    return null;
+                }
+            } else {
+                return null;
+            }
+            return delegate.chooseServerAlias(keyType, issuers, socket);
+        }
+
+        @Override
+        public String chooseEngineServerAlias(String keyType, java.security.Principal[] issuers,
+                                              javax.net.ssl.SSLEngine engine) {
+            if (!sniMatches(engine.getHandshakeSession())) {
+                return null;
+            }
+            return delegate.chooseEngineServerAlias(keyType, issuers, engine);
+        }
+
+        @Override
+        public java.security.PrivateKey getPrivateKey(String alias) {
+            return delegate.getPrivateKey(alias);
+        }
+
+        @Override
+        public java.security.cert.X509Certificate[] getCertificateChain(String alias) {
+            return delegate.getCertificateChain(alias);
+        }
     }
 }
