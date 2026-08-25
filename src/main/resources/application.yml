@@ -29,6 +29,21 @@ server:
     include-stacktrace: never
     include-exception: false
 
+# ===== Spring Boot Actuator（ヘルスチェック・コンテナプローブ） =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+  health:
+    mail:
+      enabled: false
+
 # 組織スコープ(R3)。V60が既存ユーザーと既存要員をLEGACY組織へbackfillするため、
 # 適用直後でも誰も空scopeにならない。したがって既定で有効にする。
 # 段階導入したい場合のみ ORGANIZATION_SCOPE_ENABLED=false で無効化できる。

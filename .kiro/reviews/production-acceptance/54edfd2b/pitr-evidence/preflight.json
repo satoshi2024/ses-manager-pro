@@ -1,0 +1,30 @@
+{
+  "schema_version": "1",
+  "status": "OK",
+  "checked_at_utc": "2026-08-24T04:33:09Z",
+  "reasons": [],
+  "checks": {
+    "client_ok": true,
+    "server_ok": true,
+    "binlog_on": true,
+    "binlog_format": "ROW",
+    "binlog_checksum": "CRC32",
+    "binlog_compression": "0",
+    "gtid_mode": "ON",
+    "tls_ok": true,
+    "all_tables_innodb": true,
+    "server_uuid": "d10e96a9-9f74-11f1-9162-ee21cebc35b3",
+    "server_version": "8.0.36",
+    "mysql_client_version": "8.0.46",
+    "log_bin_basename": "/var/lib/mysql/binlog",
+    "tool_image_digest": "unknown",
+    "binlog_expire_seconds": "86400",
+    "uploads": {
+      "status": "ok",
+      "filesystem": "v9fs",
+      "free_bytes": "150217256960"
+    },
+    "disk_free_bytes": "150217256960",
+    "work_dir": "/work/work"
+  }
+}

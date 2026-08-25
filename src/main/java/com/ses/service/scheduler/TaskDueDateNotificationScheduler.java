@@ -8,6 +8,7 @@ import com.ses.mapper.TaskNotificationLogMapper;
 import com.ses.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,7 @@ public class TaskDueDateNotificationScheduler {
      * 毎日深夜 02:00 に実行
      */
     @Scheduled(cron = "0 0 2 * * ?")
+    @SchedulerLock(name = "taskDueDateNotificationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDailyOverdueCheck() {
         processOverdueTaskNotifications(LocalDate.now());
     }

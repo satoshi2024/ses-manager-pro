@@ -6,15 +6,17 @@ import com.ses.entity.UserExternalIdentity;
 import com.ses.service.ExternalIdentityProvisioningService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 管理者承認済みのOIDC外部identity link API。更新系のためCSRF/監査対象となる。 */
+/** 管理者承認済みのOIDC外部identity link API。更新系のためCSRF/監査対象となる。管理者のみ実行可能。 */
 @RestController
 @RequestMapping("/api/identity-providers/{providerId}/external-identities")
+@PreAuthorize("hasRole('管理者')")
 @RequiredArgsConstructor
 public class ExternalIdentityApiController {
 

@@ -49,12 +49,12 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             throw new BusinessException("AI use case が指定されていません");
         }
         Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
-        if (isExternalFacing(request.getUseCase()) && AiPiiMasker.containsCanary(masked)) {
+        if (AiPiiMasker.containsCanary(masked)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
         String untrusted = AiPiiMasker.sanitizeUntrusted(request.getUntrustedSourceText());
         String prompt = buildPrompt(request, masked, untrusted);
-        if (isExternalFacing(request.getUseCase()) && prompt.contains(AiGatewayRequest.CANARY)) {
+        if (prompt.contains(AiGatewayRequest.CANARY)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
         outboundProbe.record(prompt);

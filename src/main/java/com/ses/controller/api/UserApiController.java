@@ -115,7 +115,6 @@ public class UserApiController {
     /**
      * ユーザー登録
      */
-    @Transactional(rollbackFor = Exception.class)
     @PostMapping
     public ApiResult<Boolean> save(@Valid @RequestBody SysUser sysUser, Authentication authentication) {
         com.ses.common.util.EntityProtectUtil.protectForCreate(sysUser);
@@ -148,7 +147,6 @@ public class UserApiController {
      * ユーザー更新
      * パスワードが空の場合は既存パスワードを維持する
      */
-    @Transactional(rollbackFor = Exception.class)
     @PutMapping("/{id}")
     public ApiResult<Boolean> update(@PathVariable Long id, @Valid @RequestBody SysUser sysUser, Authentication authentication) {
         sysUser.setId(id);

@@ -31,8 +31,12 @@ public class ExternalIdentityProvisioningServiceImpl implements ExternalIdentity
     private final com.ses.config.OidcSecurityProperties properties;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public UserExternalIdentity provision(Long providerId, ExternalIdentityProvisionRequest request) {
+        String currentRole = com.ses.common.util.SecurityUtils.currentRole();
+        if (currentRole != null && !com.ses.common.constant.StatusConstants.ROLE_ADMIN.equals(currentRole)) {
+            throw BusinessException.of(403, "error.identity.adminOnly");
+        }
         IdentityProvider provider = identityProviderMapper.selectById(providerId);
         if (provider == null || provider.getEnabled() == null || provider.getEnabled() != 1
                 || !"OIDC".equalsIgnoreCase(provider.getProviderType())

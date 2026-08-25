@@ -1,0 +1,30 @@
+{
+  "state": "SUCCESS",
+  "rpo_seconds": 60,
+  "rto_seconds": 14400,
+  "total_seconds": 8,
+  "rto_ok": true,
+  "rpo_ok": true,
+  "segments": [
+    {
+      "label": "plan",
+      "seconds": 1
+    },
+    {
+      "label": "integrity",
+      "seconds": 2
+    },
+    {
+      "label": "restore",
+      "seconds": 4
+    },
+    {
+      "label": "validate",
+      "seconds": 0
+    },
+    {
+      "label": "cutover",
+      "seconds": 1
+    }
+  ]
+}

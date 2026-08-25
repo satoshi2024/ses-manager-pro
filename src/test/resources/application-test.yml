@@ -97,6 +97,8 @@ app:
   batch:
     token-secret: test-batch-token-hmac-secret
   security:
+    webhook:
+      allow-loopback: true
     oidc:
       enabled: false
       local-login-enabled: true

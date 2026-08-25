@@ -41,7 +41,7 @@ class WebhookNotifierLoopbackIntegrationTest {
             notification.setMessage("実HTTP endpoint到達");
             notification.setLinkUrl("/approval/inbox");
 
-            boolean delivered = new WebhookNotifier(config, new RestTemplate()).notifyNow(notification);
+            boolean delivered = new WebhookNotifier(config, new RestTemplate(), true).notifyNow(notification);
 
             assertTrue(delivered, "loopback endpointへのPOSTが成功すること");
             assertEquals(1, requestCount.get(), "Webhook POSTが1回だけ到達すること");
