@@ -188,7 +188,8 @@ public class PortalAuthServiceImpl implements PortalAuthService {
                 .eq("id", invitation.getId())
                 .set("accepted_by", user.getId()));
         log.info("portal招待受諾: orgId={} email={} (tokenはログへ出さない)",
-                invitation.getPortalOrgId(), user.getEmail());
+                invitation.getPortalOrgId(),
+                com.ses.common.util.LogRedaction.maskEmail(user.getEmail()));
     }
 
     @Override

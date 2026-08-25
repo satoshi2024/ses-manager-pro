@@ -7,19 +7,12 @@ import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * B2-6 (ACC-SEC-P1-007 / REV-P1-006): PasswordEncoder の fail-closed プロファイル解決マトリクス。
- *
- * <ul>
- *   <li>prod → BCrypt で起動できる。</li>
- *   <li>明示 dev / test → NoOp（平文）で起動できる。</li>
- *   <li>プロファイル未指定 → 起動失敗（平文へサイレントフォールバックしない）。</li>
- *   <li>prod/dev/test 以外の不安全な値（"production" もどき・"staging" 等）→ 起動失敗。</li>
- *   <li>prod と dev/test の併用 → prod を優先し BCrypt（平文へ落ちない）。</li>
- * </ul>
+ * B2-6 / REV-B2-P1-003: PasswordEncoder と prod Flyway locations の fail-closed マトリクス。
  */
-@SuppressWarnings("deprecation") // NoOpPasswordEncoder はテストでの型判定に用いる。
+@SuppressWarnings("deprecation")
 class PasswordEncoderConfigTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -28,6 +21,7 @@ class PasswordEncoderConfigTest {
     @Test
     void prodはBCryptで起動できる() {
         runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("prod"))
+                .withPropertyValues("spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBean(PasswordEncoder.class))
@@ -81,24 +75,46 @@ class PasswordEncoderConfigTest {
     }
 
     @Test
-    void devとprod併用はprod優先でBCrypt() {
+    void prodとdev併用は起動失敗する() {
         runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("prod", "dev"))
                 .run(context -> {
-                    assertThat(context).hasNotFailed();
-                    assertThat(context.getBean(PasswordEncoder.class))
-                            .isInstanceOf(BCryptPasswordEncoder.class);
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class);
                 });
     }
 
     @Test
-    void testとprod併用もprod優先でBCrypt() {
-        // ProductionSecurityConfigurationTest が @ActiveProfiles({"test","prod"}) を使うため、
-        // その組み合わせで平文へ落ちない（BCryptになる）ことを固定する。
+    void prodとtest併用は起動失敗する() {
         runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("test", "prod"))
                 .run(context -> {
-                    assertThat(context).hasNotFailed();
-                    assertThat(context.getBean(PasswordEncoder.class))
-                            .isInstanceOf(BCryptPasswordEncoder.class);
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class);
                 });
+    }
+
+    @Test
+    void prodのFlywayにmigration_devが含まれると起動失敗する() {
+        runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("prod"))
+                .withPropertyValues("spring.flyway.locations=classpath:db/migration,classpath:db/migration-dev")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class);
+                });
+    }
+
+    @Test
+    void prodのFlywayにmigration_prodが無いと起動失敗する() {
+        runner.withInitializer(ctx -> ctx.getEnvironment().setActiveProfiles("prod"))
+                .withPropertyValues("spring.flyway.locations=classpath:db/migration")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void resolveはprod混在を拒否する() {
+        assertThatThrownBy(() -> PasswordEncoderConfig.resolve(new String[]{"prod", "dev"}))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

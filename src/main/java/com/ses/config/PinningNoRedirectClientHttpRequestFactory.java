@@ -2,41 +2,36 @@ package com.ses.config;
 
 import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
+import org.apache.hc.client5.http.DnsResolver;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.io.HttpClientConnectionManager;
+import org.apache.hc.core5.util.Timeout;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
-import org.springframework.http.client.AbstractClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.lang.Nullable;
-import org.springframework.util.StreamUtils;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SNIHostName;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.Inet6Address;
 import java.net.InetAddress;
-import java.net.Socket;
 import java.net.URI;
-import java.net.URL;
+import java.net.UnknownHostException;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 
 /**
- * Webhook 送信専用: 検証済み IP へ直接接続し、DNS リバインディング窓を塞ぐ。
+ * Webhook 送信専用: 検証済み IP へ DNS を固定し、DNS リバインディング窓を塞ぐ。
  * <p>
- * {@link java.net.HttpURLConnection} は URL ホストを再解決するため、
- * 「ガードで安全判定 → クライアントが独立に再解決」だと判定後に内部 IP へ差し替えられる。
- * 本ファクトリは {@link OutboundUrlGuard#validateAndResolvePublicHttpsUrl(String)} が返した
- * アドレスへ接続し、Host / SNI / HostnameVerifier は元のホスト名を使う。
+ * リクエスト URI のホスト名はそのまま残すため、HTTP {@code Host}・TLS SNI・証明書ホスト名検証は
+ * 元ホストに対して行われる。接続先 IP だけを {@link OutboundUrlGuard} が返したアドレスへピン留めする。
+ * {@code sun.net.http.allowRestrictedHeaders} は使わない（REV-B2-P1-002）。
  * リダイレクトは追跡しない。
  */
 public class PinningNoRedirectClientHttpRequestFactory implements ClientHttpRequestFactory {
@@ -68,243 +63,159 @@ public class PinningNoRedirectClientHttpRequestFactory implements ClientHttpRequ
         if (safeAddresses.isEmpty()) {
             throw new IOException("Webhook宛先URLの検証に失敗しました: 解決済みアドレスが空です");
         }
-        return new PinnedHttpsRequest(uri, httpMethod, safeAddresses.get(0), connectTimeout, readTimeout);
+        String expectedHost = normalizeHost(uri.getHost());
+        CloseableHttpClient httpClient = buildPinnedClient(expectedHost, safeAddresses);
+        HttpComponentsClientHttpRequestFactory delegate = new HttpComponentsClientHttpRequestFactory(httpClient);
+        if (connectTimeout >= 0) {
+            delegate.setConnectTimeout(connectTimeout);
+        }
+        if (readTimeout >= 0) {
+            delegate.setConnectionRequestTimeout(readTimeout);
+        }
+        ClientHttpRequest request = delegate.createRequest(uri, httpMethod);
+        return new ClosingClientHttpRequest(request, httpClient);
     }
 
-    static final class PinnedHttpsRequest extends AbstractClientHttpRequest {
-        private final URI originalUri;
-        private final HttpMethod method;
-        private final InetAddress pinnedAddress;
-        private final int connectTimeout;
-        private final int readTimeout;
-        private final ByteArrayOutputStream bufferedBody = new ByteArrayOutputStream(1024);
+    public CloseableHttpClient buildPinnedClient(String expectedHost, List<InetAddress> safeAddresses) {
+        return buildPinnedClient(expectedHost, safeAddresses, null);
+    }
 
-        PinnedHttpsRequest(URI originalUri, HttpMethod method, InetAddress pinnedAddress,
-                           int connectTimeout, int readTimeout) {
-            this.originalUri = originalUri;
-            this.method = method;
-            this.pinnedAddress = pinnedAddress;
-            this.connectTimeout = connectTimeout;
-            this.readTimeout = readTimeout;
+    /**
+     * @param sslSocketFactory テスト用に自己署名TLS等を差し込む場合のみ指定。本番は {@code null}（既定SSL）。
+     */
+    public CloseableHttpClient buildPinnedClient(String expectedHost, List<InetAddress> safeAddresses,
+                                          org.apache.hc.client5.http.socket.LayeredConnectionSocketFactory sslSocketFactory) {
+        InetAddress[] pinned = safeAddresses.toArray(InetAddress[]::new);
+        DnsResolver resolver = new DnsResolver() {
+            @Override
+            public InetAddress[] resolve(String host) throws UnknownHostException {
+                if (!normalizeHost(host).equals(expectedHost)) {
+                    throw new UnknownHostException("pinned DNS refused unexpected host: " + host);
+                }
+                return pinned.clone();
+            }
+
+            @Override
+            public String resolveCanonicalHostname(String host) throws UnknownHostException {
+                resolve(host);
+                return expectedHost;
+            }
+        };
+
+        var cmBuilder = PoolingHttpClientConnectionManagerBuilder.create()
+                .setDnsResolver(resolver);
+        if (sslSocketFactory != null) {
+            cmBuilder.setSSLSocketFactory(sslSocketFactory);
+        }
+        HttpClientConnectionManager connectionManager = cmBuilder.build();
+
+        var builder = HttpClients.custom()
+                .setConnectionManager(connectionManager)
+                .disableRedirectHandling();
+        if (connectTimeout >= 0 || readTimeout >= 0) {
+            RequestConfig.Builder config = RequestConfig.custom();
+            if (connectTimeout >= 0) {
+                config.setConnectionRequestTimeout(Timeout.ofMilliseconds(connectTimeout));
+            }
+            if (readTimeout >= 0) {
+                config.setResponseTimeout(Timeout.ofMilliseconds(readTimeout));
+            }
+            builder.setDefaultRequestConfig(config.build());
+        }
+        return builder.build();
+    }
+
+    public static String normalizeHost(String host) {
+        if (host == null) {
+            return "";
+        }
+        String h = host.trim().toLowerCase(Locale.ROOT);
+        if (h.endsWith(".")) {
+            h = h.substring(0, h.length() - 1);
+        }
+        if (h.startsWith("[") && h.endsWith("]")) {
+            h = h.substring(1, h.length() - 1);
+        }
+        return h;
+    }
+
+    /** レスポンス close 時に per-request HttpClient も解放する。 */
+    public static final class ClosingClientHttpRequest implements ClientHttpRequest {
+        private final ClientHttpRequest delegate;
+        private final CloseableHttpClient httpClient;
+
+        public ClosingClientHttpRequest(ClientHttpRequest delegate, CloseableHttpClient httpClient) {
+            this.delegate = delegate;
+            this.httpClient = httpClient;
         }
 
         @Override
         public HttpMethod getMethod() {
-            return method;
+            return delegate.getMethod();
         }
 
         @Override
         public URI getURI() {
-            return originalUri;
-        }
-
-        @Override
-        protected OutputStream getBodyInternal(HttpHeaders headers) {
-            return bufferedBody;
-        }
-
-        @Override
-        protected ClientHttpResponse executeInternal(HttpHeaders headers) throws IOException {
-            byte[] bufferedOutput = bufferedBody.toByteArray();
-            String originalHost = originalUri.getHost();
-            int port = originalUri.getPort() > 0 ? originalUri.getPort() : 443;
-            URL pinnedUrl = URI.create(buildPinnedUrl(originalUri, pinnedAddress, port)).toURL();
-            HttpURLConnection connection = (HttpURLConnection) pinnedUrl.openConnection();
-            try {
-                connection.setInstanceFollowRedirects(false);
-                if (connectTimeout >= 0) {
-                    connection.setConnectTimeout(connectTimeout);
-                }
-                if (readTimeout >= 0) {
-                    connection.setReadTimeout(readTimeout);
-                }
-                connection.setRequestMethod(method.name());
-                connection.setDoInput(true);
-
-                if (connection instanceof HttpsURLConnection https) {
-                    SSLSocketFactory defaultFactory = HttpsURLConnection.getDefaultSSLSocketFactory();
-                    https.setSSLSocketFactory(new SniSslSocketFactory(originalHost, defaultFactory));
-                    https.setHostnameVerifier((hostname, session) ->
-                            HttpsURLConnection.getDefaultHostnameVerifier().verify(originalHost, session));
-                }
-
-                for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
-                    String name = entry.getKey();
-                    if (HttpHeaders.HOST.equalsIgnoreCase(name)) {
-                        continue;
-                    }
-                    for (String value : entry.getValue()) {
-                        connection.addRequestProperty(name, value);
-                    }
-                }
-                connection.setRequestProperty(HttpHeaders.HOST, originalHost);
-
-                if (bufferedOutput.length > 0 || method == HttpMethod.POST
-                        || method == HttpMethod.PUT || method == HttpMethod.PATCH) {
-                    connection.setDoOutput(true);
-                    try (OutputStream out = connection.getOutputStream()) {
-                        out.write(bufferedOutput);
-                    }
-                }
-                connection.connect();
-                return new HttpUrlConnectionClientHttpResponse(connection);
-            } catch (IOException ex) {
-                connection.disconnect();
-                throw ex;
-            }
-        }
-    }
-
-    /**
-     * {@link HttpURLConnection} 向けの最小 {@link ClientHttpResponse}。
-     * Spring の SimpleClientHttpResponse は package-private のため自前実装する。
-     */
-    static final class HttpUrlConnectionClientHttpResponse implements ClientHttpResponse {
-        private final HttpURLConnection connection;
-        @Nullable
-        private HttpHeaders headers;
-        @Nullable
-        private InputStream responseStream;
-
-        HttpUrlConnectionClientHttpResponse(HttpURLConnection connection) {
-            this.connection = connection;
-        }
-
-        @Override
-        public HttpStatusCode getStatusCode() throws IOException {
-            return HttpStatusCode.valueOf(connection.getResponseCode());
-        }
-
-        @Override
-        public String getStatusText() throws IOException {
-            String message = connection.getResponseMessage();
-            return message != null ? message : "";
+            return delegate.getURI();
         }
 
         @Override
         public HttpHeaders getHeaders() {
-            if (headers == null) {
-                headers = new HttpHeaders();
-                // getHeaderFields は接続後に有効。キー null はステータス行。
-                Map<String, List<String>> raw = connection.getHeaderFields();
-                if (raw != null) {
-                    for (Map.Entry<String, List<String>> entry : raw.entrySet()) {
-                        if (entry.getKey() != null) {
-                            headers.put(entry.getKey(), entry.getValue());
-                        }
-                    }
-                }
-            }
-            return headers;
+            return delegate.getHeaders();
+        }
+
+        @Override
+        public OutputStream getBody() throws IOException {
+            return delegate.getBody();
+        }
+
+        @Override
+        public ClientHttpResponse execute() throws IOException {
+            ClientHttpResponse response = delegate.execute();
+            return new ClosingClientHttpResponse(response, httpClient);
+        }
+    }
+
+    static final class ClosingClientHttpResponse implements ClientHttpResponse {
+        private final ClientHttpResponse delegate;
+        private final CloseableHttpClient httpClient;
+
+        ClosingClientHttpResponse(ClientHttpResponse delegate, CloseableHttpClient httpClient) {
+            this.delegate = delegate;
+            this.httpClient = httpClient;
+        }
+
+        @Override
+        public HttpStatusCode getStatusCode() throws IOException {
+            return delegate.getStatusCode();
+        }
+
+        @Override
+        public String getStatusText() throws IOException {
+            return delegate.getStatusText();
+        }
+
+        @Override
+        public HttpHeaders getHeaders() {
+            return delegate.getHeaders();
         }
 
         @Override
         public InputStream getBody() throws IOException {
-            if (responseStream == null) {
-                InputStream errorStream = connection.getErrorStream();
-                responseStream = (errorStream != null) ? errorStream : connection.getInputStream();
-                if (responseStream == null) {
-                    responseStream = InputStream.nullInputStream();
-                }
-            }
-            return responseStream;
+            return delegate.getBody();
         }
 
         @Override
         public void close() {
             try {
-                if (responseStream != null) {
-                    StreamUtils.drain(responseStream);
-                    responseStream.close();
-                }
-            } catch (IOException ignored) {
-                // クローズ時の二次例外は握りつぶす（呼び出し側の主例外を優先）。
+                delegate.close();
             } finally {
-                connection.disconnect();
+                try {
+                    httpClient.close();
+                } catch (IOException ignored) {
+                    // クローズ時の二次例外は握りつぶす
+                }
             }
-        }
-    }
-
-    static String buildPinnedUrl(URI original, InetAddress address, int port) {
-        String host = address.getHostAddress();
-        if (address instanceof Inet6Address) {
-            host = "[" + host + "]";
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("https://").append(host).append(':').append(port);
-        if (original.getRawPath() != null && !original.getRawPath().isEmpty()) {
-            sb.append(original.getRawPath());
-        } else {
-            sb.append('/');
-        }
-        if (original.getRawQuery() != null) {
-            sb.append('?').append(original.getRawQuery());
-        }
-        return sb.toString();
-    }
-
-    /** SNI に元ホスト名を載せる SSLSocketFactory。 */
-    static final class SniSslSocketFactory extends SSLSocketFactory {
-        private final String sniHost;
-        private final SSLSocketFactory delegate;
-
-        SniSslSocketFactory(String sniHost, SSLSocketFactory delegate) {
-            this.sniHost = sniHost;
-            this.delegate = delegate;
-        }
-
-        private Socket applySni(Socket socket) throws IOException {
-            // IPリテラルへSNIHostNameは使えず例外になるため、FQDNのときだけSNIを載せる。
-            if (socket instanceof SSLSocket ssl && sniHost != null && !sniHost.isBlank()
-                    && !isIpLiteral(sniHost)) {
-                SSLParameters params = ssl.getSSLParameters();
-                params.setServerNames(List.of(new SNIHostName(sniHost)));
-                ssl.setSSLParameters(params);
-            }
-            return socket;
-        }
-
-        private static boolean isIpLiteral(String host) {
-            if (host.indexOf(':') >= 0) {
-                return true;
-            }
-            return host.chars().allMatch(c -> (c >= '0' && c <= '9') || c == '.');
-        }
-
-        @Override
-        public String[] getDefaultCipherSuites() {
-            return delegate.getDefaultCipherSuites();
-        }
-
-        @Override
-        public String[] getSupportedCipherSuites() {
-            return delegate.getSupportedCipherSuites();
-        }
-
-        @Override
-        public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-            return applySni(delegate.createSocket(s, host, port, autoClose));
-        }
-
-        @Override
-        public Socket createSocket(String host, int port) throws IOException {
-            return applySni(delegate.createSocket(host, port));
-        }
-
-        @Override
-        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
-            return applySni(delegate.createSocket(host, port, localHost, localPort));
-        }
-
-        @Override
-        public Socket createSocket(InetAddress host, int port) throws IOException {
-            return applySni(delegate.createSocket(host, port));
-        }
-
-        @Override
-        public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort)
-                throws IOException {
-            return applySni(delegate.createSocket(address, port, localAddress, localPort));
         }
     }
 }

@@ -83,7 +83,9 @@ public class WebhookNotifier {
             return true;
         } catch (Exception e) {
             // outbox workerが再送するため、ここでは例外を外へ投げず失敗だけ返す。
-            log.warn("Webhook通知の送信に失敗しました: type={} title={}", notification.getType(), notification.getTitle(), e);
+            // タイトル・例外本文は Webhook URL（トークン付き）を含みうるため出さない（REV-B2-P1-004）。
+            log.warn("Webhook通知の送信に失敗しました: type={} errorType={}",
+                    notification.getType(), e.getClass().getName());
             return false;
         }
     }

@@ -232,8 +232,9 @@ public class PortalAdminServiceImpl implements PortalAdminService {
         try {
             mailService.sendInvitation(normalizedEmail, rawToken);
         } catch (RuntimeException e) {
-            log.warn("招待メール送信に失敗しました: orgId={} email={}（招待は有効のまま再送可能） error={}",
-                    orgId, normalizedEmail, e.getMessage());
+            log.warn("招待メール送信に失敗しました: orgId={} email={}（招待は有効のまま再送可能） errorType={}",
+                    orgId, com.ses.common.util.LogRedaction.maskEmail(normalizedEmail),
+                    com.ses.common.util.LogRedaction.exceptionType(e));
         }
         return invitation;
     }

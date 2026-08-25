@@ -95,6 +95,30 @@ class OutboundUrlGuardTest {
     }
 
     @Test
+    void IPv4のベンチマーク198_18は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://198.18.0.1/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv4のTEST_NET_1は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://192.0.2.1/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv4のTEST_NET_2は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://198.51.100.10/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv4のTEST_NET_3は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://203.0.113.5/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
     void IPv4のunspecified0は拒否される() {
         assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://0.0.0.0/x"))
                 .isInstanceOf(OutboundUrlException.class);
@@ -111,6 +135,12 @@ class OutboundUrlGuardTest {
     @Test
     void IPv6のULAは拒否される() {
         assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://[fd00::1]/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv6のdocumentation_2001_db8は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://[2001:db8::1]/x"))
                 .isInstanceOf(OutboundUrlException.class);
     }
 

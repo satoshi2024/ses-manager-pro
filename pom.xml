@@ -71,6 +71,13 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Webhook IPピン留め用（Host/SNIは元ホストのまま、DNSだけ検証済みIPへ固定）。
+             sun.net.http.allowRestrictedHeaders は使わない（REV-B2-P1-002）。 -->
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+
         <!-- Thymeleaf + Security 連携 -->
         <dependency>
             <groupId>org.thymeleaf.extras</groupId>

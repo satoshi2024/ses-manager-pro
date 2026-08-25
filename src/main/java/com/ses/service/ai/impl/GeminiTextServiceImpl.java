@@ -113,20 +113,21 @@ public class GeminiTextServiceImpl implements AiTextService {
             String jsonResponse = aiRestTemplate.postForObject(apiUrl, entity, String.class);
             return parseGeminiResponse(jsonResponse);
         } catch (HttpClientErrorException e) {
-            // APIキー不正・クォータ超過等のクライアント起因エラー
-            log.error("Gemini API クライアントエラー: status={}, body={}",
-                    e.getStatusCode(), sanitize(e.getResponseBodyAsString()), e);
+            // APIキー不正・クォータ超過等のクライアント起因エラー。本文・例外は出さない（REV-B2-P2-001）。
+            log.error("Gemini API クライアントエラー: status={} bodySummary={}",
+                    e.getStatusCode(), sanitize(e.getResponseBodyAsString()));
             throw BusinessException.of(e.getStatusCode().value(), "error.ai.clientError");
         } catch (HttpServerErrorException e) {
             // Gemini側の障害
-            log.error("Gemini API サーバーエラー: status={}", e.getStatusCode(), e);
+            log.error("Gemini API サーバーエラー: status={} errorType={}",
+                    e.getStatusCode(), e.getClass().getName());
             throw BusinessException.of(503, "error.ai.serverError");
         } catch (RestClientException e) {
-            // タイムアウト・接続失敗
-            log.error("Gemini API 呼び出し失敗（ネットワーク）", e);
+            // タイムアウト・接続失敗（例外本文に URL が含まれることがある）
+            log.error("Gemini API 呼び出し失敗（ネットワーク）: errorType={}", e.getClass().getName());
             throw BusinessException.of(503, "error.ai.networkError");
         } catch (Exception e) {
-            log.error("Gemini API 呼び出し失敗（予期しないエラー）", e);
+            log.error("Gemini API 呼び出し失敗（予期しないエラー）: errorType={}", e.getClass().getName());
             throw BusinessException.of(500, "error.ai.unexpected");
         }
     }
@@ -149,9 +150,22 @@ public class GeminiTextServiceImpl implements AiTextService {
         }
     }
 
-    /** APIキー・PII等の機密情報をログに出さないためのサニタイズ */
-    private String sanitize(String body) {
-        if (body == null) return "";
-        return body.length() > 200 ? body.substring(0, 200) + "..." : body;
+    /**
+     * エラー応答本文のログ用要約（REV-B2-P2-001）。
+     * APIキー・Bearer・メール等を除去し、短い固定長に切り詰める。原文プレフィックスは残さない。
+     */
+    static String sanitize(String body) {
+        if (body == null || body.isBlank()) {
+            return "empty";
+        }
+        int originalLen = body.length();
+        String redacted = body
+                .replaceAll("(?i)(api[_-]?key|token|authorization|bearer|x-goog-api-key)\\s*[:=]\\s*[^\\s\",}]+",
+                        "$1=***")
+                .replaceAll("AIza[0-9A-Za-z_\\-]{10,}", "***")
+                .replaceAll("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "***@***")
+                .replaceAll("https?://\\S+", "https://***");
+        String summary = redacted.length() > 80 ? redacted.substring(0, 80) : redacted;
+        return summary + "...(redacted,len=" + originalLen + ")";
     }
 }

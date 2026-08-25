@@ -190,10 +190,7 @@ public class MailServiceImpl implements MailService {
     }
 
     private String maskEmail(String email) {
-        if (email == null || !email.contains("@")) return "***";
-        int atIdx = email.indexOf("@");
-        if (atIdx <= 2) return email.charAt(0) + "***" + email.substring(atIdx);
-        return email.substring(0, 2) + "***" + email.substring(atIdx);
+        return com.ses.common.util.LogRedaction.maskEmail(email);
     }
 }
 
