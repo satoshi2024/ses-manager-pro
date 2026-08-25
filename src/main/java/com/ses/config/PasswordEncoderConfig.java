@@ -7,22 +7,22 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * PasswordEncoder を「明示プロファイル」に基づき fail-closed で解決する（ACC-SEC-P1-007 / REV-P1-006 / REV-B2-P1-003）。
+ * PasswordEncoder を「明示プロファイル」に基づき fail-closed で解決する
+ * （ACC-SEC-P1-007 / REV-P1-006 / REV-B2-P1-003 / REV-B2.1-P1-002）。
  *
  * <p>ルール:
  * <ul>
- *   <li>{@code prod} 単独: BCrypt。{@code dev}/{@code test}/その他との併用は起動失敗（fail-closed）。</li>
- *   <li>{@code prod} 以外で明示 {@code dev} または {@code test}: NoOp（平文。開発・テスト専用）。</li>
- *   <li>未指定・不明値のみ（{@code production} もどき等）: 起動失敗。</li>
- *   <li>{@code prod} 時の Flyway locations に {@code migration-dev} が含まれていれば起動失敗。
- *       locations が設定されている場合は {@code migration-prod} を必須とする。</li>
+ *   <li>{@code prod} 単独: BCrypt。他プロファイル併用は起動失敗。</li>
+ *   <li>{@code prod} 以外で明示 {@code dev}/{@code test}: NoOp。</li>
+ *   <li>未指定・不明値: 起動失敗。</li>
+ *   <li>{@code prod} 時の {@code spring.flyway.locations} は必須（欠損・空・空白は失敗）。
+ *       カンマ分割した<strong>正確な</strong> location 集合が
+ *       {@code classpath:db/migration-prod} を含み、
+ *       {@code classpath:db/migration-dev} を含んではならない（substring 判定禁止）。</li>
  * </ul>
  */
 @Configuration
@@ -31,6 +31,8 @@ public class PasswordEncoderConfig {
     static final String PROFILE_PROD = "prod";
     static final String PROFILE_DEV = "dev";
     static final String PROFILE_TEST = "test";
+    static final String FLYWAY_LOCATION_PROD = "classpath:db/migration-prod";
+    static final String FLYWAY_LOCATION_DEV = "classpath:db/migration-dev";
 
     @Bean
     public PasswordEncoder passwordEncoder(Environment environment) {
@@ -38,9 +40,6 @@ public class PasswordEncoderConfig {
         return resolve(environment.getActiveProfiles());
     }
 
-    /**
-     * 有効プロファイルから PasswordEncoder を決定する。テストから直接呼べるよう static + package-private。
-     */
     @SuppressWarnings("deprecation")
     static PasswordEncoder resolve(String[] activeProfiles) {
         Set<String> profiles = normalizeProfiles(activeProfiles);
@@ -68,7 +67,7 @@ public class PasswordEncoderConfig {
     }
 
     /**
-     * prod 混在と Flyway locations の安全条件を検証する（REV-B2-P1-003）。
+     * prod 混在と Flyway locations の安全条件を検証する（REV-B2.1-P1-002）。
      */
     static void assertProfileAndFlywaySafety(Environment environment) {
         Set<String> profiles = normalizeProfiles(environment.getActiveProfiles());
@@ -81,25 +80,47 @@ public class PasswordEncoderConfig {
         if (!prod) {
             return;
         }
-        String locations = environment.getProperty("spring.flyway.locations", "");
-        if (locations == null) {
-            locations = "";
-        }
-        String normalized = Arrays.stream(locations.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .map(s -> s.toLowerCase(Locale.ROOT))
-                .collect(Collectors.joining(","));
-        if (normalized.contains("migration-dev")) {
+        // Environment#getProperty は未設定時 null。空文字・空白も拒否する。
+        if (!environment.containsProperty("spring.flyway.locations")) {
             throw new IllegalStateException(
-                    "prod プロファイルで Flyway locations に migration-dev が含まれています（fail-closed）: "
-                            + locations);
+                    "prod プロファイルでは spring.flyway.locations が必須です（欠損は fail-closed）。");
         }
-        if (!normalized.isEmpty() && !normalized.contains("migration-prod")) {
+        String locations = environment.getProperty("spring.flyway.locations");
+        Set<String> parsed = parseFlywayLocations(locations);
+        if (!parsed.contains(FLYWAY_LOCATION_PROD)) {
             throw new IllegalStateException(
-                    "prod プロファイルの Flyway locations には migration-prod が必要です（fail-closed）: "
-                            + locations);
+                    "prod の Flyway locations は正確に '" + FLYWAY_LOCATION_PROD
+                            + "' を含める必要があります（fail-closed）: " + locations);
         }
+        if (parsed.contains(FLYWAY_LOCATION_DEV)) {
+            throw new IllegalStateException(
+                    "prod の Flyway locations に正確な '" + FLYWAY_LOCATION_DEV
+                            + "' を含めてはいけません（fail-closed）: " + locations);
+        }
+    }
+
+    /**
+     * カンマ区切り locations を trim 済みの正確な集合へ解析する。
+     * 欠損・null・空白のみ・要素が空の場合は失敗する。substring 判定は行わない。
+     */
+    static Set<String> parseFlywayLocations(String locations) {
+        if (locations == null || locations.isBlank()) {
+            throw new IllegalStateException(
+                    "prod プロファイルでは spring.flyway.locations が必須です（空/空白は fail-closed）。");
+        }
+        Set<String> set = new LinkedHashSet<>();
+        for (String part : locations.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            set.add(trimmed);
+        }
+        if (set.isEmpty()) {
+            throw new IllegalStateException(
+                    "prod プロファイルでは spring.flyway.locations が必須です（空/空白は fail-closed）。");
+        }
+        return set;
     }
 
     private static Set<String> normalizeProfiles(String[] activeProfiles) {

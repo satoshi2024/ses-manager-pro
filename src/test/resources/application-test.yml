@@ -108,9 +108,6 @@ app:
 ai:
   enabled: false
   external-send-enabled: false
-  # テストの PII canary 検査用。本番既定は false（REV-B2-P2-002）。
-  outbound-probe:
-    enabled: true
   retention:
     redacted-days: 730
     raw-prompt-days: 0

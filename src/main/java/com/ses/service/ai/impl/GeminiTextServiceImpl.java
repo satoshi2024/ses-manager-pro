@@ -113,21 +113,25 @@ public class GeminiTextServiceImpl implements AiTextService {
             String jsonResponse = aiRestTemplate.postForObject(apiUrl, entity, String.class);
             return parseGeminiResponse(jsonResponse);
         } catch (HttpClientErrorException e) {
-            // APIキー不正・クォータ超過等のクライアント起因エラー。本文・例外は出さない（REV-B2-P2-001）。
-            log.error("Gemini API クライアントエラー: status={} bodySummary={}",
-                    e.getStatusCode(), sanitize(e.getResponseBodyAsString()));
+            // provider 応答本文は一切出さない（REV-B2.1-P2-001）。
+            log.error("Gemini API クライアントエラー: status={} category={} responseBytes={} responseSha256={}",
+                    e.getStatusCode(), "CLIENT_ERROR",
+                    responseByteLength(e.getResponseBodyAsString()),
+                    responseSha256(e.getResponseBodyAsString()));
             throw BusinessException.of(e.getStatusCode().value(), "error.ai.clientError");
         } catch (HttpServerErrorException e) {
-            // Gemini側の障害
-            log.error("Gemini API サーバーエラー: status={} errorType={}",
-                    e.getStatusCode(), e.getClass().getName());
+            log.error("Gemini API サーバーエラー: status={} category={} responseBytes={} responseSha256={}",
+                    e.getStatusCode(), "SERVER_ERROR",
+                    responseByteLength(e.getResponseBodyAsString()),
+                    responseSha256(e.getResponseBodyAsString()));
             throw BusinessException.of(503, "error.ai.serverError");
         } catch (RestClientException e) {
-            // タイムアウト・接続失敗（例外本文に URL が含まれることがある）
-            log.error("Gemini API 呼び出し失敗（ネットワーク）: errorType={}", e.getClass().getName());
+            log.error("Gemini API 呼び出し失敗（ネットワーク）: category={} errorType={}",
+                    "NETWORK_ERROR", e.getClass().getName());
             throw BusinessException.of(503, "error.ai.networkError");
         } catch (Exception e) {
-            log.error("Gemini API 呼び出し失敗（予期しないエラー）: errorType={}", e.getClass().getName());
+            log.error("Gemini API 呼び出し失敗（予期しないエラー）: category={} errorType={}",
+                    "UNEXPECTED_ERROR", e.getClass().getName());
             throw BusinessException.of(500, "error.ai.unexpected");
         }
     }
@@ -145,27 +149,28 @@ public class GeminiTextServiceImpl implements AiTextService {
             log.warn("Gemini APIから有効な応答テキストを取得できませんでした");
             return "";
         } catch (Exception e) {
-            log.error("Gemini APIレスポンスのパースに失敗しました", e);
+            log.error("Gemini APIレスポンスのパースに失敗しました: category={}", "PARSE_ERROR");
             throw BusinessException.of(500, "error.ai.parseError");
         }
     }
 
-    /**
-     * エラー応答本文のログ用要約（REV-B2-P2-001）。
-     * APIキー・Bearer・メール等を除去し、短い固定長に切り詰める。原文プレフィックスは残さない。
-     */
-    static String sanitize(String body) {
-        if (body == null || body.isBlank()) {
-            return "empty";
+    /** 応答本文はログに出さず、長さのみ返す。 */
+    static int responseByteLength(String body) {
+        if (body == null) {
+            return 0;
         }
-        int originalLen = body.length();
-        String redacted = body
-                .replaceAll("(?i)(api[_-]?key|token|authorization|bearer|x-goog-api-key)\\s*[:=]\\s*[^\\s\",}]+",
-                        "$1=***")
-                .replaceAll("AIza[0-9A-Za-z_\\-]{10,}", "***")
-                .replaceAll("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "***@***")
-                .replaceAll("https?://\\S+", "https://***");
-        String summary = redacted.length() > 80 ? redacted.substring(0, 80) : redacted;
-        return summary + "...(redacted,len=" + originalLen + ")";
+        return body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
+    /** 応答本文の不可逆 SHA-256（hex）。本文そのものは返さない。 */
+    static String responseSha256(String body) {
+        try {
+            byte[] raw = body == null ? new byte[0] : body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(raw);
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return "unavailable";
+        }
     }
 }

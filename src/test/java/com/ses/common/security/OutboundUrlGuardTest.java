@@ -95,6 +95,12 @@ class OutboundUrlGuardTest {
     }
 
     @Test
+    void IPv4のIETF_Protocol_Assignments_192_0_0は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://192.0.0.9/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
     void IPv4のベンチマーク198_18は拒否される() {
         assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://198.18.0.1/x"))
                 .isInstanceOf(OutboundUrlException.class);
@@ -141,6 +147,18 @@ class OutboundUrlGuardTest {
     @Test
     void IPv6のdocumentation_2001_db8は拒否される() {
         assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://[2001:db8::1]/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv6のdiscard_100は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://[100::1]/x"))
+                .isInstanceOf(OutboundUrlException.class);
+    }
+
+    @Test
+    void IPv6のbenchmarking_2001_2は拒否される() {
+        assertThatThrownBy(() -> guard.validatePublicHttpsUrl("https://[2001:2::1]/x"))
                 .isInstanceOf(OutboundUrlException.class);
     }
 

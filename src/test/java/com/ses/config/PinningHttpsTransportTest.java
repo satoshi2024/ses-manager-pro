@@ -34,7 +34,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * REV-B2-P1-002: IPピン留めでも Host/SNI/証明書ホスト検証が元ホスト名のままであること、
@@ -49,6 +48,7 @@ class PinningHttpsTransportTest {
     private static HttpsServer httpsServer;
     private static int port;
     private static final AtomicReference<String> lastHostHeader = new AtomicReference<>();
+    private static final AtomicReference<String> lastSni = new AtomicReference<>();
     private static final AtomicInteger hookHits = new AtomicInteger();
     private static final AtomicInteger internalHits = new AtomicInteger();
 
@@ -122,6 +122,7 @@ class PinningHttpsTransportTest {
     void ピン留め接続はHostとSNIに元ホストを使い証明書検証も通る() throws Exception {
         hookHits.set(0);
         lastHostHeader.set(null);
+        lastSni.set(null);
         RestTemplate rest = new RestTemplate(newFactory(testGuard()));
         ResponseEntity<String> response = rest.postForEntity(
                 "https://" + VHOST + ":" + port + "/hook",
@@ -129,9 +130,9 @@ class PinningHttpsTransportTest {
                 String.class);
         assertEquals(200, response.getStatusCode().value());
         assertEquals(1, hookHits.get());
-        String host = lastHostHeader.get();
-        assertTrue(host != null && host.startsWith(VHOST),
-                "Host ヘッダは元ホスト名であること: " + host);
+        assertEquals(VHOST + ":" + port, lastHostHeader.get(),
+                "Host ヘッダは host:port の正確一致であること");
+        assertEquals(VHOST, lastSni.get(), "SNI は元ホスト名の正確一致であること");
     }
 
     @Test
@@ -149,9 +150,13 @@ class PinningHttpsTransportTest {
     }
 
     private static PinningNoRedirectClientHttpRequestFactory newFactory(OutboundUrlGuard guard) throws Exception {
+        DefaultHostnameVerifier defaultVerifier = new DefaultHostnameVerifier();
         SSLConnectionSocketFactory ssl = new SSLConnectionSocketFactory(
                 SSLContexts.custom().loadTrustMaterial(null, new TrustSelfSignedStrategy()).build(),
-                new DefaultHostnameVerifier());
+                (hostname, session) -> {
+                    lastSni.set(hostname);
+                    return defaultVerifier.verify(hostname, session);
+                });
         return new PinningNoRedirectClientHttpRequestFactory(guard) {
             @Override
             public org.springframework.http.client.ClientHttpRequest createRequest(
