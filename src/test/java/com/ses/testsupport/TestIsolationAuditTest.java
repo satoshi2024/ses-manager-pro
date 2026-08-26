@@ -58,7 +58,23 @@ class TestIsolationAuditTest {
             // CloudSign 派遣の並行・ゲート検証。クラスTXだと他スレッドから見えない
             "com.ses.service.cloudsign.CloudSignDispatchIntegrationTest",
             // provider HTTP を TX 外に出す契約検証（クラスTXを意図的に付けない）
-            "com.ses.service.ai.AiExecutionGatewayPiiTest"
+            "com.ses.service.ai.AiExecutionGatewayPiiTest",
+            // REQUIRES_NEW / 永続化可視性が必要（クラスTXだと更新が外から見えない）
+            "com.ses.service.impl.FreeeReauthPersistenceTest",
+            "com.ses.controller.api.ComplianceDocumentApiTest",
+            "com.ses.expense.ExpenseRequestFlowIntegrationTest",
+            "com.ses.service.impl.ReferentialIntegrityGuardTest",
+            "com.ses.service.notification.NotificationOutboxSchedulerIntegrationTest",
+            "com.ses.integration.AccountingWorkerRawExceptionLogTest",
+            // 明示的に rollback 挙動を検証するためクラスTXと衝突する
+            "com.ses.controller.api.SystemConfigScopeInvalidationTest",
+            // MockRest + DB 接続読取がクラスTXで company_id が null 化する
+            "com.ses.service.accounting.FreeeAccountingProviderTest",
+            "com.ses.oneonone.OneOnOneSurveyFlowIntegrationTest",
+            // ポータル連携の commit 可視性がクラスTXで潰れる
+            "com.ses.web.EngineerSelfServicePortalMRegressionTest",
+            // 添付ファイル公開メタデータがクラスTX内では download 経路から見えない
+            "com.ses.changerequest.EngineerChangeRequestAttachmentApiTest"
     );
 
     @Test

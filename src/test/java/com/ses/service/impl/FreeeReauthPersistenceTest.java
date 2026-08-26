@@ -14,7 +14,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
 
@@ -35,7 +34,6 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @SpringBootTest
 @ActiveProfiles("test")
 @DisplayName("REV-002: REAUTH_REQUIREDの永続化（実proxy + H2）")
-@Transactional
 class FreeeReauthPersistenceTest {
 
     private static final String TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token";
