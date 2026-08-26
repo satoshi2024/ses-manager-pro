@@ -302,8 +302,15 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks) {
+        return saveHours(contractId, workMonth, actualHours, remarks, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks,
+                                Integer expectedVersion) {
         checkClosing(workMonth);
-        return saveHoursInternal(contractId, workMonth, actualHours, remarks, false);
+        return saveHoursInternal(contractId, workMonth, actualHours, remarks, false, expectedVersion);
     }
 
     /**
@@ -312,6 +319,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
      */
     private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
                                          String remarks, boolean fromDaily) {
+        // 日次再集計は FOR UPDATE 済み行の現行 version を用いる。
+        return saveHoursInternal(contractId, workMonth, actualHours, remarks, fromDaily, null);
+    }
+
+    private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
+                                         String remarks, boolean fromDaily, Integer expectedVersion) {
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
@@ -393,6 +406,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             record.setContractId(contractId);
             record.setWorkMonth(workMonth);
             record.setStatus("入力中");
+        } else {
+            // 既存行: API はクライアント版必須。日次再集計は FOR UPDATE 済みの現行版を使う。
+            Integer versionToUse = fromDaily ? record.getVersion() : expectedVersion;
+            if (versionToUse == null) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
+            record.setVersion(versionToUse);
         }
 
         record.setActualHours(actualHours);
@@ -404,7 +424,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         freezeAccountingDimension(record, contract);
 
         try {
-            this.saveOrUpdate(record);
+            if (isNew) {
+                this.save(record);
+            } else if (baseMapper.updateById(record) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
         } catch (DuplicateKeyException e) {
             throw BusinessException.of("error.workRecord.userNotFound2");
         }

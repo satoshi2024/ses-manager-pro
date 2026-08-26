@@ -214,7 +214,11 @@ class AcceptanceServiceImplTest {
         workRecordService.reopenMonth("2026-07");
 
         // reopen後は工数編集可能
-        WorkRecord updated = workRecordService.saveHours(contractId, "2026-07", new BigDecimal("170.00"), "修正");
+        WorkRecord current = workRecordService.getOne(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<WorkRecord>()
+                        .eq("contract_id", contractId).eq("work_month", "2026-07"), false);
+        WorkRecord updated = workRecordService.saveHours(
+                contractId, "2026-07", new BigDecimal("170.00"), "修正", current.getVersion());
         assertEquals(0, new BigDecimal("170.00").compareTo(updated.getActualHours()));
     }
 

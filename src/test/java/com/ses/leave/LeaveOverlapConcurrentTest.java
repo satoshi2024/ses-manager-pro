@@ -1,5 +1,6 @@
 package com.ses.leave;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.dto.leave.LeaveApplyRequest;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.EngineerAccountLink;
@@ -39,8 +40,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -153,6 +156,7 @@ class LeaveOverlapConcurrentTest {
         CountDownLatch go = new CountDownLatch(1);
         AtomicInteger success = new AtomicInteger();
         AtomicInteger failure = new AtomicInteger();
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             List<Future<?>> futures = new ArrayList<>();
@@ -168,7 +172,7 @@ class LeaveOverlapConcurrentTest {
                         go.await(10, TimeUnit.SECONDS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, e);
                         return;
                     }
                     try {
@@ -181,8 +185,17 @@ class LeaveOverlapConcurrentTest {
                             leaveService.apply(request);
                         });
                         success.incrementAndGet();
+                    } catch (BusinessException ex) {
+                        // REV-RP-P2-003: 重複は overlap、並行競合は 409
+                        boolean expected = ex.getCode() == 409
+                                || "error.leave.overlap".equals(ex.getMessageKey());
+                        if (expected) {
+                            failure.incrementAndGet();
+                        } else {
+                            unexpected.compareAndSet(null, ex);
+                        }
                     } catch (RuntimeException ex) {
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, ex);
                     } finally {
                         SecurityContextHolder.clearContext();
                     }
@@ -201,6 +214,7 @@ class LeaveOverlapConcurrentTest {
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.LeaveRequest>()
                         .eq(com.ses.entity.LeaveRequest::getEngineerId, engineerId)
                         .eq(com.ses.entity.LeaveRequest::getStatus, "申請中"));
+        assertNull(unexpected.get(), () -> "想定外の例外: " + unexpected.get());
         assertEquals(1, success.get(), "成功は1件");
         assertEquals(1, failure.get(), "失敗は1件");
         assertEquals(1, applied, "申請中は1件のみ");

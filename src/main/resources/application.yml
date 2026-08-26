@@ -35,11 +35,13 @@ server:
 #   - exposure.include は health,prometheus に限定する（それ以外の追加＝内部情報漏洩）。
 #   - 匿名アクセスは SecurityConfig で /actuator/health, /actuator/health/liveness,
 #     /actuator/health/readiness の3パスのみ permitAll する。
-#   - /actuator/prometheus は permitAll にしない。管理者/マネージャーのみ（認証必須）。
+#   - /actuator/prometheus は permitAll にしない。管理者/マネージャー、または
+#     app.metrics.scraper のマシン認証（ROLE_METRICS_SCRAPER）のみ。
 #   - show-details/show-components は never 固定。匿名でも DB 接続先・ディスク・ホスト名・
 #     資格情報など内部の詳細を返さない（health は status のみ）。
-# 実 K8s への配線（Deployment の probe 設定・別 management port・network policy 等）は
-# 本タスク範囲外で BLOCKED のまま。ここではアプリ側のエンドポイント公開制御のみを行う。
+# 実 K8s / ECS への配線（Deployment の probe・ServiceMonitor・別 management port・
+# network policy・スクレイパー Secret 注入等）は本タスク範囲外で BLOCKED のまま。
+# ここではアプリ側のエンドポイント公開制御とマシン認証のみを行う。
 management:
   endpoints:
     web:
@@ -188,6 +190,15 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  # ===== Prometheus スクレイパー・マシン認証（REV-RP-P1-004 / ACC-OPS-P1-002） =====
+  # 秘密情報は環境変数のみ。リポジトリ・設定ファイルへ平文パスワードを書かないこと。
+  # username/password が両方非空のときだけ ROLE_METRICS_SCRAPER のインメモリユーザーを登録する。
+  # K8s ServiceMonitor / ECS scrape への配線は BLOCKED（アプリ側の認証口のみ）。
+  metrics:
+    scraper:
+      enabled: ${METRICS_SCRAPER_ENABLED:false}
+      username: ${METRICS_SCRAPER_USERNAME:}
+      password: ${METRICS_SCRAPER_PASSWORD:}
   scheduler:
     lock:
       # 本番の共有DBロックはDBサーバ時刻を使う。H2 test profileだけfalseで上書きする。

@@ -231,11 +231,10 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- ACC-TEST-P1-004: alphabetical 固定は共有 H2 汚染を隠すため廃止。
-                         並行更新・順序依存の検証は @Tag("mysql") の Testcontainers へ寄せる。
-                         H2 上の業務テストは @Transactional ロールバックまたは明示クリーンアップを前提とする。
-                         filesystem 順は OS で差が出うるが、汚染依存を許容しない契約にする。 -->
-                    <runOrder>filesystem</runOrder>
+                    <!-- 固定順序（alphabetical/filesystem）は隔離の代替にしない。
+                         隔離は @Transactional ロールバックまたは mysql タグ。
+                         乱数 seed は -Dsurefire.runOrder.random.seed=N で再現可能。 -->
+                    <runOrder>random</runOrder>
                     <!-- タイムゾーン/ロケール/文字コードを本番設定(application.ymlのAsia/Tokyo・日本語)へ固定する。
                          未固定だとローカル(JST・ja_JP・環境依存のfile.encoding)とCI(UTC・en_US)で
                          日付境界やメッセージ解決が食い違う。@{jacocoArgLine}はカバレッジ計測用エージェント。 -->

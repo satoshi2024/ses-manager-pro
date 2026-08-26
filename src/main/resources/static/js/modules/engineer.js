@@ -423,6 +423,7 @@ function editEngineer(id) {
             if (res.code === 200 && res.data) {
                 const eng = res.data;
                 $('#eng-id').val(eng.id);
+                $('#eng-version').val(eng.version != null ? eng.version : '');
                 $('#eng-fullName').val(eng.fullName);
                 $('#eng-fullNameKana').val(eng.fullNameKana);
                 $('#eng-employmentType').val(eng.employmentType);
@@ -525,6 +526,8 @@ function saveEngineer() {
 
     if (id) {
         data.id = parseInt(id);
+        const versionVal = $('#eng-version').val();
+        data.version = versionVal !== '' && versionVal != null ? parseInt(versionVal, 10) : null;
     }
 
     $.ajax({
@@ -551,6 +554,7 @@ function saveEngineer() {
 
                 $('#engineer-form')[0].reset();
                 $('#eng-id').val('');
+                $('#eng-version').val('');
                 loadEngineers(1);
             } else {
                 Toast.error(res.message || SES.i18n.t('error.saveFailed'));

@@ -14,6 +14,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,6 +40,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Transactional
 class CloudSignSyncIntegrationTest {
 
     private static final String DOC_ID = "0123456789abcdef0123456789abcdef01";

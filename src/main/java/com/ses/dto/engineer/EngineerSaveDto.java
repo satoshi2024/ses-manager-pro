@@ -57,4 +57,7 @@ public class EngineerSaveDto {
     private String resumeSummary;
     private String photoUrl;
     private String remarks;
+
+    /** 楽観ロック用バージョン。新規作成時は不要、更新時は必須。 */
+    private Integer version;
 }

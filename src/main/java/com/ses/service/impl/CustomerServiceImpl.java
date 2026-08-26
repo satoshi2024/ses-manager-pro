@@ -31,6 +31,23 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public boolean updateWithOptimisticLock(Customer customer) {
+        if (customer == null || customer.getId() == null || customer.getVersion() == null) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        Customer current = getById(customer.getId());
+        if (current == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        // OptimisticLockerInnerInterceptor が version を検査し、成功時に +1 する。
+        if (baseMapper.updateById(customer) != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+        return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long customerId = Long.valueOf(id.toString());
         long projects = projectMapper.selectCount(new LambdaQueryWrapper<Project>().eq(Project::getCustomerId, customerId));

@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /** DataScope設定の変更がcommit後にのみDashboard cache generationへ反映されることを検証する。 */
 @SpringBootTest
 @ActiveProfiles("test")
+@Transactional
 class SystemConfigScopeInvalidationTest {
 
     @Autowired

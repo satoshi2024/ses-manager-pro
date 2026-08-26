@@ -40,7 +40,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.payment_amount AS paymentAmount,
             w.status AS status,
             w.remarks AS remarks,
-            w.reject_comment AS rejectComment
+            w.reject_comment AS rejectComment,
+            w.version AS version
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -77,7 +78,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.payment_amount AS paymentAmount,
             w.status AS status,
             w.remarks AS remarks,
-            w.reject_comment AS rejectComment
+            w.reject_comment AS rejectComment,
+            w.version AS version
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -119,7 +121,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             c.fraction_rule AS fractionRule, e.employment_type AS employmentType,
             w.id AS workRecordId, w.work_month AS workMonth, w.actual_hours AS actualHours,
             w.billing_amount AS billingAmount, w.payment_amount AS paymentAmount,
-            w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment
+            w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment, w.version AS version
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -181,7 +183,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             c.fraction_rule AS fractionRule, e.employment_type AS employmentType,
             w.id AS workRecordId, w.work_month AS workMonth, w.actual_hours AS actualHours,
             w.billing_amount AS billingAmount, w.payment_amount AS paymentAmount,
-            w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment
+            w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment, w.version AS version
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -317,7 +319,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.payment_amount AS paymentAmount,
             w.status AS status,
             w.remarks AS remarks,
-            w.reject_comment AS rejectComment
+            w.reject_comment AS rejectComment,
+            w.version AS version
         FROM t_contract c
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
@@ -498,11 +501,14 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
 
     @org.apache.ibatis.annotations.Update("""
         UPDATE t_work_record
-        SET billing_amount = #{billingAmount}, payment_amount = #{paymentAmount}, updated_at = NOW()
+        SET billing_amount = #{billingAmount}, payment_amount = #{paymentAmount},
+            updated_at = NOW(), version = version + 1
         WHERE id = #{id} AND status != '確定' AND actual_hours = #{actualHours}
+          AND version = #{version}
     """)
     int updateBillingAndPayment(@Param("id") Long id,
                                 @Param("actualHours") java.math.BigDecimal actualHours,
                                 @Param("billingAmount") java.math.BigDecimal billingAmount,
-                                @Param("paymentAmount") java.math.BigDecimal paymentAmount);
+                                @Param("paymentAmount") java.math.BigDecimal paymentAmount,
+                                @Param("version") Integer version);
 }

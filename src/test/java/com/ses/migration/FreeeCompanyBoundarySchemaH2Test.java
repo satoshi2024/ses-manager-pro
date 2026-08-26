@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Sql(scripts = "/sql/schema-freee-payroll-h2.sql",
         executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 @DisplayName("HFP-01-002 H2 schema: freee事業所境界（V102_4同期）")
+@Transactional
 class FreeeCompanyBoundarySchemaH2Test {
 
     @Autowired

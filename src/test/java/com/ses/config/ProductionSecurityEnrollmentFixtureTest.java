@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -14,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/production-security-users-h2.sql",
         config = @org.springframework.test.context.jdbc.SqlConfig(encoding = "UTF-8"))
+@Transactional
 class ProductionSecurityEnrollmentFixtureTest {
 
     @Autowired SysUserMapper sysUserMapper;

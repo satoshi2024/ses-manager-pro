@@ -87,8 +87,14 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean updateWithStatusGuard(Engineer engineer) {
+        if (engineer == null || engineer.getId() == null || engineer.getVersion() == null) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
         Engineer old = getById(engineer.getId());
-        if (old != null && engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
+        if (old == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
             long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
                     .eq(Contract::getEngineerId, engineer.getId())
                     .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
@@ -99,20 +105,22 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
                 throw BusinessException.of("error.engineer.statusBenchHasContract");
             }
         }
-        boolean updated = updateById(engineer);
-        if (updated) {
-            recordAccountingHistory(engineer.getId());
-            // 要員自身の所属組織（organizationId）はscope派生SQLの一次情報。変更後もTTLが切れる
-            // まで旧scopeの母集団が返らないよう進める（第十四次Review P1-3）。
-            // organizationIdはupdate-strategy:not_nullのため、リクエストがnullなら未変更のまま
-            // （old値が維持される）。nullの場合はここで比較する意味がないので対象から外す。
-            if (old != null && engineer.getOrganizationId() != null
-                    && !java.util.Objects.equals(old.getOrganizationId(), engineer.getOrganizationId())
-                    && scopeChangeInvalidator != null) {
-                scopeChangeInvalidator.invalidate();
-            }
+        // OptimisticLockerInnerInterceptor が version を検査し、成功時に +1 する。
+        // 競合は 409。存在しない行との区別を保つため false 返却や 404 へ落とさない。
+        if (baseMapper.updateById(engineer) != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
         }
-        return updated;
+        recordAccountingHistory(engineer.getId());
+        // 要員自身の所属組織（organizationId）はscope派生SQLの一次情報。変更後もTTLが切れる
+        // まで旧scopeの母集団が返らないよう進める（第十四次Review P1-3）。
+        // organizationIdはupdate-strategy:not_nullのため、リクエストがnullなら未変更のまま
+        // （old値が維持される）。nullの場合はここで比較する意味がないので対象から外す。
+        if (engineer.getOrganizationId() != null
+                && !java.util.Objects.equals(old.getOrganizationId(), engineer.getOrganizationId())
+                && scopeChangeInvalidator != null) {
+            scopeChangeInvalidator.invalidate();
+        }
+        return true;
     }
 
     @Override

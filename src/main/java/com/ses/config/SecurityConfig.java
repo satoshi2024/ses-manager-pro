@@ -2,12 +2,16 @@ package com.ses.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.www.BasicAuthenticationEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfToken;
@@ -53,6 +57,8 @@ public class SecurityConfig {
     private final ObjectProvider<org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
             org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest>>
             oidcTokenResponseClientProvider;
+    private final MetricsScraperProperties metricsScraperProperties;
+    private final PasswordEncoder passwordEncoder;
 
     /**
      * MenuPermissionFilterのServletコンテナへの自動登録を無効化する
@@ -142,8 +148,10 @@ public class SecurityConfig {
                     "/actuator/health/liveness",
                     "/actuator/health/readiness"
                 ).permitAll()
-                // Prometheus スクレイプは管理者/マネージャーのみ（匿名・営業・HR は拒否）
-                .requestMatchers("/actuator/prometheus").hasAnyRole("管理者", "マネージャー")
+                // Prometheus: 管理者/マネージャー、またはスクレイパー専用ロール（マシン認証）。
+                // 匿名・営業・HR・要員は拒否。env/beans は exposure 未登録のまま公開しない。
+                .requestMatchers("/actuator/prometheus").hasAnyRole(
+                        "管理者", "マネージャー", MetricsScraperAuthConfig.ROLE_METRICS_SCRAPER)
                 // ユーザー管理・identity-provider・権限設定・監査・システム設定は管理者のみアクセス可能
                 .requestMatchers(
                     "/user/**",
@@ -209,13 +217,23 @@ public class SecurityConfig {
                 // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する
                 .anyRequest().hasAnyRole("管理者", "営業", "HR", "マネージャー")
             )
-            // 例外処理: API(/api/**)への未認証アクセスは302リダイレクトではなく401 JSONを返す
-            .exceptionHandling(ex -> ex
-                .defaultAuthenticationEntryPointFor(
+            // 例外処理:
+            //   - API(/api/**)への未認証アクセスは302ではなく401 JSON
+            //   - Prometheus は Basic 向けに 401 + WWW-Authenticate（フォームリダイレクトにしない）
+            .exceptionHandling(ex -> {
+                ex.defaultAuthenticationEntryPointFor(
                     new org.springframework.security.web.authentication.HttpStatusEntryPoint(org.springframework.http.HttpStatus.UNAUTHORIZED),
                     new AntPathRequestMatcher("/api/**")
-                )
-            )
+                );
+                BasicAuthenticationEntryPoint prometheusEntryPoint = new BasicAuthenticationEntryPoint();
+                prometheusEntryPoint.setRealmName("SES Metrics");
+                ex.defaultAuthenticationEntryPointFor(
+                    prometheusEntryPoint,
+                    new AntPathRequestMatcher("/actuator/prometheus")
+                );
+            })
+            // HTTP Basic（Prometheus スクレイパー用）。フォームログインと併用可能。
+            .httpBasic(Customizer.withDefaults())
             // フォームログインの設定（local-login-enabled=false時はUserDetailsService側でbreak-glass以外を拒否）
             .formLogin(form -> form
                 .loginPage("/login")
@@ -224,6 +242,14 @@ public class SecurityConfig {
                 .failureHandler(loginFailureHandler)
                 .permitAll()
             );
+
+        // スクレイパー資格情報が設定されているときだけ専用 AuthenticationProvider を追加する
+        // （@Bean 公開は UserDetailsService 自動配線を壊し得るため、ここでのみ登録）
+        AuthenticationProvider scraperProvider = MetricsScraperAuthConfig.createAuthenticationProvider(
+                metricsScraperProperties, passwordEncoder);
+        if (scraperProvider != null) {
+            http.authenticationProvider(scraperProvider);
+        }
 
         if (oidcSecurityProperties.isEnabled()) {
             http.oauth2Login(oauth2 -> oauth2

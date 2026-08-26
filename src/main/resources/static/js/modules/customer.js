@@ -165,6 +165,7 @@ function editCustomer(id) {
             if (res.code === 200) {
                 const cust = res.data;
                 $('#cust-id').val(cust.id);
+                $('#cust-version').val(cust.version != null ? cust.version : '');
                 $('#cust-companyName').val(cust.companyName);
                 $('#cust-commercialFlow').val(cust.commercialFlow);
                 $('#cust-trustLevel').val(cust.trustLevel);
@@ -177,6 +178,7 @@ function editCustomer(id) {
         });
     } else {
         $('#cust-id').val('');
+        $('#cust-version').val('');
         $('#cust-companyName').val('');
         $('#cust-commercialFlow').val('エンド直');
         $('#cust-trustLevel').val('B');
@@ -205,6 +207,8 @@ function saveCustomer() {
 
     if (id) {
         data.id = parseInt(id);
+        const versionVal = $('#cust-version').val();
+        data.version = versionVal !== '' && versionVal != null ? parseInt(versionVal, 10) : null;
     }
 
     $.ajax({
@@ -218,6 +222,7 @@ function saveCustomer() {
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).hide();
                 $('#customer-form')[0].reset();
                 $('#cust-id').val('');
+                $('#cust-version').val('');
                 loadCustomers(1);
             } else {
                 Toast.error(res.message || SES.i18n.t('error.saveFailed'));

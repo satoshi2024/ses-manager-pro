@@ -88,6 +88,7 @@ class EngineerServiceImplTest {
 
         Engineer changed = Engineer.builder().fullName("要員A").organizationId(200L).build();
         changed.setId(1L);
+        changed.setVersion(0);
         when(engineerMapper.selectOne(any())).thenReturn(null);
 
         service.updateWithStatusGuard(changed);
@@ -104,6 +105,7 @@ class EngineerServiceImplTest {
 
         Engineer unchanged = Engineer.builder().fullName("要員A").organizationId(100L).build();
         unchanged.setId(1L);
+        unchanged.setVersion(0);
 
         service.updateWithStatusGuard(unchanged);
 

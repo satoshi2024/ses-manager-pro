@@ -130,6 +130,67 @@ class NonGlobalAddressPolicyTest {
         assertThat(NonGlobalAddressPolicy.isNonGlobal(InetAddress.getByName(host))).isTrue();
     }
 
+    /**
+     * REV-RP-P3-001: 2001::/23 内 Globally Reachable=True carve-out ごとの
+     * 先頭・末尾 ALLOW、直前・直後 DENY（隣接 carve-out や /23 外は applicable 外）。
+     */
+    @Test
+    void slash23のGloballyReachableCarveOut境界を検証する() throws Exception {
+        assertCarveOutBounds(
+                "PCP Anycast 2001:1::1/128",
+                "2001:1::1", "2001:1::1",
+                "2001:1::", null); // 直後 2001:1::2 は TURN carve-out
+        assertCarveOutBounds(
+                "TURN Anycast 2001:1::2/128",
+                "2001:1::2", "2001:1::2",
+                null, null); // 前後とも他 /128 carve-out
+        assertCarveOutBounds(
+                "DNS-SD SRP Anycast 2001:1::3/128",
+                "2001:1::3", "2001:1::3",
+                null, "2001:1::4"); // 直前は TURN carve-out
+        assertCarveOutBounds(
+                "AMT 2001:3::/32",
+                "2001:3::", "2001:3:ffff:ffff:ffff:ffff:ffff:ffff",
+                "2001:2:ffff:ffff:ffff:ffff:ffff:ffff", "2001:4::");
+        assertCarveOutBounds(
+                "AS112-v6 2001:4:112::/48",
+                "2001:4:112::", "2001:4:112:ffff:ffff:ffff:ffff:ffff",
+                "2001:4:111:ffff:ffff:ffff:ffff:ffff", "2001:4:113::");
+        assertCarveOutBounds(
+                "ORCHIDv2 2001:20::/28",
+                "2001:20::", "2001:2f:ffff:ffff:ffff:ffff:ffff:ffff",
+                "2001:1f:ffff:ffff:ffff:ffff:ffff:ffff", null); // 直後は Drone RID carve-out
+        assertCarveOutBounds(
+                "Drone Remote ID 2001:30::/28",
+                "2001:30::", "2001:3f:ffff:ffff:ffff:ffff:ffff:ffff",
+                null, "2001:40::"); // 直前は ORCHIDv2 末尾
+    }
+
+    private static void assertCarveOutBounds(String displayName,
+                                             String firstHost, String lastHost,
+                                             String beforeHost, String afterHost) throws Exception {
+        InetAddress first = InetAddress.getByName(firstHost);
+        InetAddress last = InetAddress.getByName(lastHost);
+        assertThat(NonGlobalAddressPolicy.isNonGlobal(first))
+                .as("%s 先頭は許可 (isNonGlobal=false): %s", displayName, firstHost)
+                .isFalse();
+        assertThat(NonGlobalAddressPolicy.isNonGlobal(last))
+                .as("%s 末尾は許可 (isNonGlobal=false): %s", displayName, lastHost)
+                .isFalse();
+        if (beforeHost != null) {
+            InetAddress before = InetAddress.getByName(beforeHost);
+            assertThat(NonGlobalAddressPolicy.isNonGlobal(before))
+                    .as("%s 直前は拒否 (isNonGlobal=true): %s", displayName, beforeHost)
+                    .isTrue();
+        }
+        if (afterHost != null) {
+            InetAddress after = InetAddress.getByName(afterHost);
+            assertThat(NonGlobalAddressPolicy.isNonGlobal(after))
+                    .as("%s 直後は拒否 (isNonGlobal=true): %s", displayName, afterHost)
+                    .isTrue();
+        }
+    }
+
     @Test
     void ポリシー登録CIDRごとの先頭末尾境界外を検証する() throws Exception {
         List<NonGlobalAddressPolicy.Cidr> all = new ArrayList<>();

@@ -176,12 +176,14 @@ function renderWorkRecords(list) {
         const readonly = editable ? '' : 'readonly';
         const hoursInput = `<input type="number" step="0.01" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark actual-hours-input"
                                 data-contract-id="${item.contractId}"
+                                data-version="${item.version != null ? item.version : ''}"
                                 value="${item.actualHours != null ? item.actualHours : ''}"
                                 ${readonly}
                                 onblur="saveHours(this)">`;
 
         const remarksInput = `<input type="text" class="form-control form-control-sm form-control-dark bg-secondary text-white border-dark remarks-input"
                                 data-contract-id="${item.contractId}"
+                                data-version="${item.version != null ? item.version : ''}"
                                 value="${SES.escapeHtml(item.remarks || '')}"
                                 ${readonly}
                                 onblur="saveHours(this)">`;
@@ -269,6 +271,10 @@ function saveHours(element) {
         actualHours: parseFloat(actualHoursStr),
         remarks: remarks
     };
+    const versionAttr = $(element).data('version');
+    if (versionAttr !== undefined && versionAttr !== null && versionAttr !== '') {
+        data.version = parseInt(versionAttr, 10);
+    }
 
     $.ajax({
         url: '/api/work-records',
@@ -281,6 +287,10 @@ function saveHours(element) {
                 row.find('.billing-amount-' + contractId).text(rec.billingAmount != null ? '¥' + rec.billingAmount.toLocaleString() : '-');
                 row.find('.payment-amount-' + contractId).text(rec.paymentAmount != null ? '¥' + rec.paymentAmount.toLocaleString() : '-');
                 row.find('.status-cell-' + contractId).html(getStatusBadge(rec.status));
+                // 保存成功後に version を進め、次の編集で競合しないようにする
+                if (rec.version != null) {
+                    row.find('.actual-hours-input, .remarks-input').attr('data-version', rec.version);
+                }
                 if (rec.id != null) delete dailyCache[rec.id]; // 日次明細を再取得させ、古い内訳の表示を防ぐ
                 Toast.success(SES.i18n.t('common.msg.saveSuccess'));
             } else {

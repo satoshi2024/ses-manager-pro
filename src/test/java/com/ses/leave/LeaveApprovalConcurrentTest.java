@@ -1,5 +1,6 @@
 package com.ses.leave;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.LeaveLedger;
 import com.ses.entity.LeaveRequest;
@@ -35,8 +36,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -140,6 +143,7 @@ class LeaveApprovalConcurrentTest {
         CountDownLatch go = new CountDownLatch(1);
         AtomicInteger success = new AtomicInteger();
         AtomicInteger failure = new AtomicInteger();
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             List<Future<?>> futures = new ArrayList<>();
@@ -152,7 +156,7 @@ class LeaveApprovalConcurrentTest {
                         go.await(10, TimeUnit.SECONDS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, e);
                         return;
                     }
                     try {
@@ -161,8 +165,18 @@ class LeaveApprovalConcurrentTest {
                             adapter.applyApproved(approvalRequest(leave));
                         });
                         success.incrementAndGet();
+                    } catch (BusinessException ex) {
+                        // REV-RP-P2-003: 409 concurrent または残数不足 messageKey
+                        boolean expected = ex.getCode() == 409
+                                || "error.attendance.concurrent".equals(ex.getMessageKey())
+                                || "error.leave.balanceInsufficient".equals(ex.getMessageKey());
+                        if (expected) {
+                            failure.incrementAndGet();
+                        } else {
+                            unexpected.compareAndSet(null, ex);
+                        }
                     } catch (RuntimeException ex) {
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, ex);
                     }
                 }));
             }
@@ -175,6 +189,7 @@ class LeaveApprovalConcurrentTest {
             pool.shutdownNow();
         }
 
+        assertNull(unexpected.get(), () -> "想定外の例外: " + unexpected.get());
         assertEquals(1, success.get(), "成功はちょうど1件");
         assertEquals(1, failure.get(), "失敗はちょうど1件");
 

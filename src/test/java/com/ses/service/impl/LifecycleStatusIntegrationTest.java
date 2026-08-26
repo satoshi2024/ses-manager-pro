@@ -59,6 +59,7 @@ class LifecycleStatusIntegrationTest {
         Long id = insertEngineer("Bench");
         Engineer update = new Engineer();
         update.setId(id);
+        update.setVersion(engineerService.getById(id).getVersion());
         update.setStatus("稼動中");
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> engineerService.updateWithStatusGuard(update));
@@ -71,6 +72,7 @@ class LifecycleStatusIntegrationTest {
         insertContract(id, "稼動中");
         Engineer update = new Engineer();
         update.setId(id);
+        update.setVersion(engineerService.getById(id).getVersion());
         update.setStatus("Bench");
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> engineerService.updateWithStatusGuard(update));
@@ -82,6 +84,7 @@ class LifecycleStatusIntegrationTest {
         Long id = insertEngineer("Bench");
         Engineer update = new Engineer();
         update.setId(id);
+        update.setVersion(engineerService.getById(id).getVersion());
         update.setStatus("提案中");
         assertTrue(engineerService.updateWithStatusGuard(update));
         assertEquals("提案中", engineerStatus(id));
@@ -92,6 +95,7 @@ class LifecycleStatusIntegrationTest {
         Long id = insertEngineer("稼動中"); // 契約が無くても、statusを変えなければ通る
         Engineer update = new Engineer();
         update.setId(id);
+        update.setVersion(engineerService.getById(id).getVersion());
         update.setStatus("稼動中"); // 不変
         update.setFullName("氏名変更");
         assertTrue(engineerService.updateWithStatusGuard(update));

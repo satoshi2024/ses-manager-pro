@@ -138,8 +138,7 @@ public class CustomerApiController {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
         dataScopeService.assertAllowedCustomer(id);
-        boolean success = customerService.updateById(customer);
-        if (!success) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        customerService.updateWithOptimisticLock(customer);
         return ApiResult.success(true);
     }
 

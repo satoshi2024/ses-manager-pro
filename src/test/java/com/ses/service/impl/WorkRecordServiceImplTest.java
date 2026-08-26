@@ -297,7 +297,7 @@ class WorkRecordServiceImplTest {
 
         assertThat(record.getActualHours()).isNull();
         verify(engineerMapper, never()).selectById(7L);
-        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+        verify(workRecordMapper, never()).updateById(any(WorkRecord.class));
         verify(workRecordMapper, never()).insert(any(WorkRecord.class));
     }
 
@@ -308,14 +308,15 @@ class WorkRecordServiceImplTest {
                 .thenReturn(Collections.emptyList());
         when(bpPaymentMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
 
         WorkRecord result = workRecordService.saveHours(
-                1L, "2026-06", new BigDecimal("150"), "正当な更新");
+                1L, "2026-06", new BigDecimal("150"), "正当な更新", 0);
 
         assertThat(result).isSameAs(record);
         assertThat(record.getActualHours()).isEqualByComparingTo("150");
         verify(engineerMapper, never()).selectById(7L);
-        verify(workRecordMapper).insertOrUpdate(record);
+        verify(workRecordMapper).updateById(record);
     }
 
     @Test
@@ -333,7 +334,7 @@ class WorkRecordServiceImplTest {
         verify(workRecordDailyMapper, never()).insert(any(WorkRecordDaily.class));
         verify(workRecordDailyMapper, never()).updateById(any(WorkRecordDaily.class));
         verify(engineerMapper, never()).selectById(7L);
-        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+        verify(workRecordMapper, never()).updateById(any(WorkRecord.class));
     }
 
     @Test
@@ -349,6 +350,7 @@ class WorkRecordServiceImplTest {
                 anyList(), anyList(), isNull())).thenReturn(record);
         when(workRecordDailyMapper.selectOne(any())).thenReturn(null);
         when(workRecordDailyMapper.selectList(any())).thenReturn(Collections.singletonList(daily));
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
 
         WorkRecord result = workRecordService.saveDaily(1L, "2026-06", daily);
 
@@ -356,7 +358,7 @@ class WorkRecordServiceImplTest {
         assertThat(daily.getWorkedHours()).isEqualByComparingTo("8");
         verify(engineerMapper, never()).selectById(7L);
         verify(workRecordDailyMapper).insert(daily);
-        verify(workRecordMapper, atLeastOnce()).insertOrUpdate(record);
+        verify(workRecordMapper, atLeastOnce()).updateById(record);
     }
 
     @Test
@@ -370,7 +372,7 @@ class WorkRecordServiceImplTest {
 
         assertThat(record.getActualHours()).isNull();
         verify(organizationScopeService, never()).isAllowedUser(77L, LocalDate.of(2026, 6, 1));
-        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+        verify(workRecordMapper, never()).updateById(any(WorkRecord.class));
     }
 
     @Test
@@ -379,10 +381,10 @@ class WorkRecordServiceImplTest {
         stubWorkRecordWriteDependencies();
 
         WorkRecord result = workRecordService.saveHours(
-                1L, "2026-06", new BigDecimal("150"), "正当な更新");
+                1L, "2026-06", new BigDecimal("150"), "正当な更新", 0);
 
         assertThat(result).isSameAs(record);
-        verify(workRecordMapper).insertOrUpdate(record);
+        verify(workRecordMapper).updateById(record);
     }
 
     @Test
@@ -395,7 +397,7 @@ class WorkRecordServiceImplTest {
 
         verify(organizationScopeService, never()).isAllowedUser(77L, LocalDate.of(2026, 6, 1));
         verify(workRecordDailyMapper, never()).insert(any(WorkRecordDaily.class));
-        verify(workRecordMapper, never()).insertOrUpdate(any(WorkRecord.class));
+        verify(workRecordMapper, never()).updateById(any(WorkRecord.class));
     }
 
     @Test
@@ -413,7 +415,7 @@ class WorkRecordServiceImplTest {
 
         assertThat(result).isSameAs(record);
         verify(workRecordDailyMapper).insert(daily);
-        verify(workRecordMapper, atLeastOnce()).insertOrUpdate(record);
+        verify(workRecordMapper, atLeastOnce()).updateById(record);
     }
 
     private WorkRecord configureFrozenWorkRecordScope(Long allowedOrganizationId) {
@@ -446,6 +448,7 @@ class WorkRecordServiceImplTest {
         record.setStatus("入力中");
         record.setOrganizationId(200L);
         record.setAccountingDimensionFrozen(1);
+        record.setVersion(0);
         when(workRecordMapper.selectByContractIdAndMonthForUpdate(1L, "2026-06"))
                 .thenReturn(record);
         return record;
@@ -475,6 +478,7 @@ class WorkRecordServiceImplTest {
                 .thenReturn(Collections.emptyList());
         when(bpPaymentMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workRecordMapper.selectEmploymentTypeByContractId(1L)).thenReturn(null);
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
     }
 
     private WorkRecordDaily validDaily(String date) {
@@ -884,16 +888,16 @@ class WorkRecordServiceImplTest {
         WorkRecord existing = new WorkRecord();
         existing.setId(10L);
         existing.setStatus("入力中");
+        existing.setVersion(0);
         when(workRecordMapper.selectByContractIdAndMonthForUpdate(any(), anyString())).thenReturn(existing);
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         // 解約で 2026-03 まで短縮された契約。対象月 2026-07 は期間外＋状態も解約。
         when(contractMapper.selectByIdForUpdate(contractId))
                 .thenReturn(billableContract(contractId, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 31), "解約"));
+        when(workRecordMapper.updateById(any(WorkRecord.class))).thenReturn(1);
 
-        WorkRecordServiceImpl spyService = spy(workRecordService);
-        doReturn(true).when(spyService).saveOrUpdate(any(WorkRecord.class));
-
-        WorkRecord result = spyService.saveHours(contractId, "2026-07", new BigDecimal("150"), "修正");
+        WorkRecord result = workRecordService.saveHours(
+                contractId, "2026-07", new BigDecimal("150"), "修正", 0);
 
         assertThat(result).isNotNull();
         assertThat(result.getId()).isEqualTo(10L);
@@ -941,7 +945,7 @@ class WorkRecordServiceImplTest {
         when(contractMapper.selectByIdForUpdate(contractId)).thenReturn(contract);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
-        doThrow(new org.springframework.dao.DuplicateKeyException("Duplicate entry")).when(spyService).saveOrUpdate(any(WorkRecord.class));
+        doThrow(new org.springframework.dao.DuplicateKeyException("Duplicate entry")).when(spyService).save(any(WorkRecord.class));
 
         assertThatThrownBy(() -> spyService.saveHours(contractId, workMonth, new BigDecimal("150"), "テスト"))
                 .isInstanceOf(BusinessException.class)

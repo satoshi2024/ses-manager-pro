@@ -24,4 +24,6 @@ public class WorkRecordGridDto {
     private String status;
     private String remarks;
     private String rejectComment;
+    /** 楽観ロック用。既存勤怠行があるときのみ設定される。 */
+    private Integer version;
 }

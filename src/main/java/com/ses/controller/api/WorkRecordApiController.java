@@ -64,7 +64,8 @@ public class WorkRecordApiController {
                 request.getContractId(),
                 request.getWorkMonth(),
                 request.getActualHours(),
-                request.getRemarks()
+                request.getRemarks(),
+                request.getVersion()
         ));
     }
 
