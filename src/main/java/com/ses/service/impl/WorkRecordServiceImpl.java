@@ -954,6 +954,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
         record = baseMapper.selectByIdForUpdate(workRecordId);
 
+        // 並行 approve/reject の敗者は、先勝ちで 確定/差戻し になった後にここに来る。
+        // 遷移不正ではなく楽観競合（409）として返す（REV-RP-P2-003）。
+        if ("確定".equals(record.getStatus()) || "差戻し".equals(record.getStatus())) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
+        }
         requireTransition(record, "確定");
         // 単件承認も月次一括確定と同じ帰属凍結を行い、NULLを含む次元を明示的に保存する。
         freezeAccountingDimension(record, contract);
@@ -993,7 +998,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
         record = baseMapper.selectByIdForUpdate(workRecordId);
-        
+
         // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
         String trimmed = comment == null ? "" : comment.trim();
         if (trimmed.isEmpty()) {
@@ -1001,6 +1006,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         if (trimmed.length() > 500) {
             throw BusinessException.of(400, "error.workRecord.rejectCommentTooLong");
+        }
+        // 並行 approve/reject の敗者は 409（REV-RP-P2-003）。
+        if ("確定".equals(record.getStatus()) || "差戻し".equals(record.getStatus())) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
         requireTransition(record, "差戻し");
         // 条件付きUPDATE（CAS）で差戻しコメントを保存する（R3R-10/R3R-12）。

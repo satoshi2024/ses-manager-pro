@@ -24,6 +24,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -41,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class ConcurrentUpdateTest {
 
     @Container
@@ -168,5 +169,10 @@ class ConcurrentUpdateTest {
         // 1つだけが成功し、もう1つはCAS失敗(409)でBusinessExceptionを投げるはず
         assertEquals(1, successCount.get(), "1つの操作のみ成功するべき");
         assertEquals(1, conflict409.get(), "1つの操作はCASによって409失敗するべき");
+
+        WorkRecord finalRecord = workRecordMapper.selectById(record.getId());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Set.of("確定", "差戻し").contains(finalRecord.getStatus()),
+                "最終 status は確定または差戻し: " + finalRecord.getStatus());
     }
 }
