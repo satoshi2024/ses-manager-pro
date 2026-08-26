@@ -13,6 +13,7 @@ import com.ses.mapper.ProjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,30 +41,38 @@ class AiRecommendationRecorderHashTest {
     private EngineerSkillMapper engineerSkillMapper;
     @Autowired
     private AiEvaluationQueryService queryService;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @WithMockUser(username = "1", roles = "管理者")
     void matchingのrunはallowlistのhashとgrain済み勤務地スキルを残す() {
-        // 共有 H2 + 乱数順では seed id=1 が無いことがあるため、検証用データを自前で用意する
         Engineer engineer = engineerMapper.selectById(1L);
         if (engineer == null) {
-            engineer = Engineer.builder()
-                    .fullName("AI-hash-engineer-" + System.nanoTime())
-                    .employmentType("正社員")
-                    .status("Bench")
-                    .build();
-            engineerMapper.insert(engineer);
+            jdbcTemplate.update(
+                    "INSERT INTO t_engineer (id, full_name, employment_type, status) VALUES (1, 'AI-hash-e1', '正社員', 'Bench')");
+            engineer = engineerMapper.selectById(1L);
         }
-        Long engineerId = engineer.getId();
+        final Long engineerId = engineer.getId();
 
-        Project project = new Project();
-        project.setProjectName("AI-hash-project-" + System.nanoTime());
-        project.setStatus("募集中");
-        project.setWorkLocation("東京都千代田区丸の内1-1-1");
-        projectMapper.insert(project);
-        Long projectId = project.getId();
+        Project project = projectMapper.selectById(1L);
+        if (project == null) {
+            jdbcTemplate.update(
+                    "INSERT INTO m_customer (id, company_name) VALUES (91001, 'AI-hash-cust')");
+            project = new Project();
+            project.setProjectName("AI-hash-seed-" + System.nanoTime());
+            project.setCustomerId(91001L);
+            project.setStatus("募集中");
+            project.setWorkLocation("東京都千代田区丸の内1-1-1");
+            projectMapper.insert(project);
+        } else {
+            project.setWorkLocation("東京都千代田区丸の内1-1-1");
+            projectMapper.updateById(project);
+        }
+        final Long projectId = project.getId();
 
-        if (engineerSkillMapper.selectDetailByEngineerId(engineerId).isEmpty()) {
+        Integer skillCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM m_skill_tag WHERE id = 1", Integer.class);
+        if (skillCount != null && skillCount > 0 && engineerSkillMapper.selectDetailByEngineerId(engineerId).isEmpty()) {
             EngineerSkill skill = new EngineerSkill();
             skill.setEngineerId(engineerId);
             skill.setSkillId(1L);
@@ -82,15 +91,8 @@ class AiRecommendationRecorderHashTest {
         assertNotEquals("0".repeat(64), run.getInputHash());
         assertTrue(run.getInputHash() != null && run.getInputHash().length() == 64);
         String summary = run.getRedactedSummaryJson();
-        assertTrue(summary != null && !summary.isBlank(), "redacted summary must exist");
-        // 番地は必ず落とす（grain）。都道府県までは残る想定だが、スキル未解決時は location のみのケースもある
+        assertTrue(summary != null && summary.contains("東京都千代田区"), summary);
         assertFalse(summary.contains("丸の内1-1-1"), summary);
-        assertTrue(
-                summary.contains("東京都千代田区")
-                        || summary.contains("千代田区")
-                        || summary.contains("workLocation")
-                        || summary.contains("location"),
-                summary);
 
         for (int i = 0; i < 4; i++) {
             MatchResultDto extra = new MatchResultDto();
@@ -100,9 +102,9 @@ class AiRecommendationRecorderHashTest {
             recorder.recordMatch("MATCHING", engineerId, List.of(extra), 1L, 1L);
         }
         AiEvaluationDashboardDto dashboard = queryService.dashboard();
-        assertTrue(dashboard.getSegments() != null, "dashboard segments");
-        // セグメントは累積件数に依存。hash/grain の本丸は上で固定済み
-        assertTrue(dashboard.getSegments().size() >= 0);
+        assertTrue(dashboard.getSegments().stream().anyMatch(row ->
+                        String.valueOf(row.get("segment")).contains("location:東京都千代田区")
+                                || String.valueOf(row.get("segment")).startsWith("skill:")),
+                String.valueOf(dashboard.getSegments()));
     }
 }
-

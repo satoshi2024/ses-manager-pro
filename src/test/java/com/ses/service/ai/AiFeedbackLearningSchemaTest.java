@@ -11,6 +11,7 @@ import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiOutcomeMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -92,6 +93,7 @@ class AiFeedbackLearningSchemaTest {
     }
 
     @Test
+    @Tag("mysql")
     void 同時昇格は片方だけ成功しACTIVEは1つ() throws Exception {
         String useCase = uniqueUseCase();
         AiArtifactVersion baseline = shadow(useCase, "ACTIVE");
