@@ -57,7 +57,7 @@ class AiRecommendationRecorderHashTest {
         Long engineerId = engineer.getId();
 
         Project project = new Project();
-        project.setName("AI-hash-project-" + System.nanoTime());
+        project.setProjectName("AI-hash-project-" + System.nanoTime());
         project.setStatus("募集中");
         project.setWorkLocation("東京都千代田区丸の内1-1-1");
         projectMapper.insert(project);
