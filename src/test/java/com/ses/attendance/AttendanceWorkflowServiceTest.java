@@ -1,5 +1,6 @@
 package com.ses.attendance;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.attendance.AttendanceBreakRequest;
 import com.ses.dto.attendance.AttendanceDayRequest;
@@ -72,6 +73,11 @@ class AttendanceWorkflowServiceTest {
         calendarId = jdbcTemplate.queryForObject("SELECT id FROM m_work_calendar WHERE engineer_id = ?", Long.class, engineerId);
         jdbcTemplate.update("INSERT INTO m_work_calendar_day (calendar_id, calendar_date, day_type, scheduled_minutes) "
                 + "VALUES (?, '2026-08-03', '通常', 480)", calendarId);
+        // 共有 H2 で engineer id が再利用されると旧 link が UNIQUE(engineer_id) と衝突する
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, USER_ID)
+                .or()
+                .eq(EngineerAccountLink::getEngineerId, engineerId));
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(USER_ID);
