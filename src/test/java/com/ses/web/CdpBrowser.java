@@ -101,12 +101,17 @@ public final class CdpBrowser implements AutoCloseable {
         long deadline = System.currentTimeMillis() + 40_000;
         while (System.currentTimeMillis() < deadline) {
             if (Files.exists(portFile)) {
-                String content = Files.readString(portFile).trim();
-                if (!content.isBlank()) {
-                    lines = content.split("\\s+");
-                    if (lines.length >= 1) {
-                        break;
+                try {
+                    String content = Files.readString(portFile).trim();
+                    if (!content.isBlank()) {
+                        lines = content.split("\\s+");
+                        if (lines.length >= 1) {
+                            break;
+                        }
                     }
+                } catch (IOException locked) {
+                    // Windows では起動直後に DevToolsActivePort が他プロセスでロックされ得る。
+                    // 読み取り失敗は失敗扱いせず期限まで再試行する。
                 }
             }
             Thread.sleep(200);
