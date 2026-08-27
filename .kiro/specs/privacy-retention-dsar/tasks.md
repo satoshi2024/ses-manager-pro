@@ -27,7 +27,7 @@ DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、
 - [ ] **0.4 coverage closure**
   - **Objective**: 全migration/entity/providerの明示inventory rowとresult evidenceを揃える。
   - **Implementation**: 各table/column/providerへ owner、purpose、trigger、policy version、legal hold、disposition、DSAR provider、result evidenceを付与する。unknownは人の確認までBLOCKEDとする。
-  - **Test requirements**: scanner exit code 0、unmapped=0、inventory/source hash固定、AI egress/log/cache/file/index/exportおよびbackup/replicaのcoverageを独立Reviewで確認する。
+  - **Test requirements**: source coverageのunmapped/entity/provider missing=0、privacy catalog unclassified=0、inventory/source hash固定、AI egress/log/cache/file/index/exportおよびbackup/replicaのcoverageを独立Reviewで確認する。
   - **Demo**: coverageがexit code 0になるまでF1以降を開始しない。
 
 ## D0. read-only dry-run（今回の完了範囲）

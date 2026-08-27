@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$InventoryPath = '.kiro/specs/privacy-retention-dsar/pii-inventory.md',
+    [string]$SourceCoveragePath = '.kiro/specs/privacy-retention-dsar/source-coverage.md',
     [string]$MigrationRoot = 'src/main/resources/db/migration',
     [string]$EntityRoot = 'src/main/java',
     [string]$ProviderRoot = 'src/main/java'
@@ -35,7 +36,7 @@ function Test-SqlColumnLine {
     if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('--')) {
         return $false
     }
-    if ($trimmed -match '^(?i)(CONSTRAINT|PRIMARY|UNIQUE|INDEX|KEY|CHECK|FOREIGN|FULLTEXT|SPATIAL|PARTITION|ENGINE|COMMENT)\b') {
+    if ($trimmed -match '^(?i)(CONSTRAINT|PRIMARY|UNIQUE|INDEX|KEY|CHECK|FOREIGN|FULLTEXT|SPATIAL|PARTITION|ENGINE|COMMENT|ON|REFERENCES|AND|OR|THEN|ELSE|END|IF|SET|CALL|DROP|ALTER|ADD)\b') {
         return $false
     }
     return $trimmed -match '^[`]?([A-Za-z0-9_]+)[`]?\s+[A-Za-z]'
@@ -54,6 +55,9 @@ if (-not (Test-Path -LiteralPath $EntityRoot -PathType Container)) {
 $inventoryFullPath = (Resolve-Path -LiteralPath $InventoryPath).Path
 $inventoryText = Get-Content -LiteralPath $inventoryFullPath -Raw
 $inventoryHash = (Get-FileHash -LiteralPath $inventoryFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceCoverageExists = Test-Path -LiteralPath $SourceCoveragePath -PathType Leaf
+$sourceCoverageText = if ($sourceCoverageExists) { Get-Content -LiteralPath $SourceCoveragePath -Raw } else { '' }
+$sourceCoverageHash = if ($sourceCoverageExists) { (Get-FileHash -LiteralPath $SourceCoveragePath -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
 
 $tableRecords = [System.Collections.Generic.List[object]]::new()
 $alterColumnRecords = [System.Collections.Generic.List[object]]::new()
@@ -157,6 +161,61 @@ $unmappedTables = @($tableNames | Where-Object {
 $entityOnlyTables = @($entityRecords.table | Where-Object {
         -not $tableNames.Contains($_)
     } | Sort-Object -Unique)
+$allTableRecords = @($tableRecords | Group-Object table | Sort-Object Name | ForEach-Object {
+        $group = @($_.Group)
+        $columns = [System.Collections.Generic.List[string]]::new()
+        $sources = [System.Collections.Generic.List[string]]::new()
+        foreach ($member in $group) {
+            foreach ($column in @($member.columns)) { $columns.Add($column) }
+            $sources.Add($member.source)
+        }
+        [pscustomobject]@{
+            table = $_.Name
+            columns = @($columns | Sort-Object -Unique)
+            source = @($sources | Sort-Object -Unique) -join '; '
+        }
+    })
+$unmappedTableRecords = @($tableRecords | Where-Object {
+        $unmappedTables -contains $_.table
+    } | Group-Object table | Sort-Object Name | ForEach-Object {
+        $group = @($_.Group)
+        $columns = [System.Collections.Generic.List[string]]::new()
+        $sources = [System.Collections.Generic.List[string]]::new()
+        foreach ($member in $group) {
+            foreach ($column in @($member.columns)) { $columns.Add($column) }
+            $sources.Add($member.source)
+        }
+        [pscustomobject]@{
+            table = $_.Name
+            columns = @($columns | Sort-Object -Unique)
+            source = @($sources | Sort-Object -Unique) -join '; '
+        }
+    })
+$sourceCoverageMatchedTables = @($tableNames | Where-Object {
+        $sourceCoverageText -match ([regex]::Escape('`' + $_) + '(?:`|\.)')
+    } | Sort-Object)
+$sourceCoverageUnmappedTables = @($tableNames | Where-Object {
+        $sourceCoverageText -notmatch ([regex]::Escape('`' + $_) + '(?:`|\.)')
+    } | Sort-Object)
+$sourceCoverageMissingColumns = [System.Collections.Generic.List[object]]::new()
+foreach ($record in $allTableRecords) {
+    foreach ($column in $record.columns) {
+        $columnRef = '`' + $record.table + '.' + $column + '`'
+        if ($sourceCoverageText -notmatch [regex]::Escape($columnRef)) {
+            $sourceCoverageMissingColumns.Add([pscustomobject]@{
+                table = $record.table
+                column = $column
+            })
+        }
+    }
+}
+$providerCoverageMissing = @($providerRecords | Where-Object {
+        $sourceCoverageText -notmatch [regex]::Escape('`' + $_ + '`')
+    })
+$entityCoverageMissing = @($entityRecords | Where-Object {
+        $sourceCoverageText -notmatch [regex]::Escape('`' + $_.table + '`')
+    } | Sort-Object table, source)
+$privacyCatalogUnclassifiedTables = $unmappedTables
 
 $canonicalLines = [System.Collections.Generic.List[string]]::new()
 foreach ($record in ($tableRecords | Sort-Object table, source)) {
@@ -176,13 +235,16 @@ $sourceManifestHash = Get-CanonicalSha256 -Text ($canonicalLines -join "`n")
 $dbIdCount = @([regex]::Matches($inventoryText, '(?m)^\| DB-[0-9]{3}\b')).Count
 $fileIdCount = @([regex]::Matches($inventoryText, '(?m)^\| FILE-[0-9]{3}\b')).Count
 $aiIdCount = @([regex]::Matches($inventoryText, '(?m)^\| AI-[0-9]{3}\b')).Count
-$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } else { 'COVERAGE_EXPLICIT' }
+$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0 -or $sourceCoverageUnmappedTables.Count -gt 0 -or $sourceCoverageMissingColumns.Count -gt 0 -or $providerCoverageMissing.Count -gt 0 -or $entityCoverageMissing.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } else { 'COVERAGE_EXPLICIT' }
+$sourceCoverageDisplayPath = if ($sourceCoverageExists) { Get-RelativePath -Path (Resolve-Path -LiteralPath $SourceCoveragePath).Path } else { $SourceCoveragePath }
 
 $result = [ordered]@{
     mode = 'READ_ONLY_SOURCE_COVERAGE'
     status = $status
     inventoryPath = Get-RelativePath -Path $inventoryFullPath
     inventorySha256 = $inventoryHash
+    sourceCoveragePath = $sourceCoverageDisplayPath
+    sourceCoverageSha256 = $sourceCoverageHash
     sourceManifestSha256 = $sourceManifestHash
     migrationFileCount = $migrationFiles.Count
     migrationTableCount = $tableNames.Count
@@ -195,8 +257,26 @@ $result = [ordered]@{
     explicitFileRecordCount = $fileIdCount
     explicitAiRecordCount = $aiIdCount
     inventoryMatchedTableCount = $inventoryMatchedTables.Count
-    unmappedTableCount = $unmappedTables.Count
-    unmappedTables = $unmappedTables
+    unmappedTableCount = $sourceCoverageUnmappedTables.Count
+    unmappedTables = $sourceCoverageUnmappedTables
+    unmappedTableRecords = @($sourceCoverageUnmappedTables)
+    privacyCatalogExplicitTableCount = $inventoryMatchedTables.Count
+    privacyCatalogUnclassifiedTableCount = $privacyCatalogUnclassifiedTables.Count
+    privacyCatalogUnclassifiedTables = $privacyCatalogUnclassifiedTables
+    privacyCatalogUnclassifiedTableRecords = $unmappedTableRecords
+    sourceTableRecords = $allTableRecords
+    entityRecords = @($entityRecords)
+    providerCandidateFiles = @($providerRecords)
+    sourceCoverageMatchedTableCount = $sourceCoverageMatchedTables.Count
+    sourceCoverageUnmappedTableCount = $sourceCoverageUnmappedTables.Count
+    sourceCoverageUnmappedTables = $sourceCoverageUnmappedTables
+    sourceCoverageColumnCount = @($allTableRecords.columns | ForEach-Object { $_ }).Count
+    sourceCoverageMissingColumnCount = $sourceCoverageMissingColumns.Count
+    sourceCoverageMissingColumns = @($sourceCoverageMissingColumns | Select-Object -First 100)
+    providerCoverageMissingCount = $providerCoverageMissing.Count
+    providerCoverageMissing = $providerCoverageMissing
+    entityCoverageMissingCount = $entityCoverageMissing.Count
+    entityCoverageMissing = @($entityCoverageMissing)
     entityOnlyTableCount = $entityOnlyTables.Count
     entityOnlyTables = $entityOnlyTables
     providerCallCount = 0

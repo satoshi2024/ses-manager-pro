@@ -14,7 +14,7 @@
 | audit | CONDITIONAL | append-only/technical loggingはinventory済み。法的保持/DSAR表示policyは未確定 | 未割当 |
 | recruiting retention | BLOCKED | candidate/resume/rejected/activity retention未確定 | 未割当 |
 | AI G10 | BLOCKED | external provider DPA/region/training opt-out/owner gate未完。external send false | 未割当 |
-| mechanical source coverage | BLOCKED | migration 180 table / 4,220 CREATE column / 114 ALTER column、entity 176、provider候補123。明示table match 102、unmapped 78、exit 2、hashは`coverage-evidence.md`参照 | 実装AI（証跡生成のみ） |
+| mechanical source coverage | COMPLETE（policyはBLOCKED） | migration 180 table / 4,220 CREATE column / 114 ALTER column、entity 176、provider候補123。privacy catalog explicit/unclassified 102/78、source coverage unmapped/missing column/entity/provider 0/0/0/0、exit 2は未分類policyをfail-closedした結果、hashは`coverage-evidence.md`参照 | 実装AI（証跡生成のみ） |
 
 ## append-only notes
 

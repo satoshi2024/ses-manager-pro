@@ -25,7 +25,8 @@
 9. `tools/privacy-retention-dsar/read-only-dry-run.ps1`
 10. `tools/privacy-retention-dsar/dry-run-fixture.json`
 11. `.kiro/specs/privacy-retention-dsar/coverage-evidence.md`
-12. `tools/privacy-retention-dsar/inventory-coverage.ps1`（read-only source coverage、未マップ時exit 2）
+12. `.kiro/specs/privacy-retention-dsar/source-coverage.md`（全source table/column/entity/provider候補の明示manifest）
+13. `tools/privacy-retention-dsar/inventory-coverage.ps1`（read-only source coverage、privacy catalog未分類時exit 2）
 
 ## Review request
 

@@ -118,12 +118,12 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | migration file / table / CREATE column record / ALTER column record | 116 / 180 / 4,220 / 114 |
 | entity table / provider候補file | 176 / 123 |
 | explicit inventory record（DB / FILE / AI） | 79（62 / 10 / 7） |
-| explicit table match / unmapped table | 102 / 78 |
+| privacy catalog explicit / unclassified; source coverage unmapped | 102 / 78; 0 |
 | `providerCallCount` / `writeCount` | 0 / 0 |
 | inventory SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録（inventory自身へ固定値を書かない） |
 | source manifest SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録 |
 
-78 tableはまだ明示rowがなく、wildcardを含むものも `UNKNOWN/BLOCKED` とする。したがってcoverageは未完了であり、PR-R1とcompletion matrixを完全達成扱いにしない。scannerのstdoutが全unmapped table名とsource manifestを出力し、再走査の生成証跡となる。
+78 tableはmain privacy catalogでまだ個別policy分類されていない。source-coverage manifestでは全180 tableと全2,620 columnを明示しているが、該当78 tableのowner/purpose/trigger/policy/hold/disposition/providerは`UNKNOWN/BLOCKED`であり、処分候補にしない。したがってprivacy catalog coverageは未完了で、PR-R1とcompletion matrixを完全達成扱いにしない。scannerのstdoutがprivacy catalog未分類一覧とsource manifestを出力し、再走査の生成証跡となる。
 
 ## 5. audit / retention unresolved matters
 

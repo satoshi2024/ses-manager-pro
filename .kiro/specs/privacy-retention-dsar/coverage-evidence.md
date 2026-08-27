@@ -19,16 +19,18 @@ pwsh -NoProfile -File .\tools\privacy-retention-dsar\inventory-coverage.ps1
 | entity table | `176` |
 | provider/gateway/file/backup/restore/export/search/cache/audit/integration candidate file | `123` |
 | explicit inventory record（DB / FILE / AI） | `79（62 / 10 / 7）` |
-| explicit table match / unmapped table | `102 / 78` |
+| privacy catalog explicit / unclassified table | `102 / 78` |
+| source coverage unmapped / missing column / entity / provider | `0 / 0 / 0 / 0` |
 | providerCallCount / writeCount | `0 / 0` |
-| inventory SHA-256 | `b0760b7337380f018f79bd7d07e6bf5c7e83e454c0a9bb123031b48a52ed6548` |
-| source manifest SHA-256 | `6137cb504d8e17290727249de4d4808052d6c5d41c92c59ec25ac13f8a8d4cc3` |
+| inventory SHA-256 | `ff27ae374dd8a1ed4d565c9bc8968ecd90a818db845ddde0aaee8e0b65dd513d` |
+| source coverage SHA-256 | `ebae0cc69ba84369c9603af97977f3d47e0d9cb59989936dd46e2d2403865320` |
+| source manifest SHA-256 | `a5a608f80700f055d206170fef5f75feb57cf057b0081ff50fe559f949d805e4` |
 
 inventory SHAは対象inventoryそのもの、source manifest SHAはmigration table/column・entity・provider候補の正規化列をハッシュした値である。固定値をinventory自身へ埋め込まず、同じcommandのstdoutと本ファイルを証跡にする。
 
-## unmapped tables（全件 UNKNOWN/BLOCKED）
+## privacy catalog unclassified tables（全件 UNKNOWN/BLOCKED）
 
-明示的なtable/column/provider rowがない対象、またはwildcard/group表記だけの対象はcompletion候補にしない。以下はscannerが列挙した未マップtableである。
+source-coverage manifestは全source table/column/entity/provider候補を明示している。一方、main privacy catalogで個別policy分類が未完の対象、またはwildcard/group表記だけの対象はcompletion候補にしない。以下はscannerが列挙したprivacy catalog未分類tableである。
 
 ```text
 m_approval_route
@@ -112,4 +114,4 @@ t_user_organization
 t_user_permission_group
 ```
 
-この未マップ一覧が0になるまで、PR-R1は完全達成ではない。法的保持、owner、purpose、policy version、hold、disposition、DSAR provider、result evidenceを推測で補完せず、F1-Mを開始しない。
+このprivacy catalog未分類一覧が0になるまで、PR-R1は完全達成ではない。法的保持、owner、purpose、policy version、hold、disposition、DSAR provider、result evidenceを推測で補完せず、F1-Mを開始しない。

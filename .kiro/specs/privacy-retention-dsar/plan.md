@@ -10,7 +10,7 @@
 
 | 順序 | increment | 成果 | 開始条件 | 現在 |
 |---|---|---|---|---|
-| 0 | legal/PII inventory | table/column/file/AI payload catalog、owner/purpose/trigger/retention/hold/disposition/provider | 読み取り可能なrepo evidence、全migration/entity/providerのcoverage hash | INCOMPLETE（78 unmapped table、fail-closed） |
+| 0 | legal/PII inventory | table/column/file/AI payload catalog、owner/purpose/trigger/retention/hold/disposition/provider | 読み取り可能なrepo evidence、全migration/entity/providerのcoverage hash | INCOMPLETE（privacy catalog unclassified 78、fail-closed） |
 | D0 | dry-run | redacted snapshotのcandidate/blocked/unknown、no-write evidence | 0完了。実データ/provider接続なし | COMPLETE（offline） |
 | F1 | catalog/policy/hold/request/job DDL | versioned policy、hold、case/action/job | DG-07とapproved scope/owner、migration approval | BLOCKED |
 | F2 | provider/search/dry-run | DB/file/AI/backup/replica provider、scope/redaction | F1、external provider scope/security approval | BLOCKED |
