@@ -2,7 +2,7 @@
 
 ## Handoff status
 
-- Review対象: `origin/codex/privacy-retention-dsar` の最終branch tip。直近の内容検証済みHeadは `5b92bc8b0683e13e3cfcfaab05695e8eaa994dd7` であり、dispatch時に `git ls-remote` でtipを再確認する。
+- Review対象: `origin/codex/privacy-retention-dsar` のdispatch時点のbranch tip。remote Headを正本とし、dispatch時に `git ls-remote` で取得したSHAとworktree HEADを一致確認して記録する（特定の過去Headを最新とみなさない）。
 - 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
 - fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。

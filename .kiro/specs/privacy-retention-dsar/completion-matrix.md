@@ -25,6 +25,7 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | 0 inventory/spec foundation | `6ea110bb` | `origin/codex/privacy-retention-dsar` | pushed |
 | D0 dry-run | `eb0e2dd3cb566161e7878bd7a0ee377bdd63393f` | `origin/codex/privacy-retention-dsar` | pushed |
 | D0 blocker coverage | `3875ccb578d0fe31546d8e7b33fde1d3bf1c2cc3` | `origin/codex/privacy-retention-dsar` | pushed |
+| D0 review-gap closure | `314b6a9bf2b80af6a50e25fa2e6c0a1dcf531524` | `origin/codex/privacy-retention-dsar` | pushed |
 | handoff/base drift evidence | `2ea49d44bbe45296d9f69e39fb3e371abd503d13` | `origin/codex/privacy-retention-dsar` | pushed |
 | evidence formatting | `5b92bc8b0683e13e3cfcfaab05695e8eaa994dd7` | `origin/codex/privacy-retention-dsar` | pushed |
 
