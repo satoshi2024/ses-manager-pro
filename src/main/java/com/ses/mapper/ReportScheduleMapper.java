@@ -23,7 +23,9 @@ public interface ReportScheduleMapper extends BaseMapper<ReportSchedule> {
     @Update("UPDATE m_report_schedule SET next_run_at = #{nextRunAt}, last_run_at = #{runAt}, "
             + "retry_scheduled_at = NULL, updated_at = CURRENT_TIMESTAMP "
             + "WHERE id = #{id} AND enabled = 1 AND deleted_flag = 0 "
-            + "AND next_run_at = #{expectedNextRunAt}")
+            + "AND next_run_at = #{expectedNextRunAt} "
+            + "AND ((retry_scheduled_at IS NULL AND next_run_at <= #{runAt}) "
+            + "OR (retry_scheduled_at IS NOT NULL AND retry_scheduled_at <= #{runAt}))")
     int claimDue(@Param("id") Long id, @Param("expectedNextRunAt") LocalDateTime expectedNextRunAt,
                  @Param("nextRunAt") LocalDateTime nextRunAt, @Param("runAt") LocalDateTime runAt);
 
