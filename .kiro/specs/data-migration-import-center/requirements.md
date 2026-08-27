@@ -53,7 +53,7 @@
 ### R3. Apply・chunk・restart・idempotency
 
 1. applyはREADYかつ、source SHA-256、mapping version/hash、schema version、承認者、base snapshotがvalidate結果と一致するjobだけを受け付ける。
-2. jobはUPLOADED→MAPPED→VALIDATED→READY→APPLYING→COMPLETED/FAILED/ROLLED_BACKの状態機械を持ち、許可されない遷移、二重apply、同一source hashで異なるmappingのapplyを拒否しなければならない。
+2. jobはUPLOADED→MAPPED→VALIDATED→READY→APPLYING→COMPLETED/FAILED/ROLLED_BACKの公開状態と、rollback時のROLLBACK_REQUESTED→ROLLING_BACK→ROLLED_BACK/ROLLBACK_FAILEDの内部状態を持ち、許可遷移、terminal性、retry/reopen条件、CAS条件を設計表どおりに検証しなければならない。二重apply、同一source hashで異なるmappingのapply、COMPLETED/ROLLED_BACKからの直接再applyを拒否しなければならない。
 3. applyはchunk/checkpoint単位で処理し、row result、id-map、checkpointを同じ冪等境界で確定する。mid-chunk crash後の再開で成功済みrowを重複作成してはならない。
 4. 再開は、job id、mapping version、source row number/natural key、target entity/id、action、result hashの組を検証し、未完了rowだけを再実行しなければならない。
 5. create/update/status change/child replacementを含む全業務操作はcanonical DTOからdomain serviceへ渡す。mapper直insert/update/deleteでvalidation、監査、履歴、関連同期を迂回してはならない。
@@ -68,9 +68,9 @@
 
 ### R5. Reconciliation・evidence
 
-1. jobごとにsource、accepted、rejected、applied、updated、skippedの件数を保存し、重複計上せず、定義を画面/API/CSVで共通化する。
+1. jobごとにsource、accepted、rejected、applied、updated、skipped、apply_failed、empty_skipped、amount_excludedの拡張カウンタを保存し、重複計上せず、同じ名前・定義を画面/API/CSVで共通化する。
 2. 金額列があるentityは、JPY、period、source amount、accepted/rejected/applied/updated/skipped amountの合計を保存し、source合計との差分を理由コード付きで照合しなければならない。分類式は source = accepted + rejected、accepted = applied + updated + skipped + apply_failed とし、validate完了/COMPLETEDでは apply_failed = 0、差異件数・差異金額 = 0でなければならない。
-3. 空/不正金額は0円と混同せず、amount-excluded件数と理由を分離する。負数は業務上許可される場合とformula文字列を別に扱う。
+3. 空/不正金額は0円と混同せず、amount_excluded件数と理由を分離する。負数は業務上許可される場合とformula文字列を別に扱う。金額のcurrency=JPY、scale、rounding modeはvalidate開始前にmapping承認者が確定し、既定はscale=0・UNNECESSARYで小数をrejectする。別modeはDG-06承認理由とmapping versionへ保存し、apply時に変更しない。
 4. 完了時に、source hash、mapping version、mapping hash、schema version、executor、approvedBy、started/finished time、base snapshot、result hashを保存する。
 5. result hashはrow resultの安定した並びと正規化された結果項目から算出し、同一入力・同一mapping・同一結果の再検証に使えるようにする。
 

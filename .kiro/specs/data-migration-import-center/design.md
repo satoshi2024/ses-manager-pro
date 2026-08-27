@@ -61,6 +61,8 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 | rollback | 管理者＋rollback権限＋別承認者 | 当該jobのapplied/updated rowのみ | downstream ref、version conflict、policy禁止 |
 | async/batch | system executor（起動actorを保存） | 起動時にsnapshotしたtenant/scope | request SecurityContextの参照、scope未保存 |
 
+営業、HR、マネージャー、要員、portal user、および未認証主体は、対象データへの通常の可視権限を持っていてもImport Centerのupload/mapping/preview/validate/apply/retry/rollback/error export/reconciliation downloadを実行できない。MVPは管理者＋明示されたimport権限だけを許可し、その他はUI表示の有無にかかわらずAPIで403、scope/role解決不能時はfail-closedとする。
+
 空の許可集合は全件許可ではなく0件とする。preview、count、error export、apply、retry、rollback、document downloadで同じvisible populationを再計算し、UI非表示を認可の代替にしない。
 
 #### 状態機械・競合
@@ -74,6 +76,25 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 | target natural key | target domain unique/行lock | id-mapとtarget lookupを同一row transactionで照合 |
 | checkpoint | job_id + chunk_no、last_committed_row | commit済みprefixのみ再開。未commit rowは再処理 |
 | rollback | ROLLBACK_REQUESTED→ROLLING_BACK CAS | 二重rollbackを拒否し、compensation failureを終端化 |
+
+### 2.4 状態遷移の許可表
+
+| From | To | 許可条件 | terminal / 再開 |
+|---|---|---|---|
+| UPLOADED | MAPPED | source documentがCLEAN、source identityが未登録、mapping schemaが許可済み | 非terminal |
+| MAPPED | VALIDATED | mapping hash/versionを固定してread-only validateを開始 | 非terminal |
+| VALIDATED | READY | blocking finding 0、reconciliation式が成立、base snapshotと承認が一致 | 非terminal |
+| READY | APPLYING | executorがCAS取得、同一source identityの未実行job、apply approvalあり | 非terminal |
+| APPLYING | COMPLETED | 全chunk/checkpointがCOMPLETED、apply_failed=0、差異0、result hash確定 | terminal |
+| APPLYING | FAILED | retryable/unknown errorを保存し、実行leaseを解放 | 非terminal。same jobだけ再開可 |
+| FAILED | APPLYING | 同じsource/mapping/base、lease期限切れまたは明示retry承認、CAS成功 | 非terminal |
+| APPLYING / FAILED / COMPLETED | ROLLBACK_REQUESTED | applied/updated prefixがあり、rollback対象と別承認者を確定。APPLYINGはlease失効後のみ | 非terminal |
+| ROLLBACK_REQUESTED | ROLLING_BACK | rollback policy、scope、version、承認を再確認しCAS取得 | 非terminal |
+| ROLLING_BACK | ROLLED_BACK | 全rowのrollback/compensation成功、reconciliation確定 | terminal。同一source identityを再applyしない |
+| ROLLING_BACK | ROLLBACK_FAILED | 1件以上のcompensation失敗、失敗理由と未処理rowを保存 | operational terminal。再試行は別承認＋CASのみ |
+| ROLLBACK_FAILED | ROLLING_BACK | 同じrollback plan、未処理row、scope/baseを再確認し、別のrollback lease/CASを取得 | terminal化まで再試行可 |
+
+上表にない遷移、COMPLETEDからAPPLYINGへの遷移、ROLLED_BACKからの再apply、異なるmappingでのFAILED再開は拒否する。COMPLETEDからのrollbackは業務参照を壊さない範囲で明示承認を要求し、ROLLED_BACK後に同じsource identityをもう一度適用する場合はsource hashを変えた新しいsourceとして扱うのではなく、運用者が新しいmigration jobを承認できる状態になるまで拒否する。
 
 ## 3. 候補データモデル
 
@@ -226,7 +247,7 @@ entityごとに次の表をmapping versionへ記録する。
 - row hash: source rowの元値をencoding復元後のcanonical representationでSHA-256。PIIをログへ出さない。
 - result hash: row number順のrow result（target id、action、status、error code、amount、row hash）をstable serializeしてSHA-256。
 
-amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。reconciliationにはsource、accepted、rejected、applied、updated、skippedに加え、apply_failed、empty_skipped、amount_excludedを各件数・金額または理由付き件数で保存する。
+amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。reconciliationの共通カウンタはsource、accepted、rejected、applied、updated、skipped、apply_failed、empty_skipped、amount_excludedとし、画面/API/CSVで同じ名前・定義を使う。各amount対象カウンタには金額を、empty_skipped/amount_excludedには理由付き件数を保存する。
 
 分類式は次で固定する。
 
@@ -240,6 +261,8 @@ amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含�
 - difference_amount = source_amount_known - accepted_amount - rejected_amount
 
 blank/invalid/formula-like amountはamount_excludedへ分離し、数値合計へ入れない。duplicateは同一source内の二重rowとしてrejected、既存id-mapのhash一致による再実行だけをskippedとする。COMPLETEDの条件はdifference_count=0、difference_amount=0、apply_failed_rows=0、result hash確定である。
+
+金額の決定主体と確定時点も固定する。mapping承認者（Ownerが指定する会計責任者）が、validate開始前にcurrency=JPY、scale=0、rounding modeをmapping versionへ保存する。既定のrounding modeはUNNECESSARYとし、小数を含むsource amountは丸めずamount_excluded/rejectedにする。ROUND_HALF_UP等を使う場合はDG-06の承認理由とmapping versionへ明記し、canonical conversion時に一度だけ適用する。apply時に現在設定を再読込して丸め直すことは禁止する。
 
 ## 9. File / UI / API候補
 

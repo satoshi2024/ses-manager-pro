@@ -174,9 +174,11 @@ Spikeでは、DB接続をread-only datasourceまたはtransaction rollbackで隔
 | applied | applyで新規作成された行 |
 | updated | 承認済みupsertで更新された行 |
 | skipped | idempotent再実行または明示skipされた行 |
-| amount source | sourceの有効な金額合計 |
-| amount accepted/applied/updated/skipped | それぞれの状態に属する金額合計 |
-| difference | source合計と状態合計の差。理由コード別に0であること |
+| apply_failed | accepted後に業務処理が失敗し、jobがFAILEDになった行 |
+| empty_skipped | header以外の完全空行として除外した行 |
+| amount_excluded | 空/不正/formula-likeで金額合計から除外した行 |
+| amount source/accepted/applied/updated/skipped/apply_failed/rejected | 各状態に属する既知JPY金額の合計 |
+| difference | source = accepted + rejected、accepted = applied + updated + skipped + apply_failedの差。COMPLETEDでは件数・金額・apply_failedとも0 |
 
 amountが空・不正・非金額entityの場合は、合計対象外件数と理由を別に保持し、ゼロ金額と欠損を混同しない。
 

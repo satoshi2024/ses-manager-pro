@@ -147,7 +147,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 - source existing row updateは自動復元せず、before snapshot/version conflict/管理者承認を要求する。
 - compensation actionとrollback failureをrow/job/auditへ記録する。
 - source document、error export、auditはretention/legal holdを尊重し、rollbackで削除しない。
-- source/accepted/rejected/applied/updated/skippedのcount/JPY amountとexcluded reasonを再計算し、difference 0を完了条件にする。
+- source/accepted/rejected/applied/updated/skipped/apply_failed/empty_skipped/amount_excludedの拡張9カウンタ、JPY amount、excluded reasonを再計算し、designの分類式とdifference 0を完了条件にする。
 
 ### Test requirements
 
@@ -179,7 +179,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 ### Demo
 
-- source hash、mapping version/hash、result hash、six counters、amount reconciliation、target duplicate count、restart/rollback outcomeをReview artifactとして渡す。
+- source hash、mapping version/hash、result hash、拡張9カウンタ、amount reconciliation、target duplicate count、restart/rollback outcomeをReview artifactとして渡す。
 
 ## 完了対応表（現時点）
 
