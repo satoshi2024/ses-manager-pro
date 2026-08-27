@@ -85,25 +85,17 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             wrapper.like(Customer::getCompanyName, keyword);
         }
 
-        List<Customer> customers = customerMapper.selectList(wrapper);
-        if (customers.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        // DataScope による顧客絞り込み（WIP-4 回帰防止）
+        // DataScope による SQL レベル絞り込み (design.md 表2: 条件はSQLへ、空集合はid=-1、取得後filter禁止)
         if (dataScopeService.isScoped()) {
-            customers = customers.stream()
-                    .filter(c -> {
-                        try {
-                            dataScopeService.assertAllowedCustomer(c.getId());
-                            return true;
-                        } catch (BusinessException e) {
-                            return false;
-                        }
-                    })
-                    .collect(Collectors.toList());
+            Set<Long> allowed = dataScopeService.allowedCustomerIds();
+            if (allowed == null || allowed.isEmpty()) {
+                wrapper.eq(Customer::getId, -1L);
+            } else {
+                wrapper.in(Customer::getId, allowed);
+            }
         }
 
+        List<Customer> customers = customerMapper.selectList(wrapper);
         if (customers.isEmpty()) {
             return Collections.emptyList();
         }
@@ -193,8 +185,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             overdueInvoicesByCustomer = invoices.stream()
                     .filter(inv -> {
                         String st = inv.getStatus();
-                        boolean isUnpaidStatus = "送付済".equals(st) || "一部入金".equals(st)
-                                || "OVERDUE".equalsIgnoreCase(st) || "ISSUED".equalsIgnoreCase(st);
+                        boolean isUnpaidStatus = "送付済".equals(st) || "一部入金".equals(st);
                         return isUnpaidStatus && inv.getDueDate() != null && inv.getDueDate().isBefore(today) && inv.getPaidDate() == null;
                     })
                     .collect(Collectors.groupingBy(Invoice::getCustomerId));
@@ -215,7 +206,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             int openP1 = (int) custOpenReqs.stream().filter(r -> "P1".equalsIgnoreCase(r.getPriority())).count();
             int openCritical = openP0 + openP1;
 
-            // 直近30日SLA違反件数（リクエスト単位で1カウント）
+            // 直近30日SLA違反件数（リクエスト単位で1カウント）および clock 有無
             List<Long> custReqIds = reqIdsByCustomer.getOrDefault(custId, Collections.emptyList());
             int slaBreaches30d = 0;
             for (Long rId : custReqIds) {
@@ -253,8 +244,11 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             breakdown.put("openP0Deduction", p0Deduction);
             breakdown.put("openP1Deduction", p1Deduction);
 
-            // 2. 直近30日SLA超過（request単位1カウント: -10点/件）
+            // 2. 直近30日SLA超過（request単位1カウント: -10点/件、clock無しはmissing）
             int slaDeduction = slaBreaches30d * 10;
+            if (custReqIds.isEmpty()) {
+                missingInputs.add("SLA");
+            }
             deductions += slaDeduction;
             breakdown.put("slaBreachDeduction", slaDeduction);
 

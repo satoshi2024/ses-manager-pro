@@ -71,26 +71,48 @@ class ServiceSlaCalculatorTest {
     }
 
     @Test
-    @DisplayName("祝日(m_work_calendar_day)スキップの計算 (WIP-1)")
+    @DisplayName("法人カレンダー(m_work_calendar 有効)および祝日(m_work_calendar_day)マッパー経由でのスキップ計算 (WIP-1)")
     void testCalculateDeadline_holidaySkip() {
-        LocalDate holidayDate = LocalDate.of(2026, 8, 25); // 火曜日を祝日と定義
-        ServiceSlaCalculator holidayCalculator = new ServiceSlaCalculator(
-                Clock.fixed(LocalDateTime.of(2026, 8, 24, 9, 0).atZone(ZoneId.of("Asia/Tokyo")).toInstant(), ZoneId.of("Asia/Tokyo")),
-                null,
-                null) {
-            @Override
-            public boolean isNonWorkingDay(LocalDate date) {
-                if (date.equals(holidayDate)) {
-                    return true;
+        com.ses.entity.WorkCalendar legalCal = new com.ses.entity.WorkCalendar();
+        legalCal.setId(100L);
+        legalCal.setStatus("有効");
+
+        com.ses.mapper.WorkCalendarMapper calMapper = mock(com.ses.mapper.WorkCalendarMapper.class);
+        when(calMapper.selectList(any())).thenReturn(List.of(legalCal));
+
+        WorkCalendarDay holidayDay = new WorkCalendarDay();
+        holidayDay.setCalendarId(100L);
+        holidayDay.setCalendarDate(LocalDate.of(2026, 8, 25)); // 火曜日を祝日
+        holidayDay.setDayType("祝日");
+
+        when(workCalendarDayMapper.selectList(any())).thenAnswer(invocation -> {
+            Object arg = invocation.getArgument(0);
+            if (arg instanceof com.baomidou.mybatisplus.core.conditions.AbstractWrapper<?, ?, ?> wrapper) {
+                wrapper.getCustomSqlSegment();
+                if (wrapper.getParamNameValuePairs() != null) {
+                    for (Object val : wrapper.getParamNameValuePairs().values()) {
+                        if (LocalDate.of(2026, 8, 25).equals(val)) {
+                            return List.of(holidayDay);
+                        }
+                    }
                 }
-                return super.isWeekend(date);
             }
-        };
+            return List.of();
+        });
 
-        LocalDateTime start = LocalDateTime.of(2026, 8, 24, 16, 0); // 月曜 16:00
-        LocalDateTime deadline = holidayCalculator.calculateDeadline(start, 4, standardPolicy);
+        ObjectProvider<com.ses.mapper.WorkCalendarMapper> calProvider = mock(ObjectProvider.class);
+        when(calProvider.getIfAvailable()).thenReturn(calMapper);
 
-        // 火曜が祝日としてスキップされ、水曜 2026-08-26 09:00 から2時間 -> 11:00
+        ObjectProvider<WorkCalendarDayMapper> dayProvider = mock(ObjectProvider.class);
+        when(dayProvider.getIfAvailable()).thenReturn(workCalendarDayMapper);
+
+        Clock fixedClock = Clock.fixed(LocalDateTime.of(2026, 8, 24, 9, 0).atZone(ZoneId.of("Asia/Tokyo")).toInstant(), ZoneId.of("Asia/Tokyo"));
+        ServiceSlaCalculator realLookupCalculator = new ServiceSlaCalculator(fixedClock, dayProvider, calProvider);
+
+        LocalDateTime start = LocalDateTime.of(2026, 8, 24, 16, 0); // 月曜 16:00 (当日残り2時間)
+        LocalDateTime deadline = realLookupCalculator.calculateDeadline(start, 4, standardPolicy);
+
+        // 火曜が祝日としてマッパーから取得されてスキップされ、水曜 2026-08-26 09:00 から2時間 -> 11:00
         assertEquals(LocalDateTime.of(2026, 8, 26, 11, 0), deadline);
     }
 

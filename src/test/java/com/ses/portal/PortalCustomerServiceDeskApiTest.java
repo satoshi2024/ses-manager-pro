@@ -50,6 +50,9 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     protected CustomerMapper customerMapper;
 
     @Autowired
+    protected com.ses.mapper.EngineerMapper engineerMapper;
+
+    @Autowired
     protected ServiceRequestService serviceRequestService;
 
     @Override
@@ -251,5 +254,35 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                         .content(objectMapper.writeValueAsString(csatReq)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value(409));
+    }
+
+    @Test
+    @DisplayName("自社契約に紐付かない他社要員IDを指定して起票した場合は400エラーで拒否されること (要員自社所属検証: WIP-8)")
+    void testCreateRequest_otherCompanyEngineerRejected() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        // ダミー要員作成（契約なし）
+        com.ses.entity.Engineer otherEng = com.ses.entity.Engineer.builder()
+                .fullName("他社要員")
+                .status("稼動中")
+                .employmentType("正社員")
+                .build();
+        engineerMapper.insert(otherEng);
+
+        PortalServiceRequestCreateRequest reqWithOtherEng = PortalServiceRequestCreateRequest.builder()
+                .category("TECHNICAL")
+                .priority("P2")
+                .subject("他社要員の稼働について")
+                .description("問い合わせ内容")
+                .engineerId(otherEng.getId())
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reqWithOtherEng)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
     }
 }

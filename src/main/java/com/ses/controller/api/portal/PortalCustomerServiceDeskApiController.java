@@ -143,11 +143,19 @@ public class PortalCustomerServiceDeskApiController {
             }
         }
 
-        // 要員が指定された場合の存在検証
+        // 要員が指定された場合の存在検証および自社契約所属検証 (WIP-8)
         if (req.getEngineerId() != null) {
             Engineer engineer = engineerMapper.selectById(req.getEngineerId());
             if (engineer == null) {
                 throw BusinessException.of(400, "指定された要員が見つかりません");
+            }
+            Long contractCount = contractMapper.selectCount(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Contract>()
+                            .eq(Contract::getCustomerId, custId)
+                            .eq(Contract::getEngineerId, req.getEngineerId())
+            );
+            if (contractCount == null || contractCount == 0) {
+                throw BusinessException.of(400, "指定された要員は自社の契約に紐付いていません");
             }
         }
 
