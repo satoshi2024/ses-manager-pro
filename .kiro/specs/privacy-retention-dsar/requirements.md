@@ -6,7 +6,7 @@
 |---|---|---|
 | Approved policy/scope | `<APPROVED_SCOPE>`（未置換） | 未承認。処分対象の範囲を確定できない |
 | Privacy owner | `<OWNER>`（未置換） | 未定。データ要素ごとの責任者が未確定 |
-| Base commit / branch | `<BASE_COMMIT>` / `<BASE_BRANCH>`（未置換） | 入力値は未確定。実際の作業baseは開始時検証の `origin/main@0333b0a4afadef42639bad27e1ae443758f9804f` |
+| Base commit / branch | `<BASE_COMMIT>` / `<BASE_BRANCH>`（未置換） | 入力値は未確定。開始時の作業base/merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。fetch後の現在 `origin/main` は `f131f51c50dbfb68ffc8e71878da52947560c80e` に進んだため、rebaseしない |
 | NF-07 | CANDIDATE | 承認済み要求ではない |
 | DG-07 | 未完了 | 保持期間、法的根拠、hold権限、二者承認、法務/HR/税務責任者が未確定 |
 | 外部専門家 / 社内責任者 gate | 未完了 | 本番処分を許可しない |

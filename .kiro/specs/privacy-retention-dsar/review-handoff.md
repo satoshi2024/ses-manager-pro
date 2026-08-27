@@ -3,7 +3,8 @@
 ## Handoff status
 
 - Review対象: `codex/privacy-retention-dsar` の最終remote Head `eb0e2dd3cb566161e7878bd7a0ee377bdd63393f`。
-- Base: `origin/main@0333b0a4afadef42639bad27e1ae443758f9804f`。
+- 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
+- fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。
