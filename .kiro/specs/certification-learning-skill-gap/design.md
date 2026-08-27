@@ -16,16 +16,22 @@
 
 | logical table | 必須責務 | 主要な候補属性 | integrity |
 |---|---|---|---|
-| `m_certification` | 資格master・expiry rule | issuer、external_code、name、expiry_type、expiry_months、active | tenant＋external_code unique、expiry ruleの範囲検証 |
-| `t_engineer_certification` | engineerの取得record/current state | engineer_id、certification_id、acquired_on、expires_on、certificate_number_ref、status、version | activeな重複取得unique、期限はLocalDate、scope owner固定 |
-| `t_certification_event` | append-only state/correction history | certification_record_id、event_type、supersedes_event_id、reason、actor、occurred_at、payload hash | event id unique、update/delete禁止、correct/cancel reason必須 |
+| `m_certification` | 資格master・expiry rule | issuer_key、external_code_key、name_key、identity_key、expiry_type、expiry_months、rule_version、active | tenant＋identity_key unique。code NULLもname identityで一意、表記揺れはalias/merge review |
+| `m_certification_alias` | 資格名表記揺れ・merge候補 | certification_id、issuer/name alias、normalized_key、valid period、approved_by | aliasから別masterを作らず、mergeはappend-only eventと人の承認が必要 |
+| `t_engineer_certification` | engineerの取得record/current state | engineer_id、certification_id、continuity_group_id、acquired_on、expires_on、expiry_rule_version、certificate_number_ref、record_state、current_flag、revision、version | current_flag=1のcontinuity groupをrow lock＋uniqueで一意化、期限はLocalDate、scope owner固定 |
+| `t_certification_event` | append-only state/correction history | certification_record_id、event_type、supersedes_event_id、reason、actor、occurred_at、effective fields、evidence_document_version_id、evidence_hash | event id unique、update/delete禁止、correct/cancel reason必須。CORRECTEDはeventのみ |
 | `m_training_course` | course/provider/catalog | provider、name、cost_jpy、period、capacity、active | JPY BigDecimal、capacity非負、期間inclusive |
 | `t_training_course_skill` | courseとcanonical skillの関連 | course_id、skill_id、target_level、required_flag | `(course_id,skill_id)` unique、名称保存を正本にしない |
 | `t_learning_plan` | goal、deadline、criteria、approval/state | engineer_id、created_by、period、status、approval_request_id、version | creatorのscope、state CAS、criteria必須 |
 | `t_learning_plan_skill` | plan target skill | plan_id、skill_id、target_level、target_date | `(plan_id,skill_id)` unique、`m_skill_tag` FK |
-| `t_training_enrollment` | plan/courseの実施record | plan_id、course_id、status、started_on、completed_on、score、actual_cost_jpy、certificate_document_id | state transition、completion条件、DocumentLink必須 |
-| `t_skill_tag_alias`（optional） | synonym map | normalized_alias、canonical_skill_id、valid period、approved_by | alias unique、変更履歴、unknown自動master化禁止 |
-| `t_skill_gap_snapshot`（optional） | 再現用snapshot | as_of、demand_version、engineer_skill_version、result、created_at | immutable。source of truthではない |
+| `t_training_enrollment` | plan/courseの実施record | plan_id、course_id、status、started_on、completed_on、score、certificate_document_id、planned_cost_snapshot | state transition、completion条件、DocumentLink必須。actual costは既存経費から導出 |
+| `t_training_enrollment_expense` | enrollmentと既存経費の関連 | enrollment_id、expense_request_id、relation_reason | 金額・支払状態を所有せず、既存`t_expense_request`を参照 |
+| `t_engineer_skill_event` / `t_project_skill_event` | supply・project skillのeffective history | source row、skill、level、effective_from/to、supersedes、actor、reason、event id | current projectionを過去へ遡及適用しない |
+| `t_project_position_event` | staffing positionのas-of snapshot | position fields、skills_json、effective period、source version、event id | 現行positionだけで過去需要を推測しない |
+| `t_engineer_skill_assessment` | 本人/上長/HRの評価proposal・確定を分離 | assessment_type、proposed level、state、actor、effective period、reason、version | `t_engineer_skill`のcurrent値へAI/本人が直接書かない |
+| `t_learning_decision_event` | 人の確定・利用目的・不利益利用監査 | decision domain、source type/id、human actor、adverse flag、reason、snapshot hash | AI candidateだけでは確定・配置・不利益判断できない |
+| `t_skill_tag_alias` | synonym map | normalized_alias、canonical_skill_id、valid period、approved_by | alias unique、変更履歴、unknown自動master化禁止 |
+| `t_skill_gap_snapshot` | 再現用snapshot | as_of、demand_version、supply_version、taxonomy_version、result_hash、created_at | monthly close/exportでは必須、immutable。source of truthではない |
 
 番号のraw値を `certificate_number_ref` に格納する方法（暗号化、token、vault reference）はDG-03承認値に従う。ログ、通知、AI payloadには出さない。
 
@@ -35,21 +41,69 @@
 
 取得申請はpendingで保存し、証憑がCLEANかつscope内で確認された後に、既存approval route（必要な場合）を通してactiveへ遷移する。cancel/correctは旧recordを物理削除せずeventを追加し、effective stateを再計算する。active取得のduplicateはDB uniqueとservice validationの両方で拒否する。
 
-90/60/30通知は `expires_on - configured_days` をLocalDateで計算し、境界日を含む。既送通知は対象record version、threshold、recipient、periodのidempotency keyで抑止する。設定変更、訂正、取消は新versionとして再計算する。
+90/60/30通知は `expires_on - configured_days` をLocalDateで計算し、境界日を含む。既送通知は `record_id + semantic_expiry_date + threshold_days + recipient_user_id` のidempotency keyで抑止し、無関係なrevision番号を含めない。expiry dateが変わる訂正・更新だけを新しいsemantic keyとして扱い、同一expiryへの再実行は既存uniqueでdedupeする。
 
 ### 3.2 skill gap
 
 rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決する。
 
-1. target period内の `t_project_skill`。
-2. staffing positionの `skills_json`（start/end inclusive、status、as-of ruleを適用）。
-3. engineerのas-of skill/career evidence。
+1. `PROJECT`は`t_project_skill_event`、`POSITION`は`t_project_position_event`を正本とする。
+2. `COMBINED`は同一project・canonical skillについて`t_project_skill_event`を優先し、position側の追加skillだけを加える。source IDとprecedenceを返す。
+3. engineerの`t_engineer_skill_event`とcareer evidenceをas-ofで評価する。
 
 同義語は承認済みaliasだけを利用し、未知skillは`unknown`の結果として返す。現在の`SkillTagResolver`が未知名を`未分類`で作成する挙動は、需要計算の暗黙master化に使わない。AIが有効ならrule結果をinputに候補courseを作り、AIが停止または失敗した場合は候補部分だけ空にしてgap結果を返す。
 
 ### 3.3 費用承認
 
-金額はJPY `BigDecimal`、threshold境界はinclusiveを候補とする。実際の承認判定は既存approval engineのrequestType、amount snapshot、route snapshotに委譲する。threshold/approverが未設定またはcandidate不在ならfail closed、申請者と承認者の同一判定は拒否する。閾値を `m_system_config` で持つか、approval routeのmin/maxを設定画面の正本とするかはDG-03で決める。
+金額は税込JPY `BigDecimal`。planのplanned costは申請時snapshotで、NULLは申請不可、0円は監査eventのみで許可する。actual cost・支払・会計連携は既存`t_expense_request`／会計outboxを正本とし、enrollmentには保存しない。thresholdは`learning.plan`用`m_approval_route.min_amount`を正本とし、minはinclusive、別の`m_system_config`閾値を併存させない。既存approval engineのrequestType、amount snapshot、route snapshotに委譲する。threshold/approverが未設定またはcandidate不在ならfail closed、申請者と承認者の同一判定は拒否する。approved budgetを超える実費は差額を上書きせず、追加expense approvalまたはplan amendmentを要求する。締め済みwork monthは`MonthlyClosingService.assertOpenForUpdate`で拒否し、reopenは既存workflowだけから行う。
+
+### 3.4 as-of source、effective dating、snapshot
+
+既存の`t_engineer_skill`と`t_project_skill`はcurrent projectionとして維持し、同じtransactionでappend-onlyのskill eventを登録する。eventは`effective_from`、`effective_to`、source version、actor、reason、`supersedes_event_id`を持ち、重なる有効期間はrow lockとservice validationで拒否する。`t_project_position`も変更ごとのposition eventに`skills_json`とrequired fieldsをsnapshotする。
+
+as-of queryは次の順で実行する。
+
+1. requestが指定した`as_of`またはtarget periodをLocalDateとして確定する。
+2. supply/demandのeffective eventだけをSQLで抽出し、履歴のない過去をcurrent projectionで補完しない。
+3. `PROJECT`はproject skill、`POSITION`はposition skill、`COMBINED`はproject skillを同一canonical skillの優先sourceとしてposition-only skillを追加する。
+4. unknown、alias、source ID、precedence、使用versionをresultへ残す。
+5. monthly close、export、replayは`snapshot`のsource version/hashを再利用し、snapshotがなければreplay不可として明示する。
+
+feature有効化より前の期間にeventがない場合は`historical_data_unavailable`を返す。これは現在値を過去に遡及適用するより安全なfail-closedであり、backfillを行う場合は開始日・元データ・actor・hashを別途承認する。
+
+### 3.5 資格のnatural identity、renew、訂正
+
+資格masterは入力をtrim、全角正規化、uppercase化した`issuer_key`、`external_code_key`、`name_key`を作り、`identity_key`（codeがある場合はissuer+code、ない場合はissuer+nameのhash）をNOT NULLでuniqueにする。issuer別の同じcodeは別master候補としてmerge reviewへ送り、code NULLの行もname identityで重複を防ぐ。名称aliasは`m_certification_alias`で解決し、silent mergeはしない。
+
+取得recordは`record_state`（DRAFT/SUBMITTED/VERIFIED/ACTIVE/CANCELLED/SUPERSEDED）と`current_flag`を持つ。`EXPIRED`は`as_of > expires_on`から導出し、`CORRECTED`はstateにしない。訂正は同一recordのrevision/eventを追加し、訂正後もACTIVEまたはEXPIRED等を独立に判定する。renewは同じ`continuity_group_id`の新recordとして作り、旧recordをSUPERSEDEDにして履歴を保持する。current_flag=1の行はtenant・engineer・certification・continuity group単位でuniqueにし、cancel/renew/correctは同一group row lock＋version CASで直列化する。
+
+`expires_on`当日はAsia/Tokyoの終日まで有効である。masterのexpiry rule更新は既存recordへ遡及せず、recordの`expiry_rule_version`を使って取得時の計算を再現する。
+
+### 3.6 証憑のtyped resolverとmixed-link policy
+
+`CERTIFICATION_EVIDENCE`文書は`CERTIFICATION_RECORD` linkのみを認可根拠とする。既存DocumentLinkの一般文書向けOR-unionを資格証憑へ適用しない。資格証憑文書に誤って`ENGINEER`等のgeneric linkが混在していても、restricted policyを先に評価し、generic linkはgrantに使わない。資格証憑の登録serviceはgeneric linkを作らず、typed linkがなければverified/download可能状態にしない。
+
+eventには`evidence_document_id`、`evidence_document_version_id`、version hashを保存し、download/export時にDocumentLinkのrecord owner、要求version、tenant、hash、scan status=CLEAN、retention/legal hold、menu＋DataScopeを再検証する。version不一致、unknown stored name、未scan、REJECTED、linkなしはfail closedする。FileScopeValidationServiceのtarget resolverはこの順序を明示的に実装し、DocumentLink OR-unionに戻らない。
+
+### 3.7 研修費用と既存経費正本
+
+`t_learning_plan.planned_cost_jpy`はplan申請時の見積snapshot、`t_training_enrollment_expense`はenrollmentと既存`t_expense_request`の関連だけを持つ。金額、approval状態、accounting job、paid stateは`t_expense_request`と既存ExpenseAccounting outboxが所有する。plan approved snapshotはcourse price変更やactual expenseで上書きしない。
+
+amountは税込JPYでNULL不可、0円planは`ZERO_COST_CONFIRMED` eventと人の確認だけを残し、既存expense requestは作成しない。actualのexpenseは既存ExpenseRequestが要求する正のamountを使う。approved plan budgetを超えるactualは、差額expenseの既存approvalまたは新plan amendmentを経由し、無承認でenrollmentへ加算しない。expense日付のwork monthが締め済みなら`MonthlyClosingService.assertOpenForUpdate`で関連・金額・支払状態の変更を拒否する。
+
+### 3.8 scheduler、timezone、通知対象
+
+通知判定は注入`Clock`を使用し、tenant timezone設定がある場合はそれを正本、テストと既定環境はAsia/Tokyoとする。semantic keyは`CERT_EXPIRY:recordId:effectiveExpiryDate:thresholdDays:recipientUserId`とし、record revision、表示文言、無関係な訂正を含めない。expiry dateが変わったときだけ新semantic keyを許可する。
+
+既存`t_notification.dedupe_key`のDB uniqueが複数JVMの最終防衛線になる。insertのduplicateは対象keyを再読して`DEDUPED`として扱い、例外を成功に握りつぶさない。outboxを使う場合はcommit後にclaimし、claim競合とlease回復をテストする。
+
+通知recipientはdispatch時点で解決してuser IDを保存する。退社完了・休職中・無効accountの本人には通常90/60/30を送らず、manager変更後に旧managerへ再送しない。managerはdispatch時点の有効org/DataScope内、HRは既存HR scope内だけを対象にする。account未linkは本人recipientを作らず、manager/HRへの通知可否を同じscope policyで判定する。復職時は過去の90/60/30をbackfillせず、残日数に対する`REINSTATEMENT`を一回だけsemantic keyで発行する。
+
+### 3.9 本人評価・上長提案・HR確定
+
+`t_engineer_skill_assessment`はSELF、MANAGER、HR_FINALを別recordとして保存する。SELFは本人提案、MANAGERはレビュー/提案、HR_FINALだけが承認されたeffective skill projectionへ反映可能である。learning planではgoal skill、deadline、attainment criteriaについて本人提出と上長合意を別versionで保持し、合意前に公式skillへ反映しない。
+
+AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻、as-of、taxonomy version、allowlist、candidate hash、human accept/reject、期限を記録する。AI candidateのacceptはlearning suggestionを作るだけで、assessment、placement、採否、昇格、給与、不利益判断のstate transitionを呼べない。人が確定した場合は`t_learning_decision_event`へdecision domain、source type/id、human actor、reason、snapshot hash、adverse-use flagをappendする。adverse decisionではAI candidateをsole sourceにせず、既存HR/legal workflowと人の明示確定を要求する。
 
 ## 4. Decision tables
 
@@ -57,8 +111,8 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | data | candidate classification | list/detail | export | AI/log | unresolved decision |
 |---|---|---|---|---|---|
-| 資格番号raw | 個人情報・restricted（特定個人情報該当性は法務確認） | engineer本人と権限付HR/adminのみfull候補、それ以外mask | default omitまたはmask | deny | full reveal role、暗号化/token方式、retention |
-| 資格番号masked | derived restricted | scope内のみ | scope内のみ | deny | mask形式、検索可否 |
+| 資格番号raw | 個人情報・restricted（特定個人情報該当性は法務確認） | engineer本人と`certification.pii.view`を持つHR/adminのみfull候補、それ以外mask | rawはomit、maskedもscope内のみ | deny | Owner/法務承認、暗号化/token方式、retention |
+| 資格番号masked | derived restricted | scope内のみ | scope内のみ | deny | full valueを再構成できないmask方式 |
 | issuer/code/name | business data（番号と結合時はrestricted） | scope内 | scope内 | allowlist候補 | 外部コードの公開性 |
 | evidence metadata | business＋個人関連情報 | link scope内 | metadataのみ候補 | deny raw file | export項目、保管期間 |
 
@@ -66,10 +120,10 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | operation | candidate link | required checks | deny condition | unresolved decision |
 |---|---|---|---|---|
-| upload/register | `target_type=ENGINEER_CERTIFICATION`、target_id=取得record候補 | owner engineer scope、DocumentService、CLEAN、FileReferenceProvider登録 | unknown target、未scan、scope外 | 既存ENGINEER linkで代替するか、record resolver追加か |
-| list/detail | recordに紐づくDocumentLink union | same effective population、legal hold/retention、record state | linkなしを証憑verifiedにしない | 複数証憑のprimary rule |
-| download | linkからownerを解決 | FileScopeValidationService、scan=CLEAN、menu＋DataScope | stored name unknown、CLEAN以外、scope外 | target typeの正式enum/resolve実装 |
-| export | raw fileは出さずmetadata/link status候補 | UIと同一population/scope | UIで見えないrecord/file | exportにdocument IDを含めるか |
+| upload/register | `target_type=CERTIFICATION_RECORD`、target_id=取得record | owner engineer scope、`CERTIFICATION_EVIDENCE`、DocumentService、CLEAN、FileReferenceProvider登録 | `ENGINEER` linkだけ、unknown target、未scan、scope外 | 正式enumはOwner承認対象 |
+| list/detail | recordに紐づくtyped DocumentLink | same effective population、restricted policy、legal hold/retention、record state | generic linkだけ、linkなし、mixed linkでrestrictedを迂回 | 複数証憑のprimary ruleはlatest verified exact version |
+| download | typed linkからownerとexact versionを解決 | FileScopeValidationService、eventのdocument_version_id/hashと完全一致、scan=CLEAN、menu＋DataScope | stored name unknown、CLEAN以外、scope外、version不一致 | resolverの正式実装はOwner承認対象 |
+| export | raw file・storage key・document IDは出さずmetadata/link statusだけ | UIと同一population/scope | UIで見えないrecord/file | Ownerが監査用IDを別途許可するか |
 
 ### 4.3 skill taxonomy・同義語・未知skill
 
@@ -85,21 +139,24 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | query | candidate as-of rule | interval | no-data result | unresolved decision |
 |---|---|---|---|---|
-| point-in-time | `start_date <= as_of <= end_date`、null endはopen | 両端inclusive | empty demand＋diagnostic | position history/versionの要否 |
-| target period | `position.start <= period.to` かつ `position.end >= period.from` | overlap inclusive | empty gap rows、0件 | period中のrequired level change |
-| project skill | project validityとtarget periodのintersection | existing project source | 0 required skills | source precedence |
-| staffing position | status/as-ofとskills_jsonを評価 | position period inclusive | unresolved/unknownを明示 | free textをcanonicalizeする責任者 |
-| monthly close/replay | immutable snapshotがある場合のみsnapshot優先候補 | close period | snapshotなしはcurrent read不可候補 | snapshot導入時期 |
+| point-in-time | `start <= as_of <= end`のeffective event | 両端inclusive | `historical_data_unavailable`（current fallback禁止） | backfill開始日だけOwner承認 |
+| target period | `position.start <= period.to` かつ `position.end >= period.from` | overlap inclusive | empty gap rows、0件 | period中のrequired level changeはevent分割 |
+| project skill | `t_project_skill_event`とtarget periodのintersection | project source | 0 required skills | PROJECTでは正規project skillを優先 |
+| staffing position | `t_project_position_event`のstatus/as-ofとskills_json | position period inclusive | unresolved/unknownを明示 | POSITIONではpositionを正本 |
+| COMBINED | 同一project・canonical skillはproject skill優先、position-only追加 | source ID/precedenceを保存 | source欠落をcurrent補完しない | precedenceは本candidateで固定、Owner承認対象 |
+| monthly close/replay | `t_skill_gap_snapshot`をsnapshot時点のsource/taxonomy versionで再現 | close period | snapshotなしはreplay不可 | snapshot導入migrationはOwner承認対象 |
 
 ### 4.5 費用承認
 
 | amount/state | approval candidate | applicant self-approval | failure behavior | unresolved decision |
 |---|---|---|---|---|
-| 0円またはthreshold未満 | no approval候補（監査eventは残す） | N/A | config invalidならfail closed候補 | 0円のevidence/approval要否 |
-| thresholdと等しい | approval required候補 | deny | route snapshot | threshold source |
-| threshold超 | approval required | deny | candidate不在はfail closed | chain（org manager→finance/admin候補） |
-| approved | completion transition可 | requesterは承認不可 | version CAS | route変更後の既存request |
-| rejected/withdrawn | completion不可 | requesterの再申請条件 | explicit transition | resubmit/reset方針 |
+| NULL | 申請不可、amount_snapshotへ変換しない | N/A | validation error、fail closed | — |
+| 0円 | plan監査eventのみ、expense requestを作らない | N/A | zero-cost reason必須 | zero-cost evidence policy |
+| threshold−1 | approval不要候補、監査eventを残す | N/A | route設定不在ならfail closed | `m_approval_route.min_amount`を正本候補 |
+| thresholdと等しい | approval required | deny | route snapshot | `m_approval_route.min_amount` inclusive |
+| threshold＋1 | approval required | deny | candidate不在はfail closed | chain（org manager→finance/admin候補） |
+| approved budget超のactual | 差額expenseまたはplan amendmentを新規approval | requesterは承認不可 | approved snapshotを上書きしない | tolerance=0候補 |
+| closed work month | expense金額/関連/支払状態変更不可 | N/A | `assertOpenForUpdate`拒否 | reopen権限/理由 |
 
 ### 4.6 AI候補と人の確定境界
 
@@ -107,10 +164,10 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 |---|---|---|---|---|
 | gap detection | primary・always available | supplement不可欠ではない | review可能 | source/as-of/unknownを保存 |
 | course suggestion | deterministic matching | candidate ranking/explanation | accept/reject/edit | provider status、model、prompt allowlist |
-| skill level evaluation | existing evidence・policy | suggest only | engineer/manager/HRが確定 | actor、reason、effective date |
+| skill level evaluation | existing evidence・policy | suggest only | self proposal→manager proposal→HR final | assessment type、actor、reason、effective date |
 | placement/assignment | existing business approval | prohibited | authorized workflow | no AI final action |
-| adverse personnel decision | not applicable | prohibited | explicit human policy process | AI result cannot be sole basis |
-| AI unavailable | return gap | empty/degraded | can continue | outage/error not swallowed |
+| adverse personnel decision | not applicable | prohibited as sole source | explicit human/legal policy process | `adverse_use_flag`、AI source禁止 |
+| AI unavailable | return gap | empty/degraded | can continue | timeout/error/auditを保存、gapは欠落させない |
 
 ## 5. 必須のdecision/time/scope/state tables
 
@@ -118,9 +175,9 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | object | time field | effective rule | correction |
 |---|---|---|---|
-| certification | acquired/expires/effective version | LocalDate、expiry boundary inclusive | event追加＋old version参照 |
-| demand | position start/end、project skill validity | null endはwindow end、両端inclusive | source version/snapshot decision required |
-| engineer skill | current record＋career period | as-of日で有効なrecord | approval後のeffective dateを保存 |
+| certification | acquired/expires/effective version | LocalDate、expiry boundary inclusive、expiry rule version snapshot | event追加＋old version参照 |
+| demand | position/project skill effective events | null endはwindow end、両端inclusive | history欠落はunavailable、snapshotでreplay |
+| engineer skill | skill eventのeffective period | as-of日で有効なeventのみ | current projectionとeventを同一transactionで更新 |
 | learning | plan target/enrollment period | target period外はgap対象外候補 | cancel/correctはCAS＋event |
 | notification | threshold date＋recipient | 90/60/30当日含む候補 | idempotency keyで再送制御 |
 
@@ -128,9 +185,9 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | actor | list/detail/gap | create/update | evidence download | export |
 |---|---|---|---|---|
-| engineer | self only | self plan/acquisition request | self own link if CLEAN | self own masked/full policy pending |
-| manager | org∩DataScope | managed plan/review | linked engineer scope、番号mask | same population、番号mask/omit |
-| HR | existing HR scope | master/verification/review | scope内、PII policy | same population、PII policy |
+| engineer | self only、退職/休職の履歴は本人policyに従い保持 | self plan/acquisition request | self own typed link if CLEAN | same self population、番号policy |
+| manager | org∩DataScope（effective date） | managed plan/review | typed link scope、番号mask | same population、番号mask/omit |
+| HR | existing HR scope | master/verification/review、PII permission | scope内、typed link、PII policy | same population、PII policy |
 | admin | all | all admin operations | all allowed by legal hold/scope | same population、PII policy |
 | sales/other | existing DataScope only if feature allowed | no certification finalization | no raw number、link scope | no scope expansion |
 | scheduler/AI | no user population expansion | notification/candidate only | no download | no export |
@@ -139,7 +196,7 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 | aggregate | normal states | allowed conflict handling | forbidden shortcut |
 |---|---|---|---|
-| certification | DRAFT→SUBMITTED→VERIFIED/REJECTED→ACTIVE→EXPIRED/CANCELLED/CORRECTED | version CAS、duplicate unique、append-only event | delete active evidence or direct active by client |
+| certification | DRAFT→SUBMITTED→VERIFIED/REJECTED→ACTIVE/CANCELLED/SUPERSEDED; EXPIREDはas-of導出 | revision/CAS、continuity group unique、append-only event | `CORRECTED`をcurrent statusにする、delete active evidence、direct active |
 | learning plan | DRAFT→SUBMITTED→APPROVED/REJECTED→IN_PROGRESS→COMPLETED/CANCELLED | approval snapshot＋target version CAS | completion before approval |
 | enrollment | PLANNED→STARTED→COMPLETED/CANCELLED | one active enrollment per policy、CAS | duplicate completion/event |
 | document | RECEIVED→SCANNING→CLEAN/REJECTED＋legal hold | DocumentService/version/scan check | raw path、unknown file allow |

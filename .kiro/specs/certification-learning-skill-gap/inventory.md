@@ -23,12 +23,15 @@
 | engineer career | `t_engineer_career` / `EngineerCareer` | 期間、project、role、tech stack、description等 | 再利用。研修の完了結果をcareerへ自動複製しない |
 | training history | `t_training_history` / `TrainingHistory` | `contract_id`必須の契約・dispatch履歴、event/correctionを含むappend-only | course/enrollmentの正本にはしない。必要なら結果から明示的に参照 |
 | career consulting | `t_career_consulting_history` | career面談等の履歴 | learning planとは別用途。重複しない |
+| expense/accounting | `t_expense_request` / `ExpenseRequest`、`ExpenseRequestService` | JPY経費申請、approval、領収書Document、会計outbox、支払状態。`accounting_job_id`で連携を冪等化 | 研修費の金額・支払・会計状態の正本として再利用。enrollmentへactual costを複製しない |
+| lifecycle | `m_lifecycle_template`、`t_lifecycle_case`、`t_lifecycle_task`、`t_lifecycle_event` | 入社・休職・復職・退社等の有効なライフサイクルと監査 | 退職・休職・復職の通知対象判定に参照。資格履歴を削除・取消する理由にはしない |
+| notification | `t_notification` / `Notification`、`t_notification_outbox` / `NotificationOutbox` | `recipient_user_id`、global unique `dedupe_key`、outbox claim | 既存uniqueとoutboxを再利用。資格のsemantic keyをversion番号だけで作らない |
 | staffing demand | `t_project_position` / `ProjectPosition` | `skills_json`、`start_date`/`end_date`（inclusive）、allocation、status | 読み取りsource。skill JSONを黙って正本化しない |
 | staffing plan | `t_allocation_plan` / `AllocationPlan` | position期間、actual/plan、approval、version | skill gapの需要そのものに置換しない |
 | self-service workflow | `t_engineer_change_request` / `EngineerChangeRequest` | profile/skill/career変更申請、target version、attachment document、approval | 資格取得やlearning planの承認境界を参考にする。既存request typeを無理に拡張しない |
 | document | `t_document`、`t_document_version`、`t_document_link` / `Document`、`DocumentVersion`、`DocumentLink` | versioned file、scan status、retention/legal hold、scopeの根拠となるlink | 再利用。資格証憑typeとtarget scopeはDG-03決定後に追加 |
 | approval | `m_approval_route`、approval request等 / `ApprovalEngineService`、adapter registry | request時route snapshot、金額range inclusive、version CAS、申請者自己承認拒否 | 再利用。request typeと対象adapterだけ追加候補 |
-| config | `m_system_config` / `SystemConfig` | 管理画面で変更する各種閾値 | 学習費用閾値を追加するか、route設定だけで表現するかは未決 |
+| config | `m_system_config` / `SystemConfig` | 管理画面で変更する各種閾値 | 学習費用thresholdは`m_approval_route.min_amount`を正本候補とし、同じ値を`m_system_config`へ重複保存しない |
 
 ### 既存の無関係なqualification
 
@@ -84,17 +87,46 @@
 | `t_training_course_skill` | courseが対象とするcanonical skill | `skills_json`を新たなskill masterにしない |
 | `t_learning_plan` | engineer/creator、goal period、criteria、approval、state | career consultation履歴をplanに変換しない |
 | `t_learning_plan_skill` | planのgoal skillとtarget level | `m_skill_tag`のIDを参照し、名称を保存して正本化しない |
-| `t_training_enrollment` | plan/courseの申込・開始・完了・cancel、result、certificate link、actual cost | 契約training historyへ直接insertしない |
-| `t_skill_tag_alias`（必要な場合のみ） | synonym解決の監査可能なmap | 既存`SkillTagResolver`の未知自動作成だけで同義語を表現しない |
-| `t_skill_gap_snapshot`（必要な場合のみ） | 月次close等で再現性が必要な場合のimmutable snapshot | defaultはcurrent sourceのas-of計算。snapshotをsource of truthにしない |
+| `t_training_enrollment` | plan/courseの申込・開始・完了・cancel、result、certificate link、planned cost snapshot | 契約training historyへ直接insertしない。actual costは経費正本から導出 |
+| `t_training_enrollment_expense` | enrollmentと既存経費の関連 | 金額・支払状態を所有せず、既存`t_expense_request`を参照 |
+| `t_skill_tag_alias` | synonym解決の監査可能なmap | 既存`SkillTagResolver`の未知自動作成だけで同義語を表現しない |
+| `m_certification_alias` | 資格名表記揺れのcanonical map | `m_certification`の別masterを作らず、merge履歴を残す |
+| `t_engineer_skill_event` / `t_project_skill_event` | supply・project skillのeffective history | current projectionを過去へ遡及適用しない |
+| `t_project_position_event` | staffing positionのas-of snapshot | 現行positionだけで過去需要を推測しない |
+| `t_engineer_skill_assessment` | 本人/上長/HRの評価proposal・確定を分離 | `t_engineer_skill`のcurrent値へAI/本人が直接書かない |
+| `t_learning_decision_event` | 人の確定・利用目的・不利益利用監査 | AI candidateだけでは確定・配置・不利益判断できない |
+| `t_skill_gap_snapshot` | monthly close/export等の再現用immutable snapshot | source of truthではなく、interactive current/as-of計算と区別 |
 
 F1のmigration番号は、実装開始時にそのbranchの最新migrationを再確認し、platform-invariantsのlatest+1規約で決める。新specはH2 replay listへMySQL migrationを追加しない。
 
-## 5. 未解決のDG-03
+## 5. Review指摘を受けたcandidate方針
+
+以下は実装候補を曖昧なまま残さないために本spec上で固定した方針です。ただし中央traceabilityが `CANDIDATE` のため、Owner承認までは実装契約になりません。
+
+### 5.1 as-of sourceの完全性とprecedence
+
+- `t_engineer_skill`と`t_project_skill`はcurrent projectionとして残し、書込みtransactionごとにそれぞれのappend-only eventへeffective rowを記録する。履歴がない期間をcurrent rowで補完しない。
+- `t_project_position`もupdateごとにposition eventを記録する。feature有効化前の期間にeventが存在しない場合は `historical_data_unavailable` を返し、現在値を過去へ遡及適用しない。
+- `PROJECT`分析は`t_project_skill`を正本、`POSITION`分析はposition eventの`skills_json`を正本とする。`COMBINED`では同一project・canonical skillについて`t_project_skill`を優先し、position側の追加skillだけを加える。source IDとprecedenceを結果へ残す。
+- 月次締め・export・再現要求は`t_skill_gap_snapshot`を必須とし、interactive queryは指定as-ofのeffective eventを読む。snapshotはsource of truthではない。
+
+### 5.2 DocumentLinkのrestricted scope
+
+資格証憑は専用document type `CERTIFICATION_EVIDENCE` と `target_type=CERTIFICATION_RECORD` のDocumentLinkだけで認可する。`ENGINEER` linkを補助的に付けない。既存の複数link OR-unionは一般文書に限り、資格証憑ではrestricted policyが優先し、generic linkは認可根拠にしない。eventへ対象document version ID/hashを保存し、requested versionが完全一致しCLEANである場合だけdownload/exportする。
+
+### 5.3 費用・状態・scheduler・人の確定
+
+- 学習planのplanned costは申請時snapshot、actual costと支払状態は既存`t_expense_request`／会計outboxが正本。enrollmentにactual costを保存しない。
+- 資格の`CORRECTED`はcurrent statusではなくevent type。訂正後のcurrent stateはACTIVE/EXPIRED/CANCELLED等を独立に導出し、renewはcontinuity groupを持つ新recordとする。
+- 期限通知keyはsemantic expiry date＋threshold＋recipientを使い、無関係なrevision番号を含めない。Asia/Tokyoの注入Clock、退職・休職・account未link、manager変更、複数JVM unique競合を対象母集団表とtestで固定する。
+- 本人自己評価、上長提案、HR確定を別assessmentとして保存する。AIは候補・説明だけを返し、human decision eventなしに`t_engineer_skill`、配置、採否、adverse decisionを変更しない。
+
+## 6. 承認が必要なDG-03
 
 - 資格番号の法務上の分類、暗号化方式、表示可能なrole、export可否。
-- `DocumentLink.target_type`を資格取得record単位にするか、既存ENGINEER linkで足りるか。record単位を採るならFileScopeValidationServiceの解決ルールが必要。
-- `t_project_position.skills_json`をいつ・誰がcanonical `m_skill_tag`へ解決するか。未知skillを新masterへ自動登録してよいか。
-- 需要の過去時点をpositionの現行rowだけで再現できない場合にsnapshot/versionを導入するか。
-- 学習費用のthreshold、threshold等値の扱い（候補はinclusive）、承認者chain、0円/実費精算の扱い。
+- `CERTIFICATION_EVIDENCE`と`CERTIFICATION_RECORD`の正式enum、専用typed resolverの組織横断契約。
+- `t_project_position.skills_json`のcanonical解決を行う承認role。未知skillを新masterへ自動登録しない方針。
+- 上記as-of event/snapshot schemaを採用するmigration scopeとbackfill開始日。
+- 学習費用threshold、threshold等値の扱い（candidateはinclusive）、承認者chain、0円/実費精算の扱い。NULLは申請不可、金額は税込JPY候補。
+- self/manager/HR評価の最終確定role、異議申立て、staffing・評価・採否・不利益利用の禁止境界。
 - AIの利用停止、timeout、低信頼、候補拒否時のUIとaudit。人の評価・配置確定をAIに委譲しないことは不変条件。

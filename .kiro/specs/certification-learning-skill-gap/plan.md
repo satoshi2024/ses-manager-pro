@@ -10,13 +10,22 @@
 
 Gate 0はproduction変更なし、文書の自己検証、Task 0のcommit/pushまでで完了とする。
 
+Review remediationでは、承認前に次の候補契約を曖昧なまま残さない。
+
+- supply (`t_engineer_skill`)、project skill、position demandはcurrent projectionとappend-only effective eventを併存させ、履歴欠落時はcurrent fallbackをしない。
+- `CERTIFICATION_EVIDENCE`は`CERTIFICATION_RECORD` typed DocumentLinkだけを認可し、generic `ENGINEER` linkとのmixed-link OR-unionをrestricted policyで遮断する。eventのexact document version/hashとCLEANを再検証する。
+- course予定額はlearning planの申請時snapshot、actual cost・payment・accountingは既存`t_expense_request`の正本とし、enrollmentへactual costを複製しない。
+- `CORRECTED`は資格current statusではなくevent。renewはcontinuity groupの新record、EXPIREDはas-ofから導出する。
+- notification keyはsemantic expiry date＋threshold＋recipient、注入Clock、lifecycle/active account population、DB unique＋outbox claimを使う。
+- SELF/MANAGER/HR_FINAL assessmentと人のdecision eventを分離し、AI candidateから評価・配置・採否・不利益判断への直接遷移を禁止する。
+
 ## Gate 1: F1 DDL（承認後のみ）
 
-資格master、engineer取得record、append-only event、course、course-skill、learning plan、plan-skill、enrollmentを確定する。migration番号は実装開始時のlatest+1、V1/H2専用schema/entity同期を設計に従って実施する。PII field、unique、version/CAS、document foreign referenceを先に固定する。
+資格master、engineer取得record、append-only event、course、course-skill、learning plan、plan-skill、enrollment、effective history、assessment、decision eventを確定する。migration番号は実装開始時のlatest+1、V1/H2専用schema/entity同期を設計に従って実施する。PII field、自然同一性、continuity/current unique、version/CAS、exact document version、expense relationを先に固定する。
 
 ## Gate 2: F2 service（承認後のみ）
 
-取得・期限・cancel/correct・duplicate防止、course/plan/enrollment state、DocumentLink、approval adapter、as-of skill gap、synonym/unknown、rule fallbackを実装する。scope checkはcontrollerだけでなくservice/file validationにも置く。
+取得・期限・cancel/correct/renew・duplicate防止、course/plan/enrollment state、既存ExpenseRequest連携、typed DocumentLink、approval adapter、effective as-of skill gap、synonym/unknown、rule fallback、scheduler population/dedupe、人のassessmentを実装する。scope checkはcontrollerだけでなくservice/file validationにも置く。
 
 ## Gate 3: A1/A2 UI（承認後のみ）
 
@@ -36,7 +45,7 @@ mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates�
 
 ## 変更許可ゲート
 
-以下が全て実値で `APPROVED` になるまでGate 1以降に進まない。
+以下が全て実値で `APPROVED` になるまでGate 1以降に進まない。candidate方針を文書へ書いたことは承認の代替ではない。
 
 - NF-03 traceability status
 - approved scope
@@ -44,3 +53,5 @@ mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates�
 - base commit/branch
 - DG-03の6 decision（番号、証憑、taxonomy、as-of、費用、AI）
 - Review/統合担当が要求する追加acceptance criteria
+
+P1-01は実装AIが解決できない外部gateである。Ownerが中央traceabilityへ決定者・決定日・scope・baseを記録した後、Reviewを再実行する。

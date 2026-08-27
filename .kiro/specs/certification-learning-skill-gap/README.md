@@ -4,6 +4,8 @@
 
 このspecはNF-03の準備成果物です。2026-08-28時点のtraceabilityは `CANDIDATE` であり、`<APPROVED_SCOPE>`、`<OWNER>`、`<BASE_COMMIT>`、`<BASE_BRANCH>` は実値で承認されていません。
 
+直近ReviewはPLAN `FAIL`です。本specは指摘のうち実装前に文書で具体化できる項目を補正中ですが、Ownerによる実承認を代行せず、PLAN PASSとは扱いません。
+
 - 承認前にproduction code、migration、test、seed dataを変更しない。
 - 本ディレクトリのinventory/spec/tasks作成と、読み取り専用の確認だけを許可する。
 - `tasks.md` は成功条件を証拠で確認できたTaskだけを `[x]` にする。
@@ -17,7 +19,7 @@
 | 専用worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
 | base branch | `origin/main`（開始時点で `455fc92e` へfast-forward） |
-| 現行migration最新 | `V108_3__digital_invoice_send_unique.sql` |
+| 現行migration最新 | `V111__optimistic_lock_version_core_entities.sql` |
 | 通常checkout | `C:\work\ses-manager-pro`。開始時・Task 0完了時とも変更なしを確認 |
 
 ## 文書構成
@@ -28,3 +30,4 @@
 - [plan.md](plan.md): 0→F1→F2→A1→A2→B1→B2→Mの実装順とゲート。
 - [tasks.md](tasks.md): spec-driven task一覧。現時点で完了はTask 0のみ。
 - [completion-matrix.md](completion-matrix.md): 要件・task・証拠・Demoの対応表。
+- [review-remediation.md](review-remediation.md): 今回のPLAN Review指摘への対応状況と、外部承認が必要な残件。
