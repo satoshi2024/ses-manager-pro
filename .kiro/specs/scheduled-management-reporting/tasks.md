@@ -24,8 +24,14 @@
 - [x] F1: template/version/schedule/run/snapshot/delivery の DDL。最新migration+1、V1/H2同期、shape test、7年保持を実装する。
   - Evidence: `V112__scheduled_management_reporting.sql`、`schema-scheduled-management-reporting-h2.sql`、6 entity/mapper、test schema location。
   - Demo: `AttendanceSchemaTest` 6件全緑、compile成功。MySQL migration smokeはMで実施する。
-- [ ] F2: explicit system principal/scope の snapshot orchestration。管理者/マネージャーscope、速報/確定、retry不変性、partial/failed停止を実装する。
-- [ ] A1: template/preview/run UI。管理者有効化、recipient preview、actual/forecast、dataAsOf/freshness、Asia/Tokyoを表示する。
+- [x] F2: explicit system principal/scope の snapshot orchestration。管理者/マネージャーscope、速報/確定、retry不変性、partial/failed停止を実装する。
+  - Objective: 正本service/DTOをadapter経由で呼び、scope・cutoff・freshness・hashとともにimmutable section snapshotへ固定する。
+  - Evidence: `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`。run/section一意キー、通常retry再利用、明示再生成、新規run、部分失敗時配布停止状態を実装。
+  - Demo: template versionのrecipient preview hashを生成APIへ渡し、Asia/Tokyoのperiod/dataAsOfとsection statusを表示する。
+- [x] A1: template/preview/run UI。管理者有効化、recipient preview、actual/forecast、dataAsOf/freshness、Asia/Tokyoを表示する。
+  - Objective: 管理者/マネージャーがtemplate/version、recipient preview、速報/確定runを操作できる画面/APIを提供する。
+  - Evidence: `ManagementReportApiController`、`ManagementReportPageController`、`management-reports/index.html`、`management-reports.js`、`SecurityConfig`の静的role境界。
+  - Demo: `/management-reports`で公開済みversion、対象月、cutoffを選択し、preview hashを経由してrunとsection snapshotを表示する。
 - [ ] B1: PDF/XLSX/CSV と DocumentService 登録。同一snapshot、hash/version/CLEAN、7年保持、scope/access auditを実装する。
 - [ ] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
 - [ ] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。

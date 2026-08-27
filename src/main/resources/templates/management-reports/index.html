@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>定期管理レポート</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <h4 class="text-white fw-bold mb-1"><i class="bi bi-file-earmark-bar-graph me-2 text-accent-blue"></i>定期管理レポート</h4>
+            <p class="text-muted small mb-0">管理者は全社、マネージャーは許可された組織scopeを対象に月次レポートを生成します。</p>
+        </div>
+        <button class="btn btn-primary bg-gradient-blue border-0 rounded-pill" id="new-template-button">テンプレートを作成</button>
+    </div>
+
+    <div class="alert alert-dark border-secondary small" role="status">
+        <span class="badge bg-secondary me-2">固定方針</span>
+        timezone: Asia/Tokyo ／ snapshot・document: 7年保持 ／ PDF・XLSX・CSV: 同一immutable snapshot
+    </div>
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-5">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-dark border-dark text-white">テンプレート / version</div>
+                <div class="card-body" id="report-template-list">
+                    <div class="text-muted small">読み込み中...</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-xl-7">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-dark border-dark text-white">月次snapshot生成</div>
+                <div class="card-body">
+                    <form id="report-run-form" class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label text-muted small" for="report-version">公開済みversion</label>
+                            <select class="form-select bg-secondary text-white border-dark" id="report-version" required></select>
+                        </div>
+                        <div class="col-12 col-sm-6">
+                            <label class="form-label text-muted small" for="report-period">対象月</label>
+                            <input class="form-control bg-secondary text-white border-dark" type="month" id="report-period" required>
+                        </div>
+                        <div class="col-12 col-sm-6">
+                            <label class="form-label text-muted small" for="report-cutoff">cutoff</label>
+                            <select class="form-select bg-secondary text-white border-dark" id="report-cutoff">
+                                <option value="速報">速報（未締め）</option>
+                                <option value="確定">確定（締め済みのみ）</option>
+                            </select>
+                        </div>
+                        <div class="col-12 d-grid d-sm-flex justify-content-sm-end">
+                            <button class="btn btn-primary bg-gradient-blue border-0" type="submit">recipient preview後に生成</button>
+                        </div>
+                    </form>
+                    <div id="report-run-result" class="mt-3" aria-live="polite"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mt-3">
+        <div class="card-header bg-dark border-dark text-white">section snapshot</div>
+        <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0 align-middle">
+                <thead><tr><th>section</th><th>状態</th><th>分類</th><th>dataAsOf</th><th>hash</th></tr></thead>
+                <tbody id="report-section-table"><tr><td colspan="5" class="text-muted">runを生成すると表示します。</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal fade" id="report-template-modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog"><div class="modal-content bg-card border-dark">
+            <div class="modal-header border-dark"><h5 class="modal-title text-white">テンプレートを作成</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal" type="button"></button></div>
+            <div class="modal-body"><form id="report-template-form">
+                <label class="form-label text-muted small" for="report-template-key">template key</label>
+                <input class="form-control bg-secondary text-white border-dark mb-3" id="report-template-key" value="monthly-management" required>
+                <label class="form-label text-muted small" for="report-template-name">名称</label>
+                <input class="form-control bg-secondary text-white border-dark" id="report-template-name" value="月次管理レポート" required>
+            </form></div>
+            <div class="modal-footer border-dark"><button class="btn btn-primary" type="button" id="save-report-template">保存</button></div>
+        </div></div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/management-reports.js}"></script>
+</th:block>
+</body>
+</html>

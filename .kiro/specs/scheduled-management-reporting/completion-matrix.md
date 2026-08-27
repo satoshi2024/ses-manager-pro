@@ -15,8 +15,9 @@
 | T2 | sample snapshot spec | 完了 | `sample-snapshot-spec.md`、actual/forecast、cutoff、timezone、freshness、scope、source hash、section status | `868265384e91960dfa71a279173f9de30e9a128d` |
 | T3 | 最新Base取り込みとapproved plan/spec/tasks昇格 | 完了 | `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、中央traceability、承認済みspec | `a86af3f30f89feff28e88bf4dda5e10974852cdd` |
 | F1 | template/version/schedule/run/snapshot/delivery DDL | 完了 | `V112__scheduled_management_reporting.sql`、H2 schema、6 entity/mapper | `9b342c79d8495ce52e81d1c2a862d603f3b8581a`。compile成功、AttendanceSchemaTest 6/6 |
-| F2 | snapshot orchestration | 着手前 | 未着手 | — |
-| A1 / B1 / B2 | UI / document / delivery | 着手前 | 未着手 | — |
+| F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl` | `compile`成功、F1 H2 context 6/6 |
+| A1 | template/preview/run UI | 完了 | `ManagementReportApiController`、`management-reports/index.html`、静的role境界 | `compile`成功、F1 H2 context 6/6 |
+| B1 / B2 | document / delivery | 着手前 | 未着手 | — |
 | M | test / restore / drill / base-head evidence | 着手前 | 未着手 | — |
 
 ## Review に渡すもの
