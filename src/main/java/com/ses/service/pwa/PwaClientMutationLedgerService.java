@@ -35,7 +35,7 @@ public class PwaClientMutationLedgerService {
     private final Clock clock;
     private final PwaMutationMetrics metrics;
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public Claim claim(PwaMutationCommand command, String clientRequestId, String payloadHash,
                        String opaqueScope) {
         validateHeaders(clientRequestId, payloadHash);
@@ -93,7 +93,7 @@ public class PwaClientMutationLedgerService {
                 "type", "MUTATION_IN_PROGRESS", "clientRequestId", clientRequestId));
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void complete(Long mutationId, Object responseData) {
         PwaClientMutation row = mapper.selectById(mutationId);
         if (row == null || !PROCESSING.equals(row.getStatus())) return;
@@ -108,7 +108,7 @@ public class PwaClientMutationLedgerService {
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void abandon(Long mutationId) {
         PwaClientMutation row = mapper.selectById(mutationId);
         if (row != null && PROCESSING.equals(row.getStatus())) {
