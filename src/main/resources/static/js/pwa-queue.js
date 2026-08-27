@@ -82,6 +82,20 @@
         return withStore('readwrite', store => { store.clear(); });
     }
 
+    async function deleteScope(scope) {
+        const records = await readAll();
+        await Promise.all(records.filter(record => record.userScope === scope)
+            .map(record => remove(record.clientRequestId)));
+    }
+
+    async function rebindScope(oldScope, newScope) {
+        const records = await readAll();
+        await Promise.all(records.filter(record => record.userScope === oldScope).map(record => {
+            record.userScope = newScope;
+            return put(record);
+        }));
+    }
+
     function canonical(value) {
         if (Array.isArray(value)) return value.map(canonical);
         if (value !== null && typeof value === 'object') {
@@ -118,6 +132,21 @@
 
     function validPath(path) {
         return typeof path === 'string' && ALLOWED_PATHS.some(pattern => pattern.test(path));
+    }
+
+    function validMethod(screen, path, method) {
+        if (screen === 'attendance' && path === '/api/my/pwa/attendance/daily') {
+            return method === 'POST' || method === 'DELETE';
+        }
+        if (screen === 'timesheet' && path === '/api/my/pwa/timesheet/daily') {
+            return method === 'POST' || method === 'DELETE';
+        }
+        if (screen === 'expense' && /^\/api\/my\/pwa\/expenses\/drafts(?:\/\d+)?$/.test(path)) {
+            return method === 'POST' || method === 'PUT';
+        }
+        return screen === 'change-request'
+                && path === '/api/my/pwa/change-requests/drafts'
+                && method === 'POST';
     }
 
     function isPlainObject(value) {
@@ -165,6 +194,9 @@
     }
 
     function validatePayload(spec, method, payload) {
+        if (!validMethod(spec.screen, spec.path, method)) {
+            rejectPayload('screen/method/pathの組み合わせが不正です');
+        }
         validateSafeValue(payload, 'payload', 0);
         const path = spec.path;
         if (spec.screen === 'attendance' && path === '/api/my/pwa/attendance/daily') {
@@ -242,7 +274,13 @@
             const result = await response.json();
             const scope = result && result.data && result.data.userScope;
             if (!scope || typeof scope !== 'string') throw new Error('ユーザーscopeが不正です');
-            if (oldScope && oldScope !== scope) await deleteAll();
+            const preserveQueue = Boolean(result && result.data && result.data.preserveQueue);
+            if (oldScope && oldScope !== scope) {
+                // scope切替中に削除/再束縛が失敗しても、旧userのrecordを一瞬も表示しない。
+                state.scope = null;
+                if (preserveQueue) await rebindScope(oldScope, scope);
+                else await deleteScope(oldScope);
+            }
             state.scope = scope;
             persistScope(scope);
             state.paused = false;
@@ -263,13 +301,16 @@
         const threshold = now() - MAX_AGE_MS;
         const records = await readAll();
         await Promise.all(records.filter(record => !record.createdAt || record.createdAt < threshold)
-            .filter(record => record.status !== 'ERROR')
             .map(record => {
+                const alreadyError = record.status === 'ERROR';
                 record.status = 'ERROR';
-                record.error = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+                if (!alreadyError || !record.error) {
+                    record.error = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+                }
                 // 期限後は入力payloadを残さず、画面には破棄を促す最小metadataだけを残す。
                 record.payload = null;
                 record.payloadHash = null;
+                delete record.conflict;
                 return put(record);
             }));
     }
@@ -402,6 +443,36 @@
         return null;
     }
 
+    function refreshedSnapshot(data, record) {
+        const root = data && data.data !== undefined ? data.data : data;
+        if (!root) return null;
+        if (record.screen === 'attendance' && Array.isArray(root.months)) {
+            const row = root.months.find(item => item && String(item.workMonth || '').startsWith(String(record.month || '')));
+            return row || { exists: false, version: 0 };
+        }
+        if (record.screen === 'timesheet' && Array.isArray(root.rows)) {
+            const row = root.rows.find(item => item && String(item.contractId) === String(record.payload.contractId));
+            return row || { exists: false, version: 0 };
+        }
+        if (record.screen === 'expense' && Array.isArray(root.records)) {
+            const row = root.records.find(item => item && String(item.id) === String(record.payload.id));
+            return row || { exists: false, version: 0 };
+        }
+        if (record.screen === 'change-request' && typeof root === 'object') return root;
+        return null;
+    }
+
+    function refreshedFields(server, client, baseVersion) {
+        const serverObject = server && typeof server === 'object' ? server : {};
+        const clientObject = client && typeof client === 'object' ? client : {};
+        const names = Array.from(new Set(['version', ...Object.keys(serverObject), ...Object.keys(clientObject)]));
+        return names.map(name => ({
+            name,
+            serverValue: serverObject[name],
+            clientValue: name === 'version' ? baseVersion : clientObject[name]
+        }));
+    }
+
     async function refreshConflict(clientRequestId) {
         const record = (await readAll()).find(candidate => candidate.clientRequestId === clientRequestId);
         if (!record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
@@ -419,10 +490,17 @@
             }
             const result = await response.json();
             if (!response.ok || !result || result.code !== 200) throw new Error('server版を再取得できません');
-            const version = refreshedVersion(result, record);
+            const server = refreshedSnapshot(result, record);
+            const version = server && Number.isInteger(Number(server.version))
+                ? Number(server.version) : refreshedVersion(result, record);
             if (version === null) throw new Error('server versionを再取得できません');
-            record.conflict = Object.assign({}, record.conflict, { serverVersion: version,
-                serverRefreshAt: new Date().toISOString() });
+            record.conflict = Object.assign({}, record.conflict, {
+                server: server || record.conflict.server,
+                serverVersion: version,
+                fields: refreshedFields(server || record.conflict.server, record.payload,
+                    record.baseVersion),
+                serverRefreshAt: new Date().toISOString()
+            });
             await put(record);
         } catch (error) {
             record.error = error.message || 'server版を再取得できません';

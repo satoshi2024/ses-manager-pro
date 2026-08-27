@@ -145,7 +145,7 @@ public class PwaClientMutationLedgerService {
         }
     }
 
-    /** 端末の時計を正本にせず、server発行のscope leaseとserver時刻で30日保持期限を検査する。 */
+    /** server受信時刻を正本としてrecord単位の30日保持期限を検査する。scope leaseの更新とは分離する。 */
     private void validateClientCreatedAtShape(Long clientCreatedAt) {
         if (clientCreatedAt == null || clientCreatedAt <= 0) {
             throw BusinessException.of(400, "error.pwa.createdAtInvalid");
@@ -162,11 +162,9 @@ public class PwaClientMutationLedgerService {
 
     private void validateClientCreatedAt(Long clientCreatedAt,
                                          PwaUserContextService.CurrentContext context) {
+        if (context.issuedAt() == null) return;
         Instant created = Instant.ofEpochMilli(clientCreatedAt);
-        Instant now = Instant.now(clock);
-        Instant leaseStart = context.issuedAt();
-        if (leaseStart != null && (now.isAfter(leaseStart.plus(MAX_QUEUE_AGE))
-                || created.isBefore(leaseStart))) {
+        if (created.isBefore(Instant.now(clock).minus(MAX_QUEUE_AGE))) {
             throw queueExpired(clientCreatedAt);
         }
     }

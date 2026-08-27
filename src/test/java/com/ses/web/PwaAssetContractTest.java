@@ -66,6 +66,9 @@ class PwaAssetContractTest {
         assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
                 "X-Client-Created-At", "X-User-Scope", "cache: 'no-store'");
         assertThat(queue).contains("const contextHeaders", "contextHeaders['X-User-Scope'] = oldScope");
+        assertThat(queue).contains("preserveQueue", "rebindScope(oldScope, scope)", "deleteScope(oldScope)",
+                "record.status === 'ERROR'", "refreshedFields", "serverRefreshAt");
+        assertThat(queue).contains("function validMethod", "method === 'POST' || method === 'PUT'");
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
@@ -84,7 +87,7 @@ class PwaAssetContractTest {
 
         assertThat(common).contains("'serviceWorker' in navigator && navigator.serviceWorker.controller");
         assertThat(sessionApi).contains("@RequestHeader(value = \"X-User-Scope\", required = false)",
-                "current(presentedScope)");
+                "resolve(presentedScope)", "preserveQueue");
     }
 
     @Test

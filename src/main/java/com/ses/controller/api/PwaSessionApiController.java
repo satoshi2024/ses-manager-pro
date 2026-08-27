@@ -16,8 +16,10 @@ public class PwaSessionApiController {
     private final PwaUserContextService userContextService;
 
     @GetMapping("/api/my/session-context")
-    public ApiResult<Map<String, String>> context(
+    public ApiResult<Map<String, Object>> context(
             @RequestHeader(value = "X-User-Scope", required = false) String presentedScope) {
-        return ApiResult.success(Map.of("userScope", userContextService.current(presentedScope).userScope()));
+        PwaUserContextService.ContextResolution resolution = userContextService.resolve(presentedScope);
+        return ApiResult.success(Map.of("userScope", resolution.context().userScope(),
+                "preserveQueue", resolution.preserveQueue()));
     }
 }

@@ -87,7 +87,7 @@ Payroll page/API、document/file/download、receipt、attachment、PDF、portal 
 
 ## 5. IndexedDB model
 
-DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではqueue record自身を最小draftのimmutable snapshotとして扱い、別の入力値storeを持たない。raw user ID/usernameはclient recordへ保存せず、serverが発行するopaque contextを`userScope`としてrecordに束縛する。contextは内部IDへHMACで束縛したserver-issued time lease（発行時刻＋nonce）を含み、clientのcreatedAtを書き換えて期限を延長できない。contextはsessionに結びつき、flush前にserverで再検証する。
+DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではqueue record自身を最小draftのimmutable snapshotとして扱い、別の入力値storeを持たない。raw user ID/usernameはclient recordへ保存せず、serverが発行するopaque contextを`userScope`としてrecordに束縛する。contextは内部IDへHMACで束縛したserver-issued time lease（発行時刻＋nonce）を含み、server受信時刻を正本にrecord単位の`createdAt`/30日retentionを検査する。scope leaseの更新で同一ユーザーのrecordを早期削除せず、同一user確認後に旧scope recordを新scopeへ再束縛する。contextはsessionに結びつき、flush前にserverで再検証する。
 
 ### 5.1 Store
 
@@ -104,7 +104,7 @@ payloadは画面・method・pathごとのallowlist、32KiB、深さ、plain obje
 
 ## 6. Session context and user boundary
 
-`GET /api/my/session-context`を新設し、authenticated internal userへopaque `userScope`だけを返す。許可されたoffline operationはserver側のPWA endpoint allowlistで固定し、engineer linkや本人データはこのendpointへ含めない。認証失効、別principal、endpoint error、role/link変更時はqueue flushを停止する。オンラインでcontextを再検証できない場合、clientは保存済みscopeへfallbackせずfail-closedとする。
+`GET /api/my/session-context`を新設し、authenticated internal userへopaque `userScope`と`preserveQueue`だけを返す。提示scopeが同一userとして署名検証できる場合だけ、scope lease更新時に既存recordを新scopeへ再束縛する。別principal・無効scopeでは旧scope recordだけを削除し、Bへ表示・送信しない。許可されたoffline operationはserver側のPWA endpoint allowlistで固定し、engineer linkや本人データはこのendpointへ含めない。認証失効、別principal、endpoint error、role/link変更時はqueue flushを停止する。オンラインでcontextを再検証できない場合、clientは保存済みscopeへfallbackせずfail-closedとする。
 
 logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_SCOPE`を送る。server logout完了後にlogin pageへ遷移する。offline logoutではserver revokeは未確認だが、local queueを削除して再接続後の自動送信を禁止する。
 
@@ -115,7 +115,7 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 - Header: `X-Client-Request-Id`（UUID、1 commandにつき不変）
 - Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`、`X-Client-Created-At`（epoch milliseconds）。bodyは`screen`、`month`、`payload`を持つ。
 - Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
-- Retention: serverは`X-Client-Created-At`をserver時計と比較し、30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。加えてserver-issued userScope leaseの発行時刻より前のcreatedAt、lease失効後の送信、client時刻の書換えによる期限延長を拒否する。
+- Retention: serverは`X-Client-Created-At`をserver時計と比較し、record単位で30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。scope lease失効はrecord retentionとは別に扱い、同一userとして更新したscopeへrecordを再束縛する。期限判定後はpayloadを保存・再送せず、client側でもERROR recordのpayload/hash/conflictを除去して破棄または再入力を促す。
 - Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。
 
 ### 7.2 Storage

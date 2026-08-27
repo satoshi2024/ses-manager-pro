@@ -65,6 +65,23 @@ class PwaUserContextServiceTest {
                 .hasMessage("error.pwa.userScopeMismatch");
     }
 
+    @Test
+    void scopeLease更新後も同一userならqueue保持を許可する() {
+        authenticateAs(7L);
+        when(linkService.findEngineerIdByUserId(7L)).thenReturn(9L);
+        PwaUserContextService.CurrentContext first = service.current();
+
+        Clock afterLease = Clock.fixed(first.issuedAt().plusSeconds(30L * 24 * 60 * 60 + 1), ZoneOffset.UTC);
+        PwaUserContextService rotatedService = new PwaUserContextService(linkService, environment, afterLease);
+        ReflectionTestUtils.setField(rotatedService, "contextSecret", "test-pwa-secret");
+
+        PwaUserContextService.ContextResolution rotated = rotatedService.resolve(first.userScope());
+
+        assertThat(rotated.preserveQueue()).isTrue();
+        assertThat(rotated.context().userScope()).isNotEqualTo(first.userScope());
+        assertThat(rotated.context().userId()).isEqualTo(first.userId());
+    }
+
     private void authenticateAs(Long userId) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(String.valueOf(userId), null));

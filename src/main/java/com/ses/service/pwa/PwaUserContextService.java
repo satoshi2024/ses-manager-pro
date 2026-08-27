@@ -42,19 +42,31 @@ public class PwaUserContextService {
     }
 
     public CurrentContext current() {
-        return current(null);
+        return resolve(null).context();
     }
 
     /** 同一ユーザーの再認証では、未失効の既存scopeを再提示してqueueを継続する。 */
     public CurrentContext current(String presentedScope) {
+        return resolve(presentedScope).context();
+    }
+
+    /** scopeの更新理由をclientへ伝え、同一ユーザーのrecordだけを保持できるようにする。 */
+    public ContextResolution resolve(String presentedScope) {
         Long userId = requireUserId();
         Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
         if (engineerId == null) throw BusinessException.of(403, "error.my.notLinked");
         CurrentContext presented = parseAndVerify(presentedScope, userId, engineerId);
-        if (presented != null && !clock.instant().isAfter(
-                presented.issuedAt().plusSeconds(MAX_LEASE_AGE_SECONDS))) {
-            return presented;
+        if (presented != null) {
+            if (!clock.instant().isAfter(presented.issuedAt().plusSeconds(MAX_LEASE_AGE_SECONDS))) {
+                return new ContextResolution(presented, true);
+            }
+            // scope leaseの更新はrecordの30日retentionとは別管理にする。
+            return new ContextResolution(issueContext(userId, engineerId), true);
         }
+        return new ContextResolution(issueContext(userId, engineerId), false);
+    }
+
+    private CurrentContext issueContext(Long userId, Long engineerId) {
         Instant issuedAt = clock.instant();
         return new CurrentContext(userId, engineerId, issue(userId, engineerId, issuedAt), issuedAt);
     }
@@ -143,5 +155,9 @@ public class PwaUserContextService {
         public CurrentContext(Long userId, Long engineerId, String userScope) {
             this(userId, engineerId, userScope, null);
         }
+    }
+
+    /** scope更新時に、同一ユーザーのrecord retentionをscope leaseと独立して維持するための結果。 */
+    public record ContextResolution(CurrentContext context, boolean preserveQueue) {
     }
 }

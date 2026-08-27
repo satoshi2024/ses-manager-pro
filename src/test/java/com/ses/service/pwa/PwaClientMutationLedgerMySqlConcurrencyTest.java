@@ -4,8 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ses.common.exception.PwaConflictException;
+import com.ses.entity.Engineer;
 import com.ses.entity.PwaClientMutation;
+import com.ses.entity.ExpenseRequest;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.PwaClientMutationMapper;
+import com.ses.mapper.ExpenseRequestMapper;
+import com.ses.service.expense.ExpenseRequestService;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -16,6 +21,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -23,12 +30,14 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /** 実MySQLで同一clientRequestIdの二writerを競合させ、DB UNIQUEとclaim transactionを検証する。 */
@@ -40,6 +49,7 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
 
     private static final String REQUEST_ID = "pwa-mysql-race-1";
     private static final String SCOPE = "opaque-scope-mysql";
+    private static final long USER_ID = 700001L;
 
     @Container
     @SuppressWarnings("resource")
@@ -63,9 +73,20 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     @Autowired
     private PwaClientMutationMapper mapper;
     @Autowired
+    private ExpenseRequestMapper expenseMapper;
+    @Autowired
+    private EngineerMapper engineerMapper;
+    @Autowired
+    private ExpenseRequestService expenseService;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+    @Autowired
     private PwaCanonicalizer canonicalizer;
     @Autowired
     private ObjectMapper objectMapper;
+
+    private Long expenseId;
+    private Long engineerId;
 
     @MockBean
     private PwaUserContextService userContextService;
@@ -73,7 +94,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     @AfterEach
     void cleanup() {
         mapper.delete(new QueryWrapper<PwaClientMutation>()
-                .eq("client_request_id", REQUEST_ID));
+                .eq("user_id", USER_ID));
+        if (expenseId != null) expenseMapper.deleteById(expenseId);
+        if (engineerId != null) engineerMapper.deleteById(engineerId);
     }
 
     @Test
@@ -111,6 +134,143 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         assertThat(failures).hasSize(1)
                 .first().isInstanceOf(PwaConflictException.class);
         assertThat(claims).hasSize(1);
-        assertThat(mapper.selectByUserAndClientRequest(700001L, REQUEST_ID)).isNotNull();
+        assertThat(mapper.selectByUserAndClientRequest(USER_ID, REQUEST_ID)).isNotNull();
+    }
+
+    @Test
+    void 同一baseVersionの実domain更新は一件成功し一件409になり業務行を上書きしない() throws Exception {
+        engineerId = seedEngineer();
+        ExpenseRequest expense = ExpenseRequest.builder()
+                .engineerId(engineerId)
+                .expenseDate(java.time.LocalDate.of(2026, 8, 28))
+                .category(ExpenseRequestService.CATEGORY_TRANSPORT)
+                .amount(new java.math.BigDecimal("1000"))
+                .description("初期")
+                .status(ExpenseRequestService.STATUS_DRAFT)
+                .version(0)
+                .build();
+        expenseMapper.insert(expense);
+        expenseId = expense.getId();
+
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("id", expenseId)
+                .put("expenseDate", "2026-08-28")
+                .put("category", ExpenseRequestService.CATEGORY_TRANSPORT)
+                .put("amount", 2000)
+                .putNull("customerId")
+                .putNull("projectId")
+                .put("description", "競合writer");
+        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+        PwaUserContextService.CurrentContext context = new PwaUserContextService.CurrentContext(
+                USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60));
+        when(userContextService.assertCurrent(SCOPE)).thenReturn(context);
+        when(userContextService.hashScope(SCOPE)).thenReturn("c".repeat(64));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<String> requestIds = List.of("pwa-mysql-domain-a", "pwa-mysql-domain-b");
+        List<Integer> successfulVersions = Collections.synchronizedList(new ArrayList<>());
+        List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        long createdAt = Instant.now().toEpochMilli();
+        for (String requestId : requestIds) {
+            executor.submit(() -> {
+                try {
+                    ready.countDown();
+                    start.await(10, TimeUnit.SECONDS);
+                    TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                    tx.executeWithoutResult(status -> {
+                        PwaClientMutationLedgerService.Claim claim = ledger.claim(
+                                command, requestId, hash, createdAt, SCOPE);
+                        ExpenseRequest locked = expenseMapper.selectByIdForUpdate(expenseId);
+                        if (!Integer.valueOf(0).equals(locked.getVersion())) {
+                            ledger.abandon(claim.mutationId());
+                            throw new PwaConflictException("pwa.staleBaseVersion", Map.of(
+                                    "type", "STALE_BASE_VERSION", "serverVersion", locked.getVersion()));
+                        }
+                        expenseService.updateDraft(engineerId, expenseId,
+                                new ExpenseRequestService.ExpenseDraftCommand(
+                                        java.time.LocalDate.of(2026, 8, 28),
+                                        ExpenseRequestService.CATEGORY_TRANSPORT,
+                                        new java.math.BigDecimal("2000"), null, null, "競合writer"));
+                        ExpenseRequest after = expenseMapper.selectById(expenseId);
+                        ledger.complete(claim.mutationId(), Map.of("version", after.getVersion()));
+                        successfulVersions.add(after.getVersion());
+                    });
+                } catch (Throwable e) {
+                    failures.add(e);
+                }
+            });
+        }
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(successfulVersions).containsExactly(1);
+        assertThat(failures).hasSize(1).first().isInstanceOf(PwaConflictException.class);
+        ExpenseRequest saved = expenseMapper.selectById(expenseId);
+        assertThat(saved.getVersion()).isEqualTo(1);
+        assertThat(saved.getDescription()).isEqualTo("競合writer");
+        assertThat(mapper.selectList(new QueryWrapper<PwaClientMutation>()
+                .eq("user_id", USER_ID).in("client_request_id", requestIds)))
+                .allMatch(row -> "COMPLETED".equals(row.getStatus()));
+    }
+
+    @Test
+    void domain失敗時は業務行とledgerackを同一transactionでrollbackする() {
+        engineerId = seedEngineer();
+        ExpenseRequest expense = ExpenseRequest.builder()
+                .engineerId(engineerId)
+                .expenseDate(java.time.LocalDate.of(2026, 8, 28))
+                .category(ExpenseRequestService.CATEGORY_TRANSPORT)
+                .amount(new java.math.BigDecimal("1000"))
+                .description("rollback前")
+                .status(ExpenseRequestService.STATUS_DRAFT)
+                .version(0)
+                .build();
+        expenseMapper.insert(expense);
+        expenseId = expense.getId();
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("id", expenseId).put("expenseDate", "2026-08-28")
+                .put("category", ExpenseRequestService.CATEGORY_TRANSPORT)
+                .put("amount", 3000).putNull("customerId").putNull("projectId")
+                .put("description", "rollback後は残さない");
+        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+        when(userContextService.assertCurrent(SCOPE)).thenReturn(new PwaUserContextService.CurrentContext(
+                USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60)));
+        when(userContextService.hashScope(SCOPE)).thenReturn("d".repeat(64));
+
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        assertThatThrownBy(() -> tx.executeWithoutResult(status -> {
+            PwaClientMutationLedgerService.Claim claim = ledger.claim(
+                    command, "pwa-mysql-rollback", hash, Instant.now().toEpochMilli(), SCOPE);
+            expenseService.updateDraft(engineerId, expenseId,
+                    new ExpenseRequestService.ExpenseDraftCommand(
+                            java.time.LocalDate.of(2026, 8, 28),
+                            ExpenseRequestService.CATEGORY_TRANSPORT,
+                            new java.math.BigDecimal("3000"), null, null, "rollback後は残さない"));
+            ledger.complete(claim.mutationId(), Map.of("version", 1));
+            throw new IllegalStateException("forced PWA rollback");
+        })).isInstanceOf(IllegalStateException.class);
+
+        ExpenseRequest restored = expenseMapper.selectById(expenseId);
+        assertThat(restored.getVersion()).isEqualTo(0);
+        assertThat(restored.getDescription()).isEqualTo("rollback前");
+        assertThat(mapper.selectByUserAndClientRequest(USER_ID, "pwa-mysql-rollback"))
+                .isNull();
+    }
+
+    private Long seedEngineer() {
+        Engineer engineer = Engineer.builder()
+                .fullName("PWA concurrency engineer")
+                .employmentType("正社員")
+                .status("稼動中")
+                .version(0)
+                .build();
+        engineerMapper.insert(engineer);
+        return engineer.getId();
     }
 }
