@@ -158,10 +158,8 @@
                 if (window.SES && SES.pwa) SES.pwa.sessionExpired();
                 throw error;
             }
-            if (oldScope) {
-                state.scope = oldScope;
-                return oldScope;
-            }
+            // オンラインでcontextを再検証できない場合は、古いscopeで送信しない。
+            state.paused = true;
             throw error;
         }
     }
@@ -277,9 +275,12 @@
                 method: record.method, cache: 'no-store', credentials: 'same-origin',
                 headers, body: JSON.stringify({ screen: record.screen, month: record.month, payload: record.payload })
             });
-            if (response.status === 401) {
+            const contentType = response.headers.get('content-type') || '';
+            const sessionRedirect = (response.redirected && /\/login(?:[/?#]|$)/.test(response.url))
+                || contentType.toLowerCase().includes('text/html');
+            if (response.status === 401 || sessionRedirect) {
                 state.paused = true;
-                if (SES.pwa) SES.pwa.sessionExpired();
+                if (window.SES && SES.pwa) SES.pwa.sessionExpired();
                 await render();
                 window.location.href = '/login?error=timeout';
                 return { paused: true };

@@ -14,7 +14,7 @@ Authenticated browser
  │   ├─ static shell/assets allow-list ──> Cache Storage
  │   └─ /api /my /portal /PII routes ────> network-only + no-store
  │
- ├─ pwa-sync.js / common.js
+ ├─ pwa-queue.js / common.js
  │   ├─ GET /api/my/session-context ─────> opaque current user context
  │   ├─ IndexedDB draft/queue ───────────> user-scoped minimal input
  │   └─ same-origin fetch + CSRF header ─> existing domain API
@@ -87,37 +87,24 @@ Payroll page/API、document/file/download、receipt、attachment、PDF、portal 
 
 ## 5. IndexedDB model
 
-DB名は`ses-pwa-self-service`、schema versionを明示する。raw user ID/usernameはkeyにせず、serverが発行するopaque contextをSHA-256化した`userScopeKey`をnamespaceにする。contextはsessionに結びつき、flush前にserverで再検証する。
+DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではqueue record自身を最小draftのimmutable snapshotとして扱い、別の入力値storeを持たない。raw user ID/usernameはclient recordへ保存せず、serverが発行するopaque contextを`userScope`としてrecordに束縛する。contextはsessionに結びつき、flush前にserverで再検証する。
 
-### 5.1 Stores
+### 5.1 Store
 
-`drafts`:
-
-```text
-{ id, userScopeKey, screen, month, targetKey, fields, createdAt, updatedAt, expiresAt }
-```
-
-`queue`:
+`queue`（最小draftを兼ねる）:
 
 ```text
 {
-  id, userScopeKey, operation, endpoint, method, screen, month,
-  targetKey, payload, clientRequestId, payloadHash, baseVersion,
-  createdAt, expiresAt, state, attemptCount, lastErrorCode
+  clientRequestId, payloadHash, baseVersion, userScope, screen, month,
+  method, path, resourceKey, payload, createdAt, expiresAt, status
 }
 ```
 
-`meta`:
-
-```text
-{ key, swVersion, userScopeKey, contextVersion, lastSyncAt }
-```
-
-payloadは最小入力に限定し、receipt/attachment/binary/secretを拒否する。IndexedDBのclearはuser namespace単位で実行し、logoutでは全user namespaceも列挙して削除する。削除完了を確認できない場合はflushをfail-closedする。
+payloadは最小入力に限定し、receipt/attachment/binary/secretを拒否する。logout/user switchではDB全体をclearし、削除完了を確認できない場合はflushをfail-closedする。`meta`やraw user ID/usernameは保存しない。
 
 ## 6. Session context and user boundary
 
-`GET /api/my/session-context`を新設し、authenticated internal userへopaque `userScope`、context version、server time、許可されたoffline operation keyだけを返す。engineer linkや本人データはこのendpointへ含めない。認証失効、別principal、endpoint error、role/link変更時はqueue flushを停止する。
+`GET /api/my/session-context`を新設し、authenticated internal userへopaque `userScope`だけを返す。許可されたoffline operationはserver側のPWA endpoint allowlistで固定し、engineer linkや本人データはこのendpointへ含めない。認証失効、別principal、endpoint error、role/link変更時はqueue flushを停止する。オンラインでcontextを再検証できない場合、clientは保存済みscopeへfallbackせずfail-closedとする。
 
 logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_SCOPE`を送る。server logout完了後にlogin pageへ遷移する。offline logoutではserver revokeは未確認だが、local queueを削除して再接続後の自動送信を禁止する。
 
@@ -126,22 +113,22 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 ### 7.1 Request
 
 - Header: `X-Client-Request-Id`（UUID、1 commandにつき不変）
-- Body/query: `baseVersion`
-- Hash: serverがmethod、path、query、canonical JSON bodyのUTF-8 bytesからSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
-- Response: `ApiResult<T>`。replay時は元のresourceを再取得して同じ結果形を返す。
+- Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`。bodyは`screen`、`month`、`payload`を持つ。
+- Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
+- Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。
 
 ### 7.2 Storage
 
-汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`client mutation` ledgerを追加する。候補名は`t_my_client_mutation`とし、`tenant_id,user_id,operation,client_request_id`のunique、`payload_hash`、`resource_type/resource_id`、`result_hash`、`state`、`expires_at`、`version`、監査時刻を持つ。raw payloadとPII response bodyは保存しない。migrationは実装開始時の全Flyway locationの最新+1（現時点ではV111の次だが、開始時に再確認）とする。
+汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`t_pwa_client_mutation` ledgerを追加する。`user_id,client_request_id`のunique、opaque scope hash、screen/month、payload hash、base version、status、最小ack JSON、監査時刻を持つ。raw payload、入力内容、PII response bodyは保存しない。migrationは実装開始時の全Flyway locationを再確認したうえでV112とした。
 
-処理順序は、ledger keyをlock/insert、既存keyならhash照合、同一hashはresource/result replay、異hashは409、未登録なら既存domain serviceを同一transactionで実行しledgerへresource reference/result digestを保存する。ledger insert競合は再取得して同じ規則を適用する。
+処理順序は、ledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行しledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時にclaimを破棄する。
 
 ## 8. Domain adapters
 
 | Domain | Existing API | baseVersionの正本 | 追加設計 |
 |---|---|---|---|
-| timesheet | `/api/my/timesheet/daily`、daily delete | `WorkRecord.version`を月次aggregate versionとして扱う | save/deleteにexpected versionを渡し、`WorkRecordService`のCASを維持 |
-| employment attendance | `/api/my/attendance/daily`、daily delete | `AttendanceMonth.version` | `AttendanceService`へexpected month versionを渡し、計算は既存calculatorのみ |
+| timesheet | `/api/my/timesheet/daily`、daily delete | `WorkRecord.version`を対象row versionとして扱う | PWA入口でsnapshotとbaseVersionを比較し、save/deleteは既存`WorkRecordService`の検証・CASを維持 |
+| employment attendance | `/api/my/attendance/daily`、daily delete | `AttendanceMonth.version` | PWA入口でsnapshotとbaseVersionを比較し、更新・削除と計算は既存`AttendanceService`へ委譲 |
 | expense | `/api/my/expenses` POST/PUT | expense row `version`、createは0 | draft create/updateだけidempotent/CAS化 |
 | change request | `/api/my/change-requests` POST | createは0 | allowlist payloadのdraft createだけidempotent化 |
 

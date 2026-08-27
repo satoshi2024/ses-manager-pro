@@ -131,10 +131,10 @@ public class PwaMutationApiController {
     public ApiResult<Object> createExpenseDraft(@RequestBody PwaMutationCommandBody body,
                                                 @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                                 @RequestHeader("X-Client-Payload-Hash") String payloadHash,
-                                                @RequestHeader("X-Client-Base-Version") Integer baseVersion,
-                                                @RequestHeader("X-User-Scope") String userScope) {
+                                            @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                            @RequestHeader("X-User-Scope") String userScope) {
         return run(body, "expense", clientRequestId, payloadHash, baseVersion, userScope, context -> {
-            return expenseRequestService.createDraft(context.engineerId(), expenseCommand(body.payload()));
+            return expenseAck(expenseRequestService.createDraft(context.engineerId(), expenseCommand(body.payload())));
         });
     }
 
@@ -145,7 +145,7 @@ public class PwaMutationApiController {
                                                 @RequestHeader("X-Client-Base-Version") Integer baseVersion,
                                                 @RequestHeader("X-User-Scope") String userScope) {
         return run(body, "expense", clientRequestId, payloadHash, baseVersion, userScope, context ->
-                expenseRequestService.updateDraft(context.engineerId(), id, expenseCommand(body.payload())));
+                expenseAck(expenseRequestService.updateDraft(context.engineerId(), id, expenseCommand(body.payload()))));
     }
 
     @PostMapping("/change-requests/drafts")
@@ -162,9 +162,10 @@ public class PwaMutationApiController {
             }
             Map<String, Object> changePayload = objectMapper.convertValue(
                     payload.path("payload"), Map.class);
-            return changeRequestService.createDraft(context.engineerId(),
-                    requiredText(payload, "requestType"), changePayload,
+            EngineerChangeRequestService.ChangeRequestDto draft = changeRequestService.createDraft(
+                    context.engineerId(), requiredText(payload, "requestType"), changePayload,
                     text(payload, "reason", null), null);
+            return changeRequestAck(draft);
         });
     }
 
@@ -296,6 +297,23 @@ public class PwaMutationApiController {
                 read(payload.path("amount"), BigDecimal.class),
                 nullableLong(payload, "customerId"), nullableLong(payload, "projectId"),
                 text(payload, "description", null));
+    }
+
+    /** PWA ledgerへ保存するackは、再表示に不要な本人情報・入力内容を含めない。 */
+    private Map<String, Object> expenseAck(ExpenseRequestService.ExpenseRequestDto dto) {
+        Map<String, Object> ack = new LinkedHashMap<>();
+        ack.put("id", dto.id());
+        ack.put("status", dto.status());
+        ack.put("version", value(dto.version()));
+        return ack;
+    }
+
+    /** PWA ledgerへ保存する変更申請ackを最小化する。payloadJson/diffJson/reasonは保存しない。 */
+    private Map<String, Object> changeRequestAck(EngineerChangeRequestService.ChangeRequestDto dto) {
+        Map<String, Object> ack = new LinkedHashMap<>();
+        ack.put("id", dto.id());
+        ack.put("status", dto.status());
+        return ack;
     }
 
     private <T> T read(JsonNode node, Class<T> type) {

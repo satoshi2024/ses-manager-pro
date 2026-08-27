@@ -64,6 +64,7 @@ class PwaAssetContractTest {
                 "userScope", "createdAt", "MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000");
         assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
                 "X-User-Scope", "cache: 'no-store'");
+        assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
         assertThat(queue).doesNotContain("password", "bankAccount", "receiptBlob");
     }
