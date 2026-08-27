@@ -29,7 +29,7 @@
 - 観測 base: `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 承認Base: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 取り込みcommit: `a86af3f30f89feff28e88bf4dda5e10974852cdd`
-- 最終remote Head: `c33bff464aa3d5dbbcee2599672573d5de409ad3`
+- 最終remote Head: handoff時の `git ls-remote origin refs/heads/codex/scheduled-management-reporting` 観測値（最終応答へ転記）。M実装確認Headは `c0634abff78afcbfb2bf31fe7257a66e41367702`。
 - Review 入力: 本ディレクトリの承認済みrequirements/design/tasks、inventory、sample snapshot
 - Review 判定: 実装対話ではPRを作成しない。上記のapproved plan/spec/tasksと本completion matrixを独立Reviewへ渡し、PLAN/IMPLEMENTATIONの双方PASS後だけPR作成可否を判断する。
 
