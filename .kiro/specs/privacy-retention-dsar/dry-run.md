@@ -18,7 +18,7 @@
 
 | 入力 | `CANDIDATE`条件 | `BLOCKED`条件 | `UNKNOWN`条件 |
 |---|---|---|---|
-| identityResolution | `VERIFIED` | `AMBIGUOUS` / same-name unresolved | 欠落/`UNVERIFIED` |
+| identityResolution | `VERIFIED` | `AMBIGUOUS` / `UNVERIFIED` / same-name unresolved | 欠落 |
 | scopeStatus/providerScope | `IN_SCOPE` | `OUT_OF_SCOPE` | 欠落 |
 | owner/purpose/trigger | `CONFIRMED` | — | 欠落/`UNKNOWN` |
 | policyState | `APPROVED` | — | `PROVISIONAL`/`UNKNOWN` |
@@ -46,6 +46,8 @@
 | `fixture-legal-retention-001` | BLOCKED | 法定保存のblocker |
 | `fixture-business-001` | BLOCKED | active business blocker |
 | `fixture-not-due-001` | UNKNOWN | 期限未到来。処分候補ではない |
+
+加えて `invalid-unverified-fixture.json` は本人確認未完をBLOCKED、`invalid-unsupported-disposition-fixture.json` は未知のdisposition labelをUNKNOWNにする。
 
 ## 4. 実行記録
 

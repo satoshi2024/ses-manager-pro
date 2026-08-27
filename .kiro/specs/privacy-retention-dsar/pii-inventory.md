@@ -45,6 +45,9 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | DB-028 `t_ai_log`（legacy） | `request_params`, `response_text`, request type/actor | AI/Platform候補。旧AI call log | `app.resume.retention-days=30` という技術設定・legacy raw。新規raw保存停止方針 | raw PII/third-party/legacy不明はUNKNOWN。`AiLegacyProvider` 未実装、外部sendしない | PROVISIONAL。V1、G10 allowlist/review ledger |
 | DB-029 `m_ai_artifact_version`, `t_ai_recommendation_run/item/feedback/outcome/evaluation` | redacted summary、explanation/value/metrics、actor/target IDs | AI/Platform候補。再現性・推薦・評価 | redacted 730日、raw prompt 0日、metrics 90日等はG10 technical policy | allow-list外、legacy二重記録、target scope不明はblocked/unknown。`AiRunProvider` 未実装 | PROVISIONAL。V108、g10 allowlist |
 | DB-030 `m_integration_connection` 等 | encrypted secret ref/token reference、external IDs、payload/event hashes | Integration/Finance候補。freee/外部会計 | revoke/connection lifecycle。retention未確定 | secret manager、external provider revoke、auditがblocker。`IntegrationProvider` 未実装 | UNKNOWN。V106、database-backup-recovery |
+| DB-031 `t_contract_document` | `rendered_html`, `recipient_name`, `recipient_email`, `error_message`、CloudSign IDs/participant ID、dispatch metadata | Contract document/CloudSign候補。署名依頼、配送、署名状態 | 契約文書のversion/署名/完了がtrigger候補。法定文書archiveへのlinkとprovider側copyを別評価 | `pdf_path`, `signed_pdf_path`, `certificate_path` のbinary、CloudSign remote copy、recipient第三者情報がblocker。`ContractDocumentProvider` 未実装 | UNKNOWN/PROVISIONAL。V20、legal-document-ledger-archive、enterprise identity |
+| DB-032 `t_engineer_followup` | `topic`, `content`, `satisfaction`, engineer/creator link | Engineer followup/HR候補。定着支援、通知、相談記録 | followup/case close。保持期間未確定 | 1on1/private note、active engineer/business、HR access、auditがblocker。`EngineerFollowupProvider` 未実装 | UNKNOWN。V54、audit round8 |
+| DB-033 `t_project_ingestion` | `raw_text`, `parsed_json`, `original_file_name`, `review_note`, `error_message`、converted project link | Project ingestion/営業候補。案件メール貼付/EML解析 | project close/converted/rejected。raw本文保持未確定 | sender/recipient/顧客第三者、document link、AI二次コピーがblocker。`ProjectIngestionProvider` 未実装 | UNKNOWN。V44、G10/AI gateway |
 
 ## 2. file/object inventory
 
@@ -58,6 +61,7 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | FILE-006 `DocumentArchiveFileReferenceProvider` | `t_document_version.storage_key` + basename | legal original/version PDF、契約・請求・receipt等 | document type policy/retention_until。NULLはunknown | legal hold、hash/version、backup same-time、disposal approvalが必須。`DocumentFileProvider` 未実装 | V67、legal-document-ledger-archive |
 | FILE-007 `FileSecurityMetadataReferenceProvider` | `t_file_security_metadata.stored_name`（quarantine/published/rejected） | scan対象file、拒否理由、owner link | scan state/cleanup safety window。retention未確定 | scan未完/unknown referenceはfail-closed。`SecurityFileProvider` 未実装 | V63、FileScopeValidationService |
 | FILE-008 upload dirs / backup / replica | upload base、`quarantine`、`published`、DB/upload backup、restore target、read replica | DBに登録されない孤児、binary二次コピー、同時点snapshot | `FileCleanupServiceImpl` の孤児cleanupは既存物理削除経路。backup retention/restore state未確定 | backup/replica/unknown referenceは必ずhold/unknown。`BackupBinaryProvider` 未実装 | database-backup-recovery、platform invariants |
+| FILE-009 `t_contract_document` paths / CloudSign artifacts | `pdf_path`, `signed_pdf_path`, `certificate_path`、CloudSign document/file remote artifact | 契約本文、署名者/宛先、証明書、第三者情報 | contract document completion/ledger link。CloudSign remote retentionは未確定 | legal original、署名済PDF/証明書、remote copy、DB+binary backup整合がblocker。`CloudSignArtifactProvider` 未実装 | UNKNOWN/PROVISIONAL。V20、CloudSign/document archive |
 
 ## 3. AI payload inventory
 
@@ -70,6 +74,7 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | AI-003 `t_ai_recommendation_run.redacted_summary_json` | mask済summaryのみ。raw prompt/PII canary不可。`input_hash`は再現用 | redacted 730日、metrics 90日（G10 technical setting） | DSAR exportはsummaryも第三者redaction後。`AiRunProvider` 未実装 | PROVISIONAL。V108、G10 |
 | AI-004 legacy `t_ai_log.request_params/response_text` | legacy raw/二重記録の可能性。新規保存停止、raw promptを復活させない | legacy `app.resume.retention-days=30` 技術設定。法的保持未承認 | legacy不明、audit/evaluation dependencyはUNKNOWN。`AiLegacyProvider` 未実装 | PROVISIONAL。V1、G10 review ledger R2-P2-04 |
 | AI-005 provider boundary | `mock`/`rule` local only。Gemini等real providerはDPA、region、training opt-out、security/HR/product owner gate後のみ | `external-send-enabled=false` がkill switch | scope外provider呼出しはBLOCKED。providerにDSAR subjectを送らない | BLOCKED external。GATE-S17-G10-PROD |
+| AI-006 `INGEST_RESUME` / `INGEST_PROJECT` / `INGEST_BP_AVAILABILITY` | `untrustedSourceText` に `extracted_text` / `raw_text` / EML本文が入り得る。trusted instructionとデータを分離するが、raw本文自体はPII/第三者情報を含み得る | 現行parse serviceは `AiExecutionGateway` へ渡し、`persistRun=false`。real provider送信は設定で停止中だが、payload retention/外部copyを未確定とする | raw source、prompt injection、third-party、provider二次copy、scope不明はBLOCKED/UNKNOWN。`AiIngestionPayloadProvider` 未実装 | BLOCKED external / PROVISIONAL local。`AiGatewayRequest`、Gemini*ParseService、G10 allow-list |
 
 ## 4. audit / retention unresolved matters
 

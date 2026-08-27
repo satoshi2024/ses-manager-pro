@@ -29,8 +29,16 @@ function Assert-NoRawPiiProperty {
 
     $forbiddenNames = @(
         'email', 'contactemail', 'phone', 'contactphone', 'address', 'name',
-        'fullname', 'body', 'content', 'raw', 'rawprompt', 'prompt', 'token',
-        'secret', 'password', 'extractedtext', 'parsedjson', 'remarks', 'comment'
+        'fullname', 'realname', 'birthdate', 'nationality', 'initialname',
+        'photourl', 'body', 'content', 'raw', 'rawprompt', 'prompt',
+        'untrustedtext', 'untrustedsourcetext', 'token', 'tokenhash', 'secret',
+        'password', 'extractedtext', 'rawtext', 'parsedjson', 'remarks',
+        'comment', 'originalfilename', 'storedfilename', 'storagekey',
+        'resumesummary', 'skillsummary', 'description', 'worklocation',
+        'neareststation', 'useragent', 'ip', 'iphash', 'subject', 'recipient',
+        'recipientname', 'recipientemail', 'accountnumber', 'accountholder',
+        'bankaccount', 'privatenoteref', 'employeevisiblenote', 'note',
+        'topic', 'reason'
     )
 
     if ($null -eq $Value) {
@@ -129,7 +137,7 @@ for ($index = 0; $index -lt $records.Count; $index++) {
     }
 
     $identityResolution = [string](Get-PropertyValue -Object $record -Name 'identityResolution')
-    if ($identityResolution -eq 'AMBIGUOUS') {
+    if ($identityResolution -eq 'AMBIGUOUS' -or $identityResolution -eq 'UNVERIFIED') {
         Add-Reason -Reasons $blockingReasons -Reason 'IDENTITY_AMBIGUOUS_HUMAN_RESOLUTION_REQUIRED'
     } elseif ($identityResolution -ne 'VERIFIED') {
         Add-Reason -Reasons $unknownReasons -Reason 'IDENTITY_NOT_VERIFIED'
@@ -192,8 +200,16 @@ for ($index = 0; $index -lt $records.Count; $index++) {
     }
 
     $dispositionMethod = [string](Get-PropertyValue -Object $record -Name 'dispositionMethod')
+    $knownDispositionMethods = @(
+        'PENDING_HUMAN_APPROVAL_ONLY', 'NO_ACTION', 'LOGIC_DELETE_AFTER_APPROVAL',
+        'ANONYMIZE_AFTER_APPROVAL', 'PHYSICAL_DELETE_AFTER_APPROVAL',
+        'RESTRICT_AFTER_APPROVAL', 'BINARY_PURGE_AFTER_APPROVAL',
+        'REDACT_EXPORT_ONLY'
+    )
     if ([string]::IsNullOrWhiteSpace($dispositionMethod)) {
         Add-Reason -Reasons $unknownReasons -Reason 'DISPOSITION_METHOD_UNKNOWN'
+    } elseif ($knownDispositionMethods -notcontains $dispositionMethod) {
+        Add-Reason -Reasons $unknownReasons -Reason 'DISPOSITION_METHOD_UNSUPPORTED'
     }
 
     if ($blockingReasons.Count -gt 0) {
