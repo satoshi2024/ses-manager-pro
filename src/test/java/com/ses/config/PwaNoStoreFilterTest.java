@@ -31,7 +31,7 @@ class PwaNoStoreFilterTest {
     void portalとmyのページもnoStoreにする() throws Exception {
         PwaNoStoreFilter filter = new PwaNoStoreFilter();
         for (String path : new String[]{"/my/timesheet", "/portal/customer", "/portal",
-                "/document/list", "/payroll", "/contract-document"}) {
+                "/document/list", "/payroll", "/contract-document", "/js/i18n.js"}) {
             MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
             MockHttpServletResponse response = new MockHttpServletResponse();
             filter.doFilter(request, response, mock(FilterChain.class));

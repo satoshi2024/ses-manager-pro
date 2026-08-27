@@ -38,6 +38,8 @@ public class PwaNoStoreFilter extends OncePerRequestFilter {
 
     static boolean isDynamicPath(String path) {
         if (path == null) return false;
+        // i18n.jsは静的ファイルではなくlocale/queryで内容が変わるcontroller response。
+        if (path.equals("/js/i18n.js")) return true;
         // PWAのshell allow-list以外はserver-rendered画面・APIを含めて動的扱いにする。
         // これにより /document、/payroll、PDF/attachment等の新規route追加時も
         // HTTP browser cacheへPIIが残る漏れを防ぐ（SWもdynamicはnetwork-only）。
