@@ -69,7 +69,7 @@
 ### R5. Reconciliation・evidence
 
 1. jobごとにsource、accepted、rejected、applied、updated、skippedの件数を保存し、重複計上せず、定義を画面/API/CSVで共通化する。
-2. 金額列があるentityは、JPY、period、source amount、accepted/rejected/applied/updated/skipped amountの合計を保存し、source合計との差分を理由コード付きで照合しなければならない。
+2. 金額列があるentityは、JPY、period、source amount、accepted/rejected/applied/updated/skipped amountの合計を保存し、source合計との差分を理由コード付きで照合しなければならない。分類式は source = accepted + rejected、accepted = applied + updated + skipped + apply_failed とし、validate完了/COMPLETEDでは apply_failed = 0、差異件数・差異金額 = 0でなければならない。
 3. 空/不正金額は0円と混同せず、amount-excluded件数と理由を分離する。負数は業務上許可される場合とformula文字列を別に扱う。
 4. 完了時に、source hash、mapping version、mapping hash、schema version、executor、approvedBy、started/finished time、base snapshot、result hashを保存する。
 5. result hashはrow resultの安定した並びと正規化された結果項目から算出し、同一入力・同一mapping・同一結果の再検証に使えるようにする。
@@ -77,7 +77,7 @@
 ### R6. Security・file・audit・scope
 
 1. upload/apply/rollback/exportはCSRF、role、dynamic menu、DataScope、OrganizationScopeを適用し、UI非表示だけで認可を代替してはならない。
-2. source原本はDocumentService.registerReceivedとDocumentService.linkを使い、quarantine/scan/hash/access log/FileReferenceProviderの境界を再利用する。
+2. source原本はDocumentService.registerReceivedとDocumentService.linkを使い、quarantine/scan/hash/access log/FileReferenceProviderの境界を再利用する。IMPORT_JOB linkはFileScopeValidationServiceへ登録し、tenant、job、対象entityのscope不一致や未登録targetTypeはfail-closedで403にする。
 3. jobの原本・error export・previewには、raw PII、storageKey、secretをアプリケーションログへ出さない。download/preview/rollbackを監査対象に含める。
 4. async/schedulerでSecurityContextやrequest scopeを参照せず、executor、tenant、correlation idを明示的に渡す。ThreadLocalはfinallyでclearする。
 5. DataScopeのvisible populationはlist/detail/count/options/autocomplete/preview/error export/apply/retry/rollback/batchの全経路で一致させる。

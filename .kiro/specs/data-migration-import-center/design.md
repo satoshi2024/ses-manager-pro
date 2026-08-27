@@ -21,7 +21,8 @@
 
 UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
                                       └──────────────→ FAILED
-                                                     └→ ROLLED_BACK
+                                      └──────────────→ ROLLBACK_REQUESTED → ROLLING_BACK → ROLLED_BACK
+                                                     └─────────────────────────────────→ ROLLBACK_FAILED
 
 - UPLOADED: source documentがCLEANで、source SHA-256が確定。
 - MAPPED: schema versionとmapping version/hashが確定。
@@ -29,10 +30,50 @@ UPLOADED → MAPPED → VALIDATED → READY → APPLYING → COMPLETED
 - READY: source hash、mapping hash、base snapshot、承認条件がvalidate結果と一致。
 - APPLYING: apply lockを1つだけ取得し、chunk/checkpointを更新。
 - COMPLETED:全row結果、件数/金額、result hash、auditが確定。
-- FAILED:再開可能/要手動判定の理由を保存。無条件retryしない。
+- FAILED:再開可能/要手動判定の理由を保存。無条件retryしない。再開は同じjobのlease/CASを再取得してAPPLYINGへ戻す。
+- ROLLBACK_REQUESTED:対象・承認者・rollback policyを再確認する。新しい業務writeはまだ行わない。
+- ROLLING_BACK: row result/id-map単位でrollback/compensationを実行する。
 - ROLLED_BACK:承認済みrollbackとcompensationの結果が確定。
+- ROLLBACK_FAILED:一部の補償が失敗し、再実行または管理者対応を必要とする終端状態。
 
-不許可遷移、同じjobの二重apply、source hashが同じでもmapping hashが異なるapply、mapping変更後のREADY再利用を拒否する。
+不許可遷移、同じjobの二重apply、source hashが同じでもmapping hashが異なるapply、mapping変更後のREADY再利用を拒否する。COMPLETEDから直接APPLYINGへ戻すことはできず、再importは同一source identityの既存jobを返すか、別mappingとして拒否する。
+
+### 2.3 platform-invariantsの3決定表
+
+#### 時間・asOf
+
+| 項目 | 決定 |
+|---|---|
+| 日付型 | canonical DTOはLocalDateまたはYearMonth。日時はInstant/LocalDateTimeをtenant timezoneで正規化する |
+| timezone | tenant設定から取得し、Asia/Tokyoをコードへハードコードしない |
+| 有効期間 | start/endはinclusive。end < startはreject |
+| historical lookup | sourceのeffective date/asOfで候補を解決し、現在値だけへ黙って置換しない |
+| 欠損日 | default=nowを自動適用しない。mappingで明示defaultが承認されない限りreject |
+| monthly close | closed monthへのapply/updateはMonthlyClosingServiceのopen checkを通す |
+
+#### 主体×操作×可視母集団
+
+| 操作 | 主体 | 可視・変更可能な母集団 | 拒否条件 |
+|---|---|---|---|
+| upload/mapping/preview/validate | 管理者＋import権限 | tenant内の承認済みentity/schemaとsource document | role/menu/tenant不一致、scope外 |
+| error/reconciliation download | 管理者＋job可視性 | jobとそのsource/error document、対象entityのvisible population | FileScope未登録、tenant/job不一致 |
+| apply/retry | 管理者＋apply権限＋承認者 | validate snapshotと一致するscope内row | scope変化、approval不足、base hash不一致 |
+| rollback | 管理者＋rollback権限＋別承認者 | 当該jobのapplied/updated rowのみ | downstream ref、version conflict、policy禁止 |
+| async/batch | system executor（起動actorを保存） | 起動時にsnapshotしたtenant/scope | request SecurityContextの参照、scope未保存 |
+
+空の許可集合は全件許可ではなく0件とする。preview、count、error export、apply、retry、rollback、document downloadで同じvisible populationを再計算し、UI非表示を認可の代替にしない。
+
+#### 状態機械・競合
+
+| 資源 | 競合制御 | 一意性/再開規則 |
+|---|---|---|
+| job | version CAS + apply lease | READY→APPLYINGは1回。lease期限後だけ同じjobを再開 |
+| source identity | tenant + entity + schema + source_sha256のDB unique/lock | different mappingは409。same mappingのFAILEDは同一job再開 |
+| mapping | mapping_version + mapping_hash | hash再計算不一致でREADY/apply拒否 |
+| row | job_id + source_row_number、source row hash | 完了hash一致はSKIP、hash不一致は停止 |
+| target natural key | target domain unique/行lock | id-mapとtarget lookupを同一row transactionで照合 |
+| checkpoint | job_id + chunk_no、last_committed_row | commit済みprefixのみ再開。未commit rowは再処理 |
+| rollback | ROLLBACK_REQUESTED→ROLLING_BACK CAS | 二重rollbackを拒否し、compensation failureを終端化 |
 
 ## 3. 候補データモデル
 
@@ -49,6 +90,8 @@ job単位の不変入力と状態を保持する。sourceの全payloadやPIIをJ
 
 source原本はDocumentService.registerReceivedで登録し、DocumentService.link(documentId, "IMPORT_JOB", jobId)で紐付ける。job作成とdocument登録の失敗は、sourceを孤児にしないcleanup-safeな状態へ記録する。source documentは業務rollbackで削除しない。
 
+source identityはtenant_id + entity_type + schema_version + source_sha256で定義し、同じidentityのjobを複数のapply対象として作らない。既存jobがMAPPED/VALIDATED/READY/APPLYING/COMPLETEDの場合、別mapping_hashは拒否する。同じmapping_hashのFAILED/lease期限切れjobだけを同一jobとして再開し、COMPLETEDは二重applyとして拒否する。この判定はアプリケーションの事前lookupだけでなく、DB unique/lockとCASで直列化する。
+
 ### 3.2 t_import_mapping（候補）
 
 - entity_type、schema_version、mapping_version、mapping_hash
@@ -57,7 +100,7 @@ source原本はDocumentService.registerReceivedで登録し、DocumentService.li
 - natural key columns、duplicate policy、upsert policy、existing-row approval policy
 - mapping status、created_by、approved_by、created_at
 
-同じsource hashへ別mappingを適用しないため、job内でmapping_hashを固定し、READY/apply時に再計算して一致を要求する。mappingのJSONは定義情報に限り、全row payloadは保存しない。
+同じsource hashへ別mappingを適用しないため、job内でmapping_hashを固定し、READY/apply時に再計算して一致を要求する。mappingのJSONは定義情報に限り、全row payloadは保存しない。source identityの別job lookupでもmapping_hashを比較し、different mappingを拒否する。
 
 ### 3.3 t_import_row_result（候補）
 
@@ -146,13 +189,21 @@ job version CASでREADY→APPLYINGを1回だけ許可する。scheduler/HTTP ret
 
 ### 6.2 chunk境界
 
-1. source streamを次chunkへ読み、canonical rowを検証する。
-2. rowごとにid-mapをlookupする。COMPLETED済みtarget/result hash一致はSKIPPED、hash不一致は同一jobの改竄/不整合として停止する。
+1. source streamを一定数のchunkへ読み、canonical rowを検証する。chunkはメモリ/進捗単位であり、未確定の業務writeを意味しない。
+2. rowごとにid-mapとtarget natural keyをlookup/lockする。COMPLETED済みtarget/result hash一致はSKIPPED、hash不一致は同一jobの改竄/不整合として停止する。
 3. 未処理rowだけdomain serviceへ渡す。
-4. row result、id-map、checkpoint、job countersをDB transactionでcommitする。
-5. commit後の外部通知/cache invalidationはafterCommitで実行する。
+4. row単位のREQUIRES_NEW transactionで、domain service、target natural key lock、row result、id-map、last_committed_rowを同一DB transactionへ入れる。domain serviceの@Transactionalはこのtransactionへjoinし、mapper直insert/updateは使わない。
+5. row transactionがcommitするまで、target/domain変更もrow result/id-map/checkpointも外部から確定済みと見なさない。commit後の通知/cache invalidationはafterCommitで実行する。
+6. chunk完了時にcheckpointをCOMPLETEDへCASする。job全chunk完了後にCOMPLETEDへCASし、reconciliation/result hashを確定する。
 
-domain serviceのtransactionとjob checkpointのtransactionを分離すると二重作成し得るため、F1/F2で最終的なtransaction boundaryを確定する。domain serviceを変更せずに二重作成を防げない場合は、target natural key unique/idempotency commandを先に追加する。
+crash windowは次のとおり固定する。
+
+- row transaction commit前: target変更、row result、id-map、checkpointが同時にrollbackされ、再開時に同じrowを再処理する。
+- commit後、次row開始前: target/result/id-map/last_committed_rowが揃っているため、再開時はhash一致をSKIPPEDにする。
+- job状態更新前: COMPLETED checkpointを再照合し、未完了chunkだけを処理する。
+- lease期限切れ: 同じjobのCASを再取得し、異なるexecutorが同時にapplyしない。
+
+これによりmid-chunk crash後の再開で重複作成を起こさない。10,000行ではread/parserをchunk化し、row transactionを既定の安全境界とする。target domainにnatural key unique/idempotency commandが不足する場合は、B1より前にそのdomain facade/constraintを追加する。
 
 ## 7. Rollback / compensation
 
@@ -175,13 +226,28 @@ entityごとに次の表をmapping versionへ記録する。
 - row hash: source rowの元値をencoding復元後のcanonical representationでSHA-256。PIIをログへ出さない。
 - result hash: row number順のrow result（target id、action、status、error code、amount、row hash）をstable serializeしてSHA-256。
 
-amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。reconciliationにはsource、accepted、rejected、applied、updated、skippedを各件数・金額で保存する。row stateの合計とsourceの分類合計が一致しない場合は、amount-excluded/duplicate/invalid/compensated等の理由が必ず残り、差異0を完了条件とする。
+amountはJPY BigDecimalで正規化し、scale/roundingをmapping versionに含める。reconciliationにはsource、accepted、rejected、applied、updated、skippedに加え、apply_failed、empty_skipped、amount_excludedを各件数・金額または理由付き件数で保存する。
+
+分類式は次で固定する。
+
+- source_rows = accepted_rows + rejected_rows
+- physical_data_rows = source_rows + empty_skipped_rows
+- accepted_rows = applied_rows + updated_rows + skipped_rows + apply_failed_rows
+- validate完了時は apply_failed_rows = 0
+- source_amount_known = accepted_amount + rejected_amount
+- accepted_amount = applied_amount + updated_amount + skipped_amount + apply_failed_amount
+- difference_count = source_rows - accepted_rows - rejected_rows
+- difference_amount = source_amount_known - accepted_amount - rejected_amount
+
+blank/invalid/formula-like amountはamount_excludedへ分離し、数値合計へ入れない。duplicateは同一source内の二重rowとしてrejected、既存id-mapのhash一致による再実行だけをskippedとする。COMPLETEDの条件はdifference_count=0、difference_amount=0、apply_failed_rows=0、result hash確定である。
 
 ## 9. File / UI / API候補
 
 ### 9.1 File
 
 UploadはFileStorageService/FileKindとDocumentServiceの境界を再利用し、独自のupload pathを作らない。CSV用FileKind、XLSX用FileKind、source/errorのretentionはDG-06後に決める。error CSVはstream出力し、CsvUtilsと同じRFC4180/formula injection規則を使う。
+
+DocumentLinkのtargetType=IMPORT_JOBは、既存のFileScopeValidationService/DocumentService access boundaryへ登録する。jobのtenant、executor/承認者、対象entityのDataScope/OrganizationScope、document statusを検証し、未登録のtargetTypeやscope不明はfail-closedで403とする。FileReferenceProviderはcleanupからの孤児削除を防ぎ、FileScopeValidationは閲覧・download・error exportの認可を担う。DocumentServiceがIMPORT_JOBを認識できない状態で実装を進めない。
 
 ### 9.2 API
 
@@ -207,6 +273,7 @@ Upload → entity/schema選択 → mapping → sample/preview → validation err
 
 - parser: UTF-8 BOM/no BOM、Shift_JIS、CRLF/LF/CR、quoted newline、escaped quote、comma。
 - safety: =、+、@、tab、CR、通常の負数、巨大cell、制御文字、malformed quote、wrong encoding。
+- formula/number: 型がnumericの列だけはBigDecimal全体parseに成功する-50000、-1.5、+1、指数表記を通常の数値として扱う。numeric parseに失敗した-1+cmdや、型がStringの列の-始まりはformula-like literal/warningとして扱い、error/exportでは無害化する。
 - semantic: required、enum、date/amount、duplicate natural key、missing reference、logical-delete candidate、customer-project-contract mismatch。
 - no-write: validate前後の全対象table count/max id/updated_at/hashが不変。resolveOrCreate/replaceSkills等のwrite mockは0回。
 - idempotency: double apply、same hash/different mapping、mid-chunk crash、checkpoint restart、result hash mismatch。

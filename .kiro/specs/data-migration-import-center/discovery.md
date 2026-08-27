@@ -67,6 +67,7 @@ Engineer CSVは、既存仕様として日本語11列、UTF-8 BOM付き出力、
 ### 2.4 既存の文書・監査・batch
 
 - DocumentServiceはquarantine、scan、hash、DB metadata、publish、link、access log、integrity verifyを持つ。source fileを独自テーブルのpathだけで保持しない。
+- 既存のFileScopeValidationServiceはresume/engineer photo/proposal/project ingestion/BP ingestion/document archiveを認識するが、IMPORT_JOBは未登録である。F1ではDocumentLinkのcleanup参照と別に、IMPORT_JOBのtenant/job/entity scopeをfail-closedで検証する経路を追加する。
 - FileStorageService / FileKindは拡張子、magic、MIME、サイズ、scanを検証する。CSV/XLSXの許可種別はDG-06承認後にFileKind追加または既存種別の適用を決める。
 - FileReferenceProviderを実装し、FileCleanupServiceからimport原本やerror exportが孤児扱いされないようにする。
 - ApiAuditFilterは更新系 /api/**をt_audit_logへ記録する。import jobの内部行処理は、request単位の監査だけに依存せず、jobのexecutor、correlation id、操作結果を専用証跡へ残す。

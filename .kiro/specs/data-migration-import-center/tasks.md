@@ -51,7 +51,8 @@ t_import_job、t_import_mapping、t_import_row_result、t_import_checkpoint、t_
 - MySQL fresh、legacy/upgrade、partial/backfill、repairの各schema shapeを検証する。
 - V1へ逆戻りして列を追加せず、新テーブルは独立migration、H2は専用schema fixtureとして同期する。
 - source file全量やrow payloadをJSON保存せず、document_id、row number、row hash、error/id/result hashを保存する。
-- job state、chunk、row、id-mapの一意制約とCAS/lockをMySQLで確認する。
+- source identity（tenant/entity/schema/source_sha256）のjob間unique/lock、job state、chunk、row、id-mapの一意制約とCAS/lockをMySQLで確認する。
+- IMPORT_JOBのDocumentLinkをFileScopeValidationServiceへ登録し、FileReferenceProviderとは別に閲覧/download/error exportのfail-closed認可を確認する。
 
 ### Test requirements
 
@@ -128,6 +129,7 @@ READYのjobだけを、canonical DTOからdomain service経由でchunk applyし�
 
 - double apply、same hash/different mapping拒否、chunk境界crash、restart、target natural key collision、version conflictをtestする。
 - 10,000行でtarget重複0、row resultとcheckpointの整合をtestする。
+- row transaction commit前/後、checkpoint完成前後、lease期限切れのcrash windowをtestする。
 
 ### Demo
 
@@ -173,6 +175,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 - UTF-8 BOM/Shift_JIS、quoted newline、formula injection、巨大cell、duplicate/missing ref、10,000行を実データfixtureでtestする。
 - mid-chunk crash、restart、double apply、rollback/compensation、document/source retentionを再実行する。
+- numeric列の-50000/-1.5/+1と、String列またはnumeric parse不能の-1+cmdを分離してtestする。
 
 ### Demo
 
@@ -182,7 +185,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 | Task | 状態 | 対応文書/証拠 | commit |
 |---|---|---|---|
-| 0 Discovery/gate | [x] | discovery.md、requirements.md、design.md、tasks.md、mapping-spike.md、targeted regression 16件 PASS | 81354d00 |
+| 0 Discovery/gate | [x] | discovery.md、requirements.md、design.md、tasks.md、mapping-spike.md、test-evidence.md、targeted regression 16件 PASS | 81354d00, b73a1c49 |
 | F1 Job/mapping foundation | [ ] | 承認後 |
 | F2 Parser/canonical/no-write | [ ] | 承認後 |
 | A1 Upload/mapping/preview UI | [ ] | 承認後 |
