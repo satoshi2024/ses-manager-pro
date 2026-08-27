@@ -46,8 +46,8 @@ Self-review notes:
 |---|---|---|---|---|
 | 0 Discovery/Gate/Spec | COMPLETED | b3c69d990932f1ea2e74020b95741a6b4757180f | b3c69d990932f1ea2e74020b95741a6b4757180f | this spec, central traceability, inventory |
 | F1 Manifest/SW/Cache | COMPLETED | 1dc2056397c8236acc5c347b2629e0ce2933265c | 1dc2056397c8236acc5c347b2629e0ce2933265c | PwaAssetContractTest, PwaNoStoreFilterTest, static shell/cache policy |
-| F2 Idempotency/Version | NOT_STARTED | - | - | - |
-| A1 Mobile shell | NOT_STARTED | - | - | - |
+| F2 Idempotency/Version | COMPLETED | d4f13189e8289300121863c619bb874c839bb58e | d4f13189e8289300121863c619bb874c839bb58e | PwaCanonicalizerTest, PwaClientMutationLedgerServiceTest, PwaMutationApiControllerTest, AllMappersSchemaSweepTest, MessageBundleConsistencyTest |
+| A1 Mobile shell | COMPLETED | TBD | TBD | MobileResponsiveLayoutTest (28), PwaAssetContractTest (4); 44px touch target, focus-visible, modal focus restore, offline/online status |
 | A2 Draft/Queue/Conflict | NOT_STARTED | - | - | - |
 | B1 Update/Cleanup/Monitoring | NOT_STARTED | - | - | - |
 | M Integrated gate | NOT_STARTED | - | - | - |

@@ -42,6 +42,17 @@ class PwaAssetContractTest {
         assertThat(layout).contains("rel=\"manifest\"");
     }
 
+    @Test
+    void 共通shellはタッチ操作とキーボード操作の契約を持つ() throws Exception {
+        String header = Files.readString(Path.of("src/main/resources/templates/layout/header.html"), StandardCharsets.UTF_8);
+        String sidebar = Files.readString(Path.of("src/main/resources/templates/layout/sidebar.html"), StandardCharsets.UTF_8);
+        String css = Files.readString(STATIC_ROOT.resolve("css/common.css"), StandardCharsets.UTF_8);
+
+        assertThat(header).contains("id=\"pwa-status\"", "aria-live=\"polite\"", "aria-expanded=\"false\"");
+        assertThat(sidebar).contains("id=\"sidebar-close-btn\"", "aria-label=\"メニューを閉じる\"");
+        assertThat(css).contains("min-height: 44px", ":focus-visible", ".pwa-status[data-state=\"offline\"]");
+    }
+
     private String read(String name) throws Exception {
         return Files.readString(STATIC_ROOT.resolve(name), StandardCharsets.UTF_8);
     }

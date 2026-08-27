@@ -76,7 +76,7 @@ queue再送の副作用を1件にし、異hash/stale versionを409にして既�
 
 network timeout後の同一command再送、同時2 session、stale draftを実行し、DB副作用1件、409差分、last-write-winsなしを証拠化する。
 
-## Task A1 — Mobile shell/navigation
+## Task A1 — Mobile shell/navigation `[x]`
 
 ### Objective
 

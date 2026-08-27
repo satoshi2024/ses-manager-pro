@@ -332,10 +332,12 @@ const SES = {
             const openSidebar = () => {
                 sidebar.classList.add('show');
                 if (backdrop) backdrop.classList.add('show');
+                if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'true');
             };
             const closeSidebar = () => {
                 sidebar.classList.remove('show');
                 if (backdrop) backdrop.classList.remove('show');
+                if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
             };
 
             if (toggleBtn && sidebar) {
@@ -959,6 +961,9 @@ SES.pwa = {
     hadController: false,
 
     init: function() {
+        this.setStatus(navigator.onLine ? 'online' : 'offline');
+        window.addEventListener('online', function() { SES.pwa.setStatus('online'); });
+        window.addEventListener('offline', function() { SES.pwa.setStatus('offline'); });
         if (!('serviceWorker' in navigator)) return;
         this.hadController = !!navigator.serviceWorker.controller;
         const self = this;
@@ -987,6 +992,16 @@ SES.pwa = {
             window.location.reload();
         });
         this.bindLogout();
+    },
+
+    setStatus: function(state, label) {
+        const status = document.getElementById('pwa-status');
+        const text = document.getElementById('pwa-status-label');
+        if (!status || !text) return;
+        const labels = { online: 'オンライン', offline: 'オフライン', syncing: '同期中',
+            pending: '未同期あり', conflict: '競合あり', error: '同期停止' };
+        status.dataset.state = state;
+        text.textContent = label || labels[state] || state;
     },
 
     promptUpdate: function(worker) {
@@ -1081,6 +1096,23 @@ document.addEventListener('DOMContentLoaded', function() {
             pageTitleHeader.textContent = titleText;
         }
     }
+
+    // モーダルを閉じた後に起点ボタンへ戻し、キーボード/スクリーンリーダーの位置を失わせない。
+    document.addEventListener('show.bs.modal', function(event) {
+        event.target._sesReturnFocus = document.activeElement;
+    });
+    document.addEventListener('hidden.bs.modal', function(event) {
+        const target = event.target._sesReturnFocus;
+        if (target && document.contains(target) && typeof target.focus === 'function') target.focus();
+    });
+
+    // ネイティブvalidationは最初のinvalid controlをスクロールして明示的にfocusする。
+    document.addEventListener('invalid', function(event) {
+        if (event.target && typeof event.target.focus === 'function') {
+            event.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            event.target.focus({ preventScroll: true });
+        }
+    }, true);
 
     SES.pwa.init();
 });

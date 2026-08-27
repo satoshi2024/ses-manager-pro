@@ -561,8 +561,43 @@ a:hover {
     min-width: 0;
 }
 
+/* PWA通信状態。認証情報・業務データはここへ表示しない。 */
+.pwa-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 32px;
+    padding: 0.25rem 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.pwa-status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: 0 0 0.5rem;
+    border-radius: 50%;
+    background: var(--accent-green);
+}
+
+.pwa-status[data-state="offline"] .pwa-status-dot,
+.pwa-status[data-state="error"] .pwa-status-dot {
+    background: var(--accent-red);
+}
+
+.pwa-status[data-state="syncing"] .pwa-status-dot,
+.pwa-status[data-state="pending"] .pwa-status-dot {
+    background: var(--accent-yellow);
+}
+
 /* ================== SIDEBAR NAV ================== */
 .sidebar .nav-link {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
     color: var(--text-secondary);
     font-weight: 500;
     transition: var(--transition-base);
@@ -584,6 +619,11 @@ a:hover {
     font-size: 1.1rem;
     width: 24px;
     text-align: center;
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid rgba(56, 189, 248, 0.75);
+    outline-offset: 2px;
 }
 
 /* ================== UI COMPONENTS ================== */
@@ -1132,6 +1172,12 @@ input[type="date"]::-webkit-datetime-edit-text {
 
     .header-tools {
         gap: 0.25rem !important;
+    }
+
+    .pwa-status {
+        min-height: 30px;
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
     }
 
     .content-area .d-flex.justify-content-between.align-items-center.mb-4 > div:last-child:not(:first-child) {
