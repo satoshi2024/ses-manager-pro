@@ -37,6 +37,7 @@ public class ServiceRequestApiController {
 
     private final ServiceRequestService serviceRequestService;
     private final ServiceSlaPolicyMapper slaPolicyMapper;
+    private final com.ses.service.servicedesk.ServiceRequestExportService exportService;
 
     /**
      * 問い合わせ一覧検索（ページネーション・DataScope適用）
@@ -116,5 +117,22 @@ public class ServiceRequestApiController {
                 new LambdaQueryWrapper<ServiceSlaPolicy>().eq(ServiceSlaPolicy::getStatus, "ACTIVE")
         );
         return ApiResult.success(list);
+    }
+
+    /**
+     * サービスデスク一覧 CSV エクスポート
+     */
+    @GetMapping("/export")
+    public void exportCsv(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) Long customerId,
+            jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        response.setContentType("text/csv; charset=UTF-8");
+        String filename = "service_requests_" + java.time.LocalDate.now() + ".csv";
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+        exportService.exportRequestsToCsv(response.getOutputStream(), keyword, status, priority, category, customerId);
     }
 }

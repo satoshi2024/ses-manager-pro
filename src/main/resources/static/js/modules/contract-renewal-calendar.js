@@ -137,8 +137,17 @@ $(document).ready(function() {
 
     function buildPillHtml(item) {
         const meta = stateMeta(item.renewalState);
+        let healthBadge = '';
+        if (item.healthStatus === 'AT_RISK') {
+            healthBadge = ' <span class="badge bg-danger p-1" title="顧客ヘルス: 危険 (' + (item.healthScore || 0) + '点)">⚠</span>';
+        } else if (item.healthStatus === 'NEUTRAL') {
+            healthBadge = ' <span class="badge bg-warning text-dark p-1" title="顧客ヘルス: 注意 (' + (item.healthScore || 0) + '点)">●</span>';
+        } else if (item.healthStatus === 'HEALTHY') {
+            healthBadge = ' <span class="badge bg-success p-1" title="顧客ヘルス: 健全 (' + (item.healthScore || 0) + '点)">✓</span>';
+        }
+
         const label = SES.escapeHtml((item.engineerName || '-') + ' / ' + (item.customerName || '-'));
-        return `<button type="button" class="renewal-pill status-badge ${meta.badgeClass}" data-contract-id="${item.contractId}" title="${label}">${label}</button>`;
+        return `<button type="button" class="renewal-pill status-badge ${meta.badgeClass}" data-contract-id="${item.contractId}" title="${label}">${label}${healthBadge}</button>`;
     }
 
     function renderDayCellInner(dateStr, dayNum, extraClasses) {
@@ -232,6 +241,16 @@ $(document).ready(function() {
         $('#renewalDetailEndDate').text(item.endDate || '-');
         $('#renewalDetailDueDate').text(item.renewalDueDate || '-');
         $('#renewalDetailStatus').text(item.status || '-');
+
+        let healthHtml = '<span class="text-muted">-</span>';
+        if (item.healthStatus === 'HEALTHY') {
+            healthHtml = `<span class="badge bg-success">健全 (${item.healthScore || 0}点)</span>`;
+        } else if (item.healthStatus === 'NEUTRAL') {
+            healthHtml = `<span class="badge bg-warning text-dark">注意 (${item.healthScore || 0}点)</span>`;
+        } else if (item.healthStatus === 'AT_RISK') {
+            healthHtml = `<span class="badge bg-danger">危険 (${item.healthScore || 0}点)</span>`;
+        }
+        $('#renewalDetailCustomerHealth').html(healthHtml);
 
         const meta = stateMeta(item.renewalState);
         $('#renewalDetailState').html(`<span class="status-badge ${meta.badgeClass}">${SES.escapeHtml(stateLabel(item.renewalState))}</span>`);

@@ -93,8 +93,9 @@ public final class ActionPermissionResolver {
             Map.entry("batch-operations", "batch-operation"),
             // customer-success-service-desk (NF-02 / DG-02)
             Map.entry("service-desk", "service-desk"),
-            Map.entry("customer-health", "customer-health"),
-            Map.entry("customer-qbr", "customer-qbr")
+            Map.entry("customer-success", "service-desk"),
+            Map.entry("customer-health", "service-desk"),
+            Map.entry("customer-qbr", "service-desk")
     );
 
     private ActionPermissionResolver() {

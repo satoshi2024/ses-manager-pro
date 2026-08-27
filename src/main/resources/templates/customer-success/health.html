@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>顧客ヘルススコア・CSダッシュボード - SES管理プロ</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h4 class="mb-1 fw-bold"><i class="bi bi-heart-pulse-fill text-danger me-2"></i>顧客ヘルススコア & CSダッシュボード</h4>
+            <p class="text-muted small mb-0">SLA達成率・CSAT・稼働状況・定例会履歴から健康状態を総合評価（契約更新判断支援）</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnGenerateSnapshot">
+                <i class="bi bi-camera me-1"></i>月次スナップショット作成
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" id="btnOpenQbrModal" data-bs-toggle="modal" data-bs-target="#qbrModal">
+                <i class="bi bi-calendar-plus me-1"></i>定例会(QBR)記録
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="card mb-4 bg-dark-subtle border-secondary">
+        <div class="card-body py-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-4">
+                    <input type="text" class="form-control form-control-sm" id="healthKeyword" placeholder="顧客名で検索...">
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" id="healthStatusFilter">
+                        <option value="">すべての状態</option>
+                        <option value="HEALTHY">健全 (HEALTHY: 80点以上)</option>
+                        <option value="NEUTRAL">注意 (NEUTRAL: 60〜79点)</option>
+                        <option value="AT_RISK">危険 (AT_RISK: 60点未満)</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-secondary btn-sm w-100" id="btnSearchHealth">
+                        <i class="bi bi-search me-1"></i>検索
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Health Score List Table -->
+    <div class="card shadow-sm border-secondary mb-4">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-dark align-middle mb-0" id="healthTable">
+                    <thead>
+                    <tr>
+                        <th>顧客名</th>
+                        <th>総合ヘルススコア</th>
+                        <th>状態</th>
+                        <th>SLA遵守度 (30)</th>
+                        <th>満足度 CSAT (25)</th>
+                        <th>稼働安定度 (25)</th>
+                        <th>対話頻度 (20)</th>
+                        <th>操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="healthTableBody">
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">読み込み中...</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- QBR Modal -->
+    <div class="modal fade" id="qbrModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="qbrModalTitle">定例会(QBR)記録の登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="qbrForm">
+                    <input type="hidden" id="qbrId">
+                    <div class="modal-body">
+                        <div class="alert alert-danger d-none" id="qbrModalError"></div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label required">顧客ID / 顧客名 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="qbrCustomerId" placeholder="顧客ID" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label required">開催日 <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" id="qbrMeetingDate" required>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label required">タイトル <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="qbrTitle" placeholder="例: 2026年第2四半期 定例振り返りミーティング" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">参加者</label>
+                                <input type="text" class="form-control" id="qbrAttendees" placeholder="例: 顧客側: 山田部長、弊社: 佐藤">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">定例会満足度 (1〜5)</label>
+                                <select class="form-select" id="qbrCsatScore">
+                                    <option value="">未評価</option>
+                                    <option value="5">5 (大変満足)</option>
+                                    <option value="4">4 (満足)</option>
+                                    <option value="3">3 (普通)</option>
+                                    <option value="2">2 (やや不満)</option>
+                                    <option value="1">1 (不満)</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">アジェンダ</label>
+                                <textarea class="form-control" id="qbrAgenda" rows="2"></textarea>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">議事録・ディスカッション要点</label>
+                                <textarea class="form-control" id="qbrMinutes" rows="3"></textarea>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">ネクストアクション / 課題</label>
+                                <textarea class="form-control" id="qbrActionItems" rows="2"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-primary" id="btnSaveQbr">保存する</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/customer-health.js}"></script>
+</th:block>
+</body>
+</html>

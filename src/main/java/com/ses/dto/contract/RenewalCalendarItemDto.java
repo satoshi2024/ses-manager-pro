@@ -22,4 +22,6 @@ public class RenewalCalendarItemDto {
     private String renewalDecision;
     private Long salesUserId;
     private String salesUserName;
+    private String healthStatus;
+    private Integer healthScore;
 }

@@ -108,8 +108,13 @@
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('service-desk')}">
-                    <a th:href="@{/service-desk/requests}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/service-desk') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/service-desk/requests}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/service-desk/requests') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-headset me-2"></i><span th:text="#{menu.serviceDesk}">サービスデスク</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('service-desk')}">
+                    <a th:href="@{/customer-success/health}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/customer-success') or #strings.startsWith(currentUri, '/service-desk/health') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-heart-pulse me-2"></i><span>顧客ヘルス</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
