@@ -708,6 +708,26 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "t_integration_job", "organization_id");
             assertColumnExists(st, "t_integration_job", "next_retry_at");
             assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='accounting-integration'");
+
+            // V109: 要員ライフサイクルワークフロー (engineer-lifecycle-workflow)
+            assertTableExists(st, "m_lifecycle_template");
+            assertTableExists(st, "m_lifecycle_template_task");
+            assertTableExists(st, "m_lifecycle_template_task_dep");
+            assertTableExists(st, "t_lifecycle_case");
+            assertTableExists(st, "t_lifecycle_task");
+            assertTableExists(st, "t_lifecycle_task_dep");
+            assertTableExists(st, "t_lifecycle_evidence_link");
+            assertTableExists(st, "t_lifecycle_event");
+            assertColumnExists(st, "t_lifecycle_case", "version");
+            assertColumnExists(st, "t_lifecycle_case", "engineer_snapshot_json");
+            assertColumnExists(st, "t_lifecycle_task", "version");
+            assertColumnExists(st, "t_lifecycle_task", "approval_request_id");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='lifecycle'");
+            assertRowExists(st, "SELECT 1 FROM m_menu WHERE menu_key='myLifecycle'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='HR' AND m.menu_key='lifecycle'");
+            assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                    + "WHERE rm.role='要員' AND m.menu_key='myLifecycle'");
         }
     }
 

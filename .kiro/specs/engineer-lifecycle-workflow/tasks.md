@@ -17,7 +17,7 @@
   - **テスト要件**: スコープ境界・非目標・契約インターフェースの整合性確認。
   - **Demo**: DG-01決定事項とインベントリ台帳の確認。
 
-- [ ] F1. テンプレート・案件・タスク・イベント DDLと状態競合
+- [x] F1. テンプレート・案件・タスク・イベント DDLと状態競合
   - **Objective**: ライフサイクルテンプレート（`m_lifecycle_template`, `m_lifecycle_template_task`, `m_lifecycle_template_task_dep`）、案件（`t_lifecycle_case`）、タスク（`t_lifecycle_task`, `t_lifecycle_task_dep`）、証跡リンク（`t_lifecycle_evidence_link`）、およびイベント台帳（`t_lifecycle_event`）をDBへ構築し、版番号CASによる状態遷移排他制御を確立する。
   - **実装ガイダンス**: **V109** / `V1__create_tables.sql` / H2 (`sql/schema-lifecycle-workflow-h2.sql`) / MySQL smoke、MyBatis-Plusエンティティ・Mapper群。
     テンプレート版の不変性（進行中案件が改定版に影響されないこと）をDB/Entityレベルで担保。
