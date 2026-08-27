@@ -97,6 +97,16 @@ class LifecycleMySqlIntegrationTest {
                 .build();
         sysUserMapper.insert(admin);
 
+        // ROLE:HR 担当解決用（必須タスクは userId 解決に失敗すると createCase が落ちる）
+        SysUser hr = SysUser.builder()
+                .username("hr_mysql_lc")
+                .password("pass")
+                .realName("人事MySQL")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hr);
+
         OrganizationUnit org = OrganizationUnit.builder()
                 .code("ORG-MYSQL-LC")
                 .name("開発本部")

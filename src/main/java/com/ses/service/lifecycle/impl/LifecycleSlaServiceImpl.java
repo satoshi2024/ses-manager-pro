@@ -29,7 +29,7 @@ public class LifecycleSlaServiceImpl implements LifecycleSlaService {
     private final LifecycleNotificationService notificationService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int processSlaCheck(LocalDate asOf) {
         LocalDate today = asOf != null ? asOf : LocalDate.now();
 
