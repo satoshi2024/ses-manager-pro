@@ -35,6 +35,7 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | source inventory completion | `b45a2f4f42beb3e87400318b84271d40a8340e37` | `origin/codex/privacy-retention-dsar` | pushed |
 | compliance history inventory | `ab06e0a3098e4e072cdee0d6b75f9ec439189bed` | `origin/codex/privacy-retention-dsar` | pushed |
 | reviewer qualification inventory | `a05ad24203110090afdd69d2248e054133cf29b9` | `origin/codex/privacy-retention-dsar` | pushed |
+| reviewer adoption inventory | `64e33cbc54720264f785c8030b99fa3630a23a95` | `origin/codex/privacy-retention-dsar` | pushed |
 
 ## D0 actual verification
 
