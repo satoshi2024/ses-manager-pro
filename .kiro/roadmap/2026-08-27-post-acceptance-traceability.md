@@ -22,7 +22,7 @@
 
 | ID | feature-name候補 | 現在Status | Owner | 主要KPI | 主依存 | Decision/理由 | 再評価日 |
 |---|---|---|---|---|---|---|---|
-| NF-01 | `engineer-lifecycle-workflow` | CANDIDATE | 未定 | 退社後access残存、期限超過率 | identity、organization、document、approval | 未決定 | 未定 |
+| NF-01 | `engineer-lifecycle-workflow` | PASS | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 独立Review PASS (Stage A/B 合格)。PR #85 更新済み。要員の入社・配属・異動・休職・復職・退社ワークフロー、退社ゲート9項目、SoD例外承認確立 | 2026-08-27 |
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | CANDIDATE | 未定 | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | 未決定 | 未定 |
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
