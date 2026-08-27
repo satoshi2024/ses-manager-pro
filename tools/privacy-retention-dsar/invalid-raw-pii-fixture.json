@@ -1,0 +1,9 @@
+{
+  "asOf": "2026-08-27T00:00:00+09:00",
+  "records": [
+    {
+      "candidateKey": "invalid-raw-pii",
+      "contact_name": "REDACTED_TEST_VALUE"
+    }
+  ]
+}

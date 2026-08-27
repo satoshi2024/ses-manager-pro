@@ -28,7 +28,7 @@
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
-| NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list | 未決定 | 未定 |
+| NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
 | NF-09 | `asset-account-license-lifecycle` | CANDIDATE | 未定 | 未返却、active account残存 | NF-01、identity、document | 未決定 | 未定 |
 | NF-10 | `scheduled-management-reporting` | CANDIDATE | 未定 | 作成時間、配布失敗率 | dashboard、document、notification、NF-02 | 未決定 | 未定 |
@@ -94,6 +94,13 @@
 - legal holdの開始/解除権限と二者承認。
 - 削除、匿名化、参照制限、exportの対象別方式。
 - 本人確認手段とrequest期限。
+- policy version、起算trigger、対象別result evidence、処分方式のallow-list。
+- 同姓同名/複数候補のhuman resolution、第三者redaction、scope/delivery/期限/reopen。
+- legal-document-ledger-archiveの未分類3文書、storage削除失敗時のresult evidence。
+- database-backup-recoveryのPROD-001〜008、DB+binary同時点restore、restore後tombstone再適用。
+- production feature flag、法務owner、runbook、monitoring、emergency stop。
+
+NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<OWNER>`、`<BASE_BRANCH>`、`<BASE_COMMIT>`を推測で置換せず、技術比較base `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` と開始時merge-base `0333b0a4afadef42639bad27e1ae443758f9804f`を未承認のReview境界として記録する。中央台帳のStatusは`CANDIDATE`のまま変更しない。
 
 ### DG-08 NF-08
 
