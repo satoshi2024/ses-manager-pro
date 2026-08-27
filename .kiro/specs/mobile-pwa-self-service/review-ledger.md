@@ -45,7 +45,7 @@ Self-review notes:
 | Task | Status | Commit | Remote SHA | Evidence |
 |---|---|---|---|---|
 | 0 Discovery/Gate/Spec | COMPLETED | b3c69d990932f1ea2e74020b95741a6b4757180f | b3c69d990932f1ea2e74020b95741a6b4757180f | this spec, central traceability, inventory |
-| F1 Manifest/SW/Cache | NOT_STARTED | - | - | - |
+| F1 Manifest/SW/Cache | COMPLETED | 1dc2056397c8236acc5c347b2629e0ce2933265c | 1dc2056397c8236acc5c347b2629e0ce2933265c | PwaAssetContractTest, PwaNoStoreFilterTest, static shell/cache policy |
 | F2 Idempotency/Version | NOT_STARTED | - | - | - |
 | A1 Mobile shell | NOT_STARTED | - | - | - |
 | A2 Draft/Queue/Conflict | NOT_STARTED | - | - | - |

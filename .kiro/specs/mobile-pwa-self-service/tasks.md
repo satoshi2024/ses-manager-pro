@@ -26,7 +26,7 @@
 
 承認条件、Base SHA、route inventory、offline decision table、非目標、review-ledgerのPlan self-review結果を確認する。
 
-## Task F1 — Manifest、Service Worker、Cache/HTTP policy
+## Task F1 — Manifest、Service Worker、Cache/HTTP policy `[x]`
 
 ### Objective
 
