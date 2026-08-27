@@ -1,0 +1,30 @@
+# Local AWS API simulator (Moto) — NOT real AWS / NOT production ECS PASS.
+# LocalStack community lacks ECS; Moto provides free ECS + Secrets + SSM + Logs APIs.
+# Usage:
+#   docker compose -f infra/local-aws/docker-compose.yml up -d
+#   pwsh infra/local-aws/verify-local-aws.ps1
+services:
+  moto:
+    image: motoserver/moto:5.1.1
+    container_name: ses-moto-aws
+    ports:
+      - "4566:4566"
+    environment:
+      MOTO_PORT: "4566"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4566/')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+# Kept for optional LocalStack experiments (secrets/ssm only). Not used by default.
+  localstack-optional:
+    profiles: ["localstack"]
+    image: localstack/localstack:4.3.0
+    container_name: ses-localstack
+    ports:
+      - "4567:4566"
+    environment:
+      SERVICES: logs,secretsmanager,ssm,iam,sts
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: ap-northeast-1

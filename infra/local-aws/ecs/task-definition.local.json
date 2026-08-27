@@ -1,0 +1,52 @@
+{
+  "family": "ses-manager-staging",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "ses-manager",
+      "image": "ses-manager-pro:local",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "prod" },
+        { "name": "AI_PROVIDER", "value": "mock" },
+        { "name": "AI_EXTERNAL_SEND_ENABLED", "value": "false" },
+        { "name": "CLOUDSIGN_ENABLED", "value": "false" },
+        { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
+        { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
+        { "name": "DB_POOL_SIZE", "value": "10" }
+      ],
+      "secrets": [
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:ses/staging/db"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ses-manager-staging",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "ses"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/liveness || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 120
+      }
+    }
+  ]
+}

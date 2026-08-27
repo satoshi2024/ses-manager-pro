@@ -1,0 +1,33 @@
+{
+  "cluster": "ses-manager-staging",
+  "serviceName": "ses-manager-staging",
+  "taskDefinition": "ses-manager-staging",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "schedulingStrategy": "REPLICA",
+  "deploymentConfiguration": {
+    "maximumPercent": 200,
+    "minimumHealthyPercent": 100,
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    }
+  },
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["SUBNET_PLACEHOLDER"],
+      "securityGroups": ["SG_PLACEHOLDER"],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "TG_PLACEHOLDER",
+      "containerName": "ses-manager",
+      "containerPort": 8080
+    }
+  ],
+  "healthCheckGracePeriodSeconds": 120,
+  "enableExecuteCommand": false
+}
