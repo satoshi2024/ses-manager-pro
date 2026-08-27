@@ -49,50 +49,86 @@ public class ResignationGateChecker {
         Long engineerId = engineer.getId();
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         Long linkedUserId = link != null ? link.getSysUserId() : null;
+        SysUser linkedUser = linkedUserId != null ? sysUserMapper.selectById(linkedUserId) : null;
 
         // 1. 内部アカウント無効化 (USER_DEACTIVATION - 自動実行)
+        // アカウント未連携の場合は対象なし（自動実行不要）。連携済みの場合は現状 status==0 かどうかを確認。
+        boolean accountDeactivated;
+        String accountMsg;
+        if (linkedUser == null) {
+            // アカウント未連携: 内部ログインアカウントが存在しないため無効化対象なし
+            accountDeactivated = true;
+            accountMsg = "ログインアカウント未連携のため無効化対象なし";
+        } else if (linkedUser.getStatus() != null && linkedUser.getStatus() == 0) {
+            accountDeactivated = true;
+            accountMsg = "ログインアカウントは既に無効化済みです (status=0)";
+        } else {
+            // まだ有効(status=1等) — executeAutomaticGateActions で自動実行される
+            accountDeactivated = true;
+            accountMsg = "案件完了確定時にログインアカウントを自動的に無効化します (現在: status=" + linkedUser.getStatus() + ")";
+        }
         items.add(GateItemResult.builder()
                 .code("USER_DEACTIVATION")
                 .name("ログインアカウント無効化")
-                .passed(true)
+                .passed(accountDeactivated)
                 .autoExecutable(true)
-                .message("案件完了確定時にログインアカウントを自動的に無効化(0)します")
+                .message(accountMsg)
                 .build());
 
         // 2. Webセッション失効 (SESSION_REVOCATION - 自動実行)
+        // executeAutomaticGateActions で必ず実行される。未連携の場合はセッションなし。
+        String sessionMsg = linkedUser != null
+                ? "案件完了確定時に内部およびポータルの有効セッションを強制失効します"
+                : "ログインアカウント未連携のためセッション失効対象なし";
         items.add(GateItemResult.builder()
                 .code("SESSION_REVOCATION")
                 .name("全セッション強制失効")
                 .passed(true)
                 .autoExecutable(true)
-                .message("案件完了確定時に内部およびポータルの有効セッションを強制失効します")
+                .message(sessionMsg)
                 .build());
 
         // 3. 要員ポータル連携解除または無効化 (PORTAL_UNLINK - 自動実行)
+        // アカウント連携が存在する場合は executeAutomaticGateActions で解除される。
+        String portalMsg = link != null
+                ? "案件完了確定時に要員ポータル連携を解除します"
+                : "ポータル連携なし（連携解除対象外）";
         items.add(GateItemResult.builder()
                 .code("PORTAL_UNLINK")
                 .name("要員ポータル連携解除・無効化")
                 .passed(true)
                 .autoExecutable(true)
-                .message("案件完了確定時に要員ポータル連携を無効化します")
+                .message(portalMsg)
                 .build());
 
         // 4. 担当営業割当の解除・引継ぎ (SALES_RELEASE - 自動実行)
+        // executeAutomaticGateActions で有効な割当が全件解除される。
+        List<EngineerSales> activeSalesForCheck = engineerSalesMapper.selectList(
+                new LambdaQueryWrapper<EngineerSales>()
+                        .eq(EngineerSales::getEngineerId, engineerId)
+                        .isNull(EngineerSales::getReleasedAt));
+        String salesMsg = activeSalesForCheck.isEmpty()
+                ? "有効な担当営業割当なし（解除対象外）"
+                : "案件完了確定時に " + activeSalesForCheck.size() + " 件の担当営業割当を自動的に解除します";
         items.add(GateItemResult.builder()
                 .code("SALES_RELEASE")
                 .name("担当営業の引継ぎ・割当解除")
                 .passed(true)
                 .autoExecutable(true)
-                .message("案件完了確定時に有効な担当営業割当を自動的に解除します")
+                .message(salesMsg)
                 .build());
 
         // 5. 組織所属の終了 (ORG_ASSIGNMENT_CLOSE - 自動実行)
+        // executeAutomaticGateActions で closeAssignmentsForUser が実行される。
+        String orgMsg = linkedUser != null
+                ? "案件完了確定時に有効な組織所属を自動的に閉鎖します"
+                : "ログインアカウント未連携のため組織所属閉鎖対象なし";
         items.add(GateItemResult.builder()
                 .code("ORG_ASSIGNMENT_CLOSE")
                 .name("組織所属の終了")
                 .passed(true)
                 .autoExecutable(true)
-                .message("案件完了確定時に有効な組織所属を自動的に閉鎖します")
+                .message(orgMsg)
                 .build());
 
         // 6. 貸与資産の返却 (ASSET_RETURN)
@@ -183,6 +219,23 @@ public class ResignationGateChecker {
                 .message(docMsg)
                 .build());
 
+        // 9. 稼働中契約の終了確認 (ACTIVE_CONTRACT)
+        Long activeContractCount = contractMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.Contract>()
+                .eq(com.ses.entity.Contract::getEngineerId, engineerId)
+                .eq(com.ses.entity.Contract::getStatus, "稼動中"));
+        boolean noActiveContracts = activeContractCount == null || activeContractCount == 0;
+        String contractMsg = noActiveContracts
+                ? "稼働中の契約なし"
+                : "稼働中の契約が " + activeContractCount + " 件残存しています。契約を終了または解約してから退社手続きを完了してください。";
+        if (!noActiveContracts) allPassed = false;
+        items.add(GateItemResult.builder()
+                .code("ACTIVE_CONTRACT")
+                .name("稼働中契約の終了確認")
+                .passed(noActiveContracts)
+                .autoExecutable(false)
+                .message(contractMsg)
+                .build());
+
         return ResignationGateResultDto.builder()
                 .passed(allPassed)
                 .summary(allPassed ? "退社ゲート全項目PASS。案件を完了可能です。" : "退社ゲートに未充足の項目が存在します。")
@@ -216,17 +269,13 @@ public class ResignationGateChecker {
             persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
             log.info("Revoked all persistent sessions for user {}", userId);
 
-            // ポータルユーザーが存在する場合はポータルセッションも失効
+            // ポータルユーザーが存在する場合はポータルセッションも失効 (Fail-Closed)
             if (user != null && user.getEmail() != null) {
-                try {
-                    com.ses.entity.PortalUser portalUser = portalUserMapper.selectOne(
-                            new LambdaQueryWrapper<com.ses.entity.PortalUser>().eq(com.ses.entity.PortalUser::getEmail, user.getEmail()));
-                    if (portalUser != null) {
-                        portalSessionService.revokeAllForUser(portalUser.getId(), "退社案件完了によるポータルセッション強制失効");
-                        log.info("Revoked all portal sessions for portal user {}", portalUser.getId());
-                    }
-                } catch (Exception e) {
-                    log.warn("Portal user lookup skipped or not found: {}", e.getMessage());
+                com.ses.entity.PortalUser portalUser = portalUserMapper.selectOne(
+                        new LambdaQueryWrapper<com.ses.entity.PortalUser>().eq(com.ses.entity.PortalUser::getEmail, user.getEmail()));
+                if (portalUser != null) {
+                    portalSessionService.revokeAllForUser(portalUser.getId(), "退社案件完了によるポータルセッション強制失効");
+                    log.info("Revoked all portal sessions for portal user {}", portalUser.getId());
                 }
             }
 

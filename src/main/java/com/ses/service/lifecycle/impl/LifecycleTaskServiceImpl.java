@@ -233,7 +233,17 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
             throw BusinessException.of(404, "error.lifecycle.taskNotFound");
         }
 
+        // 案件がACTIVEであることを確認（終端状態の案件は担当変更不可）
+        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.caseNotActive", "進行中の案件のタスクのみ担当者を変更できます");
+        }
+
+        // 操作者のタスク編集権限チェック
+        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
         SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
+        scopeService.assertCanEditTask(actor, task, lcCase, engineer);
+
         SysUser newAssignee = sysUserMapper.selectById(newAssigneeUserId);
         if (newAssignee == null || newAssignee.getStatus() == null || newAssignee.getStatus() != 1) {
             throw BusinessException.of(400, "error.lifecycle.invalidAssignee", "有効なユーザーを指定してください");
@@ -397,6 +407,40 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                         .version(t.getVersion())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public void correctCompletedTask(Long taskId, Long actorUserId, String correctionNote) {
+        LifecycleTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+        if (!"COMPLETED".equals(task.getStatus()) && !"WAIVED".equals(task.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.taskNotCompleted",
+                    "完了済みまたは免除済みのタスクのみ訂正記録が可能です（現在のステータス: " + task.getStatus() + "）");
+        }
+        if (correctionNote == null || correctionNote.isBlank()) {
+            throw BusinessException.of(400, "error.lifecycle.correctionNoteRequired", "訂正内容の記述は必須です");
+        }
+
+        SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
+
+        // 訂正はイベント追記INSERTのみ（タスクのステータスは変更しない）
+        String noteEscaped = correctionNote.replace("\"", "\\\"");
+        eventMapper.insert(LifecycleEvent.builder()
+                .caseId(task.getCaseId())
+                .taskId(taskId)
+                .eventType("TASK_CORRECTION")
+                .actorUserId(actorUserId != null ? actorUserId : 0L)
+                .actorRoleSnapshot(actor != null && actor.getRole() != null ? actor.getRole() : "SYSTEM")
+                .beforeState(task.getStatus())
+                .afterState(task.getStatus()) // ステータスは変更なし
+                .detailsJson("{\"correctionNote\":\"" + noteEscaped + "\"}")
+                .occurredAt(LocalDateTime.now())
+                .build());
+
+        log.info("Recorded correction for task {} by user {}: {}", taskId, actorUserId, correctionNote);
     }
 
     private void assertPredecessorsCompleted(LifecycleTask task) {

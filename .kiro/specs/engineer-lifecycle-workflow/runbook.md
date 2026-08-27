@@ -6,20 +6,21 @@
 
 ---
 
-## 2. 退社統制ゲート（8項目）の運用基準
+## 2. 退社統制ゲート（9項目）の運用基準
 
-退社案件（`RESIGNATION`）の完了確定（`POST /api/lifecycle/cases/{id}/complete`）は、以下の8項目がすべて充足されている場合にのみ実行可能となる。
+退社案件（`RESIGNATION`）の完了確定（`POST /api/lifecycle/cases/{id}/complete`）は、以下の9項目がすべて充足されている場合にのみ実行可能となる。
 
 | No | 項目コード | 項目名 | 自動/手動 | 判定基準・アクション |
 |:---|:---|:---|:---|:---|
-| 1 | `USER_DEACTIVATION` | ログインアカウント無効化 | 自動実行 | 案件完了時に `sys_user.status = 0` に自動更新。 |
-| 2 | `SESSION_REVOCATION` | 全セッション強制失効 | 自動実行 | `PersistentSessionService` および `PortalSessionService` による全セッション即時破棄。 |
-| 3 | `PORTAL_UNLINK` | 要員ポータル連携解除 | 自動実行 | `EngineerAccountLinkService.unlinkByEngineerId` による連携解除。 |
-| 4 | `SALES_RELEASE` | 担当営業割当の解除 | 自動実行 | `EngineerSales` の全アクティブ割当の `released_at` に基準日を設定。 |
+| 1 | `USER_DEACTIVATION` | ログインアカウント無効化 | 自動実行 | 案件完了時に `sys_user.status = 0` に自動更新。アカウント未連携の場合は対象なし（自動PASS）。 |
+| 2 | `SESSION_REVOCATION` | 全セッション強制失効 | 自動実行 | `PersistentSessionService` および `PortalSessionService` による全セッション即時破棄（Fail-Closed）。 |
+| 3 | `PORTAL_UNLINK` | 要員ポータル連携解除 | 自動実行 | `EngineerAccountLinkService.unlinkByEngineerId` による連携解除。ポータル連携なしの場合は対象なし（自動PASS）。 |
+| 4 | `SALES_RELEASE` | 担当営業割当の解除 | 自動実行 | `EngineerSales` の全アクティブ割当の `released_at` に基準日を設定。割当なしの場合は対象なし（自動PASS）。 |
 | 5 | `ORG_ASSIGNMENT_CLOSE` | 組織所属の終了 | 自動実行 | `OrganizationService.closeAssignmentsForUser` による組織配属終了。 |
-| 6 | `ASSET_RETURN` | 貸与資産の返却 | 手動タスク | `RESIGN_ASSET_RETURN` タスクが `COMPLETED` または承認済み `WAIVED`。 |
-| 7 | `EXPENSE_SETTLE` | 立替経費・精算確認 | 手動タスク | `RESIGN_EXPENSE_SETTLE` タスクが `COMPLETED` または承認済み `WAIVED`。未精算経費申請が0件。 |
-| 8 | `DOCUMENT_RETENTION` | 退職関連文書の保管確認 | 手動タスク | `RESIGN_DOC_RETENTION` タスクが `COMPLETED` または承認済み `WAIVED`。 |
+| 6 | `ASSET_RETURN` | 貸与資産の返却 | 手動タスク | `RESIGN_ASSET_RETURN` タスクが `COMPLETED` または承認済み `WAIVED`。タスク未定義の場合はゲートFAIL。 |
+| 7 | `UNSETTLED_EXPENSE` | 立替経費・精算確認 | 手動タスク | `t_expense_request` で対象要員の未精算件数を確認。未精算0件 → 自動PASS。未精算あり → `RESIGN_EXPENSE_SETTLE` タスクが承認済み `WAIVED` でなければFAIL。 |
+| 8 | `DOCUMENT_RETENTION` | 退職関連文書の保管確認 | 手動タスク | `RESIGN_DOC_RETENTION` タスクが `COMPLETED` または承認済み `WAIVED`。タスク未定義の場合はゲートFAIL。 |
+| 9 | `ACTIVE_CONTRACT` | 稼働中契約の終了確認 | 手動確認 | `t_contract` で対象要員の `status='稼動中'` の件数を確認。残存している場合はゲートFAIL（契約を終了または解約してから退社を完了）。 |
 
 ---
 

@@ -26,4 +26,11 @@ public interface LifecycleTaskService extends IService<LifecycleTask> {
     LifecycleTaskDto getTaskDetail(Long taskId, SysUser currentUser);
 
     List<LifecycleTaskDto> getMyPendingTasks(SysUser currentUser);
+
+    /**
+     * 完了済みタスクの訂正記録。
+     * タスク自体のステータスは変更せず、{@code t_lifecycle_event} に
+     * {@code TASK_CORRECTION} イベントを追記する（イミュータブル監査台帳への追記のみ）。
+     */
+    void correctCompletedTask(Long taskId, Long actorUserId, String correctionNote);
 }

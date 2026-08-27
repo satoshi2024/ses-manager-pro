@@ -16,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -68,6 +69,12 @@ class ResignationGateFailureDrillTest {
 
     @Autowired
     private LifecycleTaskMapper taskMapper;
+
+    @Autowired
+    private ContractMapper contractMapper;
+
+    @Autowired
+    private LifecycleScopeService scopeService;
 
     private SysUser adminUser;
     private SysUser salesUser;
@@ -321,4 +328,154 @@ class ResignationGateFailureDrillTest {
         assertEquals(400, ex.getCode());
         assertEquals("error.lifecycle.resignationGateFailed", ex.getMessageKey());
     }
+
+    @Test
+    @DisplayName("M-4: 稼働中契約残存によるゲートFAIL検証 (LC-P1-09)")
+    void testResignationBlockedByActiveContract() {
+        // 稼働中の契約を作成
+        Engineer testEng = Engineer.builder().fullName("退職要員3").status("稼動中").employmentType("正社員").build();
+        engineerMapper.insert(testEng);
+
+        // t_contractに稼働中の契約を挿入（最低限の必須フィールドのみ）
+        Contract contract = new Contract();
+        contract.setEngineerId(testEng.getId());
+        contract.setProjectId(1L);
+        contract.setCustomerId(1L);
+        contract.setStartDate(LocalDate.now().minusMonths(3));
+        contract.setSellingPrice(BigDecimal.valueOf(500000));
+        contract.setCostPrice(BigDecimal.valueOf(400000));
+        contract.setStatus("稼動中");
+        contract.setAcceptanceRequired(true);
+        contractMapper.insert(contract);
+
+        LifecycleCase lcCase = LifecycleCase.builder()
+                .caseNo("LC-TEST-9999")
+                .lifecycleType("RESIGNATION")
+                .engineerId(testEng.getId())
+                .templateId(1L)
+                .templateVersion(1)
+                .anchorDate(LocalDate.now())
+                .status("ACTIVE")
+                .title("稼働中契約テスト")
+                .applicantUserId(adminUser.getId())
+                .engineerSnapshotJson("{}")
+                .version(0)
+                .build();
+        // caseMapperではなくResignationGateCheckerを直接呼ぶ
+        // LC-P1-09: ACTIVE_CONTRACT ゲート項目が FAIL を返すこと
+        ResignationGateResultDto result = resignationGateChecker.evaluate(lcCase, testEng);
+        boolean activeContractFailed = result.getItems().stream()
+                .filter(i -> "ACTIVE_CONTRACT".equals(i.getCode()))
+                .anyMatch(i -> !i.isPassed());
+        assertTrue(activeContractFailed, "稼働中契約が残存している場合、ACTIVE_CONTRACTゲートはFAILであること");
+        assertFalse(result.isPassed(), "稼働中契約残存時はゲート全体がFAILであること");
+    }
+
+    @Test
+    @DisplayName("M-5: reassignTask - COMPLETED案件のタスク担当変更ブロック検証 (LC-P1-05)")
+    void testReassignTaskBlockedOnCompletedCase() {
+        LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(engineer.getId())
+                .lifecycleType("RESIGNATION")
+                .templateId(resignationTemplate.getId())
+                .anchorDate(LocalDate.now())
+                .title("担当変更テスト退社")
+                .build());
+
+        // 全タスクを完了して退社ゲートをPASS
+        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseDto.getId());
+        for (LifecycleTask task : tasks) {
+            taskService.completeTask(task.getId(), adminUser.getId(), null);
+        }
+        caseService.completeCase(caseDto.getId(), adminUser.getId());
+
+        // COMPLETED案件のタスクに対して担当変更を試みる
+        LifecycleTask completedTask = taskMapper.selectByCaseId(caseDto.getId()).get(0);
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                taskService.reassignTask(completedTask.getId(), adminUser.getId(), adminUser.getId(), "test"));
+        assertEquals(400, ex.getCode());
+        assertEquals("error.lifecycle.caseNotActive", ex.getMessageKey(),
+                "COMPLETED案件のタスク担当変更は400 caseNotActiveで拒否されること");
+    }
+
+    @Test
+    @DisplayName("M-6: correctCompletedTask - 完了済みタスクへの訂正記録 (LC-P1-15)")
+    void testCorrectCompletedTask() {
+        LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(engineer.getId())
+                .lifecycleType("RESIGNATION")
+                .templateId(resignationTemplate.getId())
+                .anchorDate(LocalDate.now())
+                .title("訂正テスト退社")
+                .build());
+
+        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseDto.getId());
+        LifecycleTask task = tasks.get(0);
+        taskService.completeTask(task.getId(), adminUser.getId(), null);
+
+        // 完了済みタスクへの訂正記録が成功すること
+        assertDoesNotThrow(() ->
+                taskService.correctCompletedTask(task.getId(), adminUser.getId(), "提出書類の誤記訂正：誓約書の日付を修正"));
+
+        // 未完了タスクへの訂正は拒否されること
+        LifecycleTask pendingTask = taskMapper.selectByCaseId(caseDto.getId()).stream()
+                .filter(t -> !"COMPLETED".equals(t.getStatus()) && !"WAIVED".equals(t.getStatus()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(pendingTask, "未完了のタスクが存在すること");
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                taskService.correctCompletedTask(pendingTask.getId(), adminUser.getId(), "未完了タスクへの訂正試行"));
+        assertEquals(400, ex.getCode());
+        assertEquals("error.lifecycle.taskNotCompleted", ex.getMessageKey());
+    }
+
+    @Test
+    @DisplayName("M-7: isTaskVisibleToUser - 営業ロールのHR機密タスクマスク検証 (LC-P1-14)")
+    void testSalesRoleTaskMasking() {
+        // 内部タスク (is_engineer_visible=0, assignee_role=HR) — 営業に非公開
+        LifecycleTask hrTask = LifecycleTask.builder()
+                .caseId(1L)
+                .taskCode("INTERNAL_HR_TASK")
+                .taskName("HR機密タスク")
+                .dueDate(LocalDate.now())
+                .assigneeRole("HR")
+                .isEngineerVisible(0)
+                .status("PENDING")
+                .version(0)
+                .build();
+
+        // 営業関連内部タスク (is_engineer_visible=0, assignee_role=PRIMARY_SALES) — 営業に公開
+        LifecycleTask salesTask = LifecycleTask.builder()
+                .caseId(1L)
+                .taskCode("SALES_TASK")
+                .taskName("営業関連タスク")
+                .dueDate(LocalDate.now())
+                .assigneeRole("PRIMARY_SALES")
+                .isEngineerVisible(0)
+                .status("PENDING")
+                .version(0)
+                .build();
+
+        // 公開タスク (is_engineer_visible=1)
+        LifecycleTask publicTask = LifecycleTask.builder()
+                .caseId(1L)
+                .taskCode("PUBLIC_TASK")
+                .taskName("公開タスク")
+                .dueDate(LocalDate.now())
+                .assigneeRole("HR")
+                .isEngineerVisible(1)
+                .status("PENDING")
+                .version(0)
+                .build();
+
+        assertFalse(scopeService.isTaskVisibleToUser(salesUser, hrTask),
+                "営業ロールはHR機密の内部タスク（is_engineer_visible=0, role=HR）を閲覧不可");
+        assertTrue(scopeService.isTaskVisibleToUser(salesUser, salesTask),
+                "営業ロールはPRIMARY_SALES担当の内部タスクを閲覧可能");
+        assertTrue(scopeService.isTaskVisibleToUser(salesUser, publicTask),
+                "営業ロールは公開タスク（is_engineer_visible=1）を閲覧可能");
+        assertTrue(scopeService.isTaskVisibleToUser(adminUser, hrTask),
+                "管理者は全タスクを閲覧可能");
+    }
 }
+

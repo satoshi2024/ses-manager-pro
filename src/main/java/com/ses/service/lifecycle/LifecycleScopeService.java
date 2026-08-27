@@ -151,12 +151,35 @@ public class LifecycleScopeService {
 
     /**
      * タスクの閲覧可否判定（本人非公開タスクのフィルタリング含む）
+     * <p>
+     * 表2（design.md §6）の可見母集団ルール:
+     * <ul>
+     *   <li>管理者/HR: 全タスク可視</li>
+     *   <li>マネージャー: 内部タスク含む全タスク可視</li>
+     *   <li>営業: {@code is_engineer_visible=1} のタスク、および内部タスク（{@code is_engineer_visible=0}）のうち
+     *       営業関係（{@code assignee_rule = "PRIMARY_SALES"}）のタスクのみ可視。HR機密タスクはマスク。</li>
+     *   <li>要員: {@code is_engineer_visible=1} のタスクのみ</li>
+     * </ul>
      */
     public boolean isTaskVisibleToUser(SysUser currentUser, LifecycleTask task) {
         if (currentUser == null) return false;
-        if ("要員".equals(currentUser.getRole())) {
+        String role = currentUser.getRole();
+
+        if ("要員".equals(role)) {
             return task.getIsEngineerVisible() != null && task.getIsEngineerVisible() == 1;
         }
+
+        // 営業: 本人公開タスクは常に可視。内部タスク（is_engineer_visible=0）は
+        // 営業関係（PRIMARY_SALES）のもののみ可視。HR機密タスクはマスク。
+        if ("営業".equals(role)) {
+            if (task.getIsEngineerVisible() != null && task.getIsEngineerVisible() == 1) {
+                return true;
+            }
+            // 内部タスクのうち営業担当ルールのみ可視
+            return "PRIMARY_SALES".equals(task.getAssigneeRole());
+        }
+
+        // 管理者・HR・マネージャーは全タスク可視
         return true;
     }
 

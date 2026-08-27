@@ -22,8 +22,8 @@ SES事業において、要員の入社、案件配属、部署/拠点異動、�
 1. WHEN ライフサイクル案件を起票する場合、THE システム SHALL 要員スナップショット（氏名、雇用形態、所属組織、主担当営業、ログインアカウント等）および起票時点の有効テンプレート版から、案件（Case）およびタスク（Task）インスタンスを原子的一括（単一DBトランザクション）で生成する。
 2. THE タスク担当者（Assignee） SHALL テンプレート定義の解決ルール（`SPECIFIC_USER: 指定ユーザー`, `ROLE: ロール`, `ORGANIZATION_MANAGER: 所属組織責任者`, `PRIMARY_SALES: 主担当営業`, `ENGINEER_SELF: 要員本人`, `APPLICANT: 申請起票者`）に基づき、起票時点の事実から一意に解決されスナップショットとして固定される。
 3. WHEN 担当者解決不能（該当者不在）またはタスク依存関係の循環（Cyclic Dependency）が検出された場合、THE システム SHALL 案件起票を直ちに拒否（Fail-Closed）し、中途半端な部分タスク行を残さず全件ロールバックする。
-4. THE 案件状態 SHALL `DRAFT (下書き)` → `ACTIVE (進行中)` → `COMPLETED (完了)` を基本とし、例外時に `ON_HOLD (保留)` または `CANCELLED (取消)` を持つ。
-5. THE タスク状態 SHALL `PENDING (先行タスク待ち)` → `IN_PROGRESS (着手可能/進行中)` → `COMPLETED (完了)` を基本とし、例外時に `ON_HOLD (保留)` または `WAIVED (例外免除)` を持つ。
+4. THE 案件状態 SHALL `ACTIVE (進行中)` → `COMPLETED (完了)` を基本とし、例外時に `ON_HOLD (保留)` または `CANCELLED (取消)` を持つ。案件起票（`createCase`）は即 `ACTIVE` で作成される（`DRAFT` 下書き状態は現時点では未サポート）。
+5. THE タスク状態 SHALL `PENDING (先行タスク待ち)` → `IN_PROGRESS (着手可能/進行中)` → `COMPLETED (完了)` を基本とし、例外時に `ON_HOLD (保留)`, `WAIVED (例外免除)`, または `CANCELLED (案件取消時の補償遷移)` を持つ。
 6. THE タスク完了 SHALL 実行者（`completed_by`）、完了日時（`completed_at`）、コメント（`completion_comment`）、証跡種別、および証跡データ（文書台帳リンクまたはメタデータJSON）を永続化する。完了済みタスクの原地直接編集は禁止し、訂正は新イベント（`t_lifecycle_event`）として追記記録する。
 
 ---

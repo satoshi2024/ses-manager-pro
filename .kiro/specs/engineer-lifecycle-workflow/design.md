@@ -260,16 +260,18 @@ CREATE TABLE t_lifecycle_event (
 
 | 対象 | 状態 | 許可遷移 | 防重・並行制御手段 | competing writer | ロールバック / 補償 |
 |---|---|---|---|---|---|
-| **Case** | `DRAFT` | → `ACTIVE`, → `CANCELLED` | 状態CAS + `version` | 二重activate | 破棄 |
 | **Case** | `ACTIVE` | → `ON_HOLD`, → `COMPLETED`, → `CANCELLED` | 状態CAS + `version` + 未完了阻害タスク0件チェック | 二重完了click | `ACTIVE` へ戻す |
 | **Case** | `ON_HOLD` | → `ACTIVE`, → `CANCELLED` | 状態CAS + `version` | — | — |
 | **Case** | `COMPLETED` | 終端 (直接再open不可) | 状態CAS + `version` | — | 訂正が必要な場合は新案件を起票 |
 | **Case** | `CANCELLED` | 終端 | 状態CAS + `version` | — | — |
-| **Task** | `PENDING` | → `IN_PROGRESS`, → `ON_HOLD` | 先行タスク全COMPLETED検知時のCAS | 複数先行タスクの同時完了 | — |
-| **Task** | `IN_PROGRESS` | → `COMPLETED`, → `ON_HOLD`, → `WAIVED` | 状態CAS + `version` | 二重完了click, 本人と代理の同時完了 | `IN_PROGRESS` へ戻す |
-| **Task** | `ON_HOLD` | → `IN_PROGRESS` | 状態CAS + `version` | — | — |
-| **Task** | `COMPLETED` | 終端 (原地更新禁止) | 状態CAS + `version` | 同時更新 | 訂正は `t_lifecycle_event` 追記 |
+| **Task** | `PENDING` | → `IN_PROGRESS`, → `ON_HOLD`, → `CANCELLED` | 先行タスク全COMPLETED検知時のCAS | 複数先行タスクの同時完了 | — |
+| **Task** | `IN_PROGRESS` | → `COMPLETED`, → `ON_HOLD`, → `WAIVED`, → `CANCELLED` | 状態CAS + `version` | 二重完了click, 本人と代理の同時完了 | `IN_PROGRESS` へ戻す |
+| **Task** | `ON_HOLD` | → `IN_PROGRESS`, → `CANCELLED` | 状態CAS + `version` | — | — |
+| **Task** | `COMPLETED` | 終端 (原地更新禁止) | 状態CAS + `version` | 同時更新 | 訂正は `t_lifecycle_event` 追記（`TASK_CORRECTION` イベント） |
 | **Task** | `WAIVED` | 終端 (例外承認完了後のみ) | `ApprovalEngine` 最終承認CAS | — | 承認取消は却下で表現 |
+| **Task** | `CANCELLED` | 終端 (案件CANCELLED時の補償遷移のみ) | cancelCase の同一トランザクション内で一括更新 | — | — |
+
+> **createCase は即 `ACTIVE`**: 案件起票（`createCase`）は DAG 検証・担当者解決・タスク一括生成がすべて成功した場合のみコミットされ、`DRAFT` を経由せず直接 `ACTIVE` で作成される。案件の事前保存（下書き）は現時点では未サポート。
 
 ---
 

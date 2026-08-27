@@ -188,6 +188,21 @@ public class LifecycleApiController {
     }
 
     /**
+     * 完了済みタスクの訂正記録
+     * <p>
+     * タスク自体のステータスは変更せず、{@code t_lifecycle_event} に
+     * {@code TASK_CORRECTION} イベントを追記する（R4.4準拠）。
+     */
+    @PostMapping("/tasks/{id}/correct")
+    public ApiResult<Void> correctTask(@PathVariable("id") Long id,
+                                       @RequestBody Map<String, Object> body) {
+        Long userId = getCurrentUserId();
+        String correctionNote = body != null ? (String) body.get("correctionNote") : null;
+        taskService.correctCompletedTask(id, userId, correctionNote);
+        return ApiResult.success("訂正記録を追記しました", null);
+    }
+
+    /**
      * 自担当の未完了タスク一覧
      */
     @GetMapping("/tasks/my-pending")
