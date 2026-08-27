@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "decisionId": "NF07-DEV-GATE-20260828",
   "decisionSource": "依頼者によるdevelopment-only technical authorization",
-  "ownerRole": "Project Maintainer (development-only)",
+  "ownerRole": "Project Maintainer（development-only）",
   "formalPrivacyOwner": "UNASSIGNED_UNTIL_PRE_PRODUCTION",
   "devGate": {
     "status": "APPROVED_DEV_ONLY",
