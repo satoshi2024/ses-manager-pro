@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "generated": "2026-08-27T11:09:51.6015398+09:00",
+  "gitRevision": "d33d22709d20c51ccf1e6cbd2573abe01ae89909",
+  "appJar": "ses-manager-pro-1.0.0-SNAPSHOT.jar",
+  "jarSha256": "e51afa042e6a88341cb0371c9106864c3558d64d9e90a7db79a8b3f734e7e986",
+  "baseImage": "eclipse-temurin:21-jre-jammy",
+  "baseImageDigest": "sha256:eebd356ad7358b7094758e5787a6726f332917cfd56feab6457c56dab895cdbf",
+  "localImageTag": "ses-manager-pro:local",
+  "localImageId": "sha256:4c9cdd7a236b2c557c385976857bc40de77a840f4363fc5b55e832fc10f0922f",
+  "registryDigest": null,
+  "registryDigestStatus": "ABSENT - not an ECR digest; do not substitute LOCAL_IMAGE_ID into task-definition IMAGE_DIGEST",
+  "ecrPush": "NOT_PERFORMED",
+  "ecsDeploy": "NOT_PERFORMED"
+}
