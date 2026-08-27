@@ -9,7 +9,7 @@
 - 実観測 Base: `origin/main` / `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 実装 branch: `codex/scheduled-management-reporting`
 - 専用 worktree: `C:\work\ses-scheduled-management-reporting`
-- 実装確認Head: `c0634abff78afcbfb2bf31fe7257a66e41367702`（completion matrix更新前）
+- 最終remote Head: `c33bff464aa3d5dbbcee2599672573d5de409ad3`
 
 NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売上、粗利、売上予測、稼働率、Bench、管理会計、Cash Flow、AR aging、BP支払予定、契約終了・更新見込みとし、NF-02 PASSまではServiceDesk/SLAを含めない。timezoneは`Asia/Tokyo`、snapshot/document保持は7年、PDF/XLSX/CSVは同一immutable snapshotから生成する。
 
