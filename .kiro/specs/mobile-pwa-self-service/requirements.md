@@ -75,6 +75,7 @@
 - 同一ID・同一hashの2回送信が同一結果となり、DB業務行・監査・通知の重複がない。
 - 同一ID・異なるhashが409となり、既存データを変更しない。
 - 同時更新の一方だけが成功し、他方は409となる。last-write-winsが発生しない。
+- 業務更新とidempotency ledgerのCOMPLETED ackは同一transactionでcommitされ、片方だけが確定する障害窓を持たない。
 
 ### PW-R4 認証、session expiry、logout、user switch
 

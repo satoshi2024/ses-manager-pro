@@ -122,7 +122,7 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 
 汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`t_pwa_client_mutation` ledgerを追加する。`user_id,client_request_id`のunique、opaque scope hash、screen/month、payload hash、base version、status、最小ack JSON、監査時刻を持つ。raw payload、入力内容、PII response bodyは保存しない。migrationは実装開始時の全Flyway locationを再確認したうえでV112とした。
 
-処理順序は、client作成時刻とheaderを検証し、ledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行しledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時にclaimを破棄する。
+処理順序は、client作成時刻とheaderを検証し、domain mutationと同一transactionでledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行し同じtransactionでledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時はdomain mutationとclaim/ackを一緒にrollbackする。
 
 ## 8. Domain adapters
 
