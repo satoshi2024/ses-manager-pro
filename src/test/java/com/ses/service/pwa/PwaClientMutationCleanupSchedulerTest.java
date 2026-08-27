@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class PwaClientMutationCleanupSchedulerTest {
 
     @Test
-    void 30日より古いledgerだけを削除し削除件数をmetricへ記録する() {
+    void 古いledgerだけを削除し削除件数をmetricへ記録する() {
         PwaClientMutationMapper mapper = mock(PwaClientMutationMapper.class);
         when(mapper.deleteOlderThan(any(LocalDateTime.class))).thenReturn(3);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();

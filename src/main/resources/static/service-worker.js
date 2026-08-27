@@ -2,7 +2,7 @@
 'use strict';
 
 const CACHE_PREFIX = 'ses-pwa-shell-';
-const CACHE_NAME = CACHE_PREFIX + 'v1';
+const CACHE_NAME = CACHE_PREFIX + 'v2';
 const SHELL_ASSETS = [
     '/manifest.webmanifest',
     '/offline.html',

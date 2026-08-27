@@ -27,6 +27,7 @@ class PwaAssetContractTest {
         String worker = read("service-worker.js");
 
         assertThat(worker).contains("const SHELL_ASSETS = [");
+        assertThat(worker).contains("const CACHE_NAME = CACHE_PREFIX + 'v2'");
         assertThat(worker).contains("path === '/js/i18n.js'");
         assertThat(worker).contains("request.method === 'GET'");
         assertThat(worker).contains("cache.put(request, response.clone())");
