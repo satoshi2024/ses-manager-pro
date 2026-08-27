@@ -27,19 +27,7 @@ function Assert-NoRawPiiProperty {
         [Parameter(Mandatory = $true)] [string]$Path
     )
 
-    $forbiddenNames = @(
-        'email', 'contactemail', 'phone', 'contactphone', 'address', 'name',
-        'fullname', 'realname', 'birthdate', 'nationality', 'initialname',
-        'photourl', 'body', 'content', 'raw', 'rawprompt', 'prompt',
-        'untrustedtext', 'untrustedsourcetext', 'token', 'tokenhash', 'secret',
-        'password', 'extractedtext', 'rawtext', 'parsedjson', 'remarks',
-        'comment', 'originalfilename', 'storedfilename', 'storagekey',
-        'resumesummary', 'skillsummary', 'description', 'worklocation',
-        'neareststation', 'useragent', 'ip', 'iphash', 'subject', 'recipient',
-        'recipientname', 'recipientemail', 'accountnumber', 'accountholder',
-        'bankaccount', 'privatenoteref', 'employeevisiblenote', 'note',
-        'topic', 'reason'
-    )
+    $forbiddenNamePattern = 'email|phone|address|name|birth|national|gender|photo|body|content|raw|prompt|untrusted|token|secret|password|extract|parsed|remark|comment|originalfile|storedfile|storagekey|resume|skillsummary|description|worklocation|neareststation|useragent|(^|ip)hash|^ip|subject|recipient|account|bank|private|employeevisible|note|topic|reason'
 
     if ($null -eq $Value) {
         return
@@ -48,7 +36,7 @@ function Assert-NoRawPiiProperty {
     if ($Value -is [System.Collections.IDictionary]) {
         foreach ($key in $Value.Keys) {
             $normalizedKey = ([string]$key).ToLowerInvariant() -replace '[_-]', ''
-            if ($forbiddenNames -contains $normalizedKey) {
+            if ($normalizedKey -match $forbiddenNamePattern) {
                 throw "raw PII property is not allowed: $Path.$key"
             }
             Assert-NoRawPiiProperty -Value $Value[$key] -Path "$Path.$key"
@@ -66,7 +54,7 @@ function Assert-NoRawPiiProperty {
     if ($Value -is [pscustomobject]) {
         foreach ($property in $Value.PSObject.Properties) {
             $normalizedName = $property.Name.ToLowerInvariant() -replace '[_-]', ''
-            if ($forbiddenNames -contains $normalizedName) {
+            if ($normalizedName -match $forbiddenNamePattern) {
                 throw "raw PII property is not allowed: $Path.$($property.Name)"
             }
             Assert-NoRawPiiProperty -Value $property.Value -Path "$Path.$($property.Name)"
