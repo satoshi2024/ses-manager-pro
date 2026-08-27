@@ -170,7 +170,9 @@ class PwaMutationApiControllerTest {
                 .isInstanceOf(com.ses.common.exception.PwaConflictException.class)
                 .satisfies(error -> {
                     Object data = ((com.ses.common.exception.PwaConflictException) error).getData();
-                    assertThat(data.toString()).contains("serverValue=09:00", "serverValue=18:00", "server値");
+                    assertThat(data.toString()).contains("serverValue=09:00", "serverValue=18:00",
+                            "name=remarks, serverValue=server値, clientValue=端末値")
+                            .doesNotContain("name=remarks, serverValue=null, clientValue=端末値");
                 });
         verify(ledger).abandon(3L);
     }

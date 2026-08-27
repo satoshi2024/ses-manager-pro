@@ -379,7 +379,7 @@ public class PwaMutationApiController {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));
             data.put("status", row.getStatus()); data.put("actualHours", row.getActualHours());
-            data.put("remarks", row.getRemarks());
+            data.put("monthlyRemarks", row.getRemarks());
             WorkRecordDaily daily = workRecordDailyMapper.selectOne(new LambdaQueryWrapper<WorkRecordDaily>()
                     .eq(WorkRecordDaily::getWorkRecordId, row.getId())
                     .eq(WorkRecordDaily::getWorkDate, LocalDate.parse(requiredText(payload, "workDate")))
@@ -391,7 +391,9 @@ public class PwaMutationApiController {
                 data.put("endTime", daily.getEndTime() == null ? null : daily.getEndTime().toString());
                 data.put("breakMinutes", daily.getBreakMinutes());
                 data.put("workedHours", daily.getWorkedHours());
-                data.put("dailyRemarks", daily.getRemarks());
+                // クライアントの日次payloadと既存GETレスポンスのキーを揃え、
+                // 月次remarksを日次remarksとして誤表示しない。
+                data.put("remarks", daily.getRemarks());
             }
             return new VersionSnapshot(value(row.getVersion()), data);
         }
