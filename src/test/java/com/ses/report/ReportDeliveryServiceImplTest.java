@@ -190,6 +190,21 @@ class ReportDeliveryServiceImplTest {
     }
 
     @Test
+    void retryはENQUEUEDまたはPROCESSING中のdeliveryを再送しない() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setAttemptCount(1);
+        delivery.setDeliveryStatus("ENQUEUED");
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+
+        service.retry(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
+        verify(deliveryMapper, never()).updateById(any(ReportDelivery.class));
+        verifyNoInteractions(previewService, notificationService);
+    }
+
+    @Test
     void manualReplayはDLQ前のdeliveryをscope再確認後に再送する() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);

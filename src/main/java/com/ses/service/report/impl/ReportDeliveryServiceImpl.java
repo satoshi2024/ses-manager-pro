@@ -168,6 +168,12 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     public void retry(Long deliveryId) {
         requireAdmin();
         ReportDelivery delivery = findRequired(deliveryId);
+        // outbox dispatch中のdeliveryをretry APIから再送すると、同一通知のtoken/outboxが重複する。
+        // 通常retryはdispatcherがRETRYへ戻したdeliveryだけを対象にし、manualReplayが明示的に
+        // RETRYへ遷移させる。ENQUEUED/PROCESSING/SENT/PENDINGは状態を変えず終了する。
+        if (!"RETRY".equals(delivery.getDeliveryStatus())) {
+            return;
+        }
         if (delivery.getAttemptCount() != null && delivery.getAttemptCount() >= MAX_ATTEMPTS) {
             delivery.setDeliveryStatus("FAILED");
             delivery.setLastErrorCode("DELIVERY_DLQ");
