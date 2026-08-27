@@ -85,7 +85,7 @@
   - **Demo**:
     - 顧客ヘルス画面で要因内訳が表示され、契約更新カレンダーに対象顧客のヘルスバッジが表示されることを確認。
 
-- [ ] **Task M: 全体統合検証 & 回帰テスト & 390px モバイル UI 検証 & Runbook**
+- [x] **Task M: 全体統合検証 & 回帰テスト & 390px モバイル UI 検証 & Runbook**
   - **Objective**: 全ゲート（Fast Suite, MySQL/Flyway, Security/IDOR, 390px モバイル表示, Runbook）を完了し、成果物を固定する。
   - **Guidance**:
     - `mvn test` (Fast suite) の全件 PASS。

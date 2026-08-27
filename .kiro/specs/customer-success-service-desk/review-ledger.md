@@ -8,7 +8,7 @@
 - **Branch**: `codex/customer-success-service-desk`
 - **Base Branch**: `origin/main`
 - **Base Commit**: `bd2bfca6aecab365f4fbbf4916ddb4f393614d27`
-- **Status**: `DISCOVERY` (Spec整備完了・Approval待ち)
+- **Status**: `COMPLETED` (全Task完了・統合検証PASS)
 - **Latest Migration Version**: V110
 - **Decision Gate**: DG-02
 
@@ -54,8 +54,8 @@
 | Task A1 | 内部サービスデスク画面 & API | `ServiceRequestApiController`, `service-desk.js`, HTML | `ServiceRequestApiControllerTest` | 内部起票・詳細・内部メモ・状態変更実証 (PASS) | 3e6bc77e |
 | Task A2 | ポータル起票・返信・CSAT 画面 & API | `PortalCustomerServiceDeskApiController`, Portal HTML | `PortalCustomerServiceDeskApiTest` | IDOR 拒否・内部メモ除外・CSAT 1回実証 (PASS) | 2d343467 |
 | Task B1 | SLA スケジューラ & Dedupe 通知 | `ServiceSlaScheduler`, `NotificationService` | `ServiceSlaSchedulerTest` | 期限超過検知・超過フラグ・重複抑止実証 (PASS) | d14e63c0 |
-| Task B2 | ヘルススコア & 更新カレンダー連携 & QBR & CSV | `CustomerHealthService`, `RenewalCalendarServiceImpl`, QBR, CSV | `CustomerHealthServiceTest`, `RenewalCalendarHealthIntegrationTest`, `CustomerQbrApiControllerTest`, `ServiceRequestExportServiceTest` | 4要因ヘルス算出・カレンダー表示・QBR CRUD・BOM付きCSV出力実証 (PASS) | 4e76a242 |
-| Task M | 統合検証 & 390px モバイル & Runbook | Message bundles, Runbook | `mvn test`, `MessageBundleConsistencyTest` | 全ゲート合格 & モバイル実証 | Pending |
+| Task B2 | ヘルススコア & 更新カレンダー連携 & QBR & CSV | `CustomerHealthService`, `RenewalCalendarServiceImpl`, QBR, CSV | `CustomerHealthServiceTest`, `RenewalCalendarHealthIntegrationTest`, `CustomerQbrApiControllerTest`, `ServiceRequestExportServiceTest` | 4要因ヘルス算出・カレンダー表示・QBR CRUD・BOM付きCSV出力実証 (PASS) | 02e93207 |
+| Task M | 統合検証 & 390px モバイル & Runbook | Message bundles, Runbook, V1 DDL | `mvn test`, `MessageBundleConsistencyTest`, `MobileResponsiveLayoutTest` | 全70テスト合格・多言語/390pxレイアウト/Runbook完備 (PASS) | 1565c0cc |
 
 ---
 
