@@ -48,8 +48,8 @@
 
 | Task ID | 内容 | 対象ファイル | 定向テスト / 回帰テスト | Demo / 検証結果 | Commit SHA |
 |---|---|---|---|---|---|
-| Task 0 | Discovery & 現行境界インベントリ・DG-02 | `requirements.md`, `design.md`, `tasks.md`, `review-ledger.md` | `mvn test-compile` | Spec & Inventory 整備確認 (PASS) | in-progress |
-| Task F1 | DDL & Entity 整備 (V110) | `V110__...sql`, `schema-service-desk-h2.sql`, Entity, Mapper | DDL Smoke Test | DDL 適用確認 | Pending |
+| Task 0 | Discovery & 現行境界インベントリ・DG-02 | `requirements.md`, `design.md`, `tasks.md`, `review-ledger.md` | `mvn test-compile` | Spec & Inventory 整備確認 (PASS) | 22d35cc3 |
+| Task F1 | DDL & Entity 整備 (V110) | `V110__...sql`, `schema-service-desk-h2.sql`, Entity, Mapper | `ServiceDeskEntityMapperTest` | 10テーブル初期化・CRUD・初期ポリシー投入確認 (PASS) | in-progress |
 | Task F2 | SLA 計算エンジン & 状態機械 & スコープ | `ServiceSlaCalculator`, `ServiceRequestService`, DTO | `ServiceSlaCalculatorTest`, `ServiceRequestServiceTest` | 休日スキップ/Pause 実証 | Pending |
 | Task A1 | 内部サービスデスク画面 & API | `ServiceRequestApiController`, `service-desk.js`, HTML | `ServiceRequestApiControllerTest` | 内部起票・内部メモ実証 | Pending |
 | Task A2 | ポータル起票・返信・CSAT 画面 & API | `PortalCustomerServiceDeskApiController`, Portal HTML | `PortalCustomerServiceDeskApiControllerTest` | IDOR 拒否・CSAT 1回実証 | Pending |

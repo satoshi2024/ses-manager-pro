@@ -53,6 +53,7 @@ spring:
         - classpath:sql/schema-jp-pint-h2.sql
         - classpath:sql/schema-ai-feedback-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
+        - classpath:sql/schema-service-desk-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
