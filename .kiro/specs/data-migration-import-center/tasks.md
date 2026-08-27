@@ -182,7 +182,7 @@ apply前に宣言したrollback classに従い、後続参照を壊さず補償�
 
 | Task | 状態 | 対応文書/証拠 | commit |
 |---|---|---|---|
-| 0 Discovery/gate | [x] | discovery.md、requirements.md、design.md、tasks.md | Task 0完了commitで記録 |
+| 0 Discovery/gate | [x] | discovery.md、requirements.md、design.md、tasks.md、mapping-spike.md、targeted regression 16件 PASS | 81354d00 |
 | F1 Job/mapping foundation | [ ] | 承認後 |
 | F2 Parser/canonical/no-write | [ ] | 承認後 |
 | A1 Upload/mapping/preview UI | [ ] | 承認後 |
