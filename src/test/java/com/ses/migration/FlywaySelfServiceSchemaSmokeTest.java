@@ -390,6 +390,9 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .target("105.2")
+                // historical fixture作成時にJava migration 74.3が解決対象外になった場合も、
+                // V105.2への順方向遷移で未適用の過去migrationを実行して検証を継続する。
+                .outOfOrder(true)
                 .load()
                 .migrate();
 
