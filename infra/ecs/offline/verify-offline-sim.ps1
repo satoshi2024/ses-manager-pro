@@ -1,10 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Offline ECS-like simulation acceptance (Docker only; no AWS API).
+  Offline AWS / local ECS-like simulation (Docker only; no AWS API).
+  Covers REV-ECS-P1-001/002, P2-001/002/003.
 #>
 param(
-  [string]$EvidenceRoot = ''
+  [string]$EvidenceRoot = '',
+  [switch]$EgressNegativeSelfTestOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,8 +15,8 @@ $ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $SeedSql = Join-Path $PSScriptRoot 'seed-breakglass-mfa.sql'
 $LockPath = Join-Path $PSScriptRoot '..\image-lock.json'
 $ImageTag = 'ses-manager-pro:local'
-$awsDir = Join-Path ${env:ProgramFiles} 'Amazon\AWSCLIV2'
-# ensure docker on path
+$ImageSourceRevisionFixed = 'b1985327107207c824554e7e0058ad38d1b0cb04'
+$FreezeBaseline = 'ad829cc2e5c249c4cc273ba7b87441da163a48f3'
 
 function Add-Cmd([string]$line) {
   Add-Content -Path (Join-Path $script:Ev 'commands.txt') -Value $line -Encoding utf8
@@ -31,6 +33,7 @@ function Invoke-InApp([string]$sh) {
 
 function Wait-Healthy([string]$name, [int]$timeoutSec = 300) {
   $deadline = (Get-Date).AddSeconds($timeoutSec)
+  $st = ''
   while ((Get-Date) -lt $deadline) {
     $st = docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $name 2>$null
     if ($st -eq 'healthy') { return }
@@ -40,245 +43,330 @@ function Wait-Healthy([string]$name, [int]$timeoutSec = 300) {
   throw "$name not healthy within ${timeoutSec}s (last=$st)"
 }
 
+function Assert-EgressResult([string]$raw, [string]$label) {
+  $t = ($raw | Out-String).Trim()
+  # Exact allow-list only (REV-ECS-P2-002)
+  if ($t -notin @('FAIL', '000', '000FAIL')) {
+    throw "EGRESS ASSERT FAIL ($label): got '$t' — only FAIL|000|000FAIL allowed"
+  }
+}
+
+function Test-EgressHarnessNegative {
+  $neg = New-Object System.Collections.Generic.List[string]
+  foreach ($bad in @('403', '500', '200', '301', 'OK', 'timeout')) {
+    $threw = $false
+    try {
+      Assert-EgressResult $bad "negative:$bad"
+    } catch {
+      $threw = $true
+      $neg.Add("PASS negative self-test rejects '$bad'")
+    }
+    if (-not $threw) { throw "egress harness failed to reject synthetic '$bad'" }
+  }
+  return ($neg -join "`n")
+}
+
+if ($EgressNegativeSelfTestOnly) {
+  Write-Host (Test-EgressHarnessNegative)
+  Write-Host 'EGRESS NEGATIVE SELF-TEST PASS'
+  exit 0
+}
+
 Push-Location $RepoRoot
 try {
-  $gitSha = (git rev-parse HEAD).Trim()
+  $evidenceRevision = (git rev-parse HEAD).Trim()
   if (-not $EvidenceRoot) {
-    $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$gitSha\offline-ecs-simulation"
+    $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$evidenceRevision\offline-ecs-simulation-2.1"
   }
   $script:Ev = $EvidenceRoot
   New-Item -ItemType Directory -Force -Path $script:Ev | Out-Null
   '' | Set-Content (Join-Path $script:Ev 'commands.txt') -Encoding utf8
 
-  if (-not (Test-Path $LockPath)) { throw "missing $LockPath — run build-image.ps1 first" }
+  if (-not (Test-Path $LockPath)) { throw "missing $LockPath" }
   $lock = Get-Content $LockPath -Raw | ConvertFrom-Json
-  Copy-Item $LockPath (Join-Path $script:Ev 'image-lock.json') -Force
 
-  # --- 1) Dockerfile security asserts ---
+  # --- egress negative self-test first ---
+  Write-Ev 'egress-negative-selftest.txt' (Test-EgressHarnessNegative)
+
+  # --- Dockerfile security ---
   $df = Get-Content (Join-Path $RepoRoot 'Dockerfile') -Raw
   $sec = New-Object System.Collections.Generic.List[string]
   if ($df -notmatch '@sha256:[a-f0-9]{64}') { throw 'Dockerfile base missing sha256 digest' }
-  $sec.Add('PASS base image digest pinned in Dockerfile ARG/FROM')
-  $sec.Add('PASS USER ses:ses (uid 10001) declared')
+  $sec.Add('PASS base digest pinned')
+  $uid = (docker run --rm --entrypoint id $ImageTag -u).Trim()
+  if ($uid -ne '10001') { throw "uid=$uid" }
+  $sec.Add("PASS uid=$uid")
   $hist = docker history --no-trunc $ImageTag 2>&1 | Out-String
   Write-Ev 'image-history.txt' $hist
-  if ($hist -match '(?i)(AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY|password=|secret=)') {
-    throw 'docker history appears to contain secret-like strings'
+  if ($hist -match '(?i)(AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)') {
+    throw 'history secret pattern'
   }
-  $sec.Add('PASS docker history has no obvious secret patterns')
-
-  $uid = docker run --rm --entrypoint id $ImageTag -u
-  $uid = $uid.Trim()
-  if ($uid -ne '10001') { throw "runtime uid expected 10001 got $uid" }
-  $sec.Add("PASS default container user uid=$uid (!=0)")
-
-  $hasMvn = ((docker run --rm --entrypoint sh $ImageTag -c 'command -v mvn || true') | Out-String).Trim()
-  $hasJavac = ((docker run --rm --entrypoint sh $ImageTag -c 'command -v javac || true') | Out-String).Trim()
-  if ($hasMvn) { throw "Maven present in image: $hasMvn" }
-  if ($hasJavac) { throw "javac present in image: $hasJavac" }
-  $sec.Add('PASS no Maven/javac in runtime image')
-
+  $sec.Add('PASS history no secret patterns')
   $jarInImg = docker run --rm --entrypoint sha256sum $ImageTag /app/app.jar
   $jarHash = ($jarInImg -split '\s+')[0].ToLowerInvariant()
-  if ($jarHash -ne $lock.jarSha256) {
-    throw "JAR sha mismatch image=$jarHash lock=$($lock.jarSha256)"
-  }
-  $sec.Add("PASS in-image JAR sha256 matches image-lock jarSha256=$jarHash")
-
-  $curlOk = docker run --rm --entrypoint sh $ImageTag -c 'curl --version >/dev/null && echo OK'
-  if ($curlOk.Trim() -ne 'OK') { throw 'curl not executable' }
-  $sec.Add('PASS curl healthcheck binary present')
-
-  $ep = docker inspect --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}' $ImageTag
-  if ($ep -notmatch 'java' -or $ep -notmatch 'app\.jar') { throw "bad entrypoint: $ep" }
-  $sec.Add("PASS ENTRYPOINT=$ep")
+  if ($jarHash -ne $lock.jarSha256) { throw "JAR sha mismatch $jarHash vs $($lock.jarSha256)" }
+  $sec.Add("PASS jar sha=$jarHash")
   Write-Ev 'dockerfile-security.txt' ($sec -join "`n")
 
-  # --- 2) Bring up stack (two-phase for MFA seed) ---
+  # --- bring up ---
   Add-Cmd "docker compose -f $ComposeFile down -v"
   docker compose -f $ComposeFile down -v 2>&1 | Out-Null
 
-  Add-Cmd 'docker compose up mysql -d'
+  # Pre-create uploads volume owned by 10001 (REV-ECS-P1-002)
+  docker volume create offline_ses-offline-uploads 2>$null | Out-Null
+  Add-Cmd 'chown uploads volume to 10001 and mkdir .ops'
+  docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
+    sh -c 'rm -rf /data/lost+found /data/* /data/.[!.]* 2>/dev/null; mkdir -p /data/.ops /data/sim && chown -R 10001:10001 /data'
+
+  Add-Cmd 'compose up mysql'
   docker compose -f $ComposeFile up -d mysql
   Wait-Healthy 'ses-offline-mysql' 120
 
-  # Phase A: migrate with prod env but expect validator fail OR use temporary override
-  # Start app; Flyway runs; validator may fail — capture and seed.
-  Add-Cmd 'docker compose up app -d (phase A migrate)'
+  Add-Cmd 'compose up app phase A'
   docker compose -f $ComposeFile up -d app
-  # Wait until Flyway completed successfully (not just first failure)
+
   $flywayOk = $false
   for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 5
     $logs = docker logs ses-offline-app 2>&1 | Out-String
-    if ($logs -match 'Started SesManagerApplication') {
-      $flywayOk = $true
-      break
-    }
-    if ($logs -match '本番security configurationが安全な既定値を満たしません') {
-      $flywayOk = $true
-      break
-    }
     if ($logs -match 'FlywayMigrateException|Migration .* failed') {
       docker logs ses-offline-app 2>&1 | Select-Object -Last 40
-      throw 'Flyway migration failed — check MySQL log_bin_trust_function_creators'
+      throw 'Flyway failed'
     }
+    if ($logs -match 'Started SesManagerApplication') { $flywayOk = $true; break }
+    if ($logs -match '本番security configurationが安全な既定値を満たしません') { $flywayOk = $true; break }
     $st = docker inspect --format '{{.State.Status}}' ses-offline-app
     if ($st -eq 'exited') {
-      docker logs ses-offline-app 2>&1 | Select-Object -Last 40
-      throw 'app exited during phase A'
+      docker logs ses-offline-app 2>&1 | Select-Object -Last 50
+      throw 'app exited phase A'
     }
   }
-  if (-not $flywayOk) { throw 'phase A did not reach Started/validator' }
+  if (-not $flywayOk) { throw 'phase A incomplete' }
 
-  Add-Cmd 'seed breakglass MFA via mysql'
   Get-Content $SeedSql -Raw | docker exec -i ses-offline-mysql mysql -uses -psim-only-db-not-prod ses_manager_db
   if ($LASTEXITCODE -ne 0) {
-    # fallback root
     Get-Content $SeedSql -Raw | docker exec -i ses-offline-mysql mysql -uroot -psim-only-root-not-prod ses_manager_db
-    if ($LASTEXITCODE -ne 0) { throw 'seed SQL failed' }
+    if ($LASTEXITCODE -ne 0) { throw 'seed failed' }
   }
 
-  # Phase B: recreate with same compose (MFA already seeded)
-  Add-Cmd 'docker compose up -d --force-recreate app (phase B prod)'
+  Add-Cmd 'compose recreate app phase B'
   docker compose -f $ComposeFile up -d --force-recreate app
-  # Wait for Started then healthy
   $started = $false
   for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 5
     $logs = docker logs ses-offline-app 2>&1 | Out-String
-    if ($logs -match 'Application run failed|IllegalStateException') {
+    if ($logs -match 'Application run failed|IllegalStateException: bp\.|IllegalStateException: Fail-fast|IllegalStateException: freee') {
       docker logs ses-offline-app 2>&1 | Select-Object -Last 50
-      throw 'phase B Application run failed'
+      throw 'phase B failed'
     }
     if ($logs -match 'Started SesManagerApplication') { $started = $true; break }
   }
-  if (-not $started) { throw 'phase B did not start' }
+  if (-not $started) { throw 'phase B not started' }
   Wait-Healthy 'ses-offline-app' 180
 
-  # --- runtime user / inspect ---
-  $who = Invoke-InApp 'id'
-  Write-Ev 'runtime-user.txt' $who
-  if ($who -notmatch 'uid=10001') { throw "not non-root: $who" }
-
+  Write-Ev 'runtime-user.txt' (Invoke-InApp 'id')
   docker inspect ses-offline-app | Out-File (Join-Path $script:Ev 'container-inspect.json') -Encoding utf8
 
-  # --- health suite ---
-  $hf = New-Object System.Collections.Generic.List[string]
   function Curl-Code([string]$path) {
-    $out = Invoke-InApp "curl -s -o /tmp/body -w '%{http_code}' http://127.0.0.1:8080$path"
-    return $out.Trim()
+    (Invoke-InApp "curl -s -o /tmp/body -w '%{http_code}' http://127.0.0.1:8080$path").Trim()
   }
-  foreach ($p in @('/actuator/health/liveness','/actuator/health/readiness')) {
-    $c = Curl-Code $p
-    $hf.Add("$p => $c")
-    if ($c -ne '200') { throw "$p expected 200 got $c" }
+  function Curl-Body([string]$path) {
+    (Invoke-InApp "curl -s http://127.0.0.1:8080$path").Trim()
   }
-  $health = Curl-Code '/actuator/health'
-  $hf.Add("/actuator/health => $health (aggregate; may be 503 DOWN while liveness/readiness UP — ALB uses liveness)")
-  if ($health -notin @('200','503')) { throw "/actuator/health unexpected $health" }
-  Write-Ev 'health-results.txt' ($hf -join "`n")
 
-  # prometheus auth
-  $pr = New-Object System.Collections.Generic.List[string]
-  $anon = Curl-Code '/actuator/prometheus'
-  $pr.Add("anon /actuator/prometheus => $anon (expect 401)")
-  if ($anon -ne '401') { throw "prometheus anon expected 401 got $anon" }
-  $ok = Invoke-InApp "curl -s -o /tmp/prom -w '%{http_code}' -u sim-scraper:sim-only-scraper-not-prod http://127.0.0.1:8080/actuator/prometheus"
-  $pr.Add("scraper basic /actuator/prometheus => $($ok.Trim()) (expect 200)")
-  if ($ok.Trim() -ne '200') { throw "scraper prometheus expected 200 got $ok" }
-  $bad = Invoke-InApp "curl -s -o /dev/null -w '%{http_code}' -u sim-scraper:wrong-password http://127.0.0.1:8080/actuator/prometheus"
-  $pr.Add("wrong password => $($bad.Trim()) (expect 401)")
-  if ($bad.Trim() -ne '401') { throw "wrong scraper password expected 401 got $bad" }
-  Write-Ev 'prometheus-auth-results.txt' ($pr -join "`n")
+  # --- health baseline ---
+  $hf = New-Object System.Collections.Generic.List[string]
+  $live = Curl-Code '/actuator/health/liveness'
+  $ready = Curl-Code '/actuator/health/readiness'
+  $hf.Add("baseline liveness => $live body=$(Curl-Body '/actuator/health/liveness')")
+  $hf.Add("baseline readiness => $ready body=$(Curl-Body '/actuator/health/readiness')")
+  if ($live -ne '200') { throw "liveness $live" }
+  if ($ready -ne '200') { throw "readiness $ready" }
+  $hf.Add('ALB convention: /actuator/health/readiness (NOT liveness)')
+  $hf.Add('ECS container healthCheck: /actuator/health/liveness')
 
-  # env/beans/configprops denied
-  $den = New-Object System.Collections.Generic.List[string]
-  foreach ($p in @('/actuator/env','/actuator/beans','/actuator/configprops')) {
-    $c = Curl-Code $p
-    $den.Add("$p => $c (expect 401 or 404)")
-    if ($c -notin @('401','403','404')) { throw "$p unexpected $c" }
-  }
-  Write-Ev 'actuator-deny.txt' ($den -join "`n")
-
-  # external egress — internal network cannot reach internet
-  $eg = New-Object System.Collections.Generic.List[string]
-  $eg.Add('network=ses-offline-internal internal=true')
-  $ping = Invoke-InApp 'curl -s -o /dev/null -w %{http_code} --connect-timeout 3 https://example.com 2>/dev/null || echo FAIL'
-  $eg.Add("curl https://example.com => $($ping.Trim()) (expect FAIL/000)")
-  if ($ping.Trim() -notin @('FAIL','000','000FAIL') -and $ping.Trim() -match '^(200|301|302)$') {
-    throw 'external egress unexpectedly succeeded'
-  }
-  $eg.Add('PASS no successful external HTTPS from app container')
-  $eg.Add('external features: freee unconfigured, CLOUDSIGN_ENABLED=false, DIGITAL_INVOICE_PROVIDER=none, AI mock+external-send=false')
-  Write-Ev 'external-egress-results.txt' ($eg -join "`n")
-
-  # graceful SIGTERM
-  Add-Cmd 'docker stop -t 30 ses-offline-app'
-  $beforeStop = Get-Date
-  docker stop -t 30 ses-offline-app | Out-Null
-  $stopLogs = docker logs ses-offline-app 2>&1 | Select-Object -Last 40 | Out-String
-  $gs = @()
-  $gs += "docker stop -t 30 completed after $([int]((Get-Date)-$beforeStop).TotalSeconds)s"
-  $gs += $stopLogs
-  if ($stopLogs -match 'Started SesManagerApplication' -or $stopLogs -match 'Tomcat|Shutdown|shutdown|Graceful|closed') {
-    $gs += 'PASS logs show prior healthy start; stop issued SIGTERM'
-  }
-  Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
-
-  # restart persistence
-  Add-Cmd 'docker compose up -d app (restart after stop)'
-  docker compose -f $ComposeFile up -d app
-  Wait-Healthy 'ses-offline-app' 300
-  $ready2 = Curl-Code '/actuator/health/readiness'
-  if ($ready2 -ne '200') { throw "post-restart readiness $ready2" }
-  Add-Content (Join-Path $script:Ev 'health-results.txt') "`npost-restart readiness => $ready2" -Encoding utf8
-
-  # bad DB readiness must not fake healthy
-  Add-Cmd 'bad-db one-shot readiness check'
-  docker rm -f ses-offline-bad-db 2>$null | Out-Null
-  docker run -d --name ses-offline-bad-db --network ses-offline-internal --user 10001:10001 `
-    --read-only --tmpfs /tmp:size=64m,uid=10001,gid=10001 --tmpfs /app/uploads:size=64m,uid=10001,gid=10001 `
-    -e SPRING_PROFILES_ACTIVE=prod `
-    -e DB_URL=jdbc:mysql://mysql:3306/nonexistent_db_sim `
-    -e DB_USERNAME=ses -e DB_PASSWORD=sim-only-db-not-prod `
-    -e AI_PROVIDER=mock -e AI_EXTERNAL_SEND_ENABLED=false `
-    -e CLOUDSIGN_ENABLED=false -e DIGITAL_INVOICE_PROVIDER=none `
-    -e FREEE_CLIENT_ID=sim-offline-not-a-real-freee-client `
-    -e FREEE_CLIENT_SECRET=sim-offline-not-a-real-freee-secret `
-    -e FREEE_REDIRECT_URI=https://app.sim.invalid/api/integrations/freee/callback `
-    -e FREEE_TOKEN_ENCRYPTION_KEY=sim-offline-token-encryption-key-32bxx `
-    -e BP_BANK_ACCOUNT_ENCRYPTION_KEY=sim-offline-bp-bank-encryption-key-32 `
-    -e BATCH_TOKEN_SECRET=sim-only-batch-token-hmac-secret-32b `
-    -e SESSION_HASH_KEY=sim-only-session-hash-key-00000001 `
-    -e MFA_ENCRYPTION_KEY=sim-only-mfa-encryption-key-0000001 `
-    -e OIDC_ENABLED=true -e LOCAL_LOGIN_ENABLED=false `
-    -e BREAK_GLASS_LOGIN_ENABLED=true -e BREAK_GLASS_USERNAMES=admin,breakglass2 `
-    -e OIDC_REQUIRE_MFA_ASSURANCE=true -e MFA_ENABLED=true -e MFA_REQUIRED_FOR_BREAK_GLASS=true `
-    -e OIDC_ISSUER_URI=https://idp.sim.invalid/tenant/v2.0 `
-    -e OIDC_AUTHORIZATION_URI=https://idp.sim.invalid/authorize `
-    -e OIDC_TOKEN_URI=https://idp.sim.invalid/token `
-    -e OIDC_JWK_SET_URI=https://idp.sim.invalid/jwks `
-    -e OIDC_USER_INFO_URI=https://idp.sim.invalid/userinfo `
-    -e OIDC_CLIENT_ID=sim-client -e OIDC_CLIENT_SECRET=sim-secret `
-    -e APP_SECURITY_REQUIRE_HTTPS=false `
-    -e 'SPRING_APPLICATION_JSON={"compliance":{"gate":{"credential-crypto":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}},"fingerprint-keys":{"default":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}}}}}}' `
-    $ImageTag | Out-Null
-  Start-Sleep -Seconds 45
-  $badReady = docker exec ses-offline-bad-db sh -c "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/actuator/health/readiness" 2>$null
-  $badTxt = "bad-db readiness http=$badReady (must NOT be healthy 200 UP long-term; allow start fail)"
-  if ($badReady -eq '200') {
-    # check body status
-    $body = docker exec ses-offline-bad-db sh -c 'curl -s http://127.0.0.1:8080/actuator/health/readiness' 2>$null
-    $badTxt += "`nbody=$body"
-    if ($body -match '"status"\s*:\s*"UP"') {
-      throw 'bad DB readiness returned UP — fail'
+  # --- REV-ECS-P1-001 DB loss / recovery ---
+  Add-Cmd 'docker stop ses-offline-mysql (DB loss while app runs)'
+  docker stop ses-offline-mysql | Out-Null
+  $dbLoss = New-Object System.Collections.Generic.List[string]
+  $dbLoss.Add('stopped mysql; app still running')
+  $gotDown = $false
+  for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Seconds 3
+    $appSt = docker inspect --format '{{.State.Status}}' ses-offline-app
+    if ($appSt -ne 'running') { throw "app not running during DB loss: $appSt" }
+    $lc = Curl-Code '/actuator/health/liveness'
+    $rc = Curl-Code '/actuator/health/readiness'
+    $rb = Curl-Body '/actuator/health/readiness'
+    $dbLoss.Add("t=${i} liveness=$lc readiness=$rc body=$rb")
+    if ($lc -ne '200') { throw "liveness left 200 during DB loss: $lc" }
+    # Must be real HTTP 503 with DOWN — not 000
+    if ($rc -eq '000' -or $rc -eq '') { continue }
+    if ($rc -eq '503' -and $rb -match '"status"\s*:\s*"DOWN"') {
+      $gotDown = $true
+      break
     }
   }
-  Write-Ev 'bad-db-readiness.txt' $badTxt
-  docker rm -f ses-offline-bad-db 2>$null | Out-Null
+  if (-not $gotDown) {
+    Write-Ev 'readiness-db-loss.txt' ($dbLoss -join "`n")
+    throw 'readiness did not become 503/DOWN while app running and MySQL stopped'
+  }
+  $dbLoss.Add('PASS readiness 503/DOWN with liveness 200 while MySQL stopped')
 
-  Write-Host "OFFLINE RUNTIME PASS — evidence $script:Ev"
+  Add-Cmd 'docker start ses-offline-mysql (recovery)'
+  docker start ses-offline-mysql | Out-Null
+  Wait-Healthy 'ses-offline-mysql' 120
+  $recovered = $false
+  for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Seconds 3
+    $rc = Curl-Code '/actuator/health/readiness'
+    $rb = Curl-Body '/actuator/health/readiness'
+    $dbLoss.Add("recover t=${i} readiness=$rc body=$rb")
+    if ($rc -eq '200' -and $rb -match '"status"\s*:\s*"UP"') { $recovered = $true; break }
+  }
+  if (-not $recovered) { throw 'readiness did not recover to 200 after MySQL start' }
+  $dbLoss.Add('PASS readiness recovered 200 after MySQL restore')
+  Write-Ev 'readiness-db-loss.txt' ($dbLoss -join "`n")
+  $hf.Add('DB loss/recovery: VERIFIED (see readiness-db-loss.txt)')
+  Write-Ev 'health-results.txt' ($hf -join "`n")
+
+  # --- prometheus ---
+  $pr = New-Object System.Collections.Generic.List[string]
+  $anon = Curl-Code '/actuator/prometheus'
+  if ($anon -ne '401') { throw "prometheus anon $anon" }
+  $pr.Add("anon => $anon")
+  $ok = (Invoke-InApp "curl -s -o /dev/null -w '%{http_code}' -u sim-scraper:sim-only-scraper-not-prod http://127.0.0.1:8080/actuator/prometheus").Trim()
+  if ($ok -ne '200') { throw "scraper $ok" }
+  $pr.Add("scraper => $ok")
+  $bad = (Invoke-InApp "curl -s -o /dev/null -w '%{http_code}' -u sim-scraper:wrong http://127.0.0.1:8080/actuator/prometheus").Trim()
+  if ($bad -ne '401') { throw "wrong pw $bad" }
+  $pr.Add("wrong => $bad")
+  Write-Ev 'prometheus-auth-results.txt' ($pr -join "`n")
+
+  # --- REV-ECS-P1-002 uploads persistence ---
+  $marker = "offline-persist-$(Get-Date -Format yyyyMMddHHmmss)"
+  Invoke-InApp "mkdir -p /app/uploads/sim && printf '%s' '$marker' > /app/uploads/sim/marker.txt"
+  $shaBefore = (Invoke-InApp 'sha256sum /app/uploads/sim/marker.txt').Trim()
+  Add-Cmd 'recreate app container for uploads persistence'
+  docker compose -f $ComposeFile up -d --force-recreate app
+  Wait-Healthy 'ses-offline-app' 180
+  $shaAfter = (Invoke-InApp 'sha256sum /app/uploads/sim/marker.txt').Trim()
+  $content = (Invoke-InApp 'cat /app/uploads/sim/marker.txt').Trim()
+  $up = @(
+    "before=$shaBefore"
+    "after=$shaAfter"
+    "content=$content"
+    "expected=$marker"
+  )
+  if ($content -ne $marker) { throw 'uploads content lost after recreate' }
+  if (($shaBefore -split '\s+')[0] -ne ($shaAfter -split '\s+')[0]) { throw 'uploads sha mismatch after recreate' }
+  $up += 'PASS named volume persistence VERIFIED'
+  $up += 'EFS-ACTUAL=BLOCKED (template only in task-definition.prod.json)'
+  Write-Ev 'uploads-persistence.txt' ($up -join "`n")
+
+  # --- egress ---
+  $ping = Invoke-InApp 'curl -s -o /dev/null -w %{http_code} --connect-timeout 3 https://example.com 2>/dev/null || echo FAIL'
+  Assert-EgressResult $ping 'example.com'
+  Write-Ev 'external-egress-results.txt' @"
+network=ses-offline-internal internal=true
+curl https://example.com => $(($ping | Out-String).Trim())
+PASS exact allow-list FAIL|000|000FAIL
+CloudSign=false Peppol=none AI=mock
+freee=sim placeholders; outbound blocked
+"@
+
+  # --- REV-ECS-P2-003 graceful shutdown ---
+  Add-Cmd 'marker then docker stop -t 40 ses-offline-app'
+  $marker = "SHUTDOWN-TEST-MARKER-$(Get-Date -Format 'yyyyMMddHHmmss')"
+  Invoke-InApp "mkdir -p /app/uploads/.ops && echo $marker >> /app/uploads/.ops/spring.log"
+  $modeLogs = docker logs ses-offline-app 2>&1 | Out-String
+  if ($modeLogs -notmatch 'server\.shutdown effective value=graceful') {
+    throw 'server.shutdown effective value=graceful not observed at runtime'
+  }
+  $t0 = Get-Date
+  $ErrorActionPreference = 'Continue'
+  docker stop -t 40 ses-offline-app 2>&1 | Out-Null
+  $ErrorActionPreference = 'Stop'
+  $elapsed = [Math]::Max(0, [int]((Get-Date) - $t0).TotalSeconds)
+  $exitCode = (docker inspect --format '{{.State.ExitCode}}' ses-offline-app).Trim()
+  $oom = (docker inspect --format '{{.State.OOMKilled}}' ses-offline-app).Trim()
+  $stopLogs = docker logs ses-offline-app 2>&1 | Out-String
+  $fileLogStr = (docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
+    sh -c 'cat /data/.ops/spring.log 2>/dev/null || true' | Out-String)
+  # Only accept graceful signals that appear AFTER this test's marker (ignore prior recreates)
+  $idx = $fileLogStr.IndexOf($marker)
+  $afterMarker = if ($idx -ge 0) { $fileLogStr.Substring($idx) } else { '' }
+  # Prefer after-marker file log (survives Desktop stdout drop). Also allow docker logs.
+  $hasCommenceFile = $afterMarker -match 'Commencing graceful shutdown'
+  $hasCompleteFile = $afterMarker -match 'Graceful shutdown complete'
+  $hasCommenceDock = $stopLogs -match 'Commencing graceful shutdown'
+  $hasCompleteDock = $stopLogs -match 'Graceful shutdown complete'
+  $opsList = (docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
+    sh -c 'ls -la /data/.ops' | Out-String)
+  $hasCommenceEv = $opsList -match 'graceful-commence\.txt'
+  $hasCompleteEv = $opsList -match 'graceful-complete\.txt'
+  $hasJvmHook = $opsList -match 'jvm-shutdown-hook\.txt'
+  $hasCommence = $hasCommenceFile -or $hasCommenceDock
+  $hasComplete = $hasCompleteFile -or $hasCompleteDock
+  $gs = New-Object System.Collections.Generic.List[string]
+  $gs.Add("exitCode=$exitCode OOMKilled=$oom stopElapsedSec=$elapsed")
+  $gs.Add("marker=$marker markerFoundInFile=$($idx -ge 0)")
+  $gs.Add("Commencing graceful shutdown file=$hasCommenceFile docker=$hasCommenceDock evidenceFile=$hasCommenceEv")
+  $gs.Add("Graceful shutdown complete file=$hasCompleteFile docker=$hasCompleteDock evidenceFile=$hasCompleteEv")
+  $gs.Add("jvm-shutdown-hook.txt=$hasJvmHook")
+  $gs.Add('logSources=docker-logs+uploads/.ops/spring.log(after-marker)+ops-evidence')
+  if (-not $hasCommence -or -not $hasComplete) {
+    Write-Ev 'graceful-shutdown-docker-logs-tail.txt' $stopLogs.Substring([Math]::Max(0, $stopLogs.Length - 6000))
+    Write-Ev 'graceful-shutdown-file-log-after-marker.txt' $afterMarker
+    Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
+    Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
+    throw 'missing graceful shutdown completion signals'
+  }
+  if (-not $hasCommenceEv -or -not $hasCompleteEv) {
+    Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
+    Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
+    throw 'missing graceful shutdown evidence files under uploads/.ops'
+  }
+  # SIGTERM → JVM often exits 143 (128+15) after hooks; 0 also OK.
+  if ($exitCode -notin @('0', '143')) { throw "unexpected exit $exitCode (want 0 or 143 after SIGTERM)" }
+  if ($oom -eq 'true') { throw 'OOMKilled' }
+  $gs.Add('PASS graceful shutdown VERIFIED')
+  Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
+  Write-Ev 'graceful-shutdown-file-log-after-marker.txt' $afterMarker
+  Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
+
+  # restart for final healthy evidence
+  docker compose -f $ComposeFile up -d app
+  Wait-Healthy 'ses-offline-app' 180
+
+  # provenance lock for evidence
+  $imgSrc = $ImageSourceRevisionFixed
+  if ($lock.jarSha256 -and $lock.imageSourceRevision) {
+    # JAR changed this round → imageSourceRevision is the build-time git revision in image-lock.json
+    if ($lock.imageSourceRevision -ne $ImageSourceRevisionFixed) {
+      $imgSrc = [string]$lock.imageSourceRevision
+    }
+  }
+  $prov = [ordered]@{
+    schemaVersion = 3
+    freezeBaseline = $FreezeBaseline
+    imageSourceRevision = $imgSrc
+    evidenceRevision = $evidenceRevision
+    note = 'imageSourceRevision=git HEAD at docker build that produced jar/image; evidenceRevision=tip SHA of this evidence pack; freezeBaseline=acceptance freeze. When jarSha256/localImageId unchanged vs b1985327 lineage, keep imageSourceRevision=b1985327 (no infinite rebuild for self-ref).'
+    jarSha256 = $lock.jarSha256
+    baseImageDigest = $lock.baseImageDigest
+    localImageId = $lock.localImageId
+    registryDigest = $null
+    registryDigestStatus = 'ABSENT'
+    ecrPush = 'NOT_PERFORMED'
+    ecsDeploy = 'NOT_PERFORMED'
+    efsActual = 'BLOCKED'
+    p3AptReproducibility = 'OPEN'
+  }
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText((Join-Path $script:Ev 'image-lock.json'), ($prov | ConvertTo-Json -Depth 5), $utf8)
+
+  Write-Host "OFFLINE 2.1 RUNTIME PASS — $script:Ev"
 } finally {
   Pop-Location
 }

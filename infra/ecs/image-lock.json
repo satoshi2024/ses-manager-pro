@@ -1,15 +1,20 @@
 {
-    "schemaVersion":  2,
-    "generated":  "2026-08-27T11:38:44.9666719+09:00",
-    "gitRevision":  "b1985327107207c824554e7e0058ad38d1b0cb04",
+    "schemaVersion":  3,
+    "generated":  "2026-08-27T12:58:07.8577860+09:00",
+    "freezeBaseline":  "ad829cc2e5c249c4cc273ba7b87441da163a48f3",
+    "imageSourceRevision":  "7d46a5cd1149547099e6e4f0ee1e27190165e9e1",
+    "evidenceRevision":  null,
+    "evidenceRevisionNote":  "Set in evidence pack to final tip SHA; do not rebuild solely to self-reference",
     "appJar":  "ses-manager-pro-1.0.0-SNAPSHOT.jar",
-    "jarSha256":  "e51afa042e6a88341cb0371c9106864c3558d64d9e90a7db79a8b3f734e7e986",
+    "jarSha256":  "40b9631fed28ab9f10826f5dc7ccd7342f903ef9c50b297401e9b200180334be",
     "baseImage":  "eclipse-temurin:21-jre-jammy",
     "baseImageDigest":  "sha256:eebd356ad7358b7094758e5787a6726f332917cfd56feab6457c56dab895cdbf",
     "localImageTag":  "ses-manager-pro:local",
-    "localImageId":  "sha256:c2162ea6e70d289183a3957334ca27d88e519223450eb21724b801e933f006d8",
+    "localImageId":  "sha256:659a0017ccd044f6a4c232636415c143d194b06d0e21348a57a9d0fc09497033",
     "registryDigest":  null,
     "registryDigestStatus":  "ABSENT - not an ECR digest; do not substitute LOCAL_IMAGE_ID into task-definition IMAGE_DIGEST",
     "ecrPush":  "NOT_PERFORMED",
-    "ecsDeploy":  "NOT_PERFORMED"
+    "ecsDeploy":  "NOT_PERFORMED",
+    "efsActual":  "BLOCKED",
+    "p3AptReproducibility":  "OPEN - base apt package versions may drift across rebuild dates"
 }

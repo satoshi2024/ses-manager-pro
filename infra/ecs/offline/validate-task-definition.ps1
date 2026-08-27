@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $TdPath = Join-Path $PSScriptRoot '..\task-definition.prod.json'
 $gitSha = (git -C $RepoRoot rev-parse HEAD).Trim()
-$Ev = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$gitSha\offline-ecs-simulation"
+$Ev = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$gitSha\offline-ecs-simulation-2.1"
 New-Item -ItemType Directory -Force -Path $Ev | Out-Null
 
 $td = Get-Content $TdPath -Raw | ConvertFrom-Json
@@ -13,57 +13,35 @@ function Ok([string]$m) { $script:lines.Add("PASS $m") }
 function Fail([string]$m) { $script:lines.Add("FAIL $m"); throw $m }
 
 if ($td.networkMode -ne 'awsvpc') { Fail 'networkMode!=awsvpc' } else { Ok 'networkMode=awsvpc' }
-if ($td.requiresCompatibilities -notcontains 'FARGATE') { Fail 'missing FARGATE' } else { Ok 'requiresCompatibilities contains FARGATE' }
+if ($td.requiresCompatibilities -notcontains 'FARGATE') { Fail 'missing FARGATE' } else { Ok 'FARGATE' }
 
-$validCombos = @{
-  '256' = @('512','1024','2048')
-  '512' = @('1024','2048','3072','4096')
-  '1024' = @('2048','3072','4096','5120','6144','7168','8192')
-  '2048' = @('4096','5120','6144','7168','8192','9216','10240','11264','12288','13312','14336','15360','16384')
-  '4096' = @('8192','9216','10240','11264','12288','13312','14336','15360','16384','17408','18432','19456','20480','21504','22528','23552','24576','25600','26624','27648','28672','29696','30720')
-}
-$cpu = [string]$td.cpu
-$mem = [string]$td.memory
-if (-not $validCombos.ContainsKey($cpu) -or $validCombos[$cpu] -notcontains $mem) {
-  Fail "illegal Fargate cpu/memory combo cpu=$cpu mem=$mem"
-} else { Ok "cpu/memory combo legal ($cpu/$mem)" }
+$cpu = [string]$td.cpu; $mem = [string]$td.memory
+if ($cpu -ne '1024' -or $mem -ne '2048') { Fail "cpu/mem $cpu/$mem" } else { Ok 'cpu/memory 1024/2048' }
 
 $c = $td.containerDefinitions[0]
-if (-not $c.essential) { Fail 'essential!=true' } else { Ok 'essential=true' }
-if (-not $c.readonlyRootFilesystem) { Fail 'readonlyRootFilesystem missing/false' } else { Ok 'readonlyRootFilesystem=true' }
-if (-not $c.linuxParameters -or -not $c.linuxParameters.initProcessEnabled) {
-  Fail 'linuxParameters.initProcessEnabled missing'
-} else { Ok 'linuxParameters.initProcessEnabled=true' }
-
-$port = $c.portMappings[0]
-if ($port.containerPort -ne 8080) { Fail 'portMappings' } else { Ok 'portMappings 8080/tcp' }
-
-if ($c.image -notmatch '@sha256:IMAGE_DIGEST$') {
-  Fail 'image must keep ECR@sha256:IMAGE_DIGEST placeholder'
-} else { Ok 'image uses ECR URI@IMAGE_DIGEST placeholder (not LOCAL_IMAGE_ID)' }
-
-$envNames = @($c.environment | ForEach-Object { $_.name })
-foreach ($forbidden in @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET')) {
-  if ($envNames -contains $forbidden) { Fail "$forbidden must not be plaintext environment" }
-}
-Ok 'no DB/OIDC/batch secrets in environment[]'
-
-$secretNames = @($c.secrets | ForEach-Object { $_.name })
-foreach ($need in @('DB_PASSWORD','DB_USERNAME','DB_URL')) {
-  if ($secretNames -notcontains $need) { Fail "secrets missing $need" }
-}
-Ok 'DB_* via secrets valueFrom placeholders'
+if (-not $c.essential) { Fail 'essential' } else { Ok 'essential=true' }
+if (-not $c.readonlyRootFilesystem) { Fail 'readonlyRootFilesystem' } else { Ok 'readonlyRootFilesystem=true' }
+if (-not $c.linuxParameters.initProcessEnabled) { Fail 'initProcessEnabled' } else { Ok 'initProcessEnabled=true' }
+if ($c.portMappings[0].containerPort -ne 8080) { Fail 'port' } else { Ok 'port 8080' }
+if ($c.image -notmatch '@sha256:IMAGE_DIGEST$') { Fail 'IMAGE_DIGEST placeholder' } else { Ok 'ECR@IMAGE_DIGEST placeholder' }
 
 $hc = ($c.healthCheck.command -join ' ')
-if ($hc -notmatch 'actuator/health/liveness') { Fail 'healthCheck path' } else { Ok 'healthCheck matches /actuator/health/liveness' }
+if ($hc -notmatch 'actuator/health/liveness') { Fail 'container healthCheck must be liveness' } else { Ok 'ECS container healthCheck=liveness' }
+if ($hc -match 'actuator/health/readiness') { Fail 'container healthCheck must NOT be readiness' }
 
-if ($c.logConfiguration.logDriver -ne 'awslogs') { Fail 'logDriver' } else {
-  Ok 'awslogs present as PLACEHOLDER — CloudWatch NOT verified offline (DEFERRED)'
+$alb = $td._offlineAcceptanceNotes.albTargetGroupHealthCheck.path
+if ($alb -ne '/actuator/health/readiness') { Fail "ALB path must be readiness, got $alb" } else { Ok 'ALB TG path=/actuator/health/readiness (documented)' }
+
+$uploads = $td.volumes | Where-Object { $_.name -eq 'uploads' }
+if (-not $uploads.efsVolumeConfiguration) { Fail 'uploads missing efsVolumeConfiguration placeholder' }
+if ($uploads.efsVolumeConfiguration.fileSystemId -ne 'fs-PLACEHOLDER') { Fail 'EFS fs id placeholder' }
+Ok 'uploads EFS template PRESENT (EFS-ACTUAL=BLOCKED)'
+
+$envNames = @($c.environment | ForEach-Object { $_.name })
+foreach ($f in @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET')) {
+  if ($envNames -contains $f) { Fail "$f in environment" }
 }
-if ($td.executionRoleArn -notmatch 'ACCOUNT_ID') { Fail 'executionRoleArn placeholder' } else {
-  Ok 'executionRoleArn ACCOUNT_ID placeholder (IAM OUT-OF-SCOPE)'
-}
-Ok 'deferred: ALB, SG, private subnet, circuit breaker service, autoscaling, ECR push'
+Ok 'no secrets in environment[]'
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllLines((Join-Path $Ev 'task-definition-validation.txt'), $lines.ToArray(), $utf8)

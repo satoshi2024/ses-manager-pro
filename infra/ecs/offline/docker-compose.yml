@@ -1,6 +1,10 @@
-# Offline ECS-like simulation — NOT real AWS.
+# Offline AWS / local ECS-like simulation — NOT real AWS.
 # Network is internal (no internet egress). Probes use docker exec.
 # Secrets are SIMULATION-ONLY markers, never production credentials.
+#
+# Probe convention (REV-ECS-P1-001):
+#   - ECS container healthCheck → /actuator/health/liveness
+#   - ALB Target Group → /actuator/health/readiness (MUST; never use liveness for ALB)
 services:
   mysql:
     image: mysql:8.0.36
@@ -36,12 +40,17 @@ services:
     read_only: true
     cpus: 1.0
     mem_limit: 2048m
+    stop_grace_period: 45s
     tmpfs:
       - /tmp:size=256m,uid=10001,gid=10001,mode=1777
-      - /app/uploads:size=256m,uid=10001,gid=10001,mode=1777
+    volumes:
+      # Named volume (NOT tmpfs) — REV-ECS-P1-002. Chown to 10001 before first start.
+      - ses-offline-uploads:/app/uploads
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: "8080"
+      # Faster readiness DOWN when MySQL is stopped (Hikari validation).
+      DB_CONNECTION_TIMEOUT: "3000"
       DB_URL: jdbc:mysql://mysql:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo
       DB_USERNAME: ses
       DB_PASSWORD: sim-only-db-not-prod
@@ -50,8 +59,6 @@ services:
       AI_EXTERNAL_SEND_ENABLED: "false"
       CLOUDSIGN_ENABLED: "false"
       DIGITAL_INVOICE_PROVIDER: none
-      # Accounting FreeeAccountingProvider prod PostConstruct forbids blank/dummy;
-      # use SIMULATION-ONLY non-dummy placeholders. No real freee account; internal net blocks egress.
       FREEE_CLIENT_ID: sim-offline-not-a-real-freee-client
       FREEE_CLIENT_SECRET: sim-offline-not-a-real-freee-secret
       FREEE_REDIRECT_URI: https://app.sim.invalid/api/integrations/freee/callback
@@ -80,13 +87,18 @@ services:
       OIDC_CLIENT_SECRET: sim-client-secret-not-real
       ALLOW_UNTRACKED_SESSIONS: "false"
       PERSISTENT_SESSION_ENABLED: "true"
-      # Simulation: TLS terminated at fictional ALB; keep HTTP inside container for probes.
       APP_SECURITY_REQUIRE_HTTPS: "false"
+      SHUTDOWN_TIMEOUT: 30s
+      # Force graceful even if an overlay forgot YAML (REV-ECS-P2-003)
+      SERVER_SHUTDOWN: graceful
+      # Persist shutdown logs onto named volume — Docker Desktop may drop final stdout on stop
+      LOGGING_FILE_NAME: /app/uploads/.ops/spring.log
       SPRING_APPLICATION_JSON: >-
         {"compliance":{"gate":{"credential-crypto":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}},"fingerprint-keys":{"default":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}}}}}}
     networks:
       - ses-offline-internal
     healthcheck:
+      # ECS container health = liveness only (REV-ECS-P1-001)
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
@@ -101,3 +113,7 @@ networks:
 
 volumes:
   ses-offline-mysql-data:
+  # Pre-created + chowned by verify-offline-sim.ps1 (uid 10001)
+  ses-offline-uploads:
+    name: offline_ses-offline-uploads
+    external: true

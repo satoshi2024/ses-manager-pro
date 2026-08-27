@@ -28,7 +28,8 @@
         { "name": "CLOUDSIGN_ENABLED", "value": "false" },
         { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
         { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
-        { "name": "DB_POOL_SIZE", "value": "10" }
+        { "name": "DB_POOL_SIZE", "value": "10" },
+        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" }
       ],
       "secrets": [
         {
@@ -90,8 +91,21 @@
     }
   ],
   "volumes": [
-    { "name": "tmp" },
-    { "name": "uploads" }
+    {
+      "name": "tmp"
+    },
+    {
+      "name": "uploads",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-PLACEHOLDER",
+        "rootDirectory": "/ses-manager/uploads",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-PLACEHOLDER",
+          "iam": "ENABLED"
+        }
+      }
+    }
   ],
   "_offlineAcceptanceNotes": {
     "IMAGE_DIGEST": "PLACEHOLDER — replace with ECR registry digest after push; never use LOCAL_IMAGE_ID here",
@@ -100,12 +114,26 @@
     "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
     "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
     "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "albTargetGroupHealthCheck": {
+      "path": "/actuator/health/readiness",
+      "matcher": "200",
+      "FORBIDDEN": "Do NOT use /actuator/health/liveness for ALB (REV-ECS-P1-001)"
+    },
+    "ecsContainerHealthCheck": {
+      "path": "/actuator/health/liveness",
+      "note": "Process liveness only; DB loss must not kill the task"
+    },
+    "efsUploads": {
+      "status": "EFS-ACTUAL=BLOCKED until real AWS",
+      "template": "volumes[].efsVolumeConfiguration is a PLACEHOLDER only — not verified offline"
+    },
     "deferredExternalIac": [
-      "ALB target group / listener",
+      "ALB target group / listener (readiness path)",
       "security groups / private subnets",
       "deployment circuit breaker (service-level)",
       "autoscaling",
-      "ECR repository + digest pin deploy"
+      "ECR repository + digest pin deploy",
+      "EFS file system + access point (uploads)"
     ]
   }
 }

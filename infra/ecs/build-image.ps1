@@ -58,9 +58,12 @@ try {
   docker run --rm --entrypoint java $ImageTag -version | Out-Host
 
   $lock = [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     generated = (Get-Date -Format o)
-    gitRevision = $gitRevision
+    freezeBaseline = 'ad829cc2e5c249c4cc273ba7b87441da163a48f3'
+    imageSourceRevision = $gitRevision
+    evidenceRevision = $null
+    evidenceRevisionNote = 'Set in evidence pack to final tip SHA; do not rebuild solely to self-reference'
     appJar = $jar.Name
     jarSha256 = $jarSha
     baseImage = $JreImage
@@ -68,9 +71,11 @@ try {
     localImageTag = $ImageTag
     localImageId = $imgId
     registryDigest = $null
-    registryDigestStatus = 'ABSENT — not an ECR digest; do not substitute LOCAL_IMAGE_ID into task-definition IMAGE_DIGEST'
+    registryDigestStatus = 'ABSENT - not an ECR digest; do not substitute LOCAL_IMAGE_ID into task-definition IMAGE_DIGEST'
     ecrPush = 'NOT_PERFORMED'
     ecsDeploy = 'NOT_PERFORMED'
+    efsActual = 'BLOCKED'
+    p3AptReproducibility = 'OPEN - base apt package versions may drift across rebuild dates'
   }
   $utf8 = New-Object System.Text.UTF8Encoding $false
   [System.IO.File]::WriteAllText($LockPath, ($lock | ConvertTo-Json -Depth 5), $utf8)

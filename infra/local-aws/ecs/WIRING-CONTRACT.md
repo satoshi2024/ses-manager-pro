@@ -6,14 +6,18 @@
 #   ACC-OPS-P1-003 remains open if desiredCount later > 1 (Redis/ElastiCache required).
 #   ALB sticky session MUST NOT close ACC-OPS-P1-003.
 #
-# ALB health checks (to configure on real Target Group):
-#   Healthy path:   /actuator/health/liveness
-#   Optional deep:  /actuator/health/readiness  (DB-sensitive; prefer TG = liveness, ECS task = both)
+# ALB health checks (to configure on real Target Group) — REV-ECS-P1-001:
+#   REQUIRED path:  /actuator/health/readiness   (includes readinessState + db)
+#   FORBIDDEN:      /actuator/health/liveness for ALB (keeps traffic when DB is down)
+#   ECS container healthCheck may remain liveness.
 #   Matcher:        HTTP 200
 #   Interval:       30s
 #   Unhealthy:      3
 #   Healthy:        2
 #   Timeout:        5s
+#
+# Uploads persistence:
+#   EFS volume template in task-definition.prod.json — EFS-ACTUAL=BLOCKED offline
 #
 # Fail-closed env (must be present in task definition / SSM):
 #   SPRING_PROFILES_ACTIVE=prod

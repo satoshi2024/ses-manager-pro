@@ -4,6 +4,8 @@
 server:
   port: 8080
   forward-headers-strategy: framework
+  # ECS/ALB 相当のローリング更新向け。SIGTERM 後に処理中リクエストを排水してから終了する。
+  shutdown: graceful
   # ===== 同時接続の受け口 =====
   # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
   # ただし実際の上限は DB コネクションプール(spring.datasource.hikari.maximum-pool-size)であり、
@@ -39,9 +41,11 @@ server:
 #     app.metrics.scraper のマシン認証（ROLE_METRICS_SCRAPER）のみ。
 #   - show-details/show-components は never 固定。匿名でも DB 接続先・ディスク・ホスト名・
 #     資格情報など内部の詳細を返さない（health は status のみ）。
-# 実 K8s / ECS への配線（Deployment の probe・ServiceMonitor・別 management port・
-# network policy・スクレイパー Secret 注入等）は本タスク範囲外で BLOCKED のまま。
-# ここではアプリ側のエンドポイント公開制御とマシン認証のみを行う。
+# ECS / ALB 配線規約（offline AWS / local ECS-like simulation でも同じ）:
+#   - ECS container healthCheck → /actuator/health/liveness（プロセス生存）
+#   - ALB Target Group health check → /actuator/health/readiness（DB 含む）
+#   - ALB に liveness を使うことは禁止（DB 断でも 200 のまま流入してしまう）。
+# 実 AWS の ALB/SG 配線は別途 BLOCKED。ここではアプリ側の probe 定義のみ。
 management:
   endpoints:
     web:
@@ -52,12 +56,22 @@ management:
           - prometheus
   endpoint:
     health:
-      # K8s liveness/readiness プローブ（/actuator/health/{liveness,readiness}）を有効化する。
+      # liveness/readiness グループを有効化（/actuator/health/{liveness,readiness}）。
       probes:
         enabled: true
       # 匿名アクセスでも内部詳細（component 状態・接続先など）を返さない。
       show-details: never
       show-components: never
+      group:
+        # プロセス生存のみ。DB 断でも UP を維持する（ECS が不要にタスクを殺さない）。
+        liveness:
+          include:
+            - livenessState
+        # ALB 流入可否。readinessState + db を必須にする（REV-ECS-P1-001）。
+        readiness:
+          include:
+            - readinessState
+            - db
     prometheus:
       enabled: true
   prometheus:
@@ -74,6 +88,9 @@ organization:
     enabled: ${ORGANIZATION_SCOPE_ENABLED:true}
 
 spring:
+  # graceful shutdown の排水待ち上限（server.shutdown=graceful と併用）
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
   # ===== プロファイルは明示指定を必須とする（ACC-SEC-P1-007 / fail-closed） =====
   # 以前はここで `profiles.active: dev` を既定にしていたが、本番で SPRING_PROFILES_ACTIVE=prod を
   # 付け忘れると平文(NoOp)エンコーダーのまま静かに起動する事故につながるため、既定値は置かない。
