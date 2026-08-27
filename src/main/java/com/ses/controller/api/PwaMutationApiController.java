@@ -255,7 +255,13 @@ public class PwaMutationApiController {
         }
         if ("timesheet".equals(command.screen())) {
             Long contractId = requiredLong(payload, "contractId");
-            assertOwnedContract(context.engineerId(), contractId);
+            // 既存の勤怠更新・月次確定と同じ Contract -> WorkRecord 順でロックする。
+            // 先に WorkRecord をロックすると、月次確定（Contract -> WorkRecord）との相互待機になる。
+            Contract contract = contractMapper.selectByIdForUpdate(contractId);
+            if (contract == null) throw BusinessException.of(404, "error.workRecord.noContract2");
+            if (!Objects.equals(context.engineerId(), contract.getEngineerId())) {
+                throw BusinessException.of(403, "error.my.notOwner");
+            }
             String month = text(payload, "workMonth", command.month());
             WorkRecord row = workRecordMapper.selectOne(new LambdaQueryWrapper<WorkRecord>()
                     .eq(WorkRecord::getContractId, contractId)

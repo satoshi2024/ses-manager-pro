@@ -59,7 +59,7 @@ class PwaMutationApiControllerTest {
                 .thenReturn(new PwaClientMutationLedgerService.Claim(1L, context, false, null));
         Contract contract = new Contract();
         contract.setEngineerId(9L);
-        when(contractMapper.selectById(100L)).thenReturn(contract);
+        when(contractMapper.selectByIdForUpdate(100L)).thenReturn(contract);
         WorkRecord record = new WorkRecord();
         record.setId(200L);
         record.setContractId(100L);
