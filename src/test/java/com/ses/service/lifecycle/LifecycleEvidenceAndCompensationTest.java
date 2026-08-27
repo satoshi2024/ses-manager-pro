@@ -77,6 +77,15 @@ class LifecycleEvidenceAndCompensationTest {
                 .build();
         sysUserMapper.insert(adminUser);
 
+        SysUser hrUser = SysUser.builder()
+                .username("hr_b2_test")
+                .password("pass")
+                .realName("人事B2")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hrUser);
+
         OrganizationUnit org = OrganizationUnit.builder()
                 .code("ORG-B2-01")
                 .name("開発部")
@@ -178,10 +187,10 @@ class LifecycleEvidenceAndCompensationTest {
         LifecycleCase cancelledCase = caseMapper.selectById(caseId);
         assertEquals("CANCELLED", cancelledCase.getStatus());
 
-        // 未完了タスクがWAIVEDに補償遷移されていること
+        // 未完了タスクがCANCELLEDに補償遷移されていること (LC-P1-11)
         LifecycleTask cancelledTask = taskMapper.selectById(taskId);
-        assertEquals("WAIVED", cancelledTask.getStatus());
-        assertEquals("案件中止に伴う免除", cancelledTask.getCompletionComment());
+        assertEquals("CANCELLED", cancelledTask.getStatus());
+        assertTrue(cancelledTask.getCompletionComment().contains("案件中止に伴うキャンセル"));
 
         // 中止イベントが記録されていること
         List<LifecycleEvent> events = eventMapper.selectList(

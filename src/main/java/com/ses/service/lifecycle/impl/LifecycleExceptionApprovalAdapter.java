@@ -50,7 +50,16 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
 
         String reason = ApprovalPayloads.text(command, "reason");
         String riskOwner = ApprovalPayloads.text(command, "riskOwner");
-        String expiryDate = ApprovalPayloads.text(command, "expiryDate");
+        if (riskOwner == null || riskOwner.isBlank()) {
+            riskOwner = ApprovalPayloads.text(command, "risk_owner");
+        }
+        String remedyDeadline = ApprovalPayloads.text(command, "remedyDeadline");
+        if (remedyDeadline == null || remedyDeadline.isBlank()) {
+            remedyDeadline = ApprovalPayloads.text(command, "remedy_deadline");
+        }
+        if (remedyDeadline == null || remedyDeadline.isBlank()) {
+            remedyDeadline = ApprovalPayloads.text(command, "expiryDate");
+        }
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("taskId", targetId);
@@ -59,7 +68,7 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
         payload.put("caseId", task.getCaseId());
         payload.put("reason", reason != null ? reason : "");
         payload.put("riskOwner", riskOwner != null ? riskOwner : "");
-        payload.put("expiryDate", expiryDate != null ? expiryDate : "");
+        payload.put("remedyDeadline", remedyDeadline != null ? remedyDeadline : "");
 
         Map<String, Object> diff = new LinkedHashMap<>();
         diff.put("status", Map.of(
@@ -71,6 +80,11 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
                 "label", "免除理由",
                 "before", "",
                 "after", reason != null ? reason : ""
+        ));
+        diff.put("remedyDeadline", Map.of(
+                "label", "是正完了期限",
+                "before", "",
+                "after", remedyDeadline != null ? remedyDeadline : ""
         ));
 
         Long orgId = null;
@@ -100,8 +114,17 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
     public void validateBeforeRequest(ApprovalSnapshot snapshot) {
         Map<String, Object> payload = snapshot.payload();
         String reason = (String) payload.get("reason");
+        String riskOwner = (String) payload.get("riskOwner");
+        String remedyDeadline = (String) payload.get("remedyDeadline");
+
         if (reason == null || reason.isBlank()) {
             throw BusinessException.of(400, "error.lifecycle.waiveReasonRequired", "免除理由は必須です");
+        }
+        if (riskOwner == null || riskOwner.isBlank()) {
+            throw BusinessException.of(400, "error.lifecycle.waiveRiskOwnerRequired", "リスク所有者の指定は必須です");
+        }
+        if (remedyDeadline == null || remedyDeadline.isBlank()) {
+            throw BusinessException.of(400, "error.lifecycle.waiveRemedyDeadlineRequired", "是正完了期限の指定は必須です");
         }
     }
 

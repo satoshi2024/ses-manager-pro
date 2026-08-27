@@ -86,6 +86,15 @@ class MyLifecycleApiControllerTest {
                 .build();
         sysUserMapper.insert(adminUser);
 
+        SysUser hrUser = SysUser.builder()
+                .username("hr_my_test")
+                .password("pass")
+                .realName("人事テスト")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hrUser);
+
         engineerUser1 = SysUser.builder()
                 .username("eng_user_01")
                 .password("pass")
@@ -197,7 +206,7 @@ class MyLifecycleApiControllerTest {
     }
 
     @Test
-    @DisplayName("A2-2: 要員本人APIで自案件が取得でき、社内専用タスクが除外されていること")
+    @DisplayName("A2-2: 要員本人APIで自案件が取得でき、社内専用タスクとスナップショットが除外されていること")
     @WithMockUser(username = "eng_user_01", roles = {"要員"})
     void testListMyCasesAndConcealedInternalTasks() throws Exception {
         mockMvc.perform(get("/api/my/lifecycle/cases"))
@@ -212,7 +221,9 @@ class MyLifecycleApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 // 公開タスク1件のみが含まれ、社内専用タスクは0件 (除外)
                 .andExpect(jsonPath("$.data.tasks", hasSize(1)))
-                .andExpect(jsonPath("$.data.tasks[0].taskCode").value("MY_SUBMIT_INFO"));
+                .andExpect(jsonPath("$.data.tasks[0].taskCode").value("MY_SUBMIT_INFO"))
+                .andExpect(jsonPath("$.data.totalTasks").value(1))
+                .andExpect(jsonPath("$.data.engineerSnapshotJson").doesNotExist());
     }
 
     @Test
@@ -232,7 +243,7 @@ class MyLifecycleApiControllerTest {
     }
 
     @Test
-    @DisplayName("A2-4: 要員本人が非公開社内タスクへ完了APIを直接呼んだ場合 403 で拒否されること")
+    @DisplayName("A2-4: 要員本人が非公開社内タスクへ完了APIを直接呼んだ場合 404 で拒否されること (推測防止)")
     @WithMockUser(username = "eng_user_01", roles = {"要員"})
     void testRejectInternalTaskCompletionByEngineer() throws Exception {
         CompleteLifecycleTaskCommand cmd = CompleteLifecycleTaskCommand.builder()
@@ -243,12 +254,12 @@ class MyLifecycleApiControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(cmd)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
     }
 
     @Test
-    @DisplayName("A2-5: 別要員 (eng_user_02) が他要員の案件詳細やタスクにアクセスした場合 404/403 で拒否されること")
+    @DisplayName("A2-5: 別要員 (eng_user_02) が他要員の案件詳細やタスクにアクセスした場合 404 で拒否されること")
     @WithMockUser(username = "eng_user_02", roles = {"要員"})
     void testRejectAccessToOtherEngineerCase() throws Exception {
         mockMvc.perform(get("/api/my/lifecycle/cases/" + case1Id))
@@ -263,7 +274,7 @@ class MyLifecycleApiControllerTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(cmd)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value(403));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
     }
 }

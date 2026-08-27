@@ -61,8 +61,8 @@ public class LifecycleSlaServiceImpl implements LifecycleSlaService {
                     long daysOverdue = Math.abs(daysUntilDue);
                     notificationService.notifyTaskOverdue(task, lcCase, daysOverdue);
                     processedCount++;
-                } else if (daysUntilDue <= 2) {
-                    // 期日接近 (2日以内)
+                } else if (daysUntilDue <= 3) {
+                    // 期日接近 (3日以内: 3日前・前日・当日)
                     notificationService.notifyTaskDueSoon(task, lcCase, daysUntilDue);
                     processedCount++;
                 }

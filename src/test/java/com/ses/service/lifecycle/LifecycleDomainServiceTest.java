@@ -66,6 +66,12 @@ class LifecycleDomainServiceTest {
     private LifecycleEventMapper eventMapper;
 
     @Autowired
+    private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
+
+    @Autowired
+    private com.ses.mapper.DocumentMapper documentMapper;
+
+    @Autowired
     private LifecycleExceptionApprovalAdapter approvalAdapter;
 
     private Engineer testEngineer;
@@ -389,8 +395,19 @@ class LifecycleDomainServiceTest {
         // 貸与PC返却タスクを完了
         taskService.completeTask(assetTask.getId(), hrUser.getId(), CompleteLifecycleTaskCommand.builder().completionComment("PC・カード回収完了").build());
 
-        // 誓約書タスクを完了
-        taskService.completeTask(docTask.getId(), hrUser.getId(), CompleteLifecycleTaskCommand.builder().completionComment("受領確認").build());
+        // 誓約書文書を台帳に登録してタスク完了 (DOCUMENT_LINK 証跡)
+        com.ses.entity.Document doc = new com.ses.entity.Document();
+        doc.setTenantId("default");
+        doc.setDocumentType("LIFECYCLE_EVIDENCE");
+        doc.setTitle("秘密保持誓約書");
+        doc.setDirection("INTERNAL");
+        doc.setStatus("CONFIRMED");
+        documentMapper.insert(doc);
+
+        taskService.completeTask(docTask.getId(), hrUser.getId(), CompleteLifecycleTaskCommand.builder()
+                .documentId(doc.getId())
+                .completionComment("誓約書受領確認")
+                .build());
 
         // ユーザーアカウントを無効化 (退社条件)
         engineerUser.setStatus(0);
@@ -439,16 +456,47 @@ class LifecycleDomainServiceTest {
         LifecycleCaseDto caseDto = caseService.createCase(hrUser.getId(), cmd);
         LifecycleTaskDto task = caseDto.getTasks().get(0);
 
-        // ApprovalSnapshot & validate
-        ApprovalSnapshot snapshot = approvalAdapter.snapshot(task.getId(), Map.of("reason", "私物なし確認済み", "riskOwner", "HR部長"));
-        assertDoesNotThrow(() -> approvalAdapter.validateBeforeRequest(snapshot));
+        // 1. バリデーション検証 (必須項目欠落時は例外)
+        ApprovalSnapshot invalidSnapshot = approvalAdapter.snapshot(task.getId(), Map.of("reason", ""));
+        assertThrows(BusinessException.class, () -> approvalAdapter.validateBeforeRequest(invalidSnapshot));
 
-        // 管理者による直接免除
-        taskService.waiveTask(task.getId(), adminUser.getId(), null, "私物残存なし");
+        ApprovalSnapshot validSnapshot = approvalAdapter.snapshot(task.getId(), Map.of(
+                "reason", "私物なし確認済み",
+                "riskOwner", "HR部長",
+                "remedyDeadline", LocalDate.now().plusMonths(1).toString()
+        ));
+        assertDoesNotThrow(() -> approvalAdapter.validateBeforeRequest(validSnapshot));
+
+        // 2. 承認申請なしの直接免除は拒否されること（SoD違反防止）
+        BusinessException directEx = assertThrows(BusinessException.class, () ->
+                taskService.waiveTask(task.getId(), adminUser.getId(), null, "私物残存なし"));
+        assertEquals("error.lifecycle.waiveRequiresApproval", directEx.getMessageKey());
+
+        // 3. 偽造・不一致承認IDによる免除も拒否されること
+        BusinessException fakeEx = assertThrows(BusinessException.class, () ->
+                taskService.waiveTask(task.getId(), adminUser.getId(), 999999L, "私物残存なし"));
+        assertEquals("error.lifecycle.waiveRequiresApproval", fakeEx.getMessageKey());
+
+        // 4. 正当な承認完了（ApprovalRequest APPROVED）経由でのみ WAIVED に遷移すること
+        com.ses.entity.ApprovalRequest req = com.ses.entity.ApprovalRequest.builder()
+                .requestNo("AR-LC-002")
+                .requestType("LIFECYCLE_EXCEPTION")
+                .targetType("LIFECYCLE_TASK")
+                .targetId(task.getId())
+                .targetVersion(0L)
+                .applicantId(hrUser.getId())
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .payloadJson("{\"reason\":\"私物なし確認済み\",\"riskOwner\":\"HR部長\",\"remedyDeadline\":\"" + LocalDate.now().plusMonths(1) + "\"}")
+                .build();
+        approvalRequestMapper.insert(req);
+
+        approvalAdapter.applyApproved(req);
 
         LifecycleTask waivedTask = taskMapper.selectById(task.getId());
         assertEquals("WAIVED", waivedTask.getStatus());
-        assertTrue(waivedTask.getCompletionComment().contains("私物残存なし"));
+        assertEquals(req.getId(), waivedTask.getApprovalRequestId());
+        assertTrue(waivedTask.getCompletionComment().contains("私物なし確認済み"));
     }
 
     @Test

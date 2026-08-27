@@ -125,14 +125,14 @@ public class MyLifecycleApiController {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
 
-        // 社内専用タスク（非公開タスク）への直接アクセスは403拒否
+        // 社内専用タスク（非公開タスク）または他要員のタスクへの直接アクセスは404返却（存在推測防止）
         if (task.getIsEngineerVisible() == null || task.getIsEngineerVisible() == 0) {
-            throw BusinessException.of(403, "error.lifecycle.forbiddenTask", "このタスクへのアクセス権限がありません");
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
 
         LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
         if (lcCase == null || !engineerId.equals(lcCase.getEngineerId())) {
-            throw BusinessException.of(403, "error.lifecycle.forbiddenCase", "他要員の案件タスクは操作できません");
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
 
         taskService.completeTask(taskId, userId, cmd);

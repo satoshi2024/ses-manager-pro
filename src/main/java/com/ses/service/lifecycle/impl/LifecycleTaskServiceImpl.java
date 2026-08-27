@@ -37,6 +37,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final SysUserMapper sysUserMapper;
     private final LifecycleScopeService scopeService;
     private final com.ses.mapper.DocumentMapper documentMapper;
+    private final com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Override
     @Transactional
@@ -110,6 +111,15 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         // 先行タスクがすべて完了しているかチェック
         assertPredecessorsCompleted(task);
 
+        // DOCUMENT_LINK の証跡強制
+        if ("DOCUMENT_LINK".equals(task.getEvidenceType())) {
+            if (cmd == null || cmd.getDocumentId() == null) {
+                if (task.getIsMandatory() != null && task.getIsMandatory() == 1) {
+                    throw BusinessException.of(400, "error.lifecycle.evidenceDocumentRequired", "証跡文書の添付が必須です");
+                }
+            }
+        }
+
         // 証跡リンク登録 (DOCUMENT_LINK時など)
         if (cmd != null && cmd.getDocumentId() != null) {
             com.ses.entity.Document doc = documentMapper.selectById(cmd.getDocumentId());
@@ -151,11 +161,11 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
                 .beforeState(before)
                 .afterState("COMPLETED")
-                .detailsJson(cmd != null ? cmd.getEvidenceDataJson() : null)
+                .detailsJson(cmd != null && cmd.getCompletionComment() != null ? "{\"comment\":\"" + cmd.getCompletionComment().replace("\"", "\\\"") + "\"}" : null)
                 .occurredAt(LocalDateTime.now())
                 .build());
 
-        // 後続タスクの自動昇格判定 (IN_PROGRESSへ)
+        // 後続タスクの自動昇格判定 (先行がすべてCOMPLETED/WAIVEDならIN_PROGRESSへ)
         promoteEligibleSuccessors(task.getCaseId(), taskId, userId);
     }
 
@@ -170,11 +180,23 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
             return;
         }
 
-        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
-        if (user == null || (!"管理者".equals(user.getRole()) && !"HR".equals(user.getRole()) && approvalRequestId == null)) {
-            throw BusinessException.of(403, "error.lifecycle.waiveRequiresApproval", "タスクの免除には管理者/HR権限または承認申請が必要です");
+        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+        if (lcCase == null || !"ACTIVE".equals(lcCase.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.caseNotActive", "進行中の案件のみタスク免除が可能です");
         }
 
+        // 免除には必ず承認済みの ApprovalRequest (RequestType = LIFECYCLE_EXCEPTION, targetId = taskId, status = APPROVED) が必須
+        if (approvalRequestId == null) {
+            throw BusinessException.of(400, "error.lifecycle.waiveRequiresApproval", "免除には承認済みの例外申請が必要です");
+        }
+        com.ses.entity.ApprovalRequest approvalReq = approvalRequestMapper.selectById(approvalRequestId);
+        if (approvalReq == null || !"LIFECYCLE_EXCEPTION".equals(approvalReq.getRequestType())
+                || !taskId.equals(approvalReq.getTargetId())
+                || !"APPROVED".equals(approvalReq.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.waiveRequiresApproval", "有効な承認済み例外申請が見つかりません");
+        }
+
+        SysUser user = userId != null ? sysUserMapper.selectById(userId) : null;
         String before = task.getStatus();
         task.setStatus("WAIVED");
         task.setApprovalRequestId(approvalRequestId);
@@ -195,7 +217,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
                 .beforeState(before)
                 .afterState("WAIVED")
-                .detailsJson("{\"approvalRequestId\":" + approvalRequestId + ",\"reason\":\"" + (reason != null ? reason : "") + "\"}")
+                .detailsJson("{\"approvalRequestId\":" + approvalRequestId + ",\"reason\":\"" + (reason != null ? reason.replace("\"", "\\\"") : "") + "\"}")
                 .occurredAt(LocalDateTime.now())
                 .build());
 

@@ -66,6 +66,9 @@ class LifecycleApiControllerTest {
     @Autowired
     private UserOrganizationMapper userOrganizationMapper;
 
+    @Autowired
+    private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
+
     private SysUser adminUser;
     private Engineer engineer;
     private OrganizationUnit org;
@@ -81,6 +84,15 @@ class LifecycleApiControllerTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(adminUser);
+
+        SysUser hrUser = SysUser.builder()
+                .username("hr_api_test")
+                .password("pass")
+                .realName("人事テスト")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hrUser);
 
         org = OrganizationUnit.builder()
                 .code("ORG-API-01")
@@ -216,11 +228,36 @@ class LifecycleApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
-        // 5. 後続タスク2の免除
+        // 5. 承認なき直接免除は 400 で拒否されること (LC-P0-01)
         mockMvc.perform(post("/api/lifecycle/tasks/" + task2Id + "/waive")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("reason", "既存アカウント流用のため免除"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        // 正当な承認完了（ApprovalRequest APPROVED）を作成
+        com.ses.entity.ApprovalRequest waiverReq = com.ses.entity.ApprovalRequest.builder()
+                .requestNo("AR-LC-API-001")
+                .requestType("LIFECYCLE_EXCEPTION")
+                .targetType("LIFECYCLE_TASK")
+                .targetId(task2Id)
+                .targetVersion(0L)
+                .applicantId(adminUser.getId())
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .payloadJson("{\"reason\":\"既存アカウント流用\",\"riskOwner\":\"管理者\",\"remedyDeadline\":\"" + LocalDate.now().plusMonths(1) + "\"}")
+                .build();
+        approvalRequestMapper.insert(waiverReq);
+
+        // 承認ID付きで免除実行 -> 成功
+        mockMvc.perform(post("/api/lifecycle/tasks/" + task2Id + "/waive")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "approvalRequestId", waiverReq.getId(),
+                                "reason", "既存アカウント流用のため免除"
+                        ))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 

@@ -32,6 +32,34 @@ public class LifecycleScopeService {
     private final EngineerAccountLinkService engineerAccountLinkService;
 
     /**
+     * 要員起票・参照権限チェック
+     */
+    public void assertCanAccessEngineer(SysUser currentUser, Engineer engineer) {
+        if (currentUser == null) return;
+        String role = currentUser.getRole();
+        if ("管理者".equals(role) || "HR".equals(role)) {
+            return;
+        }
+        if ("マネージャー".equals(role)) {
+            if (engineer.getOrganizationId() != null) {
+                Set<Long> allowedOrgs = organizationScopeService.allowedOrganizationIds(LocalDate.now());
+                if (organizationScopeService.hasFullAccess() || allowedOrgs.contains(engineer.getOrganizationId())) {
+                    return;
+                }
+            }
+            throw BusinessException.of(403, "error.lifecycle.accessDenied", "管轄外の要員に対する案件起票はできません");
+        }
+        if ("営業".equals(role)) {
+            List<EngineerSalesDto> salesList = engineerSalesService.listActive(engineer.getId());
+            boolean isAssigned = salesList.stream().anyMatch(s -> Objects.equals(s.getSalesUserId(), currentUser.getId()));
+            if (isAssigned) {
+                return;
+            }
+            throw BusinessException.of(403, "error.lifecycle.accessDenied", "担当外の要員に対する案件起票はできません");
+        }
+    }
+
+    /**
      * 案件の閲覧権限チェック
      */
     public void assertCanViewCase(SysUser currentUser, LifecycleCase lcCase, Engineer engineer) {

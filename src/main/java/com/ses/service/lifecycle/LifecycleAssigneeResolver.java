@@ -178,27 +178,29 @@ public class LifecycleAssigneeResolver {
             case "APPLICANT":
             default:
                 if (applicantUserId != null) {
-                    SysUser applicant = sysUserMapper.selectById(applicantUserId);
-                    if (applicant != null) {
+                    SysUser appUser = sysUserMapper.selectById(applicantUserId);
+                    if (appUser != null && appUser.getStatus() != null && appUser.getStatus() == 1) {
                         resolved = ResolvedAssignee.builder()
-                                .userId(applicant.getId())
-                                .role(applicant.getRole())
-                                .nameSnapshot(applicant.getRealName() != null ? applicant.getRealName() : applicant.getUsername())
+                                .userId(appUser.getId())
+                                .role(appUser.getRole())
+                                .nameSnapshot(appUser.getRealName() != null ? appUser.getRealName() : appUser.getUsername())
                                 .build();
                     }
                 }
                 break;
         }
 
-        if (resolved == null) {
+        if (resolved == null || resolved.getUserId() == null) {
             if (tplTask.getIsMandatory() != null && tplTask.getIsMandatory() == 1) {
-                throw BusinessException.of("error.lifecycle.assigneeResolutionFailed",
-                        "タスク「" + tplTask.getTaskName() + "」の担当者を解決できませんでした (ルール: " + rule + ")");
+                throw BusinessException.of(400, "error.lifecycle.assigneeResolutionFailed",
+                        "必須タスク(" + tplTask.getTaskName() + ")の担当者(" + rule + (ruleValue != null ? ":" + ruleValue : "") + ")を解決できませんでした");
             }
-            // 任意タスクなら未アサインとして許容
-            return ResolvedAssignee.builder()
+        }
+
+        if (resolved == null) {
+            resolved = ResolvedAssignee.builder()
                     .userId(null)
-                    .role(null)
+                    .role("SYSTEM")
                     .nameSnapshot("未割当")
                     .build();
         }

@@ -74,10 +74,21 @@
                         <i class="bi bi-ui-checks me-2"></i><span th:text="#{menu.mySurveys}">サーベイ</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myLifecycle')}">
+                    <a th:href="@{/my/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/lifecycle') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-arrow-repeat me-2"></i><span th:text="#{menu.myLifecycle}">マイライフサイクル</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
                     <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
                         <span th:text="#{menu.engineer}">要員管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('lifecycle')}">
+                    <a th:href="@{/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/lifecycle') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-arrow-repeat me-2"></i>
+                        <span th:text="#{menu.lifecycle}">ライフサイクル管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">

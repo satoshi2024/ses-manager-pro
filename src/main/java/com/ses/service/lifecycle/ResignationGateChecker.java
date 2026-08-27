@@ -31,6 +31,8 @@ public class ResignationGateChecker {
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final EngineerSalesService engineerSalesService;
     private final com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
+    private final com.ses.mapper.PortalUserMapper portalUserMapper;
+    private final com.ses.mapper.ContractMapper contractMapper;
     private final OrganizationService organizationService;
     private final PersistentSessionService persistentSessionService;
     private final PortalSessionService portalSessionService;
@@ -109,6 +111,9 @@ public class ResignationGateChecker {
                 assetReturned = false;
                 assetMsg = "貸与資産返却タスク（PC、スマートフォン、入館証等）が未完了です";
             }
+        } else if ("RESIGNATION".equals(lcCase.getLifecycleType())) {
+            assetReturned = false;
+            assetMsg = "退社案件に必須の貸与資産返却タスク(RESIGN_ASSET_RETURN)が定義されていません";
         }
         if (!assetReturned) allPassed = false;
         items.add(GateItemResult.builder()
@@ -163,6 +168,9 @@ public class ResignationGateChecker {
                 docSaved = false;
                 docMsg = "退職届・秘密保持誓約書等の保管タスクが未完了です";
             }
+        } else if ("RESIGNATION".equals(lcCase.getLifecycleType())) {
+            docSaved = false;
+            docMsg = "退社案件に必須の文書保管タスク(RESIGN_DOC_RETENTION)が定義されていません";
         }
         if (!docSaved) allPassed = false;
         items.add(GateItemResult.builder()
@@ -183,13 +191,14 @@ public class ResignationGateChecker {
     }
 
     /**
-     * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除）を行う。
+     * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除・ポータル連携解除）を行う。
+     * Fail-Closed: 例外発生時は例外を送出し、呼び出し元のトランザクションをロールバックする。
      */
     public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
         LocalDate anchorDate = lcCase.getAnchorDate() != null ? lcCase.getAnchorDate() : LocalDate.now();
 
-        // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効
+        // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効 & ポータル連携解除
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         if (link != null && link.getSysUserId() != null) {
             Long userId = link.getSysUserId();
@@ -203,13 +212,27 @@ public class ResignationGateChecker {
             int closedCount = organizationService.closeAssignmentsForUser(userId, anchorDate);
             log.info("Closed {} organization assignments for user {}", closedCount, userId);
 
-            try {
-                persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
-                portalSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
-                log.info("Revoked all sessions for user {}", userId);
-            } catch (Exception e) {
-                log.warn("Failed to revoke session for user {}: {}", userId, e.getMessage());
+            // 内部セッション強制失効 (Fail-Closed)
+            persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
+            log.info("Revoked all persistent sessions for user {}", userId);
+
+            // ポータルユーザーが存在する場合はポータルセッションも失効
+            if (user != null && user.getEmail() != null) {
+                try {
+                    com.ses.entity.PortalUser portalUser = portalUserMapper.selectOne(
+                            new LambdaQueryWrapper<com.ses.entity.PortalUser>().eq(com.ses.entity.PortalUser::getEmail, user.getEmail()));
+                    if (portalUser != null) {
+                        portalSessionService.revokeAllForUser(portalUser.getId(), "退社案件完了によるポータルセッション強制失効");
+                        log.info("Revoked all portal sessions for portal user {}", portalUser.getId());
+                    }
+                } catch (Exception e) {
+                    log.warn("Portal user lookup skipped or not found: {}", e.getMessage());
+                }
             }
+
+            // ポータル連携解除
+            engineerAccountLinkService.unlinkByEngineerId(engineerId);
+            log.info("Unlinked engineer account link for engineer {}", engineerId);
         }
 
         // 2. 主担当営業および割当の解除

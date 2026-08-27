@@ -64,6 +64,9 @@ class LifecycleNotificationAndSlaTest {
     private UserOrganizationMapper userOrganizationMapper;
 
     @Autowired
+    private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
+
+    @Autowired
     private LifecycleCaseMapper caseMapper;
 
     @Autowired
@@ -213,10 +216,13 @@ class LifecycleNotificationAndSlaTest {
                 .requestType("LIFECYCLE_EXCEPTION")
                 .targetType("LIFECYCLE_TASK")
                 .targetId(task2.getId())
+                .targetVersion(0L)
                 .applicantId(hrUser.getId())
-                .payloadJson("{\"reason\":\"役員承認による免除\"}")
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .payloadJson("{\"reason\":\"役員承認による免除\",\"riskOwner\":\"役員\",\"remedyDeadline\":\"" + LocalDate.now().plusMonths(1) + "\"}")
                 .build();
-        approvalReq.setId(99999L);
+        approvalRequestMapper.insert(approvalReq);
 
         // 承認確定実行
         approvalAdapter.applyApproved(approvalReq);
@@ -224,7 +230,7 @@ class LifecycleNotificationAndSlaTest {
         // タスク2がWAIVEDになっていることを確認
         LifecycleTask updatedTask2 = taskMapper.selectById(task2.getId());
         assertEquals("WAIVED", updatedTask2.getStatus());
-        assertEquals(99999L, updatedTask2.getApprovalRequestId());
+        assertEquals(approvalReq.getId(), updatedTask2.getApprovalRequestId());
 
         // 全阻害タスクがCOMPLETED/WAIVEDとなったため案件完了が成功すること
         assertDoesNotThrow(() -> caseService.completeCase(caseDto.getId(), adminUser.getId()));

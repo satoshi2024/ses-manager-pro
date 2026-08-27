@@ -236,7 +236,7 @@ CREATE TABLE t_lifecycle_event (
 | 案件基準日 (anchor_date) | `t_lifecycle_case.anchor_date` | — | 案件作成時に固定 | 案件起票時入力（入社日/退社日等） | 必須（NULL不可） |
 | タスク期日 (due_date) | `t_lifecycle_task.due_date` | — | `anchor_date + relative_due_days` で起票時算出 | 起票時算出 | 必須（NULL不可） |
 | 担当者解決 | `t_lifecycle_task.assignee_user_id` | — | `assignee_name_snapshot` に記録 | **案件起票時点の事実** | 担当未定（ROLE未アサイン時） |
-| 例外是正期限 | `t_lifecycle_task.approval_request_id` 経由 | 承認履歴 | `payload_json.remedy_deadline` | 例外申請時点 | `remedy_deadline IS NULL`＝即時免除 |
+| 例外是正期限 | `t_lifecycle_task.approval_request_id` 経由 | 承認履歴 | `payload_json.remedy_deadline` | 例外申請時点 | **必須**（将来日付） |
 
 ---
 

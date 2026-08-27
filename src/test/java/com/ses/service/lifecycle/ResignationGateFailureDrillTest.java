@@ -52,6 +52,9 @@ class ResignationGateFailureDrillTest {
     private EngineerAccountLinkMapper engineerAccountLinkMapper;
 
     @Autowired
+    private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
+
+    @Autowired
     private EngineerSalesMapper engineerSalesMapper;
 
     @Autowired
@@ -92,6 +95,15 @@ class ResignationGateFailureDrillTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(salesUser);
+
+        SysUser hrUser = SysUser.builder()
+                .username("hr_drill")
+                .password("pass")
+                .realName("人事ドリル")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hrUser);
 
         engineerUser = SysUser.builder()
                 .username("eng_drill")
@@ -167,6 +179,15 @@ class ResignationGateFailureDrillTest {
                                 .sortOrder(2)
                                 .isMandatory(1)
                                 .isBlocking(1)
+                                .build(),
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_DOC_RETENTION")
+                                .taskName("退職届・誓約書保管確認")
+                                .assigneeRule("ROLE")
+                                .assigneeRuleValue("HR")
+                                .sortOrder(3)
+                                .isMandatory(1)
+                                .isBlocking(1)
                                 .build()
                 ))
                 .build(), adminUser.getId());
@@ -240,24 +261,64 @@ class ResignationGateFailureDrillTest {
         for (UserOrganization uo : userOrgs) {
             assertNotNull(uo.getValidTo(), "組織所属が自動終了されていること");
         }
+
+        // 6. ポータル連携が解除されていること
+        EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineer.getId());
+        assertNull(link, "退社完了により要員アカウント連携が解除されていること");
     }
 
     @Test
-    @DisplayName("M-3: 退社ゲート評価単体での8項目チェック検証")
-    void testResignationGateEvaluationChecklist() {
-        LifecycleCase lcCase = LifecycleCase.builder()
-                .caseNo("LC-DRILL-001")
-                .lifecycleType("RESIGNATION")
-                .engineerId(engineer.getId())
-                .anchorDate(LocalDate.now())
-                .status("ACTIVE")
-                .title("退社テスト")
-                .build();
-        lcCase.setId(999L);
+    @DisplayName("M-3: 必須ゲートタスクコード欠落によるFail-Closed検証 (LC-P0-03)")
+    void testResignationBlockedByMissingRequiredTaskCode() {
+        // RESIGN_DOC_RETENTION を欠落させた不完全な退社テンプレートを作成
+        LifecycleTemplateDto incompleteTpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("RESIGNATION")
+                .name("不完全退社フロー")
+                .validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_ASSET_RETURN")
+                                .taskName("PC返却")
+                                .assigneeRule("ROLE")
+                                .assigneeRuleValue("HR")
+                                .sortOrder(1)
+                                .isMandatory(1)
+                                .isBlocking(1)
+                                .build(),
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_EXPENSE_SETTLE")
+                                .taskName("精算確認")
+                                .assigneeRule("ROLE")
+                                .assigneeRuleValue("HR")
+                                .sortOrder(2)
+                                .isMandatory(1)
+                                .isBlocking(1)
+                                .build()
+                ))
+                .build(), adminUser.getId());
 
-        ResignationGateResultDto result = resignationGateChecker.evaluate(lcCase, engineer);
-        assertNotNull(result);
-        assertNotNull(result.getItems());
-        assertEquals(8, result.getItems().size(), "8項目のゲート項目が存在すること");
+        // 新規要員で案件起票
+        Engineer testEng2 = Engineer.builder().fullName("退職要員2").status("稼動中").employmentType("正社員").build();
+        engineerMapper.insert(testEng2);
+
+        LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEng2.getId())
+                .lifecycleType("RESIGNATION")
+                .templateId(incompleteTpl.getId())
+                .anchorDate(LocalDate.now())
+                .title("不完全テンプレ退社案件")
+                .build());
+
+        // 全タスクを完了
+        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseDto.getId());
+        for (LifecycleTask task : tasks) {
+            taskService.completeTask(task.getId(), adminUser.getId(), null);
+        }
+
+        // RESIGN_DOC_RETENTION が欠落しているため、完了確定は 400 Bad Request で拒否されること
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                caseService.completeCase(caseDto.getId(), adminUser.getId()));
+        assertEquals(400, ex.getCode());
+        assertEquals("error.lifecycle.resignationGateFailed", ex.getMessageKey());
     }
 }

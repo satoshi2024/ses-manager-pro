@@ -49,6 +49,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final ResignationGateChecker resignationGateChecker;
     private final LifecycleScopeService scopeService;
     private final EngineerSalesService engineerSalesService;
+    private final com.ses.service.lifecycle.LifecycleNotificationService notificationService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -60,6 +61,20 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         Engineer engineer = engineerMapper.selectById(cmd.getEngineerId());
         if (engineer == null) {
             throw BusinessException.of(404, "error.lifecycle.engineerNotFound", "要員が見つかりません");
+        }
+
+        SysUser applicantUser = applicantUserId != null ? sysUserMapper.selectById(applicantUserId) : null;
+        scopeService.assertCanAccessEngineer(applicantUser, engineer);
+
+        // 同一要員の進行中退社案件の重複作成ガード
+        if ("RESIGNATION".equals(cmd.getLifecycleType())) {
+            Long activeResignCount = caseMapper.selectCount(new LambdaQueryWrapper<LifecycleCase>()
+                    .eq(LifecycleCase::getEngineerId, cmd.getEngineerId())
+                    .eq(LifecycleCase::getLifecycleType, "RESIGNATION")
+                    .in(LifecycleCase::getStatus, List.of("ACTIVE", "ON_HOLD")));
+            if (activeResignCount != null && activeResignCount > 0) {
+                throw BusinessException.of(400, "error.lifecycle.duplicateActiveCase", "対象要員には既に進行中の退社手続き案件が存在します");
+            }
         }
 
         LocalDate anchorDate = cmd.getAnchorDate() != null ? cmd.getAnchorDate() : LocalDate.now();
@@ -92,9 +107,13 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
             return allowed.contains(empType.trim());
         }).collect(Collectors.toList());
 
-        List<LifecycleTemplateTaskDep> tplDeps = templateTaskDepMapper.selectByTemplateId(template.getId());
+        List<LifecycleTemplateTaskDep> rawTplDeps = templateTaskDepMapper.selectByTemplateId(template.getId());
+        Set<String> activeTaskCodes = tplTasks.stream().map(LifecycleTemplateTask::getTaskCode).collect(Collectors.toSet());
+        List<LifecycleTemplateTaskDep> tplDeps = rawTplDeps.stream()
+                .filter(dep -> activeTaskCodes.contains(dep.getPredecessorTaskCode()) && activeTaskCodes.contains(dep.getSuccessorTaskCode()))
+                .collect(Collectors.toList());
 
-        // DAG検証
+        // DAG検証 (フィルタ後のタスクと依存関係で検証)
         dagValidator.validateTemplateDag(tplTasks, tplDeps);
 
         // 案件番号採番 (LC-yyyyMM-XXXX)
@@ -255,7 +274,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
 
         Map<Long, LifecycleTask> taskMapById = allTasks.stream().collect(Collectors.toMap(LifecycleTask::getId, t -> t));
 
-        int total = allTasks.size();
+        boolean isEngineerRole = currentUser != null && "要員".equals(currentUser.getRole());
+
+        int total = 0;
         int completed = 0;
         int pending = 0;
         int blockingUncompleted = 0;
@@ -264,6 +285,12 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         LocalDate today = LocalDate.now();
 
         for (LifecycleTask task : allTasks) {
+            boolean visible = scopeService.isTaskVisibleToUser(currentUser, task);
+            if (isEngineerRole && !visible) {
+                continue; // 要員ロールには内部タスクの存在・件数・進捗を一切含めない
+            }
+
+            total++;
             boolean isCompleted = "COMPLETED".equals(task.getStatus()) || "WAIVED".equals(task.getStatus());
             if (isCompleted) {
                 completed++;
@@ -274,8 +301,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 }
             }
 
-            if (!scopeService.isTaskVisibleToUser(currentUser, task)) {
-                continue; // 本人非公開タスクは要員ロールには返却しない
+            if (!visible) {
+                continue;
             }
 
             // 先行タスクがすべて完了しているか判定
@@ -332,7 +359,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .remarks(lcCase.getRemarks())
                 .applicantUserId(lcCase.getApplicantUserId())
                 .applicantName(applicant != null ? (applicant.getRealName() != null ? applicant.getRealName() : applicant.getUsername()) : "")
-                .engineerSnapshotJson(lcCase.getEngineerSnapshotJson())
+                .engineerSnapshotJson(isEngineerRole ? null : lcCase.getEngineerSnapshotJson())
                 .completedAt(lcCase.getCompletedAt())
                 .completedBy(lcCase.getCompletedBy())
                 .completedByName(completedUser != null ? (completedUser.getRealName() != null ? completedUser.getRealName() : completedUser.getUsername()) : "")
@@ -535,6 +562,13 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .afterState("COMPLETED")
                 .occurredAt(LocalDateTime.now())
                 .build());
+
+        // 完了通知発行
+        try {
+            notificationService.notifyCaseCompleted(lcCase);
+        } catch (Exception e) {
+            log.warn("Failed to send case completed notification: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -564,8 +598,8 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseId);
         for (LifecycleTask task : tasks) {
             if ("PENDING".equals(task.getStatus()) || "IN_PROGRESS".equals(task.getStatus()) || "ON_HOLD".equals(task.getStatus())) {
-                task.setStatus("WAIVED");
-                task.setCompletionComment("案件中止に伴う免除");
+                task.setStatus("CANCELLED");
+                task.setCompletionComment("案件中止に伴うキャンセル: " + (reason != null ? reason : ""));
                 task.setUpdatedBy(userId);
                 taskMapper.updateById(task);
             }
