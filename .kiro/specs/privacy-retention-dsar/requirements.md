@@ -68,6 +68,7 @@ DG-07 および外部専門家/社内責任者 gate が完了していないた�
 1. approved scope、Privacy owner、Decision Gate、Base branch/SHAは、実在する承認記録への参照なしに確定してはならない。placeholderや口頭説明は承認証跡として扱わない。
 2. 承認値が未提供の場合、technical comparison base（このincrementでは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`）とmerge-baseを別項目で記録し、approved Baseとの差を未解決としてfail-closedにする。
 3. PLAN FAILまたはPLAN CONDITIONALの間は、F1-M、外部I/O、処分flag、PRを開始しない。独立ReviewのPLAN/IMPLEMENTATION双方PASS後だけ、Review側が次の手続きを判断する。
+4. 開発側のgate validatorは、承認証跡・各外部gate・mechanical coverage・専用worktree/remote boundaryの欠落を `HARD_STOP` として再現可能に報告しなければならない。validatorは承認、法的判断、独立Review verdict、F1-M/本番処分の許可を生成してはならない。
 
 ## 3. 受入基準（今回）
 

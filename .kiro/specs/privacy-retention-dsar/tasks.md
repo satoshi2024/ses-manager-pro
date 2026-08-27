@@ -30,6 +30,12 @@ DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、
   - **Test requirements**: source coverageのunmapped/entity/provider missing=0、privacy catalog unclassified=0、inventory/source hash固定、AI egress/log/cache/file/index/exportおよびbackup/replicaのcoverageを独立Reviewで確認する。
   - **Demo**: structural coverageのexit code 0を確認しても、policy unknown、承認証跡、DG-07/外部gateが残る間はF1以降を開始しない。
 
+- [x] **0.5 developer gate evidence validator**
+  - **Objective**: 承認証跡・外部gate・policy coverageの欠落を、実装側が推測で埋めずに再現可能なhard stopへする。
+  - **Implementation**: `gate-evidence-validator.ps1` は承認/gate JSONの必須項目、78件を含むpolicy unknown、plan/task/Review provenance、専用worktreeとremote Headをread-onlyで検証する。承認値・法的結論・独立Review verdictは生成しない。
+  - **Test requirements**: 空のevidence fixtureと未配置evidence pathでexit code 2、`HARD_STOP`、F1-M/本番処分/provider/PR許可false、providerCallCount=0、writeCount=0を確認する。
+  - **Demo**: `pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator-test.ps1` が `gate-evidence-validator: HARD_STOP fixture PASS` を出力する。
+
 ## D0. read-only dry-run（今回の完了範囲）
 
 - [x] **D0.1 offline no-write classifier**

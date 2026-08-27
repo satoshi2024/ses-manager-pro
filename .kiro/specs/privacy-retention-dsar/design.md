@@ -110,3 +110,9 @@ requirements/designの候補には次のテーブルを置くが、今回のbran
 - 法務、HR、税務、外部専門家の判断を代替するルール。
 
 これらはDG-07と外部/社内gateがPASSし、approved scope/policyが実値になった後に、別task・別commit・別Reviewで再計画する。
+
+## 9. gate evidence validator
+
+`tools/privacy-retention-dsar/gate-evidence-validator.ps1` は開発側のhard-stop検証器である。入力JSONに承認・gate recordが無い場合、またはrequired fieldがplaceholder/UNKNOWN/BLOCKEDの場合は、承認を補完せずexit code 2を返す。既存のread-only coverage scannerを子プロセスで実行し、policy unknownを0件まで閉じること、構造coverageのmissing/extraを0件にすること、plan/tasks/review-ledgerが停止状態を維持すること、専用branchのclean・local/remote Head一致を確認する。
+
+validatorはJSON、spec、inventory、git metadataしか読み込まず、DB、file、backup/replica、HTTP、external providerへの接続や書込みを持たない。形式上の証跡が揃った場合も、出力は`EVIDENCE_PRESENT_REQUIRES_INDEPENDENT_REVIEW`に留まり、PLAN/IMPLEMENTATION PASS、法的承認、F1-M開始、production flag、PR作成を許可しない。外部Reviewの判定はimplementation-owned ledgerへ転記しない。

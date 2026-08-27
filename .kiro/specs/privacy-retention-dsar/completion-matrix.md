@@ -14,6 +14,7 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | PR-R2.3 | fixture hold/legal-retention/audit/active-business/same-name/scope-out | blockerをBLOCKEDとして説明し、scope外providerを呼ばない | COMPLETE（offline） |
 | PR-R2.4 | invalid identity/disposition fixtures、script allow-list | `UNVERIFIED`はBLOCKED、未知dispositionはUNKNOWNで、raw PII keyは拒否 | COMPLETE（offline） |
 | PR-R1.3 mechanical coverage | `inventory-coverage.ps1`、`coverage-evidence.md`、`source-coverage.md`、`pii-inventory.md` §4 | migration 116/180/4,279/153（CREATE/ALTER）、entity 176、provider候補424（filename/content semantic scan）、source unique column 2,652、privacy catalog 180/0/78（explicit/unclassified/policy unknown）、source coverage unmapped/missing/extra column/entity/provider 0/0/0/0/0/0 | COMPLETE（構造coverageのみ。policy unknown 78は処分BLOCKED） |
+| PR-R1.4 / 0.5 developer gate validator | `gate-evidence-validator.ps1`、`gate-evidence-validation.md`、missing fixture、validator test | 承認/gate/coverage/git boundary欠落をHARD_STOP・exit 2で再現し、F1-M/本番処分/provider/PRをfalse、providerCallCount/writeCountを0にする | COMPLETE（安全側validator。承認・法的判断・Review verdictは生成しない） |
 | PR-R3 | `requirements.md` §2 PR-R3、`design.md` §5 | identity/third-party redaction/export/providerを未実装・fail-closedとして明示 | SPEC ONLY |
 | PR-R4 | `requirements.md` §2 PR-R4、`tasks.md` F1〜M | DG-07未完、flag OFF、処分経路なしを確認 | BLOCKED BY GATE |
 | approved plan | `plan.md` | 推奨順0→F1→F2→A1→A2→B1→B2→Mを記載。承認入力未置換のためNOT_APPROVED | BLOCKED BY GATE |

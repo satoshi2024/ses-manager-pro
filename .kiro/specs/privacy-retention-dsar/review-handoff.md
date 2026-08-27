@@ -34,6 +34,8 @@
 11. `.kiro/specs/privacy-retention-dsar/coverage-evidence.md`
 12. `.kiro/specs/privacy-retention-dsar/source-coverage.md`（全source table/column/entity/provider候補の明示manifest）
 13. `tools/privacy-retention-dsar/inventory-coverage.ps1`（read-only source coverage、privacy catalog未分類時exit 2）
+14. `tools/privacy-retention-dsar/gate-evidence-validator.ps1`（承認/gate/coverage/git boundaryのread-only hard-stop検証）
+15. `tools/privacy-retention-dsar/gate-evidence-validator-test.ps1` と `gate-evidence-missing-fixture.json`（承認未提供を推測せずHARD_STOPにするfixture）
 
 ## Review request
 
@@ -51,4 +53,4 @@
 - 通常checkoutに変更がなく、taskごとcommit/push、remote Head、base、statusが固定されているか。
 - 今回のdiffに削除、匿名化、処分batch、migration、production flagの有効化が混入していないか。
 
-ReviewがPLAN/IMPLEMENTATION双方PASSするまで、PR作成、本番有効化、削除/匿名化の実装・実行を行わない。
+ReviewがPLAN/IMPLEMENTATION双方PASSするまで、PR作成、本番有効化、削除/匿名化の実装・実行を行わない。validatorがexit `0`になっても、それは独立Reviewへ進めるための形式確認に過ぎず、PLAN/IMPLEMENTATION PASS、法的承認、production dispositionの許可ではない。
