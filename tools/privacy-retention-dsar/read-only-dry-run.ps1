@@ -125,8 +125,10 @@ for ($index = 0; $index -lt $records.Count; $index++) {
     }
 
     $identityResolution = [string](Get-PropertyValue -Object $record -Name 'identityResolution')
-    if ($identityResolution -eq 'AMBIGUOUS' -or $identityResolution -eq 'UNVERIFIED') {
+    if ($identityResolution -eq 'AMBIGUOUS') {
         Add-Reason -Reasons $blockingReasons -Reason 'IDENTITY_AMBIGUOUS_HUMAN_RESOLUTION_REQUIRED'
+    } elseif ($identityResolution -eq 'UNVERIFIED') {
+        Add-Reason -Reasons $blockingReasons -Reason 'IDENTITY_VERIFICATION_REQUIRED'
     } elseif ($identityResolution -ne 'VERIFIED') {
         Add-Reason -Reasons $unknownReasons -Reason 'IDENTITY_NOT_VERIFIED'
     }
