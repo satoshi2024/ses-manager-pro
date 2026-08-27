@@ -31,7 +31,8 @@ class MyTimesheetJsContractTest {
 
         assertTrue(js.contains("SES.api.get"), "一覧取得は SES.api.get");
         assertTrue(js.contains("SES.api.post"), "保存/提出は SES.api.post");
-        assertTrue(js.contains("SES.api.delete"), "日次削除は SES.api.delete");
+        assertTrue(js.contains("SES.api.delete") || js.contains("SES.pwaQueue.request"),
+                "日次削除は既存APIまたはPWAキュー経由");
         assertTrue(js.contains("SES.toast."), "成功/検証エラーは Toast");
         assertTrue(js.contains("Swal.fire"), "確認は Swal");
     }
