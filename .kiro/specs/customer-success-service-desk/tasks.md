@@ -36,17 +36,17 @@
   - **Demo**:
     - SLA 計算が土日を正しくスキップし、顧客待ち中の Pause が正しく期限を延長することをテスト実行で実証。
 
-- [ ] **Task A1: 内部サービスデスク管理画面 & REST API**
-  - **Objective**: 内部利用者（管理者、マネージャー、営業）向けの問い合わせ一覧・詳細・コメント投稿・ステータス変更画面と API を実装する。
+- [x] **Task A1: 内部サービスデスク管理画面 & REST API**
+  - **Objective**: 管理者・営業・マネージャー向けサービスデスク一覧・詳細画面、および内部起票・更新・コメント・状態変更 API を実装する。
   - **Guidance**:
-    - コントローラ: `ServiceRequestApiController` (`/api/service-desk/requests/**`), `ServiceRequestPageController` (`/service-desk/requests/**`).
-    - 画面: `templates/service-desk/list.html`, `templates/service-desk/detail.html`, `static/js/modules/service-desk.js`.
-    - 内部メモ (`visibility='INTERNAL'`) とポータル公開コメント (`PORTAL_VISIBLE`) の切り替え投稿。
-    - サイドバーメニュー (`layout/sidebar.html`) に「サービスデスク」を追加し、ロール別権限（管理者・営業・マネージャー）を設定。
+    - `ServiceRequestApiController`: `/api/service-desk/requests/**`（一覧検索、詳細取得、起票、更新、状態変更、コメント投稿）。
+    - `ServiceRequestPageController`: `/service-desk/requests`（一覧画面）、`/service-desk/requests/{id}`（詳細画面）。
+    - `service-desk.js` + HTML テンプレート: 一覧テーブル、検索・フィルタ、SLA 時計カード、内部メモ/公開返信切り替え。
+    - メニュー権限: `m_menu` / `t_role_menu`（管理者・営業・マネージャー）および `ActionPermissionResolver` 登録。
   - **Test Requirements**:
-    - `ServiceRequestApiControllerTest`: 一覧検索、詳細取得、コメント投稿、ステータス変更、DataScope フィルタリング (403/404)。
+    - `ServiceRequestApiControllerTest`: 内部起票・更新・状態遷移・内部メモ投稿・DataScope 絞り込み検証。
   - **Demo**:
-    - 内部画面で問い合わせ一覧が表示され、詳細画面からステータス変更と内部メモ投稿ができることを確認。
+    - 内部画面から問い合わせを起票し、内部メモを投稿し、ステータス変更できることをテスト実行で実証。
 
 - [ ] **Task A2: 顧客ポータル起票・返信・CSAT 回答画面 & API**
   - **Objective**: 顧客ポータル利用者向けの問い合わせ一覧・起票・返信・CSAT 回答機能を実装する。

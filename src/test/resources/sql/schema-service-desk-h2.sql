@@ -166,3 +166,27 @@ VALUES
 ('P1', '高 (P1)',   2, 8, '09:00:00', '18:00:00', 0, 'ACTIVE', 0),
 ('P2', '中 (P2)',   4, 24, '09:00:00', '18:00:00', 0, 'ACTIVE', 0),
 ('P3', '低 (P3)',   8, 48, '09:00:00', '18:00:00', 0, 'ACTIVE', 0);
+
+MERGE INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+KEY(menu_key)
+VALUES ('service-desk', 'サービスデスク', '/service-desk', '/api/service-desk', 11);
+
+MERGE INTO t_role_menu (role, menu_id)
+KEY(role, menu_id)
+SELECT r.role, m.id
+FROM m_menu m
+CROSS JOIN (SELECT '管理者' AS role UNION ALL SELECT '営業' UNION ALL SELECT 'マネージャー') r
+WHERE m.menu_key = 'service-desk';
+
+MERGE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+KEY(tenant_id, group_id, action_key)
+SELECT 'default', g.id, a.action_key, 0
+FROM m_permission_group g
+CROSS JOIN (
+    SELECT 'service-desk.*' AS action_key UNION ALL
+    SELECT 'customer-health.*' AS action_key UNION ALL
+    SELECT 'customer-qbr.*' AS action_key
+) a
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('role-sales', 'role-manager', 'role-admin');

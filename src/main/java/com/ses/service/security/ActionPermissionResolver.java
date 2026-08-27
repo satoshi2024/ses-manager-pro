@@ -90,7 +90,11 @@ public final class ActionPermissionResolver {
             Map.entry("search", "search"),
             Map.entry("tasks", "task"),
             Map.entry("saved-views", "saved-view"),
-            Map.entry("batch-operations", "batch-operation")
+            Map.entry("batch-operations", "batch-operation"),
+            // customer-success-service-desk (NF-02 / DG-02)
+            Map.entry("service-desk", "service-desk"),
+            Map.entry("customer-health", "customer-health"),
+            Map.entry("customer-qbr", "customer-qbr")
     );
 
     private ActionPermissionResolver() {

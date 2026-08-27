@@ -101,12 +101,13 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
 
-        if (!isPortal) {
+        if (!isPortal && dataScopeService.isScoped()) {
             dataScopeService.assertAllowedCustomer(req.getCustomerId());
         }
 
         LocalDateTime now = LocalDateTime.now();
         String requestNo = generateRequestNo(now);
+        Long effectiveActorId = isPortal ? portalUserId : (actorUserId != null ? actorUserId : 1L);
 
         ServiceRequest serviceRequest = ServiceRequest.builder()
                 .requestNo(requestNo)
@@ -124,7 +125,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .status("RECEIVED")
                 .reopenCount(0)
                 .portalUserId(isPortal ? portalUserId : null)
-                .createdBy(isPortal ? null : actorUserId)
+                .createdBy(isPortal ? null : effectiveActorId)
                 .version(0)
                 .createdAt(now)
                 .updatedAt(now)
@@ -163,8 +164,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .toStatus("RECEIVED")
                 .reason("新規起票")
                 .actorType(isPortal ? "PORTAL_USER" : "INTERNAL_USER")
-                .actorId(isPortal ? portalUserId : actorUserId)
-                .actorName(isPortal ? "ポータル利用者" : resolveUserName(actorUserId))
+                .actorId(effectiveActorId)
+                .actorName(isPortal ? "ポータル利用者" : resolveUserName(effectiveActorId))
                 .createdAt(now)
                 .build();
         stateEventMapper.insert(event);
@@ -179,7 +180,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (req == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        dataScopeService.assertAllowedCustomer(req.getCustomerId());
+        if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(req.getCustomerId());
+        }
 
         return convertToInternalDto(req);
     }
@@ -203,17 +206,16 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
 
         if (customerId != null) {
-            dataScopeService.assertAllowedCustomer(customerId);
-            wrapper.eq(ServiceRequest::getCustomerId, customerId);
-        } else {
-            // DataScope の適用
-            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
-            if (allowedCustomerIds != null) {
-                if (allowedCustomerIds.isEmpty()) {
-                    return new Page<>(page, size, 0);
-                }
-                wrapper.in(ServiceRequest::getCustomerId, allowedCustomerIds);
+            if (dataScopeService.isScoped()) {
+                dataScopeService.assertAllowedCustomer(customerId);
             }
+            wrapper.eq(ServiceRequest::getCustomerId, customerId);
+        } else if (dataScopeService.isScoped()) {
+            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
+            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
+                return new Page<>(page, size, 0);
+            }
+            wrapper.in(ServiceRequest::getCustomerId, allowedCustomerIds);
         }
 
         if (StringUtils.hasText(status)) {
@@ -279,7 +281,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (existing == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        }
 
         if (StringUtils.hasText(req.getCategory())) {
             if (!VALID_CATEGORIES.contains(req.getCategory())) {
@@ -439,6 +443,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(409, "他のユーザーによって状態が更新されました");
         }
 
+        Long effectiveActorId = actorId != null ? actorId : 1L;
+        String effectiveActorName = StringUtils.hasText(actorName) ? actorName : resolveUserName(effectiveActorId);
+
         // 状態変更監査イベント記録
         ServiceStateEvent event = ServiceStateEvent.builder()
                 .serviceRequestId(request.getId())
@@ -446,9 +453,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .fromStatus(fromStatus)
                 .toStatus(toStatus)
                 .reason(req.getReason())
-                .actorType(actorType)
-                .actorId(actorId)
-                .actorName(actorName)
+                .actorType(actorType != null ? actorType : "INTERNAL_USER")
+                .actorId(effectiveActorId)
+                .actorName(effectiveActorName)
                 .createdAt(now)
                 .build();
         stateEventMapper.insert(event);
@@ -462,18 +469,20 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
-        if (!isPortal) {
+        if (!isPortal && dataScopeService.isScoped()) {
             dataScopeService.assertAllowedCustomer(request.getCustomerId());
         }
 
         String visibility = isPortal ? "PORTAL_VISIBLE" : (StringUtils.hasText(req.getVisibility()) ? req.getVisibility() : "PORTAL_VISIBLE");
         LocalDateTime now = LocalDateTime.now();
+        Long effectiveAuthorId = actorId != null ? actorId : (isPortal ? 0L : 1L);
+        String effectiveAuthorName = StringUtils.hasText(authorName) ? authorName : (isPortal ? "ポータル利用者" : resolveUserName(effectiveAuthorId));
 
         ServiceComment comment = ServiceComment.builder()
                 .serviceRequestId(id)
-                .authorType(authorType)
-                .authorId(actorId)
-                .authorName(authorName)
+                .authorType(authorType != null ? authorType : (isPortal ? "PORTAL_USER" : "INTERNAL_USER"))
+                .authorId(effectiveAuthorId)
+                .authorName(effectiveAuthorName)
                 .visibility(visibility)
                 .commentText(req.getCommentText())
                 .createdAt(now)

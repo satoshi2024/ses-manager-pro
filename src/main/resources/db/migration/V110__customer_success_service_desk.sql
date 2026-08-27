@@ -196,3 +196,27 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     UNIQUE KEY uk_health_customer_date (customer_id, snapshot_date),
     CONSTRAINT fk_health_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顧客ヘルススナップショット';
+
+-- 11. メニューマスタへのサービスデスク追加
+INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
+VALUES ('service-desk', 'サービスデスク', '/service-desk', '/api/service-desk', 11)
+ON DUPLICATE KEY UPDATE menu_name = VALUES(menu_name);
+
+INSERT IGNORE INTO t_role_menu (role, menu_id)
+SELECT r.role, m.id
+FROM m_menu m
+CROSS JOIN (SELECT '管理者' AS role UNION ALL SELECT '営業' UNION ALL SELECT 'マネージャー') r
+WHERE m.menu_key = 'service-desk';
+
+-- 12. サービスデスク・カスタマーサクセスのアクション権限seed
+INSERT IGNORE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, a.action_key, 0
+FROM m_permission_group g
+CROSS JOIN (
+    SELECT 'service-desk.*' AS action_key UNION ALL
+    SELECT 'customer-health.*' AS action_key UNION ALL
+    SELECT 'customer-qbr.*' AS action_key
+) a
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('role-sales', 'role-manager', 'role-admin');
