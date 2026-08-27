@@ -40,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -157,6 +158,7 @@ public class PwaMutationApiController {
                                                 @RequestHeader("X-Client-Base-Version") Integer baseVersion,
                                                 @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                                 @RequestHeader("X-User-Scope") String userScope) {
+        assertExpensePathId(id, body);
         return run(body, "expense", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context ->
                 expenseAck(expenseRequestService.updateDraft(context.engineerId(), id, expenseCommand(body.payload()))));
     }
@@ -194,6 +196,7 @@ public class PwaMutationApiController {
             throw BusinessException.of(400, "error.pwa.baseVersionRequired");
         }
         PwaMutationCommand command = new PwaMutationCommand(body.screen(), body.month(), baseVersion, body.payload());
+        validateDateMonthBoundary(command);
         PwaClientMutationLedgerService.Claim claim = ledger.claim(command, clientRequestId, payloadHash,
                 clientCreatedAt, userScope);
         httpRequest.setAttribute(PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE, claim.replay());
@@ -217,6 +220,31 @@ public class PwaMutationApiController {
         } catch (RuntimeException e) {
             ledger.abandon(claim.mutationId());
             throw e;
+        }
+    }
+
+    private void assertExpensePathId(Long pathId, PwaMutationCommandBody body) {
+        if (pathId == null || body == null || body.payload() == null
+                || !pathId.equals(requiredLong(body.payload(), "id"))) {
+            throw BusinessException.of(400, "error.pwa.commandInvalid");
+        }
+    }
+
+    /** versionを比較する月と、既存domain serviceが実際に更新する日付の月を一致させる。 */
+    private void validateDateMonthBoundary(PwaMutationCommand command) {
+        if (!"attendance".equals(command.screen()) && !"timesheet".equals(command.screen())) return;
+        JsonNode payload = command.payload();
+        String month = "attendance".equals(command.screen())
+                ? text(payload, "month", command.month())
+                : text(payload, "workMonth", command.month());
+        String workDate = requiredText(payload, "workDate");
+        try {
+            if (month == null || !YearMonth.parse(month).equals(YearMonth.from(LocalDate.parse(workDate)))
+                    || !month.equals(command.month())) {
+                throw BusinessException.of(400, "error.pwa.commandInvalid");
+            }
+        } catch (DateTimeParseException | NullPointerException e) {
+            throw BusinessException.of(400, "error.pwa.commandInvalid");
         }
     }
 

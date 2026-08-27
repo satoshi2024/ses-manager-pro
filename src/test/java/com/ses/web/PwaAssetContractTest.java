@@ -68,7 +68,8 @@ class PwaAssetContractTest {
         assertThat(queue).contains("const contextHeaders", "contextHeaders['X-User-Scope'] = oldScope");
         assertThat(queue).contains("preserveQueue", "rebindScope(oldScope, scope)", "deleteScope(oldScope)",
                 "record.status === 'ERROR'", "refreshedFields", "serverRefreshAt");
-        assertThat(queue).contains("function validMethod", "method === 'POST' || method === 'PUT'");
+        assertThat(queue).contains("function validMethod", "path === '/api/my/pwa/expenses/drafts'",
+                "return method === 'PUT'", "URL IDとpayload.idが一致しません", "row.days", "row.dailies");
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");

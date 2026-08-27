@@ -103,6 +103,30 @@ class PwaClientMutationLedgerServiceTest {
     }
 
     @Test
+    void 同一userのscope更新後も同一hashの完了commandをreplayする() {
+        ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
+        PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+        PwaUserContextService.CurrentContext rotatedContext =
+                new PwaUserContextService.CurrentContext(7L, 9L, "scope-B");
+        when(userContextService.assertCurrent("scope-B")).thenReturn(rotatedContext);
+        PwaClientMutation completed = new PwaClientMutation();
+        completed.setId(12L);
+        completed.setUserScopeHash("hash-of-scope-A");
+        completed.setPayloadHash(hash);
+        completed.setStatus("COMPLETED");
+        completed.setResponseJson("{\"saved\":true}");
+        when(mapper.selectByUserAndClientRequest(7L, "req-rotated")).thenReturn(completed);
+
+        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, "req-rotated", hash,
+                Instant.now().toEpochMilli(), "scope-B");
+
+        assertThat(replay.replay()).isTrue();
+        assertThat(replay.responseData().path("saved").asBoolean()).isTrue();
+        verify(mapper, never()).insert(any(PwaClientMutation.class));
+    }
+
+    @Test
     void 期限超過のclient作成日時は送信をclaimしない() {
         ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
         PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);

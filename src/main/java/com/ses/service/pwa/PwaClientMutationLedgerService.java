@@ -59,13 +59,13 @@ public class PwaClientMutationLedgerService {
                     "client", command.payload()));
         }
 
-        String scopeHash = userContextService.hashScope(opaqueScope);
         PwaClientMutation existing = mapper.selectByUserAndClientRequest(context.userId(), clientRequestId);
         if (existing == null) {
             PwaClientMutation row = new PwaClientMutation();
             row.setClientRequestId(clientRequestId);
             row.setUserId(context.userId());
-            row.setUserScopeHash(scopeHash);
+            // scope leaseは同一ユーザーの再認証で更新され得るため、replay判定はuser_idに束縛する。
+            row.setUserScopeHash(userContextService.hashScope(opaqueScope));
             row.setScreen(command.screen());
             row.setWorkMonth(command.month());
             row.setPayloadHash(payloadHash);
@@ -84,8 +84,9 @@ public class PwaClientMutationLedgerService {
         if (existing == null) {
             throw new PwaConflictException("pwa.mutationInProgress", Map.of("type", "RETRY_CLAIM"));
         }
-        if (!Objects.equals(existing.getUserScopeHash(), scopeHash)
-                || !Objects.equals(existing.getPayloadHash(), payloadHash)) {
+        // opaque scopeはassertCurrentで現在principalへ検証済み。lease更新後も同一userの
+        // COMPLETED commandを同hashでreplayできるよう、scope hashはidempotency判定に使わない。
+        if (!Objects.equals(existing.getPayloadHash(), payloadHash)) {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("type", "IDEMPOTENCY_PAYLOAD_MISMATCH");
             data.put("clientRequestId", clientRequestId);

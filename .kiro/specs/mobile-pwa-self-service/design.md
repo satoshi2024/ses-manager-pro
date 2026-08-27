@@ -100,7 +100,7 @@ DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではque
 }
 ```
 
-payloadは画面・method・pathごとのallowlist、32KiB、深さ、plain object、再帰的なreceipt/attachment/binary/secret/PII key検査を通過した最小入力に限定する。logout/user switchではDB全体をclearし、削除完了を確認できない場合はflushをfail-closedする。期限切れrecordは送信禁止にしてpayloadを除去し、破棄を明示的に促す。`meta`やraw user ID/usernameは保存しない。
+payloadは画面・method・pathごとのallowlist、32KiB、深さ、plain object、再帰的なreceipt/attachment/binary/secret/PII key検査を通過した最小入力に限定する。logoutではDB全体をclearし、user switchでは旧scopeのrecordだけを削除する。削除完了を確認できない場合はflushをfail-closedする。期限切れrecordは送信禁止にしてpayloadを除去し、破棄を明示的に促す。`meta`やraw user ID/usernameは保存しない。
 
 ## 6. Session context and user boundary
 
@@ -116,7 +116,7 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 - Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`、`X-Client-Created-At`（epoch milliseconds）。bodyは`screen`、`month`、`payload`を持つ。
 - Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
 - Retention: serverは`X-Client-Created-At`をserver時計と比較し、record単位で30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。scope lease失効はrecord retentionとは別に扱い、同一userとして更新したscopeへrecordを再束縛する。期限判定後はpayloadを保存・再送せず、client側でもERROR recordのpayload/hash/conflictを除去して破棄または再入力を促す。
-- Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。
+- Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。同一userのscope lease更新後も、署名検証済みの現在scopeと`user_id`で既存ledger行を特定し、scope hashの更新だけで同hash replayを拒否しない。
 
 ### 7.2 Storage
 

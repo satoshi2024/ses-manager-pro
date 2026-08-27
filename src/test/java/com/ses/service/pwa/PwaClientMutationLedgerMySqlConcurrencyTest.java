@@ -135,6 +135,16 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 .first().isInstanceOf(PwaConflictException.class);
         assertThat(claims).hasSize(1);
         assertThat(mapper.selectByUserAndClientRequest(USER_ID, REQUEST_ID)).isNotNull();
+
+        PwaClientMutationLedgerService.Claim winner = claims.get(0);
+        ledger.complete(winner.mutationId(), Map.of("version", 0));
+        String rotatedScope = "opaque-scope-mysql-rotated";
+        when(userContextService.assertCurrent(rotatedScope)).thenReturn(
+                new PwaUserContextService.CurrentContext(USER_ID, 900001L, rotatedScope,
+                        Instant.now().minusSeconds(60)));
+        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, REQUEST_ID, hash, createdAt,
+                rotatedScope);
+        assertThat(replay.replay()).isTrue();
     }
 
     @Test

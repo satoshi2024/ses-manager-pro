@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -78,5 +79,36 @@ class PwaMutationApiControllerTest {
                     assertThat(data.toString()).contains("clientVersion=3", "serverVersion=4");
                 });
         verify(ledger).abandon(1L);
+    }
+
+    @Test
+    void expense更新はURLとpayloadのID不一致を業務処理前に拒否する() {
+        ObjectNode payload = new ObjectMapper().createObjectNode()
+                .put("id", 456L).put("expenseDate", "2026-08-28")
+                .put("category", "交通費").put("amount", 1000).put("description", "不一致");
+        PwaMutationApiController.PwaMutationCommandBody body =
+                new PwaMutationApiController.PwaMutationCommandBody("expense", "2026-08", payload);
+
+        assertThatThrownBy(() -> controller.updateExpenseDraft(123L, body, "req-id", "0".repeat(64), 0,
+                System.currentTimeMillis(), "scope-A"))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class)
+                .hasMessage("error.pwa.commandInvalid");
+        verifyNoInteractions(ledger, expenseRequestService);
+    }
+
+    @Test
+    void attendanceはbody月と日付月の不一致を業務処理前に拒否する() {
+        ObjectNode payload = new ObjectMapper().createObjectNode()
+                .put("workDate", "2026-09-01").putNull("clockIn").putNull("clockOut")
+                .putNull("workType").putNull("workplaceType").putNull("remarks");
+        payload.putArray("breaks");
+        PwaMutationApiController.PwaMutationCommandBody body =
+                new PwaMutationApiController.PwaMutationCommandBody("attendance", "2026-08", payload);
+
+        assertThatThrownBy(() -> controller.saveAttendance(body, "req-id", "0".repeat(64), 0,
+                System.currentTimeMillis(), "scope-A"))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class)
+                .hasMessage("error.pwa.commandInvalid");
+        verifyNoInteractions(ledger, attendanceService);
     }
 }

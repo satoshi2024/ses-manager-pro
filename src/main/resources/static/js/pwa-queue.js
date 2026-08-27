@@ -141,8 +141,9 @@
         if (screen === 'timesheet' && path === '/api/my/pwa/timesheet/daily') {
             return method === 'POST' || method === 'DELETE';
         }
-        if (screen === 'expense' && /^\/api\/my\/pwa\/expenses\/drafts(?:\/\d+)?$/.test(path)) {
-            return method === 'POST' || method === 'PUT';
+        if (screen === 'expense' && path === '/api/my/pwa/expenses/drafts') return method === 'POST';
+        if (screen === 'expense' && /^\/api\/my\/pwa\/expenses\/drafts\/\d+$/.test(path)) {
+            return method === 'PUT';
         }
         return screen === 'change-request'
                 && path === '/api/my/pwa/change-requests/drafts'
@@ -215,6 +216,12 @@
             assertExactKeys(payload, method === 'POST'
                 ? ['expenseDate', 'category', 'amount', 'customerId', 'projectId', 'description']
                 : ['id', 'expenseDate', 'category', 'amount', 'customerId', 'projectId', 'description'], 'expense');
+            if (method === 'PUT') {
+                const pathId = path.match(/\/(\d+)$/)[1];
+                if (payload.id === undefined || String(payload.id) !== pathId) {
+                    rejectPayload('expenseのURL IDとpayload.idが一致しません');
+                }
+            }
         } else if (spec.screen === 'change-request' && path === '/api/my/pwa/change-requests/drafts') {
             assertExactKeys(payload, ['requestType', 'payload', 'reason'], 'change-request');
             const requestType = payload.requestType;
@@ -448,11 +455,21 @@
         if (!root) return null;
         if (record.screen === 'attendance' && Array.isArray(root.months)) {
             const row = root.months.find(item => item && String(item.workMonth || '').startsWith(String(record.month || '')));
-            return row || { exists: false, version: 0 };
+            if (!row) return { exists: false, version: 0 };
+            const daily = Array.isArray(row.days)
+                ? row.days.find(item => item && String(item.workDate) === String(record.payload.workDate))
+                : null;
+            return daily ? Object.assign({}, daily, { exists: true, version: Number(row.version || 0) })
+                : { exists: false, version: Number(row.version || 0) };
         }
         if (record.screen === 'timesheet' && Array.isArray(root.rows)) {
             const row = root.rows.find(item => item && String(item.contractId) === String(record.payload.contractId));
-            return row || { exists: false, version: 0 };
+            if (!row) return { exists: false, version: 0 };
+            const daily = Array.isArray(row.dailies)
+                ? row.dailies.find(item => item && String(item.workDate) === String(record.payload.workDate))
+                : null;
+            return daily ? Object.assign({}, daily, { exists: true, version: Number(row.version || 0) })
+                : { exists: false, version: Number(row.version || 0) };
         }
         if (record.screen === 'expense' && Array.isArray(root.records)) {
             const row = root.records.find(item => item && String(item.id) === String(record.payload.id));
