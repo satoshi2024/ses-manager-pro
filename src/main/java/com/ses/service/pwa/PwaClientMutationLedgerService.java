@@ -24,6 +24,10 @@ import java.util.LinkedHashMap;
 @Service
 @RequiredArgsConstructor
 public class PwaClientMutationLedgerService {
+    /** 同一hashのCOMPLETED replayをApiAuditFilterが業務監査として二重記録しないためのrequest属性。 */
+    public static final String REPLAY_REQUEST_ATTRIBUTE =
+            PwaClientMutationLedgerService.class.getName() + ".REPLAY";
+
     private static final Pattern REQUEST_ID = Pattern.compile("^[A-Za-z0-9._:-]{1,80}$");
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-f]{64}$");
     private static final String PROCESSING = "PROCESSING";

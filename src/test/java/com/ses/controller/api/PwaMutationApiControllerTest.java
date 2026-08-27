@@ -15,6 +15,7 @@ import com.ses.service.changerequest.EngineerChangeRequestService;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.pwa.PwaClientMutationLedgerService;
 import com.ses.service.pwa.PwaUserContextService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -42,6 +43,7 @@ class PwaMutationApiControllerTest {
     @Mock private WorkRecordMapper workRecordMapper;
     @Mock private ExpenseRequestMapper expenseRequestMapper;
     @Mock private EngineerMapper engineerMapper;
+    @Mock private HttpServletRequest httpRequest;
 
     @InjectMocks
     private PwaMutationApiController controller;

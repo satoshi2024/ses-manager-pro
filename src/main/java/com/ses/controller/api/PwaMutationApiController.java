@@ -25,6 +25,7 @@ import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.pwa.PwaClientMutationLedgerService;
 import com.ses.service.pwa.PwaMutationCommand;
 import com.ses.service.pwa.PwaUserContextService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -64,6 +65,7 @@ public class PwaMutationApiController {
     private final WorkRecordMapper workRecordMapper;
     private final ExpenseRequestMapper expenseRequestMapper;
     private final EngineerMapper engineerMapper;
+    private final HttpServletRequest httpRequest;
 
     @PostMapping("/attendance/daily")
     public ApiResult<Object> saveAttendance(@RequestBody PwaMutationCommandBody body,
@@ -191,6 +193,7 @@ public class PwaMutationApiController {
         PwaMutationCommand command = new PwaMutationCommand(body.screen(), body.month(), baseVersion, body.payload());
         PwaClientMutationLedgerService.Claim claim = ledger.claim(command, clientRequestId, payloadHash,
                 clientCreatedAt, userScope);
+        httpRequest.setAttribute(PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE, claim.replay());
         if (claim.replay()) return ApiResult.success(claim.responseData());
         try {
             assertBaseVersion(command, claim.context());

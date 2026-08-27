@@ -66,6 +66,10 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             throw e;
         } finally {
             if (isAuditTarget(request)) {
+                if (Boolean.TRUE.equals(request.getAttribute(
+                        com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE))) {
+                    return;
+                }
                 String username = SecurityUtils.currentUsername();
                 String method = request.getMethod();
                 String uri = request.getRequestURI();
