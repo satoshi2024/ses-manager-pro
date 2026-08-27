@@ -22,7 +22,7 @@
 
 | ID | feature-name候補 | 現在Status | Owner | 主要KPI | 主依存 | Decision/理由 | 再評価日 |
 |---|---|---|---|---|---|---|---|
-| NF-01 | `engineer-lifecycle-workflow` | CANDIDATE | 未定 | 退社後access残存、期限超過率 | identity、organization、document、approval | 未決定 | 未定 |
+| NF-01 | `engineer-lifecycle-workflow` | IMPLEMENTING | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 承認済み。要員の入社・配属・異動・休職・復職・退社ワークフローを体系化し、退社時アクセス遮断ゲート・例外承認を確立する | 2026-08-27 |
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | CANDIDATE | 未定 | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | 未決定 | 未定 |
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
@@ -51,11 +51,10 @@
 ## 4. Decision Gate
 
 ### DG-01 NF-01
-
-- lifecycle対象者: 社員だけか、BP/フリーランスを含むか。
-- 退社時の強制block対象: session、内部user、portal user、外部IdP、端末、入館証、担当案件。
-- Task完了の証跡: 自己申告、二者確認、外部API結果のどれを必須とするか。
-- 既存承認エンジンへ載せる操作と、単純Task完了の境界。
+- lifecycle対象者: 社員（正社員、契約社員）および BP/フリーランスを対象とする（テンプレートの target_employment_types でタスク差分を吸収）。
+- 退社時の強制block対象: 内部ユーザー (sys_user.status=0)、Webセッション (revokeAllForUser)、ポータル連携解除、組織所属閉鎖 (closeAssignmentsForUser)、担当営業解除 (EngineerSales)、貸与資産返却、未精算経費。
+- Task完了の証跡: NONE, SELF_DECLARATION, DUAL_CONFIRMATION, DOCUMENT_LINK, SYSTEM_CHECK の5区分。
+- 既存承認エンジンへ載せる操作と、単純Task完了の境界: 通常タスク完了は直接実行（CAS保護）、完了阻害タスクの例外免除（WAIVED）のみ ApprovalEngine（RequestType = LIFECYCLE_EXCEPTION）を利用。
 
 ### DG-02 NF-02
 

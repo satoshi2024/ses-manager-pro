@@ -11,7 +11,7 @@
 
 ---
 
-- [ ] 0. Discovery/Gate & Inventory
+- [x] 0. Discovery/Gate & Inventory
   - **Objective**: 現行の要員、ユーザー、セッション、組織、営業担当、文書台帳、承認エンジンの経路を網羅的にインベントリ化し、DG-01（対象者、退社強制ブロック対象、証跡種別、承認境界）の決定を確定する。
   - **実装ガイダンス**: `2026-08-27-post-acceptance-traceability.md` のDG-01を確定し、requirements/design/tasksの整合を確認する。
   - **テスト要件**: スコープ境界・非目標・契約インターフェースの整合性確認。
