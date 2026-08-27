@@ -1038,7 +1038,7 @@ SES.pwa = {
             request.onsuccess = request.onerror = request.onblocked = function() { resolve(); };
         });
         const timeout = new Promise(function(resolve) { setTimeout(resolve, 1000); });
-        if (navigator.serviceWorker.controller) {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
             try { navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_USER_SCOPE' }); } catch (_) {}
         }
         return Promise.race([deleteDatabase, timeout]);

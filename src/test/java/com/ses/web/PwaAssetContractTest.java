@@ -71,6 +71,13 @@ class PwaAssetContractTest {
     }
 
     @Test
+    void serviceWorker非対応環境でもlogout時のscope削除を継続する() throws Exception {
+        String common = read("js/common.js");
+
+        assertThat(common).contains("'serviceWorker' in navigator && navigator.serviceWorker.controller");
+    }
+
+    @Test
     void server側retentionと監視はpayloadやuser識別子をtagへ出さない() throws Exception {
         String scheduler = Files.readString(Path.of(
                 "src/main/java/com/ses/service/pwa/PwaClientMutationCleanupScheduler.java"), StandardCharsets.UTF_8);
