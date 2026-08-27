@@ -172,15 +172,15 @@ class CustomerHealthServiceTest {
     }
 
     @Test
-    @DisplayName("未解決重大障害や低CSATがある危険顧客が減点されCRITICALと判定されること")
+    @DisplayName("未解決重大障害や低CSATがある危険顧客が減点されWARNINGと判定されること")
     void testAtRiskCustomer_scoreDeduction() {
         CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(atRiskCustomer.getId());
 
         assertNotNull(dto);
         assertEquals(atRiskCustomer.getId(), dto.getCustomerId());
-        // 未解決P0 (-30点) + CSAT 1.0 (-30点) = 40点 (CRITICAL)
-        assertEquals(40, dto.getHealthScore(), "減点により40点");
-        assertEquals("CRITICAL", dto.getHealthStatus());
+        // 未解決P0 (-30点) + CSAT 1.0 (-15点) = 55点 (WARNING)
+        assertEquals(55, dto.getHealthScore(), "減点により55点");
+        assertEquals("WARNING", dto.getHealthStatus());
         assertEquals(1, dto.getOpenCriticalIssuesCount(), "未解決P0が1件");
     }
 

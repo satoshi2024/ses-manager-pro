@@ -36,13 +36,14 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 顧客ヘルススコア算定サービス (100点減点モデル & N+1解消: WIP-3, WIP-4)
+ * 顧客ヘルススコア算定サービス (100点減点モデル & DataScope & N+1解消: WIP-3, WIP-4, design.md §3 完全整合)
  */
 @Slf4j
 @Service
@@ -89,6 +90,24 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             return Collections.emptyList();
         }
 
+        // DataScope による顧客絞り込み（WIP-4 回帰防止）
+        if (dataScopeService.isScoped()) {
+            customers = customers.stream()
+                    .filter(c -> {
+                        try {
+                            dataScopeService.assertAllowedCustomer(c.getId());
+                            return true;
+                        } catch (BusinessException e) {
+                            return false;
+                        }
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        if (customers.isEmpty()) {
+            return Collections.emptyList();
+        }
+
         Set<Long> customerIds = customers.stream().map(Customer::getId).collect(Collectors.toSet());
         Map<Long, CustomerHealthScoreDto> scoreMap = getHealthMapForCustomers(customerIds);
 
@@ -108,7 +127,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
         LocalDateTime thirtyDaysAgo = now.minusDays(30);
-        LocalDateTime ninetyDaysAgo = now.minusDays(90);
+        LocalDate sixtyDaysAgoDate = today.minusDays(60);
         LocalDateTime oneEightyDaysAgo = now.minusDays(180);
 
         // 1. 全指定顧客の未解決リクエスト一括取得
@@ -120,7 +139,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Map<Long, List<ServiceRequest>> openReqMap = openRequests.stream()
                 .collect(Collectors.groupingBy(ServiceRequest::getCustomerId));
 
-        // 2. 直近30日のSLA違反クロック一括取得
+        // 2. 直近30日のリクエストおよびSLA違反（リクエスト単位で1カウント）
         List<ServiceRequest> recent30dRequests = serviceRequestMapper.selectList(
                 new LambdaQueryWrapper<ServiceRequest>()
                         .in(ServiceRequest::getCustomerId, customerIds)
@@ -131,7 +150,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                         Collectors.mapping(ServiceRequest::getId, Collectors.toList())));
 
         Set<Long> allRecentReqIds = recent30dRequests.stream().map(ServiceRequest::getId).collect(Collectors.toSet());
-        Map<Long, List<ServiceSlaClock>> breachedClocksByReqId = Collections.emptyMap();
+        Set<Long> breachedRequestIds = new HashSet<>();
         if (!allRecentReqIds.isEmpty()) {
             List<ServiceSlaClock> breachedClocks = slaClockMapper.selectList(
                     new LambdaQueryWrapper<ServiceSlaClock>()
@@ -139,8 +158,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                             .and(w -> w.eq(ServiceSlaClock::getResponseBreached, true)
                                     .or().eq(ServiceSlaClock::getResolveBreached, true))
             );
-            breachedClocksByReqId = breachedClocks.stream()
-                    .collect(Collectors.groupingBy(ServiceSlaClock::getServiceRequestId));
+            for (ServiceSlaClock clk : breachedClocks) {
+                breachedRequestIds.add(clk.getServiceRequestId());
+            }
         }
 
         // 3. 直近180日のCSAT一括取得
@@ -152,16 +172,15 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Map<Long, List<CustomerCsat>> csatByCustomer = csatList.stream()
                 .collect(Collectors.groupingBy(CustomerCsat::getCustomerId));
 
-        // 4. 直近90日のQBR一括取得
-        List<CustomerQbr> qbrList = qbrMapper.selectList(
+        // 4. 直近60日のQBRおよび全期間QBR存在チェック（N+1完全解消: 一括取得）
+        List<CustomerQbr> allQbrList = qbrMapper.selectList(
                 new LambdaQueryWrapper<CustomerQbr>()
                         .in(CustomerQbr::getCustomerId, customerIds)
-                        .ge(CustomerQbr::getMeetingDate, ninetyDaysAgo.toLocalDate())
         );
-        Map<Long, List<CustomerQbr>> qbrByCustomer = qbrList.stream()
+        Map<Long, List<CustomerQbr>> allQbrByCustomer = allQbrList.stream()
                 .collect(Collectors.groupingBy(CustomerQbr::getCustomerId));
 
-        // 5. 請求書 (AR overdue) 一括取得
+        // 5. 請求書 (AR overdue) 一括取得（正本status: '送付済', '一部入金', 'OVERDUE', 'ISSUED'）
         InvoiceMapper invoiceMapper = invoiceMapperProvider.getIfAvailable();
         Map<Long, List<Invoice>> overdueInvoicesByCustomer = Collections.emptyMap();
         Map<Long, List<Invoice>> allInvoicesByCustomer = Collections.emptyMap();
@@ -172,8 +191,12 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             );
             allInvoicesByCustomer = invoices.stream().collect(Collectors.groupingBy(Invoice::getCustomerId));
             overdueInvoicesByCustomer = invoices.stream()
-                    .filter(inv -> "OVERDUE".equalsIgnoreCase(inv.getStatus())
-                            || ("ISSUED".equalsIgnoreCase(inv.getStatus()) && inv.getDueDate() != null && inv.getDueDate().isBefore(today)))
+                    .filter(inv -> {
+                        String st = inv.getStatus();
+                        boolean isUnpaidStatus = "送付済".equals(st) || "一部入金".equals(st)
+                                || "OVERDUE".equalsIgnoreCase(st) || "ISSUED".equalsIgnoreCase(st);
+                        return isUnpaidStatus && inv.getDueDate() != null && inv.getDueDate().isBefore(today) && inv.getPaidDate() == null;
+                    })
                     .collect(Collectors.groupingBy(Invoice::getCustomerId));
         }
 
@@ -192,11 +215,13 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             int openP1 = (int) custOpenReqs.stream().filter(r -> "P1".equalsIgnoreCase(r.getPriority())).count();
             int openCritical = openP0 + openP1;
 
-            // 直近30日SLA違反件数
+            // 直近30日SLA違反件数（リクエスト単位で1カウント）
             List<Long> custReqIds = reqIdsByCustomer.getOrDefault(custId, Collections.emptyList());
             int slaBreaches30d = 0;
             for (Long rId : custReqIds) {
-                slaBreaches30d += breachedClocksByReqId.getOrDefault(rId, Collections.emptyList()).size();
+                if (breachedRequestIds.contains(rId)) {
+                    slaBreaches30d++;
+                }
             }
 
             // 直近180日CSAT平均
@@ -207,15 +232,16 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                 avgCsat = BigDecimal.valueOf(avg).setScale(2, RoundingMode.HALF_UP);
             }
 
-            // 直近90日QBR
-            List<CustomerQbr> custQbrs = qbrByCustomer.getOrDefault(custId, Collections.emptyList());
-            boolean hasRecentQbr = !custQbrs.isEmpty();
+            // 直近60日QBR
+            List<CustomerQbr> custAllQbrs = allQbrByCustomer.getOrDefault(custId, Collections.emptyList());
+            boolean hasRecent60dQbr = custAllQbrs.stream()
+                    .anyMatch(q -> q.getMeetingDate() != null && !q.getMeetingDate().isBefore(sixtyDaysAgoDate));
 
             // AR延滞
             boolean arOverdue = !overdueInvoicesByCustomer.getOrDefault(custId, Collections.emptyList()).isEmpty();
             boolean hasInvoices = !allInvoicesByCustomer.getOrDefault(custId, Collections.emptyList()).isEmpty();
 
-            // 100点減点算定 (design.md 準拠)
+            // 100点減点算定 (design.md §3 完全準拠)
             int deductions = 0;
             List<String> missingInputs = new ArrayList<>();
             Map<String, Object> breakdown = new HashMap<>();
@@ -227,21 +253,19 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             breakdown.put("openP0Deduction", p0Deduction);
             breakdown.put("openP1Deduction", p1Deduction);
 
-            // 2. 直近30日SLA超過 (-10点/件)
+            // 2. 直近30日SLA超過（request単位1カウント: -10点/件）
             int slaDeduction = slaBreaches30d * 10;
             deductions += slaDeduction;
             breakdown.put("slaBreachDeduction", slaDeduction);
 
-            // 3. CSAT平均 (未回答は減点なし missing_inputs に追加)
+            // 3. CSAT平均 (design.md: <3.0は-15, 3.0-3.9は-5, >=4.0は0, 回答0はmissing)
             int csatDeduction = 0;
             if (avgCsat != null) {
                 double scoreVal = avgCsat.doubleValue();
-                if (scoreVal < 2.0) {
-                    csatDeduction = 30;
-                } else if (scoreVal < 3.0) {
-                    csatDeduction = 20;
+                if (scoreVal < 3.0) {
+                    csatDeduction = 15;
                 } else if (scoreVal < 4.0) {
-                    csatDeduction = 10;
+                    csatDeduction = 5;
                 }
             } else {
                 missingInputs.add("CSAT");
@@ -249,7 +273,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             deductions += csatDeduction;
             breakdown.put("csatDeduction", csatDeduction);
 
-            // 4. 売掛金延滞 (-25点, 未請求時は missing_inputs)
+            // 4. 売掛金延滞 (design.md: 既存Invoice overdue>0が1件以上で-25点, 請求0件はmissing)
             int arDeduction = 0;
             if (arOverdue) {
                 arDeduction = 25;
@@ -259,11 +283,10 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             deductions += arDeduction;
             breakdown.put("arDeduction", arDeduction);
 
-            // 5. 定例会・QBR (直近90日開催なし: -10点, 未登録時 missing_inputs)
+            // 5. 定例会・QBR (design.md: 60日QBRなしで-10点, 未登録新規はmissing)
             int qbrDeduction = 0;
-            if (!hasRecentQbr) {
-                boolean hasAnyQbr = qbrMapper.selectCount(new LambdaQueryWrapper<CustomerQbr>().eq(CustomerQbr::getCustomerId, custId)) > 0;
-                if (hasAnyQbr) {
+            if (!hasRecent60dQbr) {
+                if (!custAllQbrs.isEmpty()) {
                     qbrDeduction = 10;
                 } else {
                     missingInputs.add("QBR");
@@ -280,7 +303,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             if (slaBreaches30d > 0) explanations.add("直近30日SLA違反: " + slaBreaches30d + "件 (-" + slaDeduction + "点)");
             if (csatDeduction > 0) explanations.add("CSAT評価低迷: " + avgCsat + " (-" + csatDeduction + "点)");
             if (arDeduction > 0) explanations.add("売掛金延滞発生中 (-25点)");
-            if (qbrDeduction > 0) explanations.add("定例会(QBR)未開催 (-10点)");
+            if (qbrDeduction > 0) explanations.add("直近60日定例会(QBR)未開催 (-10点)");
             if (explanations.isEmpty()) explanations.add("特記事項なし（健全稼動）");
 
             resultMap.put(custId, CustomerHealthScoreDto.builder()

@@ -12,12 +12,16 @@ import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentDto;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.entity.Contract;
+import com.ses.entity.CustomerContact;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.portal.PortalLoginUser;
@@ -47,6 +51,7 @@ import java.util.Objects;
  * 顧客ポータル向けサービスデスクAPI (/api/portal/customer/service-desk/requests)
  * 内部メモ・原価・内部担当者ID等の機密情報は構造的に除外されたDTOで返却する。
  * 他組織IDへのアクセスは404秘匿する。
+ * ポータル権限 (service-desk.view / service-desk.create) を強制検証する (WIP-8)。
  */
 @RestController
 @RequestMapping("/api/portal/customer/service-desk/requests")
@@ -60,6 +65,8 @@ public class PortalCustomerServiceDeskApiController {
     private final FileStorageService fileStorageService;
     private final ContractMapper contractMapper;
     private final ProjectMapper projectMapper;
+    private final CustomerContactMapper contactMapper;
+    private final EngineerMapper engineerMapper;
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -86,6 +93,7 @@ public class PortalCustomerServiceDeskApiController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.view");
         Page<PortalServiceRequestDto> result = serviceRequestService.searchPortalRequests(
                 current, size, keyword, status, customerId()
         );
@@ -97,15 +105,17 @@ public class PortalCustomerServiceDeskApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<PortalServiceRequestDto> get(@PathVariable Long id) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.view");
         PortalServiceRequestDto dto = serviceRequestService.getPortalDetail(id, customerId());
         return ApiResult.success(dto);
     }
 
     /**
-     * ポータルからの新規問い合わせ起票 (WIP-8: ポータル専用DTO利用 & 他社リソース指定検証)
+     * ポータルからの新規問い合わせ起票 (WIP-8: ポータル専用DTO利用 & 契約/案件/担当者/要員の同一組織検証 & 権限検証)
      */
     @PostMapping
     public ApiResult<PortalServiceRequestDto> create(@Valid @RequestBody PortalServiceRequestCreateRequest req) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
         Long custId = customerId();
         Long userId = portalUserId();
 
@@ -122,6 +132,22 @@ public class PortalCustomerServiceDeskApiController {
             Project project = projectMapper.selectById(req.getProjectId());
             if (project == null || !Objects.equals(project.getCustomerId(), custId)) {
                 throw BusinessException.of(400, "指定された案件は自社に紐付いていません");
+            }
+        }
+
+        // 顧客担当者が指定された場合、自社担当者であることを検証
+        if (req.getContactId() != null) {
+            CustomerContact contact = contactMapper.selectById(req.getContactId());
+            if (contact == null || !Objects.equals(contact.getCustomerId(), custId)) {
+                throw BusinessException.of(400, "指定された顧客担当者は自社に紐付いていません");
+            }
+        }
+
+        // 要員が指定された場合の存在検証
+        if (req.getEngineerId() != null) {
+            Engineer engineer = engineerMapper.selectById(req.getEngineerId());
+            if (engineer == null) {
+                throw BusinessException.of(400, "指定された要員が見つかりません");
             }
         }
 
@@ -145,10 +171,12 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     /**
-     * ポータルからの返信コメント投稿（自動的にPORTAL_VISIBLE、WAITING_CUSTOMER時は自動再開、WIP-8: 内部項目除外DTO受取・返却）
+     * ポータルからの返信コメント投稿（自動的にPORTAL_VISIBLE、WAITING_CUSTOMER時は自動再開、WIP-8: 内部項目除外DTO受取・返却 & 権限検証）
      */
     @PostMapping("/{id}/comments")
     public ApiResult<PortalServiceCommentDto> addComment(@PathVariable Long id, @Valid @RequestBody PortalServiceCommentCreateRequest req) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
+
         // 自社スコープ検証 (404 秘匿)
         serviceRequestService.getPortalDetail(id, customerId());
 
@@ -174,19 +202,22 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     /**
-     * 解決・クローズ後のCSAT評価回答（1回限り、二重回答は409拒否）
+     * 解決・クローズ後のCSAT評価回答（1回限り、二重回答は409拒否、権限検証）
      */
     @PostMapping("/{id}/csat")
     public ApiResult<Void> submitCsat(@PathVariable Long id, @Valid @RequestBody PortalCsatCreateRequest req) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
         serviceRequestService.submitCsat(id, req, customerId(), portalUserId());
         return ApiResult.success(null);
     }
 
     /**
-     * ポータル添付ファイルダウンロード (WIP-5: 自社スコープおよびPORTAL_VISIBLE検証、RFC 5987 UTF-8 エンコード)
+     * ポータル添付ファイルダウンロード (WIP-5: 自社スコープおよびPORTAL_VISIBLE検証、RFC 5987 UTF-8 エンコード & 権限検証)
      */
     @GetMapping("/{id}/attachments/{attachmentId}/download")
     public ResponseEntity<Resource> downloadAttachment(@PathVariable Long id, @PathVariable Long attachmentId) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.view");
+
         // 1. リクエスト自社スコープ検証
         serviceRequestService.getPortalDetail(id, customerId());
 

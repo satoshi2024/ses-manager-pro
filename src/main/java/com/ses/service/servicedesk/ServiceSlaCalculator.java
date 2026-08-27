@@ -169,18 +169,19 @@ public class ServiceSlaCalculator {
             LambdaQueryWrapper<WorkCalendarDay> wrapper = new LambdaQueryWrapper<WorkCalendarDay>()
                     .eq(WorkCalendarDay::getCalendarDate, date);
 
-            // 法人既定カレンダー（organization_id IS NULL かつ engineer_id IS NULL）に限定
+            // 法人既定カレンダー（organization_id IS NULL かつ engineer_id IS NULL、status IN ('有効', 'ACTIVE')）に限定
             if (calMapper != null) {
                 List<WorkCalendar> legalCalendars = calMapper.selectList(
                         new LambdaQueryWrapper<WorkCalendar>()
                                 .isNull(WorkCalendar::getOrganizationId)
                                 .isNull(WorkCalendar::getEngineerId)
-                                .eq(WorkCalendar::getStatus, "ACTIVE"));
+                                .in(WorkCalendar::getStatus, List.of("有効", "ACTIVE")));
                 if (!legalCalendars.isEmpty()) {
                     List<Long> calIds = legalCalendars.stream().map(WorkCalendar::getId).toList();
                     wrapper.in(WorkCalendarDay::getCalendarId, calIds);
                 } else {
                     log.debug("法人既定カレンダー未定義 (missing_calendar): date={}", date);
+                    wrapper.eq(WorkCalendarDay::getCalendarId, -1L); // 個人カレンダー混入を完全遮断
                 }
             }
 

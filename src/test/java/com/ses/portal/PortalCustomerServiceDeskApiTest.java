@@ -77,6 +77,10 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         customerAUser = readyUser(customerAOrg, "userA-" + uA + "@customer.com");
         customerBUser = readyUser(customerBOrg, "userB-" + uB + "@customer.com");
 
+        // サービスデスク権限を付与 (service-desk.view, service-desk.create)
+        grantServiceDeskPermissions(customerAUser.user().getId());
+        grantServiceDeskPermissions(customerBUser.user().getId());
+
         // 顧客Aの問い合わせ作成
         ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
                 .customerId(customerAOrg.getCustomerId())
@@ -94,6 +98,24 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         serviceRequestService.addComment(customerARequest.getId(),
                 ServiceCommentCreateRequest.builder().commentText("お問い合わせありがとうございます。担当よりご連絡します。").visibility("PORTAL_VISIBLE").build(),
                 1L, "INTERNAL_USER", "サポート担当", false);
+    }
+
+    private void grantServiceDeskPermissions(Long portalUserId) {
+        jdbcTemplate.update("INSERT INTO t_portal_user_permission (user_id, permission_key) VALUES (?, 'service-desk.view')", portalUserId);
+        jdbcTemplate.update("INSERT INTO t_portal_user_permission (user_id, permission_key) VALUES (?, 'service-desk.create')", portalUserId);
+    }
+
+    @Test
+    @DisplayName("サービスデスク権限を持たないポータルユーザーは403拒否されること (WIP-8 権限強制検証)")
+    void testPermissionDenied_withoutServiceDeskPermission() throws Exception {
+        String u = unique();
+        PortalOrganization org = createCustomerOrg("NoPerm-" + u);
+        UserFixture userWithoutPerm = readyUser(org, "noperm-" + u + "@customer.com");
+
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests")
+                        .cookie(userWithoutPerm.sessionCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
     }
 
     @Test
