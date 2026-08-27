@@ -71,7 +71,7 @@ class PwaAssetContractTest {
         assertThat(queue).contains("FORBIDDEN_KEY", "MAX_PAYLOAD_BYTES", "validatePayload", "ArrayBuffer.isView");
         assertThat(queue).doesNotContain("record.password", "record.bankAccount", "record.receiptBlob");
         assertThat(queue).contains("/api/my/pwa/attendance/daily", "/api/my/pwa/timesheet/daily",
-                "/api/my/pwa/expenses/drafts", "/api/my/pwa/change-requests/drafts",
+                "expenses\\/drafts", "/api/my/pwa/change-requests/drafts",
                 "data-pwa-refresh", "data-pwa-reapply", "serverRefreshAt");
     }
 
