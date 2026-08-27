@@ -57,7 +57,7 @@
 3. snapshot/document保持は7年。過去runはimmutable。template・現在DB・現在権限の変更で過去runを変化させない。
 4. 通常generation retryは同一run・同一snapshot、明示的再生成は新version。section一つでも失敗したrunは`PARTIAL`/`FAILED`として配布停止。
 5. recipient previewを生成前に必須とし、generation/downloadの両方でscope検証。権限喪失、組織異動、link期限切れはdownload拒否、download時は再認証。
-6. deliveryはnotification outbox経由の站内通知＋期限付きlink。メール添付なし。PDF/XLSX/CSVは同一snapshotから生成。
+6. deliveryはnotification outbox経由のアプリ内通知＋期限付きlink。メール添付なし。PDF/XLSX/CSVは同一snapshotから生成。
 7. ServiceDesk/SLAはNF-02 PASSまで対象外。report独自SQL・集計式・丸めは禁止。
 
 F1は承認Base `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`へ統合済みの専用branchで、最新migration番号、V1/H2 schema、MySQL smoke、shape testをそろえて開始する。

@@ -41,7 +41,7 @@ NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売�
 - 速報は未締めデータとして`dataAsOf`/freshnessを表示し、確定版は月次締め完了後のみ生成する。
 - template変更・現在DB値・現在権限変更で過去runを変化させない。明示的な再生成は新version、通常retryは同一runの同一snapshotを再利用する。
 - section失敗時は`PARTIAL`/`FAILED`として配布停止する。
-- 配布はnotification outbox経由の站内通知＋期限付きlinkのみ。メール添付は使用しない。recipient previewを生成前に必須とし、生成時/download時のscope検証、期限切れ時の再認可、download時再認証を行う。
+- 配布はnotification outbox経由のアプリ内通知＋期限付きlinkのみ。メール添付は使用しない。recipient previewを生成前に必須とし、生成時/download時のscope検証、期限切れ時の再認可、download時再認証を行う。
 - schedulerは明示system principalを使用し、HTTP sessionに依存しない。既存正本service/DTOを利用し、report独自SQL・集計式・丸めを作らない。
 
 承認済みplan/spec/tasksへ昇格済みであり、F1以降を実装する。実装対話ではPRを作成しない。Review用のbase/head、task対応、テスト証拠は`completion-matrix.md`に集約する。

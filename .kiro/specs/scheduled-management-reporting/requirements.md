@@ -30,7 +30,7 @@ run の生成時に、各 section の値、actual/forecast、速報/確定、cut
 
 ## R3. Document
 
-PDF/XLSX/CSV は同じimmutable snapshotから生成し、`DocumentService` の generated document、content hash、version、CLEAN、scope/access audit を通ること。配布はnotification outbox経由の站内通知＋期限付きlinkとし、メール添付は使用しない。期限切れlink、権限喪失、組織異動ではdownloadを拒否し、download時は再認証を要求すること。
+PDF/XLSX/CSV は同じimmutable snapshotから生成し、`DocumentService` の generated document、content hash、version、CLEAN、scope/access audit を通ること。配布はnotification outbox経由のアプリ内通知＋期限付きlinkとし、メール添付は使用しない。期限切れlink、権限喪失、組織異動ではdownloadを拒否し、download時は再認証を要求すること。
 
 受入観点:
 

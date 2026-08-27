@@ -47,5 +47,5 @@ report 専用の集計式を作らない。各 section は既存の正本 servic
 - sectionごとの速報/確定は、未締めを速報、月次締め完了後を確定とする。
 - Cash FlowとSalesPerformanceも管理者全社/マネージャー許可組織scopeを持ち、現行APIに不足する境界はadapterで補う。
 - template変更時の明示的再生成は新version、通常retryは同一run・同一snapshotとする。
-- recipient previewは生成前必須、deliveryはoutbox経由の站内通知＋期限付きlink、期限切れ・権限喪失・組織異動は拒否しdownload時再認証する。
+- recipient previewは生成前必須、deliveryはoutbox経由のアプリ内通知＋期限付きlink、期限切れ・権限喪失・組織異動は拒否しdownload時再認証する。
 - snapshot/documentは7年保持し、restore後にhash/version/ACL/outbox未送信状態を検証する。

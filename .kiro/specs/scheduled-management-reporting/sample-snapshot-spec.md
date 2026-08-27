@@ -217,4 +217,4 @@
 
 ## 5. 実装固定項目
 
-`recipientPreview.status`はscope check後の承認状態、partial sectionは配布停止、retentionは7年、deliveryは站内通知＋期限付きlink、downloadは再認証、generation retryは同一run・同一snapshotとする。ServiceDesk/SLAはNF-02 PASSまで対象外である。
+`recipientPreview.status`はscope check後の承認状態、partial sectionは配布停止、retentionは7年、deliveryはアプリ内通知＋期限付きlink、downloadは再認証、generation retryは同一run・同一snapshotとする。ServiceDesk/SLAはNF-02 PASSまで対象外である。

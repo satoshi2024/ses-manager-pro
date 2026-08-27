@@ -21,11 +21,13 @@
 
 ## Implementation
 
-- [ ] F1: template/version/schedule/run/snapshot/delivery の DDL。最新migration+1、V1/H2同期、shape test、7年保持を実装する。
+- [x] F1: template/version/schedule/run/snapshot/delivery の DDL。最新migration+1、V1/H2同期、shape test、7年保持を実装する。
+  - Evidence: `V112__scheduled_management_reporting.sql`、`schema-scheduled-management-reporting-h2.sql`、6 entity/mapper、test schema location。
+  - Demo: `AttendanceSchemaTest` 6件全緑、compile成功。MySQL migration smokeはMで実施する。
 - [ ] F2: explicit system principal/scope の snapshot orchestration。管理者/マネージャーscope、速報/確定、retry不変性、partial/failed停止を実装する。
 - [ ] A1: template/preview/run UI。管理者有効化、recipient preview、actual/forecast、dataAsOf/freshness、Asia/Tokyoを表示する。
 - [ ] B1: PDF/XLSX/CSV と DocumentService 登録。同一snapshot、hash/version/CLEAN、7年保持、scope/access auditを実装する。
-- [ ] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。站内通知＋期限付きlink、生成/download scope、再認証を実装する。
+- [ ] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
 - [ ] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
 
 各完了taskは独立commitしてremoteへpushし、completion matrixへBase/Head、テスト、Demo、rollbackを記録する。実装対話ではPRを作成しない。

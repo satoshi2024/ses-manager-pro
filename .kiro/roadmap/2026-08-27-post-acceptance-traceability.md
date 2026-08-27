@@ -31,7 +31,7 @@
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
 | NF-09 | `asset-account-license-lifecycle` | CANDIDATE | 未定 | 未返却、active account残存 | NF-01、identity、document | 未決定 | 未定 |
-| NF-10 | `scheduled-management-reporting` | APPROVED | 管理者（経営管理責任者） | 作成時間、配布失敗率、scope外配布0件、snapshot不変性 | dashboard、document、notification、NF-02（ServiceDesk sectionはNF-02 PASSまで対象外） | 2026-08-28承認。管理者/マネージャーを利用者とし、月次report、Asia/Tokyo、7年保持、immutable snapshot、outbox経由の站内通知＋期限付きlink、recipient preview・生成時/取得時scope検証を確定 | 実装・独立Review完了後 |
+| NF-10 | `scheduled-management-reporting` | APPROVED | 管理者（経営管理責任者） | 作成時間、配布失敗率、scope外配布0件、snapshot不変性 | dashboard、document、notification、NF-02（ServiceDesk sectionはNF-02 PASSまで対象外） | 2026-08-28承認。管理者/マネージャーを利用者とし、月次report、Asia/Tokyo、7年保持、immutable snapshot、outbox経由のアプリ内通知＋期限付きlink、recipient preview・生成時/取得時scope検証を確定 | 実装・独立Review完了後 |
 
 ## 3. 要件→既存資産→追加境界
 
@@ -122,7 +122,7 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 - **月次と時刻**: 月次管理レポート、timezoneは`Asia/Tokyo`。速報は未締めデータとして`dataAsOf`とfreshnessを表示する。確定版は月次締め完了後のみ生成する。
 - **snapshot**: snapshot/documentは7年間保持し、snapshotはimmutableとする。template変更・現在DB値・現在権限変更で過去runを変化させない。明示的な再生成は上書きせず新versionを作る。通常のgeneration retryは同一runの同一snapshotを再利用し、重複snapshotを生成しない。
 - **失敗**: sectionが1つでも失敗したrunは`PARTIAL`/`FAILED`として配布を停止する。失敗とretryを監査可能にする。
-- **配布と認可**: 配布はnotification outbox経由の站内通知＋期限付きlinkのみとし、メール添付は使用しない。recipient previewを生成前に必須とする。generation時とdownload時の両方でrecipient scopeを検証し、権限喪失・組織異動・link期限切れではdownloadを拒否する。download時は再認証を要求する。
+- **配布と認可**: 配布はnotification outbox経由のアプリ内通知＋期限付きlinkのみとし、メール添付は使用しない。recipient previewを生成前に必須とする。generation時とdownload時の両方でrecipient scopeを検証し、権限喪失・組織異動・link期限切れではdownloadを拒否する。download時は再認証を要求する。
 - **正本とscheduler**: PDF/XLSX/CSVは同じimmutable snapshotから生成する。既存正本service/DTOを使用し、report独自SQL・集計式・丸めを作らない。schedulerは明示system principalを使用し、HTTP sessionに依存しない。
 - 承認証跡: Owner=`管理者（経営管理責任者）`、Base branch=`origin/main`、承認済みBase policy=`再開時にfetchした最新origin/main`。承認時に確認された`origin/main`は`455fc92e3aa259d2a93f25c6a545ca6c6af835bc`。
 
