@@ -50,7 +50,7 @@ Self-review notes:
 | A1 Mobile shell | COMPLETED | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | MobileResponsiveLayoutTest (28), PwaAssetContractTest (4); 44px touch target, focus-visible, modal focus restore, offline/online status |
 | A2 Draft/Queue/Conflict | COMPLETED | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | pwa-queue.js; single queue store; allowed mutation adapters; 30-day cleanup; same-resource version advancement; conflict panel; PwaAssetContractTest (6); browser run attempted but SW/Tomcat loopback blocker recorded below |
 | B1 Update/Cleanup/Monitoring | COMPLETED | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | PwaClientMutationCleanupSchedulerTest; server 30-day ledger cleanup; Micrometer outcome/screen metrics without user/payload tags; SW old-cache cleanup/update prompt |
-| M Integrated gate | COMPLETED_WITH_ENVIRONMENT_BLOCKER | f2b26b9a（最終記録commit予定） | - | targeted PWA gate 216/0/0/0、修正後契約gate 18/0/0/0、MySQL migration契約5/0/0/0、performance 1/0/0/0; full fast/MySQL/browserは既存loopbackまたは全体run-order問題を記録 |
+| M Integrated gate | COMPLETED_WITH_ENVIRONMENT_BLOCKER | be02e05e70056f556edc145fe2c35f17643fabc5 | be02e05e70056f556edc145fe2c35f17643fabc5 | targeted PWA gate 216/0/0/0、修正後契約gate 18/0/0/0、MySQL migration契約5/0/0/0、performance 1/0/0/0; full fast/MySQL/browserは既存loopbackまたは全体run-order問題を記録 |
 
 ## 4. Completion matrix
 
@@ -69,22 +69,22 @@ Self-review notes:
 
 Implementation completion時に次を埋める。Browser実測不能項目は未実施として残し、PASSとは記載しない。
 
-- Base SHA:
-- Remote Head SHA:
-- `git diff --stat Base..Head`:
-- remote branch verification:
-- clean worktree verification:
-- fast/MySQL/performance test result:
-- CacheStorage inspection artifact:
-- 390×844 artifact:
-- offline→online artifact:
-- session expiry artifact:
-- SW update artifact:
-- double-click artifact:
-- A logout→B login artifact:
-- 409 server/client diff artifact:
-- IndexedDB prohibited-data inspection:
-- completion matrix:
+- Base SHA: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
+- Remote Head SHA（最終ledger記録commit直前の検証値）: `be02e05e70056f556edc145fe2c35f17643fabc5`
+- `git diff --stat Base..Head`: `55 files changed, 2892 insertions(+), 48 deletions(-)`
+- remote branch verification（記録時）: `git ls-remote origin refs/heads/codex/mobile-pwa-self-service` = `be02e05e70056f556edc145fe2c35f17643fabc5`; local HEADも同値。
+- clean worktree verification（記録時）: `git status --short --branch` はbranch tracking行のみで差分なし。
+- fast/MySQL/performance test result: 修正後PWA契約gate `18/0/0/0`、MySQL migration契約`5/0/0/0`、performance`1/0/0/0`。全体gateの制約は下記summary。
+- CacheStorage inspection artifact: `BLOCKED/未実行`。IAB/Chrome surfaceが`navigator.serviceWorker === undefined`で、アプリTomcatもJDK 21 loopback errorで起動不可。
+- 390×844 artifact: IAB/Chrome static probeで`innerWidth=390, innerHeight=844, devicePixelRatio=1.25`を確認。実アプリ画面は未実行。
+- offline→online artifact: `BLOCKED/未実行`（同上）。
+- session expiry artifact: `BLOCKED/未実行`（同上）。
+- SW update artifact: `BLOCKED/未実行`（同上）。
+- double-click artifact: `BLOCKED/未実行`（同上）。queue codeには250ms in-flight dedupeを実装し、静的契約で確認。
+- A logout→B login artifact: `BLOCKED/未実行`（同上）。logout/user switch clearとscope mismatch fail-closedはコード・静的契約で確認。
+- 409 server/client diff artifact: `BLOCKED/未実行`（同上）。controller stale conflict testとqueue conflict renderingは自動テストで確認。
+- IndexedDB prohibited-data inspection: `BLOCKED/未実行`。queue allow-list/minimal payload/no forbidden fieldを静的契約で確認。
+- completion matrix: 本文4節。Browser項目は未実施をPASSに昇格していない。
 
 ### Automated/Browser evidence summary
 
@@ -92,8 +92,10 @@ Implementation completion時に次を埋める。Browser実測不能項目は未
 - 既存PWA関連を含むcombined gate: 216 tests / 0 failures / 0 errors / 0 skipped。
 - MySQL migration契約: `mvn test -Pmysql-tests -Dtest=FlywaySelfServiceSchemaSmokeTest,FlywayV110AdminBoundaryUpgradeSmokeTest` → 5 / 0 / 0 / 0。
 - Performance: `mvn test -Pperformance-tests` → 1 / 0 / 0 / 0。
-- 全fast gateは既存`PinningHttpsTransportTest`、`WebhookNotifierLoopbackIntegrationTest`、`CapacityBaselineScriptTest`、`PrometheusScraperLabE2ETest`のJDK 21 loopback確立失敗と、全体run-order時のみ再現する`ExpenseRequestFlowIntegrationTest` 4 errorでFAIL。Expense単独は7 / 0 / 0 / 0。
+- 全fast gateは11 errorsでFAIL。既存`PinningHttpsTransportTest`、`WebhookNotifierLoopbackIntegrationTest`、`CapacityBaselineScriptTest`、`PrometheusScraperLabE2ETest`のJDK 21 loopback確立失敗と、全体run-order時のみ再現する`ExpenseRequestFlowIntegrationTest` 4 error。Expense単独は7 / 0 / 0 / 0。PWA対象契約gateは18 / 0 / 0 / 0。
 - 全MySQL gateは82 tests中、V112追加に伴う旧V111固定assertion 3件（修正後の対象契約gateで解消）と`FreeeConcurrentRefreshTest` loopback初期化1件でFAIL。PWA migration smokeの修正後再実行はPASS。
-- IAB/Chrome static probe: viewport `390x844`を確認。両surfaceで`navigator.serviceWorker`が`undefined`のため、CacheStorage、SW update、offline/online、session expiry、A→B、409画面の実Browser測定は未実行。Spring/Tomcat起動もJDK 21の`Unable to establish loopback connection`で停止。
+- Browser gate `EngineerSelfServiceBrowserMTest` は1 errorで、Tomcat起動時のJDK 21 `Unable to establish loopback connection`（`java.net.SocketException: Invalid argument: connect`）によりアプリ画面へ到達できず終了。
+- IAB/Chrome static probe: viewport `390x844`を確認。両surfaceで`navigator.serviceWorker`が`undefined`のため、CacheStorage、SW update、offline/online、session expiry、A→B、409画面の実Browser測定は未実行。
+- Backup補助gate: unitはbinlog `61/0`、cutover `31/0`、restore drill `19/0`、full backup `36/0`、harness `8/0`、health `29/0`、preflight `59/0`、quiesce `45/0`、restore flow `31/0`、restore plan `44/0`、restore validation `32/0`まで通過したが、retention synthetic metadataのjq生成がハングしたため停止。integrationは未実行。PWA対象外。
 
 Review is separate from implementation. This ledger must not be edited to claim independent PLAN/IMPLEMENTATION PASS before an independent Review task returns those verdicts.
