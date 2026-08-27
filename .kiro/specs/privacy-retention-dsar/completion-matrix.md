@@ -48,6 +48,9 @@ DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Proje
 | source catalog explicit rows / Review provenance boundary | `b678ce987ad93c8100a14df9776f25e89cdd597e` | `origin/codex/privacy-retention-dsar` | pushed。構造unclassified 0、policy UNKNOWN/BLOCKED 78。0.4/F1-Mは未完了 |
 | exhaustive SQL/provider scanner correction | `4ef33ac4` | `origin/codex/privacy-retention-dsar` | pushed。V20 one-line CREATE、false `t_contract_document.INSERT`、Gemini/FileStorage/FileCleanup等を補正 |
 | exact manifest/provider content coverage correction | `387e090e` | `origin/codex/privacy-retention-dsar` | pushed。extra column/provider検出、9 stale column refs除去、provider discoveryをfilename/content semantic scanへ変更 |
+| developer gate evidence validator | `baa17719` | `origin/codex/privacy-retention-dsar` | pushed。DEV/Full gate mode分離前の安全側validator |
+| development / production gate split | `ec06fa64` | `origin/codex/privacy-retention-dsar` | pushed。`NF07-DEV-GATE-20260828`をDEV-0/D0に限定し、Full Feature/ProductionをBLOCKED |
+| exact development owner binding | `8ab88d8a` | `origin/codex/privacy-retention-dsar` | pushed。依頼DecisionのOwner role表記を厳密一致。DEV scope以外の許可なし |
 
 ## D0 actual verification
 
@@ -55,4 +58,8 @@ DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Proje
 
 ## Review handoff条件
 
-独立Reviewへ渡すものは、最終remote Head、approved plan/spec/tasks、completion mapping、gate evidence、dry-run実行結果である。実装対話からPRは作成しない。ReviewのPLAN/IMPLEMENTATION双方PASS前にPR作成を依頼しない。
+独立Reviewへ渡すものは、最終remote Head、DEV-only approved plan/spec/tasks、completion mapping、DEV gate evidence、Full gate blocker、dry-run実行結果である。実装対話からPRは作成しない。DEV-0/D0 scopeのPLAN/IMPLEMENTATION双方PASS後もFull Feature/ProductionはBLOCKEDであり、PR作成を依頼しない。
+
+## 最新DEV-0/D0検証（実装側claim）
+
+2026-08-28、remote Head `8ab88d8adf1c499fd0542180a9a367298a56b881`、専用worktree clean、local/remote一致で再実行した。DEV validatorは exit `0` / `DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW`、Full validatorは exit `2` / `HARD_STOP`。coverageは180 table、unclassified 0、policy UNKNOWN 78、structural missing/extra 0、dry-runはcandidate 1 / blocked 6 / unknown 2、providerCallCount/writeCount 0である。これは実装側の検証claimであり、独立Implementation Reviewのverdictではない。

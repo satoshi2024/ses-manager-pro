@@ -4,11 +4,11 @@
 
 | item | status | evidence / blocker | reviewer |
 |---|---|---|---|
-| PLAN | PENDING | 実装branchはReview verdictを記録しない。approved scope/owner/Base branch/SHA、NF-07/DG-07の外部証跡を独立Review側で確認する | 未割当 |
+| PLAN | PENDING | 実装branchはReview verdictを記録しない。DEV-0/D0は `NF07-DEV-GATE-20260828` のdevelopment-only authorization、Full Feature/Productionのapproved scope/owner/Base branch/SHAとNF-07/DG-07の外部証跡は独立Review側で確認する | 未割当 |
 | IMPLEMENTATION | PENDING | 実装branchはReview verdictを記録しない。offline evidenceは別packetにあり、独立Review側で判定する | 未割当 |
 | DG-07 | BLOCKED | retention/legal/HR/tax owner、hold authority/release、二者承認、request deadline未確定 | 未割当 |
 | external expert gate | BLOCKED | legal documentのunclassified retention、外部専門家承認未完 | 未割当 |
-| internal responsible gate | BLOCKED | Privacy ownerが`<OWNER>`のまま | 未割当 |
+| internal responsible gate | BLOCKED | 正式Privacy Ownerは`UNASSIGNED_UNTIL_PRE_PRODUCTION`。Project Maintainerはdevelopment-only owner roleに限定 | 未割当 |
 | backup/recovery | BLOCKED | production/representative restore evidence未完。DB+binary same-time検証未完 | 未割当 |
 | enterprise identity/security | BLOCKED | external IdP/MFA/break-glass/owner gate未完 | 未割当 |
 | audit | BLOCKED | append-only/technical loggingはinventory済みだが、法的保持/DSAR表示policyは未確定 | 未割当 |
