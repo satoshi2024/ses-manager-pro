@@ -1,5 +1,7 @@
 # Operations & Runbook: Customer Success & Service Desk (NF-02)
 
+> **草稿**: 未APPROVEDの先行WIPに付随して書かれた。配点・ステータス名・scheduler間隔は `requirements.md` / `design.md` / `inventory.md` §8 と一致しない箇所がある。運用正本にするのは Task M かつ DG-02 APPROVED 後。現時点のヘルス公式は減点モデル（HEALTHY/WARNING/CRITICAL）であり、本文中の NEUTRAL/AT_RISK・加点内訳はWIP残骸として信用しない。
+
 ## 1. 概要 (Overview)
 
 SES Manager Pro のカスタマーサクセス・サービスデスク機能 (NF-02 / DG-02) は、顧客企業からの問い合わせ・要望・インシデントを一元管理し、SLA 監視、CSAT (顧客満足度調査)、定例会 (QBR) 管理、および多角的な指標に基づく顧客ヘルススコア算定と契約更新判断支援を提供する統合運用基盤です。

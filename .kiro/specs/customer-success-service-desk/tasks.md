@@ -1,98 +1,82 @@
 # Tasks — カスタマーサクセス・問い合わせ/SLA・顧客ヘルス (NF-02)
 
-## タスク一覧と進捗
+> **承認状態**: traceability は CANDIDATE/DISCOVERY。Approved scope / Owner / DG-02 が APPROVED になるまで **F1以降のproduction変更は禁止**。本対話は Task 0（inventory/spec）のみ完了可。
+>
+> **分層test**: 通常TaskはL1〜L3の定向test、Task Mで必要gate全量。skipを成功にしない。
+>
+> **既定解**: `platform-invariants.md`。時間/scope/状態は `design.md` 決定表。無い論点は推測実装せずspecへ戻す。
+>
+> **Migration**: APPROVED着手時に merge済み `db/migration` の latest+1。V109残存時は V110。欠番埋め・公開済み編集禁止。
+>
+> **先行WIP**: branch `codex/customer-success-service-desk` に未承認コード（Head `eb912340`）がある。F1〜MのcheckboxはWIPを完了とみなさない。APPROVED後に `inventory.md` §8 / `design.md` §9 を是正し、定向test+Demoが通ってから `[x]` にする。
 
-- [x] **Task 0: Discovery & 現行境界インベントリ・DG-02 合意**
-  - **Objective**: Customer, Contact, Contract, Portal, Notification, WorkCalendar, Document の現行境界を確認し、DG-02 の決定事項を spec に反映する。
-  - **Guidance**:
-    - 既存の `PortalAuthorizationService`, `DataScopeService`, `WorkCalendarDay`, `NotificationService`, `DocumentService` の接続点を確認。
-    - Migration latest (V109) を確認し、本 spec の DDL を V110 に確定。
-  - **Test Requirements**:
-    - 既存テストスイートの健全性確認（`mvn test-compile`）。
-  - **Demo**:
-    - 現行境界インベントリと DG-02 決定事項が spec に記録されていることを確認。
+---
 
-- [x] **Task F1: データベース DDL & エンティティ整備 (V110)**
-  - **Objective**: サービスデスク、SLAポリシー、計時クロック、コメント、添付リンク、状態イベント、CSAT、QBR、ヘルススナップショットのテーブルを作成する。
-  - **Guidance**:
-    - `V110__customer_success_service_desk.sql` を作成。
-    - `V1__create_tables.sql` に consolidated baseline を同期。
-    - `sql/schema-service-desk-h2.sql` を作成し、`application-test.yml` の `schema-locations` に追加。
-    - エンティティクラス群 (`ServiceRequest`, `ServiceSlaPolicy`, `ServiceSlaClock`, `ServiceComment`, `ServiceAttachmentLink`, `ServiceStateEvent`, `CustomerCsat`, `CustomerQbr`, `CustomerQbrAction`, `CustomerHealthSnapshot`) と Mapper を実装。
-  - **Test Requirements**:
-    - `FlywayMigrationSmokeTest` または H2 コンテキスト起動テストで V110 DDL とエンティティの整合性を検証。
-  - **Demo**:
-    - H2 / MySQL で V110 の全テーブル・インデックス・UNIQUE 制約が正しく適用されることを確認。
+- [x] **0. Discovery / DG-02 提案 / 現行境界inventory**
+  - **Objective**: Customer/Contact/Contract/Portal/Notification/BusinessCalendar/Documentの正本を列挙し、DG-02を提案として記録する。重複masterを作らない。
+  - **Requirements**: バックログNF-02、CS-R1〜R6、traceability DG-02
+  - **実装ガイダンス**: production codeを変更しない。`inventory.md` / requirements / design / review-ledger を現行コードで更新する。
+  - **テスト要件**: L0。inventoryのFileReferenceProvider件数が実装数と一致。portal既存inquiryとservice deskが別物と明記。`git diff --check`。
+  - **Demo**: DG-02提案表とconsumer inventoryがspecにあり、公式台帳が未APPROVEDであることが報告できる。
+  - **Rollback**: specのみ。コード無し。
 
-- [x] **Task F2: SLA 計算エンジン & 状態機械 & スコープ解決基盤**
-  - **Objective**: 営業時間・休日・タイムゾーンを考慮した SLA 計算ロジック、状態遷移エンジン、認可スコープ解決を実装する。
-  - **Guidance**:
-    - `ServiceSlaCalculator`: 営業時間（09:00-18:00）、土日祝日（`WorkCalendarDay`）、Pause / Resume、Reopen ラウンド別の計時。
-    - `ServiceRequestService` / `ServiceImpl`: 状態遷移 CAS、初回応答日時記録、解決日時記録、再オープン処理。
-    - 認可スコープ: 内部は `DataScopeService` / `CrmScopeService`、外部は `PortalAuthorizationService`。
-  - **Test Requirements**:
-    - 単体テスト `ServiceSlaCalculatorTest`: 営業時間内外、週末跨ぎ、Pause/Resume、Reopen round の網羅テスト。
-    - 状態機械テスト `ServiceRequestServiceImplTest`: 許可/禁止遷移、CAS 競合、再オープン時の SLA 時計新ラウンド作成。
-  - **Demo**:
-    - SLA 計算が土日を正しくスキップし、顧客待ち中の Pause が正しく期限を延長することをテスト実行で実証。
+- [ ] **F1. request/comment/SLA/CSAT/QBR DDL と状態競合**
+  - **Objective**: 10系統テーブル、policy version、clock UNIQUE(request,round)、CSAT UNIQUE、append-only event を同期する。
+  - **Requirements**: CS-R1, CS-R2.1, CS-R3, CR-03
+  - **実装ガイダンス**: latest+1 Flyway、V1重複ADD禁止、`schema-service-desk-h2.sql`、entity/mapper。`UNIQUE(priority,status)`は使わない。H2 replayにMySQL DDLを足さない。
+  - **テスト要件**: L1〜L3。UNIQUE衝突、fresh/legacy smoke、H2起動。
+  - **Demo**: 空DBと既存DBでmigration成功。
+  - **Rollback**: 新テーブルDROP（既存業務テーブル非変更）。
+  - **WIP注意**: V110草案あり。UNIQUEとV1同期を再確認。
 
-- [x] **Task A1: 内部サービスデスク管理画面 & REST API**
-  - **Objective**: 管理者・営業・マネージャー向けサービスデスク一覧・詳細画面、および内部起票・更新・コメント・状態変更 API を実装する。
-  - **Guidance**:
-    - `ServiceRequestApiController`: `/api/service-desk/requests/**`（一覧検索、詳細取得、起票、更新、状態変更、コメント投稿）。
-    - `ServiceRequestPageController`: `/service-desk/requests`（一覧画面）、`/service-desk/requests/{id}`（詳細画面）。
-    - `service-desk.js` + HTML テンプレート: 一覧テーブル、検索・フィルタ、SLA 時計カード、内部メモ/公開返信切り替え。
-    - メニュー権限: `m_menu` / `t_role_menu`（管理者・営業・マネージャー）および `ActionPermissionResolver` 登録。
-  - **Test Requirements**:
-    - `ServiceRequestApiControllerTest`: 内部起票・更新・状態遷移・内部メモ投稿・DataScope 絞り込み検証。
-  - **Demo**:
-    - 内部画面から問い合わせを起票し、内部メモを投稿し、ステータス変更できることをテスト実行で実証。
+- [ ] **F2. 状態機械 / SLA calculator / scope**
+  - **Objective**: 営業時間・法人休日・timezone・pause営業分数・reopen round不変、DataScope/Portal scopeをserviceに固定する。
+  - **Requirements**: CS-R1.4-5, CS-R2, CS-R5.3, CR-02
+  - **実装ガイダンス**: `ServiceSlaCalculator` に Clock/ZoneId/休日関数。`LocalDateTime.now()`禁止。内部はDataScope（営業に組織を積集合しない）。portalはSQL customer_id。
+  - **テスト要件**: 祝日跨ぎ、pause、reopen旧round不変、CAS 409、portal A/B 404、INTERNALがportal DTOに無い。
+  - **Demo**: 金曜夕方P2が土日祝を飛ばすこと、WAITING_CUSTOMER中に期限が営業分数だけ延びること。
+  - **Rollback**: service feature flag OFF（テーブルは残してAPI 404）。
+  - **WIP注意**: 現行計算機は土日のみでWIPギャップ。是正してから完了。
 
-- [x] **Task A2: 顧客ポータル起票・返信・CSAT 回答画面 & API**
-  - **Objective**: 顧客ポータル利用者向けの問い合わせ一覧・起票・返信・CSAT 回答機能を実装する。
-  - **Guidance**:
-    - コントローラ: `PortalCustomerServiceDeskApiController` (`/api/portal/customer/requests/**`), `PortalCustomerPageController`.
-    - 画面: `templates/portal/customer/requests.html`, `templates/portal/customer/request-detail.html`.
-    - **必須条件**: ポータル DTO には `INTERNAL` コメント、原価、内部ユーザー ID を含めない。
-    - CSAT 投稿: 解決済み（`RESOLVED` / `CLOSED`）リクエストに対して 1 回限り回答可能（DB UNIQUE 制約）。
-    - 添付ファイルダウンロード: 自社スコープ検証。
-  - **Test Requirements**:
-    - `PortalCustomerServiceDeskApiControllerTest`: 自社リクエストの CRUD、他社 (Customer B) リクエスト・添付・CSAT へのアクセス拒否 (IDOR 拒否)、CSAT 二重回答拒否 (409 Conflict)。
-  - **Demo**:
-    - ポータルから起票した問い合わせが内部に届き、内部からの公開返信がポータルに表示され、解決後に CSAT 評価が 1 回送信できることを確認。
+- [ ] **A1. 内部 service desk UI/API**
+  - **Objective**: 管理者/営業/マネージャーが一覧・詳細・起票・内部メモ/公開返信・状態変更できる。HR/要員は403。
+  - **Requirements**: CS-R1, CS-R6, CR-01, CR-05
+  - **実装ガイダンス**: page/API、i18n 4bundle、filter panel構造、二重click抑止、CSRF。action keyは機械生成。
+  - **テスト要件**: MVC、scope 404、CSRF、HR 403、390px。
+  - **Demo**: 内部起票→内部メモ→公開返信→着手。
+  - **Rollback**: menu_key削除で画面到達不可。
 
-- [x] **Task B1: SLA 監視スケジューラ & Dedupe 通知エンジン**
-  - **Objective**: SLA 違反・期限前警告を定期検出するスケジューラと重複通知抑止エンジンを実装する。
-  - **Guidance**:
-    - `ServiceSlaScheduler`: `@Scheduled(cron = "0 */5 * * * *")` + `@SchedulerLock`。
-    - `ServiceSlaMonitoringService`: 未解決リクエストの `ServiceSlaClock` を走査し、超過フラグ（`response_breached`, `resolve_breached`）を更新。
-    - `NotificationService`: `SERVICE_DESK_SLA_BREACH` / `SERVICE_DESK_SLA_WARNING` 通知を dedupeKey（`SLA_RESPONSE_BREACH:{id}:{round}` 等）付きで送信し二重通知を防止。
-  - **Test Requirements**:
-    - `ServiceSlaSchedulerTest`: 期限超過検知、超過フラグ更新、通知送信、2回目実行時の重複通知防止（Dedupe 実証）。
-  - **Demo**:
-    - 期限超過リクエストに対してスケジューラを実行し、SLA違反フラグが更新され、通知が1件のみ発行されることをテスト実行で実証。
+- [ ] **A2. portal 起票 / 返信 / CSAT**
+  - **Objective**: 顧客portalから自社のみ起票・返信・解決後1回CSAT。BP不可。field-inventory C-9を追加。
+  - **Requirements**: CS-R1.2, CS-R3.1-2, CS-R5
+  - **実装ガイダンス**: 専用DTO。visibilityパラメータをportalが送れない。invoice `portal_inquiry` は触らない。
+  - **テスト要件**: IDOR matrix、二重CSAT、INTERNAL除外、390px。
+  - **Demo**: portal起票が内部に見え、内部公開返信がportalに見え、INTERNALが見えない。CSAT2回目409。
+  - **Rollback**: portal permission未付与でタブ非表示+API 403。
+  - **WIP注意**: list.html欠落。添付未配線。
 
-- [x] **Task B2: 顧客ヘルススコア算定 & 契約更新カレンダー連携 & 定例会(QBR) & CSV エクスポート**
-  - **Objective**: ルールベースの顧客ヘルススコア算出、契約更新カレンダーへのヘルスバッジ表示、QBR 管理、CSV 出力を実装する。
-  - **Guidance**:
-    - `CustomerHealthCalculator` / `CustomerHealthService`: 未解決 P0/P1、SLA 違反、CSAT、AR 延滞からスコアと要因説明を算出。
-    - 契約更新カレンダー (`/contracts/renewal-calendar`, `RenewalCalendarServiceImpl`): 顧客ヘルスと未解決件数を DTO に追加（契約状態は自動変更しない）。
-    - QBR / Action: `CustomerQbrApiController`, `CustomerQbrService`.
-    - CSV エクスポート: `ServiceRequestExportService` (CSV injection 対策、DataScope 準拠)。
-  - **Test Requirements**:
-    - `CustomerHealthCalculatorTest`: 各ファクターの加減点、欠損値ハンドリング、更新カレンダーの非破壊性検証。
-    - `CustomerQbrApiControllerTest`, `ServiceRequestExportTest`.
-  - **Demo**:
-    - 顧客ヘルス画面で要因内訳が表示され、契約更新カレンダーに対象顧客のヘルスバッジが表示されることを確認。
+- [ ] **B1. SLA scheduler / 通知**
+  - **Objective**: ShedLock付き監視、warning/breach/継続のdedupe、NotificationLinks登録。
+  - **Requirements**: CS-R2.4-5, CR-06.3
+  - **実装ガイダンス**: 既存 `publishToUser`。第二outbox禁止。宛先0は管理者へ。transaction外。
+  - **テスト要件**: 二重scheduler、dedupe、reopen後は新roundだけ通知、test profileでcron無効でも直接呼出可。
+  - **Demo**: 期限超過1件に通知1件、再実行でも増えない。
+  - **Rollback**: scheduler bean条件OFF。
 
-- [x] **Task M: 全体統合検証 & 回帰テスト & 390px モバイル UI 検証 & Runbook**
-  - **Objective**: 全ゲート（Fast Suite, MySQL/Flyway, Security/IDOR, 390px モバイル表示, Runbook）を完了し、成果物を固定する。
-  - **Guidance**:
-    - `mvn test` (Fast suite) の全件 PASS。
-    - 390px ポータル画面および内部画面のレイアウト崩れなし確認。
-    - 多言語リソース（`messages.properties`, `messages_en.properties`, `messages_zh_CN.properties`, `messages_ko.properties`）の整合性。
-    - `review-ledger.md` の記録および base/head SHA の固定。
-  - **Test Requirements**:
-    - `MessageBundleConsistencyTest`, `verify-like-ci` 相当のテスト実行。
-  - **Demo**:
-    - サービスデスク起票からSLA計時、ポータル返信、解決、CSAT回答、ヘルス反映、契約更新カレンダー表示までの一連のE2Eフローを実証。
+- [ ] **B2. health / renewal連携 / export / 添付完成**
+  - **Objective**: 減点ヘルス、missing表示、カレンダー非破壊、CSV scope一致、Document+FileScope添付。
+  - **Requirements**: CS-R4, CS-R5, CR-04
+  - **実装ガイダンス**: Invoice overdue読取。`renewal_decision` 非WRITE。snapshot overwrite禁止。FileReferenceProvider必須。
+  - **テスト要件**: factor内訳、AR missing、カレンダー非破壊、CSV injection、A/B download。
+  - **Demo**: ヘルス画面のfactorとカレンダーバッジ。契約状態が変わらない。
+  - **Rollback**: カレンダーDTOのhealth欄を空表示。health API OFF。
+  - **WIP注意**: 加点モデル・NEUTRAL/AT_RISK・delete+insert snapshotを是正。
+
+- [ ] **M. 統合gate / 390px / 障害 / rollback / Review handoff**
+  - **Objective**: 必要gate skip 0、desktop/390px portal Demo、provider/通知障害、runbook、base/head固定。
+  - **Requirements**: CS-R6, 完了定義（バックログ§9）
+  - **実装ガイダンス**: fast必須。mysql/performanceは影響範囲に応じて。実測していないことを確認済みと書かない。
+  - **テスト要件**: MessageBundleConsistency、IDOR、scheduler、backup/DROP手順。
+  - **Demo**: 起票→SLA→portal返信→解決→CSAT→ヘルス→カレンダーまでのE2E。
+  - **Rollback**: runbookのDROP手順とfeature flag。
+  - **完了後**: PRは作らず remote Head と本tasks対応表を独立Reviewへ渡す。

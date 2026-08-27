@@ -123,3 +123,12 @@ T001は完了済みであり、再実行・再Reviewしない。
 - `webhook-notifications`: `WebhookNotifier`新規+`NotificationServiceImpl`への1行フックのみ
 
 いずれも既存の完了済みspec（`notification-center`, `invoice-compliance`等）のコードには非破壊的な追記のみで、相互の担当ファイルも交差しない。
+
+## 5. 受入後機能候補（2026-08-27）
+
+正本は `.kiro/roadmap/2026-08-27-post-acceptance-feature-backlog.md`。APPROVED前はspec/inventoryのみ。専用worktree `codex/<feature-name>`。実装対話はPRを作らない。
+
+| spec | 状態 | 一言で着手 |
+|---|---|---|
+| `engineer-lifecycle-workflow` | NF-01 PASS（独立Review済） | 再開しない。指摘修正は別指示。 |
+| `customer-success-service-desk` | NF-02 DISCOVERY。DG-02未APPROVED | `.kiro/specs/customer-success-service-desk/tasks.md` の Task 0 まで。F1以降はOwner APPROVED後。通常checkoutは使わない。 |

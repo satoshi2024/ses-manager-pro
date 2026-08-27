@@ -1,68 +1,86 @@
 # Requirements — カスタマーサクセス・問い合わせ/SLA・顧客ヘルス (NF-02)
 
-## 1. 概要・目的
+## 前提・背景
 
 親: `.kiro/roadmap/2026-08-27-post-acceptance-feature-backlog.md` (NF-02)
-要件・設計基線: `.kiro/roadmap/2026-08-27-post-acceptance-requirements-design.md` (§3 NF-02, CR-01〜CR-06)
-決定台帳: `.kiro/roadmap/2026-08-27-post-acceptance-traceability.md` (DG-02)
-プラットフォーム不変条件: `.kiro/specs/customer-product-expansion-2026/platform-invariants.md`
+要件基線: `.kiro/roadmap/2026-08-27-post-acceptance-requirements-design.md` §3 および CR-01〜CR-06
+決定台帳: `.kiro/roadmap/2026-08-27-post-acceptance-traceability.md`（DG-02）
+不変条件: `.kiro/specs/customer-product-expansion-2026/platform-invariants.md`
+現行境界: `inventory.md`
 
-契約更新の直前だけでなく、日常の問い合わせ、クレーム、定例会(QBR)、満足度(CSAT)、未解決課題を体系的に蓄積し、SLA遵守を管理する。
-また、顧客ヘルスを「担当者の感覚」ではなく、未解決課題、SLA違反、請求滞納、満足度、更新意向から説明可能なルールベーススコアとして算出し、契約更新カレンダーと連携する。
+契約更新カレンダー（FR-06）は終了期限の俯瞰とエスカレーションを既に持つ。本機能は日常の問い合わせ・SLA・CSAT・QBR・説明可能な顧客ヘルスを蓄積し、更新判断の**材料**だけをカレンダーへ載せる。ヘルスやSLAは契約更新ステータスを自動変更しない。
 
----
+**承認状態**: 2026-08-27 時点で traceability は CANDIDATE/DISCOVERY。Owner・Approved scope・DG-02 は未APPROVED。本requirementsは提案であり、production変更の許可ではない。
 
-## 2. 業務要件と受入基準 (Acceptance Criteria)
-
-### CS-R1: 問い合わせ・課題管理 (Service Request)
-1. **起票**: 内部利用者（営業、マネージャー、管理者）および顧客ポータル利用者は、顧客・契約・案件・要員に紐づく問い合わせ（Service Request）を起票できる。
-2. **必須属性**: リクエスト番号（一意採番 `REQ-YYYYMM-XXXX`）、顧客ID、契約ID（任意）、案件ID（任意）、要員ID（任意）、カテゴリ（契約・請求・勤怠・品質・システム・その他）、優先度（P0:緊急、P1:高、P2:中、P3:低）、受付経路（ポータル、メール、電話、定例会、内部）、件名、本文、担当営業/CS担当者、ステータス。
-3. **ステータス遷移**: `RECEIVED`(受付) → `IN_PROGRESS`(対応中) → `WAITING_CUSTOMER`(顧客確認待ち) → `RESOLVED`(解決) → `CLOSED`(終了)。
-4. **再オープン**: 解決/終了後の問い合わせに対し、追加問い合わせや未解決の申し立てがあった場合、`REOPENED` → `IN_PROGRESS` へ再オープンできる。再オープン時は履歴と新しいSLAラウンドを作成し、過去のSLA結果を上書きしない。
-5. **コメントと内部メモの完全分離**:
-   - コメントは `PORTAL_VISIBLE`（ポータル公開）と `INTERNAL`（内部メモ）の可視性区分を持つ。
-   - `INTERNAL` コメントは、DBクエリ境界およびDTOレベルでポータル利用者から完全に秘匿され、APIレスポンスに含まれない（CSS非表示等による隠蔽は禁止）。
-
-### CS-R2: SLA管理と営業時間計算 (SLA Policy & Engine)
-1. **SLAポリシー**: 優先度（P0〜P3）ごとに初回応答目標時間（Response Target Hours）と解決目標時間（Resolve Target Hours）を定義する。
-2. **営業時間・休日計算**:
-   - SLA期限（初回応答期限・解決期限）は、標準営業時間（09:00〜18:00）、土日祝日（`WorkCalendarDay` / 休日カレンダー）、タイムゾーン（`Asia/Tokyo`）を考慮して厳密に計算する（単純な24時間加算は禁止）。
-3. **一時停止 (Pause) と再開 (Resume)**:
-   - 問い合わせが `WAITING_CUSTOMER`（顧客確認待ち）状態の間はSLA時計を一時停止（Pause）し、対応再開時に停止期間（分単位）をSLA期限に繰り延べる（SLA Clockへ記録）。
-4. **SLA超過監視と通知**:
-   - SLA期限の事前予告（例: 期限1時間前）、期限超過（Breach）発生時、および未解決継続時に、担当者およびマネージャーへ通知（`t_notification`）を発行する。
-   - 通知は重複抑止キー（Dedupe Key: `sla:request:{id}:round:{round}:type:{type}`）により二重通知を防ぐ。
-
-### CS-R3: CSAT (顧客満足度調査) & 定例会/QBR記録
-1. **CSAT回答**:
-   - 問い合わせが解決（`RESOLVED` または `CLOSED`）した際、顧客ポータルから1回限り5段階評価スコアとフィードバックコメントを投稿できる。
-   - 匿名公開URL方式ではなく、ポータル認証セッション＋自社リクエスト所属検証（Customer Scope）で認可する。
-   - DB UNIQUE制約およびCASにより二重回答を防止する。
-2. **定例会・QBR (Quarterly Business Review) 記録**:
-   - 顧客ごとの定例会/QBRの日時、参加者、議題、討議内容、決定事項、次回日程を記録できる。
-   - QBRに紐づくアクションアイテム（Action Item: タイトル、説明、担当者、期日、状態）を管理できる。
-
-### CS-R4: 顧客ヘルススコア・要因分析 (Customer Health Score)
-1. **説明可能なルールベーススコア**:
-   - 顧客ヘルススコア（0〜100点）およびステータス（`HEALTHY`: 80点以上、`WARNING`: 50〜79点、`CRITICAL`: 49点以下）を算出する。
-   - スコア算出要因（未解決P0/P1件数、過去30日SLA違反件数、平均CSATスコア、売掛金滞納フラグ、定期接触なし日数等）と各因子の配点、欠損入力（Missing Inputs）を透明に説明できる。
-2. **契約更新カレンダー連携**:
-   - 契約更新カレンダー（`/contracts/renewal-calendar`）上で、対象顧客のヘルスステータス、未解決P0/P1件数、直近CSATを表示し、更新交渉の事前判断材料を提供する。
-   - **不変条件**: ヘルススコアは参考情報であり、契約更新ステータス（更新決定や解約）を自動確定・自動変更しない。
-
-### CS-R5: 外部ポータル統合とスコープ安全 (Portal Scope & Security)
-1. **顧客ポータル起票・閲覧・返信**:
-   - 顧客ポータル利用者は、自社（`customerId`）に紐づく問い合わせのみ一覧表示・詳細閲覧・新規起票・返信コメント投稿・添付ファイルダウンロードができる。
-2. **完全なマルチテナント/顧客スコープ分離 (IDOR拒否)**:
-   - 顧客Aのポータル利用者が、顧客Bの問い合わせID、添付ファイルURL、コメント、CSAT、カウント、通知リンクへアクセスした場合、存在を推測させない一貫した拒否（404 Not Found または 403 Forbidden）を返す。
-3. **添付ファイルセキュリティ**:
-   - 添付ファイルのアップロード・ダウンロードは `DocumentService` / `DocumentStorage` と連携し、`FileScopeValidationService` および `FileReferenceProvider` に登録して正当な顧客スコープ内でのみダウンロード可能とする。
+再利用する正本: Customer/Contact、Contract/RenewalCalendar、portal security chain/DTO、`WorkCalendarDay`（法人既定のみ）、`DocumentService`、`NotificationService`。
+所有するもの: service request / comment / SLA clock / CSAT / QBR / health snapshot。
+所有しないもの: 新Customer master、新portal認証、法的自動判定、第二通知/outbox。
 
 ---
 
-## 3. 非目標 (Out of Scope)
-1. 汎用ITSMツール（Jira Service Management / Zendesk）の全機能の模倣。
-2. AIチャットボットによる自動問い合わせ解決や自動クローズ。
-3. AIの感情分析のみに基づく自動解約判定や顧客危険判定。
-4. 外部メールサーバー（IMAP/POP3）からの自動チケットインポート（別連携フェーズ）。
-5. 契約更新ステータスの自動更新・自動失注処理。
+## CS-R1 問い合わせ・課題
+
+1. THE 内部利用者（管理者、営業、マネージャー）SHALL 顧客に紐づく問い合わせを起票できる。契約・案件・要員・contactは任意とするが、指定した場合は同一顧客に属することを検証し、属さなければ拒否する。
+2. THE 顧客portal利用者（orgType=`CUSTOMER`、有効、permission `service-desk.create`）SHALL 自組織 `customer_id` の問い合わせだけを起票できる。BP portal利用者は起票・閲覧できない。
+3. THE request SHALL 一意番号（`REQ-YYYYMM-XXXX`）、顧客ID、任意の契約/案件/要員/contact、カテゴリ（`CONTRACT`/`BILLING`/`ATTENDANCE`/`QUALITY`/`SYSTEM`/`OTHER`）、優先度（P0〜P3）、経路（`PORTAL`/`EMAIL`/`PHONE`/`MEETING`/`INTERNAL`）、件名、本文、内部担当 `owner_user_id`、status、SLA round を持つ。
+4. THE status SHALL `RECEIVED → IN_PROGRESS → WAITING_CUSTOMER → RESOLVED → CLOSED` を基本とする。`RESOLVED`/`CLOSED` からの再openは新SLA roundを作り、以前のSLA結果を上書きしない。永続statusに曖昧な `REOPENED` を残さず、遷移コマンド `REOPENED` は新round作成後 `IN_PROGRESS` へ進める。
+5. THE comment SHALL `INTERNAL` と `PORTAL_VISIBLE` をDB列で分離する。portalの読取SQLは `PORTAL_VISIBLE` のみとし、DTOクラスにINTERNAL本文・内部user ID・原価を持たない。CSSやフロント非表示だけで隠してはならない。
+6. THE 既存請求メモ `t_invoice.portal_inquiry` SHALL 本機能のrequestへ自動変換しない。両方を并存する。
+
+---
+
+## CS-R2 SLA
+
+1. THE SLA policy SHALL 優先度別にversionを持ち、初回応答目標時間と解決目標時間、営業開始/終了時刻を保持する。requestの各roundは適用した `policy_id` をsnapshotする。
+2. THE deadline SHALL tenant timezoneの業務日時で計算する。休日は法人既定 `m_work_calendar_day`（engineer/organization未指定）を用い、未設定時は土日除外と missing calendar を記録する。単純な24時間加算、要員個人カレンダー、派遣コンプライアンス暦は使わない。
+3. WHEN statusが `WAITING_CUSTOMER` になる場合、THE システム SHALL SLA clockを PAUSED にし、pause理由と開始時刻を保持する。再開時は**営業分数**だけ期限を延長する。完了済みroundのbreachフラグと確定時刻は変更しない。
+4. THE scheduler SHALL ShedLockで多重起動を1実行に畳み、期限前warning・breach・継続breachを `NotificationService.publishToUser` で通知する。dedupe keyは request×round×種別で一意とし、同一事象の再実行で通知を増やさない。
+5. THE 通知link SHALL `NotificationLinks` に定数登録し、遷移時に内部scopeまたはportal membershipを再認可する。
+
+---
+
+## CS-R3 CSAT / QBR
+
+1. WHEN requestが `RESOLVED` または `CLOSED` の場合、THE 当該顧客のportal user SHALL 5段階スコアと任意コメントを **1回だけ** 投稿できる。認可はportal session＋自社request membershipとする。匿名URLは使わない。
+2. THE 二重投稿 SHALL DB `UNIQUE(service_request_id)` とCASで拒否し、409を返す。
+3. THE 営業/マネージャー SHALL 顧客ごとの定例会/QBR（日時、参加者、議題、討議、決定、次回日）と action（owner、due、status）を保存できる。actionは検索と期限通知の対象になる。
+4. THE QBR SHALL portalへ公開しない（内部記録）。
+
+---
+
+## CS-R4 Health
+
+1. THE health SHALL 未解決P0件数、未解決P1件数、直近30日SLA違反件数、平均CSAT、AR延滞（既存Invoice overdueの読取）、最終QBR日を型付きfactorとして計算する。合計0–100と `HEALTHY`(≥80)/`WARNING`(50–79)/`CRITICAL`(≤49) を返す。
+2. THE UI SHALL 合計だけでなく factor、対象期間、算定時刻、missing input を表示する。欠損を「普通点」で埋めない。
+3. THE health SHALL `t_contract.renewal_decision` および更新ドラフトを自動作成・自動変更しない。
+4. THE 日次snapshot SHALL customer×日付で一意とし、同一日の再計算で過去snapshotを黙ってdeleteしない（訂正は理由付き）。
+
+---
+
+## CS-R5 Portal scope / 添付 / export
+
+1. THE 顧客Aのportal session SHALL 顧客Bのrequest ID、comment、CSAT、count、export、添付download、通知link先を取得できず、一貫した404（または存在を漏らさない拒否）を返す。
+2. THE 添付 SHALL `DocumentService` に登録し、`FileReferenceProvider` と `FileScopeValidationService` の両方に `SERVICE_REQUEST` を登録する。未scan・未知fileはfail-closed。INTERNAL添付はportal download APIから構造的に除外する。
+3. THE 内部list/detail/count/export/download/notification/scheduler SHALL 同じ顧客scope resolverを使う。営業はDataScope、マネージャーは組織∩DataScope、管理者は全件、HR/要員は不可。
+4. THE portal DTO SHALL field-inventoryへ C-9（問い合わせthread）としてallow-listを追加した項目だけを含み、内部entityをserializeしない。
+
+---
+
+## CS-R6 非機能（CR-01〜CR-06の適用）
+
+1. THE 更新API SHALL CSRF、menu/action permission、domain scopeを全て通過した場合だけ実行する。
+2. THE 状態変更 SHALL `version` CASまたは状態条件付きUPDATEで防重し、失敗は409とする。
+3. THE 外部I/O（通知outbox、file scan）SHALL DB transaction外で実行する。
+4. THE 文言 SHALL 4 bundle（`messages`/`_en`/`_zh_CN`/`_ko`）へ同一keyを追加し、日本語を正として翻訳する。`messages_ja` は作らない。
+5. THE UI SHALL desktopと390pxで起票・返信・CSAT・内部メモ切替を完了できる。二重click抑止はserver冪等の代替にしない。
+6. THE 各acceptance criterion SHALL 定向自動testまたは明示Demoへtraceする。skipを成功としない。
+
+---
+
+## 非目標
+
+1. 汎用ITSM製品の全機能。
+2. AIチャットボットによる自動解決・自動クローズ。
+3. 感情分析のみによる顧客危険判定・自動解約。
+4. IMAP/POP3からの自動チケット化。
+5. 契約更新ステータスの自動更新。

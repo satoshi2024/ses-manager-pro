@@ -23,7 +23,7 @@
 | ID | feature-name候補 | 現在Status | Owner | 主要KPI | 主依存 | Decision/理由 | 再評価日 |
 |---|---|---|---|---|---|---|---|
 | NF-01 | `engineer-lifecycle-workflow` | PASS | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 独立Review PASS (Stage A/B 合格)。PR #85 更新済み。要員の入社・配属・異動・休職・復職・退社ワークフロー、退社ゲート9項目、SoD例外承認確立 | 2026-08-27 |
-| NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
+| NF-02 | `customer-success-service-desk` | DISCOVERY | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | DG-02はspec提案済み・公式未APPROVED。Owner/KPI/期限未記入のためproduction未着手 | 2026-08-27 |
 | NF-03 | `certification-learning-skill-gap` | CANDIDATE | 未定 | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | 未決定 | 未定 |
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
@@ -58,10 +58,14 @@
 
 ### DG-02 NF-02
 
-- portal起票対象契約と利用者。
-- SLAの営業時間、休日calendar、停止時間、priority matrix。
-- internal noteと顧客公開commentの分類・誤公開防止方式。
-- health scoreの要因、重み、表示対象、更新判断への使い方。
+状態: **未APPROVED（DISCOVERY）**。提案の正本は `.kiro/specs/customer-success-service-desk/inventory.md` §5。
+
+- portal起票対象契約と利用者: 顧客portal orgの有効userが自社requestを起票。契約は任意だが同一customer。BPは対象外。`t_invoice.portal_inquiry` は請求メモのまま自動ticket化しない。
+- SLAの営業時間、休日calendar、停止時間、priority matrix: 既定09:00–18:00、tenant TZ、法人既定WorkCalendar（個人/派遣暦は不使用）、PauseはWAITING_CUSTOMERの営業分数、P0=1h/4h … P3=8h/48h、round別clock不変。
+- internal noteと顧客公開commentの分類・誤公開防止方式: DB列 `INTERNAL`/`PORTAL_VISIBLE`、portalはSQL+allow-list DTO。CSS隠蔽禁止。
+- health scoreの要因、重み、表示対象、更新判断への使い方: 減点モデル（P0/P1/SLA/CSAT/AR/QBR）、missing明示、カレンダー表示専用、`renewal_decision` 非WRITE。
+
+Ownerが本節を APPROVED と記入するまで F1 以降を開始しない。
 
 ### DG-03 NF-03
 
