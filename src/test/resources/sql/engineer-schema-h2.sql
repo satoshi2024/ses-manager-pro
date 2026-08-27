@@ -2818,6 +2818,7 @@ CREATE TABLE t_pwa_client_mutation (
     client_request_id VARCHAR(80) NOT NULL,
     user_id BIGINT NOT NULL,
     user_scope_hash CHAR(64) NOT NULL,
+    operation VARCHAR(160),
     screen VARCHAR(40) NOT NULL,
     work_month CHAR(7),
     payload_hash CHAR(64) NOT NULL,

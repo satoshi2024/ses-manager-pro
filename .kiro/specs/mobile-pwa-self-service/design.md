@@ -114,13 +114,13 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 
 - Header: `X-Client-Request-Id`（UUID、1 commandにつき不変）
 - Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`、`X-Client-Created-At`（epoch milliseconds）。bodyは`screen`、`month`、`payload`を持つ。
-- Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
+- Hash: serverが`operation`（screen + HTTP method + route）、`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
 - Retention: serverは`X-Client-Created-At`をserver時計と比較し、record単位で30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。scope lease失効はrecord retentionとは別に扱い、同一userとして更新したscopeへrecordを再束縛する。期限判定後はpayloadを保存・再送せず、client側でもERROR recordのpayload/hash/conflictを除去して破棄または再入力を促す。
 - Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。同一userのscope lease更新後も、署名検証済みの現在scopeと`user_id`で既存ledger行を特定し、scope hashの更新だけで同hash replayを拒否しない。
 
 ### 7.2 Storage
 
-汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`t_pwa_client_mutation` ledgerを追加する。`user_id,client_request_id`のunique、opaque scope hash、screen/month、payload hash、base version、status、最小ack JSON、監査時刻を持つ。raw payload、入力内容、PII response bodyは保存しない。migrationは実装開始時の全Flyway locationを再確認したうえでV112とした。
+汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`t_pwa_client_mutation` ledgerを追加する。`user_id,operation,client_request_id`を冪等性境界とし、opaque scope hash、screen/month、payload hash、base version、status、最小ack JSON、監査時刻を持つ。raw payload、入力内容、PII response bodyは保存しない。ledger本体はV112、operation境界の後方互換拡張はV113とする。
 
 処理順序は、client作成時刻とheaderを検証し、domain mutationと同一transactionでledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行し同じtransactionでledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時はdomain mutationとclaim/ackを一緒にrollbackする。
 

@@ -3,8 +3,13 @@ package com.ses.service.pwa;
 import com.fasterxml.jackson.databind.JsonNode;
 
 /** オフラインqueueから再送される最小command。baseVersionはheaderからcontrollerが注入する。 */
-public record PwaMutationCommand(String screen, String month, Integer baseVersion, JsonNode payload) {
+public record PwaMutationCommand(String operation, String screen, String month, Integer baseVersion, JsonNode payload) {
+    /** 既存のサービス単体テスト・内部呼出しとの互換用。HTTP経路ではoperationを必ず設定する。 */
+    public PwaMutationCommand(String screen, String month, Integer baseVersion, JsonNode payload) {
+        this(null, screen, month, baseVersion, payload);
+    }
+
     public String payloadHash(PwaCanonicalizer canonicalizer) {
-        return canonicalizer.hash(screen, month, baseVersion, payload);
+        return canonicalizer.hash(operation, screen, month, baseVersion, payload);
     }
 }

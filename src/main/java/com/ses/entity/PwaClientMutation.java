@@ -16,6 +16,7 @@ public class PwaClientMutation {
     private String clientRequestId;
     private Long userId;
     private String userScopeHash;
+    private String operation;
     private String screen;
     private String workMonth;
     private String payloadHash;

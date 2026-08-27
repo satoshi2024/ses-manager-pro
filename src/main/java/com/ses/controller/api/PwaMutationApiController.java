@@ -9,15 +9,18 @@ import com.ses.common.result.ApiResult;
 import com.ses.dto.attendance.AttendanceDayRequest;
 import com.ses.entity.AttendanceMonth;
 import com.ses.entity.Contract;
+import com.ses.entity.EmployeeAttendance;
 import com.ses.entity.Engineer;
 import com.ses.entity.ExpenseRequest;
 import com.ses.entity.WorkRecord;
 import com.ses.entity.WorkRecordDaily;
 import com.ses.mapper.AttendanceMonthMapper;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EmployeeAttendanceMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.mapper.WorkRecordDailyMapper;
 import com.ses.service.AttendanceService;
 import com.ses.service.WorkRecordService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
@@ -65,8 +68,10 @@ public class PwaMutationApiController {
     private final ExpenseRequestService expenseRequestService;
     private final EngineerChangeRequestService changeRequestService;
     private final AttendanceMonthMapper attendanceMonthMapper;
+    private final EmployeeAttendanceMapper employeeAttendanceMapper;
     private final ContractMapper contractMapper;
     private final WorkRecordMapper workRecordMapper;
+    private final WorkRecordDailyMapper workRecordDailyMapper;
     private final ExpenseRequestMapper expenseRequestMapper;
     private final EngineerMapper engineerMapper;
     private final HttpServletRequest httpRequest;
@@ -195,7 +200,9 @@ public class PwaMutationApiController {
         if (baseVersion == null || baseVersion < 0) {
             throw BusinessException.of(400, "error.pwa.baseVersionRequired");
         }
-        PwaMutationCommand command = new PwaMutationCommand(body.screen(), body.month(), baseVersion, body.payload());
+        PwaMutationCommand command = new PwaMutationCommand(
+                operation(expectedScreen, httpRequest.getMethod(), httpRequest.getRequestURI()),
+                body.screen(), body.month(), baseVersion, body.payload());
         validateDateMonthBoundary(command);
         PwaClientMutationLedgerService.Claim claim = ledger.claim(command, clientRequestId, payloadHash,
                 clientCreatedAt, userScope);
@@ -329,9 +336,30 @@ public class PwaMutationApiController {
                     .eq(AttendanceMonth::getEngineerId, context.engineerId())
                     .eq(AttendanceMonth::getWorkMonth, YearMonth.parse(month).atDay(1))
                     .last("LIMIT 1 FOR UPDATE"));
-            return row == null ? new VersionSnapshot(0, Map.of("exists", false))
-                    : new VersionSnapshot(value(row.getVersion()), Map.of(
-                    "exists", true, "id", row.getId(), "version", value(row.getVersion()), "status", row.getStatus()));
+            if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
+            EmployeeAttendance daily = employeeAttendanceMapper.selectOne(new LambdaQueryWrapper<EmployeeAttendance>()
+                    .eq(EmployeeAttendance::getEngineerId, context.engineerId())
+                    .eq(EmployeeAttendance::getWorkDate, LocalDate.parse(requiredText(payload, "workDate")))
+                    .eq(EmployeeAttendance::getSource, "manual")
+                    .orderByDesc(EmployeeAttendance::getId)
+                    .last("LIMIT 1 FOR UPDATE"));
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("exists", daily != null);
+            // 月次versionを競合対象として保持し、対象日の保存値を同じsnapshotへ正規化する。
+            data.put("id", row.getId());
+            data.put("version", value(row.getVersion()));
+            data.put("status", row.getStatus());
+            data.put("workDate", requiredText(payload, "workDate"));
+            if (daily != null) {
+                data.put("dailyId", daily.getId());
+                data.put("clockIn", daily.getClockIn() == null ? null : daily.getClockIn().toString());
+                data.put("clockOut", daily.getClockOut() == null ? null : daily.getClockOut().toString());
+                data.put("breakMinutes", daily.getBreakMinutes());
+                data.put("workType", daily.getWorkType());
+                data.put("workplaceType", daily.getWorkplaceType());
+                data.put("remarks", daily.getRemarks());
+            }
+            return new VersionSnapshot(value(row.getVersion()), data);
         }
         if ("timesheet".equals(command.screen())) {
             Long contractId = requiredLong(payload, "contractId");
@@ -352,6 +380,19 @@ public class PwaMutationApiController {
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));
             data.put("status", row.getStatus()); data.put("actualHours", row.getActualHours());
             data.put("remarks", row.getRemarks());
+            WorkRecordDaily daily = workRecordDailyMapper.selectOne(new LambdaQueryWrapper<WorkRecordDaily>()
+                    .eq(WorkRecordDaily::getWorkRecordId, row.getId())
+                    .eq(WorkRecordDaily::getWorkDate, LocalDate.parse(requiredText(payload, "workDate")))
+                    .last("LIMIT 1 FOR UPDATE"));
+            data.put("workDate", requiredText(payload, "workDate"));
+            if (daily != null) {
+                data.put("dailyId", daily.getId());
+                data.put("startTime", daily.getStartTime() == null ? null : daily.getStartTime().toString());
+                data.put("endTime", daily.getEndTime() == null ? null : daily.getEndTime().toString());
+                data.put("breakMinutes", daily.getBreakMinutes());
+                data.put("workedHours", daily.getWorkedHours());
+                data.put("dailyRemarks", daily.getRemarks());
+            }
             return new VersionSnapshot(value(row.getVersion()), data);
         }
         if ("expense".equals(command.screen())) {
@@ -385,6 +426,13 @@ public class PwaMutationApiController {
         if (!Objects.equals(engineerId, contract.getEngineerId())) {
             throw BusinessException.of(403, "error.my.notOwner");
         }
+    }
+
+    /** client/serverで同じoperation境界をhash・ledgerへ記録する。route IDも副作用対象の一部である。 */
+    private String operation(String screen, String method, String uri) {
+        // controller単体テスト等でrequest metadataが無い場合は旧4要素hashへフォールバックする。
+        if (method == null || uri == null) return null;
+        return screen + ":" + method.toUpperCase(java.util.Locale.ROOT) + ":" + uri;
     }
 
     private ExpenseRequestService.ExpenseDraftCommand expenseCommand(JsonNode payload) {

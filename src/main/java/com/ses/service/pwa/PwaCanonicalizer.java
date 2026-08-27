@@ -22,11 +22,17 @@ public class PwaCanonicalizer {
     }
 
     public String hash(String screen, String month, Integer baseVersion, JsonNode payload) {
+        return hash(null, screen, month, baseVersion, payload);
+    }
+
+    public String hash(String operation, String screen, String month, Integer baseVersion, JsonNode payload) {
         ObjectNode command = objectMapper.createObjectNode();
         if (baseVersion == null) command.putNull("baseVersion");
         else command.put("baseVersion", baseVersion);
         if (month == null) command.putNull("month");
         else command.put("month", month);
+        if (operation == null) command.putNull("operation");
+        else command.put("operation", operation);
         command.set("payload", payload == null ? objectMapper.nullNode() : payload);
         if (screen == null) command.putNull("screen");
         else command.put("screen", screen);

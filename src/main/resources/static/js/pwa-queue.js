@@ -89,11 +89,20 @@
     }
 
     async function rebindScope(oldScope, newScope) {
-        const records = await readAll();
-        await Promise.all(records.filter(record => record.userScope === oldScope).map(record => {
-            record.userScope = newScope;
-            return put(record);
-        }));
+        return withStore('readwrite', store => {
+            const request = store.openCursor();
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) return;
+                if (cursor.value.userScope === oldScope) {
+                    const record = cursor.value;
+                    record.userScope = newScope;
+                    cursor.update(record);
+                }
+                cursor.continue();
+            };
+            return request;
+        });
     }
 
     function canonical(value) {
@@ -116,6 +125,7 @@
         return {
             baseVersion: Number(record.baseVersion),
             month: record.month || null,
+            operation: operationFor(record),
             payload: record.payload,
             screen: record.screen
         };
@@ -123,6 +133,10 @@
 
     async function commandHash(record) {
         return sha256(JSON.stringify(canonical(commandFor(record))));
+    }
+
+    function operationFor(record) {
+        return `${record.screen}:${String(record.method).toUpperCase()}:${record.path}`;
     }
 
     function newRequestId() {

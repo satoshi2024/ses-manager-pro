@@ -29,4 +29,14 @@ class PwaCanonicalizerTest {
         assertThat(canonicalizer.hash("attendance", "2026-08", 1, payload))
                 .isNotEqualTo(canonicalizer.hash("attendance", "2026-08", 2, payload));
     }
+
+    @Test
+    void operationが変われば同一payloadでもhashが変わる() {
+        ObjectNode payload = new ObjectMapper().createObjectNode()
+                .put("id", 7L).put("description", "変更");
+        assertThat(canonicalizer.hash("expense:PUT:/api/my/pwa/expenses/drafts/7",
+                "expense", "2026-08", 0, payload))
+                .isNotEqualTo(canonicalizer.hash("expense:POST:/api/my/pwa/expenses/drafts",
+                        "expense", "2026-08", 0, payload));
+    }
 }

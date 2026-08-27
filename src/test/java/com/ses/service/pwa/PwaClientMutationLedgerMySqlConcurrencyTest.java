@@ -37,10 +37,12 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -100,6 +102,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
 
     @MockBean
     private PwaUserContextService userContextService;
+
+    @MockBean
+    private PwaMutationMetrics mutationMetrics;
 
     @AfterEach
     void cleanup() {
@@ -180,7 +185,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 .putNull("customerId")
                 .putNull("projectId")
                 .put("description", "競合writer");
-        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "expense:PUT:/api/my/pwa/expenses/drafts/" + expenseId,
+                "expense", "2026-08", 0, payload);
         String hash = command.payloadHash(canonicalizer);
         PwaUserContextService.CurrentContext context = new PwaUserContextService.CurrentContext(
                 USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60));
@@ -261,7 +268,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         ObjectNode body = objectMapper.createObjectNode()
                 .put("screen", "expense").put("month", "2026-08")
                 .set("payload", payload);
-        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "expense:PUT:/api/my/pwa/expenses/drafts/" + expenseId,
+                "expense", "2026-08", 0, payload);
         String hash = command.payloadHash(canonicalizer);
         when(userContextService.assertCurrent(SCOPE)).thenReturn(new PwaUserContextService.CurrentContext(
                 USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60)));
@@ -286,6 +295,64 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     }
 
     @Test
+    void 実HTTPcontroller経路で完了ackが失敗するとledgerと業務行をrollbackする() throws Exception {
+        engineerId = seedEngineer();
+        ExpenseRequest expense = ExpenseRequest.builder()
+                .engineerId(engineerId)
+                .expenseDate(java.time.LocalDate.of(2026, 8, 28))
+                .category(ExpenseRequestService.CATEGORY_TRANSPORT)
+                .amount(new java.math.BigDecimal("1000"))
+                .description("HTTP rollback前")
+                .status(ExpenseRequestService.STATUS_DRAFT)
+                .version(0)
+                .build();
+        expenseMapper.insert(expense);
+        expenseId = expense.getId();
+
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("id", expenseId).put("expenseDate", "2026-08-28")
+                .put("category", ExpenseRequestService.CATEGORY_TRANSPORT)
+                .put("amount", 3000).putNull("customerId").putNull("projectId")
+                .put("description", "HTTP rollback後は残さない");
+        ObjectNode body = objectMapper.createObjectNode()
+                .put("screen", "expense").put("month", "2026-08")
+                .set("payload", payload);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "expense:PUT:/api/my/pwa/expenses/drafts/" + expenseId,
+                "expense", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+        when(userContextService.assertCurrent(SCOPE)).thenReturn(new PwaUserContextService.CurrentContext(
+                USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60)));
+        when(userContextService.hashScope(SCOPE)).thenReturn("f".repeat(64));
+
+        AtomicBoolean failCompletion = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (failCompletion.get()) throw new IllegalStateException("forced HTTP completion failure");
+            return null;
+        }).when(mutationMetrics).increment("completed", "expense");
+        failCompletion.set(true);
+        try {
+            mockMvc.perform(put("/api/my/pwa/expenses/drafts/" + expenseId)
+                            .with(user("1").roles("要員")).with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body.toString())
+                            .header("X-Client-Request-Id", "pwa-mysql-http-rollback")
+                            .header("X-Client-Payload-Hash", hash)
+                            .header("X-Client-Base-Version", "0")
+                            .header("X-Client-Created-At", Instant.now().toEpochMilli())
+                            .header("X-User-Scope", SCOPE))
+                    .andExpect(status().is5xxServerError());
+        } finally {
+            failCompletion.set(false);
+        }
+
+        ExpenseRequest restored = expenseMapper.selectById(expenseId);
+        assertThat(restored.getVersion()).isEqualTo(0);
+        assertThat(restored.getDescription()).isEqualTo("HTTP rollback前");
+        assertThat(mapper.selectByUserAndClientRequest(USER_ID, "pwa-mysql-http-rollback")).isNull();
+    }
+
+    @Test
     void domain失敗時は業務行とledgerackを同一transactionでrollbackする() {
         engineerId = seedEngineer();
         ExpenseRequest expense = ExpenseRequest.builder()
@@ -304,7 +371,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 .put("category", ExpenseRequestService.CATEGORY_TRANSPORT)
                 .put("amount", 3000).putNull("customerId").putNull("projectId")
                 .put("description", "rollback後は残さない");
-        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "expense:PUT:/api/my/pwa/expenses/drafts/" + expenseId,
+                "expense", "2026-08", 0, payload);
         String hash = command.payloadHash(canonicalizer);
         when(userContextService.assertCurrent(SCOPE)).thenReturn(new PwaUserContextService.CurrentContext(
                 USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60)));

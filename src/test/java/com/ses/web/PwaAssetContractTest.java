@@ -62,7 +62,7 @@ class PwaAssetContractTest {
         String queue = read("js/pwa-queue.js");
 
         assertThat(queue).contains("indexedDB", "clientRequestId", "payloadHash", "baseVersion",
-                "userScope", "createdAt", "MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000");
+                "userScope", "createdAt", "operationFor", "MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000");
         assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
                 "X-Client-Created-At", "X-User-Scope", "cache: 'no-store'");
         assertThat(queue).contains("const contextHeaders", "contextHeaders['X-User-Scope'] = oldScope");

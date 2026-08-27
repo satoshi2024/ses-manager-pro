@@ -103,6 +103,29 @@ class PwaClientMutationLedgerServiceTest {
     }
 
     @Test
+    void 同一ID同一payloadでもoperationが異なれば409で再利用しない() {
+        ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "timesheet:POST:/api/my/pwa/timesheet/daily", "timesheet", "2026-08", 0, payload);
+        String scope = "scope-operation";
+        String hash = command.payloadHash(canonicalizer);
+        PwaUserContextService.CurrentContext context = new PwaUserContextService.CurrentContext(7L, 9L, scope);
+        when(userContextService.assertCurrent(scope)).thenReturn(context);
+        PwaClientMutation existing = new PwaClientMutation();
+        existing.setId(13L);
+        existing.setOperation("expense:POST:/api/my/pwa/expenses/drafts");
+        existing.setPayloadHash(hash);
+        existing.setStatus("COMPLETED");
+        when(mapper.selectByUserAndClientRequest(7L, "req-operation")).thenReturn(existing);
+
+        assertThatThrownBy(() -> ledger.claim(command, "req-operation", hash,
+                Instant.now().toEpochMilli(), scope))
+                .isInstanceOf(com.ses.common.exception.PwaConflictException.class)
+                .hasMessage("pwa.idempotencyPayloadMismatch");
+        verify(mapper, never()).insert(any(PwaClientMutation.class));
+    }
+
+    @Test
     void 同一userのscope更新後も同一hashの完了commandをreplayする() {
         ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
         PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);
