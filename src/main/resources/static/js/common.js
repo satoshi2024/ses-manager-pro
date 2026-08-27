@@ -88,6 +88,10 @@ const SES = {
         },
         
         _fetch: async function(url, options) {
+            options = options || {};
+            // API/portal/PIIレスポンスをブラウザHTTPキャッシュへ残さない。
+            options.cache = 'no-store';
+            options.credentials = options.credentials || 'same-origin';
             // CSRF: 更新系リクエストで XSRF-TOKEN Cookie を X-XSRF-TOKEN ヘッダーへ複製
             const method = (options.method || 'GET').toUpperCase();
             if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(method)) {
@@ -104,6 +108,7 @@ const SES = {
                 // Fetch API follows redirects by default. If redirected to login or returns HTML...
                 const contentType = response.headers.get('content-type') || '';
                 if (response.redirected && (response.url.indexOf('/login') !== -1 || contentType.indexOf('text/html') !== -1)) {
+                    if (SES.pwa) SES.pwa.sessionExpired();
                     window.location.href = '/login?error=timeout';
                     throw new Error('Session timeout');
                 }
@@ -125,6 +130,7 @@ const SES = {
                         SES.toast.error(message);
                         throw new Error(message);
                     }
+                    if (SES.pwa) SES.pwa.sessionExpired();
                     window.location.href = '/login?error=timeout';
                     throw new Error('Unauthorized');
                 }
@@ -156,7 +162,7 @@ const SES = {
     /** バイナリダウンロード。APIエラーはページ遷移せずトーストで通知する。 */
     download: async function(url, fallbackName) {
         try {
-            const response = await fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/octet-stream, application/json' } });
+            const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: { 'Accept': 'application/octet-stream, application/json' } });
             const contentType = response.headers.get('content-type') || '';
             if (response.redirected && response.url.indexOf('/login') !== -1) {
                 window.location.href = '/login?error=timeout';
@@ -945,6 +951,103 @@ const SES = {
 
 window.Toast = SES.toast;
 
+// ================== PWA shell / user-scope cleanup ==================
+SES.pwa = {
+    databaseName: 'ses-pwa-self-service',
+    registration: null,
+    updatePrompted: false,
+    hadController: false,
+
+    init: function() {
+        if (!('serviceWorker' in navigator)) return;
+        this.hadController = !!navigator.serviceWorker.controller;
+        const self = this;
+        navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).then(function(registration) {
+            self.registration = registration;
+            if (registration.waiting) self.promptUpdate(registration.waiting);
+            registration.addEventListener('updatefound', function() {
+                const worker = registration.installing;
+                if (!worker) return;
+                worker.addEventListener('statechange', function() {
+                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                        self.promptUpdate(worker);
+                    }
+                });
+            });
+        }).catch(function(error) {
+            console.warn('PWA service worker registration failed', error);
+        });
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+            if (!self.hadController) {
+                self.hadController = true;
+                return;
+            }
+            if (self._reloadingForUpdate) return;
+            self._reloadingForUpdate = true;
+            window.location.reload();
+        });
+        this.bindLogout();
+    },
+
+    promptUpdate: function(worker) {
+        if (this.updatePrompted) return;
+        this.updatePrompted = true;
+        const self = this;
+        const apply = function() { worker.postMessage({ type: 'SKIP_WAITING' }); };
+        if (window.Swal && typeof Swal.fire === 'function') {
+            Swal.fire({
+                title: '更新があります',
+                text: '最新の画面を読み込みます。保存済みの下書きは維持されます。',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: '更新する',
+                cancelButtonText: '後で'
+            }).then(function(result) {
+                if (result.isConfirmed) apply();
+                else self.updatePrompted = false;
+            });
+        } else if (window.confirm('最新の画面を読み込みますか？')) {
+            apply();
+        } else {
+            self.updatePrompted = false;
+        }
+    },
+
+    clearUserScope: function() {
+        const self = this;
+        try { localStorage.removeItem('ses_pwa_user_scope'); } catch (_) {}
+        const deleteDatabase = new Promise(function(resolve) {
+            if (!window.indexedDB) { resolve(); return; }
+            const request = indexedDB.deleteDatabase(self.databaseName);
+            request.onsuccess = request.onerror = request.onblocked = function() { resolve(); };
+        });
+        const timeout = new Promise(function(resolve) { setTimeout(resolve, 1000); });
+        if (navigator.serviceWorker.controller) {
+            try { navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_USER_SCOPE' }); } catch (_) {}
+        }
+        return Promise.race([deleteDatabase, timeout]);
+    },
+
+    sessionExpired: function() {
+        window.dispatchEvent(new CustomEvent('ses:session-expired'));
+        this.clearUserScope();
+    },
+
+    bindLogout: function() {
+        const self = this;
+        document.querySelectorAll('form[action="/logout"]').forEach(function(form) {
+            if (form.dataset.sesPwaBound === 'true') return;
+            form.dataset.sesPwaBound = 'true';
+            form.addEventListener('submit', function(event) {
+                event.preventDefault();
+                self.clearUserScope().finally(function() {
+                    HTMLFormElement.prototype.submit.call(form);
+                });
+            });
+        });
+    }
+};
+
 // ================== 初期化処理 ==================
 document.addEventListener('DOMContentLoaded', function() {
     // 1. 日時表示の更新（1分毎）
@@ -978,6 +1081,8 @@ document.addEventListener('DOMContentLoaded', function() {
             pageTitleHeader.textContent = titleText;
         }
     }
+
+    SES.pwa.init();
 });
 
 
@@ -1021,6 +1126,7 @@ $(function() {
                 const url = this.url || '';
                 if (url.indexOf('/api/') !== -1) {
                     Toast.error('セッションが切れました。再ログインしてください。');
+                    if (SES.pwa) SES.pwa.sessionExpired();
                     setTimeout(function() {
                         window.location.href = '/login';
                     }, 1500);
@@ -1029,6 +1135,7 @@ $(function() {
             // 401 Unauthorized
             if (xhr.status === 401) {
                 Toast.error('セッションが切れました。再ログインしてください。');
+                if (SES.pwa) SES.pwa.sessionExpired();
                 setTimeout(function() {
                     window.location.href = '/login';
                 }, 1500);
