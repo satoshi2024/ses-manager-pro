@@ -93,7 +93,7 @@ CREATE TABLE sys_user (
   username   VARCHAR(50)  NOT NULL UNIQUE             COMMENT 'ログインID',
   password   VARCHAR(255) NOT NULL                    COMMENT 'パスワード(BCrypt)',
   real_name  VARCHAR(50)                              COMMENT '氏名',
-  role       ENUM('管理者','営業','HR','マネージャー') NOT NULL COMMENT '権限ロール',
+  role       ENUM('管理者','営業','HR','マネージャー','要員') NOT NULL COMMENT 'ロール',
   email      VARCHAR(100)                             COMMENT 'メールアドレス',
   status     TINYINT      DEFAULT 1                   COMMENT '1:有効 0:無効',
   failed_count INT        DEFAULT 0                   COMMENT 'ログイン失敗回数',

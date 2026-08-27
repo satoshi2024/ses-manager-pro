@@ -24,7 +24,7 @@
   - **テスト要件**: L1〜L3。テーブル作成、CRUD、UNIQUE制約、`version` CASによる二重更新・状態遷移競合テスト、MySQL Flyway smoke test。
   - **Demo**: 空DBおよび既存DBでのV109マイグレーション成功、エンティティのCAS競合検知確認。
 
-- [ ] F2. ドメインサービス・担当解決・スコープ・退社ゲート
+- [x] F2. ドメインサービス・担当解決・スコープ・退社ゲート
   - **Objective**: 案件・タスクのライフサイクル管理、担当者自動解決（`LifecycleAssigneeResolver`）、DAG循環検出（Cycle Detection）、認可スコープ解決（`LifecycleScopeService`）、および退社ゲート（`ResignationGateChecker`）を実装する。
   - **実装ガイダンス**: 担当解決不能時または循環依存時の原子的一括ロールバック（Fail-Closed）。
     退社ゲートにおけるアカウント無効化、セッション失効、組織閉鎖、営業担当引継ぎ、未精算チェックのシステム検証。
