@@ -12,28 +12,37 @@ public record ReportGenerationCommand(
         boolean systemPrincipal,
         Long principalUserId,
         Long regenerationOfRunId,
-        String recipientPreviewHash) {
+        String recipientPreviewHash,
+        ReportScopeSnapshot scopeSnapshot) {
 
     public static ReportGenerationCommand manual(Long templateVersionId, YearMonth period,
                                                   String cutoffKind) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                false, null, false, null, null, null);
+                false, null, false, null, null, null, null);
     }
 
     public static ReportGenerationCommand scheduled(Long templateVersionId, YearMonth period,
                                                     String cutoffKind, Long scheduleId,
                                                     Long effectivePrincipalUserId) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                false, scheduleId, true, effectivePrincipalUserId, null, null);
+                false, scheduleId, true, effectivePrincipalUserId, null, null, null);
+    }
+
+    public static ReportGenerationCommand scheduled(Long templateVersionId, YearMonth period,
+                                                    String cutoffKind, Long scheduleId,
+                                                    Long effectivePrincipalUserId,
+                                                    ReportScopeSnapshot scopeSnapshot) {
+        return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
+                false, scheduleId, true, effectivePrincipalUserId, null, null, scopeSnapshot);
     }
 
     public ReportGenerationCommand forRegeneration() {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                true, scheduleId, systemPrincipal, principalUserId, null, null);
+                true, scheduleId, systemPrincipal, principalUserId, null, null, scopeSnapshot);
     }
 
     public ReportGenerationCommand forRegenerationOf(Long previousRunId) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                true, scheduleId, systemPrincipal, principalUserId, previousRunId, null);
+                true, scheduleId, systemPrincipal, principalUserId, previousRunId, null, scopeSnapshot);
     }
 }

@@ -91,7 +91,9 @@ public class ReportDocumentServiceImpl implements ReportDocumentService {
                 .versionDiscriminator(run.getSourcePolicyHash() + ":" + normalized)
                 .originalName("management-report-" + run.getPeriodFrom().toString().substring(0, 7) + "." + extension)
                 .contentType(contentType)
-                .createdBy(SecurityUtils.currentUserId())
+                // schedulerはHTTP sessionを持たないため、非HTTP実行ではrunの監査principalを使う。
+                .createdBy(SecurityUtils.currentUserId() != null
+                        ? SecurityUtils.currentUserId() : run.getPrincipalUserId())
                 .build();
         Document document = documentService.registerGenerated(request, new java.io.ByteArrayInputStream(bytes));
         if (document != null && "DRAFT".equals(document.getStatus())) {

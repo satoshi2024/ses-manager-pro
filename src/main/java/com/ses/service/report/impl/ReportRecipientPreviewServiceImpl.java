@@ -8,6 +8,7 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.config.LoginUser;
 import com.ses.dto.report.ReportRecipientPreview;
 import com.ses.dto.report.ReportRecipientPreviewResult;
+import com.ses.dto.report.ReportScopeSnapshot;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.entity.ReportRun;
 import com.ses.entity.SysUser;
@@ -70,16 +71,34 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
-        Scope owner;
+        ReportScopeSnapshot savedScope;
         try {
-            JsonNode saved = objectMapper.readTree(run.getOrganizationScopeJson());
+            JsonNode savedJson = objectMapper.readTree(run.getOrganizationScopeJson());
             Set<Long> ids = new HashSet<>();
-            saved.path("organizationIds").forEach(node -> ids.add(node.asLong()));
-            owner = new Scope(saved.path("companyWide").asBoolean(false), ids, run.getScopeHash());
+            savedJson.path("organizationIds").forEach(node -> ids.add(node.asLong()));
+            List<Long> directUsers = new ArrayList<>();
+            savedJson.path("directUserIds").forEach(node -> directUsers.add(node.asLong()));
+            savedScope = new ReportScopeSnapshot(run.getScopeOwnerType(), run.getScopeOwnerId(),
+                    savedJson.path("companyWide").asBoolean(false), ids.stream().sorted().toList(),
+                    directUsers.stream().sorted().toList(), run.getScopePolicyVersion(),
+                    run.getOrganizationScopeJson(), run.getScopeHash());
         } catch (Exception ex) {
             throw BusinessException.of(500, "error.managementReport.scopeSnapshotInvalid");
         }
-        return previewInternal(version, YearMonth.from(run.getPeriodFrom()), owner);
+        return previewInternal(version, YearMonth.from(run.getPeriodFrom()), toScope(savedScope));
+    }
+
+    @Override
+    public ReportRecipientPreviewResult previewForScope(Long templateVersionId, YearMonth period,
+                                                         ReportScopeSnapshot scope) {
+        if (period == null || scope == null) {
+            throw BusinessException.of(400, "error.managementReport.scopeSnapshotInvalid");
+        }
+        ReportTemplateVersion version = versionMapper.selectById(templateVersionId);
+        if (version == null || !"PUBLISHED".equals(version.getStatus())) {
+            throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
+        }
+        return previewInternal(version, period, toScope(scope));
     }
 
     private ReportRecipientPreviewResult previewInternal(ReportTemplateVersion version, YearMonth period, Scope owner) {
@@ -153,6 +172,12 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         Set<Long> ids = organizationScopeService.allowedOrganizationIds(asOf);
         return new Scope(false, ids == null ? Set.of() : new HashSet<>(ids),
                 sha256("ORGANIZATION|" + sorted(ids) + "|" + POLICY_VERSION));
+    }
+
+    private Scope toScope(ReportScopeSnapshot scope) {
+        return new Scope(scope.isCompanyWide(),
+                scope.getOrganizationIds() == null ? Set.of() : new HashSet<>(scope.getOrganizationIds()),
+                scope.getHash() == null ? sha256(scope.getJson()) : scope.getHash());
     }
 
     private <T> T withUser(SysUser user, java.util.function.Supplier<T> action) {

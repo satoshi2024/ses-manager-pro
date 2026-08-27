@@ -35,6 +35,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -55,6 +57,7 @@ class ReportSnapshotServiceImplTest {
     private DashboardService dashboardService;
     private MonthlyClosingService monthlyClosingService;
     private ReportRecipientPreviewService recipientPreviewService;
+    private OrganizationScopeService scopeService;
     private ReportSnapshotServiceImpl service;
     private ReportRun currentRun;
     private final Map<String, ReportSectionSnapshot> snapshots = new HashMap<>();
@@ -65,7 +68,7 @@ class ReportSnapshotServiceImplTest {
         runMapper = mock(ReportRunMapper.class);
         sectionMapper = mock(ReportSectionSnapshotMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
-        OrganizationScopeService scopeService = mock(OrganizationScopeService.class);
+        scopeService = mock(OrganizationScopeService.class);
         monthlyClosingService = mock(MonthlyClosingService.class);
         dashboardService = mock(DashboardService.class);
         UtilizationForecastService utilizationService = mock(UtilizationForecastService.class);
@@ -92,8 +95,16 @@ class ReportSnapshotServiceImplTest {
                         null, List.of()));
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
                 .revenue(123_456L).profitMargin(25.0).build();
+        DashboardSummaryDto.RevenueChartDto revenue = DashboardSummaryDto.RevenueChartDto.builder()
+                .labels(IntStream.rangeClosed(1, 12).mapToObj(month -> month + "月").toList())
+                .sales(IntStream.rangeClosed(1, 12).mapToObj(month -> month == 8 ? 123_456L : 0L).toList())
+                .profit(IntStream.rangeClosed(1, 12).mapToObj(month -> month == 8 ? 30_000L : 0L).toList())
+                .isActual(IntStream.rangeClosed(1, 12).mapToObj(month -> month < 9).toList())
+                .forecast(IntStream.rangeClosed(1, 12).mapToObj(month -> month == 8 ? 123_456L : 0L).toList())
+                .build();
         when(dashboardService.getSummary(anyInt())).thenReturn(
-                DashboardSummaryDto.builder().kpi(kpi).build());
+                DashboardSummaryDto.builder().kpi(kpi)
+                        .charts(DashboardSummaryDto.ChartsDto.builder().revenue(revenue).build()).build());
 
         when(runMapper.selectOne(any())).thenAnswer(invocation -> currentRun);
         doAnswer(invocation -> {
@@ -171,6 +182,9 @@ class ReportSnapshotServiceImplTest {
     void 明示再生成は元runと別runになり親runを記録する() {
         currentRun = null;
         when(runMapper.selectOne(any())).thenReturn(null);
+        ReportRun previous = new ReportRun();
+        previous.setSnapshotVersion(1);
+        when(runMapper.selectList(any())).thenReturn(List.of(previous));
         when(sectionMapper.selectOne(any())).thenReturn(null);
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
@@ -178,6 +192,31 @@ class ReportSnapshotServiceImplTest {
 
         assertThat(result.isReused()).isFalse();
         assertThat(result.getRun().getRegenerationOfRunId()).isEqualTo(99L);
+        assertThat(result.getRun().getSnapshotVersion()).isEqualTo(2);
         assertThat(result.getRun().getRunKey()).startsWith("report:2026-08:");
+    }
+
+    @Test
+    void managerRunFreezesOrganizationScopeAndRejectsDownloadAfterScopeChange() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("7", "N/A",
+                        List.of(new SimpleGrantedAuthority("ROLE_マネージャー"))));
+        when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(10L));
+        when(scopeService.allowedDirectUserIds(any())).thenReturn(Set.of(20L));
+        when(scopeService.allowedEngineerIds(any())).thenReturn(Set.of(30L));
+        when(scopeService.allowedContractIds(any())).thenReturn(Set.of(40L));
+        when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(50L));
+
+        ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "速報"));
+
+        assertThat(result.getRun().getScopeOwnerType()).isEqualTo("ORGANIZATION");
+        assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
+        assertThat(result.getRun().getOrganizationScopeJson()).contains("\"contractIds\":[40]");
+        service.assertAccessible(result.getRun());
+
+        when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(11L));
+        assertThatThrownBy(() -> service.assertAccessible(result.getRun()))
+                .hasMessageContaining("error.managementReport.scopeChanged");
     }
 }

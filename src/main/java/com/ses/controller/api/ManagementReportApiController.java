@@ -71,7 +71,7 @@ public class ManagementReportApiController {
     public ApiResult<ReportGenerationResult> generate(@RequestBody ReportRunRequest request) {
         ReportGenerationCommand command = new ReportGenerationCommand(request.templateVersionId(),
                 YearMonth.parse(request.period()), request.cutoffKind(), false, null, false, null,
-                null, request.recipientPreviewHash());
+                null, request.recipientPreviewHash(), null);
         return ApiResult.success(snapshotService.generate(command));
     }
 
@@ -84,15 +84,17 @@ public class ManagementReportApiController {
     @PostMapping("/runs/{runId}/regenerate")
     public ApiResult<ReportGenerationResult> regenerate(@PathVariable Long runId) {
         ReportRun previous = snapshotService.findRun(runId);
+        snapshotService.assertAccessible(previous);
         return ApiResult.success(snapshotService.generate(new ReportGenerationCommand(
                 previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
                 previous.getCutoffKind(), true, previous.getScheduleId(), false, null,
-                previous.getId(), null)));
+                previous.getId(), null, snapshotService.scopeSnapshotOf(previous))));
     }
 
     @GetMapping("/runs/{runId}")
     public ApiResult<ReportGenerationResult> run(@PathVariable Long runId) {
         ReportRun run = snapshotService.findRun(runId);
+        snapshotService.assertAccessible(run);
         List<ReportSectionSnapshot> sections = snapshotService.listSections(runId);
         return ApiResult.success(new ReportGenerationResult(run, sections, true));
     }
@@ -100,11 +102,13 @@ public class ManagementReportApiController {
     @PostMapping("/runs/{runId}/documents/{format}")
     public ApiResult<com.ses.dto.report.ReportDocumentArtifact> registerDocument(@PathVariable Long runId,
                                                                                    @PathVariable String format) {
+        snapshotService.assertAccessible(snapshotService.findRun(runId));
         return ApiResult.success(reportDocumentService.register(runId, format));
     }
 
     @GetMapping("/runs/{runId}/documents/{format}/preview")
     public ResponseEntity<byte[]> previewDocument(@PathVariable Long runId, @PathVariable String format) {
+        snapshotService.assertAccessible(snapshotService.findRun(runId));
         String normalized = format.toUpperCase(java.util.Locale.ROOT);
         byte[] bytes = reportDocumentService.render(runId, normalized);
         MediaType mediaType = "PDF".equals(normalized) ? MediaType.APPLICATION_PDF

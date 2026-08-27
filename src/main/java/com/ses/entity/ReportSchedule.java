@@ -22,6 +22,15 @@ public class ReportSchedule extends BaseEntity {
     private String lockKey;
     private LocalDateTime nextRunAt;
     private LocalDateTime lastRunAt;
+    private String scopeOwnerType;
+    private Long scopeOwnerId;
+    private String organizationScopeJson;
+    private String scopePolicyVersion;
+    private String scopeHash;
+    private LocalDateTime retryScheduledAt;
+    private Integer failureCount;
+    private String lastErrorCode;
+    private String lastErrorMessage;
     private Long createdBy;
     private Long updatedBy;
 

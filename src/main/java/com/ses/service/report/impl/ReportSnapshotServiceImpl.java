@@ -32,7 +32,9 @@ import com.ses.service.MonthlyClosingService;
 import com.ses.service.SalesPerformanceService;
 import com.ses.service.UtilizationForecastService;
 import com.ses.service.billing.CashFlowForecastService;
+import com.ses.service.billing.CashFlowForecastScope;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.ReportScopeContext;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
 import lombok.RequiredArgsConstructor;
@@ -119,6 +121,71 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 .orderByAsc("id"));
     }
 
+    @Override
+    public void assertAccessible(ReportRun run) {
+        if (run == null) {
+            throw BusinessException.of(404, "error.managementReport.runNotFound");
+        }
+        String role = SecurityUtils.currentRole();
+        // schedulerからのdeliveryはHTTP sessionを持たない明示system principalで行う。
+        // API入口はSpring Securityで保護されているため、この分岐は非HTTP実行に限定される。
+        if (role == null && "SYSTEM_PRINCIPAL".equals(run.getPrincipalType())) {
+            scopeSnapshotOf(run); // 保存scopeのJSON/hash改ざんはsystem実行でもfail-closedにする。
+            return;
+        }
+        if ("管理者".equals(role)) {
+            return;
+        }
+        Long currentUserId = SecurityUtils.currentUserId();
+        if (!"マネージャー".equals(role) || currentUserId == null
+                || !currentUserId.equals(run.getScopeOwnerId())
+                || !"ORGANIZATION".equals(run.getScopeOwnerType())) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+        try {
+            ReportScopeSnapshot savedScope = scopeSnapshotOf(run);
+            JsonNode saved = objectMapper.readTree(savedScope.getJson());
+            Set<Long> savedOrganizations = readLongSet(saved.path("organizationIds"));
+            Set<Long> savedDirectUsers = readLongSet(saved.path("directUserIds"));
+            LocalDate asOf = run.getPeriodTo() == null ? LocalDate.now(ZoneId.of(TIMEZONE)) : run.getPeriodTo();
+            Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
+            Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
+            if (currentOrganizations == null || currentDirectUsers == null
+                    || !currentOrganizations.containsAll(savedOrganizations)
+                    || !currentDirectUsers.containsAll(savedDirectUsers)) {
+                throw BusinessException.of(403, "error.managementReport.scopeChanged");
+            }
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+    }
+
+    @Override
+    public ReportScopeSnapshot scopeSnapshotOf(ReportRun run) {
+        if (run == null || run.getOrganizationScopeJson() == null
+                || run.getOrganizationScopeJson().isBlank()) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+        try {
+            if (run.getScopeHash() == null || !run.getScopeHash().equals(sha256(run.getOrganizationScopeJson()))) {
+                throw BusinessException.of(403, "error.managementReport.scopeChanged");
+            }
+            JsonNode saved = objectMapper.readTree(run.getOrganizationScopeJson());
+            return new ReportScopeSnapshot(run.getScopeOwnerType(), run.getScopeOwnerId(),
+                    saved.path("companyWide").asBoolean(false),
+                    readLongList(saved.path("organizationIds")),
+                    readLongList(saved.path("directUserIds")),
+                    run.getScopePolicyVersion(), run.getOrganizationScopeJson(), run.getScopeHash(),
+                    readLongList(saved.path("engineerIds")),
+                    readLongList(saved.path("contractIds")),
+                    readLongList(saved.path("invoiceIds")));
+        } catch (Exception ex) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+    }
+
     private ReportGenerationResult generateInternal(ReportGenerationCommand command) {
         YearMonth target = command.period();
         LocalDate periodFrom = target.atDay(1);
@@ -134,17 +201,24 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
 
+        LocalDateTime asOfAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
+        ReportScopeSnapshot scope = command.scopeSnapshot() == null
+                ? resolveScope(periodTo) : command.scopeSnapshot();
+        if (command.scopeSnapshot() != null) {
+            assertGenerationScope(scope, periodTo);
+        }
+
         // generation直前に同一principalでrecipient scopeを再評価する。APIからhashが渡された場合は
         // previewとgenerationの間に権限・組織が変わっていないことも確認する。
-        ReportRecipientPreviewResult preview = recipientPreviewService.preview(
-                command.templateVersionId(), target);
+        ReportRecipientPreviewResult preview = command.scopeSnapshot() == null
+                ? recipientPreviewService.preview(command.templateVersionId(), target)
+                : recipientPreviewService.previewForScope(command.templateVersionId(), target,
+                command.scopeSnapshot());
         if (command.recipientPreviewHash() != null
                 && !command.recipientPreviewHash().equals(preview.getPreviewHash())) {
             throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
         }
 
-        LocalDateTime asOfAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
-        ReportScopeSnapshot scope = resolveScope(periodTo);
         String stableRunKey = buildRunKey(templateVersion, target, cutoffKind, scope, command);
         ReportRun run = runMapper.selectOne(new QueryWrapper<ReportRun>()
                 .eq("tenant_id", TENANT_ID)
@@ -162,6 +236,8 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setTemplateVersionId(templateVersion.getId());
             run.setScheduleId(command.scheduleId());
             run.setRegenerationOfRunId(command.regenerationOfRunId());
+            run.setSnapshotVersion(nextSnapshotVersion(templateVersion, periodFrom, periodTo,
+                    cutoffKind, scope, command));
             run.setPrincipalType("SYSTEM_PRINCIPAL");
             run.setPrincipalUserId(command.principalUserId() != null
                     ? command.principalUserId() : SecurityUtils.currentUserId());
@@ -197,7 +273,8 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 continue;
             }
             try {
-                SectionValue value = loadSection(sectionKey, target, sourceCache);
+                SectionValue value = ReportScopeContext.with(command.scopeSnapshot(),
+                        () -> loadSection(sectionKey, target, sourceCache, scope));
                 saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo);
             } catch (Exception ex) {
                 hasFailure = true;
@@ -286,57 +363,101 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     }
 
     private SectionValue loadSection(String sectionKey, YearMonth target,
-                                     Map<String, JsonNode> sourceCache) {
+                                     Map<String, JsonNode> sourceCache,
+                                     ReportScopeSnapshot scope) {
         return switch (sectionKey) {
             case ReportSectionKey.SALES, ReportSectionKey.GROSS_PROFIT -> {
                 JsonNode source = sourceCache.computeIfAbsent("dashboard",
-                        ignored -> objectMapper.valueToTree(dashboardService.getSummary(target.getYear())));
-                yield new SectionValue(source, source.path("kpi"), "実績",
-                        DashboardSummaryDto.class.getSimpleName(), DashboardSummaryDto.class.getName());
+                        ignored -> objectMapper.valueToTree(dashboardService.getSummary(dashboardFiscalYear(target))));
+                JsonNode value = dashboardMonthValue(source, target, false);
+                yield new SectionValue(source, value, "実績",
+                        DashboardService.class.getSimpleName(), DashboardSummaryDto.class.getName());
             }
             case ReportSectionKey.REVENUE_FORECAST -> {
                 JsonNode source = sourceCache.computeIfAbsent("dashboard",
-                        ignored -> objectMapper.valueToTree(dashboardService.getSummary(target.getYear())));
-                yield new SectionValue(source, source.path("charts").path("revenue"), "予測",
-                        DashboardSummaryDto.class.getSimpleName(), DashboardSummaryDto.class.getName());
+                        ignored -> objectMapper.valueToTree(dashboardService.getSummary(dashboardFiscalYear(target))));
+                JsonNode value = dashboardMonthValue(source, target, true);
+                yield new SectionValue(source, value, "予測",
+                        DashboardService.class.getSimpleName(), DashboardSummaryDto.class.getName());
             }
             case ReportSectionKey.UTILIZATION, ReportSectionKey.BENCH, ReportSectionKey.CONTRACT_RENEWAL_OUTLOOK -> {
                 JsonNode source = sourceCache.computeIfAbsent("utilization",
-                        ignored -> objectMapper.valueToTree(utilizationForecastService.getForecast(1)));
+                        ignored -> objectMapper.valueToTree(utilizationForecastService.getForecast(target, 1)));
                 JsonNode value = switch (sectionKey) {
                     case ReportSectionKey.UTILIZATION, ReportSectionKey.BENCH -> source.path("monthlyForecasts");
                     default -> source.path("rolloffEngineers");
                 };
                 yield new SectionValue(source, value, "予測",
-                        UtilizationForecastDto.class.getSimpleName(), UtilizationForecastDto.class.getName());
+                        UtilizationForecastService.class.getSimpleName(), UtilizationForecastDto.class.getName());
             }
             case ReportSectionKey.MANAGEMENT_ACCOUNTING -> {
                 JsonNode source = objectMapper.valueToTree(managementAccountingService.summary(target.toString()));
                 yield new SectionValue(source, source, "実績",
-                        ManagementAccountingSummaryDto.class.getSimpleName(), ManagementAccountingSummaryDto.class.getName());
+                        ManagementAccountingService.class.getSimpleName(), ManagementAccountingSummaryDto.class.getName());
             }
             case ReportSectionKey.CASH_FLOW, ReportSectionKey.BP_PAYMENT_PLAN -> {
                 JsonNode source = sourceCache.computeIfAbsent("cash-flow",
-                        ignored -> objectMapper.valueToTree(cashFlowForecastService.forecast(target, 1, null)));
+                        ignored -> objectMapper.valueToTree(cashFlowForecastService.forecast(
+                                target, 1, null, cashFlowScope(scope, target.atEndOfMonth()))));
                 JsonNode value = ReportSectionKey.BP_PAYMENT_PLAN.equals(sectionKey)
                         ? source.path("months") : source;
                 yield new SectionValue(source, value, "予測",
-                        CashFlowForecastDto.class.getSimpleName(), CashFlowForecastDto.class.getName());
+                        CashFlowForecastService.class.getSimpleName(), CashFlowForecastDto.class.getName());
             }
             case ReportSectionKey.AR_AGING -> {
                 JsonNode source = objectMapper.valueToTree(invoiceService.aging(target.atEndOfMonth()));
                 yield new SectionValue(source, source, "実績",
-                        AgingReportDto.class.getSimpleName(), AgingReportDto.class.getName());
+                        InvoiceService.class.getSimpleName(), AgingReportDto.class.getName());
             }
             default -> throw BusinessException.of(400, "error.managementReport.sectionNotAccepted");
         };
+    }
+
+    /** Dashboardの既存chart値から対象月だけを取り出す。report側で売上式を再計算しない。 */
+    private JsonNode dashboardMonthValue(JsonNode source, YearMonth target, boolean forecast) {
+        JsonNode revenue = source.path("charts").path("revenue");
+        List<String> labels = new ArrayList<>();
+        revenue.path("labels").forEach(node -> labels.add(node.asText()));
+        String monthLabel = target.getMonthValue() + "月";
+        int index = labels.indexOf(monthLabel);
+        if (index < 0) {
+            throw BusinessException.of(400, "error.managementReport.sourceMonthNotFound");
+        }
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("month", target.toString());
+        value.put("sales", arrayValue(revenue.path("sales"), index));
+        value.put("grossProfit", arrayValue(revenue.path("profit"), index));
+        value.put("isActual", arrayValue(revenue.path("isActual"), index));
+        if (forecast) {
+            value.put("forecast", arrayValue(revenue.path("forecast"), index));
+            value.put("forecastPipelineCount", revenue.path("forecastPipelineCount").isMissingNode()
+                    ? null : revenue.path("forecastPipelineCount").asInt());
+            value.put("forecastPipelineAmount", revenue.path("forecastPipelineAmount").isMissingNode()
+                    ? null : revenue.path("forecastPipelineAmount").asLong());
+        }
+        return objectMapper.valueToTree(value);
+    }
+
+    private Object arrayValue(JsonNode array, int index) {
+        return array.isArray() && index < array.size() ? objectMapper.convertValue(array.get(index), Object.class) : null;
+    }
+
+    /** Dashboardは4月始まりの年度chartなので、1〜3月は前年の年度を読む。 */
+    private int dashboardFiscalYear(YearMonth target) {
+        return target.getMonthValue() < 4 ? target.getYear() - 1 : target.getYear();
+    }
+
+    private CashFlowForecastScope cashFlowScope(ReportScopeSnapshot scope, LocalDate asOf) {
+        if (scope == null || scope.isCompanyWide()) return null;
+        return new CashFlowForecastScope(false, scope.getInvoiceIds(), scope.getContractIds(),
+                scope.getEngineerIds(), scope.getOrganizationIds(), scope.getDirectUserIds(), asOf);
     }
 
     private ReportScopeSnapshot resolveScope(LocalDate asOf) {
         String role = SecurityUtils.currentRole();
         Long userId = SecurityUtils.currentUserId();
         if ("管理者".equals(role)) {
-            return buildScope("COMPANY", null, true, List.of(), List.of());
+            return buildScope("COMPANY", null, true, List.of(), List.of(), List.of(), List.of(), List.of());
         }
         if (!"マネージャー".equals(role) || userId == null) {
             throw BusinessException.of(403, "error.managementReport.roleDenied");
@@ -344,22 +465,73 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         Set<Long> organizations = organizationScopeService.allowedOrganizationIds(asOf);
         Set<Long> directUsers = organizationScopeService.allowedDirectUserIds(asOf);
         return buildScope("ORGANIZATION", userId, false,
-                sorted(organizations), sorted(directUsers));
+                sorted(organizations), sorted(directUsers),
+                sorted(organizationScopeService.allowedEngineerIds(asOf)),
+                sorted(organizationScopeService.allowedContractIds(asOf)),
+                sorted(organizationScopeService.allowedInvoiceIds(asOf)));
+    }
+
+    private void assertGenerationScope(ReportScopeSnapshot scope, LocalDate asOf) {
+        if (scope == null || scope.isCompanyWide()) {
+            if (scope == null || !scope.isCompanyWide() || !"管理者".equals(SecurityUtils.currentRole())) {
+                throw BusinessException.of(403, "error.managementReport.scopeDenied");
+            }
+            return;
+        }
+        Long currentUserId = SecurityUtils.currentUserId();
+        if (!"マネージャー".equals(SecurityUtils.currentRole())
+                || currentUserId == null || !currentUserId.equals(scope.getOwnerId())) {
+            throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+        Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
+        Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
+        if (currentOrganizations == null || currentDirectUsers == null
+                || !currentOrganizations.containsAll(scope.getOrganizationIds())
+                || !currentDirectUsers.containsAll(scope.getDirectUserIds())) {
+            throw BusinessException.of(403, "error.managementReport.scopeChanged");
+        }
     }
 
     private ReportScopeSnapshot buildScope(String ownerType, Long ownerId, boolean companyWide,
-                                           List<Long> organizationIds, List<Long> directUserIds) {
+                                           List<Long> organizationIds, List<Long> directUserIds,
+                                           List<Long> engineerIds, List<Long> contractIds,
+                                           List<Long> invoiceIds) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("ownerType", ownerType);
         map.put("ownerId", ownerId);
         map.put("companyWide", companyWide);
         map.put("organizationIds", organizationIds);
         map.put("directUserIds", directUserIds);
+        map.put("engineerIds", engineerIds);
+        map.put("contractIds", contractIds);
+        map.put("invoiceIds", invoiceIds);
         map.put("policyVersion", POLICY_VERSION);
         map.put("sessionIndependent", true);
         String json = toJson(map);
         return new ReportScopeSnapshot(ownerType, ownerId, companyWide, organizationIds,
-                directUserIds, POLICY_VERSION, json, sha256(json));
+                directUserIds, POLICY_VERSION, json, sha256(json), engineerIds, contractIds, invoiceIds);
+    }
+
+    private int nextSnapshotVersion(ReportTemplateVersion version, LocalDate periodFrom,
+                                    LocalDate periodTo, String cutoff, ReportScopeSnapshot scope,
+                                    ReportGenerationCommand command) {
+        if (!command.explicitRegeneration()) return 1;
+        List<ReportRun> history = runMapper.selectList(new QueryWrapper<ReportRun>()
+                .eq("tenant_id", TENANT_ID)
+                .eq("template_version_id", version.getId())
+                .eq("period_from", periodFrom)
+                .eq("period_to", periodTo)
+                .eq("cutoff_kind", cutoff)
+                .eq("scope_hash", scope.getHash()));
+        int max = 0;
+        if (history != null) {
+            for (ReportRun item : history) {
+                if (item != null && item.getSnapshotVersion() != null) {
+                    max = Math.max(max, item.getSnapshotVersion());
+                }
+            }
+        }
+        return max + 1;
     }
 
     private <T> T withExplicitPrincipal(Long userId, Supplier<T> action) {
@@ -509,6 +681,18 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private List<Long> sorted(Set<Long> values) {
         return values == null ? List.of() : values.stream().sorted().toList();
+    }
+
+    private Set<Long> readLongSet(JsonNode node) {
+        return new java.util.HashSet<>(readLongList(node));
+    }
+
+    private List<Long> readLongList(JsonNode node) {
+        List<Long> result = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            node.forEach(value -> result.add(value.asLong()));
+        }
+        return result;
     }
 
     private record SectionValue(JsonNode source, JsonNode value, String factType,

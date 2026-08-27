@@ -77,5 +77,5 @@ function generateReport(event) {
 }
 
 function renderReportSections(sections) {
-    $('#report-section-table').html(sections.map(s => `<tr><td>${SES.escapeHtml(s.sectionKey)}</td><td>${SES.escapeHtml(s.sectionStatus)}</td><td>${SES.escapeHtml(s.factType)} / ${SES.escapeHtml(s.confirmation)}</td><td>${SES.escapeHtml(s.dataAsOfAt || '')}</td><td class="font-monospace small">${SES.escapeHtml(s.snapshotHash || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="text-muted">sectionなし</td></tr>');
+    $('#report-section-table').html(sections.map(s => `<tr><td>${SES.escapeHtml(s.sectionKey)}</td><td>${SES.escapeHtml(s.sectionStatus)}</td><td>${SES.escapeHtml(s.factType)} / ${SES.escapeHtml(s.confirmation)}</td><td>${SES.escapeHtml(s.dataAsOfAt || '')}</td><td>${SES.escapeHtml(s.freshnessStatus || 'UNKNOWN')}</td><td class="font-monospace small">${SES.escapeHtml(s.snapshotHash || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">sectionなし</td></tr>');
 }

@@ -20,6 +20,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -52,6 +53,9 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
     private final DataScopeService dataScopeService;
     /** 当月値がダッシュボードKPIと一致することを保証する共通口径サービス(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
+    /** report schedulerの保存済みscopeを含め、画面と同じ組織母集団で予測する。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private OrganizationScopeService organizationScopeService;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
@@ -64,10 +68,22 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
             // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
             sync = true)
     public UtilizationForecastDto getForecast(int months) {
+        return getForecast(YearMonth.from(LocalDate.now()), months);
+    }
+
+    @Override
+    public UtilizationForecastDto getForecast(YearMonth from, int months) {
         int forecastMonths = months > 0 ? Math.min(months, 12) : 3;
 
         // 1. 権限スコープと対象要員の取得 (Requirement 3.2: DataScopeService に従う)
         List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
+        YearMonth currentYm = from == null ? YearMonth.from(LocalDate.now()) : from;
+        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+            Set<Long> allowedEngineerIds = organizationScopeService.allowedEngineerIds(currentYm.atEndOfMonth());
+            allEngineers = allEngineers.stream()
+                    .filter(e -> e.getId() != null && allowedEngineerIds.contains(e.getId()))
+                    .collect(Collectors.toList());
+        }
         if (dataScopeService.isScoped()) {
             Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
             allEngineers = allEngineers.stream()
@@ -80,7 +96,6 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
-        YearMonth currentYm = YearMonth.from(LocalDate.now());
         List<YearMonth> targetMonths = new ArrayList<>();
         for (int i = 0; i <= forecastMonths; i++) {
             targetMonths.add(currentYm.plusMonths(i));

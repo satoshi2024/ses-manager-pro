@@ -19,6 +19,7 @@ import com.ses.service.OrganizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationRelationResolver;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.ReportScopeContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -84,6 +85,10 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
      */
     @Override
     public boolean hasFullAccess() {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide();
+        }
         if (!organizationScopeEnabled) {
             return true;
         }
@@ -96,6 +101,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedOrganizationIds(LocalDate asOf) {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide() ? Collections.emptySet()
+                    : savedScope.getOrganizationIds() == null ? Set.of()
+                    : Set.copyOf(savedScope.getOrganizationIds());
+        }
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
         if (hasFullAccess()) {
             // 空集合は「制限なし」ではなく「組織条件を付けない」を意味する。
@@ -175,6 +186,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedDirectUserIds(LocalDate asOf) {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide() ? Set.of()
+                    : savedScope.getDirectUserIds() == null ? Set.of()
+                    : Set.copyOf(savedScope.getDirectUserIds());
+        }
         if (!ROLE_MANAGER.equals(SecurityUtils.currentRole()) || resolveCurrentUserId() == null) {
             return Set.of();
         }
@@ -185,6 +202,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedEngineerIds(LocalDate asOf) {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide() ? Set.of()
+                    : savedScope.getEngineerIds() == null ? Set.of()
+                    : Set.copyOf(savedScope.getEngineerIds());
+        }
         if (hasFullAccess()) {
             return Set.of();
         }
@@ -196,6 +219,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedContractIds(LocalDate asOf) {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide() ? Set.of()
+                    : savedScope.getContractIds() == null ? Set.of()
+                    : Set.copyOf(savedScope.getContractIds());
+        }
         if (hasFullAccess()) {
             return Set.of();
         }
@@ -207,6 +236,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedInvoiceIds(LocalDate asOf) {
+        com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
+        if (savedScope != null) {
+            return savedScope.isCompanyWide() ? Set.of()
+                    : savedScope.getInvoiceIds() == null ? Set.of()
+                    : Set.copyOf(savedScope.getInvoiceIds());
+        }
         if (hasFullAccess()) {
             return Set.of();
         }

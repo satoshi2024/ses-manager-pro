@@ -18,6 +18,7 @@ import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportRecipientPreviewService;
+import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.report.impl.ReportDeliveryServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,7 @@ class ReportDeliveryServiceImplTest {
     private ReportDeliveryMapper deliveryMapper;
     private SysUserMapper userMapper;
     private ReportRecipientPreviewService previewService;
+    private ReportSnapshotService snapshotService;
     private ReportDocumentService documentService;
     private DocumentService archiveService;
     private NotificationService notificationService;
@@ -56,12 +58,13 @@ class ReportDeliveryServiceImplTest {
         deliveryMapper = mock(ReportDeliveryMapper.class);
         userMapper = mock(SysUserMapper.class);
         previewService = mock(ReportRecipientPreviewService.class);
+        snapshotService = mock(ReportSnapshotService.class);
         documentService = mock(ReportDocumentService.class);
         archiveService = mock(DocumentService.class);
         notificationService = mock(NotificationService.class);
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, userMapper, previewService,
-                documentService, archiveService, notificationService, passwordEncoder, new ObjectMapper());
+                snapshotService, documentService, archiveService, notificationService, passwordEncoder, new ObjectMapper());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));

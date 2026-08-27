@@ -21,6 +21,7 @@ public class ReportRun extends BaseEntity {
     private Long templateVersionId;
     private Long scheduleId;
     private Long regenerationOfRunId;
+    private Integer snapshotVersion;
     private String principalType;
     private Long principalUserId;
     private String scopeOwnerType;

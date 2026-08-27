@@ -21,6 +21,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportRecipientPreviewService;
+import com.ses.service.report.ReportSnapshotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private final ReportDeliveryMapper deliveryMapper;
     private final SysUserMapper sysUserMapper;
     private final ReportRecipientPreviewService recipientPreviewService;
+    private final ReportSnapshotService snapshotService;
     private final ReportDocumentService reportDocumentService;
     private final DocumentService documentService;
     private final NotificationService notificationService;
@@ -60,6 +62,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     public ReportDeliveryResult deliver(Long runId, String previewHash) {
         ReportRun run = runMapper.selectById(runId);
         requireReady(run);
+        snapshotService.assertAccessible(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
             throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
@@ -117,6 +120,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
         ReportRun run = runMapper.selectById(delivery.getRunId());
+        snapshotService.assertAccessible(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         boolean stillAllowed = preview.getRecipients().stream().anyMatch(item ->
                 userId.equals(item.getRecipientUserId()) && "ALLOW".equals(item.getScopeDecision()));

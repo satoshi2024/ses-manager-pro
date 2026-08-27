@@ -89,6 +89,12 @@ public class CacheConfig {
             } else {
                 scopeKey = "ALL";
             }
+            // schedulerの保存済みscopeは同一userの現在scopeと別cache境界にする。
+            com.ses.dto.report.ReportScopeSnapshot savedScope =
+                    com.ses.service.security.ReportScopeContext.current();
+            if (savedScope != null && savedScope.getHash() != null) {
+                scopeKey += ":R" + savedScope.getHash();
+            }
             // 同一ユーザーでも所属・組織階層・DataScope・担当が変わればキーを変える。
             // これが無いと権限縮小後もTTLが切れるまで旧scopeの集計が返る。
             com.ses.service.security.ScopeVersionRegistry scopeVersion = scopeVersionProvider.getIfAvailable();

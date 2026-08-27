@@ -45,6 +45,17 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
 
     @Override
     public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance) {
+        return forecast(from, months, openingBalance, null);
+    }
+
+    @Override
+    public CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
+                                       com.ses.service.billing.CashFlowForecastScope scope) {
+        return forecastInternal(from, months, openingBalance, scope);
+    }
+
+    private CashFlowForecastDto forecastInternal(YearMonth from, int months, BigDecimal openingBalance,
+                                                  com.ses.service.billing.CashFlowForecastScope scope) {
         if (openingBalance == null) {
             openingBalance = systemConfigService.getDecimal("cashflow.opening-balance", BigDecimal.ZERO);
         }
@@ -54,14 +65,19 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         BigDecimal alertThreshold = systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO);
         int bpSiteMonths = systemConfigService.getInt("cashflow.bp-payment-site-months", 1);
 
-        BigDecimal estimatedPayroll = getEstimatedPayroll();
+        BigDecimal estimatedPayroll = getEstimatedPayroll(scope);
 
         List<CashFlowForecastDto.CashFlowMonthDto> monthDtos = new ArrayList<>();
         BigDecimal currentBalance = openingBalance;
 
         // Fetch all unpaid invoices upfront
-        List<Invoice> unpaidInvoices = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>()
-                .ne(Invoice::getStatus, "入金済"));
+        LambdaQueryWrapper<Invoice> unpaidInvoiceQuery = new LambdaQueryWrapper<Invoice>()
+                .ne(Invoice::getStatus, "入金済");
+        if (scope != null && !scope.companyWide()) {
+            unpaidInvoiceQuery.in(Invoice::getId,
+                    scope.invoiceIds().isEmpty() ? List.of(-1L) : scope.invoiceIds());
+        }
+        List<Invoice> unpaidInvoices = invoiceMapper.selectList(unpaidInvoiceQuery);
         
         List<Long> unpaidInvoiceIds = unpaidInvoices.stream().map(Invoice::getId).toList();
         // 請求書ごとの入金合計を先に畳んでおく。月ループの内側で毎回 allPayments を走査すると
@@ -79,7 +95,11 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         }
 
         // Fetch all unpaid BP payments upfront
-        List<BpPaymentListDto> unpaidBpPayments = bpPaymentMapper.selectListWithDetails(null, "未払");
+        List<BpPaymentListDto> unpaidBpPayments = scope == null || scope.companyWide()
+                ? bpPaymentMapper.selectListWithDetails(null, "未払")
+                : bpPaymentMapper.selectListWithDetailsScoped(null, "未払",
+                scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds(),
+                nullIfEmpty(scope.organizationIds()), nullIfEmpty(scope.directUserIds()), scope.asOf());
 
         for (int i = 0; i < months; i++) {
             YearMonth ym = from.plusMonths(i);
@@ -146,7 +166,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
         CashFlowForecastDto result = new CashFlowForecastDto();
         result.setMonths(monthDtos);
         result.setAlertThreshold(alertThreshold);
-        result.setReconciliation(buildReconciliation(from));
+        result.setReconciliation(buildReconciliation(from, scope));
         return result;
     }
 
@@ -155,29 +175,44 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
      * ダッシュボードと同じ対象契約・確定実績の絞り込みを用いることで、CFの入金予定の元になっている
      * 請求額が全社KPIの売上と同じ母集団から来ていることを確認できるようにする。
      */
-    private CashFlowForecastDto.ReconciliationDto buildReconciliation(YearMonth month) {
+    private CashFlowForecastDto.ReconciliationDto buildReconciliation(YearMonth month,
+                                                                       com.ses.service.billing.CashFlowForecastScope scope) {
         String monthStr = month.toString();
 
         // 当月の確定実績（contract_id -> record）。DashboardServiceImpl と同一の絞り込み。
-        Map<Long, WorkRecord> confirmedByContractId = workRecordMapper.selectList(
-                        new LambdaQueryWrapper<WorkRecord>()
-                                .eq(WorkRecord::getWorkMonth, monthStr)
-                                .eq(WorkRecord::getStatus, "確定"))
+        LambdaQueryWrapper<WorkRecord> workRecordQuery = new LambdaQueryWrapper<WorkRecord>()
+                .eq(WorkRecord::getWorkMonth, monthStr)
+                .eq(WorkRecord::getStatus, "確定");
+        if (scope != null && !scope.companyWide()) {
+            workRecordQuery.in(WorkRecord::getContractId,
+                    scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
+        }
+        Map<Long, WorkRecord> confirmedByContractId = workRecordMapper.selectList(workRecordQuery)
                 .stream()
                 .filter(w -> w.getContractId() != null)
                 .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
 
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        LambdaQueryWrapper<Contract> contractQuery = new LambdaQueryWrapper<Contract>()
                 .in(Contract::getStatus, "稼動中", "終了", "解約")
-                .le(Contract::getStartDate, month.atEndOfMonth()));
+                .le(Contract::getStartDate, month.atEndOfMonth());
+        if (scope != null && !scope.companyWide()) {
+            contractQuery.in(Contract::getId,
+                    scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
+        }
+        List<Contract> contracts = contractMapper.selectList(contractQuery);
 
         MonthlyRevenueCalcService.MonthlyAmount amount =
                 monthlyRevenueCalcService.calc(month, contracts, confirmedByContractId);
         BigDecimal kpiSales = BigDecimal.valueOf(amount.getSales());
 
         // 当月請求分の税抜合計（請求書は確定実績の billing_amount から生成されるため kpiSales と一致するはず）。
-        BigDecimal invoicedSubtotal = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>()
-                        .eq(Invoice::getBillingMonth, monthStr))
+        LambdaQueryWrapper<Invoice> invoiceQuery = new LambdaQueryWrapper<Invoice>()
+                .eq(Invoice::getBillingMonth, monthStr);
+        if (scope != null && !scope.companyWide()) {
+            invoiceQuery.in(Invoice::getId,
+                    scope.invoiceIds().isEmpty() ? List.of(-1L) : scope.invoiceIds());
+        }
+        BigDecimal invoicedSubtotal = invoiceMapper.selectList(invoiceQuery)
                 .stream()
                 .map(inv -> inv.getSubtotal() != null ? inv.getSubtotal() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -200,7 +235,7 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
      * </ol>
      * 給与0円が正式値である月は0円のまま返す（fallbackしない）。
      */
-    private BigDecimal getEstimatedPayroll() {
+    private BigDecimal getEstimatedPayroll(com.ses.service.billing.CashFlowForecastScope scope) {
         if (!freeeIntegrationService.connected()) {
             return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
         }
@@ -210,6 +245,12 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
             try {
                 List<PayrollStatementDto> statements = freeeIntegrationService.statements(
                         ym.getYear(), ym.getMonthValue(), "salary");
+                if (scope != null && !scope.companyWide()) {
+                    statements = statements == null ? List.of() : statements.stream()
+                            .filter(statement -> statement.getEngineerId() != null
+                                    && scope.engineerIds().contains(statement.getEngineerId()))
+                            .toList();
+                }
                 if (statements == null || statements.isEmpty()) {
                     continue; // 利用可能金額0件 → 前月→2か月前の順に試す
                 }
@@ -255,5 +296,9 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
             return BigDecimal.ZERO;
         }
         return gross.multiply(rate).divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN);
+    }
+
+    private List<Long> nullIfEmpty(List<Long> values) {
+        return values == null || values.isEmpty() ? null : values;
     }
 }
