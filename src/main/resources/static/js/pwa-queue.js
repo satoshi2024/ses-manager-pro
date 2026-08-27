@@ -231,9 +231,11 @@
             return state.scope;
         }
         try {
+            const contextHeaders = { 'Accept': 'application/json' };
+            if (oldScope) contextHeaders['X-User-Scope'] = oldScope;
             const response = await fetch('/api/my/session-context', {
                 method: 'GET', cache: 'no-store', credentials: 'same-origin',
-                headers: { 'Accept': 'application/json' }
+                headers: contextHeaders
             });
             if (response.status === 401) throw Object.assign(new Error('Session timeout'), { sessionExpired: true });
             if (!response.ok) throw new Error('ユーザーscopeを確認できません');

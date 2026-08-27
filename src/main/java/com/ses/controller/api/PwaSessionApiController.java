@@ -4,6 +4,7 @@ import com.ses.common.result.ApiResult;
 import com.ses.service.pwa.PwaUserContextService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -15,7 +16,8 @@ public class PwaSessionApiController {
     private final PwaUserContextService userContextService;
 
     @GetMapping("/api/my/session-context")
-    public ApiResult<Map<String, String>> context() {
-        return ApiResult.success(Map.of("userScope", userContextService.current().userScope()));
+    public ApiResult<Map<String, String>> context(
+            @RequestHeader(value = "X-User-Scope", required = false) String presentedScope) {
+        return ApiResult.success(Map.of("userScope", userContextService.current(presentedScope).userScope()));
     }
 }

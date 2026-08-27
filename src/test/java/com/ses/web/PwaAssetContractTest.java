@@ -65,6 +65,7 @@ class PwaAssetContractTest {
                 "userScope", "createdAt", "MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000");
         assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
                 "X-Client-Created-At", "X-User-Scope", "cache: 'no-store'");
+        assertThat(queue).contains("const contextHeaders", "contextHeaders['X-User-Scope'] = oldScope");
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
@@ -78,8 +79,12 @@ class PwaAssetContractTest {
     @Test
     void serviceWorker非対応環境でもlogout時のscope削除を継続する() throws Exception {
         String common = read("js/common.js");
+        String sessionApi = Files.readString(Path.of(
+                "src/main/java/com/ses/controller/api/PwaSessionApiController.java"), StandardCharsets.UTF_8);
 
         assertThat(common).contains("'serviceWorker' in navigator && navigator.serviceWorker.controller");
+        assertThat(sessionApi).contains("@RequestHeader(value = \"X-User-Scope\", required = false)",
+                "current(presentedScope)");
     }
 
     @Test

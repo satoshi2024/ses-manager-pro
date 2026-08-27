@@ -23,6 +23,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PwaUserContextService {
     private static final String DEFAULT_SECRET = "dev-only-change-this-pwa-context-secret";
+    private static final long MAX_LEASE_AGE_SECONDS = 30 * 24 * 60 * 60L;
 
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final Environment environment;
@@ -41,9 +42,19 @@ public class PwaUserContextService {
     }
 
     public CurrentContext current() {
+        return current(null);
+    }
+
+    /** 同一ユーザーの再認証では、未失効の既存scopeを再提示してqueueを継続する。 */
+    public CurrentContext current(String presentedScope) {
         Long userId = requireUserId();
         Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
         if (engineerId == null) throw BusinessException.of(403, "error.my.notLinked");
+        CurrentContext presented = parseAndVerify(presentedScope, userId, engineerId);
+        if (presented != null && !clock.instant().isAfter(
+                presented.issuedAt().plusSeconds(MAX_LEASE_AGE_SECONDS))) {
+            return presented;
+        }
         Instant issuedAt = clock.instant();
         return new CurrentContext(userId, engineerId, issue(userId, engineerId, issuedAt), issuedAt);
     }
@@ -52,35 +63,36 @@ public class PwaUserContextService {
         if (opaqueScope == null || opaqueScope.isBlank()) {
             throw BusinessException.of(400, "error.pwa.userScopeRequired");
         }
-        String[] parts = opaqueScope.split("\\.", -1);
-        if (parts.length != 2) throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-        String payload;
-        try {
-            payload = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-        }
         Long userId = requireUserId();
         Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
         if (engineerId == null) {
             throw BusinessException.of(403, "error.pwa.userScopeMismatch");
         }
+        CurrentContext context = parseAndVerify(opaqueScope, userId, engineerId);
+        if (context == null) throw BusinessException.of(403, "error.pwa.userScopeMismatch");
+        return context;
+    }
+
+    private CurrentContext parseAndVerify(String opaqueScope, Long userId, Long engineerId) {
+        if (opaqueScope == null || opaqueScope.isBlank()) return null;
+        String[] parts = opaqueScope.split("\\.", -1);
+        if (parts.length != 2) return null;
+        String payload;
+        try {
+            payload = new String(Base64.getUrlDecoder().decode(parts[0]), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
         if (!MessageDigest.isEqual(sign(payload, userId, engineerId).getBytes(StandardCharsets.UTF_8),
-                parts[1].getBytes(StandardCharsets.UTF_8))) {
-            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-        }
+                parts[1].getBytes(StandardCharsets.UTF_8))) return null;
         String[] values = payload.split(":", -1);
-        if (values.length != 2 || values[0].isBlank() || values[1].isBlank()) {
-            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-        }
+        if (values.length != 2 || values[0].isBlank() || values[1].isBlank()) return null;
         try {
             Instant issuedAt = Instant.ofEpochMilli(Long.parseLong(values[0]));
-            if (issuedAt.isAfter(clock.instant().plusSeconds(5 * 60L))) {
-                throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-            }
+            if (issuedAt.isAfter(clock.instant().plusSeconds(5 * 60L))) return null;
             return new CurrentContext(userId, engineerId, opaqueScope, issuedAt);
         } catch (NumberFormatException e) {
-            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
+            return null;
         }
     }
 
