@@ -91,12 +91,10 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2）に対する是正完了対応�
 - [ ] PLAN PASS → IMPLEMENTATION PASS の独立Review
 - [ ] PRはReview PASS後のみ
 
----
+## 7. 独立Reviewへ渡すもの
 
-## 6. 独立Reviewへ渡すもの（Task 0 時点）
-
-- approved plan: **無し**（本specは提案）
+- approved plan / spec / tasks: `.kiro/specs/customer-success-service-desk/`
 - requirements / design / tasks / inventory / 本ledger
-- 完了対応表: Task 0 のみ
-- remote Head: `ab771b445d9bacfc53c8a52f078f1e85ec5cd22c`
-- 実装diff: Review対象外（未APPROVED）
+- 完了対応表: §4 に記載（WIP-1〜11, P0〜P2 是正完了、全70件テスト PASS）
+- remote Head: `dd4f73e1f93c05f98d28d97f6a92190eb59a96c6`
+- 実装diff: 26 files (SLA祝日・100点減点ヘルス・ポータル境界・多言語整合・DDL規約是正)
