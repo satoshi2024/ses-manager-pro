@@ -41,8 +41,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -236,11 +239,57 @@ public class PwaMutationApiController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("type", "STALE_BASE_VERSION");
         data.put("screen", command.screen());
+        data.put("resource", command.screen());
+        data.put("resourceId", resourceId(command, context, snapshot));
         data.put("clientVersion", command.baseVersion());
         data.put("serverVersion", snapshot.version());
         data.put("server", snapshot.data());
         data.put("client", command.payload());
+        data.put("fields", conflictFields(command, snapshot));
         return data;
+    }
+
+    /** 競合を別aggregateへ誤適用しないため、画面名だけでなく対象識別子も返す。 */
+    private String resourceId(PwaMutationCommand command,
+                              PwaUserContextService.CurrentContext context,
+                              VersionSnapshot snapshot) {
+        Object id = snapshot.data().get("id");
+        if (id != null) return String.valueOf(id);
+        JsonNode payload = command.payload();
+        if ("attendance".equals(command.screen())) {
+            return context.engineerId() + ":" + text(payload, "month", command.month());
+        }
+        if ("timesheet".equals(command.screen())) {
+            return requiredLong(payload, "contractId") + ":" + text(payload, "workMonth", command.month());
+        }
+        if ("expense".equals(command.screen())) {
+            return "new:" + context.engineerId() + ":" + command.month();
+        }
+        return String.valueOf(context.engineerId());
+    }
+
+    /** server/client双方の同名項目とbase versionを、JSON全体とは別に画面表示用へ整形する。 */
+    private List<Map<String, Object>> conflictFields(PwaMutationCommand command,
+                                                      VersionSnapshot snapshot) {
+        Map<String, Object> convertedServer = objectMapper.convertValue(snapshot.data(), Map.class);
+        Map<String, Object> convertedClient = objectMapper.convertValue(command.payload(), Map.class);
+        final Map<String, Object> server = convertedServer == null ? new LinkedHashMap<>() : convertedServer;
+        final Map<String, Object> client = convertedClient == null ? new LinkedHashMap<>() : convertedClient;
+        client.put("version", command.baseVersion());
+        Set<String> names = new LinkedHashSet<>();
+        names.add("version");
+        names.addAll(server.keySet());
+        names.addAll(client.keySet());
+        return names.stream()
+                .filter(name -> !"exists".equals(name))
+                .map(name -> {
+                    Map<String, Object> field = new LinkedHashMap<>();
+                    field.put("name", name);
+                    field.put("serverValue", server.get(name));
+                    field.put("clientValue", client.get(name));
+                    return field;
+                })
+                .toList();
     }
 
     private VersionSnapshot snapshot(PwaMutationCommand command,

@@ -47,8 +47,9 @@ public class PwaClientMutationLedgerService {
     public Claim claim(PwaMutationCommand command, String clientRequestId, String payloadHash,
                        Long clientCreatedAt, String opaqueScope) {
         validateHeaders(clientRequestId, payloadHash);
-        validateClientCreatedAt(clientCreatedAt);
+        validateClientCreatedAtShape(clientCreatedAt);
         PwaUserContextService.CurrentContext context = userContextService.assertCurrent(opaqueScope);
+        validateClientCreatedAt(clientCreatedAt, context);
         String expectedHash = command.payloadHash(canonicalizer);
         if (!Objects.equals(expectedHash, payloadHash)) {
             throw new PwaConflictException("pwa.payloadHashMismatch", Map.of(
@@ -144,8 +145,8 @@ public class PwaClientMutationLedgerService {
         }
     }
 
-    /** 端末の時計を監査正本にはせず、送信時点で30日保持期限をserver時刻でも検査する。 */
-    private void validateClientCreatedAt(Long clientCreatedAt) {
+    /** 端末の時計を正本にせず、server発行のscope leaseとserver時刻で30日保持期限を検査する。 */
+    private void validateClientCreatedAtShape(Long clientCreatedAt) {
         if (clientCreatedAt == null || clientCreatedAt <= 0) {
             throw BusinessException.of(400, "error.pwa.createdAtInvalid");
         }
@@ -155,11 +156,26 @@ public class PwaClientMutationLedgerService {
             throw BusinessException.of(400, "error.pwa.createdAtInvalid");
         }
         if (created.isBefore(now.minus(MAX_QUEUE_AGE))) {
-            throw new PwaConflictException("pwa.queueExpired", Map.of(
-                    "type", "QUEUE_EXPIRED",
-                    "clientCreatedAt", clientCreatedAt,
-                    "maxAgeDays", MAX_QUEUE_AGE.toDays()));
+            throw queueExpired(clientCreatedAt);
         }
+    }
+
+    private void validateClientCreatedAt(Long clientCreatedAt,
+                                         PwaUserContextService.CurrentContext context) {
+        Instant created = Instant.ofEpochMilli(clientCreatedAt);
+        Instant now = Instant.now(clock);
+        Instant leaseStart = context.issuedAt();
+        if (leaseStart != null && (now.isAfter(leaseStart.plus(MAX_QUEUE_AGE))
+                || created.isBefore(leaseStart))) {
+            throw queueExpired(clientCreatedAt);
+        }
+    }
+
+    private PwaConflictException queueExpired(Long clientCreatedAt) {
+        return new PwaConflictException("pwa.queueExpired", Map.of(
+                "type", "QUEUE_EXPIRED",
+                "clientCreatedAt", clientCreatedAt,
+                "maxAgeDays", MAX_QUEUE_AGE.toDays()));
     }
 
     public record Claim(Long mutationId, PwaUserContextService.CurrentContext context,

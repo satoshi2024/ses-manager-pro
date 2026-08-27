@@ -6,6 +6,9 @@
     const DB_VERSION = 1;
     const STORE = 'queue';
     const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+    const MAX_PAYLOAD_BYTES = 32 * 1024;
+    const MAX_PAYLOAD_DEPTH = 8;
+    const FORBIDDEN_KEY = /(password|token|secret|payroll|salary|bank|mynumber|receipt|attachment|binary|blob|file|document)/i;
     const ALLOWED_PATHS = [
         /^\/api\/my\/pwa\/attendance\/daily$/,
         /^\/api\/my\/pwa\/timesheet\/daily$/,
@@ -117,6 +120,96 @@
         return typeof path === 'string' && ALLOWED_PATHS.some(pattern => pattern.test(path));
     }
 
+    function isPlainObject(value) {
+        if (value === null || typeof value !== 'object') return false;
+        const prototype = Object.getPrototypeOf(value);
+        return prototype === Object.prototype || prototype === null;
+    }
+
+    function rejectPayload(message) {
+        throw new Error(`offline保存できないpayloadです: ${message}`);
+    }
+
+    function validateSafeValue(value, path, depth) {
+        if (depth > MAX_PAYLOAD_DEPTH) rejectPayload('階層が深すぎます');
+        if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+            if (typeof value === 'string' && value.length > 8192) rejectPayload(`${path}が長すぎます`);
+            return;
+        }
+        if (typeof value === 'number') {
+            if (!Number.isFinite(value)) rejectPayload(`${path}が不正です`);
+            return;
+        }
+        if (typeof value !== 'object') rejectPayload(`${path}の型は保存できません`);
+        if ((typeof Blob !== 'undefined' && value instanceof Blob)
+            || (typeof File !== 'undefined' && value instanceof File)
+            || (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer)
+            || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value))) {
+            rejectPayload(`${path}にbinaryを含められません`);
+        }
+        if (Array.isArray(value)) {
+            value.forEach((item, index) => validateSafeValue(item, `${path}[${index}]`, depth + 1));
+            return;
+        }
+        if (!isPlainObject(value)) rejectPayload(`${path}の型は保存できません`);
+        Object.keys(value).forEach(key => {
+            if (FORBIDDEN_KEY.test(key)) rejectPayload(`${path}.${key}は保存できません`);
+            validateSafeValue(value[key], `${path}.${key}`, depth + 1);
+        });
+    }
+
+    function assertExactKeys(value, allowed, path) {
+        if (!isPlainObject(value)) rejectPayload(`${path}はobjectが必要です`);
+        const unknown = Object.keys(value).filter(key => !allowed.includes(key));
+        if (unknown.length) rejectPayload(`${path}の項目がoffline許可外です`);
+    }
+
+    function validatePayload(spec, method, payload) {
+        validateSafeValue(payload, 'payload', 0);
+        const path = spec.path;
+        if (spec.screen === 'attendance' && path === '/api/my/pwa/attendance/daily') {
+            assertExactKeys(payload, method === 'DELETE'
+                ? ['month', 'workDate']
+                : ['workDate', 'clockIn', 'clockOut', 'breaks', 'breakMinutes', 'workType', 'workplaceType', 'remarks'], 'attendance');
+            if (method === 'POST' && payload.breaks !== undefined && payload.breaks !== null) {
+                if (!Array.isArray(payload.breaks)) rejectPayload('attendance.breaksが不正です');
+                payload.breaks.forEach(item => assertExactKeys(item, ['startTime', 'endTime'], 'attendance.breaks'));
+            }
+        } else if (spec.screen === 'timesheet' && path === '/api/my/pwa/timesheet/daily') {
+            assertExactKeys(payload, method === 'DELETE'
+                ? ['contractId', 'workMonth', 'workDate']
+                : ['contractId', 'workMonth', 'workDate', 'startTime', 'endTime', 'breakMinutes', 'remarks'], 'timesheet');
+        } else if (spec.screen === 'expense' && /^\/api\/my\/pwa\/expenses\/drafts(?:\/\d+)?$/.test(path)) {
+            assertExactKeys(payload, method === 'POST'
+                ? ['expenseDate', 'category', 'amount', 'customerId', 'projectId', 'description']
+                : ['id', 'expenseDate', 'category', 'amount', 'customerId', 'projectId', 'description'], 'expense');
+        } else if (spec.screen === 'change-request' && path === '/api/my/pwa/change-requests/drafts') {
+            assertExactKeys(payload, ['requestType', 'payload', 'reason'], 'change-request');
+            const requestType = payload.requestType;
+            const nested = payload.payload;
+            if (requestType === 'profile.change') {
+                assertExactKeys(nested, ['fullName', 'fullNameKana', 'initialName', 'gender', 'birthDate', 'nationality',
+                    'nearestStation', 'prefecture', 'railwayCompany', 'expectedUnitPrice', 'availableDate',
+                    'experienceYears', 'japaneseLevel', 'resumeSummary', 'email', 'phone'], 'change-request.payload');
+            } else if (requestType === 'skill.change') {
+                assertExactKeys(nested, ['skills'], 'change-request.payload');
+                if (!Array.isArray(nested.skills)) rejectPayload('change-request.skillsが不正です');
+                nested.skills.forEach(item => assertExactKeys(item, ['skillId', 'proficiency', 'experienceYears'], 'change-request.skills'));
+            } else if (requestType === 'career.change') {
+                assertExactKeys(nested, ['careers'], 'change-request.payload');
+                if (!Array.isArray(nested.careers)) rejectPayload('change-request.careersが不正です');
+                nested.careers.forEach(item => assertExactKeys(item, ['periodFrom', 'periodTo', 'projectName', 'clientIndustry',
+                    'role', 'description', 'techStack', 'teamSize'], 'change-request.careers'));
+            } else {
+                rejectPayload('change-request.requestTypeが不正です');
+            }
+        } else {
+            rejectPayload('screen/method/pathの組み合わせが不正です');
+        }
+        const bytes = new TextEncoder().encode(JSON.stringify(canonical(payload)).replace(/\u2028|\u2029/g, '')).byteLength;
+        if (bytes > MAX_PAYLOAD_BYTES) rejectPayload('payloadが大きすぎます');
+    }
+
     function now() { return Date.now(); }
 
     function persistedScope() {
@@ -168,11 +261,19 @@
         const threshold = now() - MAX_AGE_MS;
         const records = await readAll();
         await Promise.all(records.filter(record => !record.createdAt || record.createdAt < threshold)
-            .map(record => remove(record.clientRequestId)));
+            .filter(record => record.status !== 'ERROR')
+            .map(record => {
+                record.status = 'ERROR';
+                record.error = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+                // 期限後は入力payloadを残さず、画面には破棄を促す最小metadataだけを残す。
+                record.payload = null;
+                record.payloadHash = null;
+                return put(record);
+            }));
     }
 
     function scopeRecords(records) {
-        return records.filter(record => record.userScope === state.scope && record.createdAt >= now() - MAX_AGE_MS);
+        return records.filter(record => record.userScope === state.scope);
     }
 
     function safeJson(value) {
@@ -223,11 +324,24 @@
         const title = record.status === 'CONFLICT' ? '競合' : '同期エラー';
         const server = conflict.server === undefined ? { hash: conflict.serverHash } : conflict.server;
         const client = conflict.client === undefined ? record.payload : conflict.client;
+        const fields = Array.isArray(conflict.fields) ? conflict.fields : [];
+        const fieldMarkup = fields.length
+            ? `<div class="small mt-1">差分項目</div><ul class="small">${fields.map(field =>
+                `<li><code>${escapeHtml(field.name)}</code>: server=${escapeHtml(safeJson(field.serverValue))}, client=${escapeHtml(safeJson(field.clientValue))}</li>`).join('')}</ul>`
+            : '';
+        const refreshed = conflict.serverRefreshAt
+            ? `<div class="small text-muted">server再取得: ${escapeHtml(conflict.serverRefreshAt)} / version ${escapeHtml(conflict.serverVersion)}</div>` : '';
+        const reapply = conflict.serverVersion === undefined ? ''
+            : `<button type="button" class="btn btn-sm btn-outline-primary me-1" data-pwa-reapply="${escapeHtml(record.clientRequestId)}">server版を確認して再適用</button>`;
         return `<div class="pwa-queue-conflict" data-request-id="${escapeHtml(record.clientRequestId)}">` +
             `<div class="fw-bold">${title}: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
             `<div class="small text-muted">clientRequestId: ${escapeHtml(record.clientRequestId)}</div>` +
+            `<div class="small text-muted">resource: ${escapeHtml(conflict.resource || record.resourceKey || '')} / ${escapeHtml(conflict.resourceId || '')}</div>` +
+            refreshed + fieldMarkup +
             `<div class="small mt-1">サーバー版</div><pre>${escapeHtml(safeJson(server))}</pre>` +
             `<div class="small">端末版</div><pre>${escapeHtml(safeJson(client))}</pre>` +
+            `<button type="button" class="btn btn-sm btn-outline-secondary me-1" data-pwa-refresh="${escapeHtml(record.clientRequestId)}">server版を再取得</button>` +
+            reapply +
             `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">端末版を破棄</button>` +
             `</div>`;
     }
@@ -259,6 +373,78 @@
         return { conflict: true, data: record.conflict, clientRequestId: record.clientRequestId };
     }
 
+    function conflictRefreshPath(record) {
+        const month = encodeURIComponent(record.month || '');
+        if (record.screen === 'attendance') return `/api/my/attendance?month=${month}`;
+        if (record.screen === 'timesheet') return `/api/my/timesheet?month=${month}`;
+        if (record.screen === 'expense') return '/api/my/expenses?current=1&size=100';
+        if (record.screen === 'change-request') return '/api/my/profile';
+        return null;
+    }
+
+    function refreshedVersion(data, record) {
+        const root = data && data.data !== undefined ? data.data : data;
+        if (record.screen === 'attendance' && root && Array.isArray(root.months)) {
+            const row = root.months.find(item => item && String(item.workMonth || '').startsWith(String(record.month || '')));
+            return row && Number.isInteger(Number(row.version)) ? Number(row.version) : 0;
+        }
+        if (record.screen === 'timesheet' && root && Array.isArray(root.rows)) {
+            const row = root.rows.find(item => item && String(item.contractId) === String(record.payload.contractId));
+            return row && Number.isInteger(Number(row.version)) ? Number(row.version) : 0;
+        }
+        if (record.screen === 'expense' && root && root.records && Array.isArray(root.records)) {
+            const row = root.records.find(item => item && String(item.id) === String(record.payload.id));
+            return row && Number.isInteger(Number(row.version)) ? Number(row.version) : 0;
+        }
+        if (record.screen === 'change-request' && root && Number.isInteger(Number(root.version))) return Number(root.version);
+        return null;
+    }
+
+    async function refreshConflict(clientRequestId) {
+        const record = (await readAll()).find(candidate => candidate.clientRequestId === clientRequestId);
+        if (!record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
+        if (!navigator.onLine) { await render(); return; }
+        const path = conflictRefreshPath(record);
+        if (!path) return;
+        try {
+            const response = await fetch(path, { method: 'GET', cache: 'no-store', credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' } });
+            if (response.status === 401 || (response.redirected && /\/login(?:[/?#]|$)/.test(response.url))) {
+                state.paused = true;
+                if (window.SES && SES.pwa) SES.pwa.sessionExpired();
+                await render();
+                return;
+            }
+            const result = await response.json();
+            if (!response.ok || !result || result.code !== 200) throw new Error('server版を再取得できません');
+            const version = refreshedVersion(result, record);
+            if (version === null) throw new Error('server versionを再取得できません');
+            record.conflict = Object.assign({}, record.conflict, { serverVersion: version,
+                serverRefreshAt: new Date().toISOString() });
+            await put(record);
+        } catch (error) {
+            record.error = error.message || 'server版を再取得できません';
+            await put(record);
+        }
+        await render();
+    }
+
+    async function reapplyConflict(clientRequestId) {
+        const record = (await readAll()).find(candidate => candidate.clientRequestId === clientRequestId);
+        if (!record || record.userScope !== state.scope || record.status !== 'CONFLICT') return;
+        const serverVersion = Number(record.conflict && record.conflict.serverVersion);
+        if (!Number.isInteger(serverVersion) || serverVersion < 0) return;
+        if (!window.confirm('server版との差分を確認しました。端末版を新しいbase versionで再適用しますか？')) return;
+        record.baseVersion = serverVersion;
+        record.payloadHash = await commandHash(record);
+        record.status = 'PENDING';
+        delete record.conflict;
+        delete record.error;
+        await put(record);
+        await render();
+        await flush();
+    }
+
     async function markError(record, message) {
         record.status = 'ERROR';
         record.error = message || '同期できません';
@@ -269,6 +455,8 @@
     async function markExpired(record, message) {
         record.status = 'ERROR';
         record.error = message || '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+        record.payload = null;
+        record.payloadHash = null;
         await put(record);
         await render();
         return { expired: true, clientRequestId: record.clientRequestId };
@@ -276,6 +464,9 @@
 
     async function sendRecord(record) {
         if (record.userScope !== state.scope) return { skipped: true };
+        if (!record.createdAt || record.createdAt < now() - MAX_AGE_MS) {
+            return markExpired(record);
+        }
         if (!navigator.onLine || state.paused) return { queued: true, clientRequestId: record.clientRequestId };
         const headers = Object.assign({
             'Accept': 'application/json',
@@ -343,6 +534,7 @@
         const payload = spec.payload || {};
         const baseVersion = Number(spec.baseVersion);
         if (!Number.isInteger(baseVersion) || baseVersion < 0) throw new Error('baseVersionが不正です');
+        validatePayload(spec, method, payload);
         const dedupeKey = JSON.stringify(canonical({
             screen: spec.screen, month: spec.month || null, method, path: spec.path,
             baseVersion, payload
@@ -410,6 +602,10 @@
         document.addEventListener('click', event => {
             const discard = event.target.closest('[data-pwa-discard]');
             if (discard) remove(discard.dataset.pwaDiscard).then(render);
+            const refresh = event.target.closest('[data-pwa-refresh]');
+            if (refresh) refreshConflict(refresh.dataset.pwaRefresh);
+            const reapply = event.target.closest('[data-pwa-reapply]');
+            if (reapply) reapplyConflict(reapply.dataset.pwaReapply);
             if (event.target.closest('#pwa-sync-now')) resume();
         });
     }

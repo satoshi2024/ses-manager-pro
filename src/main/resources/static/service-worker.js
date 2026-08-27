@@ -40,11 +40,18 @@ function isDynamicOrSensitive(request) {
         || /(?:document|payroll|bank|attachment|receipt|files|pdf|reconciliation)/i.test(path);
 }
 
+function isSafeShellResponse(response) {
+    return response && response.ok && !response.redirected && response.type !== 'opaque';
+}
+
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache =>
             Promise.all(SHELL_ASSETS.map(asset =>
-                cache.add(asset).catch(() => undefined)
+                fetch(asset, { credentials: 'same-origin', cache: 'reload', redirect: 'error' })
+                    .then(response => isSafeShellResponse(response)
+                        ? cache.put(asset, response.clone()) : undefined)
+                    .catch(() => undefined)
             ))
         )
     );
@@ -64,7 +71,7 @@ self.addEventListener('fetch', event => {
     if (isStaticAsset(request)) {
         event.respondWith(
             caches.match(request).then(cached => cached || fetch(request).then(response => {
-                if (response.ok) {
+                if (isSafeShellResponse(response)) {
                     return caches.open(CACHE_NAME).then(cache => {
                         cache.put(request, response.clone());
                         return response;

@@ -111,8 +111,8 @@ timesheet、attendance、expense、change-requestのshell navigationを390×844�
 - `clientRequestId`、hash、baseVersion、userScope、screen、month、createdAtを毎回生成する。
 - syncはonline event、page visibility、明示再試行で実行し、logout/user switch/session expiry/context mismatchで停止する。
 - queue中のsubmit/approval/attachment/receiptを作らない。
-- 30日を超えたrecordは送信せず破棄し、409 responseをserver/client diffとして表示し、自動merge/retryをしない。
-- 送信時は`X-Client-Created-At`を付け、server時計で30日保持期限と未来時刻を検査する。期限切れは自動再送せず、破棄・再入力を促す。
+- 30日を超えたrecordは送信せずpayloadを除去し、破棄・再入力を促す。409 responseはresource/resourceIdとserver/clientのfield diffとして表示し、自動merge/retryをしない。
+- 送信時は`X-Client-Created-At`を付け、server時計とserver-issued userScope leaseで30日保持期限と未来時刻を検査する。期限切れは自動再送せず、payloadを残さず破棄・再入力を促す。
 - 50ms double-clickで同じcommandを複数生成しない。
 
 ### Test requirements
@@ -147,7 +147,7 @@ SW更新、旧cache削除、queue retention、logout cleanup、監視を運用�
 
 旧versionでqueueを作成し、新versionへ更新後、queueが保持され、禁止cacheが消え、同一user再認証後に一度だけ同期されることを確認する。
 
-## Task M — Integrated gate、evidence、Review handoff
+## Task M — Integrated gate、evidence、Review handoff `[ ]`（Browser環境BLOCKED）
 
 ### Objective
 

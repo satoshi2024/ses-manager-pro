@@ -1,5 +1,6 @@
 AllocationConcurrentConfirmTest
 ConcurrentUpdateTest
+PwaClientMutationLedgerMySqlConcurrencyTest
 ExternalIdentityConcurrentApprovalMySqlTest
 FlywayEnvironmentEvidenceTest
 FlywayLegacyV60MigrationSmokeTest

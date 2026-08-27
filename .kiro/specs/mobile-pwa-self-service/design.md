@@ -87,7 +87,7 @@ Payroll page/API、document/file/download、receipt、attachment、PDF、portal 
 
 ## 5. IndexedDB model
 
-DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではqueue record自身を最小draftのimmutable snapshotとして扱い、別の入力値storeを持たない。raw user ID/usernameはclient recordへ保存せず、serverが発行するopaque contextを`userScope`としてrecordに束縛する。contextはsessionに結びつき、flush前にserverで再検証する。
+DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではqueue record自身を最小draftのimmutable snapshotとして扱い、別の入力値storeを持たない。raw user ID/usernameはclient recordへ保存せず、serverが発行するopaque contextを`userScope`としてrecordに束縛する。contextは内部IDへHMACで束縛したserver-issued time lease（発行時刻＋nonce）を含み、clientのcreatedAtを書き換えて期限を延長できない。contextはsessionに結びつき、flush前にserverで再検証する。
 
 ### 5.1 Store
 
@@ -100,7 +100,7 @@ DB名は`ses-pwa-self-service`、schema versionを明示する。実装ではque
 }
 ```
 
-payloadは最小入力に限定し、receipt/attachment/binary/secretを拒否する。logout/user switchではDB全体をclearし、削除完了を確認できない場合はflushをfail-closedする。`meta`やraw user ID/usernameは保存しない。
+payloadは画面・method・pathごとのallowlist、32KiB、深さ、plain object、再帰的なreceipt/attachment/binary/secret/PII key検査を通過した最小入力に限定する。logout/user switchではDB全体をclearし、削除完了を確認できない場合はflushをfail-closedする。期限切れrecordは送信禁止にしてpayloadを除去し、破棄を明示的に促す。`meta`やraw user ID/usernameは保存しない。
 
 ## 6. Session context and user boundary
 
@@ -115,7 +115,7 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 - Header: `X-Client-Request-Id`（UUID、1 commandにつき不変）
 - Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`、`X-Client-Created-At`（epoch milliseconds）。bodyは`screen`、`month`、`payload`を持つ。
 - Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
-- Retention: serverは`X-Client-Created-At`をserver時計と比較し、30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。端末時刻を監査正本にはしないが、client recordの作成時刻を無検査で受け入れない。
+- Retention: serverは`X-Client-Created-At`をserver時計と比較し、30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。加えてserver-issued userScope leaseの発行時刻より前のcreatedAt、lease失効後の送信、client時刻の書換えによる期限延長を拒否する。
 - Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。
 
 ### 7.2 Storage
@@ -137,7 +137,7 @@ submitやapproval state transitionへqueue headerを付ける場合もonline-onl
 
 ## 9. Conflict UX
 
-409のdataは次の形を基本とする。
+409のdataは次の形を基本とする。`fields`はserver/clientの項目差分、`resource/resourceId`は再適用対象を固定するために返す。UIはserverを再取得してversionを更新した後、ユーザー確認を経たmanual reapplyだけを許可し、自動merge/LWWを行わない。
 
 ```json
 {

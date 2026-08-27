@@ -31,6 +31,7 @@ class PwaAssetContractTest {
         assertThat(worker).contains("path === '/js/i18n.js'");
         assertThat(worker).contains("request.method === 'GET'");
         assertThat(worker).contains("cache.put(request, response.clone())");
+        assertThat(worker).contains("!response.redirected", "response.type !== 'opaque'", "redirect: 'error'");
         assertThat(worker).contains("event.respondWith(fetch(request).catch(() => caches.match('/offline.html'))");
         assertThat(worker).doesNotContain("caches.addAll([request])");
         assertThat(worker).doesNotContain("cache.put(request, await response");
@@ -67,7 +68,11 @@ class PwaAssetContractTest {
         assertThat(queue).contains("QUEUE_EXPIRED", "error.pwa.queueExpired");
         assertThat(queue).contains("state.paused = true", "response.redirected", "text/html");
         assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
-        assertThat(queue).doesNotContain("password", "bankAccount", "receiptBlob");
+        assertThat(queue).contains("FORBIDDEN_KEY", "MAX_PAYLOAD_BYTES", "validatePayload", "ArrayBuffer.isView");
+        assertThat(queue).doesNotContain("record.password", "record.bankAccount", "record.receiptBlob");
+        assertThat(queue).contains("/api/my/pwa/attendance/daily", "/api/my/pwa/timesheet/daily",
+                "/api/my/pwa/expenses/drafts", "/api/my/pwa/change-requests/drafts",
+                "data-pwa-refresh", "data-pwa-reapply", "serverRefreshAt");
     }
 
     @Test

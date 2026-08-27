@@ -13,7 +13,10 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.UUID;
 
 /** PWA commandを現在の内部ユーザー・要員linkへ束縛するopaque context。 */
 @Service
@@ -23,6 +26,7 @@ public class PwaUserContextService {
 
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final Environment environment;
+    private final Clock clock;
 
     @Value("${app.pwa.context-secret:}")
     private String contextSecret;
@@ -40,7 +44,8 @@ public class PwaUserContextService {
         Long userId = requireUserId();
         Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
         if (engineerId == null) throw BusinessException.of(403, "error.my.notLinked");
-        return new CurrentContext(userId, engineerId, issue(userId, engineerId));
+        Instant issuedAt = clock.instant();
+        return new CurrentContext(userId, engineerId, issue(userId, engineerId, issuedAt), issuedAt);
     }
 
     public CurrentContext assertCurrent(String opaqueScope) {
@@ -55,19 +60,28 @@ public class PwaUserContextService {
         } catch (IllegalArgumentException e) {
             throw BusinessException.of(403, "error.pwa.userScopeMismatch");
         }
-        if (!MessageDigest.isEqual(sign(payload).getBytes(StandardCharsets.UTF_8),
+        Long userId = requireUserId();
+        Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
+        if (engineerId == null) {
+            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
+        }
+        if (!MessageDigest.isEqual(sign(payload, userId, engineerId).getBytes(StandardCharsets.UTF_8),
                 parts[1].getBytes(StandardCharsets.UTF_8))) {
             throw BusinessException.of(403, "error.pwa.userScopeMismatch");
         }
         String[] values = payload.split(":", -1);
-        if (values.length != 2) throw BusinessException.of(403, "error.pwa.userScopeMismatch");
-        Long userId = requireUserId();
-        Long engineerId = engineerAccountLinkService.findEngineerIdByUserId(userId);
-        if (engineerId == null || !String.valueOf(userId).equals(values[0])
-                || !String.valueOf(engineerId).equals(values[1])) {
+        if (values.length != 2 || values[0].isBlank() || values[1].isBlank()) {
             throw BusinessException.of(403, "error.pwa.userScopeMismatch");
         }
-        return new CurrentContext(userId, engineerId, opaqueScope);
+        try {
+            Instant issuedAt = Instant.ofEpochMilli(Long.parseLong(values[0]));
+            if (issuedAt.isAfter(clock.instant().plusSeconds(5 * 60L))) {
+                throw BusinessException.of(403, "error.pwa.userScopeMismatch");
+            }
+            return new CurrentContext(userId, engineerId, opaqueScope, issuedAt);
+        } catch (NumberFormatException e) {
+            throw BusinessException.of(403, "error.pwa.userScopeMismatch");
+        }
     }
 
     public String hashScope(String opaqueScope) {
@@ -82,18 +96,21 @@ public class PwaUserContextService {
         }
     }
 
-    private String issue(Long userId, Long engineerId) {
-        String payload = userId + ":" + engineerId;
+    private String issue(Long userId, Long engineerId, Instant issuedAt) {
+        // 内部IDをtoken本体へ出さず、現在のprincipalとのHMAC束縛だけでscopeを検証する。
+        String payload = issuedAt.toEpochMilli() + ":" + UUID.randomUUID();
         return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + "." + sign(payload);
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + "."
+                + sign(payload, userId, engineerId);
     }
 
-    private String sign(String payload) {
+    private String sign(String payload, Long userId, Long engineerId) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(
-                    mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+                    mac.doFinal((userId + ":" + engineerId + ":" + payload)
+                            .getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException("PWA user scopeの署名に失敗しました", e);
         }
@@ -109,5 +126,10 @@ public class PwaUserContextService {
         return userId;
     }
 
-    public record CurrentContext(Long userId, Long engineerId, String userScope) {}
+    public record CurrentContext(Long userId, Long engineerId, String userScope, Instant issuedAt) {
+        /** テストおよび既存の呼出元向け。実リクエストではserver発行時刻を必ず持つ。 */
+        public CurrentContext(Long userId, Long engineerId, String userScope) {
+            this(userId, engineerId, userScope, null);
+        }
+    }
 }
