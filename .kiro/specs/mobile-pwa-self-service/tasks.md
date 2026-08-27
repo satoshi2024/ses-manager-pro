@@ -51,7 +51,7 @@
 
 SW有効の実BrowserでCache Storageを開き、全entry URLを出力する。禁止route 0件、static allow-listのみ、更新prompt 1回を証拠化する。
 
-## Task F2 — User context、idempotency、version/CAS contract
+## Task F2 — User context、idempotency、version/CAS contract `[x]`
 
 ### Objective
 
