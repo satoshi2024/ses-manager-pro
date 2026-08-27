@@ -37,12 +37,20 @@ public class PwaNoStoreFilter extends OncePerRequestFilter {
     }
 
     static boolean isDynamicPath(String path) {
-        return path != null && (path.startsWith("/api/")
-                || path.equals("/api")
-                || path.startsWith("/my/")
-                || path.equals("/my")
-                || path.startsWith("/portal/")
-                || path.equals("/portal"));
+        if (path == null) return false;
+        // PWAのshell allow-list以外はserver-rendered画面・APIを含めて動的扱いにする。
+        // これにより /document、/payroll、PDF/attachment等の新規route追加時も
+        // HTTP browser cacheへPIIが残る漏れを防ぐ（SWもdynamicはnetwork-only）。
+        return !(path.startsWith("/css/")
+                || path.startsWith("/js/")
+                || path.startsWith("/lib/")
+                || path.startsWith("/img/")
+                || path.startsWith("/data/")
+                || path.equals("/favicon.ico")
+                || path.equals("/favicon.svg")
+                || path.equals("/manifest.webmanifest")
+                || path.equals("/offline.html")
+                || path.equals("/service-worker.js"));
     }
 
     private static void applyNoStore(HttpServletResponse response) {

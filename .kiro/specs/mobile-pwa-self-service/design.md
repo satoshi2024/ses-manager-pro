@@ -83,7 +83,7 @@ Service Workerはmutationをqueueへ変換しない。page側のsync moduleがqu
 
 ### 4.2 Server headers
 
-Payroll page/API、document/file/download、receipt、attachment、PDF、portal responseは共通のno-store helperまたは既存controllerの`CacheControl.noStore()`で統一する。エラーresponseも認証済みPII routeではno-storeを維持する。`common.js`のAPI/download fetchには`cache: 'no-store'`を指定する。
+Payroll page/API、document/file/download、receipt、attachment、PDF、portal responseは、静的assetを除く全dynamic routeへ適用する共通のno-store filterまたは既存controllerの`CacheControl.noStore()`で統一する。エラーresponseも認証済みPII routeではno-storeを維持する。`common.js`のAPI/download fetchには`cache: 'no-store'`を指定する。
 
 ## 5. IndexedDB model
 

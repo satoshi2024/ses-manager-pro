@@ -30,7 +30,8 @@ class PwaNoStoreFilterTest {
     @Test
     void portalとmyのページもnoStoreにする() throws Exception {
         PwaNoStoreFilter filter = new PwaNoStoreFilter();
-        for (String path : new String[]{"/my/timesheet", "/portal/customer", "/portal"}) {
+        for (String path : new String[]{"/my/timesheet", "/portal/customer", "/portal",
+                "/document/list", "/payroll", "/contract-document"}) {
             MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
             MockHttpServletResponse response = new MockHttpServletResponse();
             filter.doFilter(request, response, mock(FilterChain.class));
@@ -47,5 +48,12 @@ class PwaNoStoreFilterTest {
         filter.doFilter(request, response, mock(FilterChain.class));
 
         assertNull(response.getHeader("Cache-Control"));
+
+        for (String path : new String[]{"/manifest.webmanifest", "/offline.html", "/data/station_names.json"}) {
+            MockHttpServletRequest staticRequest = new MockHttpServletRequest("GET", path);
+            MockHttpServletResponse staticResponse = new MockHttpServletResponse();
+            filter.doFilter(staticRequest, staticResponse, mock(FilterChain.class));
+            assertNull(staticResponse.getHeader("Cache-Control"), path);
+        }
     }
 }
