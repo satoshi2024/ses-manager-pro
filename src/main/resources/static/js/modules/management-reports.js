@@ -52,27 +52,27 @@ function generateReport(event) {
     const versionId = $('#report-version').val();
     const period = $('#report-period').val();
     if (!versionId || !period) { Toast.error('公開済みversionと対象月を指定してください。'); return; }
-    $('#report-run-result').html('<div class="spinner-border spinner-border-sm text-info me-2"></div>recipient previewを確認中...');
+    $('#runResult').html('<div class="spinner-border spinner-border-sm text-info me-2"></div>recipient previewを確認中...');
     $.ajax({
         url: `/api/management-reports/templates/${versionId}/recipient-preview`, method: 'POST', contentType: 'application/json',
         data: JSON.stringify({period: period}),
         success: function (preview) {
-            if (preview.code !== 200) { $('#report-run-result').text(preview.message || 'recipient previewに失敗しました。'); return; }
+            if (preview.code !== 200) { $('#runResult').text(preview.message || 'recipient previewに失敗しました。'); return; }
             const allowed = (preview.data.recipients || []).filter(r => r.scopeDecision === 'ALLOW').length;
-            $('#report-run-result').html(`<div class="small text-muted mb-2">recipient preview: ${allowed}件を許可。snapshotを生成中...</div>`);
+            $('#runResult').html(`<div class="small text-muted mb-2">recipient preview: ${allowed}件を許可。snapshotを生成中...</div>`);
             $.ajax({
         url: '/api/management-reports/runs', method: 'POST', contentType: 'application/json',
         data: JSON.stringify({templateVersionId: Number(versionId), period: period, cutoffKind: $('#report-cutoff').val(), recipientPreviewHash: preview.data.previewHash}),
         success: function (res) {
-            if (res.code !== 200) { $('#report-run-result').text(res.message || '生成に失敗しました。'); return; }
+            if (res.code !== 200) { $('#runResult').text(res.message || '生成に失敗しました。'); return; }
             const run = res.data.run;
-            $('#report-run-result').html(`<span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status)}</span> run=${run.id} / timezone=${SES.escapeHtml(run.timezoneId)} / dataAsOf=${SES.escapeHtml(run.dataAsOfAt || '')}`);
+            $('#runResult').html(`<span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status)}</span> run=${run.id} / timezone=${SES.escapeHtml(run.timezoneId)} / dataAsOf=${SES.escapeHtml(run.dataAsOfAt || '')}`);
             renderReportSections(res.data.sections || []);
         },
-        error: function () { $('#report-run-result').text('snapshot生成の通信に失敗しました。'); }
+        error: function () { $('#runResult').text('snapshot生成の通信に失敗しました。'); }
             });
         },
-        error: function () { $('#report-run-result').text('recipient previewの通信に失敗しました。'); }
+        error: function () { $('#runResult').text('recipient previewの通信に失敗しました。'); }
     });
 }
 

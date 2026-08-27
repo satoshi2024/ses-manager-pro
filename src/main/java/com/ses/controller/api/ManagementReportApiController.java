@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
@@ -69,6 +70,10 @@ public class ManagementReportApiController {
 
     @PostMapping("/runs")
     public ApiResult<ReportGenerationResult> generate(@RequestBody ReportRunRequest request) {
+        if (request == null || request.recipientPreviewHash() == null
+                || request.recipientPreviewHash().isBlank()) {
+            throw BusinessException.of(400, "error.managementReport.recipientPreviewRequired");
+        }
         ReportGenerationCommand command = new ReportGenerationCommand(request.templateVersionId(),
                 YearMonth.parse(request.period()), request.cutoffKind(), false, null, false, null,
                 null, request.recipientPreviewHash(), null);
@@ -85,10 +90,13 @@ public class ManagementReportApiController {
     public ApiResult<ReportGenerationResult> regenerate(@PathVariable Long runId) {
         ReportRun previous = snapshotService.findRun(runId);
         snapshotService.assertAccessible(previous);
+        ReportRecipientPreviewResult preview = recipientPreviewService.previewForScope(
+                previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
+                snapshotService.scopeSnapshotOf(previous));
         return ApiResult.success(snapshotService.generate(new ReportGenerationCommand(
                 previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
                 previous.getCutoffKind(), true, previous.getScheduleId(), false, null,
-                previous.getId(), null, snapshotService.scopeSnapshotOf(previous))));
+                previous.getId(), preview.getPreviewHash(), snapshotService.scopeSnapshotOf(previous))));
     }
 
     @GetMapping("/runs/{runId}")
