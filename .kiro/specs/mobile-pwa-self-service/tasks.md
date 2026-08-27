@@ -106,12 +106,12 @@ timesheet、attendance、expense、change-requestのshell navigationを390×844�
 
 ### Implementation guidance
 
-- IndexedDB `drafts`/`queue`/`meta`をschema version付きで追加する。
+- IndexedDBはschema version付きの単一`queue` storeを使い、最小入力draftと送信commandを同じuser-scope recordとして保持する（token/secret/給与・銀行/添付binary/他人PII用のstoreは作らない）。
 - 保存前にallowlist、payload size、binary/secret/PII禁止を検査する。
 - `clientRequestId`、hash、baseVersion、userScope、screen、month、createdAtを毎回生成する。
 - syncはonline event、page visibility、明示再試行で実行し、logout/user switch/session expiry/context mismatchで停止する。
 - queue中のsubmit/approval/attachment/receiptを作らない。
-- 409 responseをserver/client diffとして表示し、自動merge/retryをしない。
+- 30日を超えたrecordは送信せず破棄し、409 responseをserver/client diffとして表示し、自動merge/retryをしない。
 - 50ms double-clickで同じcommandを複数生成しない。
 
 ### Test requirements
