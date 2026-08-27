@@ -138,9 +138,9 @@ $(document).ready(function() {
     function buildPillHtml(item) {
         const meta = stateMeta(item.renewalState);
         let healthBadge = '';
-        if (item.healthStatus === 'AT_RISK') {
+        if (item.healthStatus === 'CRITICAL') {
             healthBadge = ' <span class="badge bg-danger p-1" title="顧客ヘルス: 危険 (' + (item.healthScore || 0) + '点)">⚠</span>';
-        } else if (item.healthStatus === 'NEUTRAL') {
+        } else if (item.healthStatus === 'WARNING') {
             healthBadge = ' <span class="badge bg-warning text-dark p-1" title="顧客ヘルス: 注意 (' + (item.healthScore || 0) + '点)">●</span>';
         } else if (item.healthStatus === 'HEALTHY') {
             healthBadge = ' <span class="badge bg-success p-1" title="顧客ヘルス: 健全 (' + (item.healthScore || 0) + '点)">✓</span>';
@@ -245,12 +245,18 @@ $(document).ready(function() {
         let healthHtml = '<span class="text-muted">-</span>';
         if (item.healthStatus === 'HEALTHY') {
             healthHtml = `<span class="badge bg-success">健全 (${item.healthScore || 0}点)</span>`;
-        } else if (item.healthStatus === 'NEUTRAL') {
+        } else if (item.healthStatus === 'WARNING') {
             healthHtml = `<span class="badge bg-warning text-dark">注意 (${item.healthScore || 0}点)</span>`;
-        } else if (item.healthStatus === 'AT_RISK') {
+        } else if (item.healthStatus === 'CRITICAL') {
             healthHtml = `<span class="badge bg-danger">危険 (${item.healthScore || 0}点)</span>`;
         }
-        $('#renewalDetailCustomerHealth').html(healthHtml);
+        if (item.openCriticalIssuesCount !== undefined && item.openCriticalIssuesCount > 0) {
+            healthHtml += ` <span class="badge bg-danger">未解決P0/P1: ${item.openCriticalIssuesCount}件</span>`;
+        }
+        if (item.avgCsatScore) {
+            healthHtml += ` <span class="badge bg-info text-dark">CSAT: ${item.avgCsatScore}</span>`;
+        }
+        $('#renewalDetailHealth').html(healthHtml);
 
         const meta = stateMeta(item.renewalState);
         $('#renewalDetailState').html(`<span class="status-badge ${meta.badgeClass}">${SES.escapeHtml(stateLabel(item.renewalState))}</span>`);

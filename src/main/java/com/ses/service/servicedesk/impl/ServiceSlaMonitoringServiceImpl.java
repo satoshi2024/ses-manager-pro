@@ -68,7 +68,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                     String title = "[SLA超過] 初回応答期限超過: " + req.getRequestNo();
                     String message = String.format("リクエスト「%s」の初回応答期限（%s）を超過しました。",
                             req.getSubject(), clock.getResponseDeadline().toString().replace('T', ' '));
-                    String linkUrl = "/service-desk/requests/" + req.getId();
+                    String linkUrl = com.ses.common.constant.NotificationLinks.serviceDeskDetail(req.getId());
 
                     notificationService.publishToUser(targetUserId, "SERVICE_DESK_SLA_BREACH", title, message, linkUrl, dedupeKey, "serviceDesk");
                 }
@@ -86,7 +86,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                     String title = "[SLA超過] 解決期限超過: " + req.getRequestNo();
                     String message = String.format("リクエスト「%s」の解決期限（%s）を超過しました。",
                             req.getSubject(), clock.getResolveDeadline().toString().replace('T', ' '));
-                    String linkUrl = "/service-desk/requests/" + req.getId();
+                    String linkUrl = com.ses.common.constant.NotificationLinks.serviceDeskDetail(req.getId());
 
                     notificationService.publishToUser(targetUserId, "SERVICE_DESK_SLA_BREACH", title, message, linkUrl, dedupeKey, "serviceDesk");
                 } else if (asOf.plusHours(1).isAfter(clock.getResolveDeadline())) {
@@ -95,7 +95,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                     String title = "[SLA警告] 解決期限が迫っています: " + req.getRequestNo();
                     String message = String.format("リクエスト「%s」の解決期限（%s）まで1時間を切りました。",
                             req.getSubject(), clock.getResolveDeadline().toString().replace('T', ' '));
-                    String linkUrl = "/service-desk/requests/" + req.getId();
+                    String linkUrl = com.ses.common.constant.NotificationLinks.serviceDeskDetail(req.getId());
 
                     notificationService.publishToUser(targetUserId, "SERVICE_DESK_SLA_WARNING", title, message, linkUrl, dedupeKey, "serviceDesk");
                 }

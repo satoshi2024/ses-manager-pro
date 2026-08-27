@@ -5,11 +5,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
- * 顧客ヘルススコア DTO
+ * 顧客ヘルススコア DTO (100点減点モデル: WIP-3)
  */
 @Data
 @Builder
@@ -19,13 +21,15 @@ public class CustomerHealthScoreDto {
     private Long customerId;
     private String customerName;
     private Integer healthScore;
-    private String healthStatus; // HEALTHY, NEUTRAL, AT_RISK
+    private String healthStatus; // HEALTHY, WARNING, CRITICAL
 
-    private Double slaComplianceScore; // max 30
-    private Double csatScore;          // max 25
-    private Double engagementScore;    // max 25
-    private Double communicationScore; // max 20
+    private Integer openCriticalIssuesCount;
+    private Integer slaBreachCount30d;
+    private BigDecimal avgCsatScore;
+    private Boolean arOverdueFlag;
 
+    private List<String> missingInputs;
+    private String factorsExplanation;
     private Map<String, Object> factorBreakdown;
     private LocalDateTime calculatedAt;
 }

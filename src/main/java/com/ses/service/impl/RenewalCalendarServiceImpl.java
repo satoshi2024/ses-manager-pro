@@ -90,6 +90,8 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
                 com.ses.dto.servicedesk.CustomerHealthScoreDto health = healthMap.get(item.getCustomerId());
                 item.setHealthStatus(health.getHealthStatus());
                 item.setHealthScore(health.getHealthScore());
+                item.setOpenCriticalIssuesCount(health.getOpenCriticalIssuesCount());
+                item.setAvgCsatScore(health.getAvgCsatScore());
             }
         }
 

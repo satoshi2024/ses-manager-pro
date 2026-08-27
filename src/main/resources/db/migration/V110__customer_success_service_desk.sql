@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS m_service_sla_policy (
     version               INT NOT NULL DEFAULT 0,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_sla_policy_priority (priority, status)
+    INDEX idx_sla_policy_priority (priority, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SLAポリシーマスタ';
 
 -- 初期SLAポリシー投入

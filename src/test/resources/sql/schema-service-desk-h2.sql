@@ -12,8 +12,7 @@ CREATE TABLE IF NOT EXISTS m_service_sla_policy (
     status                VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     version               INT NOT NULL DEFAULT 0,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (priority, status)
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_service_request (

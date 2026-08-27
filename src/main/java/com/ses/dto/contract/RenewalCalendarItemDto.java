@@ -24,4 +24,6 @@ public class RenewalCalendarItemDto {
     private String salesUserName;
     private String healthStatus;
     private Integer healthScore;
+    private Integer openCriticalIssuesCount;
+    private java.math.BigDecimal avgCsatScore;
 }

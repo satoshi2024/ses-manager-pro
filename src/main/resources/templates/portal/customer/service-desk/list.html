@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>サービスデスク (問い合わせ一覧) - 顧客ポータル</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+</head>
+<body class="portal-body">
+<header class="portal-header">
+    <span class="portal-header-brand" th:text="#{app.title}">SES管理プロ</span>
+    <span class="portal-header-user" id="portalHeaderUser"></span>
+    <a th:href="@{/portal/customer}" class="btn btn-sm btn-outline-secondary ms-auto me-2">ポータルトップへ</a>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton"
+            th:text="#{portal.logout}">ログアウト</button>
+</header>
+
+<main class="portal-container py-4" role="main">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h3 class="mb-1 fw-bold"><i class="bi bi-headset me-2 text-primary"></i>サービスデスク (お問い合わせ)</h3>
+            <p class="text-muted small mb-0">ご契約、勤怠、請求、その他ご質問・ご要望の起票および対応状況の確認</p>
+        </div>
+        <div>
+            <button type="button" class="btn btn-primary btn-sm" id="btnOpenCreateModal" data-bs-toggle="modal" data-bs-target="#createRequestModal">
+                <i class="bi bi-plus-circle me-1"></i>新規お問い合わせ
+            </button>
+        </div>
+    </div>
+
+    <!-- Search / Filter Bar -->
+    <div class="card mb-4 shadow-sm border">
+        <div class="card-body py-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-5">
+                    <input type="text" class="form-control form-control-sm" id="portalSearchKeyword" placeholder="件名・詳細で検索...">
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select form-select-sm" id="portalSearchStatus">
+                        <option value="">すべてのステータス</option>
+                        <option value="RECEIVED">受付</option>
+                        <option value="IN_PROGRESS">対応中</option>
+                        <option value="WAITING_CUSTOMER">お客様確認待ち</option>
+                        <option value="RESOLVED">解決済み</option>
+                        <option value="CLOSED">完了</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button type="button" class="btn btn-secondary btn-sm w-100" id="btnSearchRequests">
+                        <i class="bi bi-search me-1"></i>絞り込み
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request List Table -->
+    <div class="card shadow-sm border mb-4">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="portalRequestTable">
+                    <thead class="table-light">
+                    <tr>
+                        <th>管理番号</th>
+                        <th>件名</th>
+                        <th>カテゴリ</th>
+                        <th>ステータス</th>
+                        <th>起票日時</th>
+                        <th>最新更新</th>
+                        <th class="text-end">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="portalRequestTableBody">
+                    <tr><td colspan="7" class="text-center py-4 text-muted">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- Create Request Modal -->
+<div class="modal fade" id="createRequestModal" tabindex="-1" aria-labelledby="createRequestModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form id="portalCreateForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createRequestModalLabel"><i class="bi bi-plus-circle me-1"></i>新規お問い合わせ起票</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="modalCategory" class="form-label required">カテゴリ <span class="text-danger">*</span></label>
+                        <select class="form-select" id="modalCategory" required>
+                            <option value="CONTRACT">契約関連</option>
+                            <option value="BILLING">請求・精算</option>
+                            <option value="ATTENDANCE">勤怠・稼働</option>
+                            <option value="QUALITY">業務品質・課題</option>
+                            <option value="SYSTEM">システム・アカウント</option>
+                            <option value="OTHER" selected>その他</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalPriority" class="form-label required">優先度 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="modalPriority" required>
+                            <option value="P2" selected>中 (標準対応: 目標応答4時間/解決24時間)</option>
+                            <option value="P1">高 (至急: 目標応答2時間/解決8時間)</option>
+                            <option value="P0">緊急 (クリティカル: 目標応答1時間/解決4時間)</option>
+                            <option value="P3">低 (質問・要望: 目標応答8時間/解決48時間)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalSubject" class="form-label required">件名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="modalSubject" placeholder="お問い合わせ件名" required maxlength="255">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalDescription" class="form-label required">詳細内容 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="modalDescription" rows="5" placeholder="詳細な内容をご記入ください" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="submit" class="btn btn-primary" id="btnSubmitCreate">起票する</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script th:src="@{/portal/js/portal-common.js}"></script>
+<script>
+$(document).ready(function() {
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function getStatusBadge(status) {
+        switch(status) {
+            case 'RECEIVED': return '<span class="badge bg-secondary">受付</span>';
+            case 'IN_PROGRESS': return '<span class="badge bg-primary">対応中</span>';
+            case 'WAITING_CUSTOMER': return '<span class="badge bg-warning text-dark">確認待ち</span>';
+            case 'RESOLVED': return '<span class="badge bg-success">解決済み</span>';
+            case 'CLOSED': return '<span class="badge bg-dark">完了</span>';
+            default: return `<span class="badge bg-secondary">${escapeHtml(status)}</span>`;
+        }
+    }
+
+    function loadRequests() {
+        const keyword = $('#portalSearchKeyword').val();
+        const status = $('#portalSearchStatus').val();
+        const $tbody = $('#portalRequestTableBody');
+        $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted">読み込み中...</td></tr>');
+
+        $.ajax({
+            url: '/api/portal/customer/service-desk/requests',
+            type: 'GET',
+            data: { keyword: keyword, status: status, current: 1, size: 50 },
+            success: function(res) {
+                if (res.code === 200) {
+                    renderTable(res.data ? (res.data.records || []) : []);
+                } else {
+                    $tbody.html(`<tr><td colspan="7" class="text-center py-4 text-danger">${escapeHtml(res.message || 'データ取得エラー')}</td></tr>`);
+                }
+            },
+            error: function() {
+                $tbody.html('<tr><td colspan="7" class="text-center py-4 text-danger">通信エラーが発生しました</td></tr>');
+            }
+        });
+    }
+
+    function renderTable(records) {
+        const $tbody = $('#portalRequestTableBody').empty();
+        if (records.length === 0) {
+            $tbody.html('<tr><td colspan="7" class="text-center py-4 text-muted">お問い合わせはありません</td></tr>');
+            return;
+        }
+
+        records.forEach(function(r) {
+            const tr = `
+                <tr>
+                    <td><code>${escapeHtml(r.requestNo)}</code></td>
+                    <td><strong>${escapeHtml(r.subject)}</strong></td>
+                    <td>${escapeHtml(r.category)}</td>
+                    <td>${getStatusBadge(r.status)}</td>
+                    <td class="small text-muted">${escapeHtml(r.createdAt ? r.createdAt.substring(0, 16) : '-')}</td>
+                    <td class="small text-muted">${escapeHtml(r.updatedAt ? r.updatedAt.substring(0, 16) : '-')}</td>
+                    <td class="text-end">
+                        <a href="/portal/customer/service-desk/requests/${r.id}" class="btn btn-sm btn-outline-primary">詳細・返信</a>
+                    </td>
+                </tr>
+            `;
+            $tbody.append(tr);
+        });
+    }
+
+    $('#btnSearchRequests').on('click', loadRequests);
+
+    $('#portalCreateForm').on('submit', function(e) {
+        e.preventDefault();
+        const payload = {
+            category: $('#modalCategory').val(),
+            priority: $('#modalPriority').val(),
+            subject: $('#modalSubject').val(),
+            description: $('#modalDescription').val()
+        };
+
+        $.ajax({
+            url: '/api/portal/customer/service-desk/requests',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function(res) {
+                if (res.code === 200) {
+                    $('#createRequestModal').modal('hide');
+                    $('#portalCreateForm')[0].reset();
+                    Swal.fire({
+                        title: '起票完了',
+                        text: 'お問い合わせを受け付けました。',
+                        icon: 'success'
+                    }).then(function() {
+                        loadRequests();
+                    });
+                } else {
+                    Swal.fire('エラー', res.message || '起票失敗', 'error');
+                }
+            },
+            error: function() {
+                Swal.fire('エラー', '通信エラーが発生しました', 'error');
+            }
+        });
+    });
+
+    loadRequests();
+});
+</script>
+</body>
+</html>

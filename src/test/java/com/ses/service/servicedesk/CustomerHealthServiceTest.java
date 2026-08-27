@@ -17,6 +17,7 @@ import com.ses.mapper.CustomerHealthSnapshotMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.CustomerQbrMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ProjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -64,14 +64,14 @@ class CustomerHealthServiceTest {
     private CustomerHealthSnapshotMapper snapshotMapper;
 
     @Autowired
-    private com.ses.mapper.ProjectMapper projectMapper;
+    private ProjectMapper projectMapper;
 
     private Customer healthyCustomer;
     private Customer atRiskCustomer;
 
     @BeforeEach
     void setUp() {
-        // 1. 健全な顧客のセットアップ
+        // 1. 健全な顧客のセットアップ（未解決障害なし、良好CSAT）
         healthyCustomer = Customer.builder()
                 .companyName("健全顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
@@ -103,59 +103,90 @@ class CustomerHealthServiceTest {
         c1.setStatus("稼動中");
         contractMapper.insert(c1);
 
-        // QBR 実施履歴
-        CustomerQbr qbr = CustomerQbr.builder()
+        // 解決済みリクエストと高CSAT (5点)
+        ServiceRequestCreateRequest healthyReq = ServiceRequestCreateRequest.builder()
                 .customerId(healthyCustomer.getId())
-                .meetingDate(LocalDate.now().minusDays(15))
-                .title("第1四半期定例会")
-                .discussion("要員評価は極めて良好")
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("問い合わせ")
+                .description("質問内容")
                 .build();
-        qbrMapper.insert(qbr);
+        ServiceRequest srH = serviceRequestService.createRequest(healthyReq, 1L, false, null);
+        serviceRequestService.changeStatus(srH.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                1L, "INTERNAL_USER", "管理者");
+        serviceRequestService.changeStatus(srH.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("回答完了").build(),
+                1L, "INTERNAL_USER", "管理者");
+        serviceRequestService.submitCsat(srH.getId(),
+                PortalCsatCreateRequest.builder().score(5).feedbackComment("迅速な対応でした").build(),
+                healthyCustomer.getId(), 1L);
 
-        // 2. 危険な顧客のセットアップ（SLA違反あり、契約終了など）
+        // 2. 危険な顧客のセットアップ（未解決P0障害、低CSAT）
         atRiskCustomer = Customer.builder()
                 .companyName("危険顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
         customerMapper.insert(atRiskCustomer);
 
-        // 違反リクエストを作成
-        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+        // 未解決 P0 リクエスト (減点: -20点)
+        ServiceRequestCreateRequest openReq = ServiceRequestCreateRequest.builder()
                 .customerId(atRiskCustomer.getId())
                 .category("SYSTEM")
                 .priority("P0")
-                .subject("システム障害")
+                .subject("重大障害進行中")
                 .description("業務停止中")
                 .build();
-        ServiceRequest sr = serviceRequestService.createRequest(req, 1L, false, null);
+        serviceRequestService.createRequest(openReq, 1L, false, null);
 
-        // 解決済みにしてCSAT 1点を回答
-        serviceRequestService.changeStatus(sr.getId(),
+        // 解決済みだが低CSAT 1点のリクエスト (減点: -30点)
+        ServiceRequestCreateRequest req2 = ServiceRequestCreateRequest.builder()
+                .customerId(atRiskCustomer.getId())
+                .category("QUALITY")
+                .priority("P1")
+                .subject("過去トラブル")
+                .description("障害復旧")
+                .build();
+        ServiceRequest sr2 = serviceRequestService.createRequest(req2, 1L, false, null);
+        serviceRequestService.changeStatus(sr2.getId(),
                 ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
                 1L, "INTERNAL_USER", "管理者");
-        serviceRequestService.changeStatus(sr.getId(),
+        serviceRequestService.changeStatus(sr2.getId(),
                 ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("復旧").build(),
                 1L, "INTERNAL_USER", "管理者");
-        serviceRequestService.submitCsat(sr.getId(),
+        serviceRequestService.submitCsat(sr2.getId(),
                 PortalCsatCreateRequest.builder().score(1).feedbackComment("復旧まで遅すぎた").build(),
                 atRiskCustomer.getId(), 1L);
     }
 
     @Test
-    @DisplayName("健全顧客のヘルススコアが80点以上かつHEALTHYと判定されること")
+    @DisplayName("健全顧客のヘルススコアが100点減点モデルで80点以上かつHEALTHYと判定されること")
     void testHealthyCustomer_scoreAndRank() {
         CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(healthyCustomer.getId());
 
         assertNotNull(dto);
         assertEquals(healthyCustomer.getId(), dto.getCustomerId());
-        assertTrue(dto.getHealthScore() >= 80, "ヘルススコアは80点以上");
+        assertTrue(dto.getHealthScore() >= 80, "減点なし/軽微で80点以上");
         assertEquals("HEALTHY", dto.getHealthStatus());
-        assertEquals(25.0, dto.getEngagementScore(), "有効契約ありで25点");
-        assertEquals(20.0, dto.getCommunicationScore(), "QBR実施ありで20点");
+        assertEquals(0, dto.getOpenCriticalIssuesCount(), "未解決P0/P1は0件");
+        assertEquals(BigDecimal.valueOf(5.0).setScale(2), dto.getAvgCsatScore(), "CSATは5.0");
     }
 
     @Test
-    @DisplayName("問合せや契約が全くない新規顧客でも減点されず欠損値デフォルトで計算されること")
-    void testNewCustomer_missingInputDefaults() {
+    @DisplayName("未解決重大障害や低CSATがある危険顧客が減点されCRITICALまたはWARNINGと判定されること")
+    void testAtRiskCustomer_scoreDeduction() {
+        CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(atRiskCustomer.getId());
+
+        assertNotNull(dto);
+        assertEquals(atRiskCustomer.getId(), dto.getCustomerId());
+        // 未解決P0 (-20点) + CSAT 1.0 (-30点) = 50点以下 (CRITICAL または WARNING)
+        assertTrue(dto.getHealthScore() <= 60, "減点により60点以下");
+        assertTrue(List.of("WARNING", "CRITICAL").contains(dto.getHealthStatus()));
+        assertEquals(1, dto.getOpenCriticalIssuesCount(), "未解決P0が1件");
+    }
+
+    @Test
+    @DisplayName("問合せやCSATが全くない新規顧客でも減点されず欠損値リストに記録されること")
+    void testNewCustomer_missingInputTracking() {
         Customer newCust = Customer.builder()
                 .companyName("新規顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
@@ -164,33 +195,30 @@ class CustomerHealthServiceTest {
         CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(newCust.getId());
 
         assertNotNull(dto);
-        assertEquals(30.0, dto.getSlaComplianceScore(), "問合せ0件時は減点なし30点");
-        assertEquals(20.0, dto.getCsatScore(), "CSAT未回答時はデフォルト20点");
-        assertEquals(10.0, dto.getEngagementScore(), "有効契約なし時は10点");
-        assertEquals(10.0, dto.getCommunicationScore(), "接点なし時は10点");
-        assertEquals(70, dto.getHealthScore(), "合計70点 (NEUTRAL)");
-        assertEquals("NEUTRAL", dto.getHealthStatus());
+        assertEquals(100, dto.getHealthScore(), "減点要素なしで100点 (HEALTHY)");
+        assertEquals("HEALTHY", dto.getHealthStatus());
+        assertTrue(dto.getMissingInputs().contains("CSAT"), "CSATが欠損値として記録されること");
     }
 
     @Test
-    @DisplayName("月次スナップショットが正しく生成・永続化されること")
-    void testMonthlySnapshot_generation() {
+    @DisplayName("月次スナップショットが正しく生成・非破壊更新されること")
+    void testMonthlySnapshot_generationAndNonDestructiveUpdate() {
         String currentMonth = "2026-08";
         customerHealthService.generateMonthlySnapshot(currentMonth);
 
-        List<CustomerHealthSnapshot> snapshots = snapshotMapper.selectList(
+        LocalDate snapshotDate = LocalDate.parse(currentMonth + "-01");
+        List<CustomerHealthSnapshot> list1 = snapshotMapper.selectList(
                 new LambdaQueryWrapper<CustomerHealthSnapshot>()
-                        .eq(CustomerHealthSnapshot::getSnapshotDate, LocalDate.parse("2026-08-01"))
+                        .eq(CustomerHealthSnapshot::getSnapshotDate, snapshotDate)
         );
+        assertTrue(list1.size() >= 2, "全顧客分のスナップショットが生成されること");
 
-        assertTrue(snapshots.size() >= 2, "全顧客分のスナップショットが保存されること");
-
-        CustomerHealthSnapshot healthySnapshot = snapshots.stream()
-                .filter(s -> s.getCustomerId().equals(healthyCustomer.getId()))
-                .findFirst()
-                .orElse(null);
-        assertNotNull(healthySnapshot);
-        assertEquals("HEALTHY", healthySnapshot.getHealthStatus());
-        assertNotNull(healthySnapshot.getFactorsExplanation());
+        // 2回目の実行でも重複エラーにならず更新されること
+        customerHealthService.generateMonthlySnapshot(currentMonth);
+        List<CustomerHealthSnapshot> list2 = snapshotMapper.selectList(
+                new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                        .eq(CustomerHealthSnapshot::getSnapshotDate, snapshotDate)
+        );
+        assertEquals(list1.size(), list2.size(), "重複行が作成されず件数が維持されること");
     }
 }

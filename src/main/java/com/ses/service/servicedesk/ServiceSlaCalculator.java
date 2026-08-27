@@ -1,36 +1,47 @@
 package com.ses.service.servicedesk;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.entity.ServiceSlaPolicy;
+import com.ses.entity.WorkCalendarDay;
+import com.ses.mapper.WorkCalendarDayMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 /**
- * 営業時間・休日・タイムゾーンを考慮したSLA期限計算エンジン
+ * 営業時間・祝日(m_work_calendar_day)・タイムゾーン・Clockを考慮したSLA期限計算エンジン (WIP-1)
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ServiceSlaCalculator {
 
     private static final LocalTime DEFAULT_START_TIME = LocalTime.of(9, 0);
     private static final LocalTime DEFAULT_END_TIME = LocalTime.of(18, 0);
 
+    private final Clock clock;
+    private final ObjectProvider<WorkCalendarDayMapper> workCalendarDayMapperProvider;
+
     /**
      * 起点日時と目標時間（時間）からSLA期限を計算する。
      *
-     * @param startAt 起点日時
+     * @param startAt 起点日時（null時はClockの現在日時）
      * @param targetHours 目標時間（時間）
      * @param policy SLAポリシー
      * @return 算出されたSLA期限日時
      */
     public LocalDateTime calculateDeadline(LocalDateTime startAt, int targetHours, ServiceSlaPolicy policy) {
         if (startAt == null) {
-            startAt = LocalDateTime.now();
+            startAt = LocalDateTime.now(clock);
         }
         if (targetHours <= 0) {
             return startAt;
@@ -109,7 +120,7 @@ public class ServiceSlaCalculator {
         LocalTime time = dt.toLocalTime();
 
         // 休日なら次の営業日の始業時刻
-        if (!includeHolidays && isWeekend(date)) {
+        if (!includeHolidays && isNonWorkingDay(date)) {
             LocalDate nextWorkDate = getNextWorkDay(date, includeHolidays);
             return LocalDateTime.of(nextWorkDate, start);
         }
@@ -133,14 +144,41 @@ public class ServiceSlaCalculator {
      */
     public LocalDate getNextWorkDay(LocalDate date, boolean includeHolidays) {
         LocalDate current = date;
-        while (!includeHolidays && isWeekend(current)) {
+        int maxDays = 365;
+        while (!includeHolidays && isNonWorkingDay(current) && maxDays-- > 0) {
             current = current.plusDays(1);
         }
         return current;
     }
 
     /**
-     * 土日判定（土日を休日とする）
+     * 土日・祝日・休業日判定 (m_work_calendar_day 連携)
+     */
+    public boolean isNonWorkingDay(LocalDate date) {
+        if (isWeekend(date)) {
+            return true;
+        }
+
+        WorkCalendarDayMapper mapper = workCalendarDayMapperProvider.getIfAvailable();
+        if (mapper != null) {
+            List<WorkCalendarDay> days = mapper.selectList(
+                    new LambdaQueryWrapper<WorkCalendarDay>()
+                            .eq(WorkCalendarDay::getCalendarDate, date));
+            for (WorkCalendarDay day : days) {
+                if ("HOLIDAY".equalsIgnoreCase(day.getDayType()) 
+                        || "NON_WORKING".equalsIgnoreCase(day.getDayType())
+                        || "祝日".equals(day.getDayType())
+                        || (day.getScheduledMinutes() != null && day.getScheduledMinutes() == 0)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 土日判定
      */
     public boolean isWeekend(LocalDate date) {
         DayOfWeek dow = date.getDayOfWeek();
