@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{lifecycle.title} + ' - ' + #{app.name}">ライフサイクル管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <!-- ヘッダー -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h3 mb-0 text-light">
+                <i class="bi bi-arrow-repeat me-2 text-primary"></i><th:block th:text="#{lifecycle.title}">ライフサイクル管理</th:block>
+            </h2>
+            <p class="text-muted small mb-0 mt-1">入社・配属・異動・休職・復職・退社の全フェーズを統制するワークフロー基盤</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a th:href="@{/lifecycle/templates}" class="btn btn-outline-light">
+                <i class="bi bi-gear me-1"></i><th:block th:text="#{lifecycle.templateManagement}">テンプレート管理</th:block>
+            </a>
+            <button class="btn btn-primary shadow-sm" onclick="SES.lifecycle.openCreateModal()">
+                <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{lifecycle.createCase}">案件起票</th:block>
+            </button>
+        </div>
+    </div>
+
+    <!-- タブナビゲーション -->
+    <ul class="nav nav-pills mb-4" id="lifecycleTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="cases-tab" data-bs-toggle="pill" data-bs-target="#cases-pane" type="button" role="tab" onclick="SES.lifecycle.loadCases()">
+                <i class="bi bi-folder2 me-1"></i><th:block th:text="#{lifecycle.tab.all}">全案件</th:block>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="my-tasks-tab" data-bs-toggle="pill" data-bs-target="#my-tasks-pane" type="button" role="tab" onclick="SES.lifecycle.loadMyTasks()">
+                <i class="bi bi-check2-square me-1"></i><th:block th:text="#{lifecycle.tab.my}">自担当タスク</th:block>
+                <span class="badge bg-danger ms-1" id="myTasksCount" style="display:none;">0</span>
+            </button>
+        </li>
+    </ul>
+
+    <!-- タブコンテンツ -->
+    <div class="tab-content" id="lifecycleTabContent">
+        <!-- 案件一覧ペイン -->
+        <div class="tab-pane fade show active" id="cases-pane" role="tabpanel">
+            <!-- 検索フィルター -->
+            <div class="card bg-card border-dark shadow-sm mb-4">
+                <div class="card-body">
+                    <form id="searchForm" onsubmit="event.preventDefault(); SES.lifecycle.loadCases();" class="row g-3 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small" th:text="#{lifecycle.type}">種別</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="filterType">
+                                <option value="">すべて</option>
+                                <option value="JOIN">入社 (JOIN)</option>
+                                <option value="ASSIGNMENT">現場配属 (ASSIGNMENT)</option>
+                                <option value="TRANSFER">所属異動 (TRANSFER)</option>
+                                <option value="LEAVE">休職 (LEAVE)</option>
+                                <option value="REINSTATEMENT">復職 (REINSTATEMENT)</option>
+                                <option value="RESIGNATION">退社 (RESIGNATION)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small" th:text="#{lifecycle.status}">ステータス</label>
+                            <select class="form-select bg-dark border-secondary text-light" id="filterStatus">
+                                <option value="">すべて</option>
+                                <option value="ACTIVE">進行中 (ACTIVE)</option>
+                                <option value="ON_HOLD">保留中 (ON_HOLD)</option>
+                                <option value="COMPLETED">完了 (COMPLETED)</option>
+                                <option value="CANCELLED">中止 (CANCELLED)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label text-muted small" th:text="#{lifecycle.anchorDate}">基準日範囲</label>
+                            <div class="input-group">
+                                <input type="date" class="form-control bg-dark border-secondary text-light" id="filterFromDate">
+                                <span class="input-group-text bg-dark border-secondary text-muted">〜</span>
+                                <input type="date" class="form-control bg-dark border-secondary text-light" id="filterToDate">
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="bi bi-filter me-1"></i>絞り込み
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 案件一覧テーブル -->
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4" th:text="#{lifecycle.caseNo}">案件番号</th>
+                                    <th scope="col" th:text="#{lifecycle.type}">種別</th>
+                                    <th scope="col" th:text="#{lifecycle.engineer}">対象要員</th>
+                                    <th scope="col" th:text="#{lifecycle.anchorDate}">基準日</th>
+                                    <th scope="col" th:text="#{lifecycle.status}">ステータス</th>
+                                    <th scope="col" class="text-center" th:text="#{lifecycle.progress}">進捗</th>
+                                    <th scope="col" class="text-end pe-4">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="casesTableBody">
+                                <tr>
+                                    <td colspan="7" class="text-center py-4 text-muted">読み込み中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 自担当タスクペイン -->
+        <div class="tab-pane fade" id="my-tasks-pane" role="tabpanel">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4">タスクコード</th>
+                                    <th scope="col">タスク名</th>
+                                    <th scope="col">期日</th>
+                                    <th scope="col">必須/阻害</th>
+                                    <th scope="col">ステータス</th>
+                                    <th scope="col" class="text-end pe-4">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="myTasksTableBody">
+                                <tr>
+                                    <td colspan="6" class="text-center py-4 text-muted">読み込み中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 案件起票モーダル -->
+    <div class="modal fade" id="createCaseModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2 text-primary"></i>ライフサイクル案件起票</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="createCaseForm" onsubmit="event.preventDefault(); SES.lifecycle.submitCreateCase();">
+                    <div class="modal-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label text-light required">対象要員 <span class="text-danger">*</span></label>
+                                <select class="form-select bg-dark border-secondary text-light" id="createEngineerId" required>
+                                    <option value="">要員を選択してください</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-light required">ライフサイクル種別 <span class="text-danger">*</span></label>
+                                <select class="form-select bg-dark border-secondary text-light" id="createLifecycleType" required>
+                                    <option value="JOIN">入社 (JOIN)</option>
+                                    <option value="ASSIGNMENT">現場配属 (ASSIGNMENT)</option>
+                                    <option value="TRANSFER">所属異動 (TRANSFER)</option>
+                                    <option value="LEAVE">休職 (LEAVE)</option>
+                                    <option value="REINSTATEMENT">復職 (REINSTATEMENT)</option>
+                                    <option value="RESIGNATION">退社 (RESIGNATION)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-light required">基準日 <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control bg-dark border-secondary text-light" id="createAnchorDate" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label text-light">案件タイトル</label>
+                                <input type="text" class="form-control bg-dark border-secondary text-light" id="createTitle" placeholder="未入力時は自動生成">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label text-light">備考・特記事項</label>
+                                <textarea class="form-control bg-dark border-secondary text-light" id="createRemarks" rows="3" placeholder="引き継ぎ連絡や注意事項"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>起票する</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/lifecycle.js}"></script>
+</th:block>
+</body>
+</html>

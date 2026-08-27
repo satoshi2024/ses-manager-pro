@@ -17,34 +17,34 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * REV-RP-P1-002: V110 が途中 DDL（t_engineer.version のみ成功）で失敗したあとも、
+ * REV-RP-P1-002: V111 が途中 DDL（t_engineer.version のみ成功）で失敗したあとも、
  * failed history → repair → remigrate で冪等完走できることを検証する。
  *
- * <p>U110（undo）は作らない。本テストはクラスパスに U110 が無いことも確認する。
+ * <p>U111（undo）は作らない。本テストはクラスパスに U111 が無いことも確認する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
-class FlywayV110PartialRepairSmokeTest {
+class FlywayV111PartialRepairSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
-            .withDatabaseName("ses_manager_v110_partial")
+            .withDatabaseName("ses_manager_v111_partial")
             .withUsername("root")
             .withPassword("ses");
 
     @Test
-    void V110部分適用のfailed履歴からrepair後に再migrateできる() throws Exception {
-        // U110（undo）は意図的に存在しない（REV-RP-P1-002）
+    void V111部分適用のfailed履歴からrepair後に再migrateできる() throws Exception {
+        // U111（undo）は意図的に存在しない（REV-RP-P1-002）
         URL undo = Thread.currentThread().getContextClassLoader()
-                .getResource("db/migration/U110__optimistic_lock_version_core_entities.sql");
-        assertNull(undo, "U110 undo migration を追加してはいけない");
+                .getResource("db/migration/U111__optimistic_lock_version_core_entities.sql");
+        assertNull(undo, "U111 undo migration を追加してはいけない");
 
-        // V109 まで適用（V110 直前）
+        // V110 まで適用（V111 直前: lifecycle V109 + admin boundary V110）
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
-                .target("109")
+                .target("110")
                 .load()
                 .migrate();
 
@@ -86,16 +86,16 @@ class FlywayV110PartialRepairSmokeTest {
             assertTrue(!hasColumn(st, "m_customer", "version"));
             assertTrue(!hasColumn(st, "t_work_record", "version"));
 
-            // V110 failed history を挿入（非冪等 ALTER が途中で落ちた状態）
+            // V111 failed history を挿入（非冪等 ALTER が途中で落ちた状態）
             st.executeUpdate("INSERT INTO flyway_schema_history "
                     + "(installed_rank, version, description, type, script, checksum, installed_by, "
                     + "installed_on, execution_time, success) "
-                    + "SELECT COALESCE(MAX(installed_rank), 0) + 1, '110', "
+                    + "SELECT COALESCE(MAX(installed_rank), 0) + 1, '111', "
                     + "'optimistic lock version core entities', 'SQL', "
-                    + "'V110__optimistic_lock_version_core_entities.sql', 0, CURRENT_USER(), NOW(), 1, 0 "
+                    + "'V111__optimistic_lock_version_core_entities.sql', 0, CURRENT_USER(), NOW(), 1, 0 "
                     + "FROM flyway_schema_history");
             assertEquals(1, queryInt(st,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='110' AND success=0"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='111' AND success=0"));
         }
 
         Flyway repaired = Flyway.configure()
@@ -111,9 +111,9 @@ class FlywayV110PartialRepairSmokeTest {
             assertTrue(hasColumn(st, "m_customer", "version"));
             assertTrue(hasColumn(st, "t_work_record", "version"));
             assertEquals(1, queryInt(st,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='110' AND success=1"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='111' AND success=1"));
             assertEquals(0, queryInt(st,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='110' AND success=0"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='111' AND success=0"));
 
             // 行数は不変、既存行の version は DEFAULT 0
             assertEquals(engineerCount, countRows(st, "t_engineer"));

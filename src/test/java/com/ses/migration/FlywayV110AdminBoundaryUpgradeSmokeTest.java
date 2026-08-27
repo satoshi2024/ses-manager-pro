@@ -22,16 +22,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * REV-P0-001 / REV-P2-003: V108.3 時点の歴史データから V109 へ前進のみで隔離・権限掃除・監査基数を検証する。
+ * REV-P0-001 / REV-P2-003: V108.3 時点の歴史データから V110（admin boundary; main の lifecycle は V109）へ前進のみで隔離・権限掃除・監査基数を検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
-class FlywayV109AdminBoundaryUpgradeSmokeTest {
+class FlywayV110AdminBoundaryUpgradeSmokeTest {
 
     @Container
     @SuppressWarnings("resource")
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
-            .withDatabaseName("ses_manager_v109_admin_boundary")
+            .withDatabaseName("ses_manager_v110_admin_boundary")
             .withUsername("root")
             .withPassword("ses")
             .withStartupTimeout(Duration.ofMinutes(10))
@@ -133,28 +133,28 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
         toLatest.validate();
 
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
-            assertEquals("110", queryString(st,
+            assertEquals("111", queryString(st,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL "
                             + "ORDER BY installed_rank DESC LIMIT 1"));
             assertPostConditions(st, salesGroupId, customGroupId,
                     bindingAdmin, bindingSalesA, bindingSalesB, bindingOtherTenant,
                     subjectAdmin, subjectSalesA, subjectSalesB, subjectOther);
 
-            // 部分再実行: V109 SQLを再度適用しても基数・状態が壊れないこと
+            // 部分再実行: V110 SQLを再度適用しても基数・状態が壊れないこと
             executeSqlScript(st, Path.of(
-                    "src/main/resources/db/migration/V109__restore_admin_boundaries_for_identity_and_system_config.sql"));
+                    "src/main/resources/db/migration/V110__restore_admin_boundaries_for_identity_and_system_config.sql"));
             assertPostConditions(st, salesGroupId, customGroupId,
                     bindingAdmin, bindingSalesA, bindingSalesB, bindingOtherTenant,
                     subjectAdmin, subjectSalesA, subjectSalesB, subjectOther);
 
             assertFalse(Files.exists(Path.of("src/main/resources/db/migration")
-                            .resolve("U109__restore_admin_boundaries_for_identity_and_system_config.sql")),
-                    "V109のdown migrationは持たない（forward-only）");
+                            .resolve("U110__restore_admin_boundaries_for_identity_and_system_config.sql")),
+                    "V110のdown migrationは持たない（forward-only）");
         }
     }
 
     @Test
-    void partialFailureOfV109_repairAndRemigrateSucceeds() throws Exception {
+    void partialFailureOfV110_repairAndRemigrateSucceeds() throws Exception {
         Path dir = prepareMigrationDir();
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
@@ -175,16 +175,16 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
             seeded = seedHistoricalBindings(st);
         }
 
-        installFailingV109(dir);
+        installFailingV110(dir);
         Flyway failing = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("filesystem:" + dir)
                 .load();
         Exception failure = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, failing::migrate);
-        assertTrue(allMessages(failure).contains("V109")
+        assertTrue(allMessages(failure).contains("V110")
                         || allMessages(failure).contains("syntax")
                         || allMessages(failure).contains("THIS_IS_NOT_VALID_SQL"),
-                "V109途中失敗であるはず: " + allMessages(failure));
+                "V110途中失敗であるはず: " + allMessages(failure));
 
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
             assertTrue(hasRow(st,
@@ -195,11 +195,11 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
                             + "WHERE table_schema=DATABASE() AND table_name='t_oidc_binding_review_inventory'"),
                     "inventory 作成前で失敗していること");
             assertTrue(hasRow(st,
-                            "SELECT 1 FROM flyway_schema_history WHERE version='109' AND success=0"),
-                    "V109 の failed history が残ること");
+                            "SELECT 1 FROM flyway_schema_history WHERE version='110' AND success=0"),
+                    "V110 の failed history が残ること");
         }
 
-        restoreRealV109(dir);
+        restoreRealV110(dir);
         Flyway repaired = Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("filesystem:" + dir)
@@ -210,9 +210,9 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
 
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
             assertEquals(1, queryLong(st,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='109' AND success=1"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='110' AND success=1"));
             assertEquals(0, queryLong(st,
-                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='109' AND success=0"));
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE version='110' AND success=0"));
             assertPostConditions(st, seeded.salesGroupId, seeded.customGroupId,
                     seeded.bindingAdmin, seeded.bindingSalesA, seeded.bindingSalesB, seeded.bindingOtherTenant,
                     seeded.subjectAdmin, seeded.subjectSalesA, seeded.subjectSalesB, seeded.subjectOther);
@@ -303,7 +303,7 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
 
     private Path prepareMigrationDir() throws Exception {
         Path source = Path.of("src/main/resources/db/migration");
-        Path temp = Files.createTempDirectory("v109-fixture");
+        Path temp = Files.createTempDirectory("v110-fixture");
         try (var files = Files.list(source)) {
             for (Path file : files.toList()) {
                 Files.copy(file, temp.resolve(file.getFileName().toString()));
@@ -313,26 +313,26 @@ class FlywayV109AdminBoundaryUpgradeSmokeTest {
     }
 
     /** inventory 作成前で失敗させ、review_status 追加までは通す。 */
-    private void installFailingV109(Path dir) throws Exception {
-        Path v109 = dir.resolve("V109__restore_admin_boundaries_for_identity_and_system_config.sql");
-        String original = Files.readString(v109, StandardCharsets.UTF_8);
+    private void installFailingV110(Path dir) throws Exception {
+        Path v110 = dir.resolve("V110__restore_admin_boundaries_for_identity_and_system_config.sql");
+        String original = Files.readString(v110, StandardCharsets.UTF_8);
         int cut = original.indexOf("-- 2. ");
-        assertTrue(cut > 0, "V109 inventory section の開始位置が見つかるはず");
+        assertTrue(cut > 0, "V110 inventory section の開始位置が見つかるはず");
         // section 2 の直前の区切り行ごと落とす
         int block = original.lastIndexOf("-- ------------------------------------------------------------", cut);
         if (block > 0) {
             cut = block;
         }
-        Files.writeString(v109,
+        Files.writeString(v110,
                 original.substring(0, cut)
-                        + "\n-- V109途中失敗fixture\nTHIS_IS_NOT_VALID_SQL;\n",
+                        + "\n-- V110途中失敗fixture\nTHIS_IS_NOT_VALID_SQL;\n",
                 StandardCharsets.UTF_8);
     }
 
-    private void restoreRealV109(Path dir) throws Exception {
+    private void restoreRealV110(Path dir) throws Exception {
         Files.copy(
-                Path.of("src/main/resources/db/migration/V109__restore_admin_boundaries_for_identity_and_system_config.sql"),
-                dir.resolve("V109__restore_admin_boundaries_for_identity_and_system_config.sql"),
+                Path.of("src/main/resources/db/migration/V110__restore_admin_boundaries_for_identity_and_system_config.sql"),
+                dir.resolve("V110__restore_admin_boundaries_for_identity_and_system_config.sql"),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 

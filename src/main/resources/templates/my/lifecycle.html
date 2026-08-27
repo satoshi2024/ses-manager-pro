@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>マイライフサイクル - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <!-- ヘッダー -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h3 mb-0 text-light">
+                <i class="bi bi-person-lines-fill me-2 text-primary"></i>マイライフサイクル
+            </h2>
+            <p class="text-muted small mb-0 mt-1">入社・配属・休職・復職・退社等の手続きと提出タスク</p>
+        </div>
+    </div>
+
+    <!-- マイ進行中案件 & タスク -->
+    <div class="row g-4 mb-4">
+        <!-- 進行中のライフサイクル案件 -->
+        <div class="col-lg-7">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-dark border-dark py-3">
+                    <h5 class="card-title text-light mb-0 fs-6">
+                        <i class="bi bi-folder2-open me-2 text-primary"></i>進行中・完了の手続き案件
+                    </h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                            <thead class="table-dark-header border-bottom border-dark">
+                                <tr>
+                                    <th scope="col" class="ps-4">手続き種別</th>
+                                    <th scope="col">基準日</th>
+                                    <th scope="col">進捗</th>
+                                    <th scope="col">ステータス</th>
+                                    <th scope="col" class="text-end pe-4">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="myCasesTableBody">
+                                <tr>
+                                    <td colspan="5" class="text-center py-4 text-muted">読み込み中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 本人対応が必要なタスク一覧 -->
+        <div class="col-lg-5">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header bg-dark border-dark py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="card-title text-warning mb-0 fs-6">
+                        <i class="bi bi-exclamation-circle-fill me-2"></i>要対応・提出タスク
+                    </h5>
+                    <span class="badge bg-danger" id="myPendingTasksBadge" style="display:none;">0</span>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush" id="myPendingTasksList">
+                        <li class="list-group-item bg-transparent text-center py-4 text-muted">読み込み中...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- タスク提出・報告モーダル -->
+    <div class="modal fade" id="myCompleteModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2 text-success"></i>タスク完了・提出報告</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="myCompleteForm" onsubmit="event.preventDefault(); SES.myLifecycle.submitComplete();">
+                    <div class="modal-body">
+                        <input type="hidden" id="myTaskId">
+                        <div class="mb-3">
+                            <label class="form-label text-light fw-bold" id="myTaskTitleLabel">タスク名</label>
+                            <p class="text-muted small" id="myTaskDescLabel"></p>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-light">完了報告コメント / 備考</label>
+                            <textarea class="form-control bg-dark border-secondary text-light" id="myCompletionComment" rows="3" placeholder="提出内容・受領確認メモ等"></textarea>
+                        </div>
+                        <div class="mb-3" id="myDocIdSection" style="display:none;">
+                            <label class="form-label text-light">提出文書ID (DOCUMENT_LINK)</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light" id="myDocumentId" placeholder="添付文書ID">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-success"><i class="bi bi-send me-1"></i>完了報告を送信</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/my-lifecycle.js}"></script>
+</th:block>
+</body>
+</html>

@@ -52,7 +52,7 @@ WHERE review_status <> 'APPROVED'
   AND (reviewed_at IS NOT NULL OR reviewed_by IS NOT NULL);
 
 -- パッチ適用時点の全既存bindingを隔離する（本migrationより後のAPPROVEDは維持）。
--- FlywayはV109を一度しか成功記録しないため、ここは「未承認の既存行」を対象にする。
+-- FlywayはV110を一度しか成功記録しないため、ここは「未承認の既存行」を対象にする。
 UPDATE t_user_external_identity
 SET review_status = 'QUARANTINED'
 WHERE review_status = 'PENDING_REVIEW';

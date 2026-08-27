@@ -1,22 +1,22 @@
 # OIDC binding 隔離カットオーバーと再承認（REV-P0-001 / REV-P1-010）
 
-本 runbook は、V109（外部 ID 隔離 + 管理者硬境界）を本番へ載せるときの
+本 runbook は、V110（外部 ID 隔離 + 管理者硬境界; lifecycle は V109）を本番へ載せるときの
 **切り替え条件**と、隔離後の **再承認手順**を定義する。
 
 旧 jar は `review_status` を見ない。ローリング中に旧ノードが OIDC を受けると
 パッチ前のアカウント乗っ取り経路が再発する。したがって本切り替えは
-**IdP/OIDC 停止 → 旧ノード排空 → V109 成功 → 新バージョンのみ起動**の順で行う。
+**IdP/OIDC 停止 → 旧ノード排空 → V110 成功 → 新バージョンのみ起動**の順で行う。
 
 ## 0. 禁止事項
 
-- pre-fix（V109 未満 / `review_status` 非対応）jar へのロールバック禁止
+- pre-fix（V110 未満 / `review_status` 非対応）jar へのロールバック禁止
 - OIDC を有効にしたまま新旧混在で受けること禁止
 - inventory 未署名のまま「全 binding を一括 APPROVED」すること禁止
 
 ## 1. 切り替え前ゲート
 
 1. 修正 commit が CI（Temurin 21）で fast / mysql / performance / browser / backup を通過していること
-2. `FlywayV109AdminBoundaryUpgradeSmokeTest` が緑であること
+2. `FlywayV110AdminBoundaryUpgradeSmokeTest` が緑であること
 3. 本番 DB のフルバックアップと binlog 位置を記録していること
 4. break-glass 管理者（ローカルログイン）が有効で、OIDC 無しでも管理コンソールへ入れること
 5. IdP 側で client を一時 disable、またはロードバランサで `/oauth2/**` `/login/oauth2/**` を遮断できること
@@ -26,7 +26,7 @@
 ```text
 1. IdP disable または OIDC 入口遮断
 2. 全アプリノードを停止（インフライトリクエスト排空）
-3. 新 jar をデプロイし、Flyway で V109 まで migrate（成功のみ前進）
+3. 新 jar をデプロイし、Flyway で V110 まで migrate（成功のみ前進）
 4. 検証 SQL（下記）を実行し、live binding が inventory に揃い全て QUARANTINED であることを確認
 5. 新ノードのみ起動（旧 jar を残さない）
 6. ローカル管理者（または break-glass）でログインし、再承認を開始
@@ -118,15 +118,15 @@ OIDC 全隔離後も管理者が入れるよう、切り替え中は **ローカ
 
 ## 5. ロールバック方針
 
-- **アプリのみ**の問題で DB が V109 済みなら、同じ V109 対応 jar のホットフィックスへ前進する
-- pre-V109 jar へのダウングレードは禁止（隔離状態を無視して再ログイン可能になる）
-- DB を V108.3 相当へ戻す必要がある場合は、フルバックアップからの復元 drill（`ops/backup/runbooks/restore-cutover.md`）に従う。V109 の down migration は存在しない
+- **アプリのみ**の問題で DB が V110 済みなら、同じ V110 対応 jar のホットフィックスへ前進する
+- pre-V110 jar へのダウングレードは禁止（隔離状態を無視して再ログイン可能になる）
+- DB を V108.3 相当へ戻す必要がある場合は、フルバックアップからの復元 drill（`ops/backup/runbooks/restore-cutover.md`）に従う。V110 の down migration は存在しない
 
 ## 6. 完了条件
 
 完了は checkbox だけでは閉じない。下記 **7 ファイル全部** と `evidence-manifest.sha256` が同一ディレクトリに揃い、実行人と独立したレビュー担当がそれぞれ署名するまで HOLD。
 
-- [ ] OIDC 入口遮断中に V109 migrate 成功
+- [ ] OIDC 入口遮断中に V110 migrate 成功
 - [ ] 必須7ファイルが同一ディレクトリに保存済み:
   - `artifact-digest.txt`
   - `lb-backends.txt`
