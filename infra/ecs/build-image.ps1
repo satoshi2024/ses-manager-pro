@@ -58,9 +58,10 @@ try {
   docker run --rm --entrypoint java $ImageTag -version | Out-Host
 
   $lock = [ordered]@{
-    schemaVersion = 3
+    schemaVersion = 4
     generated = (Get-Date -Format o)
     freezeBaseline = 'ad829cc2e5c249c4cc273ba7b87441da163a48f3'
+    gitRevision = $gitRevision
     imageSourceRevision = $gitRevision
     evidenceRevision = $null
     evidenceRevisionNote = 'Set in evidence pack to final tip SHA; do not rebuild solely to self-reference'
@@ -71,10 +72,11 @@ try {
     localImageTag = $ImageTag
     localImageId = $imgId
     registryDigest = $null
-    registryDigestStatus = 'ABSENT - not an ECR digest; do not substitute LOCAL_IMAGE_ID into task-definition IMAGE_DIGEST'
-    ecrPush = 'NOT_PERFORMED'
-    ecsDeploy = 'NOT_PERFORMED'
-    efsActual = 'BLOCKED'
+    registryDigestStatus = 'ABSENT - LOCAL_IMAGE_ID is not an ECR digest or ECS deployable registry digest'
+    ecrPush = 'OUT-OF-SCOPE - no AWS account'
+    ecsDeploy = 'OUT-OF-SCOPE - no AWS account'
+    efsActual = 'DEFERRED - no AWS account'
+    sbomScan = 'BLOCKED-TOOLING'
     p3AptReproducibility = 'OPEN - base apt package versions may drift across rebuild dates'
   }
   $utf8 = New-Object System.Text.UTF8Encoding $false

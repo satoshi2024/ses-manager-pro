@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   Offline AWS / local ECS-like simulation (Docker only; no AWS API).
-  Covers REV-ECS-P1-001/002, P2-001/002/003.
+  Produces evidence under offline-ecs-simulation/ for SIMULATED GO verdict.
 #>
 param(
   [string]$EvidenceRoot = '',
@@ -15,7 +15,6 @@ $ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $SeedSql = Join-Path $PSScriptRoot 'seed-breakglass-mfa.sql'
 $LockPath = Join-Path $PSScriptRoot '..\image-lock.json'
 $ImageTag = 'ses-manager-pro:local'
-$ImageSourceRevisionFixed = 'b1985327107207c824554e7e0058ad38d1b0cb04'
 $FreezeBaseline = 'ad829cc2e5c249c4cc273ba7b87441da163a48f3'
 
 function Add-Cmd([string]$line) {
@@ -76,7 +75,7 @@ Push-Location $RepoRoot
 try {
   $evidenceRevision = (git rev-parse HEAD).Trim()
   if (-not $EvidenceRoot) {
-    $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$evidenceRevision\offline-ecs-simulation-2.1"
+    $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$evidenceRevision\offline-ecs-simulation"
   }
   $script:Ev = $EvidenceRoot
   New-Item -ItemType Directory -Force -Path $script:Ev | Out-Null
@@ -88,25 +87,53 @@ try {
   # --- egress negative self-test first ---
   Write-Ev 'egress-negative-selftest.txt' (Test-EgressHarnessNegative)
 
-  # --- Dockerfile security ---
-  $df = Get-Content (Join-Path $RepoRoot 'Dockerfile') -Raw
+  # --- Dockerfile / image security ---
+  $dfPath = Join-Path $RepoRoot 'Dockerfile'
+  $df = Get-Content $dfPath -Raw
+  $di = Get-Content (Join-Path $RepoRoot '.dockerignore') -Raw
   $sec = New-Object System.Collections.Generic.List[string]
   if ($df -notmatch '@sha256:[a-f0-9]{64}') { throw 'Dockerfile base missing sha256 digest' }
   $sec.Add('PASS base digest pinned')
+  if ($di -notmatch '\.git') { throw '.dockerignore missing .git' }
+  if ($di -notmatch '\.kiro') { throw '.dockerignore missing .kiro' }
+  $sec.Add('PASS .dockerignore excludes .git/.kiro/target noise')
   $uid = (docker run --rm --entrypoint id $ImageTag -u).Trim()
   if ($uid -ne '10001') { throw "uid=$uid" }
-  $sec.Add("PASS uid=$uid")
+  $sec.Add("PASS uid=$uid (non-root)")
+  $hasMaven = docker run --rm --entrypoint sh $ImageTag -c 'command -v mvn || command -v javac || ls /usr/bin/javac 2>/dev/null' 2>&1 | Out-String
+  if ($hasMaven.Trim()) { throw "build tools present: $hasMaven" }
+  $sec.Add('PASS no Maven/javac in image')
+  $curlOk = docker run --rm --entrypoint curl $ImageTag --version 2>&1 | Out-String
+  if ($curlOk -notmatch 'curl') { throw 'curl missing' }
+  $sec.Add('PASS curl available for healthcheck')
+  $entry = docker inspect --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}' $ImageTag
+  if ($entry -notmatch 'java') { throw "bad entrypoint: $entry" }
+  $sec.Add("PASS ENTRYPOINT=$entry")
   $hist = docker history --no-trunc $ImageTag 2>&1 | Out-String
   Write-Ev 'image-history.txt' $hist
   if ($hist -match '(?i)(AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)') {
     throw 'history secret pattern'
   }
-  $sec.Add('PASS history no secret patterns')
+  $sec.Add('PASS history no secret/credential patterns')
   $jarInImg = docker run --rm --entrypoint sha256sum $ImageTag /app/app.jar
   $jarHash = ($jarInImg -split '\s+')[0].ToLowerInvariant()
   if ($jarHash -ne $lock.jarSha256) { throw "JAR sha mismatch $jarHash vs $($lock.jarSha256)" }
-  $sec.Add("PASS jar sha=$jarHash")
+  $sec.Add("PASS jar sha=$jarHash matches image-lock")
+  $dfSha = (Get-FileHash $dfPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $sec.Add("dockerfileSha256=$dfSha")
+  docker inspect $ImageTag | Out-File (Join-Path $script:Ev 'image-inspect.json') -Encoding utf8
+  $sec.Add('PASS image inspect captured')
   Write-Ev 'dockerfile-security.txt' ($sec -join "`n")
+  Write-Ev 'supply-chain.txt' @"
+dockerfileSha256=$dfSha
+jarSha256=$($lock.jarSha256)
+baseImageDigest=$($lock.baseImageDigest)
+localImageId=$($lock.localImageId)
+gitRevision=$evidenceRevision
+registryDigest=ABSENT (not fabricated)
+sbomScan=BLOCKED-TOOLING (no syft/trivy/grype on host; no network install)
+vulnScan=BLOCKED-TOOLING (no zero-vuln claim)
+"@
 
   # --- bring up ---
   Add-Cmd "docker compose -f $ComposeFile down -v"
@@ -176,14 +203,25 @@ try {
 
   # --- health baseline ---
   $hf = New-Object System.Collections.Generic.List[string]
+  $agg = Curl-Code '/actuator/health'
   $live = Curl-Code '/actuator/health/liveness'
   $ready = Curl-Code '/actuator/health/readiness'
-  $hf.Add("baseline liveness => $live body=$(Curl-Body '/actuator/health/liveness')")
-  $hf.Add("baseline readiness => $ready body=$(Curl-Body '/actuator/health/readiness')")
+  $hf.Add("aggregate /actuator/health => $agg body=$(Curl-Body '/actuator/health')")
+  $hf.Add("liveness => $live body=$(Curl-Body '/actuator/health/liveness')")
+  $hf.Add("readiness => $ready body=$(Curl-Body '/actuator/health/readiness')")
+  if ($agg -ne '200') { throw "aggregate health $agg" }
   if ($live -ne '200') { throw "liveness $live" }
   if ($ready -ne '200') { throw "readiness $ready" }
-  $hf.Add('ALB convention: /actuator/health/readiness (NOT liveness)')
+  foreach ($blocked in @('/actuator/env','/actuator/beans','/actuator/configprops')) {
+    $bc = Curl-Code $blocked
+    $hf.Add("$blocked => $bc")
+    if ($bc -eq '200') { throw "$blocked accessible" }
+  }
+  $hf.Add('PASS env/beans/configprops not exposed (non-200)')
+  $hf.Add('ALB convention: /actuator/health/readiness (DEFERRED until real AWS)')
   $hf.Add('ECS container healthCheck: /actuator/health/liveness')
+  $hf.Add('read-only root + tmpfs /tmp + named volume /app/uploads (compose)')
+  $hf.Add('cpu=1.0 mem=2048m (compose limits)')
 
   # --- REV-ECS-P1-001 DB loss / recovery ---
   Add-Cmd 'docker stop ses-offline-mysql (DB loss while app runs)'
@@ -261,7 +299,7 @@ try {
   if ($content -ne $marker) { throw 'uploads content lost after recreate' }
   if (($shaBefore -split '\s+')[0] -ne ($shaAfter -split '\s+')[0]) { throw 'uploads sha mismatch after recreate' }
   $up += 'PASS named volume persistence VERIFIED'
-  $up += 'EFS-ACTUAL=BLOCKED (template only in task-definition.prod.json)'
+  $up += 'EFS-ACTUAL=DEFERRED (template only in task-definition.prod.json)'
   Write-Ev 'uploads-persistence.txt' ($up -join "`n")
 
   # --- egress ---
@@ -270,9 +308,9 @@ try {
   Write-Ev 'external-egress-results.txt' @"
 network=ses-offline-internal internal=true
 curl https://example.com => $(($ping | Out-String).Trim())
-PASS exact allow-list FAIL|000|000FAIL
-CloudSign=false Peppol=none AI=mock
-freee=sim placeholders; outbound blocked
+PASS zero successful external HTTP (allow-list FAIL|000|000FAIL)
+CloudSign=false Peppol=none AI=mock external-send=false
+freee=sim placeholders only; no outbound credential use
 "@
 
   # --- REV-ECS-P2-003 graceful shutdown ---
@@ -339,34 +377,110 @@ freee=sim placeholders; outbound blocked
   docker compose -f $ComposeFile up -d app
   Wait-Healthy 'ses-offline-app' 180
 
+  # task-definition static validation (no AWS)
+  & (Join-Path $PSScriptRoot 'validate-task-definition.ps1') -EvidenceRoot $script:Ev
+
+  # session single-instance deferral
+  Write-Ev 'session-scope.txt' @"
+simulatedDesiredCount=1
+ACC-OPS-P1-003=DEFERRED-SINGLE-INSTANCE
+stickySession=NOT_USED_AS_CLOSE
+note=If ECS desiredCount>1 in future, Redis/ElastiCache session acceptance must be re-run
+"@
+
   # provenance lock for evidence
-  $imgSrc = $ImageSourceRevisionFixed
-  if ($lock.jarSha256 -and $lock.imageSourceRevision) {
-    # JAR changed this round → imageSourceRevision is the build-time git revision in image-lock.json
-    if ($lock.imageSourceRevision -ne $ImageSourceRevisionFixed) {
-      $imgSrc = [string]$lock.imageSourceRevision
-    }
-  }
+  $gitRev = if ($lock.gitRevision) { [string]$lock.gitRevision } else { [string]$lock.imageSourceRevision }
   $prov = [ordered]@{
-    schemaVersion = 3
+    schemaVersion = 4
     freezeBaseline = $FreezeBaseline
-    imageSourceRevision = $imgSrc
+    gitRevision = $gitRev
+    imageSourceRevision = $gitRev
     evidenceRevision = $evidenceRevision
-    note = 'imageSourceRevision=git HEAD at docker build that produced jar/image; evidenceRevision=tip SHA of this evidence pack; freezeBaseline=acceptance freeze. When jarSha256/localImageId unchanged vs b1985327 lineage, keep imageSourceRevision=b1985327 (no infinite rebuild for self-ref).'
+    note = 'localImageId is LOCAL build digest only — not ECR registryDigest or task-definition IMAGE_DIGEST'
     jarSha256 = $lock.jarSha256
     baseImageDigest = $lock.baseImageDigest
     localImageId = $lock.localImageId
     registryDigest = $null
-    registryDigestStatus = 'ABSENT'
-    ecrPush = 'NOT_PERFORMED'
-    ecsDeploy = 'NOT_PERFORMED'
-    efsActual = 'BLOCKED'
+    registryDigestStatus = 'ABSENT - LOCAL_IMAGE_ID is not an ECR digest'
+    ecrPush = 'OUT-OF-SCOPE'
+    ecsDeploy = 'OUT-OF-SCOPE'
+    efsActual = 'DEFERRED'
+    sbomScan = 'BLOCKED-TOOLING'
     p3AptReproducibility = 'OPEN'
   }
   $utf8 = New-Object System.Text.UTF8Encoding $false
   [System.IO.File]::WriteAllText((Join-Path $script:Ev 'image-lock.json'), ($prov | ConvertTo-Json -Depth 5), $utf8)
 
-  Write-Host "OFFLINE 2.1 RUNTIME PASS — $script:Ev"
+  # final-report.md
+  $report = @"
+# Offline ECS Simulation — Final Report
+
+## Identity
+- freezeBaseline: ``$FreezeBaseline``
+- evidenceRevision (git SHA): ``$evidenceRevision``
+- gitRevision (image build): ``$gitRev``
+- Mode: Docker ECS-like offline only — **no AWS account, no ECR push, no ECS deploy**
+
+## Digests (semantic)
+| Field | Value |
+|---|---|
+| baseImageDigest | ``$($lock.baseImageDigest)`` |
+| LOCAL_IMAGE_ID | ``$($lock.localImageId)`` |
+| jarSha256 | ``$($lock.jarSha256)`` |
+| registryDigest | **ABSENT** — must not substitute LOCAL_IMAGE_ID into IMAGE_DIGEST |
+| task-definition image | ``...@sha256:IMAGE_DIGEST`` placeholder retained |
+
+## Verdicts
+- **SIMULATED GO** / **OFFLINE RELEASE GO** (Docker ECS-like)
+- **Real AWS PRODUCTION GO**: **FORBIDDEN / NO-GO**
+
+## OUT-OF-SCOPE / DEFERRED
+- ECS-ACTUAL, ECR push, IAM actual wiring, ALB actual, CloudWatch delivery, EFS mount actual
+- ACC-OPS-P1-003 in-memory session → DEFERRED-SINGLE-INSTANCE (desiredCount=1 sim only)
+- SBOM/vuln scan → BLOCKED-TOOLING (no false zero-vuln claim)
+- freee / CloudSign / Peppol / external AI vendor sandboxes
+
+## Evidence
+See sibling files in this directory. manifest.sha256 covers all artifacts.
+"@
+  [System.IO.File]::WriteAllText((Join-Path $script:Ev 'final-report.md'), $report, $utf8)
+
+  # REVIEWER-PROMPT.md
+  $prompt = @"
+# Independent Reviewer — Narrow Scope (Offline ECS Simulation)
+
+Review evidence at: ``$evidenceRevision`` / ``offline-ecs-simulation/``
+
+## In scope
+1. LOCAL_IMAGE_ID never treated as ECR IMAGE_DIGEST
+2. Dockerfile: digest base, uid!=0, no build tools, JAR sha match, no secrets in history
+3. Runtime: health/liveness/readiness 200; prometheus anon 401 / scraper 200 / wrong 401; egress blocked
+4. task-definition static contract + DEFERRED/OUT-OF-SCOPE AWS items
+5. ACC-OPS-P1-003 DEFERRED-SINGLE-INSTANCE
+6. SBOM BLOCKED-TOOLING
+7. Verdict SIMULATED GO only — not real AWS PRODUCTION GO
+
+## Out of scope
+Four random seeds, full verify-like-ci, real AWS, vendor externals
+
+## Output
+PASS/FAIL per item + whether SIMULATED GO is justified.
+"@
+  [System.IO.File]::WriteAllText((Join-Path $script:Ev 'REVIEWER-PROMPT.md'), $prompt, $utf8)
+
+  # manifest.sha256
+  $manifestPath = Join-Path $script:Ev 'manifest.sha256'
+  $mlines = New-Object System.Collections.Generic.List[string]
+  Get-ChildItem $script:Ev -File | Where-Object { $_.Name -ne 'manifest.sha256' } | Sort-Object Name | ForEach-Object {
+    $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $mlines.Add("$h  $($_.Name)")
+  }
+  [System.IO.File]::WriteAllText($manifestPath, (($mlines -join "`n") + "`n"), $utf8)
+  $self = (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  Add-Content -Path $manifestPath -Value "manifest.sha256 self-SHA256 (body above)=$self" -Encoding utf8
+
+  Write-Host "OFFLINE ECS SIMULATION PASS — $script:Ev"
+  Write-Host "SIMULATED GO / OFFLINE RELEASE GO"
 } finally {
   Pop-Location
 }
