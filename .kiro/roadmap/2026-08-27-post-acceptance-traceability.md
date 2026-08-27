@@ -25,7 +25,7 @@
 | NF-01 | `engineer-lifecycle-workflow` | PASS | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 独立Review PASS (Stage A/B 合格)。PR #85 更新済み。要員の入社・配属・異動・休職・復職・退社ワークフロー、退社ゲート9項目、SoD例外承認確立 | 2026-08-27 |
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | CANDIDATE | 未定 | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | 未決定 | 未定 |
-| NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
+| NF-04 | `mobile-pwa-self-service` | APPROVED | 管理者（プロジェクト責任者） | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 2026-08-28承認。Base=`origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、branch=`codex/mobile-pwa-self-service`、worktree=`C:\\work\\ses-mobile-pwa-self-service`。Chrome/Edge/Safari現行版・直前版、Android Chrome/iOS Safariを対象。install任意、pushなし。承認済みoffline/cache、idempotency、version/CAS、logout/user switch、30日保持、409差分UXをNF-04専用specへ固定する | 2026-08-28 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
@@ -71,9 +71,15 @@
 
 ### DG-04 NF-04
 
-- 対応browser/OS、install要否、push通知要否。
-- offline対象操作と最大保持時間。
-- 端末紛失、shared device、logout、user switch時のdraft削除方針。
+- 承認日: 2026-08-28。Owner: 管理者（プロジェクト責任者）。
+- 対応browser/OS: Chrome、Edge、Safariの現行版および直前版。AndroidはChrome、iOSはSafariを対象とする。
+- PWA installは任意。初版ではpush通知を実装せず、既存のアプリ内通知/badgeを使用する。
+- Service Worker cacheは静的shell/assetsのallow-listだけを許可する。API、portal、document、payroll、bank、PDF、attachment、その他PII responseはnetwork-onlyかつno-storeとする。inventoryで検出したno-store不足routeも修正対象とする。
+- Offlineはtimesheet/attendanceの最小draftおよびdaily save/delete queue、expensesのdraft create/update、change-requestのallowlist payloadによるdraft createだけを対象とする。receipt、attachment、submit、resubmit、leave、profile、survey、1on1、lifecycle、submit/approve/reject/close/cancel/withdrawはonline-onlyとする。
+- Draft/queueの最大保持期間は30日。送信成功時、logout時、user switch時は即時削除する。session expiry時はqueue送信を停止し、再認証後に同一user contextを検証して再開する。
+- QueueはclientRequestId、canonical payload hash、baseVersion、user scope、screen、month、createdAtを保持する。同一ID・同一hashはreplay、同一ID・異なるhashおよびstale baseVersionは409とする。409ではserver/client差分を表示し、last-write-winsで上書きしない。
+- user Aのdraft/queueをuser Bへ表示・送信しない。端末紛失・shared deviceではuser-scoped storageを信頼せず、logout/user switchでclearし、user context不一致時はflushをfail-closedする。
+- 承認済みBase: `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`。実装開始時は必ずfetchして最新`origin/main`を再確認し、実際のBase SHAをspec/review-ledgerへ記録する。
 
 ### DG-05 NF-05
 
