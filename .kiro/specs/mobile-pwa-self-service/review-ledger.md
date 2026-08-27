@@ -48,7 +48,7 @@ Self-review notes:
 | F1 Manifest/SW/Cache | COMPLETED | 1dc2056397c8236acc5c347b2629e0ce2933265c | 1dc2056397c8236acc5c347b2629e0ce2933265c | PwaAssetContractTest, PwaNoStoreFilterTest, static shell/cache policy |
 | F2 Idempotency/Version | COMPLETED | d4f13189e8289300121863c619bb874c839bb58e | d4f13189e8289300121863c619bb874c839bb58e | PwaCanonicalizerTest, PwaClientMutationLedgerServiceTest, PwaMutationApiControllerTest, AllMappersSchemaSweepTest, MessageBundleConsistencyTest |
 | A1 Mobile shell | COMPLETED | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | MobileResponsiveLayoutTest (28), PwaAssetContractTest (4); 44px touch target, focus-visible, modal focus restore, offline/online status |
-| A2 Draft/Queue/Conflict | NOT_STARTED | - | - | - |
+| A2 Draft/Queue/Conflict | COMPLETED | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | pwa-queue.js; allowed mutation adapters; 30-day cleanup; same-resource version advancement; conflict panel; PwaAssetContractTest (5); browser run attempted but environment loopback blocker recorded below |
 | B1 Update/Cleanup/Monitoring | NOT_STARTED | - | - | - |
 | M Integrated gate | NOT_STARTED | - | - | - |
 
