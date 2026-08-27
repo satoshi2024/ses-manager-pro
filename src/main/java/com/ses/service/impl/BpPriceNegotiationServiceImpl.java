@@ -19,7 +19,7 @@ import java.util.List;
 public class BpPriceNegotiationServiceImpl extends ServiceImpl<BpPriceNegotiationMapper, BpPriceNegotiation> implements BpPriceNegotiationService {
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpPriceNegotiation requestNegotiation(Long bpCompanyId, BigDecimal requestedAmount, String summary, Long documentId) {
         if (bpCompanyId == null || requestedAmount == null) {
             throw new BusinessException(400, "BP会社IDおよび希望希望額は必須です");
@@ -40,7 +40,7 @@ public class BpPriceNegotiationServiceImpl extends ServiceImpl<BpPriceNegotiatio
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpPriceNegotiation respondNegotiation(Long negotiationId, String status, BigDecimal agreedAmount, String summary) {
         BpPriceNegotiation neg = this.getById(negotiationId);
         if (neg == null) {

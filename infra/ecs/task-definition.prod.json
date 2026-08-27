@@ -1,0 +1,139 @@
+{
+  "family": "ses-manager-prod",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "ses-manager",
+      "image": "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/ses-manager-pro@sha256:IMAGE_DIGEST",
+      "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "prod" },
+        { "name": "AI_PROVIDER", "value": "mock" },
+        { "name": "AI_EXTERNAL_SEND_ENABLED", "value": "false" },
+        { "name": "CLOUDSIGN_ENABLED", "value": "false" },
+        { "name": "DIGITAL_INVOICE_PROVIDER", "value": "none" },
+        { "name": "SERVER_TOMCAT_THREADS_MAX", "value": "100" },
+        { "name": "DB_POOL_SIZE", "value": "10" },
+        { "name": "SHUTDOWN_TIMEOUT", "value": "30s" }
+      ],
+      "secrets": [
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/db:password::"
+        },
+        {
+          "name": "DB_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/db:username::"
+        },
+        {
+          "name": "DB_URL",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/db:url::"
+        },
+        {
+          "name": "BATCH_TOKEN_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:ACCOUNT_ID:secret:ses/prod/app:BATCH_TOKEN_SECRET::"
+        },
+        {
+          "name": "SESSION_HASH_KEY",
+          "valueFrom": "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/ses/prod/SESSION_HASH_KEY"
+        },
+        {
+          "name": "MFA_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:ssm:ap-northeast-1:ACCOUNT_ID:parameter/ses/prod/MFA_ENCRYPTION_KEY"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "tmp",
+          "containerPath": "/tmp",
+          "readOnly": false
+        },
+        {
+          "sourceVolume": "uploads",
+          "containerPath": "/app/uploads",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ses-manager-prod",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "ses",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -fsS -H \"X-Forwarded-Proto: https\" http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 180
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "tmp"
+    },
+    {
+      "name": "uploads",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-PLACEHOLDER",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-PLACEHOLDER",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
+  "_offlineAcceptanceNotes": {
+    "IMAGE_DIGEST": "PLACEHOLDER — replace with ECR registry digest after push; never use LOCAL_IMAGE_ID here",
+    "ACCOUNT_ID": "PLACEHOLDER",
+    "executionRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
+    "taskRoleArn": "PLACEHOLDER — OUT-OF-SCOPE until real IAM",
+    "awslogs": "PLACEHOLDER — CloudWatch NOT verified offline",
+    "secrets": "PLACEHOLDER ARNs — no plaintext DB/OIDC secrets in environment",
+    "albTargetGroupHealthCheck": {
+      "path": "/actuator/health/readiness",
+      "matcher": "200",
+      "FORBIDDEN": "Do NOT use /actuator/health/liveness for ALB (REV-ECS-P1-001)"
+    },
+    "ecsContainerHealthCheck": {
+      "path": "/actuator/health/liveness",
+      "note": "Process liveness only; DB loss must not kill the task"
+    },
+    "efsUploads": {
+      "status": "EFS-ACTUAL=DEFERRED until real AWS",
+      "accessPointRootPath": "/ses-manager/uploads — set on EFS Access Point (fsap-PLACEHOLDER), NOT in task efsVolumeConfiguration.rootDirectory when accessPointId is present",
+      "taskRootDirectory": "omit or \"/\" only when accessPointId is set (ECS API rule)"
+    },
+    "deferredExternalIac": [
+      "ALB target group / listener (readiness path)",
+      "security groups / private subnets",
+      "deployment circuit breaker (service-level)",
+      "autoscaling",
+      "ECR repository + digest pin deploy",
+      "EFS file system + access point (uploads)"
+    ]
+  }
+}

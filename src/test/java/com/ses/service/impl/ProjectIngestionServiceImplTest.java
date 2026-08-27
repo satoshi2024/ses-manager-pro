@@ -46,6 +46,10 @@ public class ProjectIngestionServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // 乱数順で Spring コンテキスト未起動のまま本クラスが先に走ると lambda cache が無く落ちる
+        var configuration = new com.baomidou.mybatisplus.core.MybatisConfiguration();
+        var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(configuration, "");
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, ProjectIngestion.class);
         ReflectionTestUtils.setField(service, "baseMapper", projectIngestionMapper);
     }
 

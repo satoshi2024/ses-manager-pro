@@ -105,6 +105,7 @@
 
         <div class="collapse mb-4" id="settingsPanel">
             <div class="ai-settings shadow-sm">
+                <!-- APIキーはサーバー側設定(ai.api-key)のみを使用する。ブラウザからのAPIキー入力・保存・送信は廃止（ACC-SEC-P1-004）。 -->
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label for="contextEngineer" class="form-label"><i class="bi bi-person-badge text-info me-1"></i><th:block th:text="#{ai.label.contextEngineer}">対象要員 (コンテキスト)</th:block></label>
@@ -119,9 +120,6 @@
                             <option value="" th:text="#{common.label.unspecified}">-- 指定なし --</option>
                             <!-- Dynamically loaded -->
                         </select>
-                    </div>
-                    <div class="col-12 mt-3 text-end">
-                        <button class="btn btn-primary btn-sm px-4" id="saveSettingsBtn" th:text="#{common.btn.saveSettings}">設定を保存</button>
                     </div>
                 </div>
             </div>

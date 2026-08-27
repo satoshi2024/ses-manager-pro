@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 4,
+  "generated": "2026-08-27T14:07:44.2344645+09:00",
+  "freezeBaseline": "ad829cc2e5c249c4cc273ba7b87441da163a48f3",
+  "gitRevision": "f8a39e803c8034cb2cf7025ba69456161382386a",
+  "imageSourceRevision": "f8a39e803c8034cb2cf7025ba69456161382386a",
+  "evidenceRevision": null,
+  "evidenceRevisionNote": "Set in evidence pack to final tip SHA; do not rebuild solely to self-reference",
+  "appJar": "ses-manager-pro-1.0.0-SNAPSHOT.jar",
+  "jarSha256": "871ecaac220788943ec747bd79d8ec94fce5088ce59f62a6ce389fa624145a28",
+  "baseImage": "eclipse-temurin:21-jre-jammy",
+  "baseImageDigest": "sha256:eebd356ad7358b7094758e5787a6726f332917cfd56feab6457c56dab895cdbf",
+  "localImageTag": "ses-manager-pro:local",
+  "localImageId": "sha256:cc10212e4d880740a2b6b2892b8b4da6f4ce0e2ade5d7efb06501412e51d39f3",
+  "registryDigest": null,
+  "registryDigestStatus": "ABSENT - LOCAL_IMAGE_ID is not an ECR digest or ECS deployable registry digest",
+  "ecrPush": "OUT-OF-SCOPE - no AWS account",
+  "ecsDeploy": "OUT-OF-SCOPE - no AWS account",
+  "efsActual": "DEFERRED - no AWS account",
+  "sbomScan": "BLOCKED-TOOLING",
+  "p3AptReproducibility": "OPEN - base apt package versions may drift across rebuild dates"
+}

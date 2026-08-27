@@ -76,7 +76,7 @@ public class LeaveServiceImpl implements LeaveService {
     private final SystemConfigService systemConfigService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LeaveApplicationResult apply(LeaveApplyRequest request) {
         validate(request);
         Long engineerId = currentEngineerId();
@@ -166,7 +166,7 @@ public class LeaveServiceImpl implements LeaveService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void cancel(Long leaveId, String reason) {
         LeaveRequest leave = requireLeave(leaveId);
         if (!leave.getEngineerId().equals(currentEngineerId()) && !"管理者".equals(SecurityUtils.currentRole())) {
@@ -189,7 +189,7 @@ public class LeaveServiceImpl implements LeaveService {
 
     /** 差戻し（approval status=returned）からの再提出。engineのresubmitへ委譲する（R4-P2-01）。 */
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void resubmit(Long leaveId) {
         LeaveRequest leave = requireLeave(leaveId);
         if (!leave.getEngineerId().equals(currentEngineerId())) {
@@ -212,7 +212,7 @@ public class LeaveServiceImpl implements LeaveService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LeaveLedger grant(LeaveGrantRequest request) {
         String role = SecurityUtils.currentRole();
         if (!Set.of("管理者", "HR").contains(role)) {

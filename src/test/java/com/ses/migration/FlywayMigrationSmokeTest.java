@@ -293,6 +293,8 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_file_security_metadata");
             assertColumnExists(st, "m_identity_provider", "issuer_uri");
             assertColumnExists(st, "t_user_external_identity", "subject");
+            assertColumnExists(st, "t_user_external_identity", "review_status");
+            assertTableExists(st, "t_oidc_binding_review_inventory");
             assertColumnExists(st, "t_user_mfa", "encrypted_totp_secret");
             assertColumnExists(st, "t_mfa_recovery_code", "code_hash");
             assertColumnExists(st, "t_user_session", "revoked_at");
@@ -728,6 +730,15 @@ class FlywayMigrationSmokeTest {
                     + "WHERE rm.role='HR' AND m.menu_key='lifecycle'");
             assertRowExists(st, "SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
                     + "WHERE rm.role='要員' AND m.menu_key='myLifecycle'");
+
+            // V110: identity / system-config 管理者硬境界 + OIDC 隔離在庫
+            assertColumnExists(st, "t_user_external_identity", "review_status");
+            assertTableExists(st, "t_oidc_binding_review_inventory");
+
+            // V111: コア楽観ロック version
+            assertColumnExists(st, "t_engineer", "version");
+            assertColumnExists(st, "m_customer", "version");
+            assertColumnExists(st, "t_work_record", "version");
         }
     }
 

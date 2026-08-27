@@ -19,6 +19,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,6 +46,7 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @Sql("/sql/engineer-schema-h2.sql")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Transactional
 class CloudSignArtifactIntegrationTest {
 
     private static final String DOC_ID = "0123456789abcdef0123456789abcdef01";

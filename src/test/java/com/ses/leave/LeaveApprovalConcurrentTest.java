@@ -10,16 +10,22 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.leave.LeaveApprovalAdapter;
+import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -30,8 +36,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -39,10 +47,30 @@ import static org.mockito.Mockito.when;
 
 /**
  * S11-P1-01: 残数480分に対する並行承認はちょうど1件成功し、残高は負にならない。
+ * 実DB(MySQL Testcontainers)でロックの実効性を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
+@Testcontainers(disabledWithoutDocker = true)
 class LeaveApprovalConcurrentTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_db")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     @Autowired
     private LeaveApprovalAdapter adapter;
@@ -115,6 +143,7 @@ class LeaveApprovalConcurrentTest {
         CountDownLatch go = new CountDownLatch(1);
         AtomicInteger success = new AtomicInteger();
         AtomicInteger failure = new AtomicInteger();
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             List<Future<?>> futures = new ArrayList<>();
@@ -127,7 +156,7 @@ class LeaveApprovalConcurrentTest {
                         go.await(10, TimeUnit.SECONDS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, e);
                         return;
                     }
                     try {
@@ -136,8 +165,18 @@ class LeaveApprovalConcurrentTest {
                             adapter.applyApproved(approvalRequest(leave));
                         });
                         success.incrementAndGet();
+                    } catch (BusinessException ex) {
+                        // REV-RP-P2-003: 409 concurrent または残数不足 messageKey
+                        boolean expected = ex.getCode() == 409
+                                || "error.attendance.concurrent".equals(ex.getMessageKey())
+                                || "error.leave.balanceInsufficient".equals(ex.getMessageKey());
+                        if (expected) {
+                            failure.incrementAndGet();
+                        } else {
+                            unexpected.compareAndSet(null, ex);
+                        }
                     } catch (RuntimeException ex) {
-                        failure.incrementAndGet();
+                        unexpected.compareAndSet(null, ex);
                     }
                 }));
             }
@@ -150,6 +189,7 @@ class LeaveApprovalConcurrentTest {
             pool.shutdownNow();
         }
 
+        assertNull(unexpected.get(), () -> "想定外の例外: " + unexpected.get());
         assertEquals(1, success.get(), "成功はちょうど1件");
         assertEquals(1, failure.get(), "失敗はちょうど1件");
 

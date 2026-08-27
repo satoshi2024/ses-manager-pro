@@ -1,4 +1,5 @@
 AcceptanceIdMySqlIntegrationTest
+DigitalInvoiceEnqueueConcurrentTest
 DocumentHashClaimTest
 FlywayAttendanceSchemaSmokeTest
 FlywayContractDocumentDispatchSchemaSmokeTest

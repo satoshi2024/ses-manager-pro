@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/audit-logs")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class AuditLogApiController {
 
     private final AuditLogService auditLogService;

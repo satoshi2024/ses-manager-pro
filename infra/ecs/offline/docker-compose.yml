@@ -1,0 +1,118 @@
+# Offline AWS / local ECS-like simulation — NOT real AWS.
+# Network is internal (no internet egress). Probes use docker exec.
+# Secrets are SIMULATION-ONLY markers, never production credentials.
+#
+# Probe convention (REV-ECS-P1-001):
+#   - ECS container healthCheck → /actuator/health/liveness
+#   - ALB Target Group → /actuator/health/readiness (MUST; never use liveness for ALB)
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: ses-offline-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: sim-only-root-not-prod
+      MYSQL_DATABASE: ses_manager_db
+      MYSQL_USER: ses
+      MYSQL_PASSWORD: sim-only-db-not-prod
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+      - --log-bin-trust-function-creators=1
+    volumes:
+      - ses-offline-mysql-data:/var/lib/mysql
+    networks:
+      - ses-offline-internal
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-psim-only-root-not-prod"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  app:
+    image: ses-manager-pro:local
+    container_name: ses-offline-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    user: "10001:10001"
+    read_only: true
+    cpus: 1.0
+    mem_limit: 2048m
+    stop_grace_period: 45s
+    tmpfs:
+      - /tmp:size=256m,uid=10001,gid=10001,mode=1777
+    volumes:
+      # Named volume (NOT tmpfs) — REV-ECS-P1-002. Chown to 10001 before first start.
+      - ses-offline-uploads:/app/uploads
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: "8080"
+      # Faster readiness DOWN when MySQL is stopped (Hikari validation).
+      DB_CONNECTION_TIMEOUT: "3000"
+      DB_URL: jdbc:mysql://mysql:3306/ses_manager_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Tokyo
+      DB_USERNAME: ses
+      DB_PASSWORD: sim-only-db-not-prod
+      DB_POOL_SIZE: "10"
+      AI_PROVIDER: mock
+      AI_EXTERNAL_SEND_ENABLED: "false"
+      CLOUDSIGN_ENABLED: "false"
+      DIGITAL_INVOICE_PROVIDER: none
+      FREEE_CLIENT_ID: sim-offline-not-a-real-freee-client
+      FREEE_CLIENT_SECRET: sim-offline-not-a-real-freee-secret
+      FREEE_REDIRECT_URI: https://app.sim.invalid/api/integrations/freee/callback
+      FREEE_TOKEN_ENCRYPTION_KEY: sim-offline-token-encryption-key-32bxx
+      BP_BANK_ACCOUNT_ENCRYPTION_KEY: sim-offline-bp-bank-encryption-key-32
+      METRICS_SCRAPER_ENABLED: "true"
+      METRICS_SCRAPER_USERNAME: sim-scraper
+      METRICS_SCRAPER_PASSWORD: sim-only-scraper-not-prod
+      BATCH_TOKEN_SECRET: sim-only-batch-token-hmac-secret-32b
+      SESSION_HASH_KEY: sim-only-session-hash-key-00000001
+      MFA_ENCRYPTION_KEY: sim-only-mfa-encryption-key-0000001
+      MFA_CURRENT_KEY_VERSION: v1
+      OIDC_ENABLED: "true"
+      LOCAL_LOGIN_ENABLED: "false"
+      BREAK_GLASS_LOGIN_ENABLED: "true"
+      OIDC_REQUIRE_MFA_ASSURANCE: "true"
+      MFA_ENABLED: "true"
+      MFA_REQUIRED_FOR_BREAK_GLASS: "true"
+      BREAK_GLASS_USERNAMES: admin,breakglass2
+      OIDC_ISSUER_URI: https://idp.sim.invalid/tenant/v2.0
+      OIDC_AUTHORIZATION_URI: https://idp.sim.invalid/authorize
+      OIDC_TOKEN_URI: https://idp.sim.invalid/token
+      OIDC_JWK_SET_URI: https://idp.sim.invalid/jwks
+      OIDC_USER_INFO_URI: https://idp.sim.invalid/userinfo
+      OIDC_CLIENT_ID: sim-client-not-real
+      OIDC_CLIENT_SECRET: sim-client-secret-not-real
+      ALLOW_UNTRACKED_SESSIONS: "false"
+      PERSISTENT_SESSION_ENABLED: "true"
+      APP_SECURITY_REQUIRE_HTTPS: "false"
+      SHUTDOWN_TIMEOUT: 30s
+      SERVER_SHUTDOWN: graceful
+      # Simulation only: no SMTP in offline compose — do not disable mail health globally.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
+      SPRING_APPLICATION_JSON: >-
+        {"compliance":{"gate":{"credential-crypto":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}},"fingerprint-keys":{"default":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}}}}}}
+    networks:
+      - ses-offline-internal
+    healthcheck:
+      # ECS container health = liveness only (REV-ECS-P1-001)
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 180s
+
+networks:
+  ses-offline-internal:
+    name: ses-offline-internal
+    internal: true
+    driver: bridge
+
+volumes:
+  ses-offline-mysql-data:
+  # Pre-created + chowned by verify-offline-sim.ps1 (uid 10001)
+  ses-offline-uploads:
+    name: offline_ses-offline-uploads
+    external: true

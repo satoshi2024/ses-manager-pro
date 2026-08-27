@@ -53,7 +53,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     private final ObjectMapper objectMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LifecycleCaseDto createCase(Long applicantUserId, CreateLifecycleCaseCommand cmd) {
         if (cmd.getEngineerId() == null) {
             throw BusinessException.of(400, "error.lifecycle.engineerRequired", "対象要員は必須です");
@@ -435,7 +435,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void holdCase(Long caseId, Long userId, String reason) {
         LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
         if (lcCase == null) {
@@ -470,7 +470,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void resumeCase(Long caseId, Long userId) {
         LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
         if (lcCase == null) {
@@ -504,7 +504,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void completeCase(Long caseId, Long userId) {
         LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
         if (lcCase == null) {
@@ -572,7 +572,7 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void cancelCase(Long caseId, Long userId, String reason) {
         LifecycleCase lcCase = caseMapper.selectByIdForUpdate(caseId);
         if (lcCase == null) {

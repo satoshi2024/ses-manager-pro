@@ -117,7 +117,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto createTemplate(LifecycleTemplateDto dto, Long userId) {
         dagValidator.validateDtoDag(dto.getTasks());
 
@@ -143,7 +143,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LifecycleTemplateDto updateTemplate(Long id, LifecycleTemplateDto dto, Long userId) {
         LifecycleTemplate existing = templateMapper.selectById(id);
         if (existing == null) {
@@ -180,7 +180,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void toggleStatus(Long id, String status, Long userId) {
         LifecycleTemplate entity = templateMapper.selectById(id);
         if (entity == null) {

@@ -189,6 +189,10 @@ case_preflight_optionfile_contains_capath() {
   setup_env
   # lib を直接 source して option file の内容を検査する（preflight は
   # 終了時に trap で削除するため、生存中に検査する必要がある）
+  # mysql-options は common::trap_add に依存するため、必ず common.sh を先に source する。
+  # （ACC-OPS-P2-001: 依存未ロードのまま init を呼ぶと fail-closed で非 0 になる）
+  # shellcheck disable=SC1091
+  . "$ROOT/ops/backup/lib/common.sh"
   # shellcheck disable=SC1091
   . "$ROOT/ops/backup/lib/mysql-options.sh"
   local rc=0

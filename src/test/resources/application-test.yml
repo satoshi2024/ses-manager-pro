@@ -1,5 +1,7 @@
 spring:
   datasource:
+    # ACC-TEST-P1-004: 共有 mem DB。alphabetical 順序依存は禁止。更新テストは @Transactional でロールバックすること。
+    # 並行更新の正しさは mysql タグの Testcontainers で検証する（H2 では証明しない）。
     url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
@@ -52,6 +54,7 @@ spring:
         - classpath:sql/schema-accounting-integration-h2.sql
         - classpath:sql/schema-jp-pint-h2.sql
         - classpath:sql/schema-ai-feedback-h2.sql
+        - classpath:sql/schema-optimistic-lock-core-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
       data-locations:
         - classpath:sql/dummy.sql

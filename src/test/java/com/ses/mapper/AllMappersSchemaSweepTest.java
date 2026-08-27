@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 import java.util.stream.Stream;
@@ -31,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 @SpringBootTest
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/engineer-schema-h2.sql")
+@Transactional
 class AllMappersSchemaSweepTest {
 
     @Autowired

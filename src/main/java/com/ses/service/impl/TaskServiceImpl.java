@@ -36,7 +36,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     private com.ses.mapper.SysUserMapper sysUserMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Task createTask(Task task, Long requesterUserId) {
         if (!StringUtils.hasText(task.getTitle())) {
             throw new BusinessException(400, "タスク件名は必須です");
@@ -62,7 +62,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Task updateStatus(Long taskId, String newStatus, Long operatorUserId) {
         Task task = getById(taskId);
         if (task == null) {
@@ -110,13 +110,13 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, String newPriority, Long operatorUserId) {
         return updateTaskDetails(taskId, newAssigneeUserId, newDueDate, false, newPriority, operatorUserId);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, Boolean clearDueDate, String newPriority, Long operatorUserId) {
         Task task = getById(taskId);
         if (task == null) {

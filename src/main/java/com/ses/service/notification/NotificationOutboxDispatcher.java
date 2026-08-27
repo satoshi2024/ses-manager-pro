@@ -26,7 +26,7 @@ public class NotificationOutboxDispatcher {
     private final WebhookNotifier webhookNotifier;
 
     /** 30分以上claimされたままの行を再送可能へ戻す。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void recoverStaleRows() {
         LocalDateTime now = LocalDateTime.now();
         outboxMapper.update(null, new UpdateWrapper<NotificationOutbox>()
@@ -38,7 +38,7 @@ public class NotificationOutboxDispatcher {
     }
 
     /** claimからWebhook送信、結果更新までを1件単位のtransactionで実行する。 */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public boolean dispatchOne(Long outboxId) {
         NotificationOutbox beforeClaim = outboxMapper.selectByIdForDispatch(outboxId);
         if (beforeClaim == null || outboxMapper.claim(outboxId) == 0) {

@@ -1,5 +1,6 @@
 package com.ses.config;
 
+import com.ses.common.security.OutboundUrlGuard;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,7 +24,7 @@ public class AppConfig {
     }
 
     /**
-     * Webhook送信等の外部HTTP呼び出し用RestTemplate。
+     * 外部HTTP呼び出し用の汎用RestTemplate。
      * 接続先の遅延・無応答でバッチ処理が長時間ブロックされないよう短いタイムアウトを設定する。
      */
     @Bean
@@ -32,6 +33,20 @@ public class AppConfig {
                 .setConnectTimeout(Duration.ofSeconds(3))
                 .setReadTimeout(Duration.ofSeconds(3))
                 .build();
+    }
+
+    /**
+     * Webhook送信専用のRestTemplate（SSRF対策）。
+     * {@link PinningNoRedirectClientHttpRequestFactory} で検証済みIPへピン留め接続し、
+     * リダイレクトは追跡しない。DNSリバインディング（判定後の再解決差し替え）を塞ぐ。
+     */
+    @Bean("webhookRestTemplate")
+    public RestTemplate webhookRestTemplate(RestTemplateBuilder builder, OutboundUrlGuard outboundUrlGuard) {
+        PinningNoRedirectClientHttpRequestFactory factory =
+                new PinningNoRedirectClientHttpRequestFactory(outboundUrlGuard);
+        factory.setConnectTimeout((int) Duration.ofSeconds(3).toMillis());
+        factory.setReadTimeout((int) Duration.ofSeconds(3).toMillis());
+        return builder.requestFactory(() -> factory).build();
     }
 
     /**
@@ -62,12 +77,13 @@ public class AppConfig {
     /**
      * AI API（Gemini等）用のRestTemplate。
      * 生成モデルの応答は遅い場合があるため、読取タイムアウトを長めに設定する。
+     * SSRF対策としてリダイレクトは追跡しない（宛先ホストはallowlistで固定検証する）。
      */
     @Bean("aiRestTemplate")
     public RestTemplate aiRestTemplate(RestTemplateBuilder builder) {
-        return builder
-                .setConnectTimeout(Duration.ofSeconds(5))
-                .setReadTimeout(Duration.ofSeconds(60))
-                .build();
+        NoRedirectClientHttpRequestFactory factory = new NoRedirectClientHttpRequestFactory();
+        factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+        factory.setReadTimeout((int) Duration.ofSeconds(60).toMillis());
+        return builder.requestFactory(() -> factory).build();
     }
 }

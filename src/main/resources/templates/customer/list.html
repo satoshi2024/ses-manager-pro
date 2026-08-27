@@ -115,6 +115,7 @@
                 <div class="modal-body p-4">
                     <form id="customer-form">
                         <input type="hidden" id="cust-id">
+                        <input type="hidden" id="cust-version">
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{customer.companyName}">会社名</th:block> <span class="text-danger">*</span></label>
                             <input type="text" id="cust-companyName" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{customer.placeholder.companyName}" required>
@@ -174,6 +175,7 @@
         document.getElementById('customerModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('customer-form').reset();
             document.getElementById('cust-id').value = '';
+            document.getElementById('cust-version').value = '';
         });
     </script>
 </th:block>

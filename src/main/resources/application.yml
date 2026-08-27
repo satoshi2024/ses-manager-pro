@@ -4,6 +4,8 @@
 server:
   port: 8080
   forward-headers-strategy: framework
+  # ECS/ALB 相当のローリング更新向け。SIGTERM 後に処理中リクエストを排水してから終了する。
+  shutdown: graceful
   # ===== 同時接続の受け口 =====
   # threads.max を超えた分は accept-count まで待たされ、それも超えると接続拒否になる。
   # ただし実際の上限は DB コネクションプール(spring.datasource.hikari.maximum-pool-size)であり、
@@ -29,20 +31,53 @@ server:
     include-stacktrace: never
     include-exception: false
 
-# ===== Spring Boot Actuator（ヘルスチェック・コンテナプローブ） =====
+# ===== Actuator（監視エンドポイント） ACC-OPS-P0-001 / ACC-OPS-P1-002 =====
+# 公開するのは health（+ liveness/readiness）と prometheus のみ。
+# env / beans / configprops / heapdump / mappings 等の内部情報は「一切公開しない」。
+#   - exposure.include は health,prometheus に限定する（それ以外の追加＝内部情報漏洩）。
+#   - 匿名アクセスは SecurityConfig で /actuator/health, /actuator/health/liveness,
+#     /actuator/health/readiness の3パスのみ permitAll する。
+#   - /actuator/prometheus は permitAll にしない。管理者/マネージャー、または
+#     app.metrics.scraper のマシン認証（ROLE_METRICS_SCRAPER）のみ。
+#   - show-details/show-components は never 固定。匿名でも DB 接続先・ディスク・ホスト名・
+#     資格情報など内部の詳細を返さない（health は status のみ）。
+# ECS / ALB 配線規約（offline AWS / local ECS-like simulation でも同じ）:
+#   - ECS container healthCheck → /actuator/health/liveness（プロセス生存）
+#   - ALB Target Group health check → /actuator/health/readiness（DB 含む）
+#   - ALB に liveness を使うことは禁止（DB 断でも 200 のまま流入してしまう）。
+# 実 AWS の ALB/SG 配線は別途 BLOCKED。ここではアプリ側の probe 定義のみ。
 management:
   endpoints:
     web:
+      base-path: /actuator
       exposure:
-        include: health,info
+        include:
+          - health
+          - prometheus
   endpoint:
     health:
+      # liveness/readiness グループを有効化（/actuator/health/{liveness,readiness}）。
       probes:
         enabled: true
-      show-details: when_authorized
-  health:
-    mail:
-      enabled: false
+      # 匿名アクセスでも内部詳細（component 状態・接続先など）を返さない。
+      show-details: never
+      show-components: never
+      group:
+        # プロセス生存のみ。DB 断でも UP を維持する（ECS が不要にタスクを殺さない）。
+        liveness:
+          include:
+            - livenessState
+        # ALB 流入可否。readinessState + db を必須にする（REV-ECS-P1-001）。
+        readiness:
+          include:
+            - readinessState
+            - db
+    prometheus:
+      enabled: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 # 組織スコープ(R3)。V60が既存ユーザーと既存要員をLEGACY組織へbackfillするため、
 # 適用直後でも誰も空scopeにならない。したがって既定で有効にする。
@@ -53,8 +88,16 @@ organization:
     enabled: ${ORGANIZATION_SCOPE_ENABLED:true}
 
 spring:
-  profiles:
-    active: dev
+  # graceful shutdown の排水待ち上限（server.shutdown=graceful と併用）
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+  # ===== プロファイルは明示指定を必須とする（ACC-SEC-P1-007 / fail-closed） =====
+  # 以前はここで `profiles.active: dev` を既定にしていたが、本番で SPRING_PROFILES_ACTIVE=prod を
+  # 付け忘れると平文(NoOp)エンコーダーのまま静かに起動する事故につながるため、既定値は置かない。
+  #   - 本番: SPRING_PROFILES_ACTIVE=prod（BCrypt）
+  #   - ローカル開発: dev（`mvn spring-boot:run` は spring-boot-maven-plugin が dev を付与）
+  #   - テスト: test（@ActiveProfiles("test") / application-test.yml）
+  # prod / dev / test のいずれも有効でない場合は PasswordEncoderConfig が起動を失敗させる。
 
   # ===== マルチパート（ファイルアップロード）上限 =====
   # 個別ファイルはFileKindでさらに厳格に検証する（スキルシート10MB/写真2MB）
@@ -164,6 +207,15 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  # ===== Prometheus スクレイパー・マシン認証（REV-RP-P1-004 / ACC-OPS-P1-002） =====
+  # 秘密情報は環境変数のみ。リポジトリ・設定ファイルへ平文パスワードを書かないこと。
+  # username/password が両方非空のときだけ ROLE_METRICS_SCRAPER のインメモリユーザーを登録する。
+  # K8s ServiceMonitor / ECS scrape への配線は BLOCKED（アプリ側の認証口のみ）。
+  metrics:
+    scraper:
+      enabled: ${METRICS_SCRAPER_ENABLED:false}
+      username: ${METRICS_SCRAPER_USERNAME:}
+      password: ${METRICS_SCRAPER_PASSWORD:}
   scheduler:
     lock:
       # 本番の共有DBロックはDBサーバ時刻を使う。H2 test profileだけfalseで上書きする。

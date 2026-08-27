@@ -81,6 +81,7 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
      * 最終更新日から60日以上経過した「提案可能」な要員のステータスを「失効」に更新する。
      */
     @org.springframework.scheduling.annotation.Scheduled(cron = "0 0 3 * * ?")
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "bpAvailabilityExpireDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     @Transactional(rollbackFor = Exception.class)
     public void expireBpAvailabilities() {
         java.time.LocalDateTime threshold = java.time.LocalDateTime.now().minusDays(60);

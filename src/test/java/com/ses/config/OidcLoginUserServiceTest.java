@@ -91,6 +91,41 @@ class OidcLoginUserServiceTest {
     }
 
     @Test
+    void 隔離中の管理者bindingはOIDCログインを拒否する() {
+        OidcUser oidcUser = oidcUser("subject-admin", provider.getIssuerUri());
+        UserExternalIdentity link = link(1L, 10L);
+        link.setSubject("subject-admin");
+        link.setReviewStatus("QUARANTINED");
+        when(delegate.loadUser(request)).thenReturn(oidcUser);
+        when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-admin"))
+                .thenReturn(link);
+
+        OAuth2AuthenticationException exception = assertThrows(OAuth2AuthenticationException.class,
+                () -> service().loadUser(request));
+
+        assertEquals("oidc_identity_pending_review", exception.getError().getErrorCode());
+    }
+
+    @Test
+    void 再承認済みの管理者bindingだけが管理者roleへ解決される() {
+        OidcUser oidcUser = oidcUser("subject-admin", provider.getIssuerUri());
+        UserExternalIdentity link = link(1L, 10L);
+        link.setSubject("subject-admin");
+        link.setReviewStatus("APPROVED");
+        SysUser user = user(1L, "admin", "管理者");
+        when(delegate.loadUser(request)).thenReturn(oidcUser);
+        when(externalIdentityMapper.selectByTenantProviderAndSubject("tenant-a", 10L, "subject-admin"))
+                .thenReturn(link);
+        when(sysUserMapper.selectById(1L)).thenReturn(user);
+
+        OidcLoginUser result = (OidcLoginUser) service().loadUser(request);
+
+        assertEquals(1L, result.getSysUser().getId());
+        assertEquals("管理者", result.getSysUser().getRole());
+        assertEquals("ROLE_管理者", result.getAuthorities().iterator().next().getAuthority());
+    }
+
+    @Test
     void unknownSubjectはemailが一致しても自動linkしない() {
         OidcUser oidcUser = oidcUser("unknown", provider.getIssuerUri());
         when(delegate.loadUser(request)).thenReturn(oidcUser);
@@ -180,6 +215,7 @@ class OidcLoginUserServiceTest {
         link.setUserId(userId);
         link.setProviderId(providerId);
         link.setSubject("subject-1");
+        link.setReviewStatus("APPROVED");
         return link;
     }
 

@@ -24,6 +24,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import(OneOnOneSurveyBoundaryClockTest.FixedClockConfig.class)
+@Transactional
 class OneOnOneSurveyBoundaryClockTest {
 
     /** 固定Clock: 2026-08-18（Asia/Tokyo）。decision table §6.1の「システム時計はAsia/Tokyo」に合わせる。 */

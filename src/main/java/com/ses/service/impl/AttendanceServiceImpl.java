@@ -134,7 +134,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveMyDay(AttendanceDayRequest request) {
         if (request == null || request.getWorkDate() == null) {
             throw BusinessException.of(400, "error.attendance.invalidDate");
@@ -175,7 +175,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteMyDay(String month, String workDate) {
         YearMonth target = parseMonth(month);
         LocalDate date = parseDate(workDate);
@@ -201,7 +201,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submitMyMonth(String month) {
         YearMonth target = parseMonth(month);
         Long engineerId = currentEngineerId();
@@ -215,7 +215,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reject(Long engineerId, String month) {
         requireManagerRole();
         AttendanceMonth current = lockExistingMonth(allowedEngineerId(engineerId, month), month);
@@ -232,7 +232,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void approve(Long engineerId, String month) {
         requireManagerRole();
         transition(lockExistingMonth(allowedEngineerId(engineerId, month), month), SUBMITTED, APPROVED,
@@ -240,7 +240,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void close(Long engineerId, String month) {
         requireHrOrAdminRole();
         YearMonth target = parseMonth(month);
@@ -253,7 +253,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reopen(Long engineerId, String month, String reason) {
         if (!"管理者".equals(SecurityUtils.currentRole())) {
             throw BusinessException.of(403, "error.attendance.roleDenied");

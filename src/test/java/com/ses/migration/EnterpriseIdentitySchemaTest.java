@@ -7,6 +7,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Transactional
 class EnterpriseIdentitySchemaTest {
 
     @Autowired
@@ -28,6 +30,8 @@ class EnterpriseIdentitySchemaTest {
 
     @AfterEach
     void cleanup() {
+        jdbcTemplate.update("DELETE FROM t_oidc_binding_review_inventory WHERE tenant_id LIKE ?", "tenant-" + suffix + "%");
+        jdbcTemplate.update("DELETE FROM t_user_external_identity WHERE subject LIKE ?", suffix + "%");
         jdbcTemplate.update("DELETE FROM t_file_security_metadata WHERE stored_name LIKE ?", suffix + "%");
         jdbcTemplate.update("DELETE FROM t_mfa_recovery_code WHERE code_hash LIKE ?", suffix + "%");
         jdbcTemplate.update("DELETE FROM m_identity_provider WHERE client_id LIKE ?", suffix + "%");
@@ -37,6 +41,7 @@ class EnterpriseIdentitySchemaTest {
     void V63の全テーブルとscan項目がH2へ投入される() {
         assertEquals(1, tableCount("m_identity_provider"));
         assertEquals(1, tableCount("t_user_external_identity"));
+        assertEquals(1, tableCount("t_oidc_binding_review_inventory"));
         assertEquals(1, tableCount("t_user_mfa"));
         assertEquals(1, tableCount("t_mfa_recovery_code"));
         assertEquals(1, tableCount("t_user_session"));
@@ -44,6 +49,7 @@ class EnterpriseIdentitySchemaTest {
         assertEquals(1, tableCount("t_user_permission_group"));
         assertEquals(1, tableCount("t_permission_group_action"));
         assertEquals(1, tableCount("t_file_security_metadata"));
+        assertEquals(1, columnCount("t_user_external_identity", "review_status"));
         assertEquals(1, columnCount("t_file_security_metadata", "scan_status"));
         assertEquals(1, columnCount("t_file_security_metadata", "scanner_version"));
         assertEquals(1, columnCount("t_mfa_recovery_code", "code_hash"));
@@ -82,6 +88,28 @@ class EnterpriseIdentitySchemaTest {
                         + "(tenant_id, user_id, code_hash) VALUES ('tenant-a', 900001, ?)", hash));
         assertEquals(hash, jdbcTemplate.queryForObject(
                 "SELECT code_hash FROM t_mfa_recovery_code WHERE code_hash = ?", String.class, hash));
+    }
+
+    @Test
+    void APPROVEDはreviewed_atとreviewed_byが無いと拒否される() {
+        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+                "INSERT INTO t_user_external_identity "
+                        + "(tenant_id, user_id, provider_id, subject, linked_at, review_status, "
+                        + "reviewed_at, reviewed_by, deleted_flag) VALUES "
+                        + "('tenant-a', 900001, 1, ?, CURRENT_TIMESTAMP, 'APPROVED', NULL, NULL, 0)",
+                suffix + "-approved-null-reviewer"));
+        assertDoesNotThrow(() -> jdbcTemplate.update(
+                "INSERT INTO t_user_external_identity "
+                        + "(tenant_id, user_id, provider_id, subject, linked_at, review_status, "
+                        + "reviewed_at, reviewed_by, deleted_flag) VALUES "
+                        + "('tenant-a', 900001, 1, ?, CURRENT_TIMESTAMP, 'QUARANTINED', NULL, NULL, 0)",
+                suffix + "-quarantined-ok"));
+        assertDoesNotThrow(() -> jdbcTemplate.update(
+                "INSERT INTO t_user_external_identity "
+                        + "(tenant_id, user_id, provider_id, subject, linked_at, review_status, "
+                        + "reviewed_at, reviewed_by, deleted_flag) VALUES "
+                        + "('tenant-a', 900001, 1, ?, CURRENT_TIMESTAMP, 'APPROVED', CURRENT_TIMESTAMP, 1, 0)",
+                suffix + "-approved-ok"));
     }
 
     private int tableCount(String table) {

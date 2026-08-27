@@ -60,7 +60,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final ContractService contractService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void processProviderEvent(DigitalInvoiceEvent event) {
         if (!event.getSignatureValid()) {
             digitalInvoiceEventService.save(event);
@@ -101,7 +101,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public DigitalInvoice enqueueInvoiceForSend(Long invoiceId, String specVersion, Long customerId) {
         peppolParticipantService.assertVerified("CUSTOMER", customerId);
 
@@ -285,7 +285,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void cancelInvoice(Long digitalInvoiceId) {
         DigitalInvoice di = getById(digitalInvoiceId);
         if (di == null) {
@@ -422,7 +422,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public InboundPurchaseRequest acceptInboundReview(Long digitalInvoiceId) {
         DigitalInvoice di = getById(digitalInvoiceId);
         if (di == null || !"RECEIVE".equals(di.getDirection())) {

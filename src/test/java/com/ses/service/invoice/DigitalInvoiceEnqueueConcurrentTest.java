@@ -10,13 +10,19 @@ import com.ses.service.DigitalInvoiceService;
 import com.ses.service.PeppolParticipantService;
 import com.ses.service.integration.IntegrationJobService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -39,11 +45,30 @@ import static org.mockito.Mockito.when;
 /**
  * S16-P1-02: 同一 invoice の並行 enqueue は Standard SEND 1 行 + job 1 件、他方は 409。
  * クラスに @Transactional を付けない（並行スレッドが互いの INSERT を見えるようにする）。
- * 共有 H2(mem:testdb) を汚さないよう AfterEach で掃除する。
+ * 実DB(MySQL Testcontainers)で一意制約／CAS の実効性を検証する。
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Tag("mysql")
+@Testcontainers(disabledWithoutDocker = true)
 class DigitalInvoiceEnqueueConcurrentTest {
+
+    @Container
+    @SuppressWarnings("resource") // ライフサイクルは Testcontainers Extension が管理する。
+    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_db")
+            .withUsername("root")
+            .withPassword("ses");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
+    }
 
     @Autowired
     private DigitalInvoiceService digitalInvoiceService;
@@ -70,8 +95,8 @@ class DigitalInvoiceEnqueueConcurrentTest {
     private final AtomicReference<Long> invoiceIdRef = new AtomicReference<>();
 
     @AfterEach
-    void cleanupSharedH2() {
-        // 共有 H2 の UNIQUE は論理削除では解放されないため物理削除する
+    void cleanup() {
+        // UNIQUE は論理削除では解放されないため物理削除する
         Long invoiceId = invoiceIdRef.getAndSet(null);
         if (invoiceId != null) {
             List<Long> diIds = jdbcTemplate.queryForList(

@@ -11,6 +11,7 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,6 +20,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** 本番環境のHTTPS、HSTS、Cookieセキュリティ設定を検証する。 */
 @SpringBootTest(properties = {
+    // prod 単独で起動するため、H2/スキーマは test 設定を import（REV-B2-P1-003: prod+test 併用禁止）
+    "spring.config.import=optional:classpath:application-test.yml",
+    "spring.flyway.enabled=false",
+    "spring.flyway.locations=classpath:db/migration,classpath:db/migration-prod",
     "spring.sql.init.data-locations=classpath:sql/dummy.sql,classpath:sql/production-security-users-h2.sql",
     "app.security.oidc.break-glass-usernames=admin,breakglass2",
     "app.security.mfa.encryption-key=test-production-mfa-encryption-key-0001",
@@ -30,11 +35,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"app.security.oidc.user-info-uri=https://idp.invalid/userinfo"
     ,"app.security.oidc.client-id=test-client"
     ,"app.security.oidc.client-secret=test-secret"
-    // test+prod 併用時も prod 既定の none を明示し FailClosed provider を装配する
     ,"app.digital-invoice.provider=none"
+    ,"app.batch.token-secret=test-batch-token-hmac-secret"
+    // prod 単独起動時は compliance gate の fail-fast を満たすテスト鍵が必要（test 併用時はスキップされていた）
+    ,"compliance.gate.credential-crypto.current-key-version=v1"
+    ,"compliance.gate.credential-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
+    ,"compliance.gate.fingerprint-keys.default.current-key-version=v1"
+    ,"compliance.gate.fingerprint-keys.default.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
 })
 @AutoConfigureMockMvc
-@ActiveProfiles({"test", "prod"})
+@ActiveProfiles("prod")
+@Transactional
 class ProductionSecurityConfigurationTest {
 
     @MockBean

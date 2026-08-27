@@ -300,10 +300,17 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks) {
+        return saveHours(contractId, workMonth, actualHours, remarks, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks,
+                                Integer expectedVersion) {
         checkClosing(workMonth);
-        return saveHoursInternal(contractId, workMonth, actualHours, remarks, false);
+        return saveHoursInternal(contractId, workMonth, actualHours, remarks, false, expectedVersion);
     }
 
     /**
@@ -312,6 +319,12 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
      */
     private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
                                          String remarks, boolean fromDaily) {
+        // 日次再集計は FOR UPDATE 済み行の現行 version を用いる。
+        return saveHoursInternal(contractId, workMonth, actualHours, remarks, fromDaily, null);
+    }
+
+    private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
+                                         String remarks, boolean fromDaily, Integer expectedVersion) {
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
@@ -393,6 +406,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             record.setContractId(contractId);
             record.setWorkMonth(workMonth);
             record.setStatus("入力中");
+        } else {
+            // 既存行: API はクライアント版必須。日次再集計は FOR UPDATE 済みの現行版を使う。
+            Integer versionToUse = fromDaily ? record.getVersion() : expectedVersion;
+            if (versionToUse == null) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
+            record.setVersion(versionToUse);
         }
 
         record.setActualHours(actualHours);
@@ -404,7 +424,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         freezeAccountingDimension(record, contract);
 
         try {
-            this.saveOrUpdate(record);
+            if (isNew) {
+                this.save(record);
+            } else if (baseMapper.updateById(record) != 1) {
+                throw BusinessException.of(409, "error.common.optimisticLock");
+            }
         } catch (DuplicateKeyException e) {
             throw BusinessException.of("error.workRecord.userNotFound2");
         }
@@ -420,7 +444,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void confirmMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
@@ -616,7 +640,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reopenMonth(String workMonth) {
         com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         checkClosing(workMonth);
@@ -704,7 +728,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     // ===== 要員セルフサービス勤怠（engineer-self-service-timesheet / P1） =====
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public WorkRecord saveDaily(Long contractId, String workMonth, WorkRecordDaily daily) {
         checkClosing(workMonth);
         if (!YearMonth.from(daily.getWorkDate()).equals(com.ses.common.util.DateUtils.parseYearMonth(workMonth))) {
@@ -776,7 +800,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
         checkClosing(workMonth);
         Contract contract = contractMapper.selectByIdForUpdate(contractId);
@@ -850,7 +874,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submitByMonth(Long contractId, String workMonth) {
         checkClosing(workMonth);
         WorkRecord w = baseMapper.selectOne(new QueryWrapper<WorkRecord>()
@@ -864,7 +888,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void submit(Long workRecordId) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
@@ -914,7 +938,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void approve(Long workRecordId) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
@@ -930,6 +954,11 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
         record = baseMapper.selectByIdForUpdate(workRecordId);
 
+        // 並行 approve/reject の敗者は、先勝ちで 確定/差戻し になった後にここに来る。
+        // 遷移不正ではなく楽観競合（409）として返す（REV-RP-P2-003）。
+        if ("確定".equals(record.getStatus()) || "差戻し".equals(record.getStatus())) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
+        }
         requireTransition(record, "確定");
         // 単件承認も月次一括確定と同じ帰属凍結を行い、NULLを含む次元を明示的に保存する。
         freezeAccountingDimension(record, contract);
@@ -954,7 +983,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reject(Long workRecordId, String comment) {
         assertAllowed(workRecordId);
         WorkRecord record = this.getById(workRecordId);
@@ -969,7 +998,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         // Contractロック後に再度行ロックを取得して、月次締めや他者との競合を防ぐ（A7-06/R7-03）
         record = baseMapper.selectByIdForUpdate(workRecordId);
-        
+
         // 差戻しコメントはtrim後必須・最大500文字（R3R-12）。
         String trimmed = comment == null ? "" : comment.trim();
         if (trimmed.isEmpty()) {
@@ -977,6 +1006,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         if (trimmed.length() > 500) {
             throw BusinessException.of(400, "error.workRecord.rejectCommentTooLong");
+        }
+        // 並行 approve/reject の敗者は 409（REV-RP-P2-003）。
+        if ("確定".equals(record.getStatus()) || "差戻し".equals(record.getStatus())) {
+            throw BusinessException.of(409, "error.workRecord.concurrentModified");
         }
         requireTransition(record, "差戻し");
         // 条件付きUPDATE（CAS）で差戻しコメントを保存する（R3R-10/R3R-12）。

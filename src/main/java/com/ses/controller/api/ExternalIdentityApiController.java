@@ -13,11 +13,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 管理者承認済みのOIDC外部identity link API。更新系のためCSRF/監査対象となる。管理者のみ実行可能。 */
+/** 管理者承認済みのOIDC外部identity link API。更新系のためCSRF/監査対象となる。 */
 @RestController
 @RequestMapping("/api/identity-providers/{providerId}/external-identities")
-@PreAuthorize("hasRole('管理者')")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('管理者')")
 public class ExternalIdentityApiController {
 
     private final ExternalIdentityProvisioningService provisioningService;

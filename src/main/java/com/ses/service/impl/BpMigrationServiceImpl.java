@@ -51,7 +51,7 @@ public class BpMigrationServiceImpl implements BpMigrationService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void migrateLegacyBpData() {
         // 1. BpAvailability 移行
         LambdaQueryWrapper<BpAvailability> availWrapper = new LambdaQueryWrapper<>();
@@ -159,7 +159,7 @@ public class BpMigrationServiceImpl implements BpMigrationService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void resolveMigrationException(String sourceType, Long sourceId, Long bpCompanyId) {
         BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
         if (company == null) {

@@ -58,7 +58,7 @@ public class MonthlyAccountingSnapshotServiceImpl implements MonthlyAccountingSn
     private final MonthlyAccountingDimensionMapper dimensionMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int snapshotMonth(String workMonth) {
         YearMonth month = com.ses.common.util.DateUtils.parseYearMonth(workMonth);
         LocalDate asOf = month.atDay(1);

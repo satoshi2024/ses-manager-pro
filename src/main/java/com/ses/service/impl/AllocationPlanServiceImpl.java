@@ -55,7 +55,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     private final StaffingClock clock;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AllocationPlan saveDraft(AllocationPlan allocation) {
         validate(allocation);
         normalize(allocation);
@@ -132,7 +132,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AllocationPlan confirm(Long id) {
         AllocationPlan allocation = require(id);
         if (!STATUS_DRAFT.equals(allocation.getStatus())) {
@@ -166,7 +166,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void discard(Long id) {
         AllocationPlan allocation = require(id);
         if (allocation.getSourceContractId() != null) {
@@ -190,7 +190,7 @@ public class AllocationPlanServiceImpl implements AllocationPlanService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AllocationPlan revise(Long id, AllocationPlan newAllocation) {
         AllocationPlan existing = require(id);
         if (!STATUS_CONFIRMED.equals(existing.getStatus())) {

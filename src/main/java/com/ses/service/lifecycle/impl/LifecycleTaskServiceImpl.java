@@ -40,7 +40,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void startTask(Long taskId, Long userId) {
         LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
@@ -84,7 +84,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void completeTask(Long taskId, Long userId, CompleteLifecycleTaskCommand cmd) {
         LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
@@ -170,7 +170,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void waiveTask(Long taskId, Long userId, Long approvalRequestId, String reason) {
         LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
@@ -226,7 +226,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void reassignTask(Long taskId, Long newAssigneeUserId, Long actorUserId, String reason) {
         LifecycleTask task = taskMapper.selectByIdForUpdate(taskId);
         if (task == null) {
@@ -410,7 +410,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void correctCompletedTask(Long taskId, Long actorUserId, String correctionNote) {
         LifecycleTask task = taskMapper.selectById(taskId);
         if (task == null) {

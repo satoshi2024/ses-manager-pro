@@ -163,18 +163,22 @@ public class LeaveApprovalAdapter implements ApprovalTargetAdapter {
 
     /**
      * engineer×leaveTypeの残数を、要員行のFOR UPDATEで直列化してから算出する（S11-P1-01）。
-     * 台帳行だけのロックだとH2等で空集合時に競合を防げないため、sentinelは要員行に固定する。
+     * 台帳行だけのロックだと空集合時に競合を防げないため、sentinelは要員行に固定する。
+     * 台帳の再読込も FOR UPDATE（current read）にする — MySQL REPEATABLE READ では
+     * 非ロック SELECT が tx 開始時の snapshot のまま残り、他 tx の CONSUME 確定後も
+     * 古い残高を見て二重承認してしまうため。
      */
     private int lockAndBalanceMinutes(Long engineerId, String leaveType) {
         Engineer locked = engineerMapper.selectByIdForUpdate(engineerId);
         if (locked == null) {
             throw BusinessException.of(404, "error.leave.notFound");
         }
-        // 要員ロック保持中に台帳を再読込（他txのCONSUME確定後の残高を見る）
+        // 要員ロック保持中に台帳を current read で再読込（他txのCONSUME確定後の残高を見る）
         List<LeaveLedger> rows = leaveLedgerMapper.selectList(new LambdaQueryWrapper<LeaveLedger>()
                 .eq(LeaveLedger::getEngineerId, engineerId)
                 .eq(LeaveLedger::getLeaveType, leaveType)
-                .orderByAsc(LeaveLedger::getId));
+                .orderByAsc(LeaveLedger::getId)
+                .last("FOR UPDATE"));
         return rows.stream()
                 .mapToInt(row -> "GRANT".equals(row.getLedgerType())
                         ? value(row.getAmountMinutes()) : -value(row.getAmountMinutes()))

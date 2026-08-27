@@ -41,7 +41,7 @@ public class PortalMfaServiceImpl implements PortalMfaService {
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PortalMfaSetupDto setup(Long portalUserId) {
         PortalUser user = requireUser(portalUserId);
         if (user.getMfaEnabledAt() != null) {
@@ -60,7 +60,7 @@ public class PortalMfaServiceImpl implements PortalMfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PortalMfaCompleteDto enable(Long portalUserId, String code) {
         PortalUser user = requireUser(portalUserId);
         if (user.getMfaEnabledAt() != null) {
@@ -93,7 +93,7 @@ public class PortalMfaServiceImpl implements PortalMfaService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean verify(Long portalUserId, String code) {
         PortalUser user = userMapper.selectById(portalUserId);
         if (user == null || user.getMfaEnabledAt() == null) {

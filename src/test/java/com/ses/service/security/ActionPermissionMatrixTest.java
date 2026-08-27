@@ -11,6 +11,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -31,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest
 @ActiveProfiles("test")
 @Sql(scripts = "/sql/permission-group-seed-h2.sql")
+@Transactional
 class ActionPermissionMatrixTest {
 
     /** 旧menu権限で到達できた既知業務action。 */
@@ -159,6 +161,8 @@ class ActionPermissionMatrixTest {
         Authentication sales = authenticate(9001L, "営業");
         assertFalse(authorizationService.isAllowed(sales, "user.view"));
         assertFalse(authorizationService.isAllowed(sales, "user.delete"));
+        assertFalse(authorizationService.isAllowed(sales, "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(sales, "system-config.view"));
         assertFalse(authorizationService.isAllowed(sales, "permission.manage"));
         assertFalse(authorizationService.isAllowed(sales, "audit.security.view"));
         assertFalse(authorizationService.isAllowed(sales, "file.scan.retry"));
@@ -170,6 +174,8 @@ class ActionPermissionMatrixTest {
         Authentication manager = authenticate(9003L, "マネージャー");
         // V64はrole-managerへ '*' をseedしており、action層が素通しになっていた。
         assertFalse(authorizationService.isAllowed(manager, "user.update"));
+        assertFalse(authorizationService.isAllowed(manager, "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(manager, "system-config.view"));
         assertFalse(authorizationService.isAllowed(manager, "permission.manage"));
         assertFalse(authorizationService.isAllowed(manager, "payroll.view"));
         assertFalse(authorizationService.isAllowed(manager, "audit.security.view"));
@@ -193,6 +199,16 @@ class ActionPermissionMatrixTest {
     }
 
     @Test
+    void identityProviderとSystemConfigは管理者だけ許可される() {
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), "identity-provider.create"));
+        assertTrue(authorizationService.isAllowed(authenticate(9000L, "管理者"), "system-config.view"));
+        assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(authenticate(9002L, "HR"), "system-config.view"));
+        assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(authenticate(9003L, "マネージャー"), "system-config.view"));
+    }
+
+    @Test
     void 要員は本人向け経路だけ実行できる() {
         Authentication member = authenticate(9004L, "要員");
         assertTrue(authorizationService.isAllowed(member, "my.view"));
@@ -212,6 +228,8 @@ class ActionPermissionMatrixTest {
             assertTrue(authorizationService.isAllowed(sales, action), "legacy: " + action + " が拒否された");
         }
         assertFalse(authorizationService.isAllowed(sales, "user.view"));
+        assertFalse(authorizationService.isAllowed(sales, "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(sales, "system-config.view"));
         assertFalse(authorizationService.isAllowed(sales, "payroll.view"));
         assertFalse(authorizationService.isAllowed(sales, "permission.manage"));
 
@@ -222,6 +240,8 @@ class ActionPermissionMatrixTest {
         Authentication hr = authenticate(9997L, "HR");
         assertTrue(authorizationService.isAllowed(hr, "payroll.view"));
         assertFalse(authorizationService.isAllowed(hr, "contract.cost.view"));
+        assertFalse(authorizationService.isAllowed(hr, "identity-provider.create"));
+        assertFalse(authorizationService.isAllowed(hr, "system-config.view"));
     }
 
     @Test
@@ -249,14 +269,18 @@ class ActionPermissionMatrixTest {
                 Integer.class);
         org.junit.jupiter.api.Assertions.assertEquals(1, adminBaselineCount, "管理者groupにbaselineが未セット");
 
-        // manager(4) と sales(2) のdeny行はV66の5件にV78の口座actionを加えた6件。
+        // manager(4) と sales(2) はV66の5件 + V78口座action + Fix Batch 1の2件で計8件。
         Integer salesDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(6, salesDenyCount, "営業groupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(8, salesDenyCount, "営業groupのdeny行数が不一致");
+
+        Integer hrDenyCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 3 AND deny_flag = 1", Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(7, hrDenyCount, "HRgroupのdeny行数が不一致");
 
         Integer managerDenyCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 4 AND deny_flag = 1", Integer.class);
-        org.junit.jupiter.api.Assertions.assertEquals(6, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
+        org.junit.jupiter.api.Assertions.assertEquals(8, managerDenyCount, "マネージャーgroupのdeny行数が不一致");
 
         Integer salesBankDeny = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_permission_group_action WHERE group_id = 2 "

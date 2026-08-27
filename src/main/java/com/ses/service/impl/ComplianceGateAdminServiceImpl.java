@@ -61,7 +61,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerType createReviewerType(String typeCode, String displayName, String description,
                                                              String credentialLabel, boolean credentialRequired) {
         if (!StringUtils.hasText(typeCode) || !StringUtils.hasText(displayName)) {
@@ -88,7 +88,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerType updateReviewerType(Long typeId, String displayName, String description,
                                                              String credentialLabel, boolean credentialRequired) {
         ComplianceExternalReviewerType type = reviewerTypeMapper.selectById(typeId);
@@ -108,7 +108,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerType setReviewerTypeEnabled(Long typeId, boolean enabled) {
         ComplianceExternalReviewerType type = reviewerTypeMapper.selectById(typeId);
         if (type == null) {
@@ -124,7 +124,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceResponsibleAssignment createAssignment(Long workplaceId, Long userId, LocalDateTime effectiveFrom) {
         if (workplaceId == null || userId == null || effectiveFrom == null) {
             throw BusinessException.of(400, "compliance.gate.invalidAssignment");
@@ -187,7 +187,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceResponsibleAssignment endAssignment(Long assignmentId, String reason) {
         if (!StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "compliance.gate.endReasonRequired");
@@ -226,7 +226,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceMappingReviewRequirementGroup createRequirementGroup(Long mappingId, String groupCode,
                                                                                          String displayName,
                                                                                          int minimumDistinctReviewers) {
@@ -255,7 +255,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceMappingReviewRequirementType addRequirementType(Long groupId, Long reviewerTypeId) {
         com.ses.entity.ComplianceMappingReviewRequirementGroup group =
                 requirementGroupMapper.selectById(groupId);
@@ -309,7 +309,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
 
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceExternalReviewEvent recordExternalReview(Long mappingId, Long requirementGroupId, Long reviewerTypeId,
                                                                                String reviewerName, String organization, String credentialRaw,
                                                                                String action, LocalDateTime reviewedAt,
@@ -474,7 +474,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     // ===== R23-P1-01 §3.8/§8 dynamic policy（V102_3・P0-3） =====
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerType updateReviewerTypeDynamic(Long typeId, Integer qualificationVerificationRequired,
                                                                     Integer activeStatusVerificationRequired,
                                                                     Long verificationSourceId, Long verificationMethodId,
@@ -527,7 +527,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceVerificationSource createVerificationSource(
             String sourceCode, String sourceName, String officialUrl, boolean enabled,
             java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo) {
@@ -555,7 +555,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceVerificationSource updateVerificationSource(
             Long sourceId, String sourceName, String officialUrl, boolean enabled,
             java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo) {
@@ -587,7 +587,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceVerificationMethod createVerificationMethod(
             String methodCode, String methodName, String description, boolean enabled,
             java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo) {
@@ -615,7 +615,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceVerificationMethod updateVerificationMethod(
             Long methodId, String methodName, String description, boolean enabled,
             java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo) {
@@ -642,7 +642,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     // ===== R23-P1-01 §9 subject create path（P0-4） =====
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceExternalReviewerSubject createSubject(String subjectCode, String displayName,
                                                                           String organizationName) {
         if (!StringUtils.hasText(subjectCode) || !StringUtils.hasText(displayName)) {
@@ -669,7 +669,7 @@ public class ComplianceGateAdminServiceImpl implements ComplianceGateAdminServic
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public com.ses.entity.ComplianceReviewerQualification addQualification(
             Long reviewerSubjectId, Long reviewerTypeId, String registrationIdentifierMaskedSnapshot,
             String registrationIdentifierLabel) {

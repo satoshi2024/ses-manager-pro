@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.ses.entity.Task;
 import com.ses.service.TaskService;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 
@@ -26,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Transactional
 public class TaskApiControllerTest {
 
     @Autowired

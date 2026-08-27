@@ -35,7 +35,7 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
     private final Clock clock;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void register(HttpServletRequest request, Authentication authentication) {
         if (!properties.isEnabled() || authentication == null || !authentication.isAuthenticated()) {
             return;
@@ -89,7 +89,7 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean validateAndTouch(HttpServletRequest request, Authentication authentication) {
         if (!properties.isEnabled() || authentication == null || !authentication.isAuthenticated()) {
             return true;
@@ -127,7 +127,7 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revoke(Long sessionId, Long userId, String currentHash, String reason) {
         UserSession target = userSessionMapper.selectById(sessionId);
         if (target == null || !tenantId().equals(target.getTenantId()) || !userId.equals(target.getUserId())) {
@@ -140,19 +140,19 @@ public class PersistentSessionServiceImpl implements PersistentSessionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeOthers(Long userId, String currentHash, String reason) {
         userSessionMapper.revokeOthers(tenantId(), userId, currentHash, LocalDateTime.now(clock), reason);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeAllForUser(Long userId, String reason) {
         userSessionMapper.revokeAllForUser(tenantId(), userId, LocalDateTime.now(clock), reason);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeCurrent(HttpServletRequest request, Authentication authentication, String reason) {
         if (!properties.isEnabled() || request == null || authentication == null) {
             return;

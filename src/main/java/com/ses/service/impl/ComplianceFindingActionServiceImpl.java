@@ -39,7 +39,7 @@ public class ComplianceFindingActionServiceImpl implements ComplianceFindingActi
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void ack(Long contractId, Long findingId) {
         requireAccess();
         ComplianceFinding finding = requireFinding(contractId, findingId);
@@ -54,7 +54,7 @@ public class ComplianceFindingActionServiceImpl implements ComplianceFindingActi
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void inProgress(Long contractId, Long findingId) {
         requireAccess();
         ComplianceFinding finding = requireFinding(contractId, findingId);
@@ -67,7 +67,7 @@ public class ComplianceFindingActionServiceImpl implements ComplianceFindingActi
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void resolve(Long contractId, Long findingId, String note, Long evidenceDocumentId) {
         requireAccess();
         ComplianceFinding finding = requireFinding(contractId, findingId);
@@ -87,7 +87,7 @@ public class ComplianceFindingActionServiceImpl implements ComplianceFindingActi
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void exception(Long contractId, Long findingId, String note, LocalDateTime expiresAt) {
         requireAccess();
         ComplianceFinding finding = requireFinding(contractId, findingId);

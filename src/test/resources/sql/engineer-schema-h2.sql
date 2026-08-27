@@ -35,7 +35,8 @@ CREATE TABLE m_customer (
   remarks           TEXT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag      TINYINT DEFAULT 0
+  deleted_flag      TINYINT DEFAULT 0,
+  version           INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_engineer CASCADE;
@@ -67,7 +68,8 @@ CREATE TABLE t_engineer (
   created_by          BIGINT,
   created_at          DATETIME,
   updated_at          DATETIME,
-  deleted_flag        TINYINT DEFAULT 0
+  deleted_flag        TINYINT DEFAULT 0,
+  version             INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS m_skill_tag CASCADE;
@@ -385,6 +387,7 @@ CREATE TABLE t_work_record (
   created_by     BIGINT,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  version        INT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_work_record (contract_id, work_month)
 );
 
@@ -591,18 +594,9 @@ CREATE TABLE t_candidate_activity (
   CONSTRAINT fk_candidate_activity_candidate FOREIGN KEY (candidate_id) REFERENCES t_candidate(id)
 );
 
-DROP TABLE IF EXISTS m_menu CASCADE;
-CREATE TABLE m_menu (
-  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-  menu_key    VARCHAR(50) NOT NULL,
-  menu_name   VARCHAR(100),
-  path_prefix VARCHAR(100),
-  api_prefix  VARCHAR(100),
-  sort_order  INT DEFAULT 0,
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
+-- m_menu: H2 DDL is not rolled back; keep shared table. Re-seed keys below.
+DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate','lifecycle','myLifecycle'));
+DELETE FROM m_menu WHERE menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate','lifecycle','myLifecycle');
 -- @Sqlで共有H2 schemaを再構築した後も、画面レンダリングに必要な管理者メニューを保持する。
 INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
   ('dashboard', 'ダッシュボード', '/dashboard', '/api/dashboard', 1),
@@ -619,25 +613,28 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VA
   ('lifecycle', 'ライフサイクル管理', '/lifecycle', '/api/lifecycle', 25),
   ('myLifecycle', 'マイライフサイクル', '/my/lifecycle', '/api/my/lifecycle', 26);
 
-DROP TABLE IF EXISTS t_role_menu CASCADE;
-CREATE TABLE t_role_menu (
-  id       BIGINT AUTO_INCREMENT PRIMARY KEY,
-  role     VARCHAR(50) NOT NULL,
-  menu_id  BIGINT NOT NULL
-);
-
+-- t_role_menu: H2 DDL is not rolled back; keep shared table. Idempotent seed only.
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu;
+SELECT '管理者', m.id FROM m_menu m
+WHERE m.menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate','lifecycle','myLifecycle')
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = '管理者' AND rm.menu_id = m.id);
 INSERT INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
 FROM m_menu m
 CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
-WHERE m.menu_key <> 'user' AND m.menu_key <> 'ai-evaluation';
+WHERE m.menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate','lifecycle')
+  AND m.menu_key <> 'user' AND m.menu_key <> 'ai-evaluation'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
 INSERT INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
 FROM m_menu m
 CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'マネージャー') r
-WHERE m.menu_key = 'ai-evaluation';
+WHERE m.menu_key = 'ai-evaluation'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
+INSERT INTO t_role_menu (role, menu_id)
+SELECT '要員', m.id FROM m_menu m
+WHERE m.menu_key = 'myLifecycle'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = '要員' AND rm.menu_id = m.id);
 
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
@@ -2814,144 +2811,3 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
 
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_item_id BIGINT;
-
--- ========================================================
--- 要員ライフサイクルワークフロー (engineer-lifecycle-workflow)
--- ========================================================
-CREATE TABLE IF NOT EXISTS t_lifecycle_template (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    lifecycle_type VARCHAR(30) NOT NULL,
-    version INT NOT NULL DEFAULT 1,
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-    effective_from DATE NOT NULL,
-    effective_to DATE,
-    description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    updated_by BIGINT,
-    deleted_flag TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_lifecycle_template_type_version UNIQUE (lifecycle_type, version)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_template_task (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    template_id BIGINT NOT NULL,
-    task_code VARCHAR(50) NOT NULL,
-    task_name VARCHAR(100) NOT NULL,
-    description TEXT,
-    assignee_rule VARCHAR(30) NOT NULL DEFAULT 'ROLE',
-    assignee_rule_value VARCHAR(100),
-    is_mandatory TINYINT NOT NULL DEFAULT 1,
-    is_blocking TINYINT NOT NULL DEFAULT 0,
-    evidence_type VARCHAR(30) NOT NULL DEFAULT 'NONE',
-    is_engineer_visible TINYINT NOT NULL DEFAULT 1,
-    target_employment_types VARCHAR(100),
-    sort_order INT NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    updated_by BIGINT,
-    deleted_flag TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_lifecycle_tpl_task_code UNIQUE (template_id, task_code)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_template_task_dep (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    template_id BIGINT NOT NULL,
-    predecessor_task_code VARCHAR(50) NOT NULL,
-    successor_task_code VARCHAR(50) NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_lifecycle_tpl_task_dep UNIQUE (template_id, predecessor_task_code, successor_task_code)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_case (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    case_no VARCHAR(50) NOT NULL,
-    lifecycle_type VARCHAR(30) NOT NULL,
-    engineer_id BIGINT NOT NULL,
-    template_id BIGINT NOT NULL,
-    template_version INT NOT NULL,
-    anchor_date DATE NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-    title VARCHAR(200) NOT NULL,
-    remarks TEXT,
-    applicant_user_id BIGINT NOT NULL,
-    engineer_snapshot_json TEXT,
-    completed_at DATETIME,
-    completed_by BIGINT,
-    version INT NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    updated_by BIGINT,
-    deleted_flag TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_lifecycle_case_no UNIQUE (case_no)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_task (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    case_id BIGINT NOT NULL,
-    task_code VARCHAR(50) NOT NULL,
-    task_name VARCHAR(100) NOT NULL,
-    description TEXT,
-    due_date DATE,
-    assignee_user_id BIGINT,
-    assignee_role VARCHAR(50),
-    assignee_name_snapshot VARCHAR(100),
-    is_mandatory TINYINT NOT NULL DEFAULT 1,
-    is_blocking TINYINT NOT NULL DEFAULT 0,
-    evidence_type VARCHAR(30) NOT NULL DEFAULT 'NONE',
-    is_engineer_visible TINYINT NOT NULL DEFAULT 1,
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    completed_at DATETIME,
-    completed_by BIGINT,
-    completion_comment TEXT,
-    evidence_data_json TEXT,
-    approval_request_id BIGINT,
-    sort_order INT NOT NULL DEFAULT 0,
-    version INT NOT NULL DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    updated_by BIGINT,
-    deleted_flag TINYINT NOT NULL DEFAULT 0,
-    CONSTRAINT uk_lifecycle_case_task_code UNIQUE (case_id, task_code)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_task_dep (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    case_id BIGINT NOT NULL,
-    predecessor_task_id BIGINT NOT NULL,
-    successor_task_id BIGINT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_lifecycle_task_dep UNIQUE (case_id, predecessor_task_id, successor_task_id)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_evidence_link (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    task_id BIGINT NOT NULL,
-    document_id BIGINT NOT NULL,
-    document_version_id BIGINT,
-    verified_at DATETIME,
-    verified_by BIGINT,
-    remarks VARCHAR(500),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_lifecycle_evidence_task_doc UNIQUE (task_id, document_id)
-);
-
-CREATE TABLE IF NOT EXISTS t_lifecycle_event (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    case_id BIGINT NOT NULL,
-    task_id BIGINT,
-    event_type VARCHAR(50) NOT NULL,
-    actor_user_id BIGINT,
-    actor_role_snapshot VARCHAR(50),
-    before_state VARCHAR(50),
-    after_state VARCHAR(50),
-    details_json TEXT,
-    occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-

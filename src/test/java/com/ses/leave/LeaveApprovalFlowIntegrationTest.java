@@ -22,6 +22,7 @@ import com.ses.mapper.LeaveRequestMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.LeaveService;
 import com.ses.service.approval.ApprovalEngineService;
+import com.ses.service.impl.SystemConfigServiceImpl;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
 import org.junit.jupiter.api.AfterEach;
@@ -34,10 +35,13 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Field;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -92,12 +96,17 @@ class LeaveApprovalFlowIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private SystemConfigServiceImpl systemConfigService;
+
     private long engineerId;
     private long approverId;
     private long delegateId;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        // 共有 H2 + 乱数順でも残高判定が fail-closed にならないよう seed を再固定しキャッシュを落とす
+        ensureLeaveBalanceSourceInternal();
         approverId = insertUser("leave-approver", "管理者");
         delegateId = insertUser("leave-delegate", "管理者");
         String name = "T071flow-" + System.nanoTime();        String code = "T071flow-" + System.nanoTime();
@@ -202,6 +211,29 @@ class LeaveApprovalFlowIntegrationTest {
         assertEquals(1, actions.size());
         assertEquals(approverId, actions.get(0).getDelegatedFrom());
         assertEquals(delegateId, actions.get(0).getApproverUserId());
+    }
+
+    private void ensureLeaveBalanceSourceInternal() throws Exception {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_system_config WHERE config_key = 'leave.balance.source'", Integer.class);
+        if (count != null && count > 0) {
+            jdbcTemplate.update(
+                    "UPDATE m_system_config SET config_value = 'internal' WHERE config_key = 'leave.balance.source'");
+        } else {
+            jdbcTemplate.update(
+                    "INSERT INTO m_system_config (config_key, config_value, description) VALUES ('leave.balance.source', 'internal', 'test')");
+        }
+        // Spring の代理経由だとフィールドが null のため、実体へ到達してからキャッシュを失効する
+        SystemConfigServiceImpl target = AopTestUtils.getUltimateTargetObject(systemConfigService);
+        Field cacheField = SystemConfigServiceImpl.class.getDeclaredField("cache");
+        cacheField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ConcurrentHashMap<String, String> cache =
+                (ConcurrentHashMap<String, String>) cacheField.get(target);
+        cache.clear();
+        Field loadedField = SystemConfigServiceImpl.class.getDeclaredField("loaded");
+        loadedField.setAccessible(true);
+        loadedField.setBoolean(target, false);
     }
 
     private void insertRoute(List<List<Long>> steps) {

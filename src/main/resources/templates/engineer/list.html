@@ -200,6 +200,7 @@
                 <div class="modal-body p-4">
                     <form id="engineer-form">
                         <input type="hidden" id="eng-id">
+                        <input type="hidden" id="eng-version">
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{engineer.name}">氏名</th:block> <span class="text-danger">*</span></label>
                             <input type="text" id="eng-fullName" class="form-control form-control-dark bg-secondary text-white border-dark" th:placeholder="#{engineer.placeholder.name}" placeholder="例: 山田 太郎" required>
@@ -290,6 +291,7 @@
         document.getElementById('engineerModal').addEventListener('hidden.bs.modal', function () {
             document.getElementById('engineer-form').reset();
             document.getElementById('eng-id').value = '';
+            document.getElementById('eng-version').value = '';
             document.getElementById('eng-resumeSummary').value = '';
             // 最寄り駅まわりの派生表示・hidden値もリセットする
             document.getElementById('eng-prefecture').value = '';

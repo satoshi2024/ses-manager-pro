@@ -371,5 +371,9 @@ class OvertimeComplianceCalculatorTest {
         public List<SystemConfig> all() {
             return List.of();
         }
+
+        @Override
+        public void updateAll(List<SystemConfig> configs) {
+        }
     }
 }

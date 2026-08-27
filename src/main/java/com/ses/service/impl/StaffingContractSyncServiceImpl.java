@@ -42,7 +42,7 @@ public class StaffingContractSyncServiceImpl implements StaffingContractSyncServ
     private final ContractMapper contractMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void syncActual(Long contractId) {
         Contract contract = contractId == null ? null : contractMapper.selectById(contractId);
         if (contract == null) {
@@ -61,7 +61,7 @@ public class StaffingContractSyncServiceImpl implements StaffingContractSyncServ
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void removeActual(Long contractId) {
         discardActual(contractId);
     }

@@ -70,7 +70,7 @@ CI and `scripts/verify-like-ci.*` execute the same explicit gates: the default f
 1. **Fast feedback remains H2-based.** H2 is retained for business/service/controller regression speed, but it is not evidence of MySQL dialect compatibility.
 2. **MySQL behavior is a separate required gate.** Every Testcontainers class must carry `@Tag("mysql")`; CI invokes `-Pmysql-tests` with Docker required and zero skips.
    The profile itself stays sequential because in-JVM Testcontainers parallelism can corrupt per-class Surefire report attribution. CI parallelizes safely with three isolated jobs defined by `scripts/test-suites/mysql-shard-{1,2,3}.txt`; `MySqlTestShardInventoryTest` fails when a tagged test is missing or duplicated in those lists.
-3. **Test execution order is still pinned to `<runOrder>alphabetical</runOrder>`.** Fast tests currently share `jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1`; use transaction rollback or explicit cleanup and never read rows a test did not insert. Remove this ordering constraint only after all H2 tests are isolated.
+3. **Surefire `<runOrder>` is `random`** (order-independence evidence; reproduce with `-Dsurefire.runOrder.random.seed=N`). Isolation is **not** via fixed order: H2 fast tests use `@Transactional` rollback (or explicit cleanup) and never read rows a test did not insert; concurrency / locking tests use `@Tag("mysql")` with Testcontainers.
 4. **Schedulers are disabled in the test profile.** Scheduler-specific tests invoke their target path explicitly; background cron jobs must not mutate the shared test DB.
 5. **Timezone / locale / encoding are pinned** to `Asia/Tokyo`, `ja_JP`, and UTF-8. CI runs Temurin **21**; `<java.version>17</java.version>` is the bytecode target.
 

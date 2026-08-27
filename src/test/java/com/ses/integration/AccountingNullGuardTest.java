@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doReturn;
@@ -21,6 +22,7 @@ import static org.mockito.Mockito.doReturn;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Transactional
 class AccountingNullGuardTest {
 
     @Autowired

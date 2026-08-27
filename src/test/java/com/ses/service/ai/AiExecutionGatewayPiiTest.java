@@ -40,6 +40,7 @@ class AiExecutionGatewayPiiTest {
 
     @Test
     void canaryはoutboundとDBに出ない() {
+        probe.clear();
         com.ses.common.exception.BusinessException ex = assertThrows(
                 com.ses.common.exception.BusinessException.class,
                 () -> gateway.execute(AiGatewayRequest.builder()
@@ -49,14 +50,28 @@ class AiExecutionGatewayPiiTest {
                         .requireJson(false)
                         .build()));
         assertEquals(400, ex.getCode());
-        String outbound = probe.lastOutbound();
-        if (outbound != null) {
-            assertFalse(outbound.contains(AiGatewayRequest.CANARY));
-        }
+        assertNull(probe.lastOutbound(), "canary拒否時はprovider向けoutboundを記録しないこと");
         List<AiRecommendationRun> runs = runMapper.selectList(null);
         assertTrue(runs.stream().noneMatch(r ->
                 r.getRedactedSummaryJson() != null
                         && r.getRedactedSummaryJson().contains(AiGatewayRequest.CANARY)));
+    }
+
+    @Test
+    void INGEST用途でもcanaryは外部送信できない() {
+        // B2-4 (ACC-SEC-P1-005): INGEST_* を名前で除外していた抜け穴を塞ぐ。
+        // 取込系でもカナリアが混入したら統一ゲートウェイで外部送信を拒否する。
+        probe.clear();
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> gateway.execute(AiGatewayRequest.builder()
+                        .useCase(AiGatewayRequest.USE_INGEST_RESUME)
+                        .allowlistedFields(Map.of("engineer.initialName", AiGatewayRequest.CANARY))
+                        .persistRun(false)
+                        .requireJson(false)
+                        .build()));
+        assertEquals(400, ex.getCode());
+        assertNull(probe.lastOutbound(), "INGEST_*でもcanary拒否時はoutboundを記録しないこと");
     }
 
     @Test

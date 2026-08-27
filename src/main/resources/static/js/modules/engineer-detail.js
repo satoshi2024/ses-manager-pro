@@ -195,8 +195,11 @@ function uploadPhoto(input) {
                     data: JSON.stringify(updated),
                     success: function(r2) {
                         if (r2.code === 200) {
-                            detailEngineer = updated;
-                            renderAvatar(updated);
+                            // 楽観ロック版を進める（更新APIは Boolean のみ返す）
+                            detailEngineer = Object.assign({}, updated, {
+                                version: updated.version != null ? updated.version + 1 : updated.version
+                            });
+                            renderAvatar(detailEngineer);
                             Toast.success(SES.i18n.t('success.updatePhoto'));
                         } else {
                             Toast.error(r2.message || SES.i18n.t('error.savePhotoFailed'));
