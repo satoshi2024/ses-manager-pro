@@ -101,7 +101,14 @@ function Invoke-ReadOnlyCoverage {
         [Parameter(Mandatory = $true)] [string]$CurrentWorktree
     )
 
-    $output = & pwsh -NoProfile -File $ScriptPath 2>&1 | Out-String
+    $previousLocation = (Get-Location).Path
+    try {
+        Set-Location -LiteralPath $CurrentWorktree
+        $output = & pwsh -NoProfile -File $ScriptPath 2>&1 | Out-String
+    }
+    finally {
+        Set-Location -LiteralPath $previousLocation
+    }
     $exitCode = $LASTEXITCODE
     $jsonLines = @($output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $json = $jsonLines -join "`n"
@@ -140,6 +147,21 @@ function Invoke-Git {
 
 $blockers = [System.Collections.Generic.List[object]]::new()
 $resolvedWorktree = (Resolve-Path -LiteralPath $WorktreePath).Path
+function Resolve-WorktreeArtifactPath {
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return $Path
+    }
+    return (Join-Path $resolvedWorktree $Path)
+}
+$EvidencePath = Resolve-WorktreeArtifactPath -Path $EvidencePath
+$InventoryPath = Resolve-WorktreeArtifactPath -Path $InventoryPath
+$SourceCoveragePath = Resolve-WorktreeArtifactPath -Path $SourceCoveragePath
+$CoverageScriptPath = Resolve-WorktreeArtifactPath -Path $CoverageScriptPath
+$PlanPath = Resolve-WorktreeArtifactPath -Path $PlanPath
+$TasksPath = Resolve-WorktreeArtifactPath -Path $TasksPath
+$ReviewLedgerPath = Resolve-WorktreeArtifactPath -Path $ReviewLedgerPath
 
 foreach ($requiredPath in @($InventoryPath, $SourceCoveragePath, $CoverageScriptPath, $PlanPath, $TasksPath, $ReviewLedgerPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
