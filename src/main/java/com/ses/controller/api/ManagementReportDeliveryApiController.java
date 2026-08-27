@@ -50,6 +50,17 @@ public class ManagementReportDeliveryApiController {
                 .body(new InputStreamResource(download.getStream()));
     }
 
+    @GetMapping("/deliveries/{deliveryId}/preview")
+    public ResponseEntity<InputStreamResource> preview(@PathVariable Long deliveryId,
+                                                       @RequestParam String token,
+                                                       @RequestParam(defaultValue = "PDF") String format) {
+        ReportDownload download = deliveryService.preview(deliveryId, token, format);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + download.getFileName() + "\"")
+                .contentType(MediaType.parseMediaType(download.getContentType()))
+                .body(new InputStreamResource(download.getStream()));
+    }
+
     @PostMapping("/deliveries/{deliveryId}/retry")
     public ApiResult<Boolean> retry(@PathVariable Long deliveryId) {
         deliveryService.retry(deliveryId);

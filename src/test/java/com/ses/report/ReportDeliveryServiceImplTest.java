@@ -62,6 +62,8 @@ class ReportDeliveryServiceImplTest {
         documentService = mock(ReportDocumentService.class);
         archiveService = mock(DocumentService.class);
         notificationService = mock(NotificationService.class);
+        when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString())).thenReturn(99L);
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, userMapper, previewService,
                 snapshotService, documentService, archiveService, notificationService, passwordEncoder, new ObjectMapper());
@@ -92,7 +94,7 @@ class ReportDeliveryServiceImplTest {
 
         assertThat(result.getDeliveries()).hasSize(1);
         assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
-        verify(notificationService).publishToUser(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
                 contains("/download?token="), any(), eq("management-report"));
     }
 
@@ -184,9 +186,9 @@ class ReportDeliveryServiceImplTest {
 
         service.manualReplay(7L);
 
-        assertThat(delivery.getDeliveryStatus()).isEqualTo("SENT");
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(delivery.getAttemptCount()).isEqualTo(1);
-        verify(notificationService).publishToUser(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
                 contains("/download?token="), any(), eq("management-report"));
     }
 

@@ -6,9 +6,11 @@ import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
 import com.ses.entity.ReportRun;
+import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.mapper.ReportRunMapper;
+import com.ses.mapper.ReportSectionAttemptMapper;
 import com.ses.mapper.ReportSectionSnapshotMapper;
 import com.ses.mapper.ReportTemplateVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -25,6 +27,7 @@ import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -45,6 +48,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,6 +57,7 @@ class ReportSnapshotServiceImplTest {
 
     private ReportTemplateVersionMapper templateVersionMapper;
     private ReportRunMapper runMapper;
+    private ReportSectionAttemptMapper sectionAttemptMapper;
     private ReportSectionSnapshotMapper sectionMapper;
     private DashboardService dashboardService;
     private MonthlyClosingService monthlyClosingService;
@@ -66,6 +71,7 @@ class ReportSnapshotServiceImplTest {
     void setUp() {
         templateVersionMapper = mock(ReportTemplateVersionMapper.class);
         runMapper = mock(ReportRunMapper.class);
+        sectionAttemptMapper = mock(ReportSectionAttemptMapper.class);
         sectionMapper = mock(ReportSectionSnapshotMapper.class);
         SysUserMapper userMapper = mock(SysUserMapper.class);
         scopeService = mock(OrganizationScopeService.class);
@@ -78,7 +84,7 @@ class ReportSnapshotServiceImplTest {
         InvoiceService invoiceService = mock(InvoiceService.class);
         recipientPreviewService = mock(ReportRecipientPreviewService.class);
 
-        service = new ReportSnapshotServiceImpl(templateVersionMapper, runMapper, sectionMapper,
+        service = new ReportSnapshotServiceImpl(templateVersionMapper, runMapper, sectionAttemptMapper, sectionMapper,
                 userMapper, scopeService, monthlyClosingService, dashboardService, utilizationService,
                 cashFlowService, accountingService, salesPerformanceService, invoiceService,
                 new ObjectMapper(), recipientPreviewService);
@@ -176,6 +182,23 @@ class ReportSnapshotServiceImplTest {
         assertThat(result.getSections()).hasSize(2)
                 .allSatisfy(section -> assertThat(section.getSectionStatus()).isEqualTo("FAILED"));
         assertThat(result.getRun().getFailureCode()).isEqualTo("SECTION_FAILED");
+    }
+
+    @Test
+    void section再試行は現在行を更新しても過去attemptを追記保持する() {
+        when(dashboardService.getSummary(anyInt())).thenThrow(new IllegalStateException("source failure"));
+
+        ReportGenerationCommand command = ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "速報");
+        service.generate(command);
+        service.generate(command);
+
+        ArgumentCaptor<ReportSectionAttempt> captor = ArgumentCaptor.forClass(ReportSectionAttempt.class);
+        verify(sectionAttemptMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).extracting(ReportSectionAttempt::getAttemptNo)
+                .containsExactly(1, 2);
+        assertThat(captor.getAllValues()).extracting(ReportSectionAttempt::getSectionStatus)
+                .containsOnly("FAILED");
     }
 
     @Test

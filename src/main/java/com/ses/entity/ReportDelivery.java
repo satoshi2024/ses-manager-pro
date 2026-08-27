@@ -18,6 +18,7 @@ public class ReportDelivery extends BaseEntity {
     private Long runId;
     private Long documentId;
     private Integer documentVersionNo;
+    private Long notificationOutboxId;
     private Long recipientUserId;
     private Long organizationId;
     private String recipientScopeJson;

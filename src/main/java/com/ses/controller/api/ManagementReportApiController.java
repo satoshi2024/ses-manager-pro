@@ -23,10 +23,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-
 import java.time.YearMonth;
 import java.util.List;
 
@@ -112,20 +108,6 @@ public class ManagementReportApiController {
                                                                                    @PathVariable String format) {
         snapshotService.assertAccessible(snapshotService.findRun(runId));
         return ApiResult.success(reportDocumentService.register(runId, format));
-    }
-
-    @GetMapping("/runs/{runId}/documents/{format}/preview")
-    public ResponseEntity<byte[]> previewDocument(@PathVariable Long runId, @PathVariable String format) {
-        snapshotService.assertAccessible(snapshotService.findRun(runId));
-        String normalized = format.toUpperCase(java.util.Locale.ROOT);
-        byte[] bytes = reportDocumentService.render(runId, normalized);
-        MediaType mediaType = "PDF".equals(normalized) ? MediaType.APPLICATION_PDF
-                : "XLSX".equals(normalized)
-                ? MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                : MediaType.parseMediaType("text/csv; charset=UTF-8");
-        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
-                        "inline; filename=management-report-" + runId + "." + format.toLowerCase())
-                .contentType(mediaType).body(bytes);
     }
 
     public record ReportRunRequest(Long templateVersionId, String period, String cutoffKind,

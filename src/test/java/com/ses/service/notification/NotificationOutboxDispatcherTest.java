@@ -3,6 +3,7 @@ package com.ses.service.notification;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
+import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.NotificationOutboxMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +32,9 @@ class NotificationOutboxDispatcherTest {
     @Mock
     private WebhookNotifier webhookNotifier;
 
+    @Mock
+    private ReportDeliveryMapper reportDeliveryMapper;
+
     @Test
     void dispatchOne_送信成功時はSENTへ更新する() {
         NotificationOutbox before = row(0);
@@ -40,11 +44,13 @@ class NotificationOutboxDispatcherTest {
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(true);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+        org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
 
         assertTrue(dispatcher.dispatchOne(7L));
 
         verify(outboxMapper).claim(7L);
         verify(outboxMapper).markSent(7L);
+        verify(reportDeliveryMapper).syncOutboxStatus(7L, "SENT", null, null);
         verify(outboxMapper, never()).markResult(any(), any(), any(), any());
         ArgumentCaptor<Notification> notification = ArgumentCaptor.forClass(Notification.class);
         verify(webhookNotifier).notifyNow(notification.capture());
@@ -55,26 +61,32 @@ class NotificationOutboxDispatcherTest {
     void dispatchOne_送信失敗時はRETRYと指数backoffを記録する() {
         when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(1), row(2));
         when(outboxMapper.claim(7L)).thenReturn(1);
+        when(outboxMapper.markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+        org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
 
         assertFalse(dispatcher.dispatchOne(7L));
 
         verify(outboxMapper).markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), contains("attempt=2"));
+        verify(reportDeliveryMapper).syncOutboxStatus(eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), contains("attempt=2"));
     }
 
     @Test
     void dispatchOne_最大試行回数ではFAILEDへ遷移する() {
         when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(4), row(5));
         when(outboxMapper.claim(7L)).thenReturn(1);
+        when(outboxMapper.markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+        org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
 
         assertFalse(dispatcher.dispatchOne(7L));
 
         verify(outboxMapper).markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), contains("attempt=5"));
+        verify(reportDeliveryMapper).syncOutboxStatus(eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), contains("attempt=5"));
     }
 
     @Test

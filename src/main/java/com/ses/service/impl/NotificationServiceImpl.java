@@ -174,6 +174,13 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public Long publishToUserAndGetOutboxId(Long userId, String type, String title, String message,
+                                             String linkUrl, String dedupeKey, String menuKey) {
+        return publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey);
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publishToOrganization(Long organizationId, String type, String title, String message,
                                        String linkUrl, String dedupeKey) {
         if (organizationId == null) {
@@ -182,16 +189,16 @@ public class NotificationServiceImpl implements NotificationService {
         publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type), organizationId);
     }
 
-    private void publishInternal(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
-        publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null);
+    private Long publishInternal(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
+        return publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null);
     }
 
-    private void publishInternal(Long userId, String type, String title, String message, String linkUrl,
+    private Long publishInternal(Long userId, String type, String title, String message, String linkUrl,
                                  String dedupeKey, String menuKey, Long organizationId) {
         // 宛先ユーザーも組織も解決できない業務通知を全体配信へフォールバックさせない。
         // NULL組織を許すのは、明示的なプラットフォーム共通通知(SYSTEM)だけとする。
         if (userId == null && organizationId == null && !"SYSTEM".equals(type)) {
-            return;
+            return null;
         }
         try {
             Notification notification = new Notification();
@@ -209,10 +216,12 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setCreatedAt(LocalDateTime.now(clock));
             notificationMapper.insert(notification);
 
+            Long outboxId = null;
             if (notificationOutboxService != null) {
-                Long outboxId = notificationOutboxService.enqueue(notification);
+                outboxId = notificationOutboxService.enqueue(notification);
                 if (outboxId != null) {
-                    Runnable dispatch = () -> notificationOutboxService.dispatchOne(outboxId);
+                    final Long dispatchOutboxId = outboxId;
+                    Runnable dispatch = () -> notificationOutboxService.dispatchOne(dispatchOutboxId);
                     if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
                         org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                                 new org.springframework.transaction.support.TransactionSynchronization() {
@@ -239,8 +248,10 @@ public class NotificationServiceImpl implements NotificationService {
             } else {
                 webhookNotifier.notify(notification);
             }
+            return outboxId;
         } catch (DuplicateKeyException e) {
             // idempotent
+            return null;
         }
     }
 

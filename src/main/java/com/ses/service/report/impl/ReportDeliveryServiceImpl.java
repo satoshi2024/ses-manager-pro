@@ -154,6 +154,12 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     @Override
+    public ReportDownload preview(Long deliveryId, String token, String format) {
+        // previewも文書bytesを返すため、downloadと同じtoken/expiry/reauth/scope経路を必ず通す。
+        return download(deliveryId, token, format);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void retry(Long deliveryId) {
         requireAdmin();
@@ -222,12 +228,20 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         else deliveryMapper.updateById(delivery);
         try {
             String link = "/api/management-reports/deliveries/" + delivery.getId() + "/download?token=" + token;
-            notificationService.publishToUser(recipient.getRecipientUserId(), "MANAGEMENT_REPORT",
+            Long outboxId = notificationService.publishToUserAndGetOutboxId(
+                    recipient.getRecipientUserId(), "MANAGEMENT_REPORT",
                     "月次管理レポート", "snapshotを確認できます（ダウンロード時に再認証が必要です）。",
                     link, delivery.getNotificationDedupeKey(), "management-report");
-            delivery.setDeliveryStatus("SENT");
-            delivery.setLastErrorCode(null);
-            delivery.setLastErrorMessage(null);
+            if (outboxId == null) {
+                delivery.setDeliveryStatus(attempt >= MAX_ATTEMPTS ? "FAILED" : "RETRY");
+                delivery.setLastErrorCode(attempt >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_OUTBOX_UNAVAILABLE");
+                delivery.setLastErrorMessage("通知outboxへの登録結果を取得できませんでした");
+            } else {
+                delivery.setNotificationOutboxId(outboxId);
+                delivery.setDeliveryStatus("ENQUEUED");
+                delivery.setLastErrorCode(null);
+                delivery.setLastErrorMessage(null);
+            }
         } catch (Exception ex) {
             delivery.setDeliveryStatus(attempt >= MAX_ATTEMPTS ? "FAILED" : "RETRY");
             delivery.setLastErrorCode(attempt >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED");

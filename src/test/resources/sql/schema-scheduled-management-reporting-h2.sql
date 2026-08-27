@@ -2,6 +2,7 @@
 -- MySQL固有DDLを混ぜず、共有H2で再実行可能な形にする。
 
 DROP TABLE IF EXISTS t_report_delivery CASCADE;
+DROP TABLE IF EXISTS t_report_section_attempt CASCADE;
 DROP TABLE IF EXISTS t_report_section_snapshot CASCADE;
 DROP TABLE IF EXISTS t_report_run CASCADE;
 DROP TABLE IF EXISTS m_report_schedule CASCADE;
@@ -146,12 +147,45 @@ CREATE UNIQUE INDEX uk_report_section_snapshot ON t_report_section_snapshot(run_
 CREATE INDEX idx_report_section_snapshot_status ON t_report_section_snapshot(tenant_id, section_status);
 CREATE INDEX idx_report_section_snapshot_hash ON t_report_section_snapshot(snapshot_hash);
 
+CREATE TABLE t_report_section_attempt (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+    run_id BIGINT NOT NULL,
+    section_key VARCHAR(100) NOT NULL,
+    attempt_no INT NOT NULL,
+    section_status VARCHAR(30) NOT NULL,
+    fact_type VARCHAR(20),
+    confirmation VARCHAR(20),
+    period_from DATE,
+    period_to DATE,
+    cutoff_kind VARCHAR(30),
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP NOT NULL,
+    data_as_of_at TIMESTAMP,
+    freshness_status VARCHAR(20),
+    canonical_service VARCHAR(200),
+    canonical_dto VARCHAR(200),
+    source_row_count BIGINT,
+    source_hash VARCHAR(128),
+    value_json CLOB,
+    error_code VARCHAR(100),
+    error_message VARCHAR(500),
+    snapshot_hash VARCHAR(128),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag TINYINT NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_report_section_attempt_run ON t_report_section_attempt(run_id, section_key, attempt_no);
+CREATE INDEX idx_report_section_attempt_status ON t_report_section_attempt(tenant_id, section_status);
+
 CREATE TABLE t_report_delivery (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
     run_id BIGINT NOT NULL,
     document_id BIGINT,
     document_version_no INT,
+    notification_outbox_id BIGINT,
     recipient_user_id BIGINT NOT NULL,
     organization_id BIGINT,
     recipient_scope_json CLOB NOT NULL,

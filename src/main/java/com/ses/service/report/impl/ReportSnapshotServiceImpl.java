@@ -18,10 +18,12 @@ import com.ses.dto.report.ReportScopeSnapshot;
 import com.ses.dto.report.ReportSectionKey;
 import com.ses.dto.salesperformance.SalesPerformanceDto;
 import com.ses.entity.ReportRun;
+import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportRunMapper;
+import com.ses.mapper.ReportSectionAttemptMapper;
 import com.ses.mapper.ReportSectionSnapshotMapper;
 import com.ses.mapper.ReportTemplateVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -79,6 +81,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private final ReportTemplateVersionMapper templateVersionMapper;
     private final ReportRunMapper runMapper;
+    private final ReportSectionAttemptMapper sectionAttemptMapper;
     private final ReportSectionSnapshotMapper sectionMapper;
     private final SysUserMapper sysUserMapper;
     private final OrganizationScopeService organizationScopeService;
@@ -270,17 +273,19 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         boolean hasFailure = false;
         for (String sectionKey : sectionKeys) {
             ReportSectionSnapshot existing = findSection(run.getId(), sectionKey);
+            LocalDateTime attemptStartedAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
             if (existing != null && "SUCCEEDED".equals(existing.getSectionStatus())) {
                 continue;
             }
             try {
                 SectionValue value = ReportScopeContext.with(command.scopeSnapshot(),
                         () -> loadSection(sectionKey, target, sourceCache, scope));
-                saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo);
+                saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo,
+                        attemptStartedAt);
             } catch (Exception ex) {
                 hasFailure = true;
                 saveFailedSection(run, existing, sectionKey, confirmed, asOfAt,
-                        periodFrom, periodTo, ex);
+                        periodFrom, periodTo, attemptStartedAt, ex);
             }
         }
 
@@ -296,7 +301,8 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private void saveSection(ReportRun run, ReportSectionSnapshot existing, String sectionKey,
                              SectionValue value, boolean confirmed, LocalDateTime asOfAt,
-                             LocalDate periodFrom, LocalDate periodTo) {
+                             LocalDate periodFrom, LocalDate periodTo,
+                             LocalDateTime attemptStartedAt) {
         ReportSectionSnapshot snapshot = existing == null ? new ReportSectionSnapshot() : existing;
         snapshot.setTenantId(TENANT_ID);
         snapshot.setRunId(run.getId());
@@ -319,18 +325,20 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         snapshot.setErrorCode(null);
         snapshot.setErrorMessage(null);
         snapshot.setSnapshotHash(sha256(sectionHashInput(snapshot)));
-        snapshot.setAttemptCount(existing == null || existing.getAttemptCount() == null
-                ? 1 : existing.getAttemptCount() + 1);
+        int attemptNo = existing == null || existing.getAttemptCount() == null
+                ? 1 : existing.getAttemptCount() + 1;
+        snapshot.setAttemptCount(attemptNo);
         if (existing == null) {
             sectionMapper.insert(snapshot);
         } else {
             sectionMapper.updateById(snapshot);
         }
+        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(ZoneId.of(TIMEZONE)));
     }
 
     private void saveFailedSection(ReportRun run, ReportSectionSnapshot existing, String sectionKey,
                                    boolean confirmed, LocalDateTime asOfAt, LocalDate periodFrom,
-                                   LocalDate periodTo, Exception ex) {
+                                   LocalDate periodTo, LocalDateTime attemptStartedAt, Exception ex) {
         log.warn("[定期管理レポート] section生成失敗: runId={} section={}", run.getId(), sectionKey, ex);
         ReportSectionSnapshot snapshot = existing == null ? new ReportSectionSnapshot() : existing;
         snapshot.setTenantId(TENANT_ID);
@@ -354,13 +362,44 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         snapshot.setErrorCode("SECTION_GENERATION_FAILED");
         snapshot.setErrorMessage("正本serviceの呼出に失敗しました");
         snapshot.setSnapshotHash(sha256(sectionKey + "|SECTION_GENERATION_FAILED|" + run.getId()));
-        snapshot.setAttemptCount(existing == null || existing.getAttemptCount() == null
-                ? 1 : existing.getAttemptCount() + 1);
+        int attemptNo = existing == null || existing.getAttemptCount() == null
+                ? 1 : existing.getAttemptCount() + 1;
+        snapshot.setAttemptCount(attemptNo);
         if (existing == null) {
             sectionMapper.insert(snapshot);
         } else {
             sectionMapper.updateById(snapshot);
         }
+        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(ZoneId.of(TIMEZONE)));
+    }
+
+    /** 現在のsection状態とは別に、各attemptを追記して失敗理由とhashを監査可能にする。 */
+    private void insertAttempt(ReportRun run, ReportSectionSnapshot snapshot, int attemptNo,
+                               LocalDateTime startedAt, LocalDateTime finishedAt) {
+        ReportSectionAttempt attempt = new ReportSectionAttempt();
+        attempt.setTenantId(TENANT_ID);
+        attempt.setRunId(run.getId());
+        attempt.setSectionKey(snapshot.getSectionKey());
+        attempt.setAttemptNo(attemptNo);
+        attempt.setSectionStatus(snapshot.getSectionStatus());
+        attempt.setFactType(snapshot.getFactType());
+        attempt.setConfirmation(snapshot.getConfirmation());
+        attempt.setPeriodFrom(snapshot.getPeriodFrom());
+        attempt.setPeriodTo(snapshot.getPeriodTo());
+        attempt.setCutoffKind(snapshot.getCutoffKind());
+        attempt.setStartedAt(startedAt);
+        attempt.setFinishedAt(finishedAt);
+        attempt.setDataAsOfAt(snapshot.getDataAsOfAt());
+        attempt.setFreshnessStatus(snapshot.getFreshnessStatus());
+        attempt.setCanonicalService(snapshot.getCanonicalService());
+        attempt.setCanonicalDto(snapshot.getCanonicalDto());
+        attempt.setSourceRowCount(snapshot.getSourceRowCount());
+        attempt.setSourceHash(snapshot.getSourceHash());
+        attempt.setValueJson(snapshot.getValueJson());
+        attempt.setErrorCode(snapshot.getErrorCode());
+        attempt.setErrorMessage(snapshot.getErrorMessage());
+        attempt.setSnapshotHash(snapshot.getSnapshotHash());
+        sectionAttemptMapper.insert(attempt);
     }
 
     private SectionValue loadSection(String sectionKey, YearMonth target,

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
 import com.ses.mapper.NotificationOutboxMapper;
+import com.ses.mapper.ReportDeliveryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,9 @@ public class NotificationOutboxDispatcher {
 
     private final NotificationOutboxMapper outboxMapper;
     private final WebhookNotifier webhookNotifier;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ReportDeliveryMapper reportDeliveryMapper;
 
     /** 30分以上claimされたままの行を再送可能へ戻す。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -52,15 +56,25 @@ public class NotificationOutboxDispatcher {
         boolean delivered = webhookNotifier.notifyNow(toNotification(row));
         if (delivered) {
             outboxMapper.markSent(outboxId);
+            syncReportDelivery(outboxId, "SENT", null, null);
             return true;
         }
 
         int attempts = row.getAttemptCount() == null ? 1 : row.getAttemptCount();
         String status = attempts >= MAX_ATTEMPTS ? STATUS_FAILED : STATUS_RETRY;
         long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
-        outboxMapper.markResult(outboxId, status, LocalDateTime.now().plusMinutes(backoffMinutes),
-                "Webhook通知に失敗しました（attempt=" + attempts + "）");
+        String error = "Webhook通知に失敗しました（attempt=" + attempts + "）";
+        int updated = outboxMapper.markResult(outboxId, status, LocalDateTime.now().plusMinutes(backoffMinutes), error);
+        if (updated > 0) {
+            syncReportDelivery(outboxId, status, attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
+        }
         return false;
+    }
+
+    private void syncReportDelivery(Long outboxId, String status, String errorCode, String errorMessage) {
+        if (reportDeliveryMapper != null) {
+            reportDeliveryMapper.syncOutboxStatus(outboxId, status, errorCode, errorMessage);
+        }
     }
 
     private Notification toNotification(NotificationOutbox row) {
