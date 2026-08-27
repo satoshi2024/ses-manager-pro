@@ -4,7 +4,7 @@
 
 `template/version → run → section snapshot → DocumentService → notification outbox / link delivery` の流れで実装する。report adapter は既存の正本 service/DTO を呼び、集計式を持たない。scheduler は session/request に依存せず、保存済みの system principal、`Asia/Tokyo`、scope owner、as-of context を明示して実行する。
 
-実装対象テーブルは `m_report_template`、`m_report_template_version`、`m_report_schedule`、`t_report_run`、`t_report_section_snapshot`、`t_report_delivery`。snapshot/documentは7年間保持する。通常retryは同一runのsection snapshotを一意制約で再利用し、明示的な再生成だけ新run/versionを作る。
+実装対象テーブルは `m_report_template`、`m_report_template_version`、`m_report_schedule`、`t_report_run`、`t_report_section_snapshot`、`t_report_section_attempt`、`t_report_delivery`。snapshot/documentは7年間保持する。通常retryは同一runのsection snapshotを一意制約で再利用し、明示的な再生成だけ新run/versionを作る。sectionの各試行は `t_report_section_attempt` へappend-onlyで記録し、同じsnapshot行の更新で過去の失敗証跡を失わない。DDLは `V113__scheduled_management_report_audit.sql` で追加する。
 
 ## 2. section adapter の責務
 
@@ -47,8 +47,8 @@
 |---|---|---|
 | schedule/run | due、claimed、running、succeeded、partial、failed、retryable | ShedLock、run unique key、state CAS。partial/failedはdelivery不可 |
 | section | pending、succeeded、stale、failed | section key unique、attempt audit |
-| generation | pending、generating、generated、failed、retrying | idempotency key + content/source hash。同一runのsnapshot重複不可 |
-| delivery | pending、processing、sent、retry、failed/DLQ | outbox claim、dedupe、manual replay authorization |
+| generation | pending、generating、generated、failed、retrying | idempotency key + content/source hash。同一runのsnapshot重複不可。section attemptはappend-only |
+| delivery | pending、processing、enqueued、sent、retry、failed/DLQ | outbox claim、dedupe、manual replay authorization。outbox dispatch結果をdeliveryへ同期 |
 
 ## 4. 承認済みの実装判断
 
@@ -60,5 +60,7 @@
 6. deliveryはnotification outbox経由のアプリ内通知＋期限付きlink。メール添付なし。PDF/XLSX/CSVは同一snapshotから生成。
 7. ServiceDesk/SLAはNF-02 PASSまで対象外。report独自SQL・集計式・丸めは禁止。
 8. Cash Flowは管理者の全社reportだけが全社設定値を参照し、マネージャーreportは保存scope内の実データへ限定する。
+
+9. documentのpreview/downloadはrun直結の公開経路を持たず、recipient deliveryのtoken、期限、再認証、現在scopeを通過するdelivery経路だけを使用する。通知発行直後は `ENQUEUED` とし、outbox dispatcherの成功・retry・DLQ結果をdeliveryへ同期する。
 
 F1は承認Base `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`へ統合済みの専用branchで、最新migration番号、V1/H2 schema、MySQL smoke、shape testをそろえて開始する。
