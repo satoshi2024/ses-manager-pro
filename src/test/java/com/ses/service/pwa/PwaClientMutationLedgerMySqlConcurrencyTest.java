@@ -16,8 +16,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -39,9 +42,14 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** 実MySQLで同一clientRequestIdの二writerを競合させ、DB UNIQUEとclaim transactionを検証する。 */
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -84,6 +92,8 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     private PwaCanonicalizer canonicalizer;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private MockMvc mockMvc;
 
     private Long expenseId;
     private Long engineerId;
@@ -226,6 +236,53 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         assertThat(mapper.selectList(new QueryWrapper<PwaClientMutation>()
                 .eq("user_id", USER_ID).in("client_request_id", requestIds)))
                 .allMatch(row -> "COMPLETED".equals(row.getStatus()));
+    }
+
+    @Test
+    void 実HTTPcontroller経路でもledgerとexpense更新を同一transactionで完了する() throws Exception {
+        engineerId = seedEngineer();
+        ExpenseRequest expense = ExpenseRequest.builder()
+                .engineerId(engineerId)
+                .expenseDate(java.time.LocalDate.of(2026, 8, 28))
+                .category(ExpenseRequestService.CATEGORY_TRANSPORT)
+                .amount(new java.math.BigDecimal("1000"))
+                .description("controller前")
+                .status(ExpenseRequestService.STATUS_DRAFT)
+                .version(0)
+                .build();
+        expenseMapper.insert(expense);
+        expenseId = expense.getId();
+
+        ObjectNode payload = objectMapper.createObjectNode()
+                .put("id", expenseId).put("expenseDate", "2026-08-28")
+                .put("category", ExpenseRequestService.CATEGORY_TRANSPORT)
+                .put("amount", 2000).putNull("customerId").putNull("projectId")
+                .put("description", "controller後");
+        ObjectNode body = objectMapper.createObjectNode()
+                .put("screen", "expense").put("month", "2026-08")
+                .set("payload", payload);
+        PwaMutationCommand command = new PwaMutationCommand("expense", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+        when(userContextService.assertCurrent(SCOPE)).thenReturn(new PwaUserContextService.CurrentContext(
+                USER_ID, engineerId, SCOPE, Instant.now().minusSeconds(60)));
+        when(userContextService.hashScope(SCOPE)).thenReturn("e".repeat(64));
+
+        mockMvc.perform(put("/api/my/pwa/expenses/drafts/" + expenseId)
+                        .with(user("1").roles("要員")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.toString())
+                        .header("X-Client-Request-Id", "pwa-mysql-http-1")
+                        .header("X-Client-Payload-Hash", hash)
+                        .header("X-Client-Base-Version", "0")
+                        .header("X-Client-Created-At", Instant.now().toEpochMilli())
+                        .header("X-User-Scope", SCOPE))
+                .andExpect(status().isOk());
+
+        ExpenseRequest saved = expenseMapper.selectById(expenseId);
+        assertThat(saved.getVersion()).isEqualTo(1);
+        assertThat(saved.getDescription()).isEqualTo("controller後");
+        PwaClientMutation mutation = mapper.selectByUserAndClientRequest(USER_ID, "pwa-mysql-http-1");
+        assertThat(mutation.getStatus()).isEqualTo("COMPLETED");
     }
 
     @Test
