@@ -167,3 +167,20 @@ AND NOT EXISTS (
     SELECT 1 FROM t_role_menu rm
     WHERE rm.role = '要員' AND rm.menu_id = m.id
 );
+
+-- アクション権限seed (t_permission_group_action)
+INSERT INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, a.action_key, 0
+FROM m_permission_group g
+CROSS JOIN (
+    SELECT 'lifecycle.*' AS action_key
+    UNION ALL SELECT 'my.*' AS action_key
+) a
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('ADMIN', 'EXECUTIVE', 'MANAGER', 'SALES', 'HR', 'ENGINEER', 'role-admin', 'role-manager', 'role-sales', 'role-hr', 'role-engineer')
+  AND NOT EXISTS (
+      SELECT 1 FROM t_permission_group_action pga
+      WHERE pga.tenant_id = 'default' AND pga.group_id = g.id AND pga.action_key = a.action_key
+  );
+

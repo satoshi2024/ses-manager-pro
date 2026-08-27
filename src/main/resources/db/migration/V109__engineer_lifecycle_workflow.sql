@@ -188,3 +188,16 @@ AND NOT EXISTS (SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id 
 INSERT INTO t_role_menu (role, menu_id)
 SELECT '要員', id FROM m_menu WHERE menu_key = 'myLifecycle'
 AND NOT EXISTS (SELECT 1 FROM t_role_menu rm JOIN m_menu m ON m.id = rm.menu_id WHERE rm.role = '要員' AND m.menu_key = 'myLifecycle');
+
+-- 11. アクション権限seed (t_permission_group_action)
+INSERT IGNORE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, a.action_key, 0
+FROM m_permission_group g
+CROSS JOIN (
+    SELECT 'lifecycle.*' AS action_key
+    UNION ALL SELECT 'my.*' AS action_key
+) a
+WHERE g.tenant_id = 'default'
+  AND g.enabled = 1
+  AND g.group_key IN ('ADMIN', 'EXECUTIVE', 'MANAGER', 'SALES', 'HR', 'ENGINEER', 'role-admin', 'role-manager', 'role-sales', 'role-hr', 'role-engineer');
+

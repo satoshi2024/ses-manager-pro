@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{lifecycle.detail} + ' - ' + #{app.name}">案件詳細 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4" th:attr="data-case-id=${caseId}">
+    <!-- パンくずリスト -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a th:href="@{/lifecycle}" class="text-decoration-none">ライフサイクル管理</a></li>
+            <li class="breadcrumb-item active text-light" aria-current="page" id="breadcrumbCaseNo">案件詳細</li>
+        </ol>
+    </nav>
+
+    <!-- 案件概要ヘッダーカード -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                <div>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="badge bg-secondary px-2 py-1 fs-6" id="caseTypeBadge">-</span>
+                        <h3 class="h4 mb-0 text-light" id="caseTitleHeader">読み込み中...</h3>
+                        <span class="badge bg-primary" id="caseStatusBadge">-</span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-4 text-muted small mt-2">
+                        <div><i class="bi bi-person me-1"></i>対象要員: <strong class="text-light" id="engineerNameHeader">-</strong></div>
+                        <div><i class="bi bi-calendar-event me-1"></i>基準日: <strong class="text-light" id="anchorDateHeader">-</strong></div>
+                        <div><i class="bi bi-file-earmark-text me-1"></i>テンプレート版: <span class="text-light" id="templateVersionHeader">-</span></div>
+                        <div><i class="bi bi-clock me-1"></i>起票日時: <span class="text-light" id="createdAtHeader">-</span></div>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-outline-warning btn-sm" id="btnHoldCase" onclick="SES.lifecycle.promptHoldCase()" style="display:none;">
+                        <i class="bi bi-pause-fill me-1"></i>保留
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" id="btnResumeCase" onclick="SES.lifecycle.resumeCase()" style="display:none;">
+                        <i class="bi bi-play-fill me-1"></i>再開
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" id="btnCancelCase" onclick="SES.lifecycle.promptCancelCase()" style="display:none;">
+                        <i class="bi bi-x-circle me-1"></i>中止
+                    </button>
+                    <button class="btn btn-success" id="btnCompleteCase" onclick="SES.lifecycle.completeCase()" style="display:none;">
+                        <i class="bi bi-check2-all me-1"></i>案件完了確定
+                    </button>
+                </div>
+            </div>
+
+            <!-- 全体進捗バー -->
+            <div class="mt-4 pt-3 border-top border-secondary">
+                <div class="d-flex justify-content-between align-items-center mb-1 small">
+                    <span class="text-muted">タスク完了進捗: <strong class="text-light" id="progressSummary">0 / 0 完了</strong></span>
+                    <span class="text-primary fw-bold" id="progressPercentage">0%</span>
+                </div>
+                <div class="progress bg-dark" style="height: 10px;">
+                    <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" role="progressbar" id="progressBar" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 退社ゲート検証カード (退社案件のみ表示) -->
+    <div class="card bg-card border-warning shadow-sm mb-4" id="resignationGateCard" style="display: none;">
+        <div class="card-header bg-dark border-warning d-flex justify-content-between align-items-center">
+            <h5 class="card-title text-warning mb-0 fs-6">
+                <i class="bi bi-shield-lock-fill me-2"></i>退社ゲート検証 (Resignation Gate Checker)
+            </h5>
+            <button class="btn btn-sm btn-outline-warning" onclick="SES.lifecycle.checkGate()">
+                <i class="bi bi-arrow-repeat me-1"></i>再検証
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <div id="gateStatusBadge"><span class="badge bg-secondary">未検証</span></div>
+                <div class="text-muted small" id="gateSummaryText">退社確定にはすべてのアカウント・組織・営業引継ぎ・阻害タスクの充足が必要です。</div>
+            </div>
+            <div class="row g-2" id="gateCriteriaList">
+                <!-- ゲート項目が動的に描画される -->
+            </div>
+        </div>
+    </div>
+
+    <!-- タスク一覧セクション -->
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-header bg-dark border-dark d-flex justify-content-between align-items-center py-3">
+            <h5 class="card-title text-light mb-0 fs-6">
+                <i class="bi bi-list-check me-2 text-primary"></i>ライフサイクルタスク実行リスト
+            </h5>
+            <div class="text-muted small">
+                先行タスク完了後に後続タスクが自動昇格します
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4" style="width: 60px;">順序</th>
+                            <th scope="col">タスク名 / コード</th>
+                            <th scope="col">担当者 / ロール</th>
+                            <th scope="col">期日</th>
+                            <th scope="col">先行依存</th>
+                            <th scope="col">証跡種別</th>
+                            <th scope="col">ステータス</th>
+                            <th scope="col" class="text-end pe-4">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasksTableBody">
+                        <tr>
+                            <td colspan="8" class="text-center py-4 text-muted">読み込み中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 監査ログ / イベント履歴 -->
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-header bg-dark border-dark py-3">
+            <h5 class="card-title text-light mb-0 fs-6">
+                <i class="bi bi-clock-history me-2 text-info"></i>ライフサイクル追記イベント台帳 (監査ログ)
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-sm table-striped mb-0 align-middle">
+                    <thead class="table-dark-header border-bottom border-dark">
+                        <tr>
+                            <th scope="col" class="ps-4">発生日時</th>
+                            <th scope="col">イベント種別</th>
+                            <th scope="col">実行者 (ロール)</th>
+                            <th scope="col">状態遷移</th>
+                            <th scope="col" class="pe-4">詳細</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eventsTableBody">
+                        <tr>
+                            <td colspan="5" class="text-center py-3 text-muted">履歴はありません</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- タスク完了モーダル -->
+    <div class="modal fade" id="completeTaskModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-2 text-success"></i>タスク完了確認</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="completeTaskForm" onsubmit="event.preventDefault(); SES.lifecycle.submitCompleteTask();">
+                    <div class="modal-body">
+                        <input type="hidden" id="completeTaskId">
+                        <div class="mb-3">
+                            <label class="form-label text-light">完了コメント・確認メモ</label>
+                            <textarea class="form-control bg-dark border-secondary text-light" id="completeComment" rows="3" placeholder="確認内容や連絡事項"></textarea>
+                        </div>
+                        <div class="mb-3" id="evidenceSection" style="display: none;">
+                            <label class="form-label text-light">証跡文書ID (DOCUMENT_LINK)</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light" id="completeDocumentId" placeholder="文書ID">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i>完了確定</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- タスク免除 (例外処理) モーダル -->
+    <div class="modal fade" id="waiveTaskModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-warning"><i class="bi bi-exclamation-triangle me-2"></i>タスク例外免除</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="waiveTaskForm" onsubmit="event.preventDefault(); SES.lifecycle.submitWaiveTask();">
+                    <div class="modal-body">
+                        <input type="hidden" id="waiveTaskId">
+                        <div class="mb-3">
+                            <label class="form-label text-light required">免除理由 <span class="text-danger">*</span></label>
+                            <textarea class="form-control bg-dark border-secondary text-light" id="waiveReason" rows="3" required placeholder="業務上または顧客都合による免除根拠を入力"></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-light">承認申請ID (Approval Request ID)</label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light" id="waiveApprovalId" placeholder="承認連携時の申請ID (任意)">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-warning text-dark"><i class="bi bi-shield-slash me-1"></i>免除実行</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 担当者再割当モーダル -->
+    <div class="modal fade" id="reassignTaskModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-person-gear me-2 text-info"></i>タスク担当者変更</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="reassignTaskForm" onsubmit="event.preventDefault(); SES.lifecycle.submitReassignTask();">
+                    <div class="modal-body">
+                        <input type="hidden" id="reassignTaskId">
+                        <div class="mb-3">
+                            <label class="form-label text-light required">新担当ユーザーID <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control bg-dark border-secondary text-light" id="reassignUserId" required placeholder="ユーザーIDを入力">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-light">変更理由</label>
+                            <input type="text" class="form-control bg-dark border-secondary text-light" id="reassignReason" placeholder="不在・引継ぎ等">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-info text-dark"><i class="bi bi-arrow-left-right me-1"></i>担当者変更</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/lifecycle.js}"></script>
+</th:block>
+</body>
+</html>
