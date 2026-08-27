@@ -9,6 +9,7 @@ import com.ses.config.LoginUser;
 import com.ses.dto.report.ReportRecipientPreview;
 import com.ses.dto.report.ReportRecipientPreviewResult;
 import com.ses.entity.ReportTemplateVersion;
+import com.ses.entity.ReportRun;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportTemplateVersionMapper;
 import com.ses.mapper.SysUserMapper;
@@ -53,18 +54,45 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
         String actorRole = SecurityUtils.currentRole();
-        Long actorId = SecurityUtils.currentUserId();
         if (!("管理者".equals(actorRole) || "マネージャー".equals(actorRole))) {
             throw BusinessException.of(403, "error.managementReport.roleDenied");
         }
         Scope owner = scopeForCurrentUser(period.atEndOfMonth());
+        return previewInternal(version, period, owner);
+    }
+
+    @Override
+    public ReportRecipientPreviewResult previewForRun(ReportRun run) {
+        if (run == null || run.getTemplateVersionId() == null || run.getPeriodFrom() == null) {
+            throw BusinessException.of(400, "error.managementReport.runInvalid");
+        }
+        ReportTemplateVersion version = versionMapper.selectById(run.getTemplateVersionId());
+        if (version == null || !"PUBLISHED".equals(version.getStatus())) {
+            throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
+        }
+        Scope owner;
+        try {
+            JsonNode saved = objectMapper.readTree(run.getOrganizationScopeJson());
+            Set<Long> ids = new HashSet<>();
+            saved.path("organizationIds").forEach(node -> ids.add(node.asLong()));
+            owner = new Scope(saved.path("companyWide").asBoolean(false), ids, run.getScopeHash());
+        } catch (Exception ex) {
+            throw BusinessException.of(500, "error.managementReport.scopeSnapshotInvalid");
+        }
+        return previewInternal(version, YearMonth.from(run.getPeriodFrom()), owner);
+    }
+
+    private ReportRecipientPreviewResult previewInternal(ReportTemplateVersion version, YearMonth period, Scope owner) {
         RecipientPolicy policy = readPolicy(version.getRecipientConfigJson());
         List<SysUser> candidates = candidateUsers(policy);
         List<ReportRecipientPreview> results = new ArrayList<>();
         for (SysUser candidate : candidates) {
             Scope recipient = withUser(candidate, () -> scopeForCurrentUser(period.atEndOfMonth()));
             boolean allowed = "管理者".equals(candidate.getRole())
-                    || (owner.companyWide() || isSubset(recipient.organizationIds(), owner.organizationIds()));
+                    || (owner.companyWide()
+                    || (!recipient.organizationIds().isEmpty()
+                    && !owner.organizationIds().isEmpty()
+                    && isSubset(recipient.organizationIds(), owner.organizationIds())));
             String reason = allowed ? "SCOPE_MATCH" : "RECIPIENT_SCOPE_MISMATCH";
             results.add(new ReportRecipientPreview(candidate.getId(), candidate.getRole(),
                     allowed ? "ALLOW" : "DENY", reason, recipient.hash()));
@@ -74,7 +102,7 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (allowedIds.isEmpty()) {
             throw BusinessException.of(403, "error.managementReport.recipientScopeDenied");
         }
-        String previewHash = sha256(templateVersionId + "|" + period + "|" + owner.hash()
+        String previewHash = sha256(version.getId() + "|" + period + "|" + owner.hash()
                 + "|" + allowedIds + "|" + POLICY_VERSION);
         return new ReportRecipientPreviewResult(previewHash, "APPROVED_SCOPE_CHECKED",
                 LocalDateTime.now(ZoneId.of(TIMEZONE)), results);

@@ -36,7 +36,10 @@
   - Objective: 成功済みsnapshotのみを共通入力とし、PDF/XLSX/CSVを生成してDocumentServiceのscan/hash/version/retention経路へ登録する。
   - Evidence: `ReportDocumentServiceImpl`、`ReportDocumentArtifact`、document API。XLSX/CSVのformula injection対策と生成サイズ上限を含む。
   - Demo: 同一runの3形式を生成し、各artifact hash、Document version、`MANAGEMENT_REPORT`の月末transaction dateを確認する。
-- [ ] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
+- [x] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
+  - Objective: 管理者有効化のscheduleをShedLock＋DB CASで実行し、system principalからsnapshot生成・DocumentService登録・recipient scope再確認・通知outbox配布まで接続する。
+  - Evidence: `ReportScheduleServiceImpl`、`ReportScheduleMapper`、`ManagementReportScheduler`、`ReportDeliveryServiceImpl`、delivery API。tokenはhashのみ保存、期限7日、download前password再認証10分、権限・組織scopeを再検証、retry/DLQ/manual replayを実装。
+  - Demo: 同一scheduleのCAS二重claim、PARTIAL run配布停止、期限切れlink拒否、再認証後のdownload、notification dedupeをテストする。
 - [ ] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
 
 各完了taskは独立commitしてremoteへpushし、completion matrixへBase/Head、テスト、Demo、rollbackを記録する。実装対話ではPRを作成しない。

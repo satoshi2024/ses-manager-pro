@@ -18,7 +18,7 @@
 | F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl` | `compile`成功、F1 H2 context 6/6 |
 | A1 | template/preview/run UI | 完了 | `ManagementReportApiController`、`management-reports/index.html`、静的role境界 | `compile`成功、F1 H2 context 6/6 |
 | B1 | document | 完了 | `ReportDocumentServiceImpl`、PDF/XLSX/CSV renderer、DocumentService登録API | `ReportDocumentServiceImplTest` 2/2、compile成功 |
-| B2 | delivery | 着手前 | 未着手 | — |
+| B2 | delivery | 完了 | `ManagementReportScheduler`、schedule CAS、delivery token/scope/reauth/retry API、notification outbox接続 | `ReportDeliveryServiceImplTest` 3/3、`ManagementReportSchedulerTest` 2/2、compile成功 |
 | M | test / restore / drill / base-head evidence | 着手前 | 未着手 | — |
 
 ## Review に渡すもの
