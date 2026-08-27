@@ -28,6 +28,13 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | D0 review-gap closure | `314b6a9bf2b80af6a50e25fa2e6c0a1dcf531524` | `origin/codex/privacy-retention-dsar` | pushed |
 | handoff/base drift evidence | `2ea49d44bbe45296d9f69e39fb3e371abd503d13` | `origin/codex/privacy-retention-dsar` | pushed |
 | evidence formatting | `5b92bc8b0683e13e3cfcfaab05695e8eaa994dd7` | `origin/codex/privacy-retention-dsar` | pushed |
+| review handoff pointer correction | `90a0aec4d60c9b75049b4d8b6b82923eb7ad8b24` | `origin/codex/privacy-retention-dsar` | pushed |
+| D0 blocker evidence record | `d525dbd3cb1738fe3dae4764a8aa3d58f2e31c65` | `origin/codex/privacy-retention-dsar` | pushed |
+| D0 review-gap closure record | `aba00ab058fd7dc3c9d833005dcf0adb49112d86` | `origin/codex/privacy-retention-dsar` | pushed |
+| review Head binding | `3c3006b351e4a42146540946f4da561391ef02db` | `origin/codex/privacy-retention-dsar` | pushed |
+| source inventory completion | `b45a2f4f42beb3e87400318b84271d40a8340e37` | `origin/codex/privacy-retention-dsar` | pushed |
+| compliance history inventory | `ab06e0a3098e4e072cdee0d6b75f9ec439189bed` | `origin/codex/privacy-retention-dsar` | pushed |
+| reviewer qualification inventory | `a05ad24203110090afdd69d2248e054133cf29b9` | `origin/codex/privacy-retention-dsar` | pushed |
 
 ## D0 actual verification
 
