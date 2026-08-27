@@ -12,4 +12,9 @@ public record PwaMutationCommand(String operation, String screen, String month, 
     public String payloadHash(PwaCanonicalizer canonicalizer) {
         return canonicalizer.hash(operation, screen, month, baseVersion, payload);
     }
+
+    /** V112以前の保存済みqueue/ledgerをV113以降で再送するための旧hash。 */
+    public String legacyPayloadHash(PwaCanonicalizer canonicalizer) {
+        return canonicalizer.hash(null, screen, month, baseVersion, payload);
+    }
 }

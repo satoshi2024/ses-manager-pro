@@ -51,11 +51,13 @@ public class PwaClientMutationLedgerService {
         PwaUserContextService.CurrentContext context = userContextService.assertCurrent(opaqueScope);
         validateClientCreatedAt(clientCreatedAt, context);
         String expectedHash = command.payloadHash(canonicalizer);
-        if (!Objects.equals(expectedHash, payloadHash)) {
+        String legacyHash = command.legacyPayloadHash(canonicalizer);
+        if (!hashMatches(expectedHash, legacyHash, payloadHash)) {
             throw new PwaConflictException("pwa.payloadHashMismatch", Map.of(
                     "type", "PAYLOAD_HASH_MISMATCH",
                     "clientHash", payloadHash,
                     "serverHash", expectedHash,
+                    "legacyServerHash", legacyHash,
                     "client", command.payload()));
         }
 
@@ -96,7 +98,8 @@ public class PwaClientMutationLedgerService {
             data.put("clientOperation", command.operation());
             throw new PwaConflictException("pwa.idempotencyPayloadMismatch", data);
         }
-        if (!Objects.equals(existing.getPayloadHash(), payloadHash)) {
+        if (!hashMatches(expectedHash, legacyHash, existing.getPayloadHash())
+                || !hashMatches(expectedHash, legacyHash, payloadHash)) {
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("type", "IDEMPOTENCY_PAYLOAD_MISMATCH");
             data.put("clientRequestId", clientRequestId);
@@ -105,6 +108,12 @@ public class PwaClientMutationLedgerService {
             data.put("server", existing.getResponseJson());
             data.put("client", command.payload());
             throw new PwaConflictException("pwa.idempotencyPayloadMismatch", data);
+        }
+        // V112行はoperationがNULLのため、最初に再送された実HTTP経路へ原子的に再束縛する。
+        // SELECT ... FOR UPDATEにより、同一旧IDを別operationで同時に再束縛する競合を防ぐ。
+        if (existing.getOperation() == null && command.operation() != null) {
+            existing.setOperation(command.operation());
+            mapper.updateById(existing);
         }
         if (COMPLETED.equals(existing.getStatus())) {
             metrics.increment("replay", command.screen());
@@ -145,6 +154,10 @@ public class PwaClientMutationLedgerService {
         } catch (Exception e) {
             throw new IllegalStateException("PWA command結果の復号に失敗しました", e);
         }
+    }
+
+    private boolean hashMatches(String expectedHash, String legacyHash, String actualHash) {
+        return Objects.equals(expectedHash, actualHash) || Objects.equals(legacyHash, actualHash);
     }
 
     private void validateHeaders(String clientRequestId, String payloadHash) {

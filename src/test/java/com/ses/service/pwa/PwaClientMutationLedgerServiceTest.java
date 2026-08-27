@@ -126,6 +126,30 @@ class PwaClientMutationLedgerServiceTest {
     }
 
     @Test
+    void V112旧hash行は現在のoperationへ一度だけ再束縛してreplayできる() {
+        ObjectNode payload = objectMapper.createObjectNode().put("id", 1L);
+        PwaMutationCommand command = new PwaMutationCommand(
+                "expense:PUT:/api/my/pwa/expenses/drafts/1", "expense", "2026-08", 2, payload);
+        String scope = "scope-legacy";
+        PwaUserContextService.CurrentContext context =
+                new PwaUserContextService.CurrentContext(7L, 9L, scope);
+        when(userContextService.assertCurrent(scope)).thenReturn(context);
+        PwaClientMutation completed = new PwaClientMutation();
+        completed.setId(14L);
+        completed.setPayloadHash(command.legacyPayloadHash(canonicalizer));
+        completed.setStatus("COMPLETED");
+        completed.setResponseJson("{\"saved\":true}");
+        when(mapper.selectByUserAndClientRequest(7L, "req-legacy")).thenReturn(completed);
+
+        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, "req-legacy",
+                command.legacyPayloadHash(canonicalizer), Instant.now().toEpochMilli(), scope);
+
+        assertThat(replay.replay()).isTrue();
+        assertThat(completed.getOperation()).isEqualTo(command.operation());
+        verify(mapper).updateById(completed);
+    }
+
+    @Test
     void 同一userのscope更新後も同一hashの完了commandをreplayする() {
         ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
         PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);
