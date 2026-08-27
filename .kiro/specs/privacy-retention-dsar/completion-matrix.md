@@ -42,6 +42,7 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | delta gate traceability alignment | `0a66604c198ffda361544e070cffefcd79295f27` | `origin/codex/privacy-retention-dsar` | pushed |
 | source coverage manifest / column verification | `1dffb5d482931765e7472fc105b02bc9e68dd099` | `origin/codex/privacy-retention-dsar` | pushed |
 | delta Review evidence synchronization | `59831068153a3a6efa2ccbcd5f6618c6d7105fb8` | `origin/codex/privacy-retention-dsar` | pushed |
+| source catalog explicit rows / Review provenance boundary | `b678ce987ad93c8100a14df9776f25e89cdd597e` | `origin/codex/privacy-retention-dsar` | pushed。構造unclassified 0、policy UNKNOWN/BLOCKED 78。0.4/F1-Mは未完了 |
 
 ## D0 actual verification
 
