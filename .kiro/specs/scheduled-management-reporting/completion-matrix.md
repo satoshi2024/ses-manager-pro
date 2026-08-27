@@ -17,7 +17,8 @@
 | F1 | template/version/schedule/run/snapshot/delivery DDL | 完了 | `V112__scheduled_management_reporting.sql`、H2 schema、6 entity/mapper | `9b342c79d8495ce52e81d1c2a862d603f3b8581a`。compile成功、AttendanceSchemaTest 6/6 |
 | F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl` | `compile`成功、F1 H2 context 6/6 |
 | A1 | template/preview/run UI | 完了 | `ManagementReportApiController`、`management-reports/index.html`、静的role境界 | `compile`成功、F1 H2 context 6/6 |
-| B1 / B2 | document / delivery | 着手前 | 未着手 | — |
+| B1 | document | 完了 | `ReportDocumentServiceImpl`、PDF/XLSX/CSV renderer、DocumentService登録API | `ReportDocumentServiceImplTest` 2/2、compile成功 |
+| B2 | delivery | 着手前 | 未着手 | — |
 | M | test / restore / drill / base-head evidence | 着手前 | 未着手 | — |
 
 ## Review に渡すもの

@@ -12,6 +12,7 @@ import com.ses.entity.ReportTemplate;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.report.ReportRecipientPreviewService;
+import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportTemplateService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
 import java.time.YearMonth;
 import java.util.List;
@@ -34,6 +38,7 @@ public class ManagementReportApiController {
     private final ReportTemplateService templateService;
     private final ReportSnapshotService snapshotService;
     private final ReportRecipientPreviewService recipientPreviewService;
+    private final ReportDocumentService reportDocumentService;
 
     @GetMapping("/templates")
     public ApiResult<List<ReportTemplate>> templates() {
@@ -89,6 +94,25 @@ public class ManagementReportApiController {
         ReportRun run = snapshotService.findRun(runId);
         List<ReportSectionSnapshot> sections = snapshotService.listSections(runId);
         return ApiResult.success(new ReportGenerationResult(run, sections, true));
+    }
+
+    @PostMapping("/runs/{runId}/documents/{format}")
+    public ApiResult<com.ses.dto.report.ReportDocumentArtifact> registerDocument(@PathVariable Long runId,
+                                                                                   @PathVariable String format) {
+        return ApiResult.success(reportDocumentService.register(runId, format));
+    }
+
+    @GetMapping("/runs/{runId}/documents/{format}/preview")
+    public ResponseEntity<byte[]> previewDocument(@PathVariable Long runId, @PathVariable String format) {
+        String normalized = format.toUpperCase(java.util.Locale.ROOT);
+        byte[] bytes = reportDocumentService.render(runId, normalized);
+        MediaType mediaType = "PDF".equals(normalized) ? MediaType.APPLICATION_PDF
+                : "XLSX".equals(normalized)
+                ? MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                : MediaType.parseMediaType("text/csv; charset=UTF-8");
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=management-report-" + runId + "." + format.toLowerCase())
+                .contentType(mediaType).body(bytes);
     }
 
     public record ReportRunRequest(Long templateVersionId, String period, String cutoffKind,

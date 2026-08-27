@@ -32,7 +32,10 @@
   - Objective: 管理者/マネージャーがtemplate/version、recipient preview、速報/確定runを操作できる画面/APIを提供する。
   - Evidence: `ManagementReportApiController`、`ManagementReportPageController`、`management-reports/index.html`、`management-reports.js`、`SecurityConfig`の静的role境界。
   - Demo: `/management-reports`で公開済みversion、対象月、cutoffを選択し、preview hashを経由してrunとsection snapshotを表示する。
-- [ ] B1: PDF/XLSX/CSV と DocumentService 登録。同一snapshot、hash/version/CLEAN、7年保持、scope/access auditを実装する。
+- [x] B1: PDF/XLSX/CSV と DocumentService 登録。同一snapshot、hash/version/CLEAN、7年保持、scope/access auditを実装する。
+  - Objective: 成功済みsnapshotのみを共通入力とし、PDF/XLSX/CSVを生成してDocumentServiceのscan/hash/version/retention経路へ登録する。
+  - Evidence: `ReportDocumentServiceImpl`、`ReportDocumentArtifact`、document API。XLSX/CSVのformula injection対策と生成サイズ上限を含む。
+  - Demo: 同一runの3形式を生成し、各artifact hash、Document version、`MANAGEMENT_REPORT`の月末transaction dateを確認する。
 - [ ] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
 - [ ] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
 
