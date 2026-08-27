@@ -5,7 +5,7 @@
 - Review対象: `origin/codex/privacy-retention-dsar` のdispatch時点のbranch tip。remote Headを正本とし、dispatch時に `git ls-remote` で取得したSHAとworktree HEADを一致確認して記録する（特定の過去Headを最新とみなさない）。
 - 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
 - fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
-- approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560e` は技術比較用の観測値であり、承認証跡ではない。Full Feature/Productionはapproval-missing/hard stopを維持する。DEV-0/D0は `NF07-DEV-GATE-20260828` の範囲だけを独立Reviewへ渡す。
+- approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` は技術比較用の観測値であり、承認証跡ではない。Full Feature/Productionはapproval-missing/hard stopを維持する。DEV-0/D0は `NF07-DEV-GATE-20260828` の範囲だけを独立Reviewへ渡す。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。
