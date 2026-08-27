@@ -2,7 +2,7 @@
 
 ## Handoff status
 
-- Review対象: `codex/privacy-retention-dsar` の最終remote Head（commit/push後にこの文書を更新する）。
+- Review対象: `codex/privacy-retention-dsar` の最終remote Head `eb0e2dd3cb566161e7878bd7a0ee377bdd63393f`。
 - Base: `origin/main@0333b0a4afadef42639bad27e1ae443758f9804f`。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
@@ -15,12 +15,13 @@
 1. `.kiro/specs/privacy-retention-dsar/requirements.md`
 2. `.kiro/specs/privacy-retention-dsar/design.md`
 3. `.kiro/specs/privacy-retention-dsar/tasks.md`
-4. `.kiro/specs/privacy-retention-dsar/pii-inventory.md`
-5. `.kiro/specs/privacy-retention-dsar/dry-run.md`
-6. `.kiro/specs/privacy-retention-dsar/completion-matrix.md`
-7. `.kiro/specs/privacy-retention-dsar/review-ledger.md`
-8. `tools/privacy-retention-dsar/read-only-dry-run.ps1`
-9. `tools/privacy-retention-dsar/dry-run-fixture.json`
+4. `.kiro/specs/privacy-retention-dsar/plan.md`（NOT_APPROVED。承認入力の置換待ち）
+5. `.kiro/specs/privacy-retention-dsar/pii-inventory.md`
+6. `.kiro/specs/privacy-retention-dsar/dry-run.md`
+7. `.kiro/specs/privacy-retention-dsar/completion-matrix.md`
+8. `.kiro/specs/privacy-retention-dsar/review-ledger.md`
+9. `tools/privacy-retention-dsar/read-only-dry-run.ps1`
+10. `tools/privacy-retention-dsar/dry-run-fixture.json`
 
 ## Review request
 
