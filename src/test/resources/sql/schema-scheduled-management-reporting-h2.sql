@@ -213,6 +213,7 @@ CREATE UNIQUE INDEX uk_report_delivery_recipient ON t_report_delivery(run_id, re
 CREATE UNIQUE INDEX uk_report_delivery_dedupe ON t_report_delivery(tenant_id, notification_dedupe_key);
 CREATE INDEX idx_report_delivery_status ON t_report_delivery(tenant_id, delivery_status, link_expires_at);
 CREATE INDEX idx_report_delivery_document ON t_report_delivery(document_id);
+CREATE INDEX idx_report_delivery_outbox ON t_report_delivery(notification_outbox_id);
 
 INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
 SELECT 'MANAGEMENT_REPORT', '月次管理レポート', 'INTERNAL', 7, 'TRANSACTION_DATE', 1

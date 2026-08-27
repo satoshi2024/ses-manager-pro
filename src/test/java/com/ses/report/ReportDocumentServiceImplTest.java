@@ -13,10 +13,12 @@ import com.ses.service.report.impl.ReportDocumentServiceImpl;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
 
 import java.io.ByteArrayInputStream;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +74,34 @@ class ReportDocumentServiceImplTest {
             assertThat(workbook.getSheetAt(0).getRow(4).getCell(6).getStringCellValue())
                     .isEqualTo("'=SUM(A1:A2)");
         }
+    }
+
+    @Test
+    void snapshot値を画面と全形式exportで同じvalueJsonとして扱う() throws Exception {
+        ReportSectionSnapshot metric = new ReportSectionSnapshot();
+        metric.setSectionKey("sales");
+        metric.setSectionStatus("SUCCEEDED");
+        metric.setFactType("実績");
+        metric.setConfirmation("速報");
+        metric.setDataAsOfAt(LocalDateTime.of(2026, 8, 31, 23, 59));
+        metric.setSnapshotHash("metric-hash");
+        metric.setValueJson("{\"revenue\":123456,\"grossProfit\":30000}");
+        when(snapshotService.listSections(10L)).thenReturn(List.of(metric));
+
+        byte[] csv = service.render(10L, "CSV");
+        byte[] xlsx = service.render(10L, "XLSX");
+        String uiJs = new ClassPathResource("static/js/modules/management-reports.js")
+                .getContentAsString(StandardCharsets.UTF_8);
+        String uiHtml = new ClassPathResource("templates/management-reports/index.html")
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(new String(csv, StandardCharsets.UTF_8)).contains("123456", "30000");
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
+            assertThat(workbook.getSheetAt(0).getRow(4).getCell(6).getStringCellValue())
+                    .isEqualTo(metric.getValueJson());
+        }
+        assertThat(uiJs).contains("s.valueJson || ''");
+        assertThat(uiHtml).contains("<th>value</th>");
     }
 
     @Test

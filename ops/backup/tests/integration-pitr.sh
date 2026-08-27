@@ -54,10 +54,60 @@ log "== 2. fixture（marker テーブル + before marker） =="
 src_root "$MYSQL_DATABASE" \
   -e "CREATE TABLE IF NOT EXISTS marker_test (id BIGINT AUTO_INCREMENT PRIMARY KEY, marker VARCHAR(64)) ENGINE=InnoDB;
       DELETE FROM marker_test;
-      INSERT INTO marker_test (marker) VALUES ('marker-before-checkpoint');" \
+      INSERT INTO marker_test (marker) VALUES ('marker-before-checkpoint');
+      CREATE TABLE IF NOT EXISTS t_report_run (
+        id BIGINT PRIMARY KEY, snapshot_version INT NOT NULL, status VARCHAR(32) NOT NULL, scope_hash CHAR(64) NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_report_section_snapshot (
+        id BIGINT PRIMARY KEY, run_id BIGINT NOT NULL, section_key VARCHAR(64) NOT NULL,
+        snapshot_hash CHAR(64) NOT NULL, value_json LONGTEXT NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_report_section_attempt (
+        id BIGINT PRIMARY KEY, run_id BIGINT NOT NULL, section_key VARCHAR(64) NOT NULL,
+        attempt_no INT NOT NULL, section_status VARCHAR(32) NOT NULL, snapshot_hash CHAR(64) NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_document (
+        id BIGINT PRIMARY KEY, document_type VARCHAR(64) NOT NULL, status VARCHAR(32) NOT NULL,
+        retention_until DATE NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_document_version (
+        id BIGINT PRIMARY KEY, document_id BIGINT NOT NULL, version_no INT NOT NULL,
+        sha256 CHAR(64) NOT NULL, scan_status VARCHAR(32) NOT NULL, storage_key VARCHAR(255) NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_notification_outbox (
+        id BIGINT PRIMARY KEY, status VARCHAR(32) NOT NULL, dedupe_key VARCHAR(128) NOT NULL
+      ) ENGINE=InnoDB;
+      CREATE TABLE IF NOT EXISTS t_report_delivery (
+        id BIGINT PRIMARY KEY, run_id BIGINT NOT NULL, document_id BIGINT NOT NULL,
+        document_version_no INT NOT NULL, notification_outbox_id BIGINT NOT NULL,
+        delivery_status VARCHAR(32) NOT NULL
+      ) ENGINE=InnoDB;
+      DELETE FROM t_report_delivery;
+      DELETE FROM t_notification_outbox;
+      DELETE FROM t_document_version;
+      DELETE FROM t_document;
+      DELETE FROM t_report_section_attempt;
+      DELETE FROM t_report_section_snapshot;
+      DELETE FROM t_report_run;
+      INSERT INTO t_report_run (id, snapshot_version, status, scope_hash)
+        VALUES (91001, 3, 'SUCCEEDED', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+      INSERT INTO t_report_section_snapshot (id, run_id, section_key, snapshot_hash, value_json)
+        VALUES (91002, 91001, 'sales', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', '{\"sales\":123}');
+      INSERT INTO t_report_section_attempt (id, run_id, section_key, attempt_no, section_status, snapshot_hash)
+        VALUES (91003, 91001, 'sales', 2, 'SUCCEEDED', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+      INSERT INTO t_document (id, document_type, status, retention_until)
+        VALUES (91004, 'MANAGEMENT_REPORT', 'CONFIRMED', '2033-08-31');
+      INSERT INTO t_document_version (id, document_id, version_no, sha256, scan_status, storage_key)
+        VALUES (91005, 91004, 1, 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'CLEAN', 'published/report-restore.pdf');
+      INSERT INTO t_notification_outbox (id, status, dedupe_key)
+        VALUES (91006, 'PENDING', 'report-restore:91001:91004:1');
+      INSERT INTO t_report_delivery (id, run_id, document_id, document_version_no, notification_outbox_id, delivery_status)
+        VALUES (91007, 91001, 91004, 1, 91006, 'ENQUEUED');" \
   || fail "fixture 作成に失敗しました"
 mkdir -p "$UPLOADS_DIR/published"
 printf 'marker-before-checkpoint\n' > "$UPLOADS_DIR/published/marker-before.txt"
+printf 'report-restore\n' > "$UPLOADS_DIR/published/report-restore.pdf"
+export REPORT_RESTORE_EVIDENCE="$EVID/report-restore-contract.txt"
 
 log "== 3. backup-full =="
 /usr/local/bin/backup-full.sh > "$EVID/backup-full.log" 2>&1 || fail "backup-full が失敗しました"
@@ -170,8 +220,44 @@ cat > "$WORK_DIR/smoke.sh" <<'SMOKE'
 set -uo pipefail
 # shellcheck disable=SC2206
 read -r -a ARGS <<< "$TARGET_OPT_ARGS_JSON"
-mysql "${ARGS[@]}" -N -B --execute "SELECT COUNT(*) FROM marker_test;" > /dev/null 2>&1
-exit $?
+DB="${TARGET_DATABASE:?}"
+scalar() { mysql "${ARGS[@]}" -N -B --execute "$1"; }
+expect() {
+  local name=$1 sql=$2 expected=$3 actual
+  actual=$(scalar "$sql") || { echo "report restore smoke: $name query failed" >&2; return 1; }
+  [[ "$actual" == "$expected" ]] || {
+    echo "report restore smoke: $name expected=$expected actual=$actual" >&2
+    return 1
+  }
+}
+
+expect marker_count "SELECT COUNT(*) FROM marker_test" 2 || exit 1
+expect run_snapshot_version "SELECT snapshot_version FROM t_report_run WHERE id=91001" 3 || exit 1
+expect run_scope_hash "SELECT scope_hash FROM t_report_run WHERE id=91001" \
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa || exit 1
+expect section_snapshot_hash "SELECT snapshot_hash FROM t_report_section_snapshot WHERE run_id=91001 AND section_key='sales'" \
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || exit 1
+expect section_attempt_count "SELECT COUNT(*) FROM t_report_section_attempt WHERE run_id=91001" 1 || exit 1
+expect section_attempt_no "SELECT attempt_no FROM t_report_section_attempt WHERE id=91003" 2 || exit 1
+expect document_type "SELECT document_type FROM t_document WHERE id=91004" MANAGEMENT_REPORT || exit 1
+expect document_version "SELECT version_no FROM t_document_version WHERE document_id=91004" 1 || exit 1
+expect document_hash "SELECT sha256 FROM t_document_version WHERE id=91005" \
+  cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc || exit 1
+expect outbox_status "SELECT status FROM t_notification_outbox WHERE id=91006" PENDING || exit 1
+expect delivery_status "SELECT delivery_status FROM t_report_delivery WHERE id=91007" ENQUEUED || exit 1
+expect delivery_outbox "SELECT notification_outbox_id FROM t_report_delivery WHERE id=91007" 91006 || exit 1
+
+evidence="${REPORT_RESTORE_EVIDENCE:?}"
+mkdir -p "$(dirname "$evidence")"
+{
+  echo "restore_contract=PASS"
+  echo "run_id=91001 snapshot_version=3 status=SUCCEEDED"
+  echo "section=sales snapshot_hash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb attempt_no=2"
+  echo "document_id=91004 document_type=MANAGEMENT_REPORT version_no=1 sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  echo "outbox_id=91006 outbox_status=PENDING delivery_status=ENQUEUED"
+  echo "immutable_snapshot=PASS version_link=PASS outbox_link=PASS"
+} > "$evidence"
+exit 0
 SMOKE
 chmod +x "$WORK_DIR/smoke.sh"
 /usr/local/bin/validate-restore.sh \

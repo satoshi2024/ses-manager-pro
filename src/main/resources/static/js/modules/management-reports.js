@@ -66,7 +66,7 @@ function generateReport(event) {
         success: function (res) {
             if (res.code !== 200) { $('#runResult').text(res.message || '生成に失敗しました。'); return; }
             const run = res.data.run;
-            $('#runResult').html(`<span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status)}</span> run=${run.id} / timezone=${SES.escapeHtml(run.timezoneId)} / dataAsOf=${SES.escapeHtml(run.dataAsOfAt || '')}`);
+            $('#runResult').html(`<span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status)}</span> run=${run.id} / period=${SES.escapeHtml(run.periodFrom || '')}～${SES.escapeHtml(run.periodTo || '')} / cutoff=${SES.escapeHtml(run.cutoffKind || '')} / timezone=${SES.escapeHtml(run.timezoneId)} / dataAsOf=${SES.escapeHtml(run.dataAsOfAt || '')}`);
             renderReportSections(res.data.sections || []);
         },
         error: function () { $('#runResult').text('snapshot生成の通信に失敗しました。'); }
@@ -77,5 +77,5 @@ function generateReport(event) {
 }
 
 function renderReportSections(sections) {
-    $('#report-section-table').html(sections.map(s => `<tr><td>${SES.escapeHtml(s.sectionKey)}</td><td>${SES.escapeHtml(s.sectionStatus)}</td><td>${SES.escapeHtml(s.factType)} / ${SES.escapeHtml(s.confirmation)}</td><td>${SES.escapeHtml(s.dataAsOfAt || '')}</td><td>${SES.escapeHtml(s.freshnessStatus || 'UNKNOWN')}</td><td class="font-monospace small">${SES.escapeHtml(s.snapshotHash || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">sectionなし</td></tr>');
+    $('#report-section-table').html(sections.map(s => `<tr><td>${SES.escapeHtml(s.sectionKey)}</td><td>${SES.escapeHtml(s.sectionStatus)}</td><td>${SES.escapeHtml(s.factType)} / ${SES.escapeHtml(s.confirmation)}</td><td>${SES.escapeHtml(s.dataAsOfAt || '')}</td><td>${SES.escapeHtml(s.freshnessStatus || 'UNKNOWN')}</td><td class="font-monospace small">${SES.escapeHtml(s.snapshotHash || '')}</td><td class="small text-break">${SES.escapeHtml(s.valueJson || '')}</td></tr>`).join('') || '<tr><td colspan="7" class="text-muted">sectionなし</td></tr>');
 }

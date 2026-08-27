@@ -99,6 +99,26 @@ class ReportDeliveryServiceImplTest {
     }
 
     @Test
+    void deliverはENQUEUED中の既存deliveryを再配布しない() {
+        ReportRun run = readyRun();
+        when(runMapper.selectById(10L)).thenReturn(run);
+        ReportRecipientPreview recipient = new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope");
+        when(previewService.previewForRun(run)).thenReturn(preview(recipient));
+        ReportDelivery existing = new ReportDelivery();
+        existing.setId(71L);
+        existing.setRunId(10L);
+        existing.setRecipientUserId(2L);
+        existing.setDeliveryStatus("ENQUEUED");
+        when(deliveryMapper.selectOne(any())).thenReturn(existing);
+
+        ReportDeliveryResult result = service.deliver(10L, "preview-hash");
+
+        assertThat(result.getDeliveries()).containsExactly(existing);
+        verify(documentService, never()).register(anyLong(), anyString());
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
     void downloadRejectsExpiredLinkBeforeOpeningDocument() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);

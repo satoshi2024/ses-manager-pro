@@ -33,6 +33,8 @@
 
 ### 3.2 subject × operation × visibility decision table
 
+recipient previewのscope判定は、配布対象がreportの全データを参照可能であることを要求する。すなわち、マネージャーreportでは保存済みowner scopeがrecipientの現在scopeの部分集合でなければならず、全社reportは管理者recipientだけを許可する。現在scopeの縮小、role変更、組織異動、再認証失敗、link期限切れはdownloadをdenyする。`MANAGEMENT_REPORT` documentは汎用Document download APIからもdenyし、delivery token経路だけがdownload bytesを返す。
+
 | subject | operation | visibility owner | 承認済み制御 |
 |---|---|---|---|
 | report template/version | create/update/publish | 管理者/マネージャーの承認済み scope | version CAS、変更監査 |

@@ -157,19 +157,6 @@
         "totalCount": 20,
         "utilizationRate": 80.0
       }
-    },
-    {
-      "sectionKey": "serviceDesk.sla",
-      "status": "UNAVAILABLE",
-      "classification": {
-        "factType": "未提供",
-        "confirmation": "未定義"
-      },
-      "canonical": null,
-      "error": {
-        "code": "DEPENDENCY_NOT_ACCEPTED",
-        "message": "NF-02 の ServiceDesk/SLA 正本が未受入のため対象外"
-      }
     }
   ],
   "recipientPreview": {

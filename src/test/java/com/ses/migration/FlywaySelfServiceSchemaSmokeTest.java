@@ -67,7 +67,8 @@ class FlywaySelfServiceSchemaSmokeTest {
             }
             for (String table : new String[]{
                     "m_report_template", "m_report_template_version", "m_report_schedule",
-                    "t_report_run", "t_report_section_snapshot", "t_report_delivery"}) {
+                    "t_report_run", "t_report_section_snapshot", "t_report_section_attempt",
+                    "t_report_delivery"}) {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "m_report_template_version", "updated_at");
@@ -75,9 +76,12 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "m_report_schedule", "retry_scheduled_at");
             assertColumnExists(statement, "t_report_run", "snapshot_version");
             assertColumnExists(statement, "t_report_delivery", "reauth_required");
+            assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
             assertIndexExists(statement, "t_report_run", "uk_report_run_key");
             assertIndexExists(statement, "t_report_section_snapshot", "uk_report_section_snapshot");
+            assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
             assertIndexExists(statement, "t_report_delivery", "uk_report_delivery_dedupe");
+            assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             // t_document_linkにskill sheet確認列が追加されていること（design §1/§6.1）
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
@@ -304,6 +308,15 @@ class FlywaySelfServiceSchemaSmokeTest {
                     "t_one_on_one_request", "m_survey_template", "t_survey_campaign", "t_survey_response"}) {
                 assertTableExists(statement, table);
             }
+            for (String table : new String[]{
+                    "m_report_template", "m_report_template_version", "m_report_schedule",
+                    "t_report_run", "t_report_section_snapshot", "t_report_section_attempt",
+                    "t_report_delivery"}) {
+                assertTableExists(statement, table);
+            }
+            assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
+            assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
+            assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
             assertEquals(1, queryInt(statement,

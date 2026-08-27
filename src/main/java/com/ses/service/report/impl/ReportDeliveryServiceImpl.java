@@ -67,16 +67,20 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
             throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
         }
-        ReportDocumentArtifact artifact = reportDocumentService.register(runId, "PDF");
+        ReportDocumentArtifact artifact = null;
         List<ReportDelivery> deliveries = new ArrayList<>();
         for (ReportRecipientPreview recipient : preview.getRecipients()) {
             if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
             ReportDelivery delivery = find(runId, recipient.getRecipientUserId());
-            if (delivery != null && "SENT".equals(delivery.getDeliveryStatus())
-                    && delivery.getLinkExpiresAt() != null
-                    && delivery.getLinkExpiresAt().isAfter(now())) {
+            // deliverは同一run/recipientの既存deliveryを再送しない。
+            // ENQUEUED/PROCESSING/RETRYを新attemptへ進めるとoutbox通知が重複するため、
+            // 再送はretry/manual-replayの明示操作へ限定する。
+            if (delivery != null) {
                 deliveries.add(delivery);
                 continue;
+            }
+            if (artifact == null) {
+                artifact = reportDocumentService.register(runId, "PDF");
             }
             deliveries.add(issue(run, delivery, recipient, artifact));
         }

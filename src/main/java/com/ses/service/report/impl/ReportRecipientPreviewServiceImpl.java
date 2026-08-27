@@ -108,11 +108,13 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         List<ReportRecipientPreview> results = new ArrayList<>();
         for (SysUser candidate : candidates) {
             Scope recipient = withUser(candidate, () -> scopeForCurrentUser(permissionAsOf));
+            // reportに含まれるscopeがrecipientの現在scopeに収まる場合だけ許可する。
+            // ownerのscopeより狭いrecipientへ配布すると、recipientが参照できない組織の値を通知してしまう。
             boolean allowed = "管理者".equals(candidate.getRole())
-                    || (owner.companyWide()
-                    || (!recipient.organizationIds().isEmpty()
-                    && !owner.organizationIds().isEmpty()
-                    && isSubset(recipient.organizationIds(), owner.organizationIds())));
+                    || (!owner.companyWide()
+                    && "マネージャー".equals(candidate.getRole())
+                    && isSubset(owner.organizationIds(), recipient.organizationIds())
+                    && isSubset(owner.directUserIds(), recipient.directUserIds()));
             String reason = allowed ? "SCOPE_MATCH" : "RECIPIENT_SCOPE_MISMATCH";
             results.add(new ReportRecipientPreview(candidate.getId(), candidate.getRole(),
                     allowed ? "ALLOW" : "DENY", reason, recipient.hash()));
@@ -165,19 +167,22 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
     private Scope scopeForCurrentUser(LocalDate asOf) {
         String role = SecurityUtils.currentRole();
         if ("管理者".equals(role)) {
-            return new Scope(true, Set.of(), sha256("COMPANY|" + POLICY_VERSION));
+            return new Scope(true, Set.of(), Set.of(), sha256("COMPANY|" + POLICY_VERSION));
         }
         if (!"マネージャー".equals(role)) {
             throw BusinessException.of(403, "error.managementReport.roleDenied");
         }
         Set<Long> ids = organizationScopeService.allowedOrganizationIds(asOf);
+        Set<Long> directUsers = organizationScopeService.allowedDirectUserIds(asOf);
         return new Scope(false, ids == null ? Set.of() : new HashSet<>(ids),
-                sha256("ORGANIZATION|" + sorted(ids) + "|" + POLICY_VERSION));
+                directUsers == null ? Set.of() : new HashSet<>(directUsers),
+                sha256("ORGANIZATION|" + sorted(ids) + "|" + sorted(directUsers) + "|" + POLICY_VERSION));
     }
 
     private Scope toScope(ReportScopeSnapshot scope) {
         return new Scope(scope.isCompanyWide(),
                 scope.getOrganizationIds() == null ? Set.of() : new HashSet<>(scope.getOrganizationIds()),
+                scope.getDirectUserIds() == null ? Set.of() : new HashSet<>(scope.getDirectUserIds()),
                 scope.getHash() == null ? sha256(scope.getJson()) : scope.getHash());
     }
 
@@ -222,6 +227,6 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
     private record RecipientPolicy(Set<String> roles, List<Long> userIds) {
     }
 
-    private record Scope(boolean companyWide, Set<Long> organizationIds, String hash) {
+    private record Scope(boolean companyWide, Set<Long> organizationIds, Set<Long> directUserIds, String hash) {
     }
 }
