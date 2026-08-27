@@ -11,23 +11,29 @@ public record ReportGenerationCommand(
         Long scheduleId,
         boolean systemPrincipal,
         Long principalUserId,
+        Long regenerationOfRunId,
         String recipientPreviewHash) {
 
     public static ReportGenerationCommand manual(Long templateVersionId, YearMonth period,
                                                   String cutoffKind) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                false, null, false, null, null);
+                false, null, false, null, null, null);
     }
 
     public static ReportGenerationCommand scheduled(Long templateVersionId, YearMonth period,
                                                     String cutoffKind, Long scheduleId,
                                                     Long effectivePrincipalUserId) {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                false, scheduleId, true, effectivePrincipalUserId, null);
+                false, scheduleId, true, effectivePrincipalUserId, null, null);
     }
 
     public ReportGenerationCommand forRegeneration() {
         return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
-                true, scheduleId, systemPrincipal, principalUserId, null);
+                true, scheduleId, systemPrincipal, principalUserId, null, null);
+    }
+
+    public ReportGenerationCommand forRegenerationOf(Long previousRunId) {
+        return new ReportGenerationCommand(templateVersionId, period, cutoffKind,
+                true, scheduleId, systemPrincipal, principalUserId, previousRunId, null);
     }
 }

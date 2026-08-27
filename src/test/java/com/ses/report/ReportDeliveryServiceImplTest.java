@@ -27,6 +27,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -125,6 +127,66 @@ class ReportDeliveryServiceImplTest {
         verify(deliveryMapper).updateById(delivery);
     }
 
+    @Test
+    void downloadRechecksCurrentRecipientScopeAndRejectsAfterOrganizationChange() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(1L);
+        delivery.setLinkTokenHash(sha256("token"));
+        delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
+        delivery.setReauthRequired(1);
+        delivery.setReauthenticatedAt(LocalDateTime.now());
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        ReportRecipientPreview recipient = new ReportRecipientPreview(
+                1L, "マネージャー", "DENY", "RECIPIENT_SCOPE_MISMATCH", "changed");
+        when(previewService.previewForRun(any())).thenReturn(preview(recipient));
+
+        assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+                .hasMessageContaining("error.managementReport.scopeChanged");
+        verifyNoInteractions(archiveService);
+    }
+
+    @Test
+    void retryが5回到達時にdeliveryをDLQへ移す() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setAttemptCount(5);
+        delivery.setDeliveryStatus("RETRY");
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+
+        service.retry(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("FAILED");
+        assertThat(delivery.getLastErrorCode()).isEqualTo("DELIVERY_DLQ");
+        verify(deliveryMapper).updateById(delivery);
+        verifyNoInteractions(previewService, notificationService);
+    }
+
+    @Test
+    void manualReplayはDLQ前のdeliveryをscope再確認後に再送する() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(2L);
+        delivery.setAttemptCount(5);
+        delivery.setDeliveryStatus("FAILED");
+        delivery.setDocumentId(20L);
+        delivery.setDocumentVersionNo(1);
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(previewService.previewForRun(any())).thenReturn(
+                preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+
+        service.manualReplay(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("SENT");
+        assertThat(delivery.getAttemptCount()).isEqualTo(1);
+        verify(notificationService).publishToUser(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+                contains("/download?token="), any(), eq("management-report"));
+    }
+
     private ReportRecipientPreviewResult preview(ReportRecipientPreview recipient) {
         return new ReportRecipientPreviewResult("preview-hash", "APPROVED_SCOPE_CHECKED",
                 LocalDateTime.now(), List.of(recipient));
@@ -140,5 +202,17 @@ class ReportDeliveryServiceImplTest {
         run.setScopeHash("scope");
         run.setOrganizationScopeJson("{\"companyWide\":true,\"organizationIds\":[]}");
         return run;
+    }
+
+    private String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder();
+            for (byte b : digest) result.append(String.format("%02x", b));
+            return result.toString();
+        } catch (Exception ex) {
+            throw new AssertionError(ex);
+        }
     }
 }

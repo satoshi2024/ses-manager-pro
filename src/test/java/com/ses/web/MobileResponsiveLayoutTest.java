@@ -74,7 +74,8 @@ class MobileResponsiveLayoutTest {
             "/ai/evaluation",
             // order-acceptance-workflow(S09) の新規ページ（R09-P2-07）
             "/sales-order",
-            "/acceptance"
+            "/acceptance",
+            "/management-reports"
     };
 
     private String render(String uri) throws Exception {
@@ -106,7 +107,8 @@ class MobileResponsiveLayoutTest {
             "/ai/matching",
             "/ai/evaluation",
             "/sales-order",
-            "/acceptance"
+            "/acceptance",
+            "/management-reports"
     })
     void 全ページにモバイル用レイアウト部品が差し込まれている(String uri) throws Exception {
         String html = render(uri);

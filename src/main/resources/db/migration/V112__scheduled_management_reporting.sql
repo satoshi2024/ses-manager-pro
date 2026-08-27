@@ -182,3 +182,12 @@ SELECT r.role, m.id
 FROM (SELECT '管理者' AS role UNION ALL SELECT 'マネージャー') r
 CROSS JOIN m_menu m
 WHERE m.menu_key = 'management-report';
+
+-- V66.1以降のfail-closed action permissionへ、マネージャーのreport APIを追加する。
+-- 管理者は既存のrole-admin全action許可を使用する。
+INSERT IGNORE INTO t_permission_group_action (tenant_id, group_id, action_key, deny_flag)
+SELECT 'default', g.id, 'management-report.*', 0
+FROM m_permission_group g
+WHERE g.tenant_id = 'default'
+  AND g.group_key = 'role-manager'
+  AND g.enabled = 1;

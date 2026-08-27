@@ -161,6 +161,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setTemplateId(templateVersion.getTemplateId());
             run.setTemplateVersionId(templateVersion.getId());
             run.setScheduleId(command.scheduleId());
+            run.setRegenerationOfRunId(command.regenerationOfRunId());
             run.setPrincipalType("SYSTEM_PRINCIPAL");
             run.setPrincipalUserId(command.principalUserId() != null
                     ? command.principalUserId() : SecurityUtils.currentUserId());

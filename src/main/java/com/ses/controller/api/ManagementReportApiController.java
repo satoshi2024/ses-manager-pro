@@ -71,7 +71,7 @@ public class ManagementReportApiController {
     public ApiResult<ReportGenerationResult> generate(@RequestBody ReportRunRequest request) {
         ReportGenerationCommand command = new ReportGenerationCommand(request.templateVersionId(),
                 YearMonth.parse(request.period()), request.cutoffKind(), false, null, false, null,
-                request.recipientPreviewHash());
+                null, request.recipientPreviewHash());
         return ApiResult.success(snapshotService.generate(command));
     }
 
@@ -86,7 +86,8 @@ public class ManagementReportApiController {
         ReportRun previous = snapshotService.findRun(runId);
         return ApiResult.success(snapshotService.generate(new ReportGenerationCommand(
                 previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
-                previous.getCutoffKind(), true, previous.getScheduleId(), false, null, null)));
+                previous.getCutoffKind(), true, previous.getScheduleId(), false, null,
+                previous.getId(), null)));
     }
 
     @GetMapping("/runs/{runId}")

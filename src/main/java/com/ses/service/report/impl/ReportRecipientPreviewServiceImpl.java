@@ -110,10 +110,16 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
 
     private List<SysUser> candidateUsers(RecipientPolicy policy) {
         QueryWrapper<SysUser> query = new QueryWrapper<SysUser>().eq("status", 1);
+        // recipient設定のuserIdsだけを信頼せず、承認済みroleの交差条件を必ず付ける。
+        // これにより、誤設定で営業・HR等を配布対象へ混入させない。
+        Set<String> allowedRoles = Set.of("管理者", "マネージャー");
+        if (policy.roles().isEmpty()) {
+            query.in("role", allowedRoles);
+        } else {
+            query.in("role", policy.roles().stream().filter(allowedRoles::contains).toList());
+        }
         if (!policy.userIds().isEmpty()) {
             query.in("id", policy.userIds());
-        } else {
-            query.in("role", policy.roles());
         }
         return sysUserMapper.selectList(query);
     }
