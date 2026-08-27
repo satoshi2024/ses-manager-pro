@@ -157,7 +157,7 @@ public class LifecycleScopeService {
      *   <li>管理者/HR: 全タスク可視</li>
      *   <li>マネージャー: 内部タスク含む全タスク可視</li>
      *   <li>営業: {@code is_engineer_visible=1} のタスク、および内部タスク（{@code is_engineer_visible=0}）のうち
-     *       営業関係（{@code assignee_rule = "PRIMARY_SALES"}）のタスクのみ可視。HR機密タスクはマスク。</li>
+     *       営業関係（担当ロールが「営業」または担当ユーザーが自分自身）のタスクのみ可視。HR機密タスクはマスク。</li>
      *   <li>要員: {@code is_engineer_visible=1} のタスクのみ</li>
      * </ul>
      */
@@ -170,13 +170,14 @@ public class LifecycleScopeService {
         }
 
         // 営業: 本人公開タスクは常に可視。内部タスク（is_engineer_visible=0）は
-        // 営業関係（PRIMARY_SALES）のもののみ可視。HR機密タスクはマスク。
+        // 営業関係（assigneeRole="営業" または 担当ユーザーが自分自身）のみ可視。HR機密タスクはマスク。
         if ("営業".equals(role)) {
             if (task.getIsEngineerVisible() != null && task.getIsEngineerVisible() == 1) {
                 return true;
             }
-            // 内部タスクのうち営業担当ルールのみ可視
-            return "PRIMARY_SALES".equals(task.getAssigneeRole());
+            // 内部タスクのうち営業関係のみ可視
+            return "営業".equals(task.getAssigneeRole())
+                    || (task.getAssigneeUserId() != null && Objects.equals(task.getAssigneeUserId(), currentUser.getId()));
         }
 
         // 管理者・HR・マネージャーは全タスク可視
@@ -184,12 +185,13 @@ public class LifecycleScopeService {
     }
 
     /**
-     * タスクの完了・更新権限チェック
+     * タスクの完了・更新・訂正権限チェック
      */
     public void assertCanEditTask(SysUser currentUser, LifecycleTask task, LifecycleCase lcCase, Engineer engineer) {
         if (currentUser == null) {
             throw BusinessException.of(401, "error.unauthorized");
         }
+
         String role = currentUser.getRole();
 
         // 管理者・HRは全タスクを更新可能
@@ -197,20 +199,23 @@ public class LifecycleScopeService {
             return;
         }
 
-        // 要員本人の場合: 本人公開タスクかつ自身が担当者であること
-        if ("要員".equals(role)) {
-            if (task.getIsEngineerVisible() == null || task.getIsEngineerVisible() != 1) {
-                throw BusinessException.of(403, "error.lifecycle.taskHiddenFromEngineer", "内部限定タスクは操作できません");
-            }
-            if (task.getAssigneeUserId() != null && !Objects.equals(task.getAssigneeUserId(), currentUser.getId())) {
-                throw BusinessException.of(403, "error.lifecycle.notAssignedToYou", "あなたに割り当てられたタスクではありません");
+        // 担当者本人であれば実行可能（本人がアサインされているタスク）
+        if (task.getAssigneeUserId() != null && Objects.equals(task.getAssigneeUserId(), currentUser.getId())) {
+            // 要員本人の場合は内部非公開タスクでないことを確認
+            if ("要員".equals(role) && (task.getIsEngineerVisible() == null || task.getIsEngineerVisible() != 1)) {
+                throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
             }
             return;
         }
 
-        // 担当者本人であれば実行可能
-        if (task.getAssigneeUserId() != null && Objects.equals(task.getAssigneeUserId(), currentUser.getId())) {
-            return;
+        // 閲覧不可のタスク（スコープ外または非公開HRタスク）への操作は存在を推測させない 404 で拒否
+        if (!canViewCase(currentUser, lcCase, engineer) || !isTaskVisibleToUser(currentUser, task)) {
+            throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
+        }
+
+        // 要員本人の場合: 本人公開タスクかつ自身が担当者であること (上記本人チェックを通過しなかった場合は拒否)
+        if ("要員".equals(role)) {
+            throw BusinessException.of(403, "error.lifecycle.notAssignedToYou", "あなたに割り当てられたタスクではありません");
         }
 
         // ロール担当タスクであれば、そのロール保持者なら実行可能
@@ -218,9 +223,16 @@ public class LifecycleScopeService {
             return;
         }
 
-        // マネージャー / 営業で管轄内の場合
-        if ("マネージャー".equals(role) || "営業".equals(role)) {
+        // マネージャーで管轄内の場合
+        if ("マネージャー".equals(role)) {
             if (canViewCase(currentUser, lcCase, engineer)) {
+                return;
+            }
+        }
+
+        // 営業で管轄内かつ営業関係タスクの場合
+        if ("営業".equals(role)) {
+            if (canViewCase(currentUser, lcCase, engineer) && isTaskVisibleToUser(currentUser, task)) {
                 return;
             }
         }

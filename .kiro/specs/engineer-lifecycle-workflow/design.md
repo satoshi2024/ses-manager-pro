@@ -211,18 +211,21 @@ CREATE TABLE t_lifecycle_event (
 
 ## 5. 退社ゲート (Resignation Gate) の決定表
 
-退社案件（`RESIGNATION`）の完了（`status = COMPLETED`）に際し、システムは以下の各項目を厳格に評価する:
+退社案件（`RESIGNATION`）の完了確定（`POST /api/lifecycle/cases/{id}/complete`）に際し、システムは以下の9項目を厳格に評価・実行する:
+- **前提条件検査（#6〜#9）**: 阻害タスクの完了/承認済み免除、経費精算、文書保管、稼働中契約の終了。これらが1つでも未充足の場合は `evaluate()` で FAIL となり案件完了をブロックする。
+- **案件完了時自動実行（#1〜#5）**: `completeCase` トランザクション内で `executeAutomaticGateActions` により Fail-Closed（1つでも失敗時は全ロールバック）で自動実行される。`evaluate()` では事前確認として対象の有無を検出し、自動実行予定としてレポートする。
 
-| # | チェック項目 | 判定対象・検証方式 | 未完了時の動作 | 例外免除（WAIVE）の可否 |
-|---|---|---|---|---|
-| 1 | 内部アカウント無効化 | `sys_user.status == 0` | 案件完了をブロック | 不可（アカウント停止は必須） |
-| 2 | Webセッション失効 | `PersistentSessionService` / `PortalSessionService` による即時revocation | 案件完了処理内で自動実行 | 自動実行のため免除不要 |
-| 3 | ポータル連携解除 | `t_engineer_account_link` の解除または連携ユーザーの無効化 | 案件完了をブロック | 不可 |
-| 4 | 担当営業の引継ぎ/解除 | 有効な主担当営業割当（`EngineerSales`）の解除確認 | 案件完了をブロック | 可（例外承認必要） |
-| 5 | 組織所属の閉鎖 | `OrganizationService.closeAssignmentsForUser` の実行確認 | 案件完了処理内で自動実行 | 自動実行のため免除不要 |
-| 6 | 貸与資産の返却 | タスク `RESIGN_ASSET_RETURN` の完了状態 | 案件完了をブロック | 可（弁償手続き中等で例外承認必要） |
-| 7 | 未精算経費・請求確認 | `t_expense_request` で対象要員の未精算（`REQUESTED`/`APPROVED`）の有無 | 案件完了をブロック | 可（別途精算合意で例外承認必要） |
-| 8 | 法定文書保存確認 | 契約・誓約書等の文書台帳リンク存在確認 | 案件完了をブロック | 可（紙面保管等の例外承認必要） |
+| # | チェック項目コード | チェック項目名 | 実行種別 | 判定対象・検証方式 | 未充足時の動作 | 例外免除（WAIVE）の可否 |
+|---|---|---|---|---|---|---|
+| 1 | `USER_DEACTIVATION` | 内部アカウント無効化 | 自動実行 | 案件完了時に `sys_user.status = 0` に自動更新（アカウント未連携時は対象外PASS） | 完了時自動実行（失敗時Txロールバック） | 自動実行のため免除不要 |
+| 2 | `SESSION_REVOCATION` | Webセッション失効 | 自動実行 | `PersistentSessionService` および `PortalSessionService` による全セッション即時破棄 | 完了時自動実行（Fail-Closed） | 自動実行のため免除不要 |
+| 3 | `PORTAL_UNLINK` | ポータル連携解除 | 自動実行 | `EngineerAccountLinkService.unlinkByEngineerId` による連携解除 | 完了時自動実行（Fail-Closed） | 自動実行のため免除不要 |
+| 4 | `SALES_RELEASE` | 担当営業割当の解除 | 自動実行 | `EngineerSales` の全アクティブ割当の `released_at` に基準日を設定 | 完了時自動実行（Fail-Closed） | 自動実行のため免除不要 |
+| 5 | `ORG_ASSIGNMENT_CLOSE` | 組織所属の終了 | 自動実行 | `OrganizationService.closeAssignmentsForUser` による組織配属終了 | 完了時自動実行（Fail-Closed） | 自動実行のため免除不要 |
+| 6 | `ASSET_RETURN` | 貸与資産の返却 | 手動阻害タスク | タスク `RESIGN_ASSET_RETURN` の完了状態 (`COMPLETED`/`WAIVED`) | 案件完了をブロック | 可（弁償手続き中等で例外承認必要） |
+| 7 | `UNSETTLED_EXPENSE` | 未精算経費・請求確認 | 手動阻害タスク/DB | `t_expense_request` の未精算件数が0件、または `RESIGN_EXPENSE_SETTLE` タスクが承認済み `WAIVED` | 案件完了をブロック | 可（別途精算合意で例外承認必要） |
+| 8 | `DOCUMENT_RETENTION` | 法定文書保存確認 | 手動阻害タスク | タスク `RESIGN_DOC_RETENTION` の完了状態 (`COMPLETED`/`WAIVED`) | 案件完了をブロック | 可（紙面保管等の例外承認必要） |
+| 9 | `ACTIVE_CONTRACT` | 稼働中契約の終了確認 | システムDB検証 | `t_contract` で対象要員の `status = '稼動中'` の件数が0件 | 案件完了をブロック | 不可（契約終了または解約が必要） |
 
 ---
 

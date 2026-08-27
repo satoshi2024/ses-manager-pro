@@ -30,15 +30,16 @@ SES事業において、要員の入社、案件配属、部署/拠点異動、�
 
 ## R3. 退社ゲート (Resignation Gate) と 例外承認 (Exception Approval)
 
-1. THE 退社案件（`RESIGNATION`） SHALL 以下の必須統制項目をゲート検証タスクまたはシステム検証として包含する:
-   - (1) 内部ユーザーアカウント無効化（`sys_user.status = 0` / ロック）
-   - (2) 有効Webセッションの即時失効（`PersistentSessionService` および `PortalSessionService` による全セッション強制revocation）
-   - (3) 要員ポータル連携の解除または無効化（`t_engineer_account_link` 解除）
-   - (4) 担当営業の割当解除または主担当引継ぎ（`EngineerSalesService`）
-   - (5) 組織所属の終了（`OrganizationService.closeAssignmentsForUser` による有効所属の閉鎖）
-   - (6) 貸与資産の返却確認（PC、スマートフォン、入館証、セキュリティキー等の返却証跡）
-   - (7) 未精算経費・未完了請求の確認
-   - (8) 法定文書・電子契約原本の保管確認
+1. THE 退社案件（`RESIGNATION`） SHALL 以下の9つの必須統制項目をゲート検証（手動阻害タスク、システム検証、および案件完了時自動実行）として包含する:
+   - (1) 内部ユーザーアカウント無効化（`sys_user.status = 0` / 案件完了時自動実行）
+   - (2) 有効Webセッションの即時失効（`PersistentSessionService` および `PortalSessionService` による全セッション強制revocation / 案件完了時自動実行）
+   - (3) 要員ポータル連携の解除・無効化（`EngineerAccountLinkService.unlinkByEngineerId` / 案件完了時自動実行）
+   - (4) 担当営業の割当解除・主担当引継ぎ（`EngineerSalesService` による割当終了 / 案件完了時自動実行）
+   - (5) 組織所属の終了（`OrganizationService.closeAssignmentsForUser` による有効所属の閉鎖 / 案件完了時自動実行）
+   - (6) 貸与資産の返却確認（`RESIGN_ASSET_RETURN` 阻害タスクの `COMPLETED` または承認済み `WAIVED`）
+   - (7) 未精算経費・立替金の精算確認（`t_expense_request` 未精算0件、または `RESIGN_EXPENSE_SETTLE` 阻害タスクの承認済み `WAIVED`）
+   - (8) 法定文書・誓約書の保管確認（`RESIGN_DOC_RETENTION` 阻害タスクの `COMPLETED` または承認済み `WAIVED`）
+   - (9) 稼働中契約の終了確認（`t_contract` で対象要員の `status = '稼動中'` が0件）
 2. WHEN 案件内に未完了の完了阻害タスク（`is_blocking = 1` かつ status ≠ `COMPLETED` / `WAIVED`）が存在する場合、THE システム SHALL 案件の `COMPLETED` 遷移を確実に拒否（Block）する。
 3. WHEN 業務上不可避な理由で阻害タスクを免除・保留して案件を完了させる場合、THE システム SHALL 申請者単独での完了を禁止し、既存の統一承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）へ例外申請を要求する。例外申請には免除理由、是正期限（`remedy_deadline`）、およびリスク所有者（`risk_owner_user_id`）を必須とし、承認完了後にのみ該当タスクを `WAIVED` へ遷移させて案件完了を可能とする。
 

@@ -43,6 +43,18 @@ public interface LifecycleEventMapper extends BaseMapper<LifecycleEvent> {
         throw new UnsupportedOperationException("t_lifecycle_event はイミュータブルです。DELETE は禁止されています。");
     }
 
+    /** イミュータブル保護: 一括 DELETE は禁止 */
+    @Override
+    default int deleteBatchIds(java.util.Collection<?> idList) {
+        throw new UnsupportedOperationException("t_lifecycle_event はイミュータブルです。DELETE は禁止されています。");
+    }
+
+    /** イミュータブル保護: Map 条件付き DELETE は禁止 */
+    @Override
+    default int deleteByMap(java.util.Map<String, Object> columnMap) {
+        throw new UnsupportedOperationException("t_lifecycle_event はイミュータブルです。DELETE は禁止されています。");
+    }
+
     /** イミュータブル保護: UPDATE は禁止。訂正はイベント追記で行うこと。 */
     @Override
     default int updateById(LifecycleEvent entity) {

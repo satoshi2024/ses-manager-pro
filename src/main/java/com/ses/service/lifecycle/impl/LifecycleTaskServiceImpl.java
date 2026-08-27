@@ -416,6 +416,19 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (task == null) {
             throw BusinessException.of(404, "error.lifecycle.taskNotFound", "タスクが見つかりません");
         }
+
+        LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+        if (lcCase == null) {
+            throw BusinessException.of(404, "error.lifecycle.caseNotFound", "案件が見つかりません");
+        }
+        if ("CANCELLED".equals(lcCase.getStatus())) {
+            throw BusinessException.of(400, "error.lifecycle.caseCancelled", "取消済みの案件のタスクは訂正できません");
+        }
+
+        Engineer engineer = engineerMapper.selectById(lcCase.getEngineerId());
+        SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
+        scopeService.assertCanEditTask(actor, task, lcCase, engineer);
+
         if (!"COMPLETED".equals(task.getStatus()) && !"WAIVED".equals(task.getStatus())) {
             throw BusinessException.of(400, "error.lifecycle.taskNotCompleted",
                     "完了済みまたは免除済みのタスクのみ訂正記録が可能です（現在のステータス: " + task.getStatus() + "）");
@@ -423,8 +436,6 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
         if (correctionNote == null || correctionNote.isBlank()) {
             throw BusinessException.of(400, "error.lifecycle.correctionNoteRequired", "訂正内容の記述は必須です");
         }
-
-        SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
 
         // 訂正はイベント追記INSERTのみ（タスクのステータスは変更しない）
         String noteEscaped = correctionNote.replace("\"", "\\\"");
@@ -440,7 +451,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .occurredAt(LocalDateTime.now())
                 .build());
 
-        log.info("Recorded correction for task {} by user {}: {}", taskId, actorUserId, correctionNote);
+        log.info("Recorded correction for task {} in case {} by user {}: {}", taskId, lcCase.getId(), actorUserId, correctionNote);
     }
 
     private void assertPredecessorsCompleted(LifecycleTask task) {

@@ -76,6 +76,9 @@ class ResignationGateFailureDrillTest {
     @Autowired
     private LifecycleScopeService scopeService;
 
+    @Autowired
+    private LifecycleEventMapper eventMapper;
+
     private SysUser adminUser;
     private SysUser salesUser;
     private SysUser engineerUser;
@@ -399,7 +402,7 @@ class ResignationGateFailureDrillTest {
     }
 
     @Test
-    @DisplayName("M-6: correctCompletedTask - 完了済みタスクへの訂正記録 (LC-P1-15)")
+    @DisplayName("M-6: correctCompletedTask - 完了済みタスクへの訂正記録と認可スコープ検証 (LC-P1-15, LC-P1-18)")
     void testCorrectCompletedTask() {
         LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
                 .engineerId(engineer.getId())
@@ -413,69 +416,150 @@ class ResignationGateFailureDrillTest {
         LifecycleTask task = tasks.get(0);
         taskService.completeTask(task.getId(), adminUser.getId(), null);
 
-        // 完了済みタスクへの訂正記録が成功すること
+        // 1. 管理者による完了済みタスクへの訂正記録が成功すること
         assertDoesNotThrow(() ->
                 taskService.correctCompletedTask(task.getId(), adminUser.getId(), "提出書類の誤記訂正：誓約書の日付を修正"));
 
-        // 未完了タスクへの訂正は拒否されること
+        // 2. 未完了タスクへの訂正は拒否されること
         LifecycleTask pendingTask = taskMapper.selectByCaseId(caseDto.getId()).stream()
                 .filter(t -> !"COMPLETED".equals(t.getStatus()) && !"WAIVED".equals(t.getStatus()))
                 .findFirst()
                 .orElse(null);
         assertNotNull(pendingTask, "未完了のタスクが存在すること");
-        BusinessException ex = assertThrows(BusinessException.class, () ->
+        BusinessException ex1 = assertThrows(BusinessException.class, () ->
                 taskService.correctCompletedTask(pendingTask.getId(), adminUser.getId(), "未完了タスクへの訂正試行"));
-        assertEquals(400, ex.getCode());
-        assertEquals("error.lifecycle.taskNotCompleted", ex.getMessageKey());
+        assertEquals(400, ex1.getCode());
+        assertEquals("error.lifecycle.taskNotCompleted", ex1.getMessageKey());
+
+        // 3. HR担当タスクに対し、無権限の営業ユーザーが訂正しようとすると 404 (非公開) または 403 (権限なし) で拒否されること
+        SysUser otherSales = SysUser.builder()
+                .username("other_sales")
+                .password("pass")
+                .realName("無関係営業")
+                .role("営業")
+                .status(1)
+                .build();
+        sysUserMapper.insert(otherSales);
+        BusinessException ex2 = assertThrows(BusinessException.class, () ->
+                taskService.correctCompletedTask(task.getId(), otherSales.getId(), "無権限営業による訂正試行"));
+        assertTrue(ex2.getCode() == 404 || ex2.getCode() == 403, "無権限ユーザーの訂正操作は404または403で拒否されること");
+
+        // 4. CANCELLED案件のタスクへの訂正は 400 で拒否されること
+        caseService.cancelCase(caseDto.getId(), adminUser.getId(), "案件中止");
+        BusinessException ex3 = assertThrows(BusinessException.class, () ->
+                taskService.correctCompletedTask(task.getId(), adminUser.getId(), "中止案件への訂正試行"));
+        assertEquals(400, ex3.getCode());
+        assertEquals("error.lifecycle.caseCancelled", ex3.getMessageKey());
     }
 
     @Test
-    @DisplayName("M-7: isTaskVisibleToUser - 営業ロールのHR機密タスクマスク検証 (LC-P1-14)")
-    void testSalesRoleTaskMasking() {
-        // 内部タスク (is_engineer_visible=0, assignee_role=HR) — 営業に非公開
-        LifecycleTask hrTask = LifecycleTask.builder()
-                .caseId(1L)
-                .taskCode("INTERNAL_HR_TASK")
-                .taskName("HR機密タスク")
-                .dueDate(LocalDate.now())
-                .assigneeRole("HR")
-                .isEngineerVisible(0)
-                .status("PENDING")
-                .version(0)
-                .build();
+    @DisplayName("M-7: isTaskVisibleToUser & assertCanEditTask - 実起票データによる営業ロールのHR機密タスクマスクと操作遮断検証 (LC-P1-14)")
+    void testSalesRoleTaskMaskingAndEditBlocking() {
+        // 実起票用テンプレート: PRIMARY_SALES(内部), ROLE:HR(内部), ENGINEER_SELF(公開)
+        LifecycleTemplateDto salesMaskTpl = templateService.createTemplate(LifecycleTemplateDto.builder()
+                .templateType("RESIGNATION")
+                .name("営業マスク検証フロー")
+                .validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_SALES_HANDOVER")
+                                .taskName("営業引継ぎ確認")
+                                .assigneeRule("PRIMARY_SALES")
+                                .isEngineerVisible(0) // 内部
+                                .sortOrder(1)
+                                .isMandatory(1)
+                                .isBlocking(0)
+                                .build(),
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_HR_INTERNAL")
+                                .taskName("HR機密退職面談記録")
+                                .assigneeRule("ROLE")
+                                .assigneeRuleValue("HR")
+                                .isEngineerVisible(0) // 内部HR
+                                .sortOrder(2)
+                                .isMandatory(1)
+                                .isBlocking(0)
+                                .build(),
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("RESIGN_ENG_SURVEY")
+                                .taskName("要員アンケート提出")
+                                .assigneeRule("ENGINEER_SELF")
+                                .isEngineerVisible(1) // 公開
+                                .sortOrder(3)
+                                .isMandatory(1)
+                                .isBlocking(0)
+                                .build()
+                ))
+                .build(), adminUser.getId());
 
-        // 営業関連内部タスク (is_engineer_visible=0, assignee_role=PRIMARY_SALES) — 営業に公開
-        LifecycleTask salesTask = LifecycleTask.builder()
-                .caseId(1L)
-                .taskCode("SALES_TASK")
-                .taskName("営業関連タスク")
-                .dueDate(LocalDate.now())
-                .assigneeRole("PRIMARY_SALES")
-                .isEngineerVisible(0)
-                .status("PENDING")
-                .version(0)
+        // 新規要員で案件起票 (主担当営業: salesUser)
+        Engineer testEng = Engineer.builder().fullName("営業マスク検証要員").status("稼動中").employmentType("正社員").build();
+        engineerMapper.insert(testEng);
+        EngineerSales es = EngineerSales.builder()
+                .engineerId(testEng.getId())
+                .salesUserId(salesUser.getId())
+                .primaryFlag(1)
+                .assignedAt(LocalDate.now().minusMonths(1))
                 .build();
+        engineerSalesMapper.insert(es);
 
-        // 公開タスク (is_engineer_visible=1)
-        LifecycleTask publicTask = LifecycleTask.builder()
-                .caseId(1L)
-                .taskCode("PUBLIC_TASK")
-                .taskName("公開タスク")
-                .dueDate(LocalDate.now())
-                .assigneeRole("HR")
-                .isEngineerVisible(1)
-                .status("PENDING")
-                .version(0)
+        // 要員本人アカウント連携 (ENGINEER_SELF解決用)
+        SysUser testEngUser = SysUser.builder()
+                .username("eng_mask_user")
+                .password("pass")
+                .realName("マスク要員")
+                .role("要員")
+                .status(1)
                 .build();
+        sysUserMapper.insert(testEngUser);
 
-        assertFalse(scopeService.isTaskVisibleToUser(salesUser, hrTask),
-                "営業ロールはHR機密の内部タスク（is_engineer_visible=0, role=HR）を閲覧不可");
-        assertTrue(scopeService.isTaskVisibleToUser(salesUser, salesTask),
-                "営業ロールはPRIMARY_SALES担当の内部タスクを閲覧可能");
-        assertTrue(scopeService.isTaskVisibleToUser(salesUser, publicTask),
-                "営業ロールは公開タスク（is_engineer_visible=1）を閲覧可能");
-        assertTrue(scopeService.isTaskVisibleToUser(adminUser, hrTask),
-                "管理者は全タスクを閲覧可能");
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setEngineerId(testEng.getId());
+        link.setSysUserId(testEngUser.getId());
+        engineerAccountLinkMapper.insert(link);
+
+        LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(testEng.getId())
+                .lifecycleType("RESIGNATION")
+                .templateId(salesMaskTpl.getId())
+                .anchorDate(LocalDate.now())
+                .title("営業マスク検証案件")
+                .build());
+
+        List<LifecycleTask> tasks = taskMapper.selectByCaseId(caseDto.getId());
+        LifecycleTask salesTask = tasks.stream().filter(t -> "RESIGN_SALES_HANDOVER".equals(t.getTaskCode())).findFirst().orElseThrow();
+        LifecycleTask hrTask = tasks.stream().filter(t -> "RESIGN_HR_INTERNAL".equals(t.getTaskCode())).findFirst().orElseThrow();
+        LifecycleTask engTask = tasks.stream().filter(t -> "RESIGN_ENG_SURVEY".equals(t.getTaskCode())).findFirst().orElseThrow();
+
+        // 1. 本番解決データにおける assigneeRole の確認 (salesTaskは"営業", hrTaskは"HR")
+        assertEquals("営業", salesTask.getAssigneeRole(), "PRIMARY_SALESルールのタスクは営業ロールとして解決されること");
+        assertEquals("HR", hrTask.getAssigneeRole(), "ROLE:HRルールのタスクはHRロールとして解決されること");
+
+        // 2. 閲覧権限 (isTaskVisibleToUser) の検証
+        assertTrue(scopeService.isTaskVisibleToUser(salesUser, salesTask), "担当営業は営業関連の内部タスクを閲覧可能");
+        assertFalse(scopeService.isTaskVisibleToUser(salesUser, hrTask), "担当営業はHR機密の内部タスクを閲覧不可");
+        assertTrue(scopeService.isTaskVisibleToUser(salesUser, engTask), "担当営業は本人公開タスクを閲覧可能");
+        assertTrue(scopeService.isTaskVisibleToUser(adminUser, hrTask), "管理者は全タスクを閲覧可能");
+
+        // 3. 更新・操作権限 (assertCanEditTask) の検証
+        LifecycleCase lcCase = caseMapper.selectById(caseDto.getId());
+        // 担当営業は営業タスクを操作可能
+        assertDoesNotThrow(() -> scopeService.assertCanEditTask(salesUser, salesTask, lcCase, testEng));
+        // 担当営業がHR機密タスクを操作（complete/reassign等）しようとすると 404 で遮断されること
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                scopeService.assertCanEditTask(salesUser, hrTask, lcCase, testEng));
+        assertEquals(404, ex.getCode(), "非公開HRタスクへの操作は存在を推測させない 404 で拒否されること");
+        assertEquals("error.lifecycle.taskNotFound", ex.getMessageKey());
+    }
+
+    @Test
+    @DisplayName("M-8: LifecycleEventMapper - イベント台帳のイミュータブル性検証 (LC-P1-15)")
+    void testLifecycleEventMapperImmutability() {
+        // LifecycleEventMapper の更新・削除メソッドはすべて UnsupportedOperationException
+        assertThrows(UnsupportedOperationException.class, () -> eventMapper.deleteById(1L));
+        assertThrows(UnsupportedOperationException.class, () -> eventMapper.deleteBatchIds(List.of(1L, 2L)));
+        assertThrows(UnsupportedOperationException.class, () -> eventMapper.deleteByMap(java.util.Map.of("id", 1L)));
+        assertThrows(UnsupportedOperationException.class, () -> eventMapper.updateById(new LifecycleEvent()));
     }
 }
 
