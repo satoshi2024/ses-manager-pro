@@ -43,6 +43,8 @@
 | `fixture-same-name-001` | BLOCKED | 同姓同名/複数候補。自動統合せずhuman resolution待ち |
 | `fixture-scope-out-001` | BLOCKED | scope外provider。providerCallCount=0を確認 |
 | `fixture-audit-001` | BLOCKED | immutable audit protection |
+| `fixture-legal-retention-001` | BLOCKED | 法定保存のblocker |
+| `fixture-business-001` | BLOCKED | active business blocker |
 | `fixture-not-due-001` | UNKNOWN | 期限未到来。処分候補ではない |
 
 ## 4. 実行記録
@@ -59,7 +61,7 @@ pwsh -NoProfile -File .\tools\privacy-retention-dsar\read-only-dry-run.ps1 `
 ```text
 exit code: 0
 summary.candidate: 1
-summary.blocked: 4
+summary.blocked: 6
 summary.unknown: 2
 summary.providerCallCount: 0
 summary.writeCount: 0
