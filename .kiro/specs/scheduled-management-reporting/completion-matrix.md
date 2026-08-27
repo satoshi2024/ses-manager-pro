@@ -15,7 +15,7 @@
 | T2 | sample snapshot spec | 完了 | `sample-snapshot-spec.md`、actual/forecast、cutoff、timezone、freshness、scope、source hash、section status | `86826538` |
 | T3 | 最新Base取り込みとapproved plan/spec/tasks昇格 | 完了 | `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、中央traceability、承認済みspec | `a86af3f30f89feff28e88bf4dda5e10974852cdd` |
 | F1 | template/version/schedule/run/snapshot/delivery DDL | 完了 | `V112__scheduled_management_reporting.sql`、H2 schema、6 entity/mapper | `9b342c79d8495ce52e81d1c2a862d603f3b8581a`。compile成功、AttendanceSchemaTest 6/6 |
-| F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`、保存scope、明示system principal、再生成version | `fde702a1` / `573cf60b`、snapshot targeted test 5/5、合同gate 204/204 |
+| F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`、保存scope、明示system principal、再生成version、現在日付での再認可 | `fde702a1` / `573cf60b`、snapshot targeted test 5/5、合同gate 204/204 |
 | A1 | template/preview/run UI | 完了 | `ManagementReportApiController`、`management-reports/index.html`、静的role境界 | `fde702a1`、`MobileResponsiveLayoutTest` 29/29 |
 | B1 | document | 完了 | `ReportDocumentServiceImpl`、PDF/XLSX/CSV renderer、DocumentService登録API | `b36f91a7`、`ReportDocumentServiceImplTest` 2/2 |
 | B2 | delivery | 完了 | `ManagementReportScheduler`、schedule CAS/cron、保存scope、delivery token/scope/reauth/retry API、notification outbox接続 | `0e0d4d50` / `87d055a4` / `573cf60b` / `75490e79`、delivery 6/6、scheduler 3/3、schedule 3/3 |
@@ -39,7 +39,7 @@
 
 ## M証跡
 
-- contract/shape: `ReportSnapshotServiceImplTest` 5/5、`ReportDeliveryServiceImplTest` 6/6、`ManagementReportSchedulerTest` 3/3、`ReportScheduleServiceImplTest` 3/3、`ReportDocumentServiceImplTest` 2/2、`ActionPermissionResolverTest` 11/11、`AllMappersSchemaSweepTest` 174/174、合同targeted gate 204/204。
+- contract/shape: `ReportSnapshotServiceImplTest` 5/5、`ReportDeliveryServiceImplTest` 6/6、`ManagementReportSchedulerTest` 3/3、`ReportScheduleServiceImplTest` 3/3、`ReportDocumentServiceImplTest` 2/2、`CashFlowForecastServiceTest` 15/15、`ActionPermissionResolverTest` 11/11、`AllMappersSchemaSweepTest` 174/174、合同targeted gate 204/204（Cash Flow scope追加テストは別途15/15）。
 - 月末/timezone: `2026-08-01..31` と `Asia/Tokyo`、速報 `GENERATED_AT`、確定 `MONTHLY_CLOSING`、未締め確定拒否を検証。
 - snapshot/retry/regeneration: 同一run retryは成功sectionを再生成せず、明示regenerationは新version/runと親runを作り、schedule初回実行は保存cronの次回発火時刻から開始する。section failureは`PARTIAL`/配布停止。
 - scheduler/delivery: ShedLock＋DB CASの二重claim、preview hash、scope変更download拒否、期限切れlink、再認証、attempt 5のDLQ、manual replay、notification dedupeを検証。

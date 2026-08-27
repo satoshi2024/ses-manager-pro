@@ -147,7 +147,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             JsonNode saved = objectMapper.readTree(savedScope.getJson());
             Set<Long> savedOrganizations = readLongSet(saved.path("organizationIds"));
             Set<Long> savedDirectUsers = readLongSet(saved.path("directUserIds"));
-            LocalDate asOf = run.getPeriodTo() == null ? LocalDate.now(ZoneId.of(TIMEZONE)) : run.getPeriodTo();
+            LocalDate asOf = LocalDate.now(ZoneId.of(TIMEZONE));
             Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
             Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
             if (currentOrganizations == null || currentDirectUsers == null
@@ -190,6 +190,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         YearMonth target = command.period();
         LocalDate periodFrom = target.atDay(1);
         LocalDate periodTo = target.atEndOfMonth();
+        LocalDate permissionAsOf = LocalDate.now(ZoneId.of(TIMEZONE));
         String cutoffKind = normalizeCutoff(command.cutoffKind());
         boolean confirmed = "MONTHLY_CLOSING".equals(cutoffKind);
         if (confirmed && !monthlyClosingService.isClosed(target.toString())) {
@@ -203,9 +204,9 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
         LocalDateTime asOfAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
         ReportScopeSnapshot scope = command.scopeSnapshot() == null
-                ? resolveScope(periodTo) : command.scopeSnapshot();
+                ? resolveScope(permissionAsOf) : command.scopeSnapshot();
         if (command.scopeSnapshot() != null) {
-            assertGenerationScope(scope, periodTo);
+            assertGenerationScope(scope, permissionAsOf);
         }
 
         // generation直前に同一principalでrecipient scopeを再評価する。APIからhashが渡された場合は

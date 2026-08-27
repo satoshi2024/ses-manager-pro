@@ -14,6 +14,7 @@ Ownerは管理者（経営管理責任者）。利用者は管理者とマネー
 - recipient preview が対象 section と scope を照合し、誤配布を拒否する。
 - session のない scheduler が system principal と保存済み scope を使用する。
 - 管理者の全社scopeとマネージャーの許可組織scopeを区別する。
+- マネージャー向けCash Flowは保存済みscope内の請求・BP・給与実データだけを対象とし、全社の期首残高・固定費・閾値・全社fallbackを混在させない。
 
 ## R2. Immutable snapshot と freshness
 

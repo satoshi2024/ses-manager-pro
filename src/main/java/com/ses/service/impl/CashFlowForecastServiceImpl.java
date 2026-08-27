@@ -56,14 +56,22 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
 
     private CashFlowForecastDto forecastInternal(YearMonth from, int months, BigDecimal openingBalance,
                                                   com.ses.service.billing.CashFlowForecastScope scope) {
-        if (openingBalance == null) {
+        boolean scoped = scope != null && !scope.companyWide();
+        if (scoped) {
+            // manager向けreportへ全社の期首残高・固定費・閾値を混ぜない。
+            // 組織scope内の実データだけを表示し、会社全体の設定値は管理者reportに限定する。
+            openingBalance = BigDecimal.ZERO;
+        } else if (openingBalance == null) {
             openingBalance = systemConfigService.getDecimal("cashflow.opening-balance", BigDecimal.ZERO);
         }
         // 参照(GET)は副作用を持たない。資金ショート警告の発行は
         // NotificationGenerateService.cashflowAlert() の日次バッチが担う。
-        BigDecimal fixedCost = systemConfigService.getDecimal("cashflow.fixed-cost", BigDecimal.ZERO);
-        BigDecimal alertThreshold = systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO);
-        int bpSiteMonths = systemConfigService.getInt("cashflow.bp-payment-site-months", 1);
+        BigDecimal fixedCost = scoped ? BigDecimal.ZERO
+                : systemConfigService.getDecimal("cashflow.fixed-cost", BigDecimal.ZERO);
+        BigDecimal alertThreshold = scoped ? BigDecimal.ZERO
+                : systemConfigService.getDecimal("cashflow.alert-threshold", BigDecimal.ZERO);
+        int bpSiteMonths = scoped ? 1
+                : systemConfigService.getInt("cashflow.bp-payment-site-months", 1);
 
         BigDecimal estimatedPayroll = getEstimatedPayroll(scope);
 
@@ -237,7 +245,9 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
      */
     private BigDecimal getEstimatedPayroll(com.ses.service.billing.CashFlowForecastScope scope) {
         if (!freeeIntegrationService.connected()) {
-            return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
+            return scope != null && !scope.companyWide()
+                    ? BigDecimal.ZERO
+                    : systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
         }
         YearMonth lastMonth = YearMonth.now().minusMonths(1);
         for (int attempt = 0; attempt < 2; attempt++) {
@@ -276,21 +286,29 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
                     return gross.add(employerShare);
                 }
-                return gross.add(employerBurden(gross));
+                return gross.add(employerBurden(gross, scope));
             } catch (Exception e) {
                 // 外部障害はこれ以上試行せず、既存設定値へfallback（design §14-5）
                 log.warn("Failed to fetch freee payroll for cashflow forecast ({}): {}", ym, e.getMessage());
-                return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
+                return scope != null && !scope.companyWide()
+                        ? BigDecimal.ZERO
+                        : systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
             }
         }
-        return systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
+        return scope != null && !scope.companyWide()
+                ? BigDecimal.ZERO
+                : systemConfigService.getDecimal("cashflow.payroll-estimate", BigDecimal.ZERO);
     }
 
     /**
      * 社会保険料等の事業主負担分を総支給に対する率(%)で上乗せする。
      * 総支給には本人負担分しか含まれないため、率を設定しないと会社の実支出を過小評価する。既定0%。
      */
-    private BigDecimal employerBurden(BigDecimal gross) {
+    private BigDecimal employerBurden(BigDecimal gross,
+                                      com.ses.service.billing.CashFlowForecastScope scope) {
+        if (scope != null && !scope.companyWide()) {
+            return BigDecimal.ZERO;
+        }
         BigDecimal rate = systemConfigService.getDecimal("cashflow.payroll-employer-burden-rate", BigDecimal.ZERO);
         if (rate.signum() <= 0) {
             return BigDecimal.ZERO;

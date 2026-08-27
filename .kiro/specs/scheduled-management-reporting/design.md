@@ -12,7 +12,7 @@
 |---|---|---|---|
 | Revenue adapter | `DashboardService` + `MonthlyRevenueCalcService` / dashboard DTO | 売上・粗利の式の再実装、現在 DB 値で旧 run を再生成 | service class、DTO、対象 month、source rows/hash |
 | Utilization adapter | `UtilizationCalcService` / `UtilizationForecastService` | Bench/稼働率の別式、session の自己 scope | month、actual/forecast、contract as-of、scope hash |
-| CashFlow adapter | `CashFlowForecastService` | scopeを全社/許可組織以外へ拡張、money の double 化 | from、months、opening-balance source、reconciliation as-of、scope |
+| CashFlow adapter | `CashFlowForecastService` | scopeを全社/許可組織以外へ拡張、money の double 化、managerへ全社設定値を混在 | from、months、opening-balance source、reconciliation as-of、scope |
 | Management accounting adapter | `ManagementAccountingService` | `MonthlyAccountingDimension` の snapshot を current org で上書き | month、actual/forecast source、dimension version |
 | Sales performance adapter | `SalesPerformanceService` + `MonthlyRevenueCalcService` | commission/win rate の再計算、session self の利用 | month、rule config version、unattributed row |
 | AR adapter | `InvoiceService.aging(asOf)` | aging bucket の再実装、scope 外 customer の列挙 | asOf、scope query hash、bucket version |
@@ -59,5 +59,6 @@
 5. recipient previewを生成前に必須とし、generation/downloadの両方でscope検証。権限喪失、組織異動、link期限切れはdownload拒否、download時は再認証。
 6. deliveryはnotification outbox経由のアプリ内通知＋期限付きlink。メール添付なし。PDF/XLSX/CSVは同一snapshotから生成。
 7. ServiceDesk/SLAはNF-02 PASSまで対象外。report独自SQL・集計式・丸めは禁止。
+8. Cash Flowは管理者の全社reportだけが全社設定値を参照し、マネージャーreportは保存scope内の実データへ限定する。
 
 F1は承認Base `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`へ統合済みの専用branchで、最新migration番号、V1/H2 schema、MySQL smoke、shape testをそろえて開始する。

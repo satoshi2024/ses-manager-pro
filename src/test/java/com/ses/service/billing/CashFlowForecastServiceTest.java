@@ -40,6 +40,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class CashFlowForecastServiceTest {
@@ -159,6 +160,26 @@ class CashFlowForecastServiceTest {
         assertEquals(new BigDecimal("1149500"), m2.getBalance());
         
         verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    void scopedForecastDoesNotReadCompanyWideCashflowSettings() {
+        when(freeeIntegrationService.connected()).thenReturn(false);
+        when(invoiceMapper.selectList(any())).thenReturn(List.of());
+        when(bpPaymentMapper.selectListWithDetailsScoped(any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+
+        CashFlowForecastScope scope = new CashFlowForecastScope(false,
+                List.of(10L), List.of(20L), List.of(30L), List.of(40L), List.of(50L),
+                LocalDate.of(2026, 8, 28));
+        CashFlowForecastDto result = service.forecast(YearMonth.of(2026, 8), 1,
+                new BigDecimal("999999"), scope);
+
+        assertEquals(BigDecimal.ZERO, result.getMonths().get(0).getBalance());
+        assertEquals(BigDecimal.ZERO, result.getMonths().get(0).getFixedCost());
+        assertEquals(BigDecimal.ZERO, result.getAlertThreshold());
+        verify(systemConfigService, never()).getDecimal(anyString(), any());
+        verify(systemConfigService, never()).getInt(anyString(), anyInt());
     }
 
     /**
