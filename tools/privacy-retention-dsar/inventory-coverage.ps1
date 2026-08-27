@@ -29,17 +29,128 @@ function Get-RelativePath {
     return [System.IO.Path]::GetRelativePath((Get-Location).Path, $Path).Replace('\', '/')
 }
 
-function Test-SqlColumnLine {
-    param([string]$Line)
+function Get-SqlLineNumber {
+    param([string]$Text, [int]$Index)
 
-    $trimmed = $Line.Trim()
+    return 1 + ([regex]::Matches($Text.Substring(0, $Index), '\n')).Count
+}
+
+function Get-SqlParenthesizedBody {
+    param([string]$Text, [int]$OpenIndex)
+
+    $depth = 0
+    $quote = [char]0
+    $escaped = $false
+    for ($i = $OpenIndex; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($quote -ne [char]0) {
+            if ($escaped) {
+                $escaped = $false
+                continue
+            }
+            if ($ch -eq '\') {
+                $escaped = $true
+                continue
+            }
+            if ($ch -eq $quote) {
+                if ($i + 1 -lt $Text.Length -and $Text[$i + 1] -eq $quote) {
+                    $i++
+                    continue
+                }
+                $quote = [char]0
+            }
+            continue
+        }
+
+        if ($ch -eq "'" -or $ch -eq '"' -or $ch -eq [char]96) {
+            $quote = $ch
+            continue
+        }
+        if ($ch -eq '(') {
+            $depth++
+            continue
+        }
+        if ($ch -eq ')') {
+            $depth--
+            if ($depth -eq 0) {
+                return [pscustomobject]@{
+                    body = $Text.Substring($OpenIndex + 1, $i - $OpenIndex - 1)
+                    endIndex = $i
+                }
+            }
+        }
+    }
+
+    throw "unclosed CREATE TABLE parenthesis at index $OpenIndex"
+}
+
+function Split-SqlTopLevel {
+    param([string]$Text)
+
+    $segments = [System.Collections.Generic.List[string]]::new()
+    $start = 0
+    $depth = 0
+    $quote = [char]0
+    $escaped = $false
+    for ($i = 0; $i -lt $Text.Length; $i++) {
+        $ch = $Text[$i]
+        if ($quote -ne [char]0) {
+            if ($escaped) {
+                $escaped = $false
+                continue
+            }
+            if ($ch -eq '\') {
+                $escaped = $true
+                continue
+            }
+            if ($ch -eq $quote) {
+                if ($i + 1 -lt $Text.Length -and $Text[$i + 1] -eq $quote) {
+                    $i++
+                    continue
+                }
+                $quote = [char]0
+            }
+            continue
+        }
+
+        if ($ch -eq "'" -or $ch -eq '"' -or $ch -eq [char]96) {
+            $quote = $ch
+            continue
+        }
+        if ($ch -eq '(') {
+            $depth++
+            continue
+        }
+        if ($ch -eq ')') {
+            $depth--
+            continue
+        }
+        if ($ch -eq ',' -and $depth -eq 0) {
+            $segments.Add($Text.Substring($start, $i - $start))
+            $start = $i + 1
+        }
+    }
+    if ($start -lt $Text.Length) {
+        $segments.Add($Text.Substring($start))
+    }
+    return @($segments)
+}
+
+function Get-SqlColumnName {
+    param([string]$Segment)
+
+    $trimmed = $Segment.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('--')) {
-        return $false
+        return $null
     }
     if ($trimmed -match '^(?i)(CONSTRAINT|PRIMARY|UNIQUE|INDEX|KEY|CHECK|FOREIGN|FULLTEXT|SPATIAL|PARTITION|ENGINE|COMMENT|ON|REFERENCES|AND|OR|THEN|ELSE|END|IF|SET|CALL|DROP|ALTER|ADD)\b') {
-        return $false
+        return $null
     }
-    return $trimmed -match '^[`]?([A-Za-z0-9_]+)[`]?\s+[A-Za-z]'
+    $match = [regex]::Match($trimmed, '^[\x60]?([A-Za-z0-9_]+)[\x60]?\s+[A-Za-z]')
+    if ($match.Success) {
+        return $match.Groups[1].Value
+    }
+    return $null
 }
 
 if (-not (Test-Path -LiteralPath $InventoryPath -PathType Leaf)) {
@@ -65,68 +176,31 @@ $tableNames = [System.Collections.Generic.HashSet[string]]::new([System.StringCo
 $migrationFiles = Get-ChildItem -LiteralPath $MigrationRoot -Filter '*.sql' -File | Sort-Object FullName
 
 foreach ($file in $migrationFiles) {
-    $lines = Get-Content -LiteralPath $file.FullName
-    $currentTable = $null
-    $currentColumns = [System.Collections.Generic.List[string]]::new()
-    $createLine = 0
-    $lineNumber = 0
-
-    foreach ($line in $lines) {
-        $lineNumber++
-        if ($line -match '(?i)\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+[`]?([A-Za-z0-9_]+)[`]?') {
-            if ($null -ne $currentTable) {
-                $record = [pscustomobject]@{
-                    table = $currentTable
-                    columns = @($currentColumns | Sort-Object -Unique)
-                    source = "$(Get-RelativePath -Path $file.FullName):$createLine"
-                }
-                $tableRecords.Add($record)
-                [void]$tableNames.Add($currentTable)
-            }
-            $currentTable = $Matches[1]
-            $currentColumns = [System.Collections.Generic.List[string]]::new()
-            $createLine = $lineNumber
-            continue
-        }
-
-        foreach ($alterMatch in [regex]::Matches($line, '(?i)\bALTER\s+TABLE\s+[`]?([A-Za-z0-9_]+)[`]?\s+ADD\s+COLUMN\s+[`]?([A-Za-z0-9_]+)[`]?')) {
-            $alterColumnRecords.Add([pscustomobject]@{
-                table = $alterMatch.Groups[1].Value
-                column = $alterMatch.Groups[2].Value
-                source = "$(Get-RelativePath -Path $file.FullName):$lineNumber"
-            })
-            [void]$tableNames.Add($alterMatch.Groups[1].Value)
-        }
-
-        if ($null -ne $currentTable -and (Test-SqlColumnLine -Line $line)) {
-            $columnMatch = [regex]::Match($line.Trim(), '^[`]?([A-Za-z0-9_]+)[`]?\s+')
-            if ($columnMatch.Success) {
-                $currentColumns.Add($columnMatch.Groups[1].Value)
+    $sql = Get-Content -LiteralPath $file.FullName -Raw
+    foreach ($createMatch in [regex]::Matches($sql, '(?i)\bCREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+[\x60]?([A-Za-z0-9_]+)[\x60]?\s*\(')) {
+        $bodyResult = Get-SqlParenthesizedBody -Text $sql -OpenIndex ($createMatch.Index + $createMatch.Length - 1)
+        $columns = [System.Collections.Generic.List[string]]::new()
+        foreach ($segment in Split-SqlTopLevel -Text $bodyResult.body) {
+            $column = Get-SqlColumnName -Segment $segment
+            if ($null -ne $column) {
+                $columns.Add($column)
             }
         }
-
-        if ($null -ne $currentTable -and $line -match '^\s*\)\s*ENGINE') {
-            $record = [pscustomobject]@{
-                table = $currentTable
-                columns = @($currentColumns | Sort-Object -Unique)
-                source = "$(Get-RelativePath -Path $file.FullName):$createLine"
-            }
-            $tableRecords.Add($record)
-            [void]$tableNames.Add($currentTable)
-            $currentTable = $null
-            $currentColumns = [System.Collections.Generic.List[string]]::new()
-            $createLine = 0
-        }
+        $tableRecords.Add([pscustomobject]@{
+            table = $createMatch.Groups[1].Value
+            columns = @($columns | Sort-Object -Unique)
+            source = "$(Get-RelativePath -Path $file.FullName):$(Get-SqlLineNumber -Text $sql -Index $createMatch.Index)"
+        })
+        [void]$tableNames.Add($createMatch.Groups[1].Value)
     }
 
-    if ($null -ne $currentTable) {
-        $record = [pscustomobject]@{
-            table = $currentTable
-            columns = @($currentColumns | Sort-Object -Unique)
-            source = "$(Get-RelativePath -Path $file.FullName):$createLine"
-        }
-        $tableRecords.Add($record)
-        [void]$tableNames.Add($currentTable)
+    foreach ($alterMatch in [regex]::Matches($sql, '(?i)\bALTER\s+TABLE\s+[\x60]?([A-Za-z0-9_]+)[\x60]?\s+ADD\s+COLUMN\s+[\x60]?([A-Za-z0-9_]+)[\x60]?')) {
+        $alterColumnRecords.Add([pscustomobject]@{
+            table = $alterMatch.Groups[1].Value
+            column = $alterMatch.Groups[2].Value
+            source = "$(Get-RelativePath -Path $file.FullName):$(Get-SqlLineNumber -Text $sql -Index $alterMatch.Index)"
+        })
+        [void]$tableNames.Add($alterMatch.Groups[1].Value)
     }
 }
 
@@ -148,7 +222,7 @@ Get-ChildItem -LiteralPath $EntityRoot -Recurse -Filter '*.java' -File | Sort-Ob
 }
 
 $providerRecords = Get-ChildItem -LiteralPath $ProviderRoot -Recurse -Filter '*.java' -File |
-    Where-Object { $_.Name -match '(?i)(provider|gateway|filereference|backup|restore|export|search|cache|audit|integration|cloudsign|freee)' } |
+    Where-Object { $_.Name -match '(?i)(provider|gateway|filereference|backup|restore|export|search|cache|audit|integration|cloudsign|freee|gemini|filestorage|filecleanup|storage|cleanup|replica|snapshot|tombstone|redact|anonym|dispos|retention|dsar|privacy|ai|outbound)' } |
     Sort-Object FullName |
     ForEach-Object { Get-RelativePath -Path $_.FullName }
 
