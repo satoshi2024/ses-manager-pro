@@ -216,6 +216,7 @@ $entityCoverageMissing = @($entityRecords | Where-Object {
         $sourceCoverageText -notmatch [regex]::Escape('`' + $_.table + '`')
     } | Sort-Object table, source)
 $privacyCatalogUnclassifiedTables = $unmappedTables
+$privacyCatalogUnknownTableCount = @([regex]::Matches($inventoryText, '(?m)^\| DB-[0-9]{3}.*catalogState=UNKNOWN/BLOCKED')).Count
 
 $canonicalLines = [System.Collections.Generic.List[string]]::new()
 foreach ($record in ($tableRecords | Sort-Object table, source)) {
@@ -235,12 +236,13 @@ $sourceManifestHash = Get-CanonicalSha256 -Text ($canonicalLines -join "`n")
 $dbIdCount = @([regex]::Matches($inventoryText, '(?m)^\| DB-[0-9]{3}\b')).Count
 $fileIdCount = @([regex]::Matches($inventoryText, '(?m)^\| FILE-[0-9]{3}\b')).Count
 $aiIdCount = @([regex]::Matches($inventoryText, '(?m)^\| AI-[0-9]{3}\b')).Count
-$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0 -or $sourceCoverageUnmappedTables.Count -gt 0 -or $sourceCoverageMissingColumns.Count -gt 0 -or $providerCoverageMissing.Count -gt 0 -or $entityCoverageMissing.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } else { 'COVERAGE_EXPLICIT' }
+$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0 -or $sourceCoverageUnmappedTables.Count -gt 0 -or $sourceCoverageMissingColumns.Count -gt 0 -or $providerCoverageMissing.Count -gt 0 -or $entityCoverageMissing.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } elseif ($privacyCatalogUnknownTableCount -gt 0) { 'COVERAGE_EXPLICIT_POLICY_UNKNOWN' } else { 'COVERAGE_EXPLICIT' }
 $sourceCoverageDisplayPath = if ($sourceCoverageExists) { Get-RelativePath -Path (Resolve-Path -LiteralPath $SourceCoveragePath).Path } else { $SourceCoveragePath }
 
 $result = [ordered]@{
     mode = 'READ_ONLY_SOURCE_COVERAGE'
     status = $status
+    exitCode = if ($status -eq 'BLOCKED_COVERAGE_INCOMPLETE') { 2 } else { 0 }
     inventoryPath = Get-RelativePath -Path $inventoryFullPath
     inventorySha256 = $inventoryHash
     sourceCoveragePath = $sourceCoverageDisplayPath
@@ -264,6 +266,7 @@ $result = [ordered]@{
     privacyCatalogUnclassifiedTableCount = $privacyCatalogUnclassifiedTables.Count
     privacyCatalogUnclassifiedTables = $privacyCatalogUnclassifiedTables
     privacyCatalogUnclassifiedTableRecords = $unmappedTableRecords
+    privacyCatalogUnknownTableCount = $privacyCatalogUnknownTableCount
     sourceTableRecords = $allTableRecords
     entityRecords = @($entityRecords)
     providerCandidateFiles = @($providerRecords)

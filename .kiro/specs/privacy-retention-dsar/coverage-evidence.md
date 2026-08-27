@@ -1,6 +1,6 @@
 # mechanical source coverage evidence
 
-実行日: 2026-08-27（Asia/Tokyo）
+実行日: 2026-08-28（Asia/Tokyo）
 実行方式: read-only。DB、filesystem、backup/replica、HTTP、外部providerへの接続なし。
 
 ## command
@@ -13,24 +13,24 @@ pwsh -NoProfile -File .\tools\privacy-retention-dsar\inventory-coverage.ps1
 
 | field | value |
 |---|---:|
-| status | `BLOCKED_COVERAGE_INCOMPLETE` |
-| exit code | `2` |
-| migration file / table / CREATE column record / ALTER column record | `116 / 180 / 4,220 / 114` |
+| status | `COVERAGE_EXPLICIT_POLICY_UNKNOWN` |
+| exit code | `0`（構造coverageのみ。policy unknownは処分BLOCKED） |
+| migration file / table / CREATE column record / ALTER column record | `116 / 180 / 4,066 / 114` |
 | entity table | `176` |
 | provider/gateway/file/backup/restore/export/search/cache/audit/integration candidate file | `123` |
-| explicit inventory record（DB / FILE / AI） | `79（62 / 10 / 7）` |
-| privacy catalog explicit / unclassified table | `102 / 78` |
+| explicit inventory record（DB / FILE / AI） | `157（140 / 10 / 7）` |
+| privacy catalog explicit / unclassified / policy unknown table | `180 / 0 / 78` |
 | source coverage unmapped / missing column / entity / provider | `0 / 0 / 0 / 0` |
 | providerCallCount / writeCount | `0 / 0` |
-| inventory SHA-256 | `ff27ae374dd8a1ed4d565c9bc8968ecd90a818db845ddde0aaee8e0b65dd513d` |
-| source coverage SHA-256 | `ebae0cc69ba84369c9603af97977f3d47e0d9cb59989936dd46e2d2403865320` |
+| inventory SHA-256 | `bbfbc08be65f330a530d588b626fa6f5d0f33a5c7b769c939ec6599537b15c7d` |
+| source coverage SHA-256 | `0971c6480d73f80273bf3d6f58d01e025e80d02c455953abc7a926336dfa6fda` |
 | source manifest SHA-256 | `a5a608f80700f055d206170fef5f75feb57cf057b0081ff50fe559f949d805e4` |
 
 inventory SHAは対象inventoryそのもの、source manifest SHAはmigration table/column・entity・provider候補の正規化列をハッシュした値である。固定値をinventory自身へ埋め込まず、同じcommandのstdoutと本ファイルを証跡にする。
 
-## privacy catalog unclassified tables（全件 UNKNOWN/BLOCKED）
+## privacy catalog policy unknown tables（全件 UNKNOWN/BLOCKED）
 
-source-coverage manifestは全source table/column/entity/provider候補を明示している。一方、main privacy catalogで個別policy分類が未完の対象、またはwildcard/group表記だけの対象はcompletion候補にしない。以下はscannerが列挙したprivacy catalog未分類tableである。
+source-coverage manifestは全source table/column/entity/provider候補を明示している。main privacy catalogは全180 tableを個別rowで明示し、未分類は0である。一方、以下の78 tableはpolicy未承認のためowner/purpose/trigger/policy version/hold/disposition/DSAR provider/result evidenceをUNKNOWN/BLOCKEDとして分類しており、処分候補にしない。
 
 ```text
 m_approval_route
@@ -114,4 +114,4 @@ t_user_organization
 t_user_permission_group
 ```
 
-このprivacy catalog未分類一覧が0になるまで、PR-R1は完全達成ではない。法的保持、owner、purpose、policy version、hold、disposition、DSAR provider、result evidenceを推測で補完せず、F1-Mを開始しない。
+privacy catalogの機械的未分類は0になったが、policy unknownは78件残る。法的保持、owner、purpose、policy version、hold、disposition、DSAR provider、result evidenceを推測で補完せず、PR-R1/0.4、F1-Mを開始しない。承認済みscope/owner/Base、DG-07、外部/社内gateが揃うまで、構造scannerのexit 0をPLAN PASSまたは処分許可と解釈しない。

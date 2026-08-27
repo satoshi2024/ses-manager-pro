@@ -28,7 +28,7 @@
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
-| NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | **PLAN FAIL / overall FAIL**。approved scope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ、F1-M/処分/外部provider/PRは停止 | 承認証跡受領後 |
+| NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
 | NF-09 | `asset-account-license-lifecycle` | CANDIDATE | 未定 | 未返却、active account残存 | NF-01、identity、document | 未決定 | 未定 |
 | NF-10 | `scheduled-management-reporting` | CANDIDATE | 未定 | 作成時間、配布失敗率 | dashboard、document、notification、NF-02 | 未決定 | 未定 |

@@ -5,12 +5,19 @@
 - Review対象: `origin/codex/privacy-retention-dsar` のdispatch時点のbranch tip。remote Headを正本とし、dispatch時に `git ls-remote` で取得したSHAとworktree HEADを一致確認して記録する（特定の過去Headを最新とみなさない）。
 - 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
 - fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
-- approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` は技術比較用の観測値であり、承認証跡ではない。承認記録が到着するまでPLAN FAIL/hard stopを維持する。
+- approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` は技術比較用の観測値であり、承認証跡ではない。承認記録が到着するまでapproval-missing/hard stopを維持する。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。
 - Branch: `codex/privacy-retention-dsar`。force pushなし。
 - PR: implementation dialogueでは作成しない。PLAN/IMPLEMENTATION双方PASS後にReview側が判断する。
+
+## External Review provenance boundary
+
+- このファイルと`review-ledger.md`は実装側のhandoff/request metadataだけを持ち、external reviewerの判定、finding、reviewer名、sign-offを記録しない。
+- 入力された前回Review requestのsource threadは `01a04382-8721-7ae0-8801-63b03ad83bae`、そのrequestが示したreviewed remote Headは `862fec5246e1a88ec7ddcddc96a1a4f7701049c2` である。これは受領した境界情報であり、このbranchの自己判定ではない。
+- 次回delta Reviewは、dispatch直前の `git ls-remote origin refs/heads/codex/privacy-retention-dsar` とworktree HEADが一致した新remote Headを対象にする。外部Review証跡側で、reviewed Head、reviewer/task ID、timestamp（Asia/Tokyo）、finding ID、verdictを同一記録へbindする。
+- 実装側はその外部記録を`review-ledger.md`へ自己転記・上書きしない。PLAN PASS前のIMPLEMENTATION判定、または未提供の承認/法的結論を生成しない。
 
 ## Review packet
 
