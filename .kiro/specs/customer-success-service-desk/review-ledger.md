@@ -94,5 +94,5 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 - approved plan / spec / tasks: `.kiro/specs/customer-success-service-desk/`
 - requirements / design / tasks / inventory / 本ledger
 - 完了対応表: §4 に記載（WIP-1〜11 是正、全46件定向テスト PASS）
-- remote Head: 最新 commit SHA
+- remote Head: `fe019ef55f924958af49c699cf992c9a76a48135`
 - 実装diff: WIP是正差分（SLA祝日・法人カレンダー・100点減点ヘルス・ポータル境界・多言語整合・DDL規約是正）
