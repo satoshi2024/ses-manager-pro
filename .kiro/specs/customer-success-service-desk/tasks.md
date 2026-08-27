@@ -48,7 +48,7 @@
   - **Demo**:
     - 内部画面から問い合わせを起票し、内部メモを投稿し、ステータス変更できることをテスト実行で実証。
 
-- [ ] **Task A2: 顧客ポータル起票・返信・CSAT 回答画面 & API**
+- [x] **Task A2: 顧客ポータル起票・返信・CSAT 回答画面 & API**
   - **Objective**: 顧客ポータル利用者向けの問い合わせ一覧・起票・返信・CSAT 回答機能を実装する。
   - **Guidance**:
     - コントローラ: `PortalCustomerServiceDeskApiController` (`/api/portal/customer/requests/**`), `PortalCustomerPageController`.

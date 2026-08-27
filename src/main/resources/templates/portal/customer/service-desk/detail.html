@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>問い合わせ詳細 - 顧客ポータル</title>
+    <link rel="stylesheet" th:href="@{/portal/css/portal.css}">
+    <link rel="stylesheet" th:href="@{/lib/bootstrap/css/bootstrap.min.css}">
+</head>
+<body class="portal-body" th:data-request-id="${requestId}">
+<header class="portal-header">
+    <span class="portal-header-brand" th:text="#{app.title}">SES管理プロ</span>
+    <span class="portal-header-user" id="portalHeaderUser"></span>
+    <a th:href="@{/portal/customer}" class="btn btn-sm btn-outline-secondary ms-auto me-2">ポータルトップへ戻る</a>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="logoutButton"
+            th:text="#{portal.logout}">ログアウト</button>
+</header>
+
+<main class="portal-container py-4" role="main">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <span class="badge bg-primary fs-6 me-2" id="reqNoBadge">REQ-XXXXXX</span>
+            <span id="statusBadge" class="badge bg-secondary fs-6">受付</span>
+        </div>
+        <a th:href="@{/portal/customer}" class="btn btn-sm btn-outline-secondary">← 一覧に戻る</a>
+    </div>
+
+    <div class="card mb-4 shadow-sm border">
+        <div class="card-body">
+            <h3 class="card-title fw-bold mb-2" id="subjectText">件名読み込み中...</h3>
+            <div class="text-muted small mb-3">
+                <span class="me-3">カテゴリ: <strong id="categoryText">-</strong></span>
+                <span>起票日時: <span id="createdAtText">-</span></span>
+            </div>
+            <div class="p-3 bg-light rounded border" id="descriptionBox" style="white-space: pre-wrap;">
+                読み込み中...
+            </div>
+        </div>
+    </div>
+
+    <!-- CSAT Card (If answered or answerable) -->
+    <div class="card mb-4 border-warning shadow-sm d-none" id="csatCard">
+        <div class="card-header bg-warning-subtle fw-bold">
+            ★ サポート満足度評価
+        </div>
+        <div class="card-body" id="csatCardBody">
+            <!-- 動的レンダリング -->
+        </div>
+    </div>
+
+    <!-- Timeline & Comments -->
+    <div class="card mb-4 shadow-sm border">
+        <div class="card-header bg-light fw-bold">
+            やりとり・返信履歴
+        </div>
+        <div class="card-body" id="portalCommentsContainer">
+            <div class="text-center text-muted py-3">読み込み中...</div>
+        </div>
+    </div>
+
+    <!-- Reply Form -->
+    <div class="card shadow-sm border">
+        <div class="card-header bg-light fw-bold">
+            返信メッセージを送信
+        </div>
+        <div class="card-body">
+            <form id="portalReplyForm">
+                <div class="alert alert-danger d-none" id="replyError" role="alert"></div>
+                <div class="mb-3">
+                    <textarea class="form-control" id="replyTextInput" rows="3" placeholder="ご返信内容を入力してください..." required></textarea>
+                </div>
+                <div class="text-end">
+                    <button type="submit" class="btn btn-primary" id="btnSubmitReply">返信する</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</main>
+
+<script th:src="@{/lib/jquery/jquery.min.js}"></script>
+<script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
+<script th:src="@{/portal/js/portal.js}"></script>
+<script>
+$(function () {
+    PortalAuth.initCustomerPage();
+
+    const reqId = $('body').data('request-id');
+    const PORTAL_CSRF_COOKIE = 'XSRF-TOKEN-PORTAL';
+    const PORTAL_CSRF_HEADER = 'X-XSRF-TOKEN-PORTAL';
+
+    function readCookie(name) {
+        const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    function csrfHeader() {
+        const token = readCookie(PORTAL_CSRF_COOKIE);
+        const headers = {};
+        if (token) headers[PORTAL_CSRF_HEADER] = token;
+        return headers;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function formatDateTime(dtStr) {
+        if (!dtStr) return '-';
+        return dtStr.replace('T', ' ').substring(0, 16);
+    }
+
+    function loadDetail() {
+        $.ajax({
+            url: `/api/portal/customer/service-desk/requests/${reqId}`,
+            type: 'GET',
+            headers: csrfHeader(),
+            success: function (res) {
+                if (res.code === 200) {
+                    renderDetail(res.data);
+                } else {
+                    $('#descriptionBox').text('データの読み込みに失敗しました');
+                }
+            },
+            error: function () {
+                $('#descriptionBox').text('通信エラーが発生しました');
+            }
+        });
+    }
+
+    function renderDetail(data) {
+        $('#reqNoBadge').text(data.requestNo);
+        $('#statusBadge').text(data.status);
+        $('#subjectText').text(data.subject);
+        $('#categoryText').text(data.category);
+        $('#createdAtText').text(formatDateTime(data.createdAt));
+        $('#descriptionBox').text(data.description);
+
+        // コメント一覧
+        const $cc = $('#portalCommentsContainer').empty();
+        const comments = data.comments || [];
+        if (comments.length === 0) {
+            $cc.html('<div class="text-center text-muted py-2">返信はまだありません</div>');
+        } else {
+            comments.forEach(function (c) {
+                const isCustomer = c.authorType === 'PORTAL_USER';
+                const bg = isCustomer ? 'bg-light' : 'bg-primary-subtle';
+                const label = isCustomer ? '(貴社)' : '(サポート担当)';
+                const item = `
+                    <div class="card mb-2 p-3 ${bg} border">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <strong class="text-dark">${escapeHtml(c.authorName)} ${label}</strong>
+                            <span class="text-muted small">${formatDateTime(c.createdAt)}</span>
+                        </div>
+                        <div style="white-space: pre-wrap;">${escapeHtml(c.commentText)}</div>
+                    </div>
+                `;
+                $cc.append(item);
+            });
+        }
+
+        // CSAT
+        if (data.csatScore) {
+            $('#csatCard').removeClass('d-none');
+            $('#csatCardBody').html(`
+                <div class="fs-5 text-warning mb-1">${'★'.repeat(data.csatScore)}${'☆'.repeat(5 - data.csatScore)}</div>
+                <div class="text-muted small">${escapeHtml(data.csatComment || '(コメントなし)')}</div>
+            `);
+        } else {
+            $('#csatCard').addClass('d-none');
+        }
+    }
+
+    $('#portalReplyForm').on('submit', function (e) {
+        e.preventDefault();
+        const text = $('#replyTextInput').val();
+        if (!text.trim()) return;
+
+        $('#btnSubmitReply').prop('disabled', true);
+        $('#replyError').addClass('d-none').text('');
+
+        $.ajax({
+            url: `/api/portal/customer/service-desk/requests/${reqId}/comments`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ commentText: text }),
+            headers: csrfHeader(),
+            success: function (res) {
+                $('#btnSubmitReply').prop('disabled', false);
+                if (res.code === 200) {
+                    $('#replyTextInput').val('');
+                    loadDetail();
+                } else {
+                    $('#replyError').removeClass('d-none').text(res.message || '返信に失敗しました');
+                }
+            },
+            error: function (xhr) {
+                $('#btnSubmitReply').prop('disabled', false);
+                const msg = xhr.responseJSON ? xhr.responseJSON.message : '送信に失敗しました';
+                $('#replyError').removeClass('d-none').text(msg);
+            }
+        });
+    });
+
+    loadDetail();
+});
+</script>
+</body>
+</html>

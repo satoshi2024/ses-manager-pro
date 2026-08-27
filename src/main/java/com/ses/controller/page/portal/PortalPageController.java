@@ -69,6 +69,17 @@ public class PortalPageController {
         return "portal/customer/index";
     }
 
+    @GetMapping("/portal/customer/service-desk/requests")
+    public String customerServiceDeskList() {
+        return "portal/customer/service-desk/list";
+    }
+
+    @GetMapping("/portal/customer/service-desk/requests/{id}")
+    public String customerServiceDeskDetail(@org.springframework.web.bind.annotation.PathVariable Long id, Model model) {
+        model.addAttribute("requestId", id);
+        return "portal/customer/service-desk/detail";
+    }
+
     @GetMapping("/portal/bp")
     public String bp() {
         return "portal/bp/index";

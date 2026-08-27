@@ -27,6 +27,7 @@
             th:text="#{portal.customer.tab.quotations}">見積</button>
     <button type="button" class="portal-tab" data-tab="sales-orders"
             th:text="#{portal.customer.tab.salesOrders}">注文請</button>
+    <button type="button" class="portal-tab" data-tab="service-desk" id="tabBtnServiceDesk">問い合わせ</button>
 </nav>
 
 <main class="portal-container" role="main">
@@ -62,6 +63,22 @@
     <section id="tab-sales-orders" class="portal-tab-panel d-none">
         <h2 th:text="#{portal.customer.salesOrders.title}">注文請</h2>
         <div class="portal-list" id="salesOrderList"></div>
+    </section>
+
+    <!-- 問い合わせ (サービスデスク) -->
+    <section id="tab-service-desk" class="portal-tab-panel d-none">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h2>問い合わせ・サポート</h2>
+                <p class="portal-muted mb-0">サポート窓口への問い合わせ起票・進捗確認・返信を行えます。</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="btnOpenNewRequestModal" data-bs-toggle="modal" data-bs-target="#portalNewRequestModal">
+                ＋ 新規問い合わせ起票
+            </button>
+        </div>
+        <div class="portal-list" id="serviceDeskList">
+            <div class="text-muted small py-3">読み込み中...</div>
+        </div>
     </section>
 </main>
 
@@ -130,9 +147,107 @@
     </div>
 </div>
 
+<!-- ポータル新規問い合わせ起票モーダル -->
+<div class="modal fade" id="portalNewRequestModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">新規問い合わせ起票</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="portalNewRequestForm">
+                <div class="modal-body">
+                    <div class="alert alert-danger d-none" id="portalReqModalError" role="alert"></div>
+                    <div class="mb-3">
+                        <label class="form-label required">カテゴリ <span class="text-danger">*</span></label>
+                        <select class="form-select" id="portalNewCategory" required>
+                            <option value="CONTRACT">契約関連</option>
+                            <option value="BILLING">請求関連</option>
+                            <option value="ATTENDANCE">勤怠関連</option>
+                            <option value="QUALITY">品質・成果物</option>
+                            <option value="SYSTEM">システム障害</option>
+                            <option value="OTHER" selected>その他</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required">優先度 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="portalNewPriority" required>
+                            <option value="P0">緊急 (P0: 業務停止・重大障害)</option>
+                            <option value="P1">高 (P1: 重要業務への影響)</option>
+                            <option value="P2" selected>中 (P2: 通常のお問い合わせ)</option>
+                            <option value="P3">低 (P3: 軽微なご相談)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required">件名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="portalNewSubject" placeholder="お問い合わせ件名" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label required">詳細内容 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="portalNewDescription" rows="4" placeholder="詳細な内容やご要望を入力してください" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary" id="btnSubmitPortalReq">起票する</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- CSAT 満足度アンケート回答モーダル -->
+<div class="modal fade" id="portalCsatModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">サポート満足度アンケート</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="portalCsatForm">
+                <input type="hidden" id="csatRequestId">
+                <div class="modal-body">
+                    <div class="alert alert-danger d-none" id="portalCsatModalError" role="alert"></div>
+                    <div class="mb-3 text-center">
+                        <label class="form-label fw-bold d-block mb-2">対応はいかがでしたか？</label>
+                        <div class="btn-group" role="group" aria-label="CSAT rating">
+                            <input type="radio" class="btn-check" name="csatScore" id="score1" value="1" autocomplete="off">
+                            <label class="btn btn-outline-danger" for="score1">1 不満</label>
+
+                            <input type="radio" class="btn-check" name="csatScore" id="score2" value="2" autocomplete="off">
+                            <label class="btn btn-outline-warning" for="score2">2 やや不満</label>
+
+                            <input type="radio" class="btn-check" name="csatScore" id="score3" value="3" autocomplete="off">
+                            <label class="btn btn-outline-secondary" for="score3">3 普通</label>
+
+                            <input type="radio" class="btn-check" name="csatScore" id="score4" value="4" autocomplete="off">
+                            <label class="btn btn-outline-info" for="score4">4 満足</label>
+
+                            <input type="radio" class="btn-check" name="csatScore" id="score5" value="5" autocomplete="off" checked>
+                            <label class="btn btn-outline-success" for="score5">5 大変満足</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">フィードバック・ご意見 (任意)</label>
+                        <textarea class="form-control" id="csatCommentInput" rows="3" placeholder="対応へのご意見や感謝のメッセージ等があればご記入ください"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success" id="btnSubmitCsat">回答を送信する</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script th:src="@{/lib/jquery/jquery.min.js}"></script>
 <script th:src="@{/lib/bootstrap/js/bootstrap.bundle.min.js}"></script>
 <script th:src="@{/portal/js/portal.js}"></script>
-<script>PortalAuth.initCustomerPage();</script>
+<script th:src="@{/portal/js/portal-service-desk.js}"></script>
+<script>
+    PortalAuth.initCustomerPage();
+    PortalServiceDesk.init();
+</script>
 </body>
 </html>

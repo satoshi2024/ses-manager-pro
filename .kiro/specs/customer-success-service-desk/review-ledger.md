@@ -51,8 +51,8 @@
 | Task 0 | Discovery & 現行境界インベントリ・DG-02 | `requirements.md`, `design.md`, `tasks.md`, `review-ledger.md` | `mvn test-compile` | Spec & Inventory 整備確認 (PASS) | 22d35cc3 |
 | Task F1 | DDL & Entity 整備 (V110) | `V110__...sql`, `schema-service-desk-h2.sql`, Entity, Mapper | `ServiceDeskEntityMapperTest` | 10テーブル初期化・CRUD・初期ポリシー投入確認 (PASS) | 837c73b7 |
 | Task F2 | SLA 計算エンジン & 状態機械 & スコープ | `ServiceSlaCalculator`, `ServiceRequestService`, DTO | `ServiceSlaCalculatorTest`, `ServiceRequestServiceImplTest` | 休日スキップ/Pause/Reopen/二重CSAT防止実証 (PASS) | d54f84da |
-| Task A1 | 内部サービスデスク画面 & API | `ServiceRequestApiController`, `service-desk.js`, HTML | `ServiceRequestApiControllerTest` | 内部起票・詳細・内部メモ・状態変更実証 (PASS) | in-progress |
-| Task A2 | ポータル起票・返信・CSAT 画面 & API | `PortalCustomerServiceDeskApiController`, Portal HTML | `PortalCustomerServiceDeskApiControllerTest` | IDOR 拒否・CSAT 1回実証 | Pending |
+| Task A1 | 内部サービスデスク画面 & API | `ServiceRequestApiController`, `service-desk.js`, HTML | `ServiceRequestApiControllerTest` | 内部起票・詳細・内部メモ・状態変更実証 (PASS) | 3e6bc77e |
+| Task A2 | ポータル起票・返信・CSAT 画面 & API | `PortalCustomerServiceDeskApiController`, Portal HTML | `PortalCustomerServiceDeskApiTest` | IDOR 拒否・内部メモ除外・CSAT 1回実証 (PASS) | in-progress |
 | Task B1 | SLA スケジューラ & Dedupe 通知 | `ServiceSlaScheduler`, `NotificationService` | `ServiceSlaSchedulerTest` | 重複抑止実証 | Pending |
 | Task B2 | ヘルススコア & 更新カレンダー連携 & QBR & CSV | `CustomerHealthService`, `RenewalCalendarServiceImpl`, QBR, CSV | `CustomerHealthServiceTest`, `RenewalCalendarTest` | ヘルス要因・カレンダー連携実証 | Pending |
 | Task M | 統合検証 & 390px モバイル & Runbook | Message bundles, Runbook | `mvn test`, `MessageBundleConsistencyTest` | 全ゲート合格 & モバイル実証 | Pending |
