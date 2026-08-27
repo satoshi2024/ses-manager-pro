@@ -1,12 +1,12 @@
 {
-  "runId" : "browser-g2-20260818155654",
-  "baseUrl" : "http://localhost:57185",
+  "runId" : "browser-g2-20260827121315",
+  "baseUrl" : "http://localhost:64367",
   "desktop-png" : "desktop-compliance-gate.png",
-  "desktop-png-sha256" : "2a32ca909dff61f18487ba64f74d0611222c326c6b7b10950aa1346ae2af1839",
-  "desktop-finalUrl" : "http://localhost:57185/compliance-gate",
-  "desktop-consoleCount" : 6,
+  "desktop-png-sha256" : "e923525caa0742e859c7fe5e9f7e0b9725d898a9573ef4cff0e0e0c92535dfd0",
+  "desktop-finalUrl" : "http://localhost:64367/compliance-gate",
+  "desktop-consoleCount" : 3,
   "mobile390-png" : "mobile390-compliance-gate.png",
-  "mobile390-png-sha256" : "0f7b0a51747d53995bef4bbef1f31b45ea553e17fb2b9dadd6f30b45037eb53e",
-  "mobile390-finalUrl" : "http://localhost:57185/compliance-gate",
-  "mobile390-consoleCount" : 6
+  "mobile390-png-sha256" : "cb25b7c7b7b06a0064461ef6101544fc81d4602a6b44209104130ba03d2ce352",
+  "mobile390-finalUrl" : "http://localhost:64367/compliance-gate",
+  "mobile390-consoleCount" : 3
 }

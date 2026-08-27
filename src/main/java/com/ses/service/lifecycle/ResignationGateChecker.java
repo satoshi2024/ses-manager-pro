@@ -30,6 +30,7 @@ public class ResignationGateChecker {
     private final SysUserMapper sysUserMapper;
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final EngineerSalesService engineerSalesService;
+    private final com.ses.mapper.EngineerSalesMapper engineerSalesMapper;
     private final OrganizationService organizationService;
     private final PersistentSessionService persistentSessionService;
     private final PortalSessionService portalSessionService;
@@ -47,26 +48,16 @@ public class ResignationGateChecker {
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         Long linkedUserId = link != null ? link.getSysUserId() : null;
 
-        // 1. 内部アカウント無効化 (USER_DEACTIVATION)
-        boolean userDeactivated = true;
-        String userMsg = "アカウント停止確認済み";
-        if (linkedUserId != null) {
-            SysUser user = sysUserMapper.selectById(linkedUserId);
-            if (user != null && user.getStatus() != null && user.getStatus() != 0) {
-                userDeactivated = false;
-                userMsg = "ログインアカウント(ID: " + user.getUsername() + ")が有効なままです。ステータスを無効(0)に変更してください。";
-            }
-        }
-        if (!userDeactivated) allPassed = false;
+        // 1. 内部アカウント無効化 (USER_DEACTIVATION - 自動実行)
         items.add(GateItemResult.builder()
                 .code("USER_DEACTIVATION")
                 .name("ログインアカウント無効化")
-                .passed(userDeactivated)
-                .autoExecutable(false)
-                .message(userMsg)
+                .passed(true)
+                .autoExecutable(true)
+                .message("案件完了確定時にログインアカウントを自動的に無効化(0)します")
                 .build());
 
-        // 2. Webセッション失効 (SESSION_REVOCATION - 案件完了時に自動実行可能)
+        // 2. Webセッション失効 (SESSION_REVOCATION - 自動実行)
         items.add(GateItemResult.builder()
                 .code("SESSION_REVOCATION")
                 .name("全セッション強制失効")
@@ -75,48 +66,25 @@ public class ResignationGateChecker {
                 .message("案件完了確定時に内部およびポータルの有効セッションを強制失効します")
                 .build());
 
-        // 3. 要員ポータル連携解除または無効化 (PORTAL_UNLINK)
-        boolean portalUnlinked = true;
-        String portalMsg = "ポータル連携確認済み";
-        if (link != null && !userDeactivated) {
-            portalUnlinked = false;
-            portalMsg = "要員アカウント連携が存在し、ユーザーアカウントが有効です";
-        }
-        if (!portalUnlinked) allPassed = false;
+        // 3. 要員ポータル連携解除または無効化 (PORTAL_UNLINK - 自動実行)
         items.add(GateItemResult.builder()
                 .code("PORTAL_UNLINK")
                 .name("要員ポータル連携解除・無効化")
-                .passed(portalUnlinked)
-                .autoExecutable(false)
-                .message(portalMsg)
+                .passed(true)
+                .autoExecutable(true)
+                .message("案件完了確定時に要員ポータル連携を無効化します")
                 .build());
 
-        // 4. 担当営業割当の解除・引継ぎ (SALES_RELEASE)
-        List<EngineerSalesDto> sales = engineerSalesService.listActive(engineerId);
-        boolean salesReleased = true;
-        String salesMsg = "担当営業引継ぎ・解除完了";
-        if (sales != null && !sales.isEmpty()) {
-            boolean hasPrimary = sales.stream().anyMatch(s -> s.getPrimaryFlag() != null && s.getPrimaryFlag() == 1);
-            if (hasPrimary) {
-                salesReleased = false;
-                salesMsg = "有効な主担当営業が設定されたままです。割当解除または引継ぎを行ってください。";
-            }
-        }
-        // 阻害タスクに例外承認があるか確認
-        LifecycleTask salesTask = findTaskByCode(lcCase.getId(), "RESIGN_SALES_RELEASE");
-        boolean salesWaived = salesTask != null && "WAIVED".equals(salesTask.getStatus());
-        if (!salesReleased && !salesWaived) allPassed = false;
+        // 4. 担当営業割当の解除・引継ぎ (SALES_RELEASE - 自動実行)
         items.add(GateItemResult.builder()
                 .code("SALES_RELEASE")
                 .name("担当営業の引継ぎ・割当解除")
-                .passed(salesReleased || salesWaived)
-                .autoExecutable(false)
-                .waived(salesWaived)
-                .approvalRequestId(salesTask != null ? salesTask.getApprovalRequestId() : null)
-                .message(salesWaived ? "例外承認により免除済み" : salesMsg)
+                .passed(true)
+                .autoExecutable(true)
+                .message("案件完了確定時に有効な担当営業割当を自動的に解除します")
                 .build());
 
-        // 5. 組織所属の終了 (ORG_ASSIGNMENT_CLOSE - 自動実行可能)
+        // 5. 組織所属の終了 (ORG_ASSIGNMENT_CLOSE - 自動実行)
         items.add(GateItemResult.builder()
                 .code("ORG_ASSIGNMENT_CLOSE")
                 .name("組織所属の終了")
@@ -215,26 +183,45 @@ public class ResignationGateChecker {
     }
 
     /**
-     * 案件完了確定時に退社ゲートの自動実行処理（セッション強制失効・組織閉鎖）を行う。
+     * 案件完了確定時に退社ゲートの自動実行処理（アカウント無効化・セッション強制失効・組織閉鎖・担当営業解除）を行う。
      */
     public void executeAutomaticGateActions(LifecycleCase lcCase, Engineer engineer) {
         Long engineerId = engineer.getId();
         LocalDate anchorDate = lcCase.getAnchorDate() != null ? lcCase.getAnchorDate() : LocalDate.now();
 
-        // 1. 組織所属の閉鎖
+        // 1. ユーザーアカウント無効化 & 組織所属閉鎖 & セッション失効
         EngineerAccountLink link = engineerAccountLinkService.findByEngineerId(engineerId);
         if (link != null && link.getSysUserId() != null) {
-            int closedCount = organizationService.closeAssignmentsForUser(link.getSysUserId(), anchorDate);
-            log.info("Closed {} organization assignments for user {}", closedCount, link.getSysUserId());
-
-            // 2. Webセッションおよびポータルセッション強制失効
-            try {
-                persistentSessionService.revokeAllForUser(link.getSysUserId(), "退社案件完了によるセッション強制失効");
-                portalSessionService.revokeAllForUser(link.getSysUserId(), "退社案件完了によるセッション強制失効");
-                log.info("Revoked all sessions for user {}", link.getSysUserId());
-            } catch (Exception e) {
-                log.warn("Failed to revoke session for user {}: {}", link.getSysUserId(), e.getMessage());
+            Long userId = link.getSysUserId();
+            SysUser user = sysUserMapper.selectById(userId);
+            if (user != null && (user.getStatus() == null || user.getStatus() != 0)) {
+                user.setStatus(0);
+                sysUserMapper.updateById(user);
+                log.info("Deactivated user {} due to resignation case completion", userId);
             }
+
+            int closedCount = organizationService.closeAssignmentsForUser(userId, anchorDate);
+            log.info("Closed {} organization assignments for user {}", closedCount, userId);
+
+            try {
+                persistentSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
+                portalSessionService.revokeAllForUser(userId, "退社案件完了によるセッション強制失効");
+                log.info("Revoked all sessions for user {}", userId);
+            } catch (Exception e) {
+                log.warn("Failed to revoke session for user {}: {}", userId, e.getMessage());
+            }
+        }
+
+        // 2. 主担当営業および割当の解除
+        List<EngineerSales> activeSales = engineerSalesMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerSales>()
+                        .eq(EngineerSales::getEngineerId, engineerId)
+                        .isNull(EngineerSales::getReleasedAt)
+        );
+        for (EngineerSales es : activeSales) {
+            es.setReleasedAt(anchorDate);
+            engineerSalesMapper.updateById(es);
+            log.info("Released sales assignment {} for engineer {}", es.getId(), engineerId);
         }
     }
 
