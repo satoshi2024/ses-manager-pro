@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -50,6 +51,7 @@ import java.util.function.Function;
 @RestController
 @RequestMapping("/api/my/pwa")
 @RequiredArgsConstructor
+@Transactional(rollbackFor = Exception.class)
 public class PwaMutationApiController {
     private final PwaClientMutationLedgerService ledger;
     private final ObjectMapper objectMapper;
@@ -68,8 +70,9 @@ public class PwaMutationApiController {
                                             @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                             @RequestHeader("X-Client-Payload-Hash") String payloadHash,
                                             @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                            @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                             @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "attendance", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+        return run(body, "attendance", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             AttendanceDayRequest request = read(body.payload(), AttendanceDayRequest.class);
             attendanceService.saveMyDay(request);
             return null;
@@ -81,8 +84,9 @@ public class PwaMutationApiController {
                                               @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                               @RequestHeader("X-Client-Payload-Hash") String payloadHash,
                                               @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                              @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                               @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "attendance", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+        return run(body, "attendance", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             String month = text(body.payload(), "month", body.month());
             attendanceService.deleteMyDay(month, requiredText(body.payload(), "workDate"));
             return null;
@@ -94,8 +98,9 @@ public class PwaMutationApiController {
                                            @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                            @RequestHeader("X-Client-Payload-Hash") String payloadHash,
                                            @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                           @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                            @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "timesheet", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+        return run(body, "timesheet", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             JsonNode payload = body.payload();
             Long contractId = requiredLong(payload, "contractId");
             assertOwnedContract(context.engineerId(), contractId);
@@ -116,8 +121,9 @@ public class PwaMutationApiController {
                                              @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                              @RequestHeader("X-Client-Payload-Hash") String payloadHash,
                                              @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                             @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                              @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "timesheet", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+        return run(body, "timesheet", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             JsonNode payload = body.payload();
             Long contractId = requiredLong(payload, "contractId");
             assertOwnedContract(context.engineerId(), contractId);
@@ -131,9 +137,10 @@ public class PwaMutationApiController {
     public ApiResult<Object> createExpenseDraft(@RequestBody PwaMutationCommandBody body,
                                                 @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                                 @RequestHeader("X-Client-Payload-Hash") String payloadHash,
-                                            @RequestHeader("X-Client-Base-Version") Integer baseVersion,
-                                            @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "expense", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+                                                @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                                @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
+                                                @RequestHeader("X-User-Scope") String userScope) {
+        return run(body, "expense", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             return expenseAck(expenseRequestService.createDraft(context.engineerId(), expenseCommand(body.payload())));
         });
     }
@@ -143,18 +150,20 @@ public class PwaMutationApiController {
                                                 @RequestHeader("X-Client-Request-Id") String clientRequestId,
                                                 @RequestHeader("X-Client-Payload-Hash") String payloadHash,
                                                 @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                                @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
                                                 @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "expense", clientRequestId, payloadHash, baseVersion, userScope, context ->
+        return run(body, "expense", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context ->
                 expenseAck(expenseRequestService.updateDraft(context.engineerId(), id, expenseCommand(body.payload()))));
     }
 
     @PostMapping("/change-requests/drafts")
     public ApiResult<Object> createChangeRequestDraft(@RequestBody PwaMutationCommandBody body,
                                                        @RequestHeader("X-Client-Request-Id") String clientRequestId,
-                                                       @RequestHeader("X-Client-Payload-Hash") String payloadHash,
-                                                       @RequestHeader("X-Client-Base-Version") Integer baseVersion,
-                                                       @RequestHeader("X-User-Scope") String userScope) {
-        return run(body, "change-request", clientRequestId, payloadHash, baseVersion, userScope, context -> {
+                                               @RequestHeader("X-Client-Payload-Hash") String payloadHash,
+                                               @RequestHeader("X-Client-Base-Version") Integer baseVersion,
+                                               @RequestHeader("X-Client-Created-At") Long clientCreatedAt,
+                                               @RequestHeader("X-User-Scope") String userScope) {
+        return run(body, "change-request", clientRequestId, payloadHash, baseVersion, clientCreatedAt, userScope, context -> {
             JsonNode payload = body.payload();
             if (!payload.path("attachmentDocumentId").isMissingNode()
                     && !payload.path("attachmentDocumentId").isNull()) {
@@ -171,7 +180,8 @@ public class PwaMutationApiController {
 
     private ApiResult<Object> run(PwaMutationCommandBody body, String expectedScreen,
                                   String clientRequestId, String payloadHash, Integer baseVersion,
-                                  String userScope, Function<PwaUserContextService.CurrentContext, Object> action) {
+                                  Long clientCreatedAt, String userScope,
+                                  Function<PwaUserContextService.CurrentContext, Object> action) {
         if (body == null || body.payload() == null || !expectedScreen.equals(body.screen())) {
             throw BusinessException.of(400, "error.pwa.commandInvalid");
         }
@@ -179,7 +189,8 @@ public class PwaMutationApiController {
             throw BusinessException.of(400, "error.pwa.baseVersionRequired");
         }
         PwaMutationCommand command = new PwaMutationCommand(body.screen(), body.month(), baseVersion, body.payload());
-        PwaClientMutationLedgerService.Claim claim = ledger.claim(command, clientRequestId, payloadHash, userScope);
+        PwaClientMutationLedgerService.Claim claim = ledger.claim(command, clientRequestId, payloadHash,
+                clientCreatedAt, userScope);
         if (claim.replay()) return ApiResult.success(claim.responseData());
         try {
             assertBaseVersion(command, claim.context());
@@ -237,7 +248,7 @@ public class PwaMutationApiController {
             AttendanceMonth row = attendanceMonthMapper.selectOne(new LambdaQueryWrapper<AttendanceMonth>()
                     .eq(AttendanceMonth::getEngineerId, context.engineerId())
                     .eq(AttendanceMonth::getWorkMonth, YearMonth.parse(month).atDay(1))
-                    .last("LIMIT 1"));
+                    .last("LIMIT 1 FOR UPDATE"));
             return row == null ? new VersionSnapshot(0, Map.of("exists", false))
                     : new VersionSnapshot(value(row.getVersion()), Map.of(
                     "exists", true, "id", row.getId(), "version", value(row.getVersion()), "status", row.getStatus()));
@@ -249,7 +260,7 @@ public class PwaMutationApiController {
             WorkRecord row = workRecordMapper.selectOne(new LambdaQueryWrapper<WorkRecord>()
                     .eq(WorkRecord::getContractId, contractId)
                     .eq(WorkRecord::getWorkMonth, month)
-                    .last("LIMIT 1"));
+                    .last("LIMIT 1 FOR UPDATE"));
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));
@@ -259,7 +270,7 @@ public class PwaMutationApiController {
         }
         if ("expense".equals(command.screen())) {
             Long id = payload.has("id") && !payload.path("id").isNull() ? payload.path("id").asLong() : null;
-            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectById(id);
+            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectByIdForUpdate(id);
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             if (!Objects.equals(context.engineerId(), row.getEngineerId())) {
                 throw BusinessException.of(403, "error.my.notOwner");
@@ -271,7 +282,7 @@ public class PwaMutationApiController {
             return new VersionSnapshot(value(row.getVersion()), data);
         }
         if ("change-request".equals(command.screen())) {
-            Engineer row = engineerMapper.selectById(context.engineerId());
+            Engineer row = engineerMapper.selectByIdForUpdate(context.engineerId());
             if (row == null) throw BusinessException.of(404, "error.my.notLinked");
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));

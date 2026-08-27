@@ -59,7 +59,8 @@ class PwaClientMutationLedgerServiceTest {
             return 1;
         });
 
-        PwaClientMutationLedgerService.Claim first = ledger.claim(command, "req-1", hash, scope);
+        long createdAt = Instant.now().toEpochMilli();
+        PwaClientMutationLedgerService.Claim first = ledger.claim(command, "req-1", hash, createdAt, scope);
 
         assertThat(first.replay()).isFalse();
         verify(mapper).insert(any(PwaClientMutation.class));
@@ -72,7 +73,7 @@ class PwaClientMutationLedgerServiceTest {
         completed.setResponseJson("{\"saved\":true}");
         when(mapper.selectByUserAndClientRequest(7L, "req-1")).thenReturn(completed);
 
-        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, "req-1", hash, scope);
+        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, "req-1", hash, createdAt, scope);
 
         assertThat(replay.replay()).isTrue();
         assertThat(replay.responseData().path("saved").asBoolean()).isTrue();
@@ -95,9 +96,37 @@ class PwaClientMutationLedgerServiceTest {
         existing.setStatus("COMPLETED");
         when(mapper.selectByUserAndClientRequest(7L, "req-2")).thenReturn(existing);
 
-        assertThatThrownBy(() -> ledger.claim(command, "req-2", hash, scope))
+        assertThatThrownBy(() -> ledger.claim(command, "req-2", hash, Instant.now().toEpochMilli(), scope))
                 .isInstanceOf(com.ses.common.exception.PwaConflictException.class)
                 .hasMessage("pwa.idempotencyPayloadMismatch");
         verify(mapper, never()).insert(any(PwaClientMutation.class));
+    }
+
+    @Test
+    void 期限超過のclient作成日時は送信をclaimしない() {
+        ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
+        PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+
+        assertThatThrownBy(() -> ledger.claim(command, "req-expired", hash,
+                Instant.now().minusSeconds(31L * 24 * 60 * 60).toEpochMilli(), "scope-A"))
+                .isInstanceOf(com.ses.common.exception.PwaConflictException.class)
+                .hasMessage("pwa.queueExpired");
+        verify(mapper, never()).insert(any(PwaClientMutation.class));
+        verify(userContextService, never()).assertCurrent("scope-A");
+    }
+
+    @Test
+    void 未来すぎるclient作成日時は400で送信をclaimしない() {
+        ObjectNode payload = objectMapper.createObjectNode().put("contractId", 10);
+        PwaMutationCommand command = new PwaMutationCommand("timesheet", "2026-08", 0, payload);
+        String hash = command.payloadHash(canonicalizer);
+
+        assertThatThrownBy(() -> ledger.claim(command, "req-future", hash,
+                Instant.now().plusSeconds(10 * 60).toEpochMilli(), "scope-A"))
+                .isInstanceOf(com.ses.common.exception.BusinessException.class)
+                .hasMessage("error.pwa.createdAtInvalid");
+        verify(mapper, never()).insert(any(PwaClientMutation.class));
+        verify(userContextService, never()).assertCurrent("scope-A");
     }
 }

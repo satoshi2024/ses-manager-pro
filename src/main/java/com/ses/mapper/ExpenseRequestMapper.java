@@ -12,6 +12,10 @@ import java.util.List;
 @Mapper
 public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
 
+    /** PWAのbaseVersion確認とdomain更新を同一transactionで直列化する。 */
+    @Select("SELECT * FROM t_expense_request WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    ExpenseRequest selectByIdForUpdate(@Param("id") Long id);
+
     /** 会計連携プレビュー用の組織スコープ付き取得 (R1-P1-06 / design §5.1, §5.2)。権限外は null。 */
     @Select("""
         <script>

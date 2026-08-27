@@ -34,7 +34,7 @@ Service Workerはmutationをqueueへ変換しない。page側のsync moduleがqu
 
 | 対象 | 正本時刻 | offline時 | as-of/再計算方針 |
 |---|---|---|---|
-| draft/queue | client createdAtは表示用、server受信時刻が監査正本 | 端末時刻を信用して期限判定しない | server現在時刻で30日判定し、期限超過commandは送信しない |
+| draft/queue | server受信時刻が監査正本、client createdAtは送信時の検査入力兼表示用 | 端末時刻だけを信用して期限判定しない | `X-Client-Created-At`をserver現在時刻と比較し、30日超過または許容範囲外のcommandはclaim/送信しない |
 | timesheet daily | `workDate`と既存WorkRecordの`workMonth` | raw date/time/break/remarksだけ保持 | `WorkRecordService.saveDaily/deleteDaily`が既存の月締め、契約期間、計算を判定 |
 | employment attendance daily | `workDate`と既存AttendanceMonth | raw clock/break/remarksだけ保持 | `AttendanceService`/`AttendanceCalculator`がcalendar、scope、割増、月次集計を判定 |
 | expense draft | `expenseDate`、server created/updated time | 最小入力だけ保持 | 金額validation、scope、approval、accounting連携は既存serviceが判定 |
@@ -113,24 +113,25 @@ logout formのsubmit前にclient scopeをquarantine/clearし、SWへ`CLEAR_USER_
 ### 7.1 Request
 
 - Header: `X-Client-Request-Id`（UUID、1 commandにつき不変）
-- Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`。bodyは`screen`、`month`、`payload`を持つ。
+- Header: `X-Client-Payload-Hash`、`X-Client-Base-Version`、`X-Client-Created-At`（epoch milliseconds）。bodyは`screen`、`month`、`payload`を持つ。
 - Hash: serverが`baseVersion`、`month`、canonical JSON `payload`、`screen`をUTF-8 bytesで正規化しSHA-256を再計算する。clientのhashはqueue監査用であり、serverは信用しない。
+- Retention: serverは`X-Client-Created-At`をserver時計と比較し、30日超過を`QUEUE_EXPIRED`の409として拒否する。5分超の未来時刻、欠損、0以下も400で拒否する。端末時刻を監査正本にはしないが、client recordの作成時刻を無検査で受け入れない。
 - Response: `ApiResult<T>`。PWA経路の成功responseはid/status/version等の最小ackだけとし、replay時はledgerに保存した同じ最小ackを返す。
 
 ### 7.2 Storage
 
 汎用外部連携の`t_integration_job`やcompliance ledgerを流用せず、NF-04専用の`t_pwa_client_mutation` ledgerを追加する。`user_id,client_request_id`のunique、opaque scope hash、screen/month、payload hash、base version、status、最小ack JSON、監査時刻を持つ。raw payload、入力内容、PII response bodyは保存しない。migrationは実装開始時の全Flyway locationを再確認したうえでV112とした。
 
-処理順序は、ledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行しledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時にclaimを破棄する。
+処理順序は、client作成時刻とheaderを検証し、ledger keyをinsert、既存keyならscope/hash照合、同一hashのCOMPLETEDは最小ackをreplay、異hashは409、未登録なら既存domain serviceを実行しledgerへ最小ackを保存する。ledger insert競合は再取得して同じ規則を適用する。PROCESSINGは二重実行を拒否し、失敗時にclaimを破棄する。
 
 ## 8. Domain adapters
 
 | Domain | Existing API | baseVersionの正本 | 追加設計 |
 |---|---|---|---|
-| timesheet | `/api/my/timesheet/daily`、daily delete | `WorkRecord.version`を対象row versionとして扱う | PWA入口でsnapshotとbaseVersionを比較し、save/deleteは既存`WorkRecordService`の検証・CASを維持 |
-| employment attendance | `/api/my/attendance/daily`、daily delete | `AttendanceMonth.version` | PWA入口でsnapshotとbaseVersionを比較し、更新・削除と計算は既存`AttendanceService`へ委譲 |
+| timesheet | `/api/my/timesheet/daily`、daily delete | `WorkRecord.version`を対象row versionとして扱う | PWA入口のtransactionで対象rowを`FOR UPDATE`し、snapshot/baseVersion比較から既存`WorkRecordService`のlock・検証・CASまで同じtransactionで直列化 |
+| employment attendance | `/api/my/attendance/daily`、daily delete | `AttendanceMonth.version` | PWA入口のtransactionで月次rowを`FOR UPDATE`し、snapshot/baseVersion比較から更新・削除・計算の既存`AttendanceService`委譲まで同じtransactionで直列化 |
 | expense | `/api/my/expenses` POST/PUT | expense row `version`、createは0 | draft create/updateだけidempotent/CAS化 |
-| change request | `/api/my/change-requests` POST | createは0 | allowlist payloadのdraft createだけidempotent化 |
+| change request | `/api/my/change-requests` POST | 起票元`Engineer.version`（起票時点のprofile基準） | allowlist payloadのdraft createだけidempotent化 |
 
 submitやapproval state transitionへqueue headerを付ける場合もonline-onlyの二重click防止に限り、offline保存・自動再送は行わない。
 

@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Objects;
@@ -27,6 +29,8 @@ public class PwaClientMutationLedgerService {
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-f]{64}$");
     private static final String PROCESSING = "PROCESSING";
     private static final String COMPLETED = "COMPLETED";
+    private static final Duration MAX_QUEUE_AGE = Duration.ofDays(30);
+    private static final Duration MAX_FUTURE_SKEW = Duration.ofMinutes(5);
 
     private final PwaClientMutationMapper mapper;
     private final PwaUserContextService userContextService;
@@ -37,8 +41,9 @@ public class PwaClientMutationLedgerService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public Claim claim(PwaMutationCommand command, String clientRequestId, String payloadHash,
-                       String opaqueScope) {
+                       Long clientCreatedAt, String opaqueScope) {
         validateHeaders(clientRequestId, payloadHash);
+        validateClientCreatedAt(clientCreatedAt);
         PwaUserContextService.CurrentContext context = userContextService.assertCurrent(opaqueScope);
         String expectedHash = command.payloadHash(canonicalizer);
         if (!Objects.equals(expectedHash, payloadHash)) {
@@ -132,6 +137,24 @@ public class PwaClientMutationLedgerService {
         }
         if (payloadHash == null || !SHA256.matcher(payloadHash).matches()) {
             throw BusinessException.of(400, "error.pwa.payloadHashInvalid");
+        }
+    }
+
+    /** 端末の時計を監査正本にはせず、送信時点で30日保持期限をserver時刻でも検査する。 */
+    private void validateClientCreatedAt(Long clientCreatedAt) {
+        if (clientCreatedAt == null || clientCreatedAt <= 0) {
+            throw BusinessException.of(400, "error.pwa.createdAtInvalid");
+        }
+        Instant created = Instant.ofEpochMilli(clientCreatedAt);
+        Instant now = Instant.now(clock);
+        if (created.isAfter(now.plus(MAX_FUTURE_SKEW))) {
+            throw BusinessException.of(400, "error.pwa.createdAtInvalid");
+        }
+        if (created.isBefore(now.minus(MAX_QUEUE_AGE))) {
+            throw new PwaConflictException("pwa.queueExpired", Map.of(
+                    "type", "QUEUE_EXPIRED",
+                    "clientCreatedAt", clientCreatedAt,
+                    "maxAgeDays", MAX_QUEUE_AGE.toDays()));
         }
     }
 

@@ -112,6 +112,7 @@ timesheet、attendance、expense、change-requestのshell navigationを390×844�
 - syncはonline event、page visibility、明示再試行で実行し、logout/user switch/session expiry/context mismatchで停止する。
 - queue中のsubmit/approval/attachment/receiptを作らない。
 - 30日を超えたrecordは送信せず破棄し、409 responseをserver/client diffとして表示し、自動merge/retryをしない。
+- 送信時は`X-Client-Created-At`を付け、server時計で30日保持期限と未来時刻を検査する。期限切れは自動再送せず、破棄・再入力を促す。
 - 50ms double-clickで同じcommandを複数生成しない。
 
 ### Test requirements

@@ -212,6 +212,13 @@
     }
 
     function renderConflict(record) {
+        if (record.status === 'ERROR') {
+            return `<div class="pwa-queue-conflict" data-request-id="${escapeHtml(record.clientRequestId)}">` +
+                `<div class="fw-bold">同期エラー: ${escapeHtml(record.screen)} / ${escapeHtml(record.month || '')}</div>` +
+                `<div class="small mt-1">${escapeHtml(record.error || '同期できません')}</div>` +
+                `<button type="button" class="btn btn-sm btn-outline-danger" data-pwa-discard="${escapeHtml(record.clientRequestId)}">破棄して再入力</button>` +
+                `</div>`;
+        }
         const conflict = record.conflict || {};
         const title = record.status === 'CONFLICT' ? '競合' : '同期エラー';
         const server = conflict.server === undefined ? { hash: conflict.serverHash } : conflict.server;
@@ -259,6 +266,14 @@
         await render();
     }
 
+    async function markExpired(record, message) {
+        record.status = 'ERROR';
+        record.error = message || '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+        await put(record);
+        await render();
+        return { expired: true, clientRequestId: record.clientRequestId };
+    }
+
     async function sendRecord(record) {
         if (record.userScope !== state.scope) return { skipped: true };
         if (!navigator.onLine || state.paused) return { queued: true, clientRequestId: record.clientRequestId };
@@ -268,6 +283,7 @@
             'X-Client-Request-Id': record.clientRequestId,
             'X-Client-Payload-Hash': record.payloadHash,
             'X-Client-Base-Version': String(record.baseVersion),
+            'X-Client-Created-At': String(record.createdAt),
             'X-User-Scope': record.userScope
         }, SES.csrf.header());
         try {
@@ -288,6 +304,12 @@
             let result = null;
             try { result = await response.json(); } catch (_) { /* 非JSONは下記で処理 */ }
             if (response.status === 409 || (result && result.code === 409)) {
+                if (result && result.data && result.data.type === 'QUEUE_EXPIRED') {
+                    const fallback = '保持期間（30日）を過ぎたため送信できません。破棄して再入力してください。';
+                    const message = window.SES && SES.i18n
+                        ? SES.i18n.t('error.pwa.queueExpired', fallback) : fallback;
+                    return markExpired(record, message);
+                }
                 return markConflict(record, result && result.data);
             }
             if (!response.ok || !result || result.code !== 200) {

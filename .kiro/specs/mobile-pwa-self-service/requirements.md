@@ -58,6 +58,7 @@
 - offline入力後にbrowserを再起動しても、同一userの最小draftが復元できる。
 - online復帰後は同一commandが1回だけ適用され、成功後queue recordが消える。
 - 30日を超えたrecordは送信されず、表示上も期限切れとして扱われる。
+- serverは`X-Client-Created-At`をserver時計で検査し、30日超過commandを`QUEUE_EXPIRED`として拒否する。欠損・0以下・5分超の未来時刻も受理しない。
 
 ### PW-R3 Server idempotency、version、既存domain service
 

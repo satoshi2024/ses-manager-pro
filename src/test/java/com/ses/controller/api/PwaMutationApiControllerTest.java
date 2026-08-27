@@ -55,7 +55,7 @@ class PwaMutationApiControllerTest {
                 new PwaMutationApiController.PwaMutationCommandBody("timesheet", "2026-08", payload);
         PwaUserContextService.CurrentContext context =
                 new PwaUserContextService.CurrentContext(7L, 9L, "scope-A");
-        when(ledger.claim(any(), any(), any(), any()))
+        when(ledger.claim(any(), any(), any(), any(), any()))
                 .thenReturn(new PwaClientMutationLedgerService.Claim(1L, context, false, null));
         Contract contract = new Contract();
         contract.setEngineerId(9L);
@@ -68,7 +68,8 @@ class PwaMutationApiControllerTest {
         record.setStatus("入力中");
         when(workRecordMapper.selectOne(any())).thenReturn(record);
 
-        assertThatThrownBy(() -> controller.saveTimesheet(body, "req-1", "a".repeat(64), 3, "scope-A"))
+        assertThatThrownBy(() -> controller.saveTimesheet(body, "req-1", "a".repeat(64), 3,
+                System.currentTimeMillis(), "scope-A"))
                 .isInstanceOf(com.ses.common.exception.PwaConflictException.class)
                 .satisfies(error -> {
                     Object data = ((com.ses.common.exception.PwaConflictException) error).getData();
