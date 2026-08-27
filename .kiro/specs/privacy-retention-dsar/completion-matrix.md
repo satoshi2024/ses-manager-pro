@@ -1,8 +1,8 @@
 # completion mapping
 
-開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`  
-fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）  
-実装branch: `codex/privacy-retention-dsar`  
+開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
+fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
+実装branch: `codex/privacy-retention-dsar`
 通常checkout: `C:\work\ses-manager-pro`（変更しない）
 
 | 要件/task | evidence | 検証/Demo | status |

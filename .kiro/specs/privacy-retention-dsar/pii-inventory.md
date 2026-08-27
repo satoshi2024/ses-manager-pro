@@ -1,8 +1,8 @@
 # PII inventory（read-only discovery）
 
-更新日: 2026-08-27（Asia/Tokyo）  
-開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`  
-fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）  
+更新日: 2026-08-27（Asia/Tokyo）
+開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
+fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
 承認入力: `<APPROVED_SCOPE>` / `<OWNER>` / `<BASE_COMMIT>` / `<BASE_BRANCH>`（すべて未置換）
 
 ## 読み方
