@@ -44,7 +44,7 @@ Self-review notes:
 
 | Task | Status | Commit | Remote SHA | Evidence |
 |---|---|---|---|---|
-| 0 Discovery/Gate/Spec | COMPLETED | pending | pending | this spec, central traceability, inventory |
+| 0 Discovery/Gate/Spec | COMPLETED | b3c69d990932f1ea2e74020b95741a6b4757180f | b3c69d990932f1ea2e74020b95741a6b4757180f | this spec, central traceability, inventory |
 | F1 Manifest/SW/Cache | NOT_STARTED | - | - | - |
 | F2 Idempotency/Version | NOT_STARTED | - | - | - |
 | A1 Mobile shell | NOT_STARTED | - | - | - |
