@@ -58,16 +58,11 @@ management:
     health:
       # liveness/readiness グループを有効化（/actuator/health/{liveness,readiness}）。
       probes:
-        enabled: false
+        enabled: true
       # 匿名アクセスでも内部詳細（component 状態・接続先など）を返さない。
       show-details: never
       show-components: never
       group:
-        # 集約 /actuator/health は readiness と同口径（200 UP when DB ready）。
-        default:
-          include:
-            - readinessState
-            - db
         # プロセス生存のみ。DB 断でも UP を維持する（ECS が不要にタスクを殺さない）。
         liveness:
           include:
@@ -79,13 +74,6 @@ management:
             - db
     prometheus:
       enabled: true
-  health:
-    livenessstate:
-      enabled: true
-    readinessstate:
-      enabled: true
-    mail:
-      enabled: false
   prometheus:
     metrics:
       export:

@@ -24,6 +24,8 @@ logging:
     com.ses: INFO
     com.baomidou.mybatisplus: WARN
     org.springframework.security: WARN
+    # ECS/ALB 排水時のネイティブ Tomcat GracefulShutdown を CloudWatch に残す（カスタム reporter 不要）
+    org.springframework.boot.web.embedded.tomcat.GracefulShutdown: INFO
 
 app:
   security:

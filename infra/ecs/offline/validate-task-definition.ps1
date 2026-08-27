@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 # Static validation of task-definition.prod.json — no AWS API calls.
 param(
-  [string]$EvidenceRoot = ''
+  [string]$EvidenceRoot = '',
+  [switch]$EfsNegativeSelfTestOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,49 @@ $gitSha = (git -C $RepoRoot rev-parse HEAD).Trim()
 if (-not $EvidenceRoot) {
   $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$gitSha\offline-ecs-simulation"
 }
+
+function Assert-EfsRootDirectoryRule([object]$efsCfg, [switch]$ExpectFail) {
+  $lines = New-Object System.Collections.Generic.List[string]
+  $ap = $efsCfg.authorizationConfig.accessPointId
+  $rd = $efsCfg.rootDirectory
+  $hasAp = ($null -ne $ap -and [string]$ap -ne '')
+  if ($hasAp) {
+    if ($null -eq $rd -or [string]$rd -eq '' -or [string]$rd -eq '/') {
+      $lines.Add("PASS accessPointId=$ap rootDirectory='$rd' (absent or /)")
+    } else {
+      $lines.Add("FAIL accessPointId=$ap rootDirectory='$rd' must be absent or / only")
+      if (-not $ExpectFail) { throw "invalid EFS rootDirectory with accessPointId: $rd" }
+      return $lines
+    }
+  } else {
+    $lines.Add("INFO no accessPointId — rootDirectory rules not applied")
+  }
+  if ($ExpectFail) { throw 'negative case unexpectedly passed' }
+  return $lines
+}
+
+if ($EfsNegativeSelfTestOnly) {
+  New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
+  $neg = New-Object System.Collections.Generic.List[string]
+  $bad = [pscustomobject]@{
+    authorizationConfig = @{ accessPointId = 'fsap-TEST' }
+    rootDirectory         = '/ses-manager/uploads'
+  }
+  $threw = $false
+  try {
+    Assert-EfsRootDirectoryRule $bad -ExpectFail | Out-Null
+  } catch {
+    $threw = $true
+    $neg.Add("PASS negative: rootDirectory=/ses-manager/uploads rejected")
+    $neg.Add($_.Exception.Message)
+  }
+  if (-not $threw) { throw 'EFS negative self-test did not fail on /ses-manager/uploads' }
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText((Join-Path $EvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
+  Write-Host 'EFS negative self-test PASS'
+  exit 0
+}
+
 New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
 
 $td = Get-Content $TdPath -Raw | ConvertFrom-Json
@@ -41,7 +85,10 @@ if ($alb -ne '/actuator/health/readiness') { Fail "ALB path must be readiness, g
 $uploads = $td.volumes | Where-Object { $_.name -eq 'uploads' }
 if (-not $uploads.efsVolumeConfiguration) { Fail 'uploads missing efsVolumeConfiguration placeholder' }
 if ($uploads.efsVolumeConfiguration.fileSystemId -ne 'fs-PLACEHOLDER') { Fail 'EFS fs id placeholder' }
-Ok 'uploads EFS template PRESENT (EFS-ACTUAL=DEFERRED)'
+if ($uploads.efsVolumeConfiguration.authorizationConfig.accessPointId -ne 'fsap-PLACEHOLDER') { Fail 'EFS accessPointId placeholder missing' }
+Ok 'uploads EFS accessPointId placeholder present'
+(Assert-EfsRootDirectoryRule $uploads.efsVolumeConfiguration) | ForEach-Object { $lines.Add($_) }
+Ok 'EFS-ACTUAL=DEFERRED (template static only)'
 
 $envNames = @($c.environment | ForEach-Object { $_.name })
 foreach ($f in @('DB_PASSWORD','DB_USERNAME','DB_URL','OIDC_CLIENT_SECRET','BATCH_TOKEN_SECRET')) {
@@ -57,4 +104,20 @@ Ok 'ECR push/registryDigest=OUT-OF-SCOPE (no AWS account)'
 
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllLines((Join-Path $EvidenceRoot 'task-definition-validation.txt'), $lines.ToArray(), $utf8)
+
+# inline negative self-test output
+$neg = New-Object System.Collections.Generic.List[string]
+$bad = [pscustomobject]@{
+  authorizationConfig = @{ accessPointId = 'fsap-TEST' }
+  rootDirectory         = '/ses-manager/uploads'
+}
+try {
+  Assert-EfsRootDirectoryRule $bad -ExpectFail | Out-Null
+  throw 'negative self-test did not fail'
+} catch {
+  $neg.Add('PASS negative: rootDirectory=/ses-manager/uploads must fail when accessPointId set')
+  $neg.Add($_.Exception.Message)
+}
+[System.IO.File]::WriteAllText((Join-Path $EvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
+
 Write-Host 'task-definition static validation PASS'

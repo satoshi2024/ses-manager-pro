@@ -98,7 +98,6 @@
       "name": "uploads",
       "efsVolumeConfiguration": {
         "fileSystemId": "fs-PLACEHOLDER",
-        "rootDirectory": "/ses-manager/uploads",
         "transitEncryption": "ENABLED",
         "authorizationConfig": {
           "accessPointId": "fsap-PLACEHOLDER",
@@ -124,8 +123,9 @@
       "note": "Process liveness only; DB loss must not kill the task"
     },
     "efsUploads": {
-      "status": "EFS-ACTUAL=BLOCKED until real AWS",
-      "template": "volumes[].efsVolumeConfiguration is a PLACEHOLDER only — not verified offline"
+      "status": "EFS-ACTUAL=DEFERRED until real AWS",
+      "accessPointRootPath": "/ses-manager/uploads — set on EFS Access Point (fsap-PLACEHOLDER), NOT in task efsVolumeConfiguration.rootDirectory when accessPointId is present",
+      "taskRootDirectory": "omit or \"/\" only when accessPointId is set (ECS API rule)"
     },
     "deferredExternalIac": [
       "ALB target group / listener (readiness path)",

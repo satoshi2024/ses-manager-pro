@@ -38,21 +38,6 @@ class ActuatorReadinessGroupAndShutdownTest {
     private Environment environment;
 
     @Test
-    void defaultグループはreadinessStateとdbを含む() {
-        HealthEndpointGroup defaultGroup = healthEndpointGroups.get("default");
-        assertNotNull(defaultGroup, "default health group must exist");
-        assertTrue(defaultGroup.isMember("readinessState"));
-        assertTrue(defaultGroup.isMember("db"));
-    }
-
-    @Test
-    void health集約エンドポイントは匿名でUPを返す() throws Exception {
-        mockMvc.perform(get("/actuator/health"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("UP"));
-    }
-
-    @Test
     void readinessグループはreadinessStateとdbを含む() {
         HealthEndpointGroup readiness = healthEndpointGroups.get("readiness");
         assertNotNull(readiness, "readiness health group must exist");

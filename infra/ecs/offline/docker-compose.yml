@@ -89,10 +89,9 @@ services:
       PERSISTENT_SESSION_ENABLED: "true"
       APP_SECURITY_REQUIRE_HTTPS: "false"
       SHUTDOWN_TIMEOUT: 30s
-      # Force graceful even if an overlay forgot YAML (REV-ECS-P2-003)
       SERVER_SHUTDOWN: graceful
-      # Persist shutdown logs onto named volume — Docker Desktop may drop final stdout on stop
-      LOGGING_FILE_NAME: /app/uploads/.ops/spring.log
+      # Simulation only: no SMTP in offline compose — do not disable mail health globally.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
       SPRING_APPLICATION_JSON: >-
         {"compliance":{"gate":{"credential-crypto":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}},"fingerprint-keys":{"default":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}}}}}}
     networks:

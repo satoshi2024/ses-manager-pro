@@ -6,6 +6,7 @@
 #>
 param(
   [string]$EvidenceRoot = '',
+  [string]$ImageSourceRevision = '',
   [switch]$EgressNegativeSelfTestOnly
 )
 
@@ -124,16 +125,7 @@ try {
   docker inspect $ImageTag | Out-File (Join-Path $script:Ev 'image-inspect.json') -Encoding utf8
   $sec.Add('PASS image inspect captured')
   Write-Ev 'dockerfile-security.txt' ($sec -join "`n")
-  Write-Ev 'supply-chain.txt' @"
-dockerfileSha256=$dfSha
-jarSha256=$($lock.jarSha256)
-baseImageDigest=$($lock.baseImageDigest)
-localImageId=$($lock.localImageId)
-gitRevision=$evidenceRevision
-registryDigest=ABSENT (not fabricated)
-sbomScan=BLOCKED-TOOLING (no syft/trivy/grype on host; no network install)
-vulnScan=BLOCKED-TOOLING (no zero-vuln claim)
-"@
+  $script:DockerfileSha256 = $dfSha
 
   # --- bring up ---
   Add-Cmd "docker compose -f $ComposeFile down -v"
@@ -141,9 +133,9 @@ vulnScan=BLOCKED-TOOLING (no zero-vuln claim)
 
   # Pre-create uploads volume owned by 10001 (REV-ECS-P1-002)
   docker volume create offline_ses-offline-uploads 2>$null | Out-Null
-  Add-Cmd 'chown uploads volume to 10001 and mkdir .ops'
+  Add-Cmd 'chown uploads volume to 10001 (sim dir only)'
   docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
-    sh -c 'rm -rf /data/lost+found /data/* /data/.[!.]* 2>/dev/null; mkdir -p /data/.ops /data/sim && chown -R 10001:10001 /data'
+    sh -c 'rm -rf /data/lost+found /data/* /data/.[!.]* 2>/dev/null; mkdir -p /data/sim && chown -R 10001:10001 /data'
 
   Add-Cmd 'compose up mysql'
   docker compose -f $ComposeFile up -d mysql
@@ -206,10 +198,9 @@ vulnScan=BLOCKED-TOOLING (no zero-vuln claim)
   $agg = Curl-Code '/actuator/health'
   $live = Curl-Code '/actuator/health/liveness'
   $ready = Curl-Code '/actuator/health/readiness'
-  $hf.Add("aggregate /actuator/health => $agg body=$(Curl-Body '/actuator/health')")
+  $hf.Add("aggregate /actuator/health => $agg body=$(Curl-Body '/actuator/health') (recorded only — not ALB gate)")
   $hf.Add("liveness => $live body=$(Curl-Body '/actuator/health/liveness')")
   $hf.Add("readiness => $ready body=$(Curl-Body '/actuator/health/readiness')")
-  if ($agg -ne '200') { throw "aggregate health $agg" }
   if ($live -ne '200') { throw "liveness $live" }
   if ($ready -ne '200') { throw "readiness $ready" }
   foreach ($blocked in @('/actuator/env','/actuator/beans','/actuator/configprops')) {
@@ -313,65 +304,61 @@ CloudSign=false Peppol=none AI=mock external-send=false
 freee=sim placeholders only; no outbound credential use
 "@
 
-  # --- REV-ECS-P2-003 graceful shutdown ---
-  Add-Cmd 'marker then docker stop -t 40 ses-offline-app'
-  $marker = "SHUTDOWN-TEST-MARKER-$(Get-Date -Format 'yyyyMMddHHmmss')"
-  Invoke-InApp "mkdir -p /app/uploads/.ops && echo $marker >> /app/uploads/.ops/spring.log"
-  $modeLogs = docker logs ses-offline-app 2>&1 | Out-String
-  if ($modeLogs -notmatch 'server\.shutdown effective value=graceful') {
-    throw 'server.shutdown effective value=graceful not observed at runtime'
+  # --- REV-ECS-P2-003 graceful shutdown (Spring Boot native Tomcat only) ---
+  Add-Cmd 'docker stop -t 40 ses-offline-app (native Tomcat GracefulShutdown)'
+  $logJob = Start-Job -ScriptBlock {
+    docker logs -f ses-offline-app 2>&1 | Out-String
   }
+  Start-Sleep -Seconds 2
   $t0 = Get-Date
   $ErrorActionPreference = 'Continue'
   docker stop -t 40 ses-offline-app 2>&1 | Out-Null
   $ErrorActionPreference = 'Stop'
+  Start-Sleep -Seconds 3
+  Stop-Job $logJob -ErrorAction SilentlyContinue
+  $streamLogs = (Receive-Job $logJob -ErrorAction SilentlyContinue | Out-String)
+  Remove-Job $logJob -Force -ErrorAction SilentlyContinue
   $elapsed = [Math]::Max(0, [int]((Get-Date) - $t0).TotalSeconds)
   $exitCode = (docker inspect --format '{{.State.ExitCode}}' ses-offline-app).Trim()
   $oom = (docker inspect --format '{{.State.OOMKilled}}' ses-offline-app).Trim()
   $stopLogs = docker logs ses-offline-app 2>&1 | Out-String
-  $fileLogStr = (docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
-    sh -c 'cat /data/.ops/spring.log 2>/dev/null || true' | Out-String)
-  # Only accept graceful signals that appear AFTER this test's marker (ignore prior recreates)
-  $idx = $fileLogStr.IndexOf($marker)
-  $afterMarker = if ($idx -ge 0) { $fileLogStr.Substring($idx) } else { '' }
-  # Prefer after-marker file log (survives Desktop stdout drop). Also allow docker logs.
-  $hasCommenceFile = $afterMarker -match 'Commencing graceful shutdown'
-  $hasCompleteFile = $afterMarker -match 'Graceful shutdown complete'
-  $hasCommenceDock = $stopLogs -match 'Commencing graceful shutdown'
-  $hasCompleteDock = $stopLogs -match 'Graceful shutdown complete'
-  $opsList = (docker run --rm -v offline_ses-offline-uploads:/data mysql:8.0.36 `
-    sh -c 'ls -la /data/.ops' | Out-String)
-  $hasCommenceEv = $opsList -match 'graceful-commence\.txt'
-  $hasCompleteEv = $opsList -match 'graceful-complete\.txt'
-  $hasJvmHook = $opsList -match 'jvm-shutdown-hook\.txt'
-  $hasCommence = $hasCommenceFile -or $hasCommenceDock
-  $hasComplete = $hasCompleteFile -or $hasCompleteDock
+  $combined = $streamLogs + "`n" + $stopLogs
+  Write-Ev 'graceful-shutdown-docker-stream.txt' $combined
+
+  if ($combined -match 'GracefulShutdownModeReporter|c\.s\.config\.GracefulShutdownModeReporter') {
+    throw 'custom GracefulShutdownModeReporter must not appear — use native Tomcat GracefulShutdown only'
+  }
+  $hasNativeLogger = $combined -match 'org\.springframework\.boot\.web\.embedded\.tomcat\.GracefulShutdown|o\.s\.b\.w\.e\.tomcat\.GracefulShutdown'
+  $hasCommence = $combined -match 'Commencing graceful shutdown'
+  $hasComplete = $combined -match 'Graceful shutdown complete'
+  $shutdownSlice = $combined
+  if ($combined -match '(?s)(Commencing graceful shutdown.+)$') { $shutdownSlice = $Matches[1] }
+  $badPatterns = @(
+    'Graceful shutdown aborted',
+    'graceful shutdown timed out',
+    'graceful shutdown interrupted',
+    'shutdown error',
+    'graceful shutdown drain error'
+  )
+  foreach ($bp in $badPatterns) {
+    if ($shutdownSlice -match [regex]::Escape($bp)) { throw "graceful shutdown bad log: $bp" }
+  }
+
   $gs = New-Object System.Collections.Generic.List[string]
   $gs.Add("exitCode=$exitCode OOMKilled=$oom stopElapsedSec=$elapsed")
-  $gs.Add("marker=$marker markerFoundInFile=$($idx -ge 0)")
-  $gs.Add("Commencing graceful shutdown file=$hasCommenceFile docker=$hasCommenceDock evidenceFile=$hasCommenceEv")
-  $gs.Add("Graceful shutdown complete file=$hasCompleteFile docker=$hasCompleteDock evidenceFile=$hasCompleteEv")
-  $gs.Add("jvm-shutdown-hook.txt=$hasJvmHook")
-  $gs.Add('logSources=docker-logs+uploads/.ops/spring.log(after-marker)+ops-evidence')
+  $gs.Add("nativeTomcatLogger=$hasNativeLogger")
+  $gs.Add("Commencing graceful shutdown=$hasCommence")
+  $gs.Add("Graceful shutdown complete=$hasComplete")
+  $gs.Add('logSources=docker-logs-stream+container-logs (no uploads volume)')
+  if (-not $hasNativeLogger) { Write-Ev 'graceful-shutdown.txt' ($gs -join "`n"); throw 'missing native Tomcat GracefulShutdown logger' }
   if (-not $hasCommence -or -not $hasComplete) {
-    Write-Ev 'graceful-shutdown-docker-logs-tail.txt' $stopLogs.Substring([Math]::Max(0, $stopLogs.Length - 6000))
-    Write-Ev 'graceful-shutdown-file-log-after-marker.txt' $afterMarker
-    Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
     Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
-    throw 'missing graceful shutdown completion signals'
+    throw 'missing native Commencing/Complete graceful shutdown signals'
   }
-  if (-not $hasCommenceEv -or -not $hasCompleteEv) {
-    Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
-    Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
-    throw 'missing graceful shutdown evidence files under uploads/.ops'
-  }
-  # SIGTERM → JVM often exits 143 (128+15) after hooks; 0 also OK.
   if ($exitCode -notin @('0', '143')) { throw "unexpected exit $exitCode (want 0 or 143 after SIGTERM)" }
   if ($oom -eq 'true') { throw 'OOMKilled' }
-  $gs.Add('PASS graceful shutdown VERIFIED')
+  $gs.Add('PASS native graceful shutdown VERIFIED')
   Write-Ev 'graceful-shutdown.txt' ($gs -join "`n")
-  Write-Ev 'graceful-shutdown-file-log-after-marker.txt' $afterMarker
-  Write-Ev 'graceful-shutdown-ops-ls.txt' $opsList
 
   # restart for final healthy evidence
   docker compose -f $ComposeFile up -d app
@@ -389,14 +376,14 @@ note=If ECS desiredCount>1 in future, Redis/ElastiCache session acceptance must 
 "@
 
   # provenance lock for evidence
-  $gitRev = if ($lock.gitRevision) { [string]$lock.gitRevision } else { [string]$lock.imageSourceRevision }
+  $imgSrc = if ($ImageSourceRevision) { $ImageSourceRevision.Trim() } elseif ($lock.imageSourceRevision) { [string]$lock.imageSourceRevision } else { $evidenceRevision }
   $prov = [ordered]@{
     schemaVersion = 4
     freezeBaseline = $FreezeBaseline
-    gitRevision = $gitRev
-    imageSourceRevision = $gitRev
+    imageSourceRevision = $imgSrc
     evidenceRevision = $evidenceRevision
-    note = 'localImageId is LOCAL build digest only — not ECR registryDigest or task-definition IMAGE_DIGEST'
+    gitRevision = $imgSrc
+    note = 'imageSourceRevision=SOURCE_SHA clean build; evidenceRevision=FINAL_SHA; localImageId is not ECR registryDigest'
     jarSha256 = $lock.jarSha256
     baseImageDigest = $lock.baseImageDigest
     localImageId = $lock.localImageId
@@ -410,6 +397,19 @@ note=If ECS desiredCount>1 in future, Redis/ElastiCache session acceptance must 
   }
   $utf8 = New-Object System.Text.UTF8Encoding $false
   [System.IO.File]::WriteAllText((Join-Path $script:Ev 'image-lock.json'), ($prov | ConvertTo-Json -Depth 5), $utf8)
+  # supply-chain.txt aligned with image-lock
+  [System.IO.File]::WriteAllText((Join-Path $script:Ev 'supply-chain.txt'), @"
+imageSourceRevision=$imgSrc
+evidenceRevision=$evidenceRevision
+freezeBaseline=$FreezeBaseline
+dockerfileSha256=$($script:DockerfileSha256)
+jarSha256=$($lock.jarSha256)
+baseImageDigest=$($lock.baseImageDigest)
+localImageId=$($lock.localImageId)
+registryDigest=ABSENT (not fabricated)
+sbomScan=BLOCKED-TOOLING
+vulnScan=BLOCKED-TOOLING
+"@, $utf8)
 
   # final-report.md
   $report = @"
@@ -417,8 +417,8 @@ note=If ECS desiredCount>1 in future, Redis/ElastiCache session acceptance must 
 
 ## Identity
 - freezeBaseline: ``$FreezeBaseline``
-- evidenceRevision (git SHA): ``$evidenceRevision``
-- gitRevision (image build): ``$gitRev``
+- imageSourceRevision (SOURCE_SHA / clean build): ``$imgSrc``
+- evidenceRevision (FINAL_SHA): ``$evidenceRevision``
 - Mode: Docker ECS-like offline only — **no AWS account, no ECR push, no ECS deploy**
 
 ## Digests (semantic)
