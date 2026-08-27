@@ -3,11 +3,13 @@ package com.ses.web;
 import com.ses.common.constant.NotificationLinks;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.servlet.HandlerExecutionChain;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -27,10 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@Transactional
 class NotificationLinkRouteTest {
 
+    /**
+     * Actuator 導入後は controllerEndpointHandlerMapping も同型で登録されるため、
+     * MVC 本体の requestMappingHandlerMapping を明示する（ACC-OPS-P0-001）。
+     */
     @Autowired
-    @org.springframework.beans.factory.annotation.Qualifier("requestMappingHandlerMapping")
+    @Qualifier("requestMappingHandlerMapping")
     private RequestMappingHandlerMapping handlerMapping;
 
     private void assertResolves(String uri) throws Exception {

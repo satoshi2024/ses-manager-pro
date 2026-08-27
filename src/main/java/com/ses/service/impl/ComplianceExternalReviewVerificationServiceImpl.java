@@ -66,7 +66,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerVerificationEvent record(
             Long submittedReviewEventId,
             Long reviewerSubjectId,
@@ -230,7 +230,7 @@ public class ComplianceExternalReviewVerificationServiceImpl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceExternalReviewerVerificationEvent revoke(
             Long targetVerificationEventId, String reason, Long revokedBy, String idempotencyKey) {
         if (targetVerificationEventId == null || !StringUtils.hasText(reason) || revokedBy == null) {

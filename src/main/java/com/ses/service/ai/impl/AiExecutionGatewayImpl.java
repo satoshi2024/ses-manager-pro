@@ -108,8 +108,13 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         tx.executeWithoutResult(statusObj -> persistRun(request, masked, status, error, latencyMs));
     }
 
+    /**
+     * PIIカナリア検査は用途を問わず全リクエストに適用する（ACC-SEC-P1-005）。
+     * 取込系（INGEST_*）も実プロバイダー送信は必ずこの統一ゲートウェイを経由するため、
+     * 名前による除外は行わない。カナリアが混入した場合はどの用途でも外部送信を拒否する。
+     */
     private boolean isExternalFacing(String useCase) {
-        return !useCase.startsWith("INGEST_");
+        return true;
     }
 
     private String buildPrompt(AiGatewayRequest request, Map<String, Object> masked, String untrusted) {

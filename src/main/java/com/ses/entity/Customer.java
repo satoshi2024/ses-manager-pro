@@ -1,6 +1,7 @@
 package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Email;
@@ -71,4 +72,8 @@ public class Customer extends BaseEntity {
      * 備考
      */
     private String remarks;
+
+    /** 楽観ロック用バージョン */
+    @Version
+    private Integer version;
 }

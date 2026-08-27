@@ -108,19 +108,4 @@ CREATE TABLE t_proposal_history (
   remarks         TEXT
 );
 
-DROP TABLE IF EXISTS m_menu CASCADE;
-CREATE TABLE m_menu (
-  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-  menu_key   VARCHAR(50) NOT NULL,
-  menu_name  VARCHAR(100),
-  path       VARCHAR(200),
-  parent_id  BIGINT,
-  sort_order INT DEFAULT 0
-);
-
-DROP TABLE IF EXISTS t_role_menu CASCADE;
-CREATE TABLE t_role_menu (
-  id       BIGINT AUTO_INCREMENT PRIMARY KEY,
-  role     VARCHAR(50) NOT NULL,
-  menu_id  BIGINT NOT NULL
-);
+-- m_menu / t_role_menu: H2 DDL is not rolled back; do not DROP shared permission tables.

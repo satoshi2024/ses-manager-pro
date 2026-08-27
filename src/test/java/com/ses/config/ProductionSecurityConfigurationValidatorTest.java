@@ -23,7 +23,8 @@ class ProductionSecurityConfigurationValidatorTest {
 
         ProductionSecurityConfigurationValidator validator =
                 new ProductionSecurityConfigurationValidator(oidc, mfa, session,
-                        mock(SysUserMapper.class), mock(UserMfaMapper.class), mock(com.ses.mapper.PermissionGroupMapper.class));
+                        mock(SysUserMapper.class), mock(UserMfaMapper.class), mock(com.ses.mapper.PermissionGroupMapper.class),
+                        new AiConfig(), new com.ses.common.security.OutboundUrlGuard());
 
         assertThrows(IllegalStateException.class, validator::validate);
     }
@@ -62,8 +63,11 @@ class ProductionSecurityConfigurationValidatorTest {
                 org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         com.ses.mapper.PermissionGroupMapper permissionGroupMapper = mock(com.ses.mapper.PermissionGroupMapper.class);
         when(permissionGroupMapper.selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        AiConfig aiConfig = new AiConfig();
+        com.ses.common.security.OutboundUrlGuard outboundUrlGuard = new com.ses.common.security.OutboundUrlGuard();
         ProductionSecurityConfigurationValidator validator =
-                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper, permissionGroupMapper);
+                new ProductionSecurityConfigurationValidator(oidc, mfa, session, mapper, userMfaMapper, permissionGroupMapper,
+                        aiConfig, outboundUrlGuard);
 
         assertDoesNotThrow(validator::validate);
 
@@ -72,5 +76,13 @@ class ProductionSecurityConfigurationValidatorTest {
         oidc.setTokenUri("https://idp.example/token");
         oidc.setIssuerUri("https://user@idp.example/tenant");
         assertThrows(IllegalStateException.class, validator::validate);
+        oidc.setIssuerUri("https://idp.example/tenant");
+
+        // ai.provider=gemini かつ不正なapi-urlは本番起動検証で拒否する。
+        aiConfig.setProvider("gemini");
+        aiConfig.setApiUrl("https://evil.example.com/v1beta/models/x:generateContent");
+        assertThrows(IllegalStateException.class, validator::validate);
+        aiConfig.setApiUrl("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent");
+        assertDoesNotThrow(validator::validate);
     }
 }

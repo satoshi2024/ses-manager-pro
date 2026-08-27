@@ -3,11 +3,9 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.result.ApiResult;
 import com.ses.entity.Menu;
-import com.ses.entity.RoleMenu;
 import com.ses.mapper.MenuMapper;
 import com.ses.service.RoleMenuService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,11 +17,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/role-menus")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('管理者')")
 public class RoleMenuApiController {
 
     private final RoleMenuService roleMenuService;
     private final MenuMapper menuMapper;
-    private final com.ses.service.MenuCacheService menuCacheService;
 
     /**
      * 全メニュー一覧（並び順）
@@ -44,11 +42,10 @@ public class RoleMenuApiController {
 
     /**
      * 指定ロールのメニュー許可を置き換える
-     * 全削除→再登録を1トランザクションで行い、途中失敗時に権限が消えたままにならないようにする
      */
     @PutMapping
     public ApiResult<Boolean> update(@RequestParam String role, @RequestBody List<Long> menuIds) {
-        roleMenuService.updateRoleMenus(role, menuIds);
+        roleMenuService.replaceMenus(role, menuIds);
         return ApiResult.success(true);
     }
 }

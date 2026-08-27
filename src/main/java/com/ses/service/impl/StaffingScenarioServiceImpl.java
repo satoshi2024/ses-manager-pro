@@ -42,7 +42,7 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     private final StaffingClock clock;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public StaffingScenario create(StaffingScenario scenario) {
         Long owner = SecurityUtils.currentUserId();
         if (owner == null) {
@@ -63,7 +63,7 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public StaffingScenario update(StaffingScenario scenario) {
         if (scenario.getId() == null) {
             throw BusinessException.of(404, "error.staffing.scenarioNotFound");
@@ -84,7 +84,7 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
         StaffingScenario scenario = requireEditable(id);
         scenarioMapper.deleteById(scenario.getId());
@@ -130,7 +130,7 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public StaffingScenarioAllocation upsertAllocation(StaffingScenarioAllocation allocation) {
         StaffingScenario scenario = requireVisibleOf(allocation.getScenarioId());
         if (allocation.getEngineerId() == null || engineerMapper.selectById(allocation.getEngineerId()) == null) {
@@ -166,7 +166,7 @@ public class StaffingScenarioServiceImpl implements StaffingScenarioService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteAllocation(Long allocationId) {
         StaffingScenarioAllocation allocation = allocationMapper.selectById(allocationId);
         if (allocation == null) {

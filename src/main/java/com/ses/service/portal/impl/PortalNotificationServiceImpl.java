@@ -72,8 +72,9 @@ public class PortalNotificationServiceImpl implements PortalNotificationService 
             try {
                 mailService.sendNotification(user.getEmail(), subject, body, relativeLink);
             } catch (RuntimeException e) {
-                log.warn("portal通知メール送信に失敗しました: to={} type={} error={}",
-                        user.getEmail(), type, e.getMessage());
+                log.warn("portal通知メール送信に失敗しました: to={} type={} errorType={}",
+                        com.ses.common.util.LogRedaction.maskEmail(user.getEmail()), type,
+                        com.ses.common.util.LogRedaction.exceptionType(e));
             }
         }
     }

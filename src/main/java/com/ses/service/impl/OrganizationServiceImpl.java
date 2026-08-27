@@ -86,7 +86,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean save(OrganizationUnit entity) {
         validateOrganization(entity, null);
         boolean saved = super.save(entity);
@@ -105,7 +105,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean updateOrganization(OrganizationUnit entity, Integer expectedVersion) {
         if (entity == null || entity.getId() == null || expectedVersion == null) {
             throw BusinessException.of(409, "error.organization.versionConflict");
@@ -129,7 +129,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean merge(Long organizationId, Long targetOrganizationId, Integer expectedVersion) {
         if (organizationId == null || targetOrganizationId == null || organizationId.equals(targetOrganizationId)) {
             throw BusinessException.of("error.organization.invalid");
@@ -418,14 +418,14 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean deactivate(Long organizationId) {
         OrganizationUnit unit = getById(organizationId);
         return unit != null && updateStatus(organizationId, "無効", unit.getVersion());
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean updateStatus(Long organizationId, String status, Integer expectedVersion) {
         if (organizationId == null || expectedVersion == null
                 || (!"有効".equals(status) && !"無効".equals(status))) {
@@ -488,7 +488,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long organizationId = Long.valueOf(id.toString());
         if (isReferenced(organizationId)) {
@@ -498,7 +498,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public UserOrganization assignUser(UserOrganization assignment) {
         if (sysUserMapper.selectByIdForUpdate(assignment.getUserId()) == null) {
             throw BusinessException.of("error.organization.assignment.userNotFound");
@@ -527,7 +527,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean updateUserOrganization(UserOrganization assignment, Integer expectedVersion) {
         if (assignment == null || assignment.getId() == null || expectedVersion == null) {
             throw BusinessException.of(409, "error.organization.versionConflict");
@@ -547,7 +547,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public UserOrganization transferUser(UserOrganization assignment, Integer expectedVersion) {
         if (sysUserMapper.selectByIdForUpdate(assignment.getUserId()) == null) {
             throw BusinessException.of("error.organization.assignment.userNotFound");
@@ -591,7 +591,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean releaseAssignment(Long assignmentId, LocalDate releaseDate, Integer expectedVersion) {
         if (assignmentId == null || expectedVersion == null) {
             throw BusinessException.of(409, "error.organization.versionConflict");
@@ -616,7 +616,7 @@ public class OrganizationServiceImpl extends ServiceImpl<OrganizationUnitMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int closeAssignmentsForUser(Long userId, LocalDate releaseDate) {
         if (userId == null) {
             return 0;

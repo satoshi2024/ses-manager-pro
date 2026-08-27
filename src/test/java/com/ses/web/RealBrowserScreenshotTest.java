@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+@Tag("browser")
 class RealBrowserScreenshotTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -139,7 +141,7 @@ class RealBrowserScreenshotTest {
         assertNotNull(acceptanceId, "動的acceptance IDが採番されること");
 
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of(".kiro", "specs", "order-acceptance-workflow", "evidence", "browser-r8");
+        Path evidenceDir = Path.of("target", "browser-r8-evidence", "order-acceptance-workflow");
         Files.createDirectories(evidenceDir);
         String runId = "browser-r8-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\nacceptanceId=" + acceptanceId + "\n");

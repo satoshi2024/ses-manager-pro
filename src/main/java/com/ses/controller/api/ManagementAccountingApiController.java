@@ -1,7 +1,6 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.CsvUtils;
 import com.ses.common.util.EntityProtectUtil;
@@ -27,13 +26,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
+import java.time.LocalDate;
 import java.util.List;
 
 /** 月次snapshotと予算API。読取は組織scopeをSQL条件として適用する。 */
@@ -47,14 +42,6 @@ public class ManagementAccountingApiController {
     private final ManagementBudgetMapper budgetMapper;
     private final MonthlyAccountingDimensionMapper dimensionMapper;
     private final OrganizationScopeService organizationScopeService;
-    /**
-     * CSV取込は{@code @Valid}が効かない（{@code @RequestBody}ではなく手組みでrecordを作る）ため、
-     * JSON経路と同じ制約をここで明示的に評価する。無いと負数や欠損がCSVだけ通ってしまう。
-     */
-    private final jakarta.validation.Validator validator;
-
-    /** CSV一括取込の最大行数（ヘッダー除く）。 */
-    private static final int MAX_CSV_ROWS = 200;
 
     @GetMapping("/summary")
     public ApiResult<ManagementAccountingSummaryDto> summary(@RequestParam String month,
@@ -132,55 +119,12 @@ public class ManagementAccountingApiController {
     }
 
     /**
-     * 予算CSVを全行検証し、既存行はversion付きupsertする。数値列はBigDecimal/Integerで解析するため、
-     * 数式文字列や負数を値として受け付けない。
+     * 予算CSVを全行検証し、既存行はversion付きupsertする。
      * ヘッダー: organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version
      */
     @PostMapping(value = "/budgets/csv", consumes = "multipart/form-data")
-    @Transactional(rollbackFor = Exception.class)
     public ApiResult<Integer> importBudgetCsv(@RequestPart("file") MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw BusinessException.of("error.organization.budget.csvInvalid");
-        }
-        try {
-            String csv = new String(file.getBytes(), StandardCharsets.UTF_8).replace("\uFEFF", "");
-            String[] lines = csv.split("\\R");
-            // 一括操作の上限は全spec共通で200件（shared-standards §3）。
-            // 1行ごとにSELECT+UPDATEが走るため、上限なしだと1トランザクションで接続を占有し続ける。
-            if (lines.length > MAX_CSV_ROWS + 1) {
-                throw BusinessException.of("error.organization.budget.csvTooManyRows");
-            }
-            int imported = 0;
-            for (int i = 0; i < lines.length; i++) {
-                String line = lines[i].trim();
-                if (line.isBlank() || (i == 0 && line.toLowerCase(Locale.ROOT).startsWith("organizationid,"))) {
-                    continue;
-                }
-                String[] columns = line.split(",", -1);
-                if (columns.length != 8) {
-                    throw BusinessException.of("error.organization.budget.csvInvalid");
-                }
-                BudgetSaveRequest request = new BudgetSaveRequest(
-                        Long.valueOf(columns[0].trim()), nullableLong(columns[1]), LocalDate.parse(columns[2].trim()),
-                        new BigDecimal(columns[3].trim()), new BigDecimal(columns[4].trim()),
-                        Integer.valueOf(columns[5].trim()), Integer.valueOf(columns[6].trim()), nullableInteger(columns[7]));
-                validateRow(request);
-                organizationScopeService.assertAllowedOrganization(request.organizationId());
-                ManagementBudget budget = ManagementBudget.builder()
-                        .organizationId(request.organizationId()).costCenterId(request.costCenterId())
-                        .budgetMonth(request.budgetMonth()).revenue(request.revenue()).grossProfit(request.grossProfit())
-                        .utilizationCount(request.utilizationCount()).hireCount(request.hireCount())
-                        .version(request.version() == null ? 0 : request.version()).build();
-                EntityProtectUtil.protectForCreate(budget);
-                budgetService.upsert(budget, request.version());
-                imported++;
-            }
-            return ApiResult.success(imported);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (IllegalArgumentException | IOException e) {
-            throw BusinessException.of("error.organization.budget.csvInvalid");
-        }
+        return ApiResult.success(budgetService.importFromCsv(file));
     }
 
     @GetMapping("/snapshots")
@@ -190,21 +134,6 @@ public class ManagementAccountingApiController {
                 .orderByAsc(MonthlyAccountingDimension::getId);
         organizationScopeService.applyOrganizationScope(query, MonthlyAccountingDimension::getOrganizationId, month);
         return ApiResult.success(dimensionMapper.selectList(query));
-    }
-
-    /** JSON経路の{@code @Valid}と同じ制約（必須・負数禁止）をCSVの1行へ適用する。 */
-    private void validateRow(BudgetSaveRequest request) {
-        if (!validator.validate(request).isEmpty()) {
-            throw BusinessException.of("error.organization.budget.csvInvalid");
-        }
-    }
-
-    private Long nullableLong(String value) {
-        return value == null || value.isBlank() ? null : Long.valueOf(value.trim());
-    }
-
-    private Integer nullableInteger(String value) {
-        return value == null || value.isBlank() ? null : Integer.valueOf(value.trim());
     }
 
     /** null を空文字にするだけ。引用とCSVインジェクション対策は {@link CsvUtils} が行う。 */

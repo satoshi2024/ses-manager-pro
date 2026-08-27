@@ -58,7 +58,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
     private boolean requireHttps;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void issue(HttpServletRequest request, HttpServletResponse response, Long portalUserId) {
         PortalUser user = userMapper.selectById(portalUserId);
         if (user == null) {
@@ -165,7 +165,7 @@ public class PortalSessionServiceImpl implements PortalSessionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeCurrent(HttpServletRequest request, HttpServletResponse response) {
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
@@ -188,14 +188,14 @@ public class PortalSessionServiceImpl implements PortalSessionService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeAllForUser(Long portalUserId, String reason) {
         sessionMapper.revokeAllForUser(portalUserId, LocalDateTime.now(clock),
                 reason == null ? "ADMIN" : reason);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void revokeAllForOrg(Long portalOrgId, String reason) {
         sessionMapper.revokeAllForOrg(portalOrgId, LocalDateTime.now(clock),
                 reason == null ? "ORG_SUSPEND" : reason);

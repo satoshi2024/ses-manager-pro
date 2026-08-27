@@ -67,7 +67,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     private final ObjectProvider<OvertimeComplianceService> selfProvider;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public List<OvertimeComplianceFinding> evaluateAndPersist(Long engineerId, YearMonth targetMonth) {
         Objects.requireNonNull(engineerId, "engineerId");
         Objects.requireNonNull(targetMonth, "targetMonth");
@@ -115,7 +115,7 @@ public class OvertimeComplianceServiceImpl implements OvertimeComplianceService 
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int evaluateApprovedOrClosedMonths(YearMonth targetMonth) {
         Objects.requireNonNull(targetMonth, "targetMonth");
         List<AttendanceMonth> months = attendanceMonthMapper.selectList(new LambdaQueryWrapper<AttendanceMonth>()

@@ -33,7 +33,7 @@ class SystemConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         mapper = Mockito.mock(SystemConfigMapper.class);
-        service = new SystemConfigServiceImpl(mapper);
+        service = new SystemConfigServiceImpl(mapper, new com.ses.common.security.OutboundUrlGuard());
     }
 
     private void seed(SystemConfig... configs) {

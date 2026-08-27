@@ -55,7 +55,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceMappingVersion create(String mappingCode, String mappingVersion,
                                            java.time.LocalDate effectiveFrom, java.time.LocalDate effectiveTo,
                                            List<ComplianceMappingSourceInput> sources) {
@@ -118,13 +118,13 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceMappingVersion transition(Long mappingId, String toStatus) {
         return transition(mappingId, toStatus, null);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceMappingVersion transition(Long mappingId, String toStatus, Long approvalEventId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {
@@ -303,7 +303,7 @@ public class ComplianceMappingServiceImpl implements ComplianceMappingService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ComplianceMappingVersion promoteFutureToActive(Long mappingId) {
         ComplianceMappingVersion version = versionMapper.selectById(mappingId);
         if (version == null) {

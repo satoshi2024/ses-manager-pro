@@ -35,7 +35,8 @@ CREATE TABLE m_customer (
   remarks           TEXT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_flag      TINYINT DEFAULT 0
+  deleted_flag      TINYINT DEFAULT 0,
+  version           INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS t_engineer CASCADE;
@@ -67,7 +68,8 @@ CREATE TABLE t_engineer (
   created_by          BIGINT,
   created_at          DATETIME,
   updated_at          DATETIME,
-  deleted_flag        TINYINT DEFAULT 0
+  deleted_flag        TINYINT DEFAULT 0,
+  version             INT NOT NULL DEFAULT 0
 );
 
 DROP TABLE IF EXISTS m_skill_tag CASCADE;
@@ -385,6 +387,7 @@ CREATE TABLE t_work_record (
   created_by     BIGINT,
   created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  version        INT NOT NULL DEFAULT 0,
   UNIQUE KEY uk_work_record (contract_id, work_month)
 );
 
@@ -591,18 +594,9 @@ CREATE TABLE t_candidate_activity (
   CONSTRAINT fk_candidate_activity_candidate FOREIGN KEY (candidate_id) REFERENCES t_candidate(id)
 );
 
-DROP TABLE IF EXISTS m_menu CASCADE;
-CREATE TABLE m_menu (
-  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-  menu_key    VARCHAR(50) NOT NULL,
-  menu_name   VARCHAR(100),
-  path_prefix VARCHAR(100),
-  api_prefix  VARCHAR(100),
-  sort_order  INT DEFAULT 0,
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
+-- m_menu: H2 DDL is not rolled back; keep shared table. Re-seed keys below.
+DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate'));
+DELETE FROM m_menu WHERE menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate');
 -- @Sqlで共有H2 schemaを再構築した後も、画面レンダリングに必要な管理者メニューを保持する。
 INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VALUES
   ('dashboard', 'ダッシュボード', '/dashboard', '/api/dashboard', 1),
@@ -617,25 +611,24 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VA
   ('user',      'ユーザー管理',   '/user',       '/api/users', 9),
   ('compliance-gate', '派遣コンプライアンスG2', '/compliance-gate', '/api/compliance-gate', 73);
 
-DROP TABLE IF EXISTS t_role_menu CASCADE;
-CREATE TABLE t_role_menu (
-  id       BIGINT AUTO_INCREMENT PRIMARY KEY,
-  role     VARCHAR(50) NOT NULL,
-  menu_id  BIGINT NOT NULL
-);
-
+-- t_role_menu: H2 DDL is not rolled back; keep shared table. Idempotent seed only.
 INSERT INTO t_role_menu (role, menu_id)
-SELECT '管理者', id FROM m_menu;
+SELECT '管理者', m.id FROM m_menu m
+WHERE m.menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate')
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = '管理者' AND rm.menu_id = m.id);
 INSERT INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
 FROM m_menu m
 CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'HR' UNION ALL SELECT 'マネージャー') r
-WHERE m.menu_key <> 'user' AND m.menu_key <> 'ai-evaluation';
+WHERE m.menu_key IN ('dashboard','engineer','customer','project','proposal','contract','ai','ai-evaluation','email','user','compliance-gate')
+  AND m.menu_key <> 'user' AND m.menu_key <> 'ai-evaluation'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
 INSERT INTO t_role_menu (role, menu_id)
 SELECT r.role, m.id
 FROM m_menu m
 CROSS JOIN (SELECT '営業' AS role UNION ALL SELECT 'マネージャー') r
-WHERE m.menu_key = 'ai-evaluation';
+WHERE m.menu_key = 'ai-evaluation'
+  AND NOT EXISTS (SELECT 1 FROM t_role_menu rm WHERE rm.role = r.role AND rm.menu_id = m.id);
 
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (

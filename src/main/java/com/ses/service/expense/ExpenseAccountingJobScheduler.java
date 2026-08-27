@@ -102,7 +102,7 @@ public class ExpenseAccountingJobScheduler {
     }
 
     /** 承認済かつ未連携の経費へPENDING jobを作成する（UNIQUE(expense_request_id)衝突は冪等スキップ）。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int createAccountingJobs(int limit) {
         List<ExpenseRequest> approved = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
                 .eq(ExpenseRequest::getStatus, ExpenseRequestService.STATUS_APPROVED)

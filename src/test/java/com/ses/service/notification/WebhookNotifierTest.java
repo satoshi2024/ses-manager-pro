@@ -1,5 +1,7 @@
 package com.ses.service.notification;
 
+import com.ses.common.security.OutboundUrlException;
+import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import java.lang.reflect.Modifier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -32,8 +35,11 @@ class WebhookNotifierTest {
     @Mock
     private RestTemplate restTemplate;
 
+    @Mock
+    private OutboundUrlGuard outboundUrlGuard;
+
     private WebhookNotifier webhookNotifier() {
-        return new WebhookNotifier(systemConfigService, restTemplate);
+        return new WebhookNotifier(systemConfigService, restTemplate, outboundUrlGuard);
     }
 
     @Test
@@ -79,6 +85,36 @@ class WebhookNotifierTest {
 
         Notification notification = notification("CONTRACT_END");
         assertDoesNotThrow(() -> webhookNotifier().notify(notification));
+    }
+
+    @Test
+    void notifyNow_宛先URL検証失敗時は送信せずfalseを返す() {
+        when(systemConfigService.getString("notification.webhook-url", null))
+                .thenReturn("https://internal.example/webhook");
+        when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END");
+        doThrow(new OutboundUrlException("内部宛先")).when(outboundUrlGuard).validatePublicHttpsUrl(anyString());
+
+        Notification notification = notification("CONTRACT_END");
+        boolean delivered = webhookNotifier().notifyNow(notification);
+
+        assertFalse(delivered, "検証失敗時は配信失敗(false)を返す");
+        verify(restTemplate, never()).postForEntity(anyString(), any(), eq(String.class));
+    }
+
+    @Test
+    void notifyNow_検証を通れば送信しtrueを返す() {
+        when(systemConfigService.getString("notification.webhook-url", null))
+                .thenReturn("https://hooks.example.com/webhook");
+        when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END");
+        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("ok"));
+
+        Notification notification = notification("CONTRACT_END");
+        boolean delivered = webhookNotifier().notifyNow(notification);
+
+        assertTrue(delivered);
+        verify(outboundUrlGuard, times(1)).validatePublicHttpsUrl("https://hooks.example.com/webhook");
+        verify(restTemplate, times(1)).postForEntity(eq("https://hooks.example.com/webhook"), any(), eq(String.class));
     }
 
     @Test

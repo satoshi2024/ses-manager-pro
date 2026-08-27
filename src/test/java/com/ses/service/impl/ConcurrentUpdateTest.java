@@ -5,6 +5,7 @@ import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.WorkRecord;
+import com.ses.common.exception.BusinessException;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
@@ -23,13 +24,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * 実DB(MySQL Testcontainers)を使用した並行処理テスト。
@@ -38,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @SpringBootTest
 @ActiveProfiles("test")
 @Tag("mysql")
-@Testcontainers(disabledWithoutDocker = true)
+@Testcontainers
 class ConcurrentUpdateTest {
 
     @Container
@@ -111,7 +115,8 @@ class ConcurrentUpdateTest {
         CountDownLatch done = new CountDownLatch(threads);
 
         AtomicInteger successCount = new AtomicInteger(0);
-        AtomicInteger failCount = new AtomicInteger(0);
+        AtomicInteger conflict409 = new AtomicInteger(0);
+        AtomicReference<Throwable> unexpected = new AtomicReference<>();
 
         Runnable approveTask = () -> {
             try {
@@ -119,8 +124,15 @@ class ConcurrentUpdateTest {
                 start.await();
                 workRecordService.approve(record.getId());
                 successCount.incrementAndGet();
+            } catch (BusinessException e) {
+                // REV-RP-P2-003: 敗者は 409 / concurrentModified のみ
+                if (e.getCode() == 409 && "error.workRecord.concurrentModified".equals(e.getMessageKey())) {
+                    conflict409.incrementAndGet();
+                } else {
+                    unexpected.compareAndSet(null, e);
+                }
             } catch (Exception e) {
-                failCount.incrementAndGet();
+                unexpected.compareAndSet(null, e);
             } finally {
                 done.countDown();
             }
@@ -132,8 +144,14 @@ class ConcurrentUpdateTest {
                 start.await();
                 workRecordService.reject(record.getId(), "Reject reason");
                 successCount.incrementAndGet();
+            } catch (BusinessException e) {
+                if (e.getCode() == 409 && "error.workRecord.concurrentModified".equals(e.getMessageKey())) {
+                    conflict409.incrementAndGet();
+                } else {
+                    unexpected.compareAndSet(null, e);
+                }
             } catch (Exception e) {
-                failCount.incrementAndGet();
+                unexpected.compareAndSet(null, e);
             } finally {
                 done.countDown();
             }
@@ -147,8 +165,14 @@ class ConcurrentUpdateTest {
         done.await(10, TimeUnit.SECONDS);
         executor.shutdownNow();
 
+        assertNull(unexpected.get(), () -> "想定外の例外: " + unexpected.get());
         // 1つだけが成功し、もう1つはCAS失敗(409)でBusinessExceptionを投げるはず
         assertEquals(1, successCount.get(), "1つの操作のみ成功するべき");
-        assertEquals(1, failCount.get(), "1つの操作はCASによって失敗するべき");
+        assertEquals(1, conflict409.get(), "1つの操作はCASによって409失敗するべき");
+
+        WorkRecord finalRecord = workRecordMapper.selectById(record.getId());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Set.of("確定", "差戻し").contains(finalRecord.getStatus()),
+                "最終 status は確定または差戻し: " + finalRecord.getStatus());
     }
 }

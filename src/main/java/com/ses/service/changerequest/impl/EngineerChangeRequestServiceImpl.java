@@ -133,7 +133,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ChangeRequestDto createDraft(Long engineerId, String requestType, Map<String, Object> payload,
                                         String reason, Long attachmentDocumentId) {
         validatePayload(requestType, payload);
@@ -180,7 +180,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ChangeRequestDto submit(Long engineerId, Long id) {
         EngineerChangeRequest request = requireOwned(engineerId, id);
         if (!STATUS_DRAFT.equals(request.getStatus())) {
@@ -204,7 +204,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ChangeRequestDto withdraw(Long engineerId, Long id) {
         EngineerChangeRequest request = requireOwned(engineerId, id);
         if (!STATUS_APPLIED.equals(request.getStatus()) || request.getApprovalRequestId() == null) {
@@ -226,7 +226,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ChangeRequestDto resubmit(Long engineerId, Long id) {
         EngineerChangeRequest request = requireOwned(engineerId, id);
         if (!STATUS_APPLIED.equals(request.getStatus()) || request.getApprovalRequestId() == null) {
@@ -401,7 +401,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SkillSheetConfirmResult confirmSkillSheet(Long engineerId, String fingerprint) {
         SkillSheetPreview preview = skillSheetPreview(engineerId);
         if (fingerprint == null || !fingerprint.equals(preview.fingerprint())) {

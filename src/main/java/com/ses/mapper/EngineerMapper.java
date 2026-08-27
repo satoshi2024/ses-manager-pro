@@ -25,9 +25,11 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     @Select("SELECT * FROM t_engineer WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Engineer selectByIdForUpdate(Long id);
 
-    /** 組織統合で要員の所属組織を統合先へ付け替える。 */
+    /** 組織統合で要員の所属組織を統合先へ付け替える。
+     * version を +1 し、並行する単行更新との衝突を検出できるようにする。
+     * 単行の期待 version 照合が必要な場合は {@code updateById} を使うこと。 */
     @org.apache.ibatis.annotations.Update(
-            "UPDATE t_engineer SET organization_id = #{targetOrganizationId} "
+            "UPDATE t_engineer SET organization_id = #{targetOrganizationId}, version = version + 1 "
                     + "WHERE organization_id = #{organizationId} AND deleted_flag = 0")
     int reassignOrganization(@org.apache.ibatis.annotations.Param("organizationId") Long organizationId,
                              @org.apache.ibatis.annotations.Param("targetOrganizationId") Long targetOrganizationId);

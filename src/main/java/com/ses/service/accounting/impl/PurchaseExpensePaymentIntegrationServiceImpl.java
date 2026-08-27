@@ -75,7 +75,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerBpPurchaseSync(Long bpPaymentId, Long triggeredByUserId) {
         BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
         if (bpPayment == null) {
@@ -159,7 +159,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerPaymentSync(Long bpPaymentId, Long triggeredByUserId) {
         BpPayment bpPayment = bpPaymentMapper.selectById(bpPaymentId);
         if (bpPayment == null) {
@@ -184,7 +184,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerExpenseSync(Long expenseRequestId, Long triggeredByUserId) {
         ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
         if (expense == null) {

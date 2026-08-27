@@ -33,7 +33,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     private String uploadBase;
     
     @Override
-    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ContractDocument create(Long contractId, Long templateId, String name, String email) {
         if (name == null || email == null || !email.contains("@")) {
             throw BusinessException.of("error.contract.document.recipientInvalid");
@@ -125,7 +125,7 @@ public class ContractDocumentServiceImpl extends ServiceImpl<ContractDocumentMap
     }
 
     @Override
-    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public ContractDocument queueSend(Long id, com.ses.dto.cloudsign.ConfirmedSendRequest request) {
         // kill switch: enabled=falseの間は新規queue受付も停止する（HFP-02-AC-12-03）
         if (!cloudSignProperties.isEnabled()) {

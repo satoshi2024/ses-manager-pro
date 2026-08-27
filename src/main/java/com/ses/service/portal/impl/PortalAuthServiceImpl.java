@@ -84,7 +84,7 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PortalLoginResponse login(PortalLoginRequest request, HttpServletRequest httpRequest,
                                      HttpServletResponse httpResponse) {
         String email = normalizeEmail(request.getEmail());
@@ -122,7 +122,7 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PortalMfaCompleteDto completeMfa(String email, String code, String password,
                                             HttpServletRequest httpRequest,
                                             HttpServletResponse httpResponse) {
@@ -156,7 +156,7 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void acceptInvitation(PortalAcceptInvitationRequest request, HttpServletRequest httpRequest) {
         String tokenHash = SecurityHashUtil.sha256(request.getToken());
         PortalInvitation invitation = invitationMapper.selectByTokenHash(tokenHash);
@@ -188,11 +188,12 @@ public class PortalAuthServiceImpl implements PortalAuthService {
                 .eq("id", invitation.getId())
                 .set("accepted_by", user.getId()));
         log.info("portal招待受諾: orgId={} email={} (tokenはログへ出さない)",
-                invitation.getPortalOrgId(), user.getEmail());
+                invitation.getPortalOrgId(),
+                com.ses.common.util.LogRedaction.maskEmail(user.getEmail()));
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void consentTerms(Long portalUserId, String termsVersion, HttpServletRequest httpRequest) {
         PortalUser user = userMapper.selectById(portalUserId);
         if (user == null) {
@@ -215,13 +216,13 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void logout(HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         sessionService.revokeCurrent(httpRequest, httpResponse);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updatePreferences(Long portalUserId, boolean notifyEmail) {
         PortalUser user = userMapper.selectById(portalUserId);
         if (user == null) {

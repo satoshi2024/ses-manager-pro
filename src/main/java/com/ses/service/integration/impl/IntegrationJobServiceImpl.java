@@ -26,14 +26,14 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     private final IntegrationJobEventMapper jobEventMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob createJob(Long connectionId, String jobType, String targetType, Long targetId,
                                     String idempotencyKey, String payloadHash) {
         return createJob(connectionId, jobType, targetType, targetId, idempotencyKey, payloadHash, null, null, null, null);
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob createJob(Long connectionId, String jobType, String targetType, Long targetId,
                                     String idempotencyKey, String payloadHash,
                                     String payloadSnapshot, String tenantId, Long legalEntityId, Long organizationId) {
@@ -91,7 +91,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationJob claimJob(Long jobId) {
         IntegrationJob job = getById(jobId);
         if (job == null) {
@@ -115,7 +115,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void markSucceeded(Long jobId, String externalId, String providerRequestId, String safeDetail) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
@@ -136,7 +136,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void markRetryable(Long jobId, String errorCode, String errorMessageSafe, int backoffSeconds) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
@@ -164,7 +164,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void markFailed(Long jobId, String errorCode, String safeMessage) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
@@ -184,7 +184,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void cancelJob(Long jobId, String reason) {
         IntegrationJob job = getById(jobId);
         if (job == null) {
@@ -220,7 +220,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void resetForManualRetry(Long jobId) {
         IntegrationJob job = getById(jobId);
         if (job == null) {
@@ -270,7 +270,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int recoverStaleRunningJobs(int leaseMinutes) {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(Math.max(1, leaseMinutes));
         return baseMapper.recoverStaleRunning(threshold);

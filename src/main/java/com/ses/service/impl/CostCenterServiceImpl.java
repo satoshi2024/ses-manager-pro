@@ -62,7 +62,7 @@ public class CostCenterServiceImpl extends ServiceImpl<CostCenterMapper, CostCen
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean deactivate(Long costCenterId) {
         CostCenter center = getById(costCenterId);
         if (center == null) {

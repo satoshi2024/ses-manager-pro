@@ -44,4 +44,15 @@ public interface ProposalService extends IService<Proposal> {
      * @return 提案履歴のリスト
      */
     List<ProposalKanbanDto> getProposalHistory(Long engineerId);
+
+    /**
+     * スキルシートを生成して提案へ保存し、保存ファイル名を返す。
+     *
+     * @param proposalId 提案ID
+     * @param anonymize  匿名化するか
+     * @param template   テンプレート（任意）
+     * @param format     PDF または EXCEL
+     * @return 保存ファイル名
+     */
+    String exportAndSaveSkillSheet(Long proposalId, boolean anonymize, String template, String format);
 }

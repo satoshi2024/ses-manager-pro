@@ -90,6 +90,10 @@ public class OidcLoginUserService implements OAuth2UserService<OidcUserRequest, 
         if (link == null || link.getUserId() == null) {
             throw authError("oidc_identity_not_linked", "この外部アカウントは管理者承認が必要です");
         }
+        if (!"APPROVED".equals(link.getReviewStatus())) {
+            throw authError("oidc_identity_pending_review",
+                    "この外部アカウントは隔離中です。管理者の再承認が必要です");
+        }
         if (!provider.getId().equals(link.getProviderId())) {
             throw authError("oidc_provider_mismatch", "OIDC providerの紐付けが一致しません");
         }

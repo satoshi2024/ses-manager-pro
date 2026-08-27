@@ -562,7 +562,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void ignoreDiscrepancy(String month, String category, String externalDealId, Long internalId, String reason, Long userId) {
         if (reason == null || reason.isBlank()) {
             throw new BusinessException(400, "除外・無視理由を入力してください");

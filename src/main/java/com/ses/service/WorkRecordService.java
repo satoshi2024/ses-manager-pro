@@ -16,6 +16,12 @@ public interface WorkRecordService extends IService<WorkRecord> {
     /** 対象月の提出済（未承認）滞留サマリ。SQL で提出済のみをページングする（全件 monthlyGrid は使わない）。 */
     PendingApprovalSummaryDto pendingApprovalSummary(String workMonth, Long current, Long size);
     WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks);
+
+    /**
+     * 工数保存（楽観ロック付き）。既存行の更新時は expectedVersion 必須。
+     */
+    WorkRecord saveHours(Long contractId, String workMonth, BigDecimal actualHours, String remarks,
+                         Integer expectedVersion);
     void confirmMonth(String workMonth);
     void reopenMonth(String workMonth);
 

@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Sql(scripts = "/sql/schema-freee-payroll-h2.sql",
         executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 @DisplayName("HFP-01-002 H2 schema: freee事業所境界（V102_4同期）")
+@Transactional
 class FreeeCompanyBoundarySchemaH2Test {
 
     @Autowired
@@ -37,8 +39,9 @@ class FreeeCompanyBoundarySchemaH2Test {
     void connection_statusのdefaultはCONNECTEDである() {
         jdbcTemplate.update("INSERT INTO t_freee_connection "
                 + "(company_id, company_name, access_token_encrypted) VALUES (123, 'テスト事業所', 'enc')");
+        // 共有 H2 に他テストの connection が残っていても、本テストが挿入した行だけを見る
         String status = jdbcTemplate.queryForObject(
-                "SELECT connection_status FROM t_freee_connection", String.class);
+                "SELECT connection_status FROM t_freee_connection WHERE company_id = 123", String.class);
         assertEquals("CONNECTED", status);
     }
 

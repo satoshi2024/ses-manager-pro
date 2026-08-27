@@ -1,22 +1,13 @@
 package com.ses.service.ai;
 
-import org.springframework.stereotype.Component;
-
-import java.util.concurrent.atomic.AtomicReference;
-
 /**
- * 直近の provider 向けプロンプト。テストの canary 検査用。本文はログに出さない。
+ * Provider 向け直近プロンプトの検査口。本番では NoOp 実装のみがロードされる（REV-B2.1-P2-002）。
  */
-@Component
-public class AiOutboundProbe {
+public interface AiOutboundProbe {
 
-    private final AtomicReference<String> lastOutbound = new AtomicReference<>();
+    void record(String prompt);
 
-    public void record(String prompt) {
-        lastOutbound.set(prompt);
-    }
+    String lastOutbound();
 
-    public String lastOutbound() {
-        return lastOutbound.get();
-    }
+    void clear();
 }

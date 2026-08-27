@@ -18,7 +18,7 @@ import java.util.List;
 public class EngineerBpAffiliationServiceImpl extends ServiceImpl<EngineerBpAffiliationMapper, EngineerBpAffiliation> implements EngineerBpAffiliationService {
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public EngineerBpAffiliation assignBpAffiliation(Long engineerId, Long bpCompanyId, LocalDate validFrom, LocalDate validTo) {
         if (engineerId == null || validFrom == null) {
             throw new BusinessException(400, "要員IDおよび開始日付は必須です");

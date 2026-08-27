@@ -1,7 +1,6 @@
 package com.ses.controller.api;
 
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
-import com.ses.entity.ManagementBudget;
 import com.ses.mapper.ManagementBudgetMapper;
 import com.ses.mapper.MonthlyAccountingDimensionMapper;
 import com.ses.service.ManagementAccountingService;
@@ -21,7 +20,6 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
@@ -121,9 +119,8 @@ class ManagementAccountingApiControllerTest {
 
     @Test
     @WithMockUser(username = "admin", roles = {"管理者"})
-    void budgetCsv_全行が同じupsert経路を通る() throws Exception {
-        when(budgetService.upsert(any(ManagementBudget.class), nullable(Integer.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+    void budgetCsv_全行が同じimportFromCsv経路を通る() throws Exception {
+        when(budgetService.importFromCsv(any(MultipartFile.class))).thenReturn(2);
         MockMultipartFile file = new MockMultipartFile("file", "budget.csv", "text/csv",
                 ("organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version\n"
                         + "1,,2026-07-01,100,30,2,1,\n"
@@ -132,17 +129,23 @@ class ManagementAccountingApiControllerTest {
         mockMvc.perform(multipart("/api/management-accounting/budgets/csv").file(file).with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value(2));
-        verify(budgetService, times(2)).upsert(any(ManagementBudget.class), nullable(Integer.class));
-        org.junit.jupiter.api.Assertions.assertTrue(
+        verify(budgetService, times(1)).importFromCsv(any(MultipartFile.class));
+        // トランザクション境界はControllerではなくサービス側に置く。
+        org.junit.jupiter.api.Assertions.assertFalse(
                 ManagementAccountingApiController.class.getMethod("importBudgetCsv", MultipartFile.class)
+                        .isAnnotationPresent(Transactional.class));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ManagementBudgetService.class.getMethod("importFromCsv", MultipartFile.class)
+                        .isAnnotationPresent(Transactional.class)
+                        || com.ses.service.impl.ManagementBudgetServiceImpl.class
+                        .getMethod("importFromCsv", MultipartFile.class)
                         .isAnnotationPresent(Transactional.class));
     }
 
     @Test
     @WithMockUser(username = "admin", roles = {"管理者"})
     void budgetCsv_二行目の業務エラーは成功に変換しない() throws Exception {
-        when(budgetService.upsert(any(ManagementBudget.class), nullable(Integer.class)))
-                .thenReturn(new ManagementBudget())
+        when(budgetService.importFromCsv(any(MultipartFile.class)))
                 .thenThrow(com.ses.common.exception.BusinessException.of("error.organization.budget.conflict"));
         MockMultipartFile file = new MockMultipartFile("file", "budget.csv", "text/csv",
                 ("organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version\n"
@@ -152,16 +155,17 @@ class ManagementAccountingApiControllerTest {
         mockMvc.perform(multipart("/api/management-accounting/budgets/csv").file(file).with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
-        verify(budgetService, times(2)).upsert(any(ManagementBudget.class), nullable(Integer.class));
+        verify(budgetService, times(1)).importFromCsv(any(MultipartFile.class));
     }
 
     /**
-     * CSV経路は{@code @Valid}が効かないため、JSON経路と同じ制約をcontroller内で評価する。
-     * 評価しないと負数の売上・粗利がCSVだけ通り、予実差が反転した状態で保存される。
+     * CSV経路の負数拒否はサービスへ委譲する。ControllerはBusinessExceptionを透過する。
      */
     @Test
     @WithMockUser(username = "admin", roles = {"管理者"})
     void budgetCsv_負数はJSON経路と同じく拒否する() throws Exception {
+        when(budgetService.importFromCsv(any(MultipartFile.class)))
+                .thenThrow(com.ses.common.exception.BusinessException.of("error.organization.budget.csvInvalid"));
         MockMultipartFile file = new MockMultipartFile("file", "budget.csv", "text/csv",
                 ("organizationId,costCenterId,budgetMonth,revenue,grossProfit,utilizationCount,hireCount,version\n"
                         + "1,,2026-07-01,-100,30,2,1,\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -169,6 +173,6 @@ class ManagementAccountingApiControllerTest {
         mockMvc.perform(multipart("/api/management-accounting/budgets/csv").file(file).with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
-        verify(budgetService, times(0)).upsert(any(ManagementBudget.class), nullable(Integer.class));
+        verify(budgetService, times(1)).importFromCsv(any(MultipartFile.class));
     }
 }

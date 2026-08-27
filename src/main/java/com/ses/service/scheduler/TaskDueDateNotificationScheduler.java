@@ -33,7 +33,7 @@ public class TaskDueDateNotificationScheduler {
      * 毎日深夜 02:00 に実行
      */
     @Scheduled(cron = "0 0 2 * * ?")
-    @SchedulerLock(name = "taskDueDateNotificationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
+    @SchedulerLock(name = "taskDueDateOverdueDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDailyOverdueCheck() {
         processOverdueTaskNotifications(LocalDate.now());
     }

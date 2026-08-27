@@ -293,6 +293,8 @@ class FlywayMigrationSmokeTest {
             assertTableExists(st, "t_file_security_metadata");
             assertColumnExists(st, "m_identity_provider", "issuer_uri");
             assertColumnExists(st, "t_user_external_identity", "subject");
+            assertColumnExists(st, "t_user_external_identity", "review_status");
+            assertTableExists(st, "t_oidc_binding_review_inventory");
             assertColumnExists(st, "t_user_mfa", "encrypted_totp_secret");
             assertColumnExists(st, "t_mfa_recovery_code", "code_hash");
             assertColumnExists(st, "t_user_session", "revoked_at");

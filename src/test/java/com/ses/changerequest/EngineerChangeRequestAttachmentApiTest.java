@@ -9,7 +9,9 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.service.MenuCacheService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -61,6 +63,46 @@ class EngineerChangeRequestAttachmentApiTest {
     private EngineerMapper engineerMapper;
     @Autowired
     private EngineerAccountLinkMapper accountLinkMapper;
+    @Autowired
+    private MenuCacheService menuCacheService;
+
+    @BeforeEach
+    void restoreSelfServiceMenus() {
+        // 共有 H2 + 乱数順で engineer-schema 等がメニューを削っても /api/my と管理APIが届くようにする
+        Integer myCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_menu WHERE menu_key = 'my-timesheet'", Integer.class);
+        if (myCount == null || myCount == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) "
+                            + "VALUES ('my-timesheet', 'my-timesheet', '/my', '/api/my', 92)");
+        }
+        Integer mgmtCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM m_menu WHERE menu_key = 'engineerChangeRequests'", Integer.class);
+        if (mgmtCount == null || mgmtCount == 0) {
+            jdbcTemplate.update(
+                    "INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) "
+                            + "VALUES ('engineerChangeRequests', 'engineer-change-requests', "
+                            + "'/engineer-change-requests', '/api/engineer-change-requests', 99)");
+        }
+        Long myMenuId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_menu WHERE menu_key = 'my-timesheet'", Long.class);
+        Long mgmtMenuId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_menu WHERE menu_key = 'engineerChangeRequests'", Long.class);
+        Integer link = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_role_menu WHERE role = '要員' AND menu_id = ?", Integer.class, myMenuId);
+        if (link == null || link == 0) {
+            jdbcTemplate.update("INSERT INTO t_role_menu (role, menu_id) VALUES ('要員', ?)", myMenuId);
+        }
+        for (String role : new String[] {"管理者", "HR", "マネージャー"}) {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM t_role_menu WHERE role = ? AND menu_id = ?",
+                    Integer.class, role, mgmtMenuId);
+            if (n == null || n == 0) {
+                jdbcTemplate.update("INSERT INTO t_role_menu (role, menu_id) VALUES (?, ?)", role, mgmtMenuId);
+            }
+        }
+        menuCacheService.invalidate();
+    }
 
     @AfterEach
     void tearDown() {

@@ -38,7 +38,7 @@ public class ComplianceFindingStore {
     public record SyncResult(int opened, int resolved, int kept) {
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public SyncResult sync(Long contractId, List<ComplianceFinding> evaluated) {
         List<com.ses.entity.ComplianceFinding> existing = findingMapper.selectList(
                 new LambdaQueryWrapper<com.ses.entity.ComplianceFinding>()

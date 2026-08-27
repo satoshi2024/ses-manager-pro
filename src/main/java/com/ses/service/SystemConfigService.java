@@ -21,4 +21,10 @@ public interface SystemConfigService {
 
     /** 全設定を返す。 */
     List<SystemConfig> all();
+
+    /**
+     * 画面からの一括更新。マスキング維持・Webhook検証・scope世代更新を含む。
+     * 複数キーを1トランザクションで更新する。
+     */
+    void updateAll(List<SystemConfig> configs);
 }

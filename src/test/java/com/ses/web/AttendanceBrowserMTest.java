@@ -46,7 +46,7 @@ class AttendanceBrowserMTest {
         Path chrome = CdpBrowser.chromeExecutable();
         assertNotNull(chrome, "Chrome実行ファイルが見つかりません");
         String baseUrl = "http://localhost:" + port;
-        Path evidenceDir = Path.of("target", "browser-evidence", "attendance-leave-overtime-compliance");
+        Path evidenceDir = Path.of("target", "browser-m-evidence", "attendance-leave-overtime-compliance");
         Files.createDirectories(evidenceDir);
         String runId = "browser-m-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         Files.writeString(evidenceDir.resolve("run-id.txt"), runId + "\n");

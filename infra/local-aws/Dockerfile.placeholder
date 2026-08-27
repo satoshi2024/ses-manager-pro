@@ -1,0 +1,8 @@
+# Local-only placeholder image for ECS wiring drills.
+# NOT a production image. Real deploy still needs a digest-pinned app Dockerfile + ECR.
+FROM eclipse-temurin:21-jre-jammy
+LABEL org.opencontainers.image.title="ses-manager-local-placeholder"
+WORKDIR /app
+EXPOSE 8080
+# Placeholder process so a local "image exists" check can pass; app jar is not baked here.
+CMD ["bash", "-c", "echo ses-manager local placeholder; sleep infinity"]

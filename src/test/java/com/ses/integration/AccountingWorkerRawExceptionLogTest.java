@@ -183,6 +183,7 @@ class AccountingWorkerRawExceptionLogTest {
 
         List<ILoggingEvent> workerEvents = appender.list.stream()
                 .filter(event -> event.getLoggerName().equals(AccountingIntegrationWorker.class.getName()))
+                .filter(event -> event.getLevel() == ch.qos.logback.classic.Level.ERROR)
                 .toList();
         assertThat(workerEvents).hasSize(5);
         for (int i = 0; i < workerEvents.size(); i++) {

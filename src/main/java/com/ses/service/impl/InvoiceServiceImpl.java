@@ -571,7 +571,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     }
 
     @Override
-    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void changeBpPaymentStatus(Long id, String status, LocalDate paidDate) {
         // 直接更新経路も承認経路と同じBP支払行をロックし、状態確認からCAS更新まで保持する。
         BpPayment bpPayment = bpPaymentMapper.selectByIdForUpdate(id);

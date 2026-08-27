@@ -142,7 +142,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpCompany createBpCompany(BpCompany bpCompany) {
         if (bpCompany.getStatus() == null) {
             bpCompany.setStatus("ACTIVE");
@@ -155,7 +155,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpCompany updateBpCompany(BpCompany bpCompany) {
         BpCompany existing = this.getById(bpCompany.getId());
         if (existing == null) {
@@ -188,7 +188,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateComplianceApplicability(Long id, String applicability, String note, Long operatorUserId) {
         BpCompany existing = this.getById(id);
         if (existing == null) {
@@ -202,7 +202,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpBankAccountDto addBankAccount(Long bpCompanyId, String bankName, String branchName, String accountType, String accountNumber, String accountHolder, LocalDate validFrom, LocalDate validTo) {
         if (!StringUtils.hasText(accountNumber)) {
             throw new BusinessException(400, "口座番号は必須です");
@@ -240,7 +240,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateBankAccountApproval(Long bankAccountId, String approvalStatus, Long operatorUserId) {
         String nextStatus = "APPROVED".equalsIgnoreCase(approvalStatus) ? "APPROVED" : "REJECTED";
         int updated = bankAccountMapper.update(null,
@@ -256,7 +256,7 @@ public class BpCompanyServiceImpl extends ServiceImpl<BpCompanyMapper, BpCompany
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public BpTerms addTerms(Long bpCompanyId, BpTerms terms) {
         terms.setTenantId(1L);
         terms.setBpCompanyId(bpCompanyId);
