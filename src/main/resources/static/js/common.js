@@ -1030,6 +1030,7 @@ SES.pwa = {
 
     clearUserScope: function() {
         const self = this;
+        if (window.SES && SES.pwaQueue && typeof SES.pwaQueue.reset === 'function') SES.pwaQueue.reset();
         try { localStorage.removeItem('ses_pwa_user_scope'); } catch (_) {}
         const deleteDatabase = new Promise(function(resolve) {
             if (!window.indexedDB) { resolve(); return; }
@@ -1045,7 +1046,7 @@ SES.pwa = {
 
     sessionExpired: function() {
         window.dispatchEvent(new CustomEvent('ses:session-expired'));
-        this.clearUserScope();
+        // session expiryではqueueを削除しない。再認証後に同一user scopeを検証してから再開する。
     },
 
     bindLogout: function() {

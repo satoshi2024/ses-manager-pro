@@ -305,13 +305,38 @@ function emptyStrings(obj) {
 }
 
 async function doCreate(type, payload, reason, attachmentDocumentId) {
+    const command = {
+        requestType: type,
+        payload,
+        reason: reason || null
+    };
     try {
-        await SES.api.post('/api/my/change-requests', {
-            requestType: type,
-            payload,
-            reason: reason || null,
-            attachmentDocumentId: attachmentDocumentId || null
-        });
+        // 添付付き申請はオンライン専用。ファイル/文書IDをoffline queueへ入れない。
+        if (attachmentDocumentId) {
+            if (!navigator.onLine) {
+                SES.toast.warning(SES.i18n.t('error.pwa.onlineOnly', 'この操作はオンラインで実行してください'));
+                return;
+            }
+            await SES.api.post('/api/my/change-requests', Object.assign({}, command, {
+                attachmentDocumentId: attachmentDocumentId
+            }));
+        } else {
+            const result = await SES.pwaQueue.request({
+                screen: 'change-request', method: 'POST', path: '/api/my/pwa/change-requests/drafts',
+                month: null, baseVersion: Number(window.myProfileData?.version || 0),
+                resourceKey: `change-request:${type}`, payload: command
+            });
+            if (result && result.conflict) {
+                SES.toast.error(SES.i18n.t('error.pwa.conflict', 'サーバー側で変更がありました。下部の競合内容を確認してください'));
+                return;
+            }
+            if (result && result.queued) {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('changeModal'));
+                if (modal) modal.hide();
+                SES.toast.info(SES.i18n.t('pwa.queued', '端末に保存しました。オンライン復帰後に同期します'));
+                return;
+            }
+        }
         loadProfile();
         loadRequests();
         const modal = bootstrap.Modal.getInstance(document.getElementById('changeModal'));

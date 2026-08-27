@@ -161,13 +161,28 @@ function saveExpense() {
         SES.toast.error(SES.i18n.t('my.expense.required', '必須項目を入力してください'));
         return;
     }
-    const request = id
-        ? SES.api.put('/api/my/expenses/' + encodeURIComponent(id), body)
-        : SES.api.post('/api/my/expenses', body);
-    request.then(() => {
+    const row = id ? findRow(id) : null;
+    const payload = Object.assign({}, body, id ? { id: Number(id) } : {});
+    const request = SES.pwaQueue.request({
+        screen: 'expense', method: id ? 'PUT' : 'POST',
+        path: id ? '/api/my/pwa/expenses/drafts/' + encodeURIComponent(id) : '/api/my/pwa/expenses/drafts',
+        month: body.expenseDate ? body.expenseDate.slice(0, 7) : null,
+        baseVersion: Number(row?.version || 0),
+        resourceKey: id ? `expense:${id}` : `expense:new:${Date.now()}`,
+        payload
+    });
+    request.then(result => {
+        if (result && result.conflict) {
+            SES.toast.error(SES.i18n.t('error.pwa.conflict', 'サーバー側で変更がありました。下部の競合内容を確認してください'));
+            return;
+        }
         bootstrap.Modal.getInstance(document.getElementById('expenseModal')).hide();
-        SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
-        loadExpenses(expensePage.current);
+        if (result && result.queued) {
+            SES.toast.info(SES.i18n.t('pwa.queued', '端末に保存しました。オンライン復帰後に同期します'));
+        } else {
+            SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
+            loadExpenses(expensePage.current);
+        }
     }).catch(() => { /* SES.apiが共通トーストを表示 */ });
 }
 

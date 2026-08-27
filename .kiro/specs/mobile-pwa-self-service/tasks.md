@@ -98,7 +98,7 @@ network timeout後の同一command再送、同時2 session、stale draftを実�
 
 timesheet、attendance、expense、change-requestのshell navigationを390×844で操作し、network statusとsession expiry表示を確認する。
 
-## Task A2 — Draft、queue、sync、conflict UI
+## Task A2 — Draft、queue、sync、conflict UI `[x]`
 
 ### Objective
 

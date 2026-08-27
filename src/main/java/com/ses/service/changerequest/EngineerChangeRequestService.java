@@ -100,7 +100,7 @@ public interface EngineerChangeRequestService {
                          java.util.List<com.ses.dto.engineer.EngineerSkillDetailDto> skills,
                          java.util.List<com.ses.entity.EngineerCareer> careers,
                          String primarySalesUserName, Long primarySalesUserId,
-                         java.util.List<PublicContract> contracts, long pendingChangeRequests) {
+                         java.util.List<PublicContract> contracts, long pendingChangeRequests, Integer version) {
     }
 
     record PublicContract(String contractNo, String projectName, String customerName,

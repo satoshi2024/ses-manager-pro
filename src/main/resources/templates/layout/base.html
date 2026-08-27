@@ -36,6 +36,18 @@
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1060; pointer-events: none;"></div>
 
+    <!-- 要員PWAの未送信queue/競合。業務データのキャッシュではなく、最小commandの状態だけを表示する。 -->
+    <div sec:authorize="hasRole('要員')" id="pwa-queue-panel" class="pwa-queue-panel no-print" hidden>
+        <div class="d-flex align-items-start gap-2">
+            <span class="bi bi-cloud-arrow-up fs-5" aria-hidden="true"></span>
+            <div class="flex-grow-1">
+                <div id="pwa-queue-status" role="status" aria-live="polite"></div>
+                <div id="pwa-conflicts" class="mt-2"></div>
+            </div>
+            <button type="button" id="pwa-sync-now" class="btn btn-sm btn-outline-primary">同期</button>
+        </div>
+    </div>
+
     <!-- Password Change Modal -->
     <div class="modal fade" id="passwordChangeModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -131,6 +143,7 @@
     <!-- Custom JS -->
     <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()},v=${#dates.createNow().getTime()})}"></script>
     <script th:src="@{/js/common.js}"></script>
+    <script th:src="@{/js/pwa-queue.js}"></script>
     <script th:src="@{/js/profile.js}"></script>
     
     <!-- Additional JS from specific pages -->

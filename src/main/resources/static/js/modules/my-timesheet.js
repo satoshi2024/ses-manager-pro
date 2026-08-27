@@ -215,12 +215,12 @@ function saveMyDaily(contractId) {
         SES.toast.error(SES.i18n.t('validation.required', SES.i18n.t('my.timesheet.date', '日付')));
         return;
     }
-    SES.api.post('/api/my/timesheet/daily', body)
-        .then(() => {
-            SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
-            loadMyTimesheet();
-        })
-        .catch(() => { /* SES.apiが共通トーストを表示 */ });
+    const row = myRowMap.get(String(contractId)) || {};
+    SES.pwaQueue.request({
+        screen: 'timesheet', method: 'POST', path: '/api/my/pwa/timesheet/daily',
+        month: myMonthValue, baseVersion: Number(row.version || 0),
+        resourceKey: `timesheet:${contractId}:${myMonthValue}`, payload: body
+    }).then(handleMyMutation).catch(() => { /* 共通queueが画面へ状態を表示 */ });
 }
 
 function deleteMyDaily(contractId, workDate) {
@@ -234,16 +234,27 @@ function deleteMyDaily(contractId, workDate) {
         cancelButtonText: SES.i18n.t('common.cancel', 'キャンセル')
     }).then(result => {
         if (!result.isConfirmed) return;
-        const url = '/api/my/timesheet/daily?contractId=' + encodeURIComponent(contractId)
-            + '&workMonth=' + encodeURIComponent(myMonthValue)
-            + '&workDate=' + encodeURIComponent(workDate);
-        SES.api.delete(url)
-            .then(() => {
-                SES.toast.success(SES.i18n.t('common.deleted', '削除しました'));
-                loadMyTimesheet();
-            })
-            .catch(() => { /* SES.apiが共通トーストを表示 */ });
+        const row = myRowMap.get(String(contractId)) || {};
+        SES.pwaQueue.request({
+            screen: 'timesheet', method: 'DELETE', path: '/api/my/pwa/timesheet/daily',
+            month: myMonthValue, baseVersion: Number(row.version || 0),
+            resourceKey: `timesheet:${contractId}:${myMonthValue}`,
+            payload: { contractId, workMonth: myMonthValue, workDate }
+        }).then(handleMyMutation).catch(() => { /* 共通queueが画面へ状態を表示 */ });
     });
+}
+
+function handleMyMutation(result) {
+    if (result && result.conflict) {
+        SES.toast.error(SES.i18n.t('error.pwa.conflict', 'サーバー側で変更がありました。下部の競合内容を確認してください'));
+        return;
+    }
+    if (result && result.queued) {
+        SES.toast.info(SES.i18n.t('pwa.queued', '端末に保存しました。オンライン復帰後に同期します'));
+        return;
+    }
+    SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
+    loadMyTimesheet();
 }
 
 function submitMyByMonth(contractId) {

@@ -183,8 +183,13 @@ public class PwaMutationApiController {
         try {
             assertBaseVersion(command, claim.context());
             Object result = action.apply(claim.context());
-            ledger.complete(claim.mutationId(), result);
-            return ApiResult.success(result);
+            // 同一aggregateへ複数のoffline commandを順番に適用できるよう、適用後versionだけを返す。
+            VersionSnapshot after = snapshot(command, claim.context());
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("result", result);
+            response.put("version", after.version());
+            ledger.complete(claim.mutationId(), response);
+            return ApiResult.success(response);
         } catch (PwaConflictException | BusinessException e) {
             ledger.abandon(claim.mutationId());
             if (e instanceof BusinessException business && business.getCode() == 409) {

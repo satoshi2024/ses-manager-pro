@@ -33,6 +33,7 @@ class PwaAssetContractTest {
         assertThat(worker).contains("event.respondWith(fetch(request).catch(() => caches.match('/offline.html'))");
         assertThat(worker).doesNotContain("caches.addAll([request])");
         assertThat(worker).doesNotContain("cache.put(request, await response");
+        assertThat(worker).contains("'/js/pwa-queue.js'", "'/js/modules/my-timesheet.js'");
     }
 
     @Test
@@ -40,6 +41,7 @@ class PwaAssetContractTest {
         assertThat(Files.exists(STATIC_ROOT.resolve("offline.html"))).isTrue();
         String layout = Files.readString(Path.of("src/main/resources/templates/layout/base.html"), StandardCharsets.UTF_8);
         assertThat(layout).contains("rel=\"manifest\"");
+        assertThat(layout).contains("/js/pwa-queue.js", "id=\"pwa-queue-panel\"");
     }
 
     @Test
@@ -51,6 +53,18 @@ class PwaAssetContractTest {
         assertThat(header).contains("id=\"pwa-status\"", "aria-live=\"polite\"", "aria-expanded=\"false\"");
         assertThat(sidebar).contains("id=\"sidebar-close-btn\"", "aria-label=\"メニューを閉じる\"");
         assertThat(css).contains("min-height: 44px", ":focus-visible", ".pwa-status[data-state=\"offline\"]");
+    }
+
+    @Test
+    void offlineQueueは最小commandのscopeと保持期限を持つ() throws Exception {
+        String queue = read("js/pwa-queue.js");
+
+        assertThat(queue).contains("indexedDB", "clientRequestId", "payloadHash", "baseVersion",
+                "userScope", "createdAt", "MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000");
+        assertThat(queue).contains("X-Client-Request-Id", "X-Client-Payload-Hash", "X-Client-Base-Version",
+                "X-User-Scope", "cache: 'no-store'");
+        assertThat(queue).contains("status === 'CONFLICT'", "サーバー版", "端末版", "端末版を破棄");
+        assertThat(queue).doesNotContain("password", "bankAccount", "receiptBlob");
     }
 
     private String read(String name) throws Exception {

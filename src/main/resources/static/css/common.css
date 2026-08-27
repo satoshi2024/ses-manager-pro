@@ -593,6 +593,37 @@ a:hover {
     background: var(--accent-yellow);
 }
 
+.pwa-queue-panel {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 1050;
+    width: min(30rem, calc(100vw - 2rem));
+    max-height: min(24rem, calc(100vh - 2rem));
+    overflow: auto;
+    padding: 0.75rem 1rem;
+    color: var(--text-primary);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1.5rem rgba(15, 23, 42, 0.2);
+}
+
+.pwa-queue-panel pre {
+    max-height: 8rem;
+    overflow: auto;
+    padding: 0.5rem;
+    color: var(--text-secondary);
+    background: var(--surface-bg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.pwa-queue-conflict {
+    border-top: 1px solid var(--border-color);
+    padding-top: 0.5rem;
+}
+
 /* ================== SIDEBAR NAV ================== */
 .sidebar .nav-link {
     min-height: 44px;
@@ -1178,6 +1209,12 @@ input[type="date"]::-webkit-datetime-edit-text {
         min-height: 30px;
         padding-left: 0.45rem;
         padding-right: 0.45rem;
+    }
+
+    .pwa-queue-panel {
+        right: 0.5rem;
+        bottom: 0.5rem;
+        width: calc(100vw - 1rem);
     }
 
     .content-area .d-flex.justify-content-between.align-items-center.mb-4 > div:last-child:not(:first-child) {

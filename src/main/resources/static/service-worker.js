@@ -15,7 +15,12 @@ const SHELL_ASSETS = [
     '/lib/sweetalert2/sweetalert2.min.css',
     '/lib/sweetalert2/sweetalert2.all.min.js',
     '/js/common.js',
-    '/js/profile.js'
+    '/js/pwa-queue.js',
+    '/js/profile.js',
+    '/js/modules/my-timesheet.js',
+    '/js/modules/attendance-my.js',
+    '/js/modules/my-expenses.js',
+    '/js/modules/my-profile.js'
 ];
 
 function isSameOrigin(request) {
