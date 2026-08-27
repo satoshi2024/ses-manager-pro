@@ -33,7 +33,7 @@
 
 | Task | Requirements | Base | Head | 変更file | Tests | Demo | 未検証 | Rollback | Review ready |
 |---|---|---|---|---|---|---|---|---|---|
-| 0 | CS-R* 前提、DG-02提案 | `bd2bfca6` | （本commit） | `inventory.md`, requirements, design, tasks, review-ledger, 台帳DISCOVERY | L0 文書照合 | inventoryと提案表 | Owner承認、KPI baseline実測 | spec revert | NO（specのみ） |
+| 0 | CS-R* 前提、DG-02提案 | `bd2bfca6` | `ab771b44` | `inventory.md`, requirements, design, tasks, review-ledger, 台帳DISCOVERY | L0 文書照合 | inventoryと提案表 | Owner承認、KPI baseline実測 | spec revert | NO（specのみ） |
 | F1 | CS-R1/R2/R3 DDL | — | — | 未着手（WIPあり・未承認） | — | — | APPROVED待ち | 新テーブルDROP | NO |
 | F2 | CS-R2 calculator/scope | — | — | 未着手扱い | — | — | 同上 | flag OFF | NO |
 | A1 | CS-R1 内部UI | — | — | 未着手扱い | — | — | 同上 | menu削除 | NO |
@@ -75,5 +75,5 @@
 - approved plan: **無し**（本specは提案）
 - requirements / design / tasks / inventory / 本ledger
 - 完了対応表: Task 0 のみ
-- remote Head: spec commit push後に記入
+- remote Head: `ab771b445d9bacfc53c8a52f078f1e85ec5cd22c`
 - 実装diff: Review対象外（未APPROVED）
