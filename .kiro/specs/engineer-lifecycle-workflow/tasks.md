@@ -45,12 +45,12 @@
   - **テスト要件**: L4〜L6。要員ロールでの自案件のみアクセス可・他要員拒否（403）、社内専用タスクの非公開確認、本人タスク完了テスト。
   - **Demo**: 要員アカウントでログインし、自身のタスクのみが表示され社内タスクが不可視であること、提出完了できることを確認。
 
-- [ ] B1. 通知・SLAスケジューラ・統一承認エンジン連携
-  - **Objective**: タスク期日接近・超過・阻害・完了の重複抑止付き通知（`t_notification_outbox` 連携）、期日監視バッチ（`ApprovalSlaScheduler`）、および阻害タスクの例外免除申請アダプタ（`LifecycleExceptionApprovalAdapter`）を実装する。
-  - **実装ガイダンス**: `ApprovalEngineService` 連携（`RequestType = LIFECYCLE_EXCEPTION`）。
-    是正期日・理由・リスク所有者を保持し、承認完了時にタスクを `WAIVED` へ遷移。
-  - **テスト要件**: L2〜L3。期日リマインダー通知、期限超過エスカレーション、例外承認申請・承認・差戻し・却下の結合テスト、通知重複抑止キーの動作検証。
-  - **Demo**: 阻害タスクに対して例外承認を申請 → HR承認 → タスクがWAIVEDとなり案件が完了可能になる一連の動作を確認。
+- [x] B1. 通知・SLAスケジューラ・統一承認エンジン連携
+  - **Objective**: タスク期日接近・超過・阻害・完了の重複抑止付き通知（`t_notification_outbox` / `NotificationService` 連携）、期日監視バッチ（`LifecycleSlaScheduler`）、および阻害タスクの例外免除申請アダプタ（`LifecycleExceptionApprovalAdapter`）の完全統合を実装する。
+  - **実装ガイダンス**: 期日2日前・当日・超過時の通知生成、重複通知防止（同一タスク・同一状態での多重発行抑止）。
+    `ApprovalEngine` の例外免除（`LIFECYCLE_EXCEPTION`）完了時の自動タスク免除（`waiveTask`）。
+  - **テスト要件**: L1〜L4。期日超過検知、通知Outbox生成、ApprovalEngineとの連携ライフサイクル免除E2Eテスト。
+  - **Demo**: 期日超過タスクの通知が生成され、例外申請承認によりタスクが免除され案件が完了へ進むことを確認。申請 → HR承認 → タスクがWAIVEDとなり案件が完了可能になる一連の動作を確認。
 
 - [ ] B2. 証跡・文書台帳連携・運用手順・補償
   - **Objective**: タスク完了時の証跡として法定文書台帳（`DocumentService` / `t_document`）との原子的な紐付けを行い、案件取消時の補償処理および運用ランブックを整備する。
