@@ -58,7 +58,7 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
         if (!("管理者".equals(actorRole) || "マネージャー".equals(actorRole))) {
             throw BusinessException.of(403, "error.managementReport.roleDenied");
         }
-        Scope owner = scopeForCurrentUser(period.atEndOfMonth());
+        Scope owner = scopeForCurrentUser(currentAsOf());
         return previewInternal(version, period, owner);
     }
 
@@ -104,9 +104,10 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
     private ReportRecipientPreviewResult previewInternal(ReportTemplateVersion version, YearMonth period, Scope owner) {
         RecipientPolicy policy = readPolicy(version.getRecipientConfigJson());
         List<SysUser> candidates = candidateUsers(policy);
+        LocalDate permissionAsOf = currentAsOf();
         List<ReportRecipientPreview> results = new ArrayList<>();
         for (SysUser candidate : candidates) {
-            Scope recipient = withUser(candidate, () -> scopeForCurrentUser(period.atEndOfMonth()));
+            Scope recipient = withUser(candidate, () -> scopeForCurrentUser(permissionAsOf));
             boolean allowed = "管理者".equals(candidate.getRole())
                     || (owner.companyWide()
                     || (!recipient.organizationIds().isEmpty()
@@ -201,6 +202,10 @@ public class ReportRecipientPreviewServiceImpl implements ReportRecipientPreview
 
     private String sorted(Set<Long> ids) {
         return ids == null ? "[]" : ids.stream().sorted().toList().toString();
+    }
+
+    private LocalDate currentAsOf() {
+        return LocalDate.now(ZoneId.of(TIMEZONE));
     }
 
     private String sha256(String value) {
