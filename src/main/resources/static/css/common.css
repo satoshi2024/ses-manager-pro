@@ -359,7 +359,11 @@
 }
 [data-bs-theme="light"] .content-area .card.bg-dark,
 [data-bs-theme="light"] .content-area .list-group-item.bg-dark,
-[data-bs-theme="light"] .modal .list-group-item.bg-dark {
+[data-bs-theme="light"] .content-area .alert.bg-dark,
+[data-bs-theme="light"] .content-area .alert.bg-secondary,
+[data-bs-theme="light"] .modal .list-group-item.bg-dark,
+[data-bs-theme="light"] .modal .alert.bg-dark,
+[data-bs-theme="light"] .modal .alert.bg-secondary {
     background-color: var(--bg-card) !important;
     color: var(--text-primary) !important;
     border-color: var(--border-color) !important;
