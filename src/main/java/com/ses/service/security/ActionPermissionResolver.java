@@ -58,6 +58,7 @@ public final class ActionPermissionResolver {
             // attendance-leave-overtime-compliance(S11/T071)。未登録のままだと/api/leaveが
             // 管理者を含む全roleで403になる(CRM-R2-P1-01と同じ罠)。V98の権限seedと対にする。
             Map.entry("leave", "leave"),
+            Map.entry("lifecycle", "lifecycle"),
             Map.entry("management-accounting", "management-accounting"),
             Map.entry("monthly-closing", "monthly-closing"),
             Map.entry("my", "my"),

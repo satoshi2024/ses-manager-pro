@@ -128,6 +128,9 @@ function renderEngineerDetail(eng) {
     loadFollowups(eng.id);
     loadRetentionRisk(eng.id);
 
+    // Load Lifecycle Workflow Cases
+    loadEngineerLifecycleCases(eng.id);
+
     // Load Proposal History
     loadProposalHistory(eng.id);
 
@@ -909,3 +912,38 @@ function deleteFollowup(id) {
         }
     });
 }
+
+function loadEngineerLifecycleCases(engineerId) {
+    const list = $('#lifecycle-cases-list');
+    if (!list.length) return;
+    $.ajax({
+        url: '/api/lifecycle/cases?engineerId=' + engineerId,
+        method: 'GET',
+        success: function(res) {
+            if (res.code === 200 && res.data && res.data.length > 0) {
+                let html = '';
+                res.data.forEach(c => {
+                    const typeMap = { 'JOIN': '入社', 'ASSIGNMENT': '配属', 'TRANSFER': '異動', 'LEAVE': '休職', 'REINSTATEMENT': '復職', 'RESIGNATION': '退社' };
+                    const statusClass = c.status === 'COMPLETED' ? 'bg-success' : (c.status === 'ACTIVE' ? 'bg-primary' : 'bg-secondary');
+                    html += `
+                        <li class="list-group-item bg-transparent text-light border-dark d-flex justify-content-between align-items-center py-2">
+                            <div>
+                                <span class="badge ${statusClass} me-1">${typeMap[c.lifecycleType] || c.lifecycleType}</span>
+                                <span class="small font-monospace">${SES.escapeHtml(c.caseNo)}</span>
+                                <div class="text-muted" style="font-size: 0.75rem;">基準日: ${SES.escapeHtml(c.anchorDate || '-')}</div>
+                            </div>
+                            <a href="/lifecycle/${c.id}" class="btn btn-sm btn-outline-light py-0 px-2" style="font-size: 0.75rem;">詳細</a>
+                        </li>
+                    `;
+                });
+                list.html(html);
+            } else {
+                list.html('<li class="list-group-item bg-transparent text-muted small py-3 text-center">進行中の案件はありません</li>');
+            }
+        },
+        error: function() {
+            list.html('<li class="list-group-item bg-transparent text-muted small py-3 text-center">進行中の案件はありません</li>');
+        }
+    });
+}
+

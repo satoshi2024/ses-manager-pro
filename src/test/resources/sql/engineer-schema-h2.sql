@@ -615,7 +615,9 @@ INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order) VA
   ('ai-evaluation', 'AI評価',     '/ai/evaluation', '/api/ai/evaluations', 73),
   ('email',     'メールテンプレート', '/email/template', '/api/email-templates', 8),
   ('user',      'ユーザー管理',   '/user',       '/api/users', 9),
-  ('compliance-gate', '派遣コンプライアンスG2', '/compliance-gate', '/api/compliance-gate', 73);
+  ('compliance-gate', '派遣コンプライアンスG2', '/compliance-gate', '/api/compliance-gate', 73),
+  ('lifecycle', 'ライフサイクル管理', '/lifecycle', '/api/lifecycle', 25),
+  ('myLifecycle', 'マイライフサイクル', '/my/lifecycle', '/api/my/lifecycle', 26);
 
 DROP TABLE IF EXISTS t_role_menu CASCADE;
 CREATE TABLE t_role_menu (
@@ -2812,4 +2814,144 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
 
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_item_id BIGINT;
+
+-- ========================================================
+-- 要員ライフサイクルワークフロー (engineer-lifecycle-workflow)
+-- ========================================================
+CREATE TABLE IF NOT EXISTS t_lifecycle_template (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    lifecycle_type VARCHAR(30) NOT NULL,
+    version INT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_by BIGINT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by BIGINT,
+    deleted_flag TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_lifecycle_template_type_version UNIQUE (lifecycle_type, version)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_template_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    template_id BIGINT NOT NULL,
+    task_code VARCHAR(50) NOT NULL,
+    task_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    assignee_rule VARCHAR(30) NOT NULL DEFAULT 'ROLE',
+    assignee_rule_value VARCHAR(100),
+    is_mandatory TINYINT NOT NULL DEFAULT 1,
+    is_blocking TINYINT NOT NULL DEFAULT 0,
+    evidence_type VARCHAR(30) NOT NULL DEFAULT 'NONE',
+    is_engineer_visible TINYINT NOT NULL DEFAULT 1,
+    target_employment_types VARCHAR(100),
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_by BIGINT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by BIGINT,
+    deleted_flag TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_lifecycle_tpl_task_code UNIQUE (template_id, task_code)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_template_task_dep (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    template_id BIGINT NOT NULL,
+    predecessor_task_code VARCHAR(50) NOT NULL,
+    successor_task_code VARCHAR(50) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_lifecycle_tpl_task_dep UNIQUE (template_id, predecessor_task_code, successor_task_code)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_case (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    lifecycle_type VARCHAR(30) NOT NULL,
+    engineer_id BIGINT NOT NULL,
+    template_id BIGINT NOT NULL,
+    template_version INT NOT NULL,
+    anchor_date DATE NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    title VARCHAR(200) NOT NULL,
+    remarks TEXT,
+    applicant_user_id BIGINT NOT NULL,
+    engineer_snapshot_json TEXT,
+    completed_at DATETIME,
+    completed_by BIGINT,
+    version INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_by BIGINT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by BIGINT,
+    deleted_flag TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_lifecycle_case_no UNIQUE (case_no)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_id BIGINT NOT NULL,
+    task_code VARCHAR(50) NOT NULL,
+    task_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    due_date DATE,
+    assignee_user_id BIGINT,
+    assignee_role VARCHAR(50),
+    assignee_name_snapshot VARCHAR(100),
+    is_mandatory TINYINT NOT NULL DEFAULT 1,
+    is_blocking TINYINT NOT NULL DEFAULT 0,
+    evidence_type VARCHAR(30) NOT NULL DEFAULT 'NONE',
+    is_engineer_visible TINYINT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    completed_at DATETIME,
+    completed_by BIGINT,
+    completion_comment TEXT,
+    evidence_data_json TEXT,
+    approval_request_id BIGINT,
+    sort_order INT NOT NULL DEFAULT 0,
+    version INT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_by BIGINT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by BIGINT,
+    deleted_flag TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_lifecycle_case_task_code UNIQUE (case_id, task_code)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_task_dep (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_id BIGINT NOT NULL,
+    predecessor_task_id BIGINT NOT NULL,
+    successor_task_id BIGINT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_lifecycle_task_dep UNIQUE (case_id, predecessor_task_id, successor_task_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_evidence_link (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    document_version_id BIGINT,
+    verified_at DATETIME,
+    verified_by BIGINT,
+    remarks VARCHAR(500),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_lifecycle_evidence_task_doc UNIQUE (task_id, document_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_lifecycle_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_id BIGINT NOT NULL,
+    task_id BIGINT,
+    event_type VARCHAR(50) NOT NULL,
+    actor_user_id BIGINT,
+    actor_role_snapshot VARCHAR(50),
+    before_state VARCHAR(50),
+    after_state VARCHAR(50),
+    details_json TEXT,
+    occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 

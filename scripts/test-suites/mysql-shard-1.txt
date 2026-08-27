@@ -11,3 +11,4 @@ FlywayV84FailedHistoryRepairSmokeTest
 FlywayJpPintDigitalInvoiceSchemaSmokeTest
 FlywayAiFeedbackSchemaSmokeTest
 SalesOrderConcurrentCreateTest
+LifecycleMySqlIntegrationTest
