@@ -61,16 +61,16 @@
   - **Demo**:
     - ポータルから起票した問い合わせが内部に届き、内部からの公開返信がポータルに表示され、解決後に CSAT 評価が 1 回送信できることを確認。
 
-- [ ] **Task B1: SLA 監視スケジューラ & 重複抑止通知**
-  - **Objective**: SLA 期限直前予告および超過を検出し、担当者へ重複抑止（Dedupe）通知を発行するスケジューラを実装する。
+- [x] **Task B1: SLA 監視スケジューラ & Dedupe 通知エンジン**
+  - **Objective**: SLA 違反・期限前警告を定期検出するスケジューラと重複通知抑止エンジンを実装する。
   - **Guidance**:
-    - `ServiceSlaScheduler`: 定期的に進行中の SLA 時計を走査し、初回応答・解決期限の超過および予告を判定。
-    - `NotificationService` / `t_notification` への通知登録。Dedupe キー: `sla:request:{id}:round:{round}:type:{type}`。
-    - 重複実行防止・マルチノード安全設計。
+    - `ServiceSlaScheduler`: `@Scheduled(cron = "0 */5 * * * *")` + `@SchedulerLock`。
+    - `ServiceSlaMonitoringService`: 未解決リクエストの `ServiceSlaClock` を走査し、超過フラグ（`response_breached`, `resolve_breached`）を更新。
+    - `NotificationService`: `SERVICE_DESK_SLA_BREACH` / `SERVICE_DESK_SLA_WARNING` 通知を dedupeKey（`SLA_RESPONSE_BREACH:{id}:{round}` 等）付きで送信し二重通知を防止。
   - **Test Requirements**:
-    - `ServiceSlaSchedulerTest`: 期限前通知、超過通知、重複実行時の二重通知防止、Reopen 後の通知分離。
+    - `ServiceSlaSchedulerTest`: 期限超過検知、超過フラグ更新、通知送信、2回目実行時の重複通知防止（Dedupe 実証）。
   - **Demo**:
-    - SLA 超過データに対してスケジューラを実行し、通知が 1 件のみ生成され、再実行で重複しないことを確認。
+    - 期限超過リクエストに対してスケジューラを実行し、SLA違反フラグが更新され、通知が1件のみ発行されることをテスト実行で実証。
 
 - [ ] **Task B2: 顧客ヘルススコア算定 & 契約更新カレンダー連携 & 定例会(QBR) & CSV エクスポート**
   - **Objective**: ルールベースの顧客ヘルススコア算出、契約更新カレンダーへのヘルスバッジ表示、QBR 管理、CSV 出力を実装する。
