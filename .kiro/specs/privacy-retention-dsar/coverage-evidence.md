@@ -17,15 +17,16 @@ pwsh -NoProfile -File .\tools\privacy-retention-dsar\inventory-coverage.ps1
 | exit code | `0`（構造coverageのみ。policy unknownは処分BLOCKED） |
 | migration file / table / CREATE column record / ALTER column record | `116 / 180 / 4,279 / 153` |
 | entity table | `176` |
-| provider/gateway/file/backup/restore/export/search/cache/audit/integration/AI/storage candidate file | `271` |
+| provider/gateway/file/backup/restore/export/search/cache/audit/integration/AI/storage candidate file | `424` |
+| provider discovery | `filename_or_content_semantic_scan` |
 | source coverage unique column refs | `2,652` |
 | explicit inventory record（DB / FILE / AI） | `157（140 / 10 / 7）` |
 | privacy catalog explicit / unclassified / policy unknown table | `180 / 0 / 78` |
-| source coverage unmapped / missing column / entity / provider | `0 / 0 / 0 / 0` |
+| source coverage unmapped / missing column / extra column / missing entity / missing provider / extra provider | `0 / 0 / 0 / 0 / 0 / 0` |
 | providerCallCount / writeCount | `0 / 0` |
-| inventory SHA-256 | `d4bbaf5104ad25db3a12841ea2b1ceb7d2990afe27c392e1d8d9afe60300935e` |
-| source coverage SHA-256 | `cca479bf9084c7a679641aa4d780fec0b0777530d6d7f531d9214c114b9fe05e` |
-| source manifest SHA-256 | `089dc74a4343ec780dc8a482e537b48fa97dc93b64cacf0d1c8e99a72788cec7` |
+| inventory SHA-256 | `dc5ffa99600e5f5e1a7307d12b8aee11807bec7719432b2b0751ae5540fe679c` |
+| source coverage SHA-256 | `c0329640bdb4eac9fad688b74d12437643eb475180afe71de53a48b5e882322b` |
+| source manifest SHA-256 | `13ad323d76ca1d0dc96de3ff1bce7118338d5060cb3377a5f44e99b4a934ed37` |
 
 inventory SHAは対象inventoryそのもの、source manifest SHAはmigration table/column・entity・provider候補の正規化列をハッシュした値である。固定値をinventory自身へ埋め込まず、同じcommandのstdoutと本ファイルを証跡にする。
 

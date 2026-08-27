@@ -221,8 +221,16 @@ Get-ChildItem -LiteralPath $EntityRoot -Recurse -Filter '*.java' -File | Sort-Ob
     }
 }
 
+$providerNamePattern = '(?i)(provider|gateway|filereference|backup|restore|export|search|cache|audit|integration|cloudsign|freee|gemini|filestorage|filecleanup|storage|cleanup|replica|snapshot|tombstone|redact|anonym|dispos|retention|dsar|privacy|ai|outbound)'
+$providerContentPattern = '(?i)(RestTemplate|WebClient|HttpClient|HttpURLConnection|java\.net\.|Files\.(read|write|delete|copy|move)|FileInputStream|FileOutputStream|ObjectStorage|CloudSign|Gemini|freee|outbound|external provider|provider gateway|backup|restore|replica|tombstone|retention|DSAR|redact|anonym|dispos|export|global search|cache|audit|integration|FileStorage|FileCleanup)'
 $providerRecords = Get-ChildItem -LiteralPath $ProviderRoot -Recurse -Filter '*.java' -File |
-    Where-Object { $_.Name -match '(?i)(provider|gateway|filereference|backup|restore|export|search|cache|audit|integration|cloudsign|freee|gemini|filestorage|filecleanup|storage|cleanup|replica|snapshot|tombstone|redact|anonym|dispos|retention|dsar|privacy|ai|outbound)' } |
+    Where-Object {
+        if ($_.Name -match $providerNamePattern) {
+            return $true
+        }
+        $content = Get-Content -LiteralPath $_.FullName -Raw
+        return $content -match $providerContentPattern
+    } |
     Sort-Object FullName |
     ForEach-Object { Get-RelativePath -Path $_.FullName }
 
@@ -272,9 +280,11 @@ $sourceCoverageUnmappedTables = @($tableNames | Where-Object {
         $sourceCoverageText -notmatch ([regex]::Escape('`' + $_) + '(?:`|\.)')
     } | Sort-Object)
 $sourceCoverageMissingColumns = [System.Collections.Generic.List[object]]::new()
+$expectedColumnRefs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($record in $allTableRecords) {
     foreach ($column in $record.columns) {
         $columnRef = '`' + $record.table + '.' + $column + '`'
+        [void]$expectedColumnRefs.Add($record.table + '.' + $column)
         if ($sourceCoverageText -notmatch [regex]::Escape($columnRef)) {
             $sourceCoverageMissingColumns.Add([pscustomobject]@{
                 table = $record.table
@@ -283,9 +293,27 @@ foreach ($record in $allTableRecords) {
         }
     }
 }
+$sourceCoverageExtraColumns = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($columnMatch in [regex]::Matches($sourceCoverageText, '\x60([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\x60')) {
+    $columnRef = $columnMatch.Groups[1].Value + '.' + $columnMatch.Groups[2].Value
+    if (-not $expectedColumnRefs.Contains($columnRef)) {
+        [void]$sourceCoverageExtraColumns.Add($columnRef)
+    }
+}
 $providerCoverageMissing = @($providerRecords | Where-Object {
         $sourceCoverageText -notmatch [regex]::Escape('`' + $_ + '`')
     })
+$expectedProviderPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($provider in $providerRecords) {
+    [void]$expectedProviderPaths.Add($provider)
+}
+$sourceCoverageExtraProviders = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($providerMatch in [regex]::Matches($sourceCoverageText, '(?m)^\| PROV-[0-9]{3} \| \x60([^\x60]+)\x60 \|')) {
+    $providerPath = $providerMatch.Groups[1].Value
+    if (-not $expectedProviderPaths.Contains($providerPath)) {
+        [void]$sourceCoverageExtraProviders.Add($providerPath)
+    }
+}
 $entityCoverageMissing = @($entityRecords | Where-Object {
         $sourceCoverageText -notmatch [regex]::Escape('`' + $_.table + '`')
     } | Sort-Object table, source)
@@ -310,11 +338,12 @@ $sourceManifestHash = Get-CanonicalSha256 -Text ($canonicalLines -join "`n")
 $dbIdCount = @([regex]::Matches($inventoryText, '(?m)^\| DB-[0-9]{3}\b')).Count
 $fileIdCount = @([regex]::Matches($inventoryText, '(?m)^\| FILE-[0-9]{3}\b')).Count
 $aiIdCount = @([regex]::Matches($inventoryText, '(?m)^\| AI-[0-9]{3}\b')).Count
-$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0 -or $sourceCoverageUnmappedTables.Count -gt 0 -or $sourceCoverageMissingColumns.Count -gt 0 -or $providerCoverageMissing.Count -gt 0 -or $entityCoverageMissing.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } elseif ($privacyCatalogUnknownTableCount -gt 0) { 'COVERAGE_EXPLICIT_POLICY_UNKNOWN' } else { 'COVERAGE_EXPLICIT' }
+$status = if ($unmappedTables.Count -gt 0 -or $entityOnlyTables.Count -gt 0 -or $sourceCoverageUnmappedTables.Count -gt 0 -or $sourceCoverageMissingColumns.Count -gt 0 -or $sourceCoverageExtraColumns.Count -gt 0 -or $providerCoverageMissing.Count -gt 0 -or $sourceCoverageExtraProviders.Count -gt 0 -or $entityCoverageMissing.Count -gt 0) { 'BLOCKED_COVERAGE_INCOMPLETE' } elseif ($privacyCatalogUnknownTableCount -gt 0) { 'COVERAGE_EXPLICIT_POLICY_UNKNOWN' } else { 'COVERAGE_EXPLICIT' }
 $sourceCoverageDisplayPath = if ($sourceCoverageExists) { Get-RelativePath -Path (Resolve-Path -LiteralPath $SourceCoveragePath).Path } else { $SourceCoveragePath }
 
 $result = [ordered]@{
     mode = 'READ_ONLY_SOURCE_COVERAGE'
+    providerDiscovery = 'filename_or_content_semantic_scan'
     status = $status
     exitCode = if ($status -eq 'BLOCKED_COVERAGE_INCOMPLETE') { 2 } else { 0 }
     inventoryPath = Get-RelativePath -Path $inventoryFullPath
@@ -350,8 +379,12 @@ $result = [ordered]@{
     sourceCoverageColumnCount = @($allTableRecords.columns | ForEach-Object { $_ }).Count
     sourceCoverageMissingColumnCount = $sourceCoverageMissingColumns.Count
     sourceCoverageMissingColumns = @($sourceCoverageMissingColumns | Select-Object -First 100)
+    sourceCoverageExtraColumnCount = $sourceCoverageExtraColumns.Count
+    sourceCoverageExtraColumns = @($sourceCoverageExtraColumns | Sort-Object | Select-Object -First 100)
     providerCoverageMissingCount = $providerCoverageMissing.Count
     providerCoverageMissing = $providerCoverageMissing
+    sourceCoverageExtraProviderCount = $sourceCoverageExtraProviders.Count
+    sourceCoverageExtraProviders = @($sourceCoverageExtraProviders | Sort-Object | Select-Object -First 100)
     entityCoverageMissingCount = $entityCoverageMissing.Count
     entityCoverageMissing = @($entityCoverageMissing)
     entityOnlyTableCount = $entityOnlyTables.Count

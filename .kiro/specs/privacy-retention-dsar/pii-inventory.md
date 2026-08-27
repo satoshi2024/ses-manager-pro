@@ -203,14 +203,14 @@ source scannerが検出したが既存rowで個別policy値を確定できない
 | 項目 | 結果 |
 |---|---:|
 | migration file / table / CREATE column record / ALTER column record | 116 / 180 / 4,279 / 153 |
-| entity table / provider候補file | 176 / 271 |
+| entity table / provider候補file | 176 / 424 |
 | explicit inventory record（DB / FILE / AI） | 157（140 / 10 / 7） |
-| privacy catalog explicit / unclassified / policy unknown; source coverage unmapped | 180 / 0 / 78; 0 |
+| privacy catalog explicit / unclassified / policy unknown; source coverage unmapped / missing / extra | 180 / 0 / 78; 0 / 0 / 0 |
 | `providerCallCount` / `writeCount` | 0 / 0 |
 | inventory SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録（inventory自身へ固定値を書かない） |
 | source manifest SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録 |
 
-全180 tableはmain privacy catalogで個別rowを持ち、全2,652 unique columnをsource-coverage manifestで明示している。うち78 tableはowner/purpose/trigger/policy version/hold/disposition/DSAR provider/result evidenceを`UNKNOWN/BLOCKED`として明示しただけで、承認済みpolicyではない。scannerのstatusは`COVERAGE_EXPLICIT_POLICY_UNKNOWN`、privacy catalog unclassifiedは0だがpolicy unknownは78であり、PR-R1/0.4は未完了、処分候補にはしない。provider候補271 fileにはGemini、AI、FileStorage、FileCleanup、storage/backup/restore/replica等を含め、scope未承認のため全て呼び出していない。scannerのstdoutがinventory/source manifestのhashと再走査結果を生成証跡とする。
+全180 tableはmain privacy catalogで個別rowを持ち、全2,652 unique columnをsource-coverage manifestで明示している。うち78 tableはowner/purpose/trigger/policy version/hold/disposition/DSAR provider/result evidenceを`UNKNOWN/BLOCKED`として明示しただけで、承認済みpolicyではない。scannerのstatusは`COVERAGE_EXPLICIT_POLICY_UNKNOWN`、privacy catalog unclassifiedは0だがpolicy unknownは78であり、PR-R1/0.4は未完了、処分候補にはしない。provider候補424 fileはfilenameまたは内容のsemantic scanで抽出し、Gemini、AI、FileStorage、FileCleanup、外部I/O、storage/backup/restore/replica等を含め、scope未承認のため全て呼び出していない。scannerのstdoutがinventory/source manifestのhashと再走査結果を生成証跡とする。
 
 ## 5. audit / retention unresolved matters
 

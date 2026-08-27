@@ -21,8 +21,8 @@ DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、
 - [x] **0.3 migration/entity/provider mechanical coverage**
   - **Objective**: wildcardで完了扱いせず、全migration table/column、entity、provider/gateway/file/AI egress・log・cache・index・export・backup・replica候補を再走査する。
   - **Implementation**: `tools/privacy-retention-dsar/inventory-coverage.ps1` を追加し、inventoryの明示table reference、source manifest hash、inventory hash、件数、未マップtableをstdoutへ出す。DB/file/AIの未確定はUNKNOWN/BLOCKEDとする。
-  - **Test requirements**: scannerがwrite/provider call 0で、source coverage欠落時はexit code 2、構造coverageが揃ってもpolicy unknownは`COVERAGE_EXPLICIT_POLICY_UNKNOWN`として処分候補化しないこと、全source hashと生成結果が再現できることを確認する。
-  - **Demo**: migration 116 file / 180 table / 4,279 CREATE column / 153 ALTER column record、entity 176 table、provider候補271 file、source unique column 2,652、privacy catalog unclassified 0・policy unknown 78を出力し、未承認policyを候補化しない。
+  - **Test requirements**: scannerがwrite/provider call 0で、source coverageの欠落または余分な列/provider参照時はexit code 2、構造coverageが揃ってもpolicy unknownは`COVERAGE_EXPLICIT_POLICY_UNKNOWN`として処分候補化しないこと、全source hashと生成結果が再現できることを確認する。
+  - **Demo**: migration 116 file / 180 table / 4,279 CREATE column / 153 ALTER column record、entity 176 table、provider候補424 file（filename/content semantic scan）、source unique column 2,652、privacy catalog unclassified 0・policy unknown 78を出力し、未承認policyを候補化しない。
 
 - [ ] **0.4 coverage closure**
   - **Objective**: 全migration/entity/providerの明示inventory rowとresult evidenceを揃える。
