@@ -69,7 +69,7 @@
 ### R5. Reconciliation・evidence
 
 1. jobごとにsource、accepted、rejected、applied、updated、skipped、apply_failed、empty_skipped、amount_excludedの拡張カウンタを保存し、重複計上せず、同じ名前・定義を画面/API/CSVで共通化する。
-2. 金額列があるentityは、JPY、period、source amount、accepted/rejected/applied/updated/skipped amountの合計を保存し、source合計との差分を理由コード付きで照合しなければならない。分類式は source = accepted + rejected、accepted = applied + updated + skipped + apply_failed とし、validate完了/COMPLETEDでは apply_failed = 0、差異件数・差異金額 = 0でなければならない。
+2. 金額列があるentityは、JPY、period、source amount、accepted/rejected/applied/updated/skipped/apply_failed amountの合計を保存し、source合計との差分を理由コード付きで照合しなければならない。empty_skipped/amount_excludedは理由付き件数として別保存する。分類式は source = accepted + rejected、accepted = applied + updated + skipped + apply_failed とし、validate完了/COMPLETEDでは apply_failed = 0、差異件数・差異金額 = 0でなければならない。
 3. 空/不正金額は0円と混同せず、amount_excluded件数と理由を分離する。負数は業務上許可される場合とformula文字列を別に扱う。金額のcurrency=JPY、scale、rounding modeはvalidate開始前にmapping承認者が確定し、既定はscale=0・UNNECESSARYで小数をrejectする。別modeはDG-06承認理由とmapping versionへ保存し、apply時に変更しない。
 4. 完了時に、source hash、mapping version、mapping hash、schema version、executor、approvedBy、started/finished time、base snapshot、result hashを保存する。
 5. result hashはrow resultの安定した並びと正規化された結果項目から算出し、同一入力・同一mapping・同一結果の再検証に使えるようにする。
