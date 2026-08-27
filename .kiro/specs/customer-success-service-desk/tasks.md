@@ -24,7 +24,7 @@
   - **Demo**:
     - H2 / MySQL で V110 の全テーブル・インデックス・UNIQUE 制約が正しく適用されることを確認。
 
-- [ ] **Task F2: SLA 計算エンジン & 状態機械 & スコープ解決基盤**
+- [x] **Task F2: SLA 計算エンジン & 状態機械 & スコープ解決基盤**
   - **Objective**: 営業時間・休日・タイムゾーンを考慮した SLA 計算ロジック、状態遷移エンジン、認可スコープ解決を実装する。
   - **Guidance**:
     - `ServiceSlaCalculator`: 営業時間（09:00-18:00）、土日祝日（`WorkCalendarDay`）、Pause / Resume、Reopen ラウンド別の計時。

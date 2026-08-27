@@ -1,9 +1,5 @@
-package com.ses.entity;
+package com.ses.dto.servicedesk;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,16 +8,14 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * SLA計時クロックエンティティ
+ * SLA時計DTO
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName("t_service_sla_clock")
-public class ServiceSlaClock {
+public class ServiceSlaClockDto {
 
-    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long serviceRequestId;
@@ -29,6 +23,8 @@ public class ServiceSlaClock {
     private Integer roundNo;
 
     private Long policyId;
+
+    private String policyName;
 
     private LocalDateTime responseDeadline;
 
@@ -44,15 +40,7 @@ public class ServiceSlaClock {
 
     private Integer totalPauseMinutes;
 
-    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private LocalDateTime lastPausedAt;
 
     private String status;
-
-    @Version
-    private Integer version;
-
-    private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 }
