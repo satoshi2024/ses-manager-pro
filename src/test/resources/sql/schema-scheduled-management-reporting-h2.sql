@@ -38,6 +38,7 @@ CREATE TABLE m_report_template_version (
     retention_years INT NOT NULL DEFAULT 7,
     created_by BIGINT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMP,
     deleted_flag TINYINT NOT NULL DEFAULT 0,
     version INT NOT NULL DEFAULT 0
