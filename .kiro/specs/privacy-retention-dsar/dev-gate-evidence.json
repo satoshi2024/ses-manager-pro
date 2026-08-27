@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "decisionId": "NF07-DEV-GATE-20260828",
+  "decisionSource": "依頼者によるdevelopment-only technical authorization",
+  "ownerRole": "Project Maintainer (development-only)",
+  "formalPrivacyOwner": "UNASSIGNED_UNTIL_PRE_PRODUCTION",
+  "devGate": {
+    "status": "APPROVED_DEV_ONLY",
+    "scope": [
+      "Task 0",
+      "D0",
+      "0.3",
+      "0.5"
+    ],
+    "allowed": [
+      "spec",
+      "PII inventory",
+      "offline dry-run",
+      "coverage/gate validator",
+      "synthetic/redacted fixture",
+      "DEV-0/D0 scope-only independent Implementation Review"
+    ],
+    "data": "synthetic/redacted only",
+    "externalIo": "禁止",
+    "providerCallCount": 0,
+    "writeCount": 0,
+    "destructiveOperation": "禁止"
+  },
+  "fullFeatureProductionGate": {
+    "status": "BLOCKED",
+    "prohibited": [
+      "F1-M",
+      "実PII接続",
+      "DSAR実配布",
+      "delete/anonymize/restrict writer",
+      "外部provider",
+      "production flag",
+      "PR/release"
+    ],
+    "blockingEvidence": [
+      "78 table policy",
+      "DG-07",
+      "legal-document-ledger-archive",
+      "database-backup-recovery",
+      "enterprise-identity-security",
+      "recruiting-pipeline",
+      "ai-feedback-learning G10",
+      "本番運用gate"
+    ]
+  },
+  "legalConclusion": false,
+  "productionApproval": false
+}

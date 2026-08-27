@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('DEV_0_D0', 'FULL_FEATURE_PRODUCTION')]
+    [string]$GateMode = 'DEV_0_D0',
     [string]$EvidencePath = '.kiro/specs/privacy-retention-dsar/gate-evidence.json',
+    [string]$DevEvidencePath = '.kiro/specs/privacy-retention-dsar/dev-gate-evidence.json',
     [string]$InventoryPath = '.kiro/specs/privacy-retention-dsar/pii-inventory.md',
     [string]$SourceCoveragePath = '.kiro/specs/privacy-retention-dsar/source-coverage.md',
     [string]$CoverageScriptPath = 'tools/privacy-retention-dsar/inventory-coverage.ps1',
@@ -156,6 +159,7 @@ function Resolve-WorktreeArtifactPath {
     return (Join-Path $resolvedWorktree $Path)
 }
 $EvidencePath = Resolve-WorktreeArtifactPath -Path $EvidencePath
+$DevEvidencePath = Resolve-WorktreeArtifactPath -Path $DevEvidencePath
 $InventoryPath = Resolve-WorktreeArtifactPath -Path $InventoryPath
 $SourceCoveragePath = Resolve-WorktreeArtifactPath -Path $SourceCoveragePath
 $CoverageScriptPath = Resolve-WorktreeArtifactPath -Path $CoverageScriptPath
@@ -169,18 +173,21 @@ foreach ($requiredPath in @($InventoryPath, $SourceCoveragePath, $CoverageScript
     }
 }
 
+$activeEvidencePath = if ($GateMode -eq 'DEV_0_D0') { $DevEvidencePath } else { $EvidencePath }
 $evidence = $null
-$evidenceExists = Test-Path -LiteralPath $EvidencePath -PathType Leaf
+$evidenceExists = Test-Path -LiteralPath $activeEvidencePath -PathType Leaf
 if ($evidenceExists) {
     try {
-        $evidence = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
+        $evidence = Get-Content -LiteralPath $activeEvidencePath -Raw | ConvertFrom-Json
     }
     catch {
-        Add-Blocker -Blockers $blockers -Code 'EVIDENCE_INVALID_JSON' -Reason "evidence file is not valid JSON: $EvidencePath"
+        Add-Blocker -Blockers $blockers -Code 'EVIDENCE_INVALID_JSON' -Reason "evidence file is not valid JSON: $activeEvidencePath"
     }
 }
 else {
-    Add-Blocker -Blockers $blockers -Code 'DECISION_EVIDENCE_MISSING' -Reason 'approved policy/scope, Privacy owner, and approved Base decision evidence file is absent' -EvidenceRequired 'authority, decision time, exact scope, owner, Base branch, Base SHA, evidence reference, evidence SHA-256'
+    $missingCode = if ($GateMode -eq 'DEV_0_D0') { 'DEV_GATE_EVIDENCE_MISSING' } else { 'DECISION_EVIDENCE_MISSING' }
+    $missingReason = if ($GateMode -eq 'DEV_0_D0') { 'development-only authorization evidence file is absent' } else { 'approved policy/scope, Privacy owner, and approved Base decision evidence file is absent' }
+    Add-Blocker -Blockers $blockers -Code $missingCode -Reason $missingReason -EvidenceRequired 'decisionId, decisionSource, ownerRole, formalPrivacyOwner, exact gate status/scope, data boundary, external I/O, providerCallCount, writeCount, destructive operation'
     $evidence = [pscustomobject]@{ schemaVersion = 1; evidence = @() }
 }
 
@@ -189,19 +196,85 @@ if ($schemaVersion -ne 1) {
     Add-Blocker -Blockers $blockers -Code 'EVIDENCE_SCHEMA_INVALID' -Reason 'evidence schemaVersion must be 1'
 }
 
-$policyRecord = Get-RecordById -Evidence $evidence -Id 'approved-policy-scope'
-if ($null -eq $policyRecord -or -not (Test-StatusClosed (Get-PropertyValue -Object $policyRecord -Name 'status'))) {
-    Add-Blocker -Blockers $blockers -Code 'APPROVED_POLICY_SCOPE_MISSING' -Reason 'approved policy/scope record is missing or not closed' -EvidenceRequired 'status, exact scope, policy version, owner, purpose/legal basis, decisionAt, authority, evidenceRef, evidenceSha256'
+if ($GateMode -eq 'DEV_0_D0') {
+    $devGate = Get-PropertyValue -Object $evidence -Name 'devGate'
+    $fullGate = Get-PropertyValue -Object $evidence -Name 'fullFeatureProductionGate'
+    $expectedDecisionId = 'NF07-DEV-GATE-20260828'
+    if ([string](Get-PropertyValue -Object $evidence -Name 'decisionId') -ne $expectedDecisionId) {
+        Add-Blocker -Blockers $blockers -Code 'DEV_GATE_DECISION_ID_MISMATCH' -Reason "expected decisionId $expectedDecisionId"
+    }
+    $expectedAuthority = [ordered]@{
+        decisionSource = '依頼者によるdevelopment-only technical authorization'
+        ownerRole = 'Project Maintainer（development-only）'
+        formalPrivacyOwner = 'UNASSIGNED_UNTIL_PRE_PRODUCTION'
+    }
+    foreach ($field in $expectedAuthority.Keys) {
+        $actualValue = Get-PropertyValue -Object $evidence -Name $field
+        if (Test-PlaceholderOrUnknown $actualValue) {
+            Add-Blocker -Blockers $blockers -Code 'DEV_GATE_AUTHORITY_FIELD_MISSING' -Reason "development gate authority field is missing or unknown: $field"
+        }
+        elseif ([string]$actualValue -ne [string]$expectedAuthority[$field]) {
+            Add-Blocker -Blockers $blockers -Code 'DEV_GATE_AUTHORITY_FIELD_MISMATCH' -Reason "development gate authority field does not match decision evidence: $field"
+        }
+    }
+    if ($null -eq $devGate -or (Get-PropertyValue -Object $devGate -Name 'status') -ne 'APPROVED_DEV_ONLY') {
+        Add-Blocker -Blockers $blockers -Code 'DEV_GATE_NOT_APPROVED' -Reason 'DEV-0/D0 gate is not APPROVED_DEV_ONLY'
+    }
+    else {
+        $scope = @((Get-PropertyValue -Object $devGate -Name 'scope'))
+        foreach ($requiredScope in @('Task 0', 'D0', '0.3', '0.5')) {
+            if ($scope -notcontains $requiredScope) {
+                Add-Blocker -Blockers $blockers -Code 'DEV_GATE_SCOPE_MISSING' -Reason "DEV-0/D0 scope is missing: $requiredScope"
+            }
+        }
+        foreach ($requiredAllowed in @('spec', 'PII inventory', 'offline dry-run', 'coverage/gate validator', 'synthetic/redacted fixture', 'DEV-0/D0 scope-only independent Implementation Review')) {
+            if (@((Get-PropertyValue -Object $devGate -Name 'allowed')) -notcontains $requiredAllowed) {
+                Add-Blocker -Blockers $blockers -Code 'DEV_GATE_ALLOWED_ACTION_MISSING' -Reason "DEV-0/D0 allowed action is missing: $requiredAllowed"
+            }
+        }
+        foreach ($field in @('data', 'externalIo', 'providerCallCount', 'writeCount', 'destructiveOperation')) {
+            if ($null -eq (Get-PropertyValue -Object $devGate -Name $field)) {
+                Add-Blocker -Blockers $blockers -Code 'DEV_GATE_BOUNDARY_FIELD_MISSING' -Reason "DEV-0/D0 boundary field is missing: $field"
+            }
+        }
+        if ((Get-PropertyValue -Object $devGate -Name 'data') -ne 'synthetic/redacted only' -or (Get-PropertyValue -Object $devGate -Name 'externalIo') -ne '禁止' -or [int](Get-PropertyValue -Object $devGate -Name 'providerCallCount') -ne 0 -or [int](Get-PropertyValue -Object $devGate -Name 'writeCount') -ne 0 -or (Get-PropertyValue -Object $devGate -Name 'destructiveOperation') -ne '禁止') {
+            Add-Blocker -Blockers $blockers -Code 'DEV_GATE_BOUNDARY_NOT_FAIL_CLOSED' -Reason 'DEV-0/D0 data, I/O, provider, write, or destructive boundary is not the authorized safe value'
+        }
+    }
+    if ($null -eq $fullGate -or (Get-PropertyValue -Object $fullGate -Name 'status') -ne 'BLOCKED') {
+        Add-Blocker -Blockers $blockers -Code 'FULL_GATE_NOT_BLOCKED' -Reason 'Full Feature / Production Gate must remain BLOCKED'
+    }
+    else {
+        foreach ($prohibited in @('F1-M', '実PII接続', 'DSAR実配布', 'delete/anonymize/restrict writer', '外部provider', 'production flag', 'PR/release')) {
+            if (@((Get-PropertyValue -Object $fullGate -Name 'prohibited')) -notcontains $prohibited) {
+                Add-Blocker -Blockers $blockers -Code 'FULL_GATE_PROHIBITION_MISSING' -Reason "Full Feature / Production prohibition is missing: $prohibited"
+            }
+        }
+        foreach ($blockingEvidence in @('78 table policy', 'DG-07', 'legal-document-ledger-archive', 'database-backup-recovery', 'enterprise-identity-security', 'recruiting-pipeline', 'ai-feedback-learning G10', '本番運用gate')) {
+            if (@((Get-PropertyValue -Object $fullGate -Name 'blockingEvidence')) -notcontains $blockingEvidence) {
+                Add-Blocker -Blockers $blockers -Code 'FULL_GATE_BLOCKING_EVIDENCE_MISSING' -Reason "Full Feature / Production blocking evidence is missing: $blockingEvidence"
+            }
+        }
+    }
+    if ((Get-PropertyValue -Object $evidence -Name 'legalConclusion') -ne $false -or (Get-PropertyValue -Object $evidence -Name 'productionApproval') -ne $false) {
+        Add-Blocker -Blockers $blockers -Code 'DEV_GATE_OVERREACH' -Reason 'development decision must not assert legal conclusion or production approval'
+    }
 }
+else {
+    $policyRecord = Get-RecordById -Evidence $evidence -Id 'approved-policy-scope'
+    if ($null -eq $policyRecord -or -not (Test-StatusClosed (Get-PropertyValue -Object $policyRecord -Name 'status'))) {
+        Add-Blocker -Blockers $blockers -Code 'APPROVED_POLICY_SCOPE_MISSING' -Reason 'approved policy/scope record is missing or not closed' -EvidenceRequired 'status, exact scope, policy version, owner, purpose/legal basis, decisionAt, authority, evidenceRef, evidenceSha256'
+    }
 
-$ownerRecord = Get-RecordById -Evidence $evidence -Id 'privacy-owner'
-if ($null -eq $ownerRecord -or (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $ownerRecord -Name 'owner'))) {
-    Add-Blocker -Blockers $blockers -Code 'PRIVACY_OWNER_MISSING' -Reason 'Privacy owner is missing or placeholder/unknown' -EvidenceRequired 'named accountable owner, role, authority, decisionAt, evidenceRef, evidenceSha256'
-}
+    $ownerRecord = Get-RecordById -Evidence $evidence -Id 'privacy-owner'
+    if ($null -eq $ownerRecord -or (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $ownerRecord -Name 'owner'))) {
+        Add-Blocker -Blockers $blockers -Code 'PRIVACY_OWNER_MISSING' -Reason 'Privacy owner is missing or placeholder/unknown' -EvidenceRequired 'named accountable owner, role, authority, decisionAt, evidenceRef, evidenceSha256'
+    }
 
-$baseRecord = Get-RecordById -Evidence $evidence -Id 'approved-base'
-if ($null -eq $baseRecord -or -not (Test-StatusClosed (Get-PropertyValue -Object $baseRecord -Name 'status')) -or (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $baseRecord -Name 'branch')) -or -not (Test-Sha256 (Get-PropertyValue -Object $baseRecord -Name 'sha'))) {
-    Add-Blocker -Blockers $blockers -Code 'APPROVED_BASE_MISSING' -Reason 'approved Base branch/SHA decision evidence is missing, placeholder, or malformed' -EvidenceRequired 'status, exact branch, 64-hex SHA, decisionAt, authority, evidenceRef, evidenceSha256'
+    $baseRecord = Get-RecordById -Evidence $evidence -Id 'approved-base'
+    if ($null -eq $baseRecord -or -not (Test-StatusClosed (Get-PropertyValue -Object $baseRecord -Name 'status')) -or (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $baseRecord -Name 'branch')) -or -not (Test-Sha256 (Get-PropertyValue -Object $baseRecord -Name 'sha'))) {
+        Add-Blocker -Blockers $blockers -Code 'APPROVED_BASE_MISSING' -Reason 'approved Base branch/SHA decision evidence is missing, placeholder, or malformed' -EvidenceRequired 'status, exact branch, 64-hex SHA, decisionAt, authority, evidenceRef, evidenceSha256'
+    }
 }
 
 $coverageInvocation = $null
@@ -220,8 +293,12 @@ if (Test-Path -LiteralPath $CoverageScriptPath -PathType Leaf) {
             'providerCoverageMissingCount', 'sourceCoverageExtraProviderCount', 'entityCoverageMissingCount'
         ) | Where-Object { [int](Get-PropertyValue -Object $coverage -Name $_) -ne 0 }
         $missingOrExtra = @($missingOrExtra)
-        if ($coverageStatus -ne 'COVERAGE_EXPLICIT' -or $unclassified -ne 0 -or $unknown -ne 0 -or $missingOrExtra.Count -gt 0) {
-            Add-Blocker -Blockers $blockers -Code 'POLICY_CATALOG_NOT_CLOSED' -Reason "catalog is not eligible: status=$coverageStatus, unclassified=$unclassified, policyUnknown=$unknown, structuralGaps=$($missingOrExtra.Count)" -EvidenceRequired 'each table/column/provider owner, purpose, trigger, retention, policy version, hold, disposition, DSAR provider, result evidence; approved policy evidence'
+        $structuralCoverageClosed = $unclassified -eq 0 -and $missingOrExtra.Count -eq 0
+        if (-not $structuralCoverageClosed) {
+            Add-Blocker -Blockers $blockers -Code 'STRUCTURAL_COVERAGE_NOT_CLOSED' -Reason "structural catalog coverage is not eligible: status=$coverageStatus, unclassified=$unclassified, structuralGaps=$($missingOrExtra.Count)" -EvidenceRequired 'unmapped/missing/extra table, column, entity, provider must be zero'
+        }
+        if ($GateMode -eq 'FULL_FEATURE_PRODUCTION' -and ($coverageStatus -ne 'COVERAGE_EXPLICIT' -or $unknown -ne 0)) {
+            Add-Blocker -Blockers $blockers -Code 'POLICY_CATALOG_NOT_CLOSED' -Reason "full feature catalog is not eligible: status=$coverageStatus, policyUnknown=$unknown" -EvidenceRequired 'each table/column/provider owner, purpose, trigger, retention, policy version, hold, disposition, DSAR provider, result evidence; approved policy evidence'
         }
     }
 }
@@ -230,8 +307,11 @@ $planText = if (Test-Path -LiteralPath $PlanPath -PathType Leaf) { Get-Content -
 $tasksText = if (Test-Path -LiteralPath $TasksPath -PathType Leaf) { Get-Content -LiteralPath $TasksPath -Raw } else { '' }
 $reviewLedgerText = if (Test-Path -LiteralPath $ReviewLedgerPath -PathType Leaf) { Get-Content -LiteralPath $ReviewLedgerPath -Raw } else { '' }
 
-if ($planText -notmatch '(?i)NOT_APPROVED') {
-    Add-Blocker -Blockers $blockers -Code 'PLAN_NOT_FAIL_CLOSED' -Reason 'plan does not explicitly remain NOT_APPROVED while approval evidence is absent'
+if ($planText -notmatch '(?m)DEV-0/D0 PLAN\s*:\s*(?:\x60)?APPROVED_DEV_ONLY') {
+    Add-Blocker -Blockers $blockers -Code 'DEV_PLAN_AUTHORIZATION_MISSING' -Reason 'plan does not explicitly bind the DEV-0/D0 APPROVED_DEV_ONLY decision'
+}
+if ($planText -notmatch '(?m)FULL_FEATURE_PRODUCTION PLAN\s*:\s*(?:\x60)?BLOCKED') {
+    Add-Blocker -Blockers $blockers -Code 'FULL_PLAN_NOT_FAIL_CLOSED' -Reason 'plan does not explicitly keep Full Feature / Production BLOCKED'
 }
 if ($tasksText -notmatch '(?m)^- \[ \] \*\*0\.4 coverage closure') {
     Add-Blocker -Blockers $blockers -Code 'INVENTORY_CLOSURE_NOT_FAIL_CLOSED' -Reason 'task 0.4 is not explicitly incomplete'
@@ -245,24 +325,18 @@ if ($reviewLedgerText -match '(?m)^\|\s*(PLAN|IMPLEMENTATION)\s*\|[^|]*(PASS|FAI
     Add-Blocker -Blockers $blockers -Code 'IMPLEMENTATION_SELF_RECORDED_REVIEW' -Reason 'implementation review verdict appears in the implementation-owned ledger'
 }
 
-$requiredGateIds = @(
-    'DG-07',
-    'legal-document-ledger-archive',
-    'database-backup-recovery',
-    'enterprise-identity-security',
-    'recruiting-pipeline',
-    'ai-feedback-learning',
-    'production-disposition-release'
-)
-foreach ($gateId in $requiredGateIds) {
-    $gate = Get-RecordById -Evidence $evidence -Id $gateId
-    if ($null -eq $gate -or -not (Test-StatusClosed (Get-PropertyValue -Object $gate -Name 'status'))) {
-        Add-Blocker -Blockers $blockers -Code ("GATE_NOT_CLOSED_" + ($gateId -replace '[^A-Za-z0-9]+', '_').ToUpperInvariant()) -Reason "$gateId evidence is missing or not closed" -EvidenceRequired 'gate status, authority/owner, decisionAt, evidenceRef, evidenceSha256, gate-specific required fields'
+$requiredGateIds = @('DG-07', 'legal-document-ledger-archive', 'database-backup-recovery', 'enterprise-identity-security', 'recruiting-pipeline', 'ai-feedback-learning', 'production-disposition-release')
+if ($GateMode -eq 'FULL_FEATURE_PRODUCTION') {
+    foreach ($gateId in $requiredGateIds) {
+        $gate = Get-RecordById -Evidence $evidence -Id $gateId
+        if ($null -eq $gate -or -not (Test-StatusClosed (Get-PropertyValue -Object $gate -Name 'status'))) {
+            Add-Blocker -Blockers $blockers -Code ("GATE_NOT_CLOSED_" + ($gateId -replace '[^A-Za-z0-9]+', '_').ToUpperInvariant()) -Reason "$gateId evidence is missing or not closed" -EvidenceRequired 'gate status, authority/owner, decisionAt, evidenceRef, evidenceSha256, gate-specific required fields'
+        }
     }
 }
 
 $dg07 = Get-RecordById -Evidence $evidence -Id 'DG-07'
-if ($null -ne $dg07 -and (Test-StatusClosed (Get-PropertyValue -Object $dg07 -Name 'status'))) {
+if ($GateMode -eq 'FULL_FEATURE_PRODUCTION' -and $null -ne $dg07 -and (Test-StatusClosed (Get-PropertyValue -Object $dg07 -Name 'status'))) {
     $dg07Required = @('owner', 'purposeLegalBasis', 'retention', 'policyVersionTrigger', 'holdStartAuthority', 'holdReleaseAuthority', 'separationOfDuties', 'dispositionByTarget', 'dsarIdentityVerification', 'sameNameResolution', 'thirdPartyRedaction', 'scope', 'delivery', 'deadline', 'reopen')
     foreach ($field in $dg07Required) {
         if (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $dg07 -Name $field)) {
@@ -272,7 +346,7 @@ if ($null -ne $dg07 -and (Test-StatusClosed (Get-PropertyValue -Object $dg07 -Na
 }
 
 $backup = Get-RecordById -Evidence $evidence -Id 'database-backup-recovery'
-if ($null -ne $backup -and (Test-StatusClosed (Get-PropertyValue -Object $backup -Name 'status'))) {
+if ($GateMode -eq 'FULL_FEATURE_PRODUCTION' -and $null -ne $backup -and (Test-StatusClosed (Get-PropertyValue -Object $backup -Name 'status'))) {
     foreach ($prodId in 1..8) {
         $field = 'PROD-{0:d3}' -f $prodId
         if (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $backup -Name $field)) {
@@ -285,7 +359,7 @@ if ($null -ne $backup -and (Test-StatusClosed (Get-PropertyValue -Object $backup
 }
 
 $production = Get-RecordById -Evidence $evidence -Id 'production-disposition-release'
-if ($null -ne $production -and (Test-StatusClosed (Get-PropertyValue -Object $production -Name 'status'))) {
+if ($GateMode -eq 'FULL_FEATURE_PRODUCTION' -and $null -ne $production -and (Test-StatusClosed (Get-PropertyValue -Object $production -Name 'status'))) {
     foreach ($field in @('featureFlagDefaultOff', 'approvedPolicyAllowList', 'legalOwner', 'runbook', 'monitoring', 'emergencyStop')) {
         if (Test-PlaceholderOrUnknown (Get-PropertyValue -Object $production -Name $field)) {
             Add-Blocker -Blockers $blockers -Code 'PRODUCTION_RELEASE_FIELD_MISSING' -Reason "production release gate field is missing or unknown: $field" -EvidenceRequired "production-disposition-release.$field"
@@ -320,14 +394,17 @@ catch {
 }
 
 $result = [ordered]@{
-    mode = 'READ_ONLY_GATE_EVIDENCE_VALIDATION'
-    status = if ($blockers.Count -gt 0) { 'HARD_STOP' } else { 'EVIDENCE_PRESENT_REQUIRES_INDEPENDENT_REVIEW' }
+    mode = "READ_ONLY_GATE_EVIDENCE_VALIDATION_$GateMode"
+    status = if ($blockers.Count -gt 0) { 'HARD_STOP' } elseif ($GateMode -eq 'DEV_0_D0') { 'DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW' } else { 'EVIDENCE_PRESENT_REQUIRES_INDEPENDENT_REVIEW' }
     exitCode = if ($blockers.Count -gt 0) { 2 } else { 0 }
+    gateMode = $GateMode
+    devScopeAuthorized = $GateMode -eq 'DEV_0_D0' -and $blockers.Count -eq 0
+    canStartDevOnlyScope = $GateMode -eq 'DEV_0_D0' -and $blockers.Count -eq 0
     canStartF1M = $false
     canEnableProductionDisposition = $false
     canCallExternalProvider = $false
     canCreatePullRequest = $false
-    evidencePath = $EvidencePath
+    evidencePath = $activeEvidencePath
     evidencePresent = $evidenceExists
     blockers = @($blockers)
     coverageExitCode = if ($null -eq $coverageInvocation) { $null } else { $coverageInvocation.exitCode }

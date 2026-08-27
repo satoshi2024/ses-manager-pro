@@ -2,22 +2,24 @@
 
 開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
 fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
-承認scope/Privacy owner/approved Base branch/SHA: 実在するdecision evidence未提供。上記origin/mainは技術比較境界であり承認済みBaseではない。
+DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Project Maintainer（development-only）` / formal Privacy Owner `UNASSIGNED_UNTIL_PRE_PRODUCTION`。Full Feature/Productionのapproved policy/scope、正式owner、approved Base branch/SHAは未提供でBLOCKED。上記origin/mainは技術比較境界であり承認済みBaseではない。
 実装branch: `codex/privacy-retention-dsar`
 通常checkout: `C:\work\ses-manager-pro`（変更しない）
 
 | 要件/task | evidence | 検証/Demo | status |
 |---|---|---|---|
+| NF07-DEV-GATE-20260828 | `dev-gate-evidence.json`、`plan.md` §approval status | DEV-0/D0だけを `APPROVED_DEV_ONLY`、synthetic/redacted only、external I/O/provider/write/destructive operation禁止、法的/本番承認falseとして検証 | APPROVED_DEV_ONLY（development-only） |
 | PR-R1 / 0.1 | `pii-inventory.md`、`source-coverage.md` | DB/file/AI、owner/purpose/trigger/retention/hold/disposition/providerをstatic evidenceとunknown/provisional付きで確認 | INCOMPLETE（privacy catalog unclassified 0、policy UNKNOWN/BLOCKED 78、承認未完） |
 | PR-R1.2 | `pii-inventory.md` §4、`design.md` §4 | unapproved retentionを法的確定とせず、NULL/未確定を候補外にする | COMPLETE（discovery boundaryのみ） |
 | PR-R2 / D0.1 | `read-only-dry-run.ps1`、`dry-run.md` | fixtureでcandidate/blocked/unknownを出力、providerCallCount=0 | COMPLETE（offline） |
 | PR-R2.3 | fixture hold/legal-retention/audit/active-business/same-name/scope-out | blockerをBLOCKEDとして説明し、scope外providerを呼ばない | COMPLETE（offline） |
 | PR-R2.4 | invalid identity/disposition fixtures、script allow-list | `UNVERIFIED`はBLOCKED、未知dispositionはUNKNOWNで、raw PII keyは拒否 | COMPLETE（offline） |
 | PR-R1.3 mechanical coverage | `inventory-coverage.ps1`、`coverage-evidence.md`、`source-coverage.md`、`pii-inventory.md` §4 | migration 116/180/4,279/153（CREATE/ALTER）、entity 176、provider候補424（filename/content semantic scan）、source unique column 2,652、privacy catalog 180/0/78（explicit/unclassified/policy unknown）、source coverage unmapped/missing/extra column/entity/provider 0/0/0/0/0/0 | COMPLETE（構造coverageのみ。policy unknown 78は処分BLOCKED） |
-| PR-R1.4 / 0.5 developer gate validator | `gate-evidence-validator.ps1`、`gate-evidence-validation.md`、missing fixture、validator test | 承認/gate/coverage/git boundary欠落をHARD_STOP・exit 2で再現し、F1-M/本番処分/provider/PRをfalse、providerCallCount/writeCountを0にする | COMPLETE（安全側validator。承認・法的判断・Review verdictは生成しない） |
+| PR-R1.4 / 0.5 developer gate validator | `gate-evidence-validator.ps1`、`gate-evidence-validation.md`、dev gate evidence、missing fixture、validator test | DEV decisionはDEV scopeのみexit 0、Full evidence/DEV evidence欠落はHARD_STOP・exit 2。F1-M/本番処分/provider/PRをfalse、providerCallCount/writeCountを0にする | COMPLETE（DEV-only補助統制。独立Review verdictは生成しない） |
 | PR-R3 | `requirements.md` §2 PR-R3、`design.md` §5 | identity/third-party redaction/export/providerを未実装・fail-closedとして明示 | SPEC ONLY |
 | PR-R4 | `requirements.md` §2 PR-R4、`tasks.md` F1〜M | DG-07未完、flag OFF、処分経路なしを確認 | BLOCKED BY GATE |
-| approved plan | `plan.md` | 推奨順0→F1→F2→A1→A2→B1→B2→Mを記載。承認入力未置換のためNOT_APPROVED | BLOCKED BY GATE |
+| DEV-0/D0 plan | `plan.md`、`dev-gate-evidence.json` | `NF07-DEV-GATE-20260828`のscopeに限定してPASS相当。独立ReviewはDEV-0/D0 scopeだけ | APPROVED_DEV_ONLY / REVIEW REQUIRED |
+| Full Feature / Production plan | `plan.md` | policy/owner/Base/DG-07/外部gate未完。F1-M、本番処分、PRは不可 | BLOCKED BY GATE |
 | Git isolation | start validation/handoff | dedicated worktree、branch、clean status、base/remoteを確認 | COMPLETE |
 | F1〜M | tasks.md | DG-07/external/internal gate未完のため未着手 | STOPPED |
 

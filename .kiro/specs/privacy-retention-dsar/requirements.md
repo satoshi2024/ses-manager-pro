@@ -2,21 +2,24 @@
 
 ## 0. 承認状態と今回の実装境界
 
+開発段階のdecision `NF07-DEV-GATE-20260828`（Decision source: `依頼者によるdevelopment-only technical authorization`）により、DEV-0/D0 scopeだけが `APPROVED_DEV_ONLY` である。Owner roleは `Project Maintainer（development-only）`、正式Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION` である。このdecisionは法的結論や本番承認ではない。
+
 | 項目 | 現在値 | 判定 |
 |---|---|---|
-| Approved policy/scope | `<APPROVED_SCOPE>`（未置換） | 未承認。処分対象の範囲を確定できない |
-| Privacy owner | `<OWNER>`（未置換） | 未定。データ要素ごとの責任者が未確定 |
+| DEV-0/D0 technical scope | `Task 0`、`D0`、`0.3`、`0.5` | `APPROVED_DEV_ONLY`。synthetic/redacted only、external I/O/provider/write/destructive operationは禁止 |
+| Full Feature / Production approved policy/scope | `<APPROVED_SCOPE>`（未置換） | `BLOCKED`。処分対象の範囲を確定できない |
+| Privacy owner | `UNASSIGNED_UNTIL_PRE_PRODUCTION` | development-only Owner role以外は未定。正式責任者を推測しない |
 | Base commit / branch | 承認値は未提供（`<BASE_COMMIT>` / `<BASE_BRANCH>`） | 技術比較baseは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。これは承認済みBaseではなく、decision evidenceがないためrebase/PLAN PASSを行わない |
-| NF-07 | CANDIDATE | 承認済み要求ではない |
+| NF-07 | CANDIDATE | 開発用decisionはDEV-0/D0だけを許可し、承認済み要求・本番承認ではない |
 | DG-07 | 未完了 | 保持期間、法的根拠、hold権限、二者承認、法務/HR/税務責任者が未確定 |
 | 外部専門家 / 社内責任者 gate | 未完了 | 本番処分を許可しない |
 | 処分 feature flag | 未導入。将来の既定値は OFF とする | 今回は処分経路を追加しない |
 
-DG-07 および外部専門家/社内責任者 gate が完了していないため、このincrementは以下だけを対象とする。
+DG-07 および外部専門家/社内責任者 gate が完了していないため、このincrementはDEV-0/D0の技術的範囲として以下だけを対象とする。
 
 1. 既存schema、ファイル参照、AI allow-list、監査/保持実装からの read-only PII inventory。
 2. 事前に匿名化・マスクした fixture を読む offline dry-run。DB、filesystem、外部providerへ接続しない。
-3. 今後のF1以降を停止状態で記録した requirements/design/tasks、completion mapping、Review handoff。
+3. 今後のF1以降を停止状態で記録した requirements/design/tasks、completion mapping、Review handoff。DEV-0/D0 scopeに限り、synthetic/redacted fixtureを用いた独立Implementation Reviewを依頼できる。
 
 削除、物理削除、論理削除、匿名化、値の上書き、providerへのDSAR検索/通知は今回実装・実行しない。
 
@@ -69,6 +72,7 @@ DG-07 および外部専門家/社内責任者 gate が完了していないた�
 2. 承認値が未提供の場合、technical comparison base（このincrementでは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`）とmerge-baseを別項目で記録し、approved Baseとの差を未解決としてfail-closedにする。
 3. PLAN FAILまたはPLAN CONDITIONALの間は、F1-M、外部I/O、処分flag、PRを開始しない。独立ReviewのPLAN/IMPLEMENTATION双方PASS後だけ、Review側が次の手続きを判断する。
 4. 開発側のgate validatorは、承認証跡・各外部gate・mechanical coverage・専用worktree/remote boundaryの欠落を `HARD_STOP` として再現可能に報告しなければならない。validatorは承認、法的判断、独立Review verdict、F1-M/本番処分の許可を生成してはならない。
+5. `APPROVED_DEV_ONLY` はDEV-0/D0 scopeのPLAN authorizationだけを表す。Full Feature PLAN、Production PLAN、法的承認、正式Privacy Owner確定、PR/release許可を表さない。
 
 ## 3. 受入基準（今回）
 

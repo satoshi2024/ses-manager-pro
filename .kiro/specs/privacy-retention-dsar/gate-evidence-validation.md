@@ -2,13 +2,21 @@
 
 ## 目的と境界
 
-これは承認、法的判断、Review verdictを生成する文書ではない。approved policy/scope、Privacy owner、approved Base、DG-07、外部/社内gateの実在証跡が提供された場合に、その証跡の必須項目を機械的に検査し、欠落時にF1以降を停止するための開発側validatorである。
+これは承認、法的判断、Review verdictを生成する文書ではない。`DEV_0_D0` と `FULL_FEATURE_PRODUCTION` を分離し、development-only authorizationの範囲だけを検証可能にし、Full Feature/Productionの証跡欠落時はF1以降を停止するための開発側validatorである。
 
 validatorはローカルのJSON、spec、inventory、git状態だけを読み取る。DB、filesystem、backup/replica、HTTP、外部providerへ接続せず、`providerCallCount=0`、`writeCount=0`である。validatorの出力は独立ReviewのPLAN/IMPLEMENTATION判定や承認の代替ではない。
 
 ## 入力契約
 
-通常の入力ファイルは、承認・gate担当者が別途管理する次のJSONである。未提供時はファイル自体を作成せず、`DECISION_EVIDENCE_MISSING`として扱う。
+### DEV-0/D0
+
+`.kiro/specs/privacy-retention-dsar/dev-gate-evidence.json` は、依頼者が提示した `NF07-DEV-GATE-20260828` のdevelopment-only technical authorizationを機械検証する。`APPROVED_DEV_ONLY` のscopeは `Task 0`、`D0`、`0.3`、`0.5` に限定し、Owner roleは `Project Maintainer（development-only）`、formal Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION` とする。これは法的結論、本番承認、Full Feature PLAN PASSではない。
+
+DEV validatorのexit `0`は `DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW` を意味し、DEV-0/D0 scopeだけの独立Implementation Reviewを依頼できる状態である。実行許可はsynthetic/redacted only、external I/O禁止、providerCall/write 0、destructive operation禁止に限る。
+
+### Full Feature / Production
+
+通常の入力ファイルは、正式責任者・gate担当者が別途管理する次のJSONである。未提供時はファイル自体を作成せず、Full validatorは `DECISION_EVIDENCE_MISSING` として扱う。
 
 ```json
 {
@@ -49,20 +57,22 @@ validatorはローカルのJSON、spec、inventory、git状態だけを読み取
 
 ## 判定契約
 
-- `HARD_STOP` / exit code `2`: どれかの承認・gate・coverage・git boundaryが欠落または不整合。F1-M、外部provider、本番処分、PRは許可しない。
-- `EVIDENCE_PRESENT_REQUIRES_INDEPENDENT_REVIEW` / exit code `0`: 形式上の証跡とcoverageが揃った状態。ただしvalidatorはPLAN PASS、IMPLEMENTATION PASS、法的承認、PR作成を出力しない。
-- `canStartF1M`、`canEnableProductionDisposition`、`canCallExternalProvider`、`canCreatePullRequest`は、現実装では常に`false`である。PASS後の手続きは権限者と独立Review側が決める。
+- `DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW` / exit code `0`: DEV-0/D0 authorizationの形式とfail-closed boundaryが確認された状態。DEV scopeだけの独立Reviewを要求できるが、Full Feature PLAN、Production PLAN、法的承認、PRを出力しない。
+- `EVIDENCE_PRESENT_REQUIRES_INDEPENDENT_REVIEW` / exit code `0`: Fullの形式上の証跡とcoverageが揃った状態。ただしvalidatorはPLAN PASS、IMPLEMENTATION PASS、法的承認、PR作成を出力しない。
+- `HARD_STOP` / exit code `2`: どれかの必要証跡・coverage・git boundaryが欠落または不整合。F1-M、外部provider、本番処分、PRは許可しない。
+- `canStartDevOnlyScope`だけがDEV-0/D0の形式検証成功時に`true`となる。`canStartF1M`、`canEnableProductionDisposition`、`canCallExternalProvider`、`canCreatePullRequest`は常に`false`である。
 
-coverageは既存scannerを再実行し、`COVERAGE_EXPLICIT`、unclassified `0`、policy unknown `0`、missing/extra column/entity/provider `0`を要求する。構造coverage exit `0`だけではpolicy承認完了とみなさない。
+coverageは既存scannerを再実行する。DEV modeは構造coverage（unclassified `0`、missing/extra column/entity/provider `0`）を要求し、policy unknown 78件はFull GateのBLOCKED情報として返す。Full modeはさらに`COVERAGE_EXPLICIT`、policy unknown `0`を要求する。構造coverage exit `0`だけではpolicy承認完了とみなさない。
 
 ## 実行と現状
 
 ```powershell
-pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator.ps1
+pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator.ps1 -GateMode DEV_0_D0
+pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator.ps1 -GateMode FULL_FEATURE_PRODUCTION -EvidencePath .\path\to\gate-evidence.json
 pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator-test.ps1
 ```
 
-現branchには承認JSONを配置していない。missing fixtureを用いたテストは、承認証跡欠落、policy unknown 78件、gate欠落、provider/write 0を確認し、`HARD_STOP`で終了する。これにより、この文書やvalidator自体が承認証跡を偽造することを防ぐ。
+現branchにはDEV decision evidenceだけを配置し、Fullのapproved policy/scope、正式Privacy Owner、approved Base、DG-07等の証跡は配置していない。テストはDEV modeの限定authorization、DEV evidence欠落、Full evidence欠落を分離して検証する。現在のpolicy unknown 78件はFull GateをBLOCKEDに保つため、DEV modeのexit `0`をFullの完了とは扱わない。
 
 ## provenance境界
 

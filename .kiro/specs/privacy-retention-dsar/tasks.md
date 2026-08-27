@@ -1,8 +1,10 @@
 # privacy-retention-dsar tasks
 
-## 停止条件
+## 二段階Gateと停止条件
 
-DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、またはmechanical coverageのいずれかが未確定なら、`0` と `D0` までで停止する。F1以降のチェックは、gate証跡が追加されたtaskでのみ更新する。placeholder、口頭説明、wildcard/group表記は承認/coverage証跡とみなさない。
+`NF07-DEV-GATE-20260828` により、`Task 0`、`D0`、`0.3`、`0.5`だけが `APPROVED_DEV_ONLY` である。Owner roleは `Project Maintainer（development-only）`、正式Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION`。許可されるdataはsynthetic/redacted only、external I/Oは禁止、providerCall/writeは0、destructive operationは禁止する。
+
+Full Feature / Production Gateは `BLOCKED` のままであり、F1-M、実PII接続、DSAR実配布、delete/anonymize/restrict writer、外部provider、production flag、PR/releaseを開始しない。0.4 coverage closureはpolicy承認が必要なため未完了のまま維持する。placeholder、口頭説明、wildcard/group表記は承認/coverage証跡とみなさない。DEV-0/D0 scopeに限る独立Implementation Review以外のImplementation ReviewはPLAN PASS後まで依頼しない。
 
 ## 0. legal / PII inventory
 
@@ -32,9 +34,9 @@ DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、
 
 - [x] **0.5 developer gate evidence validator**
   - **Objective**: 承認証跡・外部gate・policy coverageの欠落を、実装側が推測で埋めずに再現可能なhard stopへする。
-  - **Implementation**: `gate-evidence-validator.ps1` は承認/gate JSONの必須項目、78件を含むpolicy unknown、plan/task/Review provenance、専用worktreeとremote Headをread-onlyで検証する。承認値・法的結論・独立Review verdictは生成しない。
-  - **Test requirements**: 空のevidence fixtureと未配置evidence pathでexit code 2、`HARD_STOP`、F1-M/本番処分/provider/PR許可false、providerCallCount=0、writeCount=0を確認する。
-  - **Demo**: `pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator-test.ps1` が `gate-evidence-validator: HARD_STOP fixture PASS` を出力する。
+  - **Implementation**: `gate-evidence-validator.ps1` は `DEV_0_D0` と `FULL_FEATURE_PRODUCTION` を分離し、development decisionの必須境界、78件を含むpolicy unknown、plan/task/Review provenance、専用worktreeとremote Headをread-onlyで検証する。承認値・法的結論・独立Review verdictは生成しない。
+  - **Test requirements**: DEV decision fixtureでexit code 0、`DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW`、DEV scopeのみ許可、F1-M/本番処分/provider/PR許可falseを確認する。Full evidence欠落とDEV evidence欠落はexit code 2、`HARD_STOP`、providerCallCount=0、writeCount=0を確認する。
+  - **Demo**: `pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator-test.ps1` が `gate-evidence-validator: DEV_ONLY_AUTHORIZED fixture PASS` を出力する。
 
 ## D0. read-only dry-run（今回の完了範囲）
 

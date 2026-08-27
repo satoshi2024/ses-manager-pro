@@ -2,16 +2,23 @@
 
 ## approval status
 
-この計画はReviewへ渡す候補計画であり、現在は `NOT_APPROVED` である。承認scope/Privacy owner/Decision Gate/Base branch/SHAの実在するdecision evidenceは提示されていないため、placeholderを推測で置換しない。DG-07、外部専門家、社内責任者 gateも未完了で、0/D0以外は開始しない。
+この計画は二段階Gateで管理する。`NF07-DEV-GATE-20260828`（依頼者によるdevelopment-only technical authorization）により、**DEV-0/D0 PLAN: `APPROVED_DEV_ONLY`** とする。**FULL_FEATURE_PRODUCTION PLAN: `BLOCKED`** のまま維持する。これは法的結論、本番承認、正式Privacy Ownerの指定、Full Feature PLAN PASSではない。
 
-技術上の比較境界は `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f` と記録する。ただしこれは承認済みBaseではなく、approved Base evidenceが到着するまでPLAN PASSにしない。Review範囲はこの明示SHAからremote feature Headへのdiffとして再現する。
+| gate | status | scope / owner | hard stop |
+|---|---|---|---|
+| DEV-0/D0 | `APPROVED_DEV_ONLY` | Task 0、D0、0.3、0.5。Project Maintainer（development-only） | synthetic/redacted only、external I/O=禁止、providerCall/write=0、destructive operation=禁止 |
+| Full Feature / Production | `BLOCKED` | F1-M、本番処分、正式Privacy Owner、DG-07/外部gate | 78 table policy、DG-07、document、backup/recovery、identity、recruiting、AI G10、本番運用gateの実在証跡まで停止 |
+
+正式Privacy Ownerは `UNASSIGNED_UNTIL_PRE_PRODUCTION` のままである。approved policy/scope、approved Base branch/SHA、正式ownerの証跡を推測で補完しない。DEV-0/D0 PLANはこの明示Decisionの範囲に限りPASS相当として独立Reviewへ渡すが、Full Feature PLANおよびProductionはPASSにしない。
+
+技術上の比較境界は `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f` と記録する。ただしこれは承認済みBaseではない。approved Base evidenceが到着するまでFull Feature/Production PLAN PASSにしない。DEV-0/D0の独立Review範囲は、この明示SHAからremote feature Headへのdiffとして再現する。
 
 ## ordered increments
 
 | 順序 | increment | 成果 | 開始条件 | 現在 |
 |---|---|---|---|---|
-| 0 | legal/PII inventory | table/column/file/AI payload catalog、owner/purpose/trigger/retention/hold/disposition/provider | 読み取り可能なrepo evidence、全migration/entity/providerのcoverage hash | INCOMPLETE（unclassified 0、policy UNKNOWN/BLOCKED 78、fail-closed） |
-| D0 | dry-run | redacted snapshotのcandidate/blocked/unknown、no-write evidence | 0完了。実データ/provider接続なし | COMPLETE（offline） |
+| 0 | legal/PII inventory | table/column/file/AI payload catalog、owner/purpose/trigger/retention/hold/disposition/provider | DEV-0/D0 Gate、読み取り可能なrepo evidence、全migration/entity/providerのcoverage hash | DEV-ONLY APPROVED（0.4 policy closureは未完。unclassified 0、policy UNKNOWN/BLOCKED 78、fail-closed） |
+| D0 | dry-run | redacted snapshotのcandidate/blocked/unknown、no-write evidence | DEV-0/D0 Gate。実データ/provider接続なし | DEV-ONLY APPROVED（offline） |
 | F1 | catalog/policy/hold/request/job DDL | versioned policy、hold、case/action/job | DG-07とapproved scope/owner、migration approval | BLOCKED |
 | F2 | provider/search/dry-run | DB/file/AI/backup/replica provider、scope/redaction | F1、external provider scope/security approval | BLOCKED |
 | A1 | dashboard/hold/approval | hold表示、二者承認、SoD、audit | F2、legal/HR/Privacy owner approval | BLOCKED |
@@ -32,4 +39,4 @@
 
 ## handoff
 
-Reviewへはこのplan、requirements/design/tasks、inventory、dry-run、completion mapping、review ledger、最終remote Headを渡す。実装対話ではPRを作成しない。PLAN/IMPLEMENTATION双方PASS後にのみ、Review側がPR作成を判断する。
+Reviewへはこのplan、requirements/design/tasks、inventory、dry-run、completion mapping、review ledger、DEV gate evidence、最終remote Headを渡す。今回の独立Review依頼scopeはDEV-0/D0のみである。実装対話ではPRを作成しない。Full Feature/ProductionのPLAN PASSおよびPR作成は行わない。
