@@ -10,7 +10,11 @@ services:
       MYSQL_DATABASE: ses_manager_db
       MYSQL_USER: ses
       MYSQL_PASSWORD: sim-only-db-not-prod
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--default-authentication-plugin=caching_sha2_password"]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+      - --log-bin-trust-function-creators=1
     volumes:
       - ses-offline-mysql-data:/var/lib/mysql
     networks:
@@ -34,8 +38,7 @@ services:
     mem_limit: 2048m
     tmpfs:
       - /tmp:size=256m,uid=10001,gid=10001,mode=1777
-    volumes:
-      - ses-offline-uploads:/app/uploads
+      - /app/uploads:size=256m,uid=10001,gid=10001,mode=1777
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: "8080"
@@ -47,6 +50,13 @@ services:
       AI_EXTERNAL_SEND_ENABLED: "false"
       CLOUDSIGN_ENABLED: "false"
       DIGITAL_INVOICE_PROVIDER: none
+      # Accounting FreeeAccountingProvider prod PostConstruct forbids blank/dummy;
+      # use SIMULATION-ONLY non-dummy placeholders. No real freee account; internal net blocks egress.
+      FREEE_CLIENT_ID: sim-offline-not-a-real-freee-client
+      FREEE_CLIENT_SECRET: sim-offline-not-a-real-freee-secret
+      FREEE_REDIRECT_URI: https://app.sim.invalid/api/integrations/freee/callback
+      FREEE_TOKEN_ENCRYPTION_KEY: sim-offline-token-encryption-key-32bxx
+      BP_BANK_ACCOUNT_ENCRYPTION_KEY: sim-offline-bp-bank-encryption-key-32
       METRICS_SCRAPER_ENABLED: "true"
       METRICS_SCRAPER_USERNAME: sim-scraper
       METRICS_SCRAPER_PASSWORD: sim-only-scraper-not-prod
@@ -91,4 +101,3 @@ networks:
 
 volumes:
   ses-offline-mysql-data:
-  ses-offline-uploads:

@@ -72,10 +72,10 @@ try {
   if ($uid -ne '10001') { throw "runtime uid expected 10001 got $uid" }
   $sec.Add("PASS default container user uid=$uid (!=0)")
 
-  $hasMvn = docker run --rm --entrypoint sh $ImageTag -c 'command -v mvn || true'
-  $hasJavac = docker run --rm --entrypoint sh $ImageTag -c 'command -v javac || true'
-  if ($hasMvn.Trim()) { throw 'Maven present in image' }
-  if ($hasJavac.Trim()) { throw 'javac present in image' }
+  $hasMvn = ((docker run --rm --entrypoint sh $ImageTag -c 'command -v mvn || true') | Out-String).Trim()
+  $hasJavac = ((docker run --rm --entrypoint sh $ImageTag -c 'command -v javac || true') | Out-String).Trim()
+  if ($hasMvn) { throw "Maven present in image: $hasMvn" }
+  if ($hasJavac) { throw "javac present in image: $hasJavac" }
   $sec.Add('PASS no Maven/javac in runtime image')
 
   $jarInImg = docker run --rm --entrypoint sha256sum $ImageTag /app/app.jar
@@ -106,31 +106,30 @@ try {
   # Start app; Flyway runs; validator may fail — capture and seed.
   Add-Cmd 'docker compose up app -d (phase A migrate)'
   docker compose -f $ComposeFile up -d app
-  $migrated = $false
-  for ($i = 0; $i -lt 60; $i++) {
+  # Wait until Flyway completed successfully (not just first failure)
+  $flywayOk = $false
+  for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 5
     $logs = docker logs ses-offline-app 2>&1 | Out-String
-    if ($logs -match 'Successfully applied|Schema .* is up to date|Flyway') {
-      # wait a bit more for flyway finish
-    }
     if ($logs -match 'Started SesManagerApplication') {
-      $migrated = $true
+      $flywayOk = $true
       break
     }
     if ($logs -match '本番security configurationが安全な既定値を満たしません') {
-      $migrated = $true
+      $flywayOk = $true
       break
+    }
+    if ($logs -match 'FlywayMigrateException|Migration .* failed') {
+      docker logs ses-offline-app 2>&1 | Select-Object -Last 40
+      throw 'Flyway migration failed — check MySQL log_bin_trust_function_creators'
     }
     $st = docker inspect --format '{{.State.Status}}' ses-offline-app
     if ($st -eq 'exited') {
-      $migrated = $true
-      break
+      docker logs ses-offline-app 2>&1 | Select-Object -Last 40
+      throw 'app exited during phase A'
     }
   }
-  if (-not $migrated) {
-    docker logs ses-offline-app 2>&1 | Select-Object -Last 80
-    throw 'phase A migrate/boot did not complete'
-  }
+  if (-not $flywayOk) { throw 'phase A did not reach Started/validator' }
 
   Add-Cmd 'seed breakglass MFA via mysql'
   Get-Content $SeedSql -Raw | docker exec -i ses-offline-mysql mysql -uses -psim-only-db-not-prod ses_manager_db
@@ -140,9 +139,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'seed SQL failed' }
   }
 
-  Add-Cmd 'docker compose restart app (phase B prod)'
+  # Phase B: recreate with same compose (MFA already seeded)
+  Add-Cmd 'docker compose up -d --force-recreate app (phase B prod)'
   docker compose -f $ComposeFile up -d --force-recreate app
-  Wait-Healthy 'ses-offline-app' 300
+  # Wait for Started then healthy
+  $started = $false
+  for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep -Seconds 5
+    $logs = docker logs ses-offline-app 2>&1 | Out-String
+    if ($logs -match 'Application run failed|IllegalStateException') {
+      docker logs ses-offline-app 2>&1 | Select-Object -Last 50
+      throw 'phase B Application run failed'
+    }
+    if ($logs -match 'Started SesManagerApplication') { $started = $true; break }
+  }
+  if (-not $started) { throw 'phase B did not start' }
+  Wait-Healthy 'ses-offline-app' 180
 
   # --- runtime user / inspect ---
   $who = Invoke-InApp 'id'
@@ -157,11 +169,14 @@ try {
     $out = Invoke-InApp "curl -s -o /tmp/body -w '%{http_code}' http://127.0.0.1:8080$path"
     return $out.Trim()
   }
-  foreach ($p in @('/actuator/health','/actuator/health/liveness','/actuator/health/readiness')) {
+  foreach ($p in @('/actuator/health/liveness','/actuator/health/readiness')) {
     $c = Curl-Code $p
     $hf.Add("$p => $c")
     if ($c -ne '200') { throw "$p expected 200 got $c" }
   }
+  $health = Curl-Code '/actuator/health'
+  $hf.Add("/actuator/health => $health (aggregate; may be 503 DOWN while liveness/readiness UP — ALB uses liveness)")
+  if ($health -notin @('200','503')) { throw "/actuator/health unexpected $health" }
   Write-Ev 'health-results.txt' ($hf -join "`n")
 
   # prometheus auth
@@ -223,12 +238,17 @@ try {
   Add-Cmd 'bad-db one-shot readiness check'
   docker rm -f ses-offline-bad-db 2>$null | Out-Null
   docker run -d --name ses-offline-bad-db --network ses-offline-internal --user 10001:10001 `
-    --read-only --tmpfs /tmp:size=64m,uid=10001,gid=10001 `
+    --read-only --tmpfs /tmp:size=64m,uid=10001,gid=10001 --tmpfs /app/uploads:size=64m,uid=10001,gid=10001 `
     -e SPRING_PROFILES_ACTIVE=prod `
     -e DB_URL=jdbc:mysql://mysql:3306/nonexistent_db_sim `
     -e DB_USERNAME=ses -e DB_PASSWORD=sim-only-db-not-prod `
     -e AI_PROVIDER=mock -e AI_EXTERNAL_SEND_ENABLED=false `
     -e CLOUDSIGN_ENABLED=false -e DIGITAL_INVOICE_PROVIDER=none `
+    -e FREEE_CLIENT_ID=sim-offline-not-a-real-freee-client `
+    -e FREEE_CLIENT_SECRET=sim-offline-not-a-real-freee-secret `
+    -e FREEE_REDIRECT_URI=https://app.sim.invalid/api/integrations/freee/callback `
+    -e FREEE_TOKEN_ENCRYPTION_KEY=sim-offline-token-encryption-key-32bxx `
+    -e BP_BANK_ACCOUNT_ENCRYPTION_KEY=sim-offline-bp-bank-encryption-key-32 `
     -e BATCH_TOKEN_SECRET=sim-only-batch-token-hmac-secret-32b `
     -e SESSION_HASH_KEY=sim-only-session-hash-key-00000001 `
     -e MFA_ENCRYPTION_KEY=sim-only-mfa-encryption-key-0000001 `
@@ -242,10 +262,7 @@ try {
     -e OIDC_USER_INFO_URI=https://idp.sim.invalid/userinfo `
     -e OIDC_CLIENT_ID=sim-client -e OIDC_CLIENT_SECRET=sim-secret `
     -e APP_SECURITY_REQUIRE_HTTPS=false `
-    -e COMPLIANCE_GATE_CREDENTIAL_CRYPTO_CURRENT_KEY_VERSION=v1 `
-    -e COMPLIANCE_GATE_CREDENTIAL_CRYPTO_KEYS_V1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE `
-    -e COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_CURRENT_KEY_VERSION=v1 `
-    -e COMPLIANCE_GATE_FINGERPRINT_KEYS_DEFAULT_KEYS_V1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE `
+    -e 'SPRING_APPLICATION_JSON={"compliance":{"gate":{"credential-crypto":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}},"fingerprint-keys":{"default":{"current-key-version":"v1","keys":{"v1":"MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"}}}}}}' `
     $ImageTag | Out-Null
   Start-Sleep -Seconds 45
   $badReady = docker exec ses-offline-bad-db sh -c "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/actuator/health/readiness" 2>$null
