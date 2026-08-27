@@ -43,6 +43,6 @@ NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売�
 - template変更・現在DB値・現在権限変更で過去runを変化させない。明示的な再生成は新version、通常retryは同一runの同一snapshotを再利用する。
 - section失敗時は`PARTIAL`/`FAILED`として配布停止する。
 - 配布はnotification outbox経由のアプリ内通知＋期限付きlinkのみ。メール添付は使用しない。recipient previewを生成前に必須とし、生成時/download時のscope検証、期限切れ時の再認可、download時再認証を行う。
-- schedulerは明示system principalを使用し、HTTP sessionに依存しない。既存正本service/DTOを利用し、report独自SQL・集計式・丸めを作らない。
+- schedulerは明示system principalを使用し、HTTP sessionに依存しない。schedule作成時にcronの次回発火時刻とscopeを固定し、実行時は保存scope/hashとDB CAS/retryを検証する。既存正本service/DTOを利用し、report独自SQL・集計式・丸めを作らない。
 
 承認済みplan/spec/tasksへ昇格済みであり、F1/F2/A1/B1/B2/Mを実装・検証済みである。実装対話ではPRを作成しない。Review用のbase/head、task対応、テスト証拠は`completion-matrix.md`に集約する。Java 21 loopback制約により全面fast/MySQL/browserの一部既存HTTPテストは環境エラーとなるため、feature-specific green、targeted MySQL smoke、responsive DOM、backup/recoveryの証跡と分離して記録する。

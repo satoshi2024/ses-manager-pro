@@ -26,7 +26,7 @@
   - Demo: `AttendanceSchemaTest` 6件全緑、compile成功。MySQL migration smokeはMで実施する。
 - [x] F2: explicit system principal/scope の snapshot orchestration。管理者/マネージャーscope、速報/確定、retry不変性、partial/failed停止を実装する。
   - Objective: 正本service/DTOをadapter経由で呼び、scope・cutoff・freshness・hashとともにimmutable section snapshotへ固定する。
-  - Evidence: `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`。run/section一意キー、通常retry再利用、明示再生成、新規run、部分失敗時配布停止状態を実装。
+  - Evidence: `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`。run/section一意キー、通常retry再利用、明示再生成時の新version、新規run、部分失敗時配布停止状態を実装。
   - Demo: template versionのrecipient preview hashを生成APIへ渡し、Asia/Tokyoのperiod/dataAsOfとsection statusを表示する。
 - [x] A1: template/preview/run UI。管理者有効化、recipient preview、actual/forecast、dataAsOf/freshness、Asia/Tokyoを表示する。
   - Objective: 管理者/マネージャーがtemplate/version、recipient preview、速報/確定runを操作できる画面/APIを提供する。
@@ -38,12 +38,12 @@
   - Demo: 同一runの3形式を生成し、各artifact hash、Document version、`MANAGEMENT_REPORT`の月末transaction dateを確認する。
 - [x] B2: schedule、outbox、link/re-auth、retry、DLQ/manual replay。アプリ内通知＋期限付きlink、生成/download scope、再認証を実装する。
   - Objective: 管理者有効化のscheduleをShedLock＋DB CASで実行し、system principalからsnapshot生成・DocumentService登録・recipient scope再確認・通知outbox配布まで接続する。
-  - Evidence: `ReportScheduleServiceImpl`、`ReportScheduleMapper`、`ManagementReportScheduler`、`ReportDeliveryServiceImpl`、delivery API。tokenはhashのみ保存、期限7日、download前password再認証10分、権限・組織scopeを再検証、retry/DLQ/manual replayを実装。
+  - Evidence: `ReportScheduleServiceImpl`、`ReportScheduleMapper`、`ManagementReportScheduler`、`ReportDeliveryServiceImpl`、delivery API。保存済みscopeとcronをscheduleへ固定し、tokenはhashのみ保存、期限7日、download前password再認証10分、権限・組織scopeを再検証、retry/DLQ/manual replayを実装。
   - Demo: 同一scheduleのCAS二重claim、PARTIAL run配布停止、期限切れlink拒否、再認証後のdownload、notification dedupeをテストする。
 - [x] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
   - Objective: 同一immutable snapshot契約、月末・Asia/Tokyo境界、二重起動・retry・DLQ、recipient scope変更、document restore、画面responsive、backup/recoveryの受入証拠を固定する。
-  - Evidence: `ReportSnapshotServiceImplTest` 4/4、`ReportDeliveryServiceImplTest` 6/6、`ManagementReportSchedulerTest` 2/2、`ReportDocumentServiceImplTest` 2/2、`ActionPermissionResolverTest` 11/11、`AllMappersSchemaSweepTest` 174/174、合同targeted gate 199/199、`MobileResponsiveLayoutTest` 29/29、MySQL V112 smoke 5/5、performance 1/1 (p95=68ms)。backup unit各suiteはfailures=0、backup integrationはskip 0でSUCCESS（RPO/RTO、restore、cutover rollback、secret scanを含む）。
-  - Boundary/incident evidence: 月末 `2026-08-01..31`、Asia/Tokyo、速報の `GENERATED_AT` cutoff、確定の月次締め拒否、同一run retry再利用、明示regenerationの親run記録、scope変更download拒否、delivery attempt 5のDLQ、manual replay、期限切れlink拒否、recipient preview hashを検証した。
+  - Evidence: `ReportSnapshotServiceImplTest` 5/5、`ReportDeliveryServiceImplTest` 6/6、`ManagementReportSchedulerTest` 3/3、`ReportScheduleServiceImplTest` 3/3、`ReportDocumentServiceImplTest` 2/2、`ActionPermissionResolverTest` 11/11、`AllMappersSchemaSweepTest` 174/174、合同targeted gate 204/204、`MobileResponsiveLayoutTest` 29/29、MySQL V112 smoke 5/5、performance 1/1 (p95=68ms)。backup unit各suiteはfailures=0、backup integrationはskip 0でSUCCESS（RPO/RTO、restore、cutover rollback、secret scanを含む）。
+  - Boundary/incident evidence: 月末 `2026-08-01..31`、Asia/Tokyo、速報の `GENERATED_AT` cutoff、確定の月次締め拒否、同一run retry再利用、明示regenerationの親run・snapshot version記録、scope変更download拒否、delivery attempt 5のDLQ、manual replay、期限切れlink拒否、recipient preview hashを検証した。schedule初回next_run_atは保存cronの次回発火時刻を使う。
   - Demo: `/management-reports` のdesktop/390px DOM/responsive検証は `MobileResponsiveLayoutTest` 29/29。専用browser testはJava 21のloopback制約でTomcat起動前に再現失敗し、スクリーンショットは生成されなかったため、Mの環境制約として記録する。document restoreはbackup integrationのrestore/validate-restoreとcutover rollbackで証明する。
 
 各完了taskは独立commitしてremoteへpushし、completion matrixへBase/Head、テスト、Demo、rollbackを記録する。実装対話ではPRを作成しない。
