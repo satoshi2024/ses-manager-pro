@@ -1,0 +1,22 @@
+{
+  "asOf": "2026-08-27T00:00:00+09:00",
+  "records": [
+    {
+      "candidateKey": "invalid-unsupported-disposition",
+      "dataElementId": "DB-017.t_document_version.storage_key",
+      "scopeStatus": "IN_SCOPE",
+      "providerScope": "IN_SCOPE",
+      "identityResolution": "VERIFIED",
+      "ownerState": "CONFIRMED",
+      "purposeState": "CONFIRMED",
+      "triggerState": "CONFIRMED",
+      "policyState": "APPROVED",
+      "retentionUntil": "2025-01-01",
+      "holdStatus": "NONE",
+      "legalRetentionStatus": "CLEAR",
+      "auditStatus": "CLEAR",
+      "activeBusinessBlocker": false,
+      "dispositionMethod": "NOT_A_SUPPORTED_METHOD"
+    }
+  ]
+}

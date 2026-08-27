@@ -1,0 +1,22 @@
+{
+  "asOf": "2026-08-27T00:00:00+09:00",
+  "records": [
+    {
+      "candidateKey": "invalid-unverified",
+      "dataElementId": "DB-001.sys_user.real_name",
+      "scopeStatus": "IN_SCOPE",
+      "providerScope": "IN_SCOPE",
+      "identityResolution": "UNVERIFIED",
+      "ownerState": "CONFIRMED",
+      "purposeState": "CONFIRMED",
+      "triggerState": "CONFIRMED",
+      "policyState": "APPROVED",
+      "retentionUntil": "2025-01-01",
+      "holdStatus": "NONE",
+      "legalRetentionStatus": "CLEAR",
+      "auditStatus": "CLEAR",
+      "activeBusinessBlocker": false,
+      "dispositionMethod": "PENDING_HUMAN_APPROVAL_ONLY"
+    }
+  ]
+}
