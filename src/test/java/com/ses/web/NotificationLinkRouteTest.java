@@ -53,5 +53,6 @@ class NotificationLinkRouteTest {
     void パラメータ付き通知リンクが実在ルートに解決される() throws Exception {
         assertResolves(NotificationLinks.engineerDetail(1L));
         assertResolves(NotificationLinks.customer(1L));
+        assertResolves(NotificationLinks.serviceDeskDetail(1L));
     }
 }

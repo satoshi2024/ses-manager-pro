@@ -4,16 +4,21 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.portal.PortalCsatCreateRequest;
+import com.ses.dto.portal.PortalServiceCommentCreateRequest;
 import com.ses.dto.portal.PortalServiceCommentDto;
 import com.ses.dto.portal.PortalServiceRequestCreateRequest;
 import com.ses.dto.portal.PortalServiceRequestDto;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentDto;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
+import com.ses.entity.Contract;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Project;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
+import com.ses.mapper.ContractMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.portal.PortalLoginUser;
 import com.ses.service.FileStorageService;
@@ -22,6 +27,7 @@ import com.ses.service.servicedesk.ServiceRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +40,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -51,6 +58,8 @@ public class PortalCustomerServiceDeskApiController {
     private final ServiceAttachmentLinkMapper attachmentLinkMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final FileStorageService fileStorageService;
+    private final ContractMapper contractMapper;
+    private final ProjectMapper projectMapper;
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -93,12 +102,28 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     /**
-     * ポータルからの新規問い合わせ起票 (WIP-8: ポータル専用DTO利用)
+     * ポータルからの新規問い合わせ起票 (WIP-8: ポータル専用DTO利用 & 他社リソース指定検証)
      */
     @PostMapping
     public ApiResult<PortalServiceRequestDto> create(@Valid @RequestBody PortalServiceRequestCreateRequest req) {
         Long custId = customerId();
         Long userId = portalUserId();
+
+        // 契約が指定された場合、自社契約であることを検証
+        if (req.getContractId() != null) {
+            Contract contract = contractMapper.selectById(req.getContractId());
+            if (contract == null || !Objects.equals(contract.getCustomerId(), custId)) {
+                throw BusinessException.of(400, "指定された契約は自社に紐付いていません");
+            }
+        }
+
+        // 案件が指定された場合、自社案件であることを検証
+        if (req.getProjectId() != null) {
+            Project project = projectMapper.selectById(req.getProjectId());
+            if (project == null || !Objects.equals(project.getCustomerId(), custId)) {
+                throw BusinessException.of(400, "指定された案件は自社に紐付いていません");
+            }
+        }
 
         ServiceRequestCreateRequest internalReq = ServiceRequestCreateRequest.builder()
                 .customerId(custId)
@@ -120,15 +145,20 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     /**
-     * ポータルからの返信コメント投稿（自動的にPORTAL_VISIBLE、WAITING_CUSTOMER時は自動再開、WIP-8: 内部項目除外DTO返却）
+     * ポータルからの返信コメント投稿（自動的にPORTAL_VISIBLE、WAITING_CUSTOMER時は自動再開、WIP-8: 内部項目除外DTO受取・返却）
      */
     @PostMapping("/{id}/comments")
-    public ApiResult<PortalServiceCommentDto> addComment(@PathVariable Long id, @Valid @RequestBody ServiceCommentCreateRequest req) {
+    public ApiResult<PortalServiceCommentDto> addComment(@PathVariable Long id, @Valid @RequestBody PortalServiceCommentCreateRequest req) {
         // 自社スコープ検証 (404 秘匿)
         serviceRequestService.getPortalDetail(id, customerId());
 
+        ServiceCommentCreateRequest internalReq = ServiceCommentCreateRequest.builder()
+                .commentText(req.getCommentText())
+                .visibility("PORTAL_VISIBLE")
+                .build();
+
         ServiceCommentDto commentDto = serviceRequestService.addComment(
-                id, req, portalUserId(), "PORTAL_USER", portalUserName(), true
+                id, internalReq, portalUserId(), "PORTAL_USER", portalUserName(), true
         );
 
         PortalServiceCommentDto portalDto = PortalServiceCommentDto.builder()
@@ -153,7 +183,7 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     /**
-     * ポータル添付ファイルダウンロード (WIP-5: 自社スコープおよびPORTAL_VISIBLE検証)
+     * ポータル添付ファイルダウンロード (WIP-5: 自社スコープおよびPORTAL_VISIBLE検証、RFC 5987 UTF-8 エンコード)
      */
     @GetMapping("/{id}/attachments/{attachmentId}/download")
     public ResponseEntity<Resource> downloadAttachment(@PathVariable Long id, @PathVariable Long attachmentId) {
@@ -178,13 +208,25 @@ public class PortalCustomerServiceDeskApiController {
 
         // 4. ストレージから読み込み
         Resource resource = fileStorageService.load(version.getStorageKey());
-        String contentType = URLConnection.guessContentTypeFromName(link.getFileName());
-        MediaType mediaType = contentType != null ? MediaType.parseMediaType(contentType) : MediaType.APPLICATION_OCTET_STREAM;
+        if (resource == null || !resource.exists()) {
+            throw BusinessException.of(404, "error.notFound");
+        }
+
+        // 5. Content-Type 判定
+        String fileName = link.getFileName() != null ? link.getFileName() : "attachment";
+        String contentType = URLConnection.guessContentTypeFromName(fileName);
+        if (contentType == null) {
+            contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        }
+
+        String contentDisposition = ContentDisposition.attachment()
+                .filename(fileName, StandardCharsets.UTF_8)
+                .build()
+                .toString();
 
         return ResponseEntity.ok()
-                .contentType(mediaType)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + link.getFileName() + "\"")
-                .header("X-Content-Type-Options", "nosniff")
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
                 .body(resource);
     }
 }

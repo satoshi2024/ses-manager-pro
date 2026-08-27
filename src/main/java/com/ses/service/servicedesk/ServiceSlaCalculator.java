@@ -2,8 +2,10 @@ package com.ses.service.servicedesk;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.entity.ServiceSlaPolicy;
+import com.ses.entity.WorkCalendar;
 import com.ses.entity.WorkCalendarDay;
 import com.ses.mapper.WorkCalendarDayMapper;
+import com.ses.mapper.WorkCalendarMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -18,7 +20,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
- * 営業時間・祝日(m_work_calendar_day)・タイムゾーン・Clockを考慮したSLA期限計算エンジン (WIP-1)
+ * 営業時間・法人既定カレンダー祝日・タイムゾーン・Clockを考慮したSLA期限計算エンジン (WIP-1)
  */
 @Slf4j
 @Component
@@ -30,6 +32,7 @@ public class ServiceSlaCalculator {
 
     private final Clock clock;
     private final ObjectProvider<WorkCalendarDayMapper> workCalendarDayMapperProvider;
+    private final ObjectProvider<WorkCalendarMapper> workCalendarMapperProvider;
 
     /**
      * 起点日時と目標時間（時間）からSLA期限を計算する。
@@ -152,22 +155,41 @@ public class ServiceSlaCalculator {
     }
 
     /**
-     * 土日・祝日・休業日判定 (m_work_calendar_day 連携)
+     * 土日・祝日・法人休業日判定 (m_work_calendar 法人既定 & m_work_calendar_day 連携: WIP-1)
      */
     public boolean isNonWorkingDay(LocalDate date) {
         if (isWeekend(date)) {
             return true;
         }
 
-        WorkCalendarDayMapper mapper = workCalendarDayMapperProvider.getIfAvailable();
-        if (mapper != null) {
-            List<WorkCalendarDay> days = mapper.selectList(
-                    new LambdaQueryWrapper<WorkCalendarDay>()
-                            .eq(WorkCalendarDay::getCalendarDate, date));
+        WorkCalendarDayMapper dayMapper = workCalendarDayMapperProvider != null ? workCalendarDayMapperProvider.getIfAvailable() : null;
+        WorkCalendarMapper calMapper = workCalendarMapperProvider != null ? workCalendarMapperProvider.getIfAvailable() : null;
+
+        if (dayMapper != null) {
+            LambdaQueryWrapper<WorkCalendarDay> wrapper = new LambdaQueryWrapper<WorkCalendarDay>()
+                    .eq(WorkCalendarDay::getCalendarDate, date);
+
+            // 法人既定カレンダー（organization_id IS NULL かつ engineer_id IS NULL）に限定
+            if (calMapper != null) {
+                List<WorkCalendar> legalCalendars = calMapper.selectList(
+                        new LambdaQueryWrapper<WorkCalendar>()
+                                .isNull(WorkCalendar::getOrganizationId)
+                                .isNull(WorkCalendar::getEngineerId)
+                                .eq(WorkCalendar::getStatus, "ACTIVE"));
+                if (!legalCalendars.isEmpty()) {
+                    List<Long> calIds = legalCalendars.stream().map(WorkCalendar::getId).toList();
+                    wrapper.in(WorkCalendarDay::getCalendarId, calIds);
+                } else {
+                    log.debug("法人既定カレンダー未定義 (missing_calendar): date={}", date);
+                }
+            }
+
+            List<WorkCalendarDay> days = dayMapper.selectList(wrapper);
             for (WorkCalendarDay day : days) {
-                if ("HOLIDAY".equalsIgnoreCase(day.getDayType()) 
-                        || "NON_WORKING".equalsIgnoreCase(day.getDayType())
-                        || "祝日".equals(day.getDayType())
+                String type = day.getDayType();
+                if ("所定休日".equals(type) || "法定休日".equals(type)
+                        || "HOLIDAY".equalsIgnoreCase(type) || "NON_WORKING".equalsIgnoreCase(type)
+                        || "祝日".equals(type)
                         || (day.getScheduledMinutes() != null && day.getScheduledMinutes() == 0)) {
                     return true;
                 }

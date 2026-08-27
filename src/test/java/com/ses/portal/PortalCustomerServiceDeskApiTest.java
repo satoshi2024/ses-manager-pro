@@ -2,6 +2,8 @@ package com.ses.portal;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.portal.PortalCsatCreateRequest;
+import com.ses.dto.portal.PortalServiceCommentCreateRequest;
+import com.ses.dto.portal.PortalServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
@@ -133,8 +135,7 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     void testCreateRequest_fromPortal() throws Exception {
         CsrfPair csrf = fetchPortalCsrf(mockMvc);
 
-        ServiceRequestCreateRequest newReq = ServiceRequestCreateRequest.builder()
-                .customerId(99999L) // 不正な他社IDを指定しても自社組織に固定されること
+        PortalServiceRequestCreateRequest newReq = PortalServiceRequestCreateRequest.builder()
                 .category("BILLING")
                 .priority("P1")
                 .subject("請求書の宛名変更希望")
@@ -153,11 +154,33 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     }
 
     @Test
+    @DisplayName("他社に属する契約IDを指定して起票した場合は400エラーで拒否されること (他社ID改ざん防止: CS-R1.1)")
+    void testCreateRequest_otherCompanyContractRejected() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        PortalServiceRequestCreateRequest invalidReq = PortalServiceRequestCreateRequest.builder()
+                .category("CONTRACT")
+                .priority("P2")
+                .subject("契約関連")
+                .description("詳細")
+                .contractId(99999L) // 存在しない/他社の契約ID
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
     @DisplayName("ポータルからの返信コメントがPORTAL_VISIBLEとして投稿され詳細に反映されること")
     void testReplyComment_fromPortal() throws Exception {
         CsrfPair csrf = fetchPortalCsrf(mockMvc);
 
-        ServiceCommentCreateRequest replyReq = ServiceCommentCreateRequest.builder()
+        PortalServiceCommentCreateRequest replyReq = PortalServiceCommentCreateRequest.builder()
                 .commentText("追加の資料を送付しました。ご確認ください。")
                 .build();
 

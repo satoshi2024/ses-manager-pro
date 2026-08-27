@@ -74,9 +74,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     private final ContractMapper contractMapper;
     private final ProjectMapper projectMapper;
     private final EngineerMapper engineerMapper;
-    private final SysUserMapper sysUserMapper;
+    private final com.ses.mapper.SysUserMapper sysUserMapper;
     private final ServiceSlaCalculator slaCalculator;
     private final DataScopeService dataScopeService;
+    private final java.time.Clock clock;
 
     private static final Set<String> VALID_CATEGORIES = Set.of(
             "CONTRACT", "BILLING", "ATTENDANCE", "QUALITY", "SYSTEM", "OTHER"
@@ -105,7 +106,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             dataScopeService.assertAllowedCustomer(req.getCustomerId());
         }
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         String requestNo = generateRequestNo(now);
         Long effectiveActorId = isPortal ? portalUserId : (actorUserId != null ? actorUserId : 1L);
 
@@ -325,7 +326,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             existing.setVersion(req.getVersion());
         }
 
-        existing.setUpdatedAt(LocalDateTime.now());
+        existing.setUpdatedAt(LocalDateTime.now(clock));
         int updated = serviceRequestMapper.updateById(existing);
         if (updated == 0) {
             throw BusinessException.of(409, "他のユーザーによって更新されました。画面を再読み込みしてください。");
@@ -349,7 +350,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
         validateStateTransition(fromStatus, toStatus);
 
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         int currentRound = request.getReopenCount() == null ? 1 : (request.getReopenCount() + 1);
 
         ServiceSlaClock currentClock = slaClockMapper.selectOne(
@@ -474,7 +475,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
 
         String visibility = isPortal ? "PORTAL_VISIBLE" : (StringUtils.hasText(req.getVisibility()) ? req.getVisibility() : "PORTAL_VISIBLE");
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         Long effectiveAuthorId = actorId != null ? actorId : (isPortal ? 0L : 1L);
         String effectiveAuthorName = StringUtils.hasText(authorName) ? authorName : (isPortal ? "ポータル利用者" : resolveUserName(effectiveAuthorId));
 
@@ -536,7 +537,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .portalUserId(portalUserId)
                 .score(req.getScore())
                 .feedbackComment(req.getFeedbackComment())
-                .answeredAt(LocalDateTime.now())
+                .answeredAt(LocalDateTime.now(clock))
                 .build();
         csatMapper.insert(csat);
     }

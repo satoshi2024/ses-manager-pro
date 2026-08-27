@@ -220,3 +220,15 @@ CROSS JOIN (
 WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('role-sales', 'role-manager', 'role-admin');
+
+-- 13. ポータル顧客向けサービスデスク権限seed (WIP-8 / CS-R1.2)
+INSERT IGNORE INTO t_portal_user_permission (user_id, permission_key)
+SELECT u.id, p.permission_key
+FROM t_portal_user u
+JOIN m_portal_organization o ON u.portal_org_id = o.id
+CROSS JOIN (
+    SELECT 'service-desk.view' AS permission_key UNION ALL
+    SELECT 'service-desk.create' AS permission_key
+) p
+WHERE o.org_type = 'CUSTOMER'
+  AND u.deleted_flag = 0;

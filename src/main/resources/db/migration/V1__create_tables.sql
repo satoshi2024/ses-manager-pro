@@ -9,20 +9,6 @@
 -- ============================================================
 -- テーブル削除（依存関係の逆順）
 -- ============================================================
-DROP TABLE IF EXISTS t_customer_qbr_action;
-DROP TABLE IF EXISTS t_customer_qbr;
-DROP TABLE IF EXISTS t_customer_health_snapshot;
-DROP TABLE IF EXISTS t_customer_csat;
-DROP TABLE IF EXISTS t_service_attachment_link;
-DROP TABLE IF EXISTS t_service_attachment;
-DROP TABLE IF EXISTS t_service_state_event;
-DROP TABLE IF EXISTS t_service_request_state_event;
-DROP TABLE IF EXISTS t_service_sla_pause_log;
-DROP TABLE IF EXISTS t_service_sla_clock;
-DROP TABLE IF EXISTS t_service_request_history;
-DROP TABLE IF EXISTS t_service_comment;
-DROP TABLE IF EXISTS t_service_request;
-DROP TABLE IF EXISTS m_service_sla_policy;
 DROP TABLE IF EXISTS t_portal_access_log;
 DROP TABLE IF EXISTS t_portal_session;
 DROP TABLE IF EXISTS t_portal_terms_consent;

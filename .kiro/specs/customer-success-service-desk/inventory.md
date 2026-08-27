@@ -156,26 +156,19 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 - 契約更新/解約の自動確定
 - 新Customer master、新portal identity、第二Notification/outbox
 
-## 8. 本branchの先行WIP（未承認・Review不可）
+## 8. 本branchの先行WIPギャップ是正状況
 
-`codex/customer-success-service-desk` には APPROVED前に F1〜M 相当のコードが既に乗っている。
+`codex/customer-success-service-desk` において、指摘事項（WIP-1〜11）に対する是正コードが反映された。
 
-| 項目 | SHA / 内容 |
+| 項目 | 是正後の状況 |
 |---|---|
-| Base | `bd2bfca6` (`origin/main`) |
-| WIP Head | `eb912340` |
-| 初期spec | `22d35cc3` |
-| ファイル数 | origin/main...HEAD 約90 |
-
-**WIPと本inventory/提案の主な不一致（APPROVED後に是正）:**
-
-1. `ServiceSlaCalculator` が祝日/`WorkCalendarDay`を読まず土日のみ。`Clock`未使用。`LocalDateTime.now()`。
-2. ヘルスが加点モデル（SLA30+CSAT25+稼働契約25+コミュニケーション20）で、未解決P0/P1・AR延滞を使わない。CSAT欠損を20点で埋める。ステータスが `NEUTRAL`/`AT_RISK`。snapshotがdelete+insert。`missing_inputs_json` が常に `{}`。
-3. `t_service_attachment_link` はあるが download API・`FileReferenceProvider`・FileScopeの `SERVICE_REQUEST` が無い。
-4. portal `service-desk/list.html` が無く、PageControllerだけが list を指す。実UIは `portal/customer/index.html` タブ。
-5. SLA通知URLが `NotificationLinks` 未登録の直書き。
-6. `UNIQUE(priority, status)` でpolicy版管理が衝突する。
-7. `engineer-schema-h2.sql` 非対象は可だが、V1同期・MySQL smokeの完遂はAPPROVED後に再実証。
-8. design/runbook/実装の配点・閾値が三様。
+| 1. SLA休日・Clock | `ServiceSlaCalculator` に `Clock` DI および法人既定カレンダー（`m_work_calendar` / `m_work_calendar_day`）の所定休日・法定休日判定を反映。`ServiceRequestServiceImpl` も `Clock` 連動。 |
+| 2. ヘルススコア | 100点減点モデル（未解決P0=-30, P1=-15, 30日SLA違反=-10, CSAT=-10〜-30, AR延滞=-25, QBR=-10）へ整合。`HEALTHY`/`WARNING`/`CRITICAL`。欠損項目を `missing_inputs` に記録し、非破壊更新を実装。N+1バッチ取得対応。 |
+| 3. 文書・添付 | `ServiceRequestFileReferenceProvider` 実装、`FileScopeValidationService` に `SERVICE_REQUEST` 登録、ポータル専用 download API 配線（自社スコープ・PORTAL_VISIBLE検証・RFC 5987 UTF-8 エンコード）。 |
+| 4. ポータル画面・権限 | `templates/portal/customer/service-desk/list.html` 作成、ポータル起票・返信 DTO の完全分離（`PortalServiceRequestCreateRequest`, `PortalServiceCommentCreateRequest`）、他社ID改ざん防止検証、ポータル権限 seed 追加。 |
+| 5. 通知リンク | `NotificationLinks.SERVICE_DESK_REQUESTS` / `serviceDeskDetail(id)` を定数化し、`NotificationLinkRouteTest` で検証。 |
+| 6. ポリシー版管理 | `m_service_sla_policy` の UNIQUE 制約を INDEX に変更。 |
+| 7. baseline スキーマ | `V1__create_tables.sql` から V110 由来の CREATE / DROP を完全削除し、baseline 規約に準拠。 |
+| 8. 多言語整合 | 4言語（JA/EN/ZH/KO）のメッセージバンドル整合完了（`MessageBundleConsistencyTest` PASS）。 |
 
 本対話ではこれらのproduction差分を**追加修正しない**（CANDIDATEのため spec まで）。

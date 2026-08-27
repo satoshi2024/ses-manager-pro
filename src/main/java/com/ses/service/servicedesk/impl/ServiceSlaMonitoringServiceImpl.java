@@ -23,12 +23,13 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     private final ServiceRequestMapper serviceRequestMapper;
     private final ServiceSlaClockMapper slaClockMapper;
     private final NotificationService notificationService;
+    private final java.time.Clock clock;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int checkSlaBreaches(LocalDateTime asOf) {
         if (asOf == null) {
-            asOf = LocalDateTime.now();
+            asOf = LocalDateTime.now(clock);
         }
 
         // 監視対象: ステータスが RECEIVED または IN_PROGRESS のリクエスト

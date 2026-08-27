@@ -33,7 +33,7 @@ class ServiceSlaCalculatorTest {
         ObjectProvider<WorkCalendarDayMapper> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(workCalendarDayMapper);
 
-        calculator = new ServiceSlaCalculator(fixedClock, provider);
+        calculator = new ServiceSlaCalculator(fixedClock, provider, null);
         standardPolicy = ServiceSlaPolicy.builder()
                 .businessHoursStart(LocalTime.of(9, 0))
                 .businessHoursEnd(LocalTime.of(18, 0))
@@ -76,6 +76,7 @@ class ServiceSlaCalculatorTest {
         LocalDate holidayDate = LocalDate.of(2026, 8, 25); // 火曜日を祝日と定義
         ServiceSlaCalculator holidayCalculator = new ServiceSlaCalculator(
                 Clock.fixed(LocalDateTime.of(2026, 8, 24, 9, 0).atZone(ZoneId.of("Asia/Tokyo")).toInstant(), ZoneId.of("Asia/Tokyo")),
+                null,
                 null) {
             @Override
             public boolean isNonWorkingDay(LocalDate date) {
