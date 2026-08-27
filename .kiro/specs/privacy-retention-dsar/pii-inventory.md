@@ -70,6 +70,13 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | DB-053 `t_compliance_external_reviewer_subject` | `subject_code`, `display_name`, `organization_name`, `person_fingerprint_snapshot`, `fingerprint_key_version`、created/updated actor | Compliance/External review候補。専門家本人・所属のperson-stable master | reviewer subject lifecycle/qualification chain close。保持未確定 | 同姓同名を統合せずfingerprintとhuman resolutionを要求。immutable subject、identity/credential/audit、external expert gateがblocker。`ExternalReviewerSubjectProvider` 未実装 | UNKNOWN。V1、V102_3、external expert gate |
 | DB-054 `t_compliance_reviewer_qualification` | `reviewer_subject_id`, `reviewer_type_id`, `registration_identifier_masked_snapshot`, `registration_identifier_label`, enabled、created/updated actor | Compliance/External review候補。専門家資格typeとmasked登録識別子の対応 | qualification enable/disable、review chain close。保持未確定 | full登録識別子はverification event側のencrypted valueと鍵管理を別評価。qualification/audit evidence、identity、external expert gateがblocker。`ReviewerQualificationProvider` 未実装 | UNKNOWN。V102_3、external expert gate |
 | DB-055 `t_compliance_external_review_adoption_event` | `action`, `review_chain_id`, submitted/revoked review event IDs、identity/qualification/active-status/authorship verification event IDs、mapping/review policy/evidence snapshot、`adopted_by`, `adopted_at`, `operation_id`, `correlation_id`, `idempotency_key` | Compliance/External review候補。外部専門家reviewの承認・却下・撤回と採用証跡 | adoption/revocation chain close。保持未確定 | APPROVED/REJECTED/REVOKEDのappend-only証跡、evidence、actor/audit、credential/identity、external expert gateがblocker。`ExternalReviewAdoptionProvider` 未実装 | UNKNOWN。V1、V102_3、external expert gate |
+| DB-056 `m_integration_connection_backup_v106_1` | `company_name`, `encrypted_tokens`, provider/product、external company、connection actor/time、expiry/status、token version、backup timestamp | Integration/Accounting候補。V106.1移行前connectionの退避・復旧 | migration/restore/reconciliation close。保持未確定 | encrypted tokenはexport不可、secret revoke/restore evidence、backup/audit/legal holdがblocker。delete/logical delete/anonymize/restrict/exportは未承認。`IntegrationBackupProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V106_1/V106_2、database-backup-recovery |
+| DB-057 `t_oidc_binding_review_inventory` | `subject_sha256`, `binding_id`, `provider_id`, `user_id`, `user_role`, `linked_at`, review status/reason | Identity/Security候補。OIDC紐付け隔離・review inventory | binding review/restore/release close。保持未確定 | subject原文を保持せずhashのみ。identity/audit/break-glass、復旧後tombstone再適用、human reviewがblocker。restrict/exportは承認済みscopeなし、delete/anonymize不可。`OidcBindingReviewProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V110、enterprise-identity-security |
+| DB-058 `m_identity_provider` | `provider_type`, `issuer_uri`, `metadata_uri`, `client_id`, `encrypted_secret_ref`, enabled、tenant/timestamps | Identity/Security候補。外部IdP設定と認証連携 | provider revoke/rotation/tenant closure。保持未確定 | `encrypted_secret_ref`/client secretはDSAR export対象外。secret-manager revoke、audit、active identity、break-glassがblocker。delete/logical delete/anonymize不可、restrictは責任者承認待ち。`IdentityProviderConfigProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V63、enterprise-identity-security |
+| DB-059 `t_opportunity` | `title`, `stage`, `expected_start_month`, `duration_months`, `required_count`, `unit_price`, `expected_amount`, `probability`, `owner_user_id`, `next_action_date`, `competitor`, `lost_reason`, converted IDs、creator/update metadata | CRM/Sales候補。商機、競合、失注理由、担当者管理 | opportunity close/convert/lost、customer contract close。保持未確定 | customer/contact/owner、active opportunity、forecast/audit、contract/quotation linkがblocker。third-party redactionとscope確認後にexport/restrict、delete/anonymizeは未承認。`OpportunityProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V73、R__crm_contact_reconciliation、audit |
+| DB-060 `t_allocation_plan` | `engineer_id`, `position_id`, allocation type/period/percent/status、`source_contract_id`, `exception_reason`, `approval_request_id`, created/updated actor | Staffing/HR/Sales候補。要員配賦、契約actual、過配賦例外 | allocation/contract/approval close。保持未確定 | active contract、engineer、approval/audit、planning snapshotがblocker。scenario/actualを分離し、delete/anonymizeは未承認。`AllocationPlanProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V103、platform-invariants |
+| DB-061 `t_staffing_scenario` | `owner_user_id`, `name`, `base_date`, `shared_flag`, `assumptions_json`、created/updated actor | Staffing/HR候補。共有需給シナリオと仮定メモ | scenario close/archive、shared scope close。保持未確定 | owner、shared organization scope、assumptions内のPII、auditがblocker。実データを変更しないがsnapshot/exportはscope確認必須。`StaffingScenarioProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V103、staffing-capacity-planning |
+| DB-062 `t_staffing_scenario_allocation` | `scenario_id`, `engineer_id`, `position_id`, `dates`, `percent`、created/updated actor | Staffing/HR候補。scenario内要員配賦 | scenario close/archive。保持未確定 | engineer/position、shared scope、scenario owner、auditがblocker。delete/anonymize/restrict/exportは承認未取得。`StaffingScenarioAllocationProvider` 未実装。result evidenceはcoverage scanのみ | UNKNOWN。V103、staffing-capacity-planning |
 
 ## 2. file/object inventory
 
@@ -84,6 +91,7 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | FILE-007 `FileSecurityMetadataReferenceProvider` | `t_file_security_metadata.stored_name`（quarantine/published/rejected） | scan対象file、拒否理由、owner link | scan state/cleanup safety window。retention未確定 | scan未完/unknown referenceはfail-closed。`SecurityFileProvider` 未実装 | V63、FileScopeValidationService |
 | FILE-008 upload dirs / backup / replica | upload base、`quarantine`、`published`、DB/upload backup、restore target、read replica | DBに登録されない孤児、binary二次コピー、同時点snapshot | `FileCleanupServiceImpl` の孤児cleanupは既存物理削除経路。backup retention/restore state未確定 | backup/replica/unknown referenceは必ずhold/unknown。`BackupBinaryProvider` 未実装 | database-backup-recovery、platform invariants |
 | FILE-009 `t_contract_document` paths / CloudSign artifacts | `pdf_path`, `signed_pdf_path`, `certificate_path`、CloudSign document/file remote artifact | 契約本文、署名者/宛先、証明書、第三者情報 | contract document completion/ledger link。CloudSign remote retentionは未確定 | legal original、署名済PDF/証明書、remote copy、DB+binary backup整合がblocker。`CloudSignArtifactProvider` 未実装 | UNKNOWN/PROVISIONAL。V20、CloudSign/document archive |
+| FILE-010 DSAR export / redaction / temporary cache boundary（未実装） | 将来のZIP/PDF/CSV、redaction intermediate、download/cache/index、delivery copy | Privacy/Document候補。本人請求exportの一時・配布二次コピー | request delivery/expiry/reopen。現行branchにwriter/exporterはない | third-party redaction失敗、scope、download/cache、backup/replica、未送達/再送がblocker。`DsarExportArtifactProvider` 未実装。result evidenceは未実装確認とD0 writeCount=0 | UNKNOWN。PR-R3/R4、platform-invariants |
 
 ## 3. AI payload inventory
 
@@ -97,8 +105,27 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 | AI-004 legacy `t_ai_log.request_params/response_text` | legacy raw/二重記録の可能性。新規保存停止、raw promptを復活させない | legacy `app.resume.retention-days=30` 技術設定。法的保持未承認 | legacy不明、audit/evaluation dependencyはUNKNOWN。`AiLegacyProvider` 未実装 | PROVISIONAL。V1、G10 review ledger R2-P2-04 |
 | AI-005 provider boundary | `mock`/`rule` local only。Gemini等real providerはDPA、region、training opt-out、security/HR/product owner gate後のみ | `external-send-enabled=false` がkill switch | scope外provider呼出しはBLOCKED。providerにDSAR subjectを送らない | BLOCKED external。GATE-S17-G10-PROD |
 | AI-006 `INGEST_RESUME` / `INGEST_PROJECT` / `INGEST_BP_AVAILABILITY` | `untrustedSourceText` に `extracted_text` / `raw_text` / EML本文が入り得る。trusted instructionとデータを分離するが、raw本文自体はPII/第三者情報を含み得る | 現行parse serviceは `AiExecutionGateway` へ渡し、`persistRun=false`。real provider送信は設定で停止中だが、payload retention/外部copyを未確定とする | raw source、prompt injection、third-party、provider二次copy、scope不明はBLOCKED/UNKNOWN。`AiIngestionPayloadProvider` 未実装 | BLOCKED external / PROVISIONAL local。`AiGatewayRequest`、Gemini*ParseService、G10 allow-list |
+| AI-007 `AiExecutionGateway` egress / log / cache / index / export boundary | request/response、`t_ai_*` log/run/item/feedback/outcome/evaluation、provider cache/index、export/rendered artifactを同一追跡対象として扱う。現行repoに未登録の二次artifactは値を収集しない | gateway invocation、AI run close、export/download、provider retention。法的retention未確定 | GATE-S17-G10-PROD、raw prompt、third-party、scope外provider、cache/index/exportの所在不明がBLOCKED。`AiArtifactBoundaryProvider` 未実装。result evidenceはcoverage scanとD0 providerCallCount=0のみ | UNKNOWN/PROVISIONAL。AiExecutionGateway、G10 allow-list、database-backup-recovery |
 
-## 4. audit / retention unresolved matters
+## 4. 機械的coverage再走査（未完了・fail-closed）
+
+`tools/privacy-retention-dsar/inventory-coverage.ps1` は、全migrationの`CREATE TABLE`/column、entityの`@TableName`、provider/gateway/file/backup/restore/export/search/cache/audit/integration候補をread-onlyで走査する。inventoryのbacktick付きtable名だけを明示coverageと数え、`t_compliance_*`等のwildcard/group表記はcoverage完了とみなさない。
+
+2026-08-27実行結果（exit code 2）:
+
+| 項目 | 結果 |
+|---|---:|
+| migration file / table / CREATE column record / ALTER column record | 116 / 180 / 4,220 / 114 |
+| entity table / provider候補file | 176 / 123 |
+| explicit inventory record（DB / FILE / AI） | 79（62 / 10 / 7） |
+| explicit table match / unmapped table | 102 / 78 |
+| `providerCallCount` / `writeCount` | 0 / 0 |
+| inventory SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録（inventory自身へ固定値を書かない） |
+| source manifest SHA-256 | scanner実行時のstdoutを `coverage-evidence.md` に記録 |
+
+78 tableはまだ明示rowがなく、wildcardを含むものも `UNKNOWN/BLOCKED` とする。したがってcoverageは未完了であり、PR-R1とcompletion matrixを完全達成扱いにしない。scannerのstdoutが全unmapped table名とsource manifestを出力し、再走査の生成証跡となる。
+
+## 5. audit / retention unresolved matters
 
 - 法定文書specの未確定: proposal skill sheet、candidate resume、project email originalの分類/保持はcompliance ownerと外部専門家の承認待ち。candidate resumeは1年 provisional、proposal skill sheet/project emailは3年 provisionalという既存資料上の案を、承認済みpolicyと扱わない。
 - recruiting-pipelineは candidate PIIのretentionを未確定としている。rejected candidate、activity、converted engineerへのlink、resume ingestionの原文/抽出text/parsed JSONを分離して決定する必要がある。
@@ -107,6 +134,6 @@ owner欄は実装上の責務候補とDG-07の未決定を分ける。`機能own
 - enterprise identityはOIDC tenant/app、MFA、break-glass、90日exercise、責任者等の外部gateが未完了。MFA secret/tokenはDSAR export・処分の通常経路から除外する。
 - AIはG10 allow-listを技術境界とし、real providerへの送信、DPA、region、training opt-out、owner gateが未完了。AI payloadの二次コピーはunknownとして残す。
 
-## 5. scope外・未発見の扱い
+## 6. scope外・未発見の扱い
 
 このinventoryはschema/entity/provider/config/searchで確認できた静的所在であり、本番DB、object storage、mailbox、backup、replica、外部SaaSの実データを検索していない。未登録のfile/object、migration後の運用artifact、ログ基盤、APM、メール受信箱、ブラウザ/download cache、開発者端末は `UNKNOWN` のまま、providerを呼び出さず、人の範囲承認後に再inventoryする。
