@@ -1,6 +1,6 @@
-# Sample snapshot spec（仮案・実装非対象）
+# Sample snapshot spec（承認済み要件を反映した実装契約例）
 
-この文書は DG-10 の議論用の sample であり、DB schema、migration、API の承認済み契約ではない。数値、ID、hash はすべて例示である。実装時は既存正本 service/DTO の値を adapter で取り込み、snapshot 後に現在 DB を再読してはならない。
+この文書は承認済みNF-10/DG-10を実装契約へ写像するsampleであり、数値、ID、hashはすべて例示である。DB schemaの細部はF1で固定するが、実装時は既存正本service/DTOの値をadapterで取り込み、snapshot後に現在DBを再読してはならない。
 
 ## 1. 契約の目的
 
@@ -17,7 +17,7 @@
   "snapshotId": "rs_20260831_000042",
   "runId": "run_20260831_000042",
   "templateVersionId": "rtv_000007",
-  "snapshotSchemaVersion": "sample-0.1",
+  "snapshotSchemaVersion": "report-1.0",
   "tenantId": "tenant-example",
   "generatedAt": "2026-09-01T00:15:22Z",
   "businessTimezone": "Asia/Tokyo",
@@ -39,10 +39,14 @@
     "staleAfter": "2026-09-01T06:00:00+09:00",
     "status": "FRESH"
   },
+  "retention": {
+    "years": 7,
+    "legalHoldAware": true
+  },
   "scope": {
     "ownerType": "SYSTEM_PRINCIPAL",
     "ownerId": "report-scheduler",
-    "policyVersion": "scope-policy-sample-3",
+    "policyVersion": "scope-policy-approved-1",
     "organizationIds": ["org-example"],
     "allowedSetHash": "sha256:example-scope-hash",
     "sessionIndependent": true
@@ -169,7 +173,7 @@
     }
   ],
   "recipientPreview": {
-    "status": "PENDING_DG10",
+    "status": "APPROVED_SCOPE_CHECKED",
     "evaluatedAt": "2026-09-01T00:15:20+09:00",
     "recipients": [
       {
@@ -189,26 +193,28 @@
     "documentSourceType": "REPORT_SNAPSHOT",
     "contentHash": "sha256:example-document-hash",
     "documentVersion": 1,
-    "deliveryMode": "EXPIRING_LINK",
+    "deliveryMode": "IN_APP_NOTIFICATION_WITH_EXPIRING_LINK",
     "linkExpiresAt": "2026-09-08T00:15:20+09:00",
-    "reauthorizeAfterExpiry": true
+    "reauthorizeAfterExpiry": true,
+    "downloadRequiresReauthentication": true,
+    "mailAttachment": false
   }
 }
 ```
 
 ## 3. 不変性ルール（仮）
 
-- `snapshotId` は一度作成した section value、canonical 識別子、scope、cutoff、freshness、source hash を更新しない。
+- `snapshotId` は一度作成した section value、canonical 識別子、scope、cutoff、freshness、source hash を更新しない。snapshot/documentは7年間保持する。
 - template/version、現在 DB 値、現在の recipient 権限を変更しても過去 run の JSON・document は変化しない。
-- 再生成は旧 snapshot の上書きではなく、新しい run/version として旧 snapshot への関係を持つ。generation retry の同一 run attempt か新 run かは DG-10 で決める。
-- `FAILED` section は値を配布可能な値として扱わず、失敗理由を sanitized code で監査する。partial document の生成・配布可否は DG-10 で決める。
+- 明示的な再生成は旧 snapshot の上書きではなく、新しい run/version として旧 snapshot への関係を持つ。generation retryは同一runの同一snapshotを再利用し、重複snapshotを作らない。
+- `FAILED` section は値を配布可能な値として扱わず、失敗理由をsanitized codeで監査する。sectionが1つでも失敗したrunは`PARTIAL`/`FAILED`として配布停止する。
 - document はこの snapshot を唯一の入力とし、render 時に正本 DB を再集計しない。PDF/XLSX/CSV の金額セルは同一 value contract から作る。
-- recipient preview は delivery enqueue 前に実施し、scope mismatch を reject する。download/open 時にも `DocumentService` の scope/access check を再実施する。
+- recipient previewはgeneration前に実施し、scope mismatchをrejectする。generation時とdownload/open時にも`DocumentService`のscope/access checkを再実施する。権限喪失、組織異動、link期限切れは拒否し、download時は再認証を要求する。
 
 ## 4. contract test の入力境界（仮）
 
 画面 DTO、既存 export DTO、snapshot section value を同じ fixture の正本 service 出力から比較する。比較対象は sales、gross profit、utilization、AR balance などの指標値とし、表示用のラベル・通貨・速報/確定フラグは別の presentation assertion にする。fixture は tenant timezone、月末、確定 record、予測 pipeline、scope 外 record を含む。
 
-## 5. DG-10 で決定するフィールド
+## 5. 実装固定項目
 
-`recipientPreview.status`、partial section の配布可否、snapshot retention、link TTL、再認可の要件、delivery channel、generation retry の run/version 関係、ServiceDesk section の追加条件は未決定である。この sample の値を既定値として実装してはならない。
+`recipientPreview.status`はscope check後の承認状態、partial sectionは配布停止、retentionは7年、deliveryは站内通知＋期限付きlink、downloadは再認証、generation retryは同一run・同一snapshotとする。ServiceDesk/SLAはNF-02 PASSまで対象外である。

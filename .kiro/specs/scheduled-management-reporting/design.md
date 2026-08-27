@@ -1,10 +1,10 @@
-# 設計ドラフト（DG-10 決定前）
+# 承認済み設計（NF-10 / DG-10）
 
 ## 1. 目標アーキテクチャ
 
-`template/version → run → section snapshot → DocumentService → notification outbox / link delivery` の流れを候補とする。report adapter は既存の正本 service/DTO を呼び、集計式を持たない。scheduler は session/request に依存せず、保存済みの system principal、tenant timezone、scope owner、as-of context を明示して実行する。
+`template/version → run → section snapshot → DocumentService → notification outbox / link delivery` の流れで実装する。report adapter は既存の正本 service/DTO を呼び、集計式を持たない。scheduler は session/request に依存せず、保存済みの system principal、`Asia/Tokyo`、scope owner、as-of context を明示して実行する。
 
-候補テーブルは `m_report_template`、`m_report_template_version`、`m_report_schedule`、`t_report_run`、`t_report_section_snapshot`、`t_report_delivery`。これは NF-10 の候補であり、DG-10/F1 の承認前に migration を作成しない。
+実装対象テーブルは `m_report_template`、`m_report_template_version`、`m_report_schedule`、`t_report_run`、`t_report_section_snapshot`、`t_report_delivery`。snapshot/documentは7年間保持する。通常retryは同一runのsection snapshotを一意制約で再利用し、明示的な再生成だけ新run/versionを作る。
 
 ## 2. section adapter の責務
 
@@ -12,17 +12,17 @@
 |---|---|---|---|
 | Revenue adapter | `DashboardService` + `MonthlyRevenueCalcService` / dashboard DTO | 売上・粗利の式の再実装、現在 DB 値で旧 run を再生成 | service class、DTO、対象 month、source rows/hash |
 | Utilization adapter | `UtilizationCalcService` / `UtilizationForecastService` | Bench/稼働率の別式、session の自己 scope | month、actual/forecast、contract as-of、scope hash |
-| CashFlow adapter | `CashFlowForecastService` | scope 未定のまま個人/顧客 report を許可、money の double 化 | from、months、opening-balance source、reconciliation as-of |
+| CashFlow adapter | `CashFlowForecastService` | scopeを全社/許可組織以外へ拡張、money の double 化 | from、months、opening-balance source、reconciliation as-of、scope |
 | Management accounting adapter | `ManagementAccountingService` | `MonthlyAccountingDimension` の snapshot を current org で上書き | month、actual/forecast source、dimension version |
 | Sales performance adapter | `SalesPerformanceService` + `MonthlyRevenueCalcService` | commission/win rate の再計算、session self の利用 | month、rule config version、unattributed row |
 | AR adapter | `InvoiceService.aging(asOf)` | aging bucket の再実装、scope 外 customer の列挙 | asOf、scope query hash、bucket version |
-| ServiceDesk adapter | 未存在 | NF-02 前の推定値・仮 section | `UNAVAILABLE / DEPENDENCY_NOT_ACCEPTED` のみ検討 |
+| ServiceDesk adapter | 未存在 | NF-02 PASS前の推定値・仮section | 実装対象外 |
 
 ## 3. 不変性・時刻・スコープ
 
 ### 3.1 time / as-of decision table
 
-| 対象 | business time | as-of / cutoff | 候補となる決定 |
+| 対象 | business time | as-of / cutoff | 承認済み規則 |
 |---|---|---|---|
 | 月次 section | tenant timezone の月初〜月末（両端含む） | monthly closing 状態と確定 work record | 速報/確定の表示、closedThrough を保存 |
 | forecast | 生成時点の pipeline/contract view | `generatedAt` と forecast source cutoff | forecast を actual と別系列で保存 |
@@ -33,7 +33,7 @@
 
 ### 3.2 subject × operation × visibility decision table
 
-| subject | operation | visibility owner | 候補制御 |
+| subject | operation | visibility owner | 承認済み制御 |
 |---|---|---|---|
 | report template/version | create/update/publish | 管理者/マネージャーの承認済み scope | version CAS、変更監査 |
 | run/snapshot | generate/view/regenerate | run に固定した scope owner | current user/DB 値で再解決しない |
@@ -43,20 +43,21 @@
 
 ### 3.3 state / competition decision table
 
-| 対象 | 状態候補 | 競合制御 |
+| 対象 | 承認済み状態 | 競合制御 |
 |---|---|---|
-| schedule/run | due、claimed、running、succeeded、partial、failed、retryable | ShedLock、run unique key、state CAS |
+| schedule/run | due、claimed、running、succeeded、partial、failed、retryable | ShedLock、run unique key、state CAS。partial/failedはdelivery不可 |
 | section | pending、succeeded、stale、failed | section key unique、attempt audit |
-| generation | pending、generating、generated、failed、retrying | idempotency key + content/source hash |
+| generation | pending、generating、generated、failed、retrying | idempotency key + content/source hash。同一runのsnapshot重複不可 |
 | delivery | pending、processing、sent、retry、failed/DLQ | outbox claim、dedupe、manual replay authorization |
 
-## 4. DDL/実装前の未決定事項
+## 4. 承認済みの実装判断
 
-1. tenant key の実際の report scope と、organization/sales/customer の組み合わせ。
-2. snapshot の retention、legal hold、削除、restore 後の再送。
-3. partial section を含む document を生成・配布できるか。
-4. generation retry は同一 run の attempt とするか、新 run/version とするか。
-5. recipient preview の承認者、delivery channel、link TTL と再認可方法。
-6. CashFlow/SalesPerformance に必要な explicit scope adapter の境界。
+1. report利用者は管理者/マネージャー。管理者は全社、マネージャーは許可された組織scope。schedule有効化は管理者のみ。
+2. 対象は月次。timezoneは`Asia/Tokyo`。速報は未締め＋dataAsOf/freshness、確定版は月次締め完了後のみ。
+3. snapshot/document保持は7年。過去runはimmutable。template・現在DB・現在権限の変更で過去runを変化させない。
+4. 通常generation retryは同一run・同一snapshot、明示的再生成は新version。section一つでも失敗したrunは`PARTIAL`/`FAILED`として配布停止。
+5. recipient previewを生成前に必須とし、generation/downloadの両方でscope検証。権限喪失、組織異動、link期限切れはdownload拒否、download時は再認証。
+6. deliveryはnotification outbox経由の站内通知＋期限付きlink。メール添付なし。PDF/XLSX/CSVは同一snapshotから生成。
+7. ServiceDesk/SLAはNF-02 PASSまで対象外。report独自SQL・集計式・丸めは禁止。
 
-これらは DG-10 の判断なしに default を置かない。F1 は決定後に最新 migration 番号、V1/H2 schema、MySQL smoke、shape test をそろえて開始する。
+F1は承認Base `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`へ統合済みの専用branchで、最新migration番号、V1/H2 schema、MySQL smoke、shape testをそろえて開始する。

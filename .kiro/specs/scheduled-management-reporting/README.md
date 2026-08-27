@@ -2,24 +2,23 @@
 
 ## 開工判定
 
-- 状態: `DISCOVERY_ONLY / BLOCKED_DG-10`
-- Approved report/recipient: `<APPROVED_SCOPE>`（未解決のプレースホルダー）
-- Owner: `<OWNER>`（未解決のプレースホルダー）
-- 指定 Base: `<BASE_COMMIT>`（未解決のプレースホルダー）
-- 指定 Base branch: `<BASE_BRANCH>`（未解決のプレースホルダー）
-- 実観測 Base: `main` / `f131f51c50dbfb68ffc8e71878da52947560c80e`
+- 状態: `APPROVED / IMPLEMENTING`
+- Approved report/recipient: 管理者（全社）およびマネージャー（許可された組織scope）
+- Owner: 管理者（経営管理責任者）
+- Base policy: 再開時にfetchした最新 `origin/main`
+- 実観測 Base: `origin/main` / `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 実装 branch: `codex/scheduled-management-reporting`
 - 専用 worktree: `C:\work\ses-scheduled-management-reporting`
 
-受入後トレーサビリティでは NF-10 が `CANDIDATE`、DG-10 が未決定である。したがって、開始対話の停止条件に従い、既存集計 inventory と sample snapshot spec までを成果物とする。F1 の DDL、アプリケーションコード、画面、生成、配布、運用訓練は着手しない。
+NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売上、粗利、売上予測、稼働率、Bench、管理会計、Cash Flow、AR aging、BP支払予定、契約終了・更新見込みとし、NF-02 PASSまではServiceDesk/SLAを含めない。timezoneは`Asia/Tokyo`、snapshot/document保持は7年、PDF/XLSX/CSVは同一immutable snapshotから生成する。
 
 ## 成果物
 
 - [inventory.md](inventory.md): 既存の指標・経路・正本 service/DTO・cutoff/timezone・scope owner・snapshot・document・recipient/delivery の対応表。
 - [sample-snapshot-spec.md](sample-snapshot-spec.md): 実装・migration ではない、契約検討用の仮 snapshot 例。
-- [requirements.md](requirements.md): DG-10 決定前の要求ドラフト。
-- [design.md](design.md): 正本再利用、時刻、スコープ、状態の設計ドラフト。
-- [tasks.md](tasks.md): discovery 完了と DG-10 待ちの実行台帳。
+- [requirements.md](requirements.md): 承認済み要求。
+- [design.md](design.md): 承認済み設計と正本再利用、時刻、スコープ、状態の規約。
+- [tasks.md](tasks.md): 承認済みの実行台帳。
 - [completion-matrix.md](completion-matrix.md): 完了対応表と Review 引き渡し条件。
 
 ## 読了した根拠資料
@@ -36,12 +35,13 @@
 
 `src/main` に ServiceDesk/SLA の正本実装は存在しない。NF-02 が受入・PASS するまで ServiceDesk section を実装対象に含めない。
 
-## 停止中の境界
+## 承認済み実装境界
 
-DG-10 で少なくとも次を決定する必要がある。
+- 管理者は全社、マネージャーは許可された組織scopeを対象とする。schedule有効化は管理者のみ。
+- 速報は未締めデータとして`dataAsOf`/freshnessを表示し、確定版は月次締め完了後のみ生成する。
+- template変更・現在DB値・現在権限変更で過去runを変化させない。明示的な再生成は新version、通常retryは同一runの同一snapshotを再利用する。
+- section失敗時は`PARTIAL`/`FAILED`として配布停止する。
+- 配布はnotification outbox経由の站内通知＋期限付きlinkのみ。メール添付は使用しない。recipient previewを生成前に必須とし、生成時/download時のscope検証、期限切れ時の再認可、download時再認証を行う。
+- schedulerは明示system principalを使用し、HTTP sessionに依存しない。既存正本service/DTOを利用し、report独自SQL・集計式・丸めを作らない。
 
-1. 利用者、template/version の管理者、速報/確定の表示・確定条件。
-2. snapshot の保持期間、再生成の意味、version 差分表示、section 部分失敗時の配布可否。
-3. recipient の型、scope owner の決定方法、preview の承認者、link の期限切れ再認可、delivery channel。
-
-決定後にのみ、承認済み plan/spec/tasks を確定版へ昇格し、F1 以降を開始する。実装対話では PR を作成しない。Review 用に必要な base/head と本ディレクトリの成果物は `completion-matrix.md` に集約する。
+承認済みplan/spec/tasksへ昇格済みであり、F1以降を実装する。実装対話ではPRを作成しない。Review用のbase/head、task対応、テスト証拠は`completion-matrix.md`に集約する。
