@@ -74,8 +74,16 @@ public class ReportScheduleServiceImpl implements ReportScheduleService {
         if (version == null || !"PUBLISHED".equals(version.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
-        LocalDateTime next = request.getNextRunAt() == null
-                ? LocalDateTime.now(ZoneId.of(TIMEZONE)).plusMinutes(1) : request.getNextRunAt();
+        ZoneId zone = ZoneId.of(TIMEZONE);
+        LocalDateTime next = request.getNextRunAt();
+        if (next == null) {
+            LocalDateTime now = LocalDateTime.now(zone);
+            var nextOccurrence = CronExpression.parse(cron).next(now.atZone(zone));
+            if (nextOccurrence == null) {
+                throw BusinessException.of(400, "error.managementReport.scheduleInvalid");
+            }
+            next = nextOccurrence.toLocalDateTime();
+        }
         ReportSchedule schedule = new ReportSchedule();
         schedule.setTenantId(TENANT_ID);
         schedule.setTemplateVersionId(request.getTemplateVersionId());

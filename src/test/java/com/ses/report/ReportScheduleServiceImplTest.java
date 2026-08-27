@@ -84,6 +84,28 @@ class ReportScheduleServiceImplTest {
                 .hasMessageContaining("error.managementReport.scheduleInvalid");
     }
 
+    @Test
+    void missingNextRunUsesNextCronOccurrenceInTokyo() {
+        ReportScheduleMapper scheduleMapper = mock(ReportScheduleMapper.class);
+        ReportTemplateVersionMapper versionMapper = mock(ReportTemplateVersionMapper.class);
+        OrganizationScopeService scopeService = mock(OrganizationScopeService.class);
+        ReportScheduleServiceImpl service = new ReportScheduleServiceImpl(scheduleMapper, versionMapper,
+                scopeService, new ObjectMapper());
+        authenticate(1L, "管理者");
+        when(versionMapper.selectById(3L)).thenReturn(publishedVersion());
+        doAnswer(invocation -> 1).when(scheduleMapper).insert(any(ReportSchedule.class));
+
+        ReportScheduleCreateRequest request = new ReportScheduleCreateRequest();
+        request.setTemplateVersionId(3L);
+        request.setCronExpression("0 0 9 1 * *");
+
+        ReportSchedule schedule = service.create(request);
+
+        assertThat(schedule.getNextRunAt().getDayOfMonth()).isEqualTo(1);
+        assertThat(schedule.getNextRunAt().getHour()).isEqualTo(9);
+        assertThat(schedule.getNextRunAt().getMinute()).isZero();
+    }
+
     private void authenticate(Long userId, String role) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(String.valueOf(userId), "N/A",
