@@ -6,7 +6,7 @@
 |---|---|---|
 | Approved policy/scope | `<APPROVED_SCOPE>`（未置換） | 未承認。処分対象の範囲を確定できない |
 | Privacy owner | `<OWNER>`（未置換） | 未定。データ要素ごとの責任者が未確定 |
-| Base commit / branch | `<BASE_COMMIT>` / `<BASE_BRANCH>`（未置換） | 入力値は未確定。開始時の作業base/merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。fetch後の現在 `origin/main` は `f131f51c50dbfb68ffc8e71878da52947560c80e` に進んだため、rebaseしない |
+| Base commit / branch | 承認値は未提供（`<BASE_COMMIT>` / `<BASE_BRANCH>`） | 技術比較baseは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`、開始時merge-baseは `0333b0a4afadef42639bad27e1ae443758f9804f`。これは承認済みBaseではなく、decision evidenceがないためrebase/PLAN PASSを行わない |
 | NF-07 | CANDIDATE | 承認済み要求ではない |
 | DG-07 | 未完了 | 保持期間、法的根拠、hold権限、二者承認、法務/HR/税務責任者が未確定 |
 | 外部専門家 / 社内責任者 gate | 未完了 | 本番処分を許可しない |
@@ -36,6 +36,8 @@ DG-07 および外部専門家/社内責任者 gate が完了していないた�
 2. retention は「保持期間」と「起算trigger」を分離し、policy version、承認者、承認日時、適用開始を持つ。値が未確定、provisional、または起算日を計算できない場合は、処分候補にしない。
 3. 法定文書、監査ログ、認証/セキュリティ証跡、バックアップ/replica、契約・請求・勤怠・税務・採用の保持判断は、各既存specと矛盾してはならない。未確定事項は `UNKNOWN` として残す。
 4. AIについては `.kiro/specs/ai-feedback-learning/g10-allowlist.json` を正本とし、allow-list、provider retention、raw prompt 0日、redacted summary 730日、legacy `t_ai_log` 30日という既存値を「技術上の現状」として記録する。ただし法的な承認済み保存期間とは扱わない。
+5. システムは全migrationのtable/column、全entityの`@TableName`、provider/gateway/file/AI egress・log・cache・index・export・backup・replica候補の機械的coverage結果を、対象件数、column件数、provider候補件数、inventory hash、source manifest hash、生成時点、未マップ件数とともに記録しなければならない。未マップまたはwildcard/group表記だけの対象は `UNKNOWN/BLOCKED` とし、PR-R1を完全達成扱いにしてはならない。
+6. 各明示inventory対象は、table/column/file/payload単位で owner、purpose、collection trigger、policy version、retention、legal hold、処分方式（delete/logical delete/anonymize/restrict/export）、DSAR provider、result evidenceを持たなければならない。未承認の値は推測せず `UNKNOWN` とする。
 
 ### PR-R2 read-only dry-run
 
@@ -61,11 +63,18 @@ DG-07 および外部専門家/社内責任者 gate が完了していないた�
 3. audit logとlegal document originalは、DSARだけを理由に無条件削除してはならない。処分候補は、既存 `t_document_disposal_request` および監査/復旧証跡との整合を確認してから扱う。
 4. システムは「削除してよい」という法的結論を生成しない。人が承認したpolicyとcase decisionを実行条件として受け取るだけとする。
 
+### PR-R5 承認証跡とReview境界
+
+1. approved scope、Privacy owner、Decision Gate、Base branch/SHAは、実在する承認記録への参照なしに確定してはならない。placeholderや口頭説明は承認証跡として扱わない。
+2. 承認値が未提供の場合、technical comparison base（このincrementでは `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e`）とmerge-baseを別項目で記録し、approved Baseとの差を未解決としてfail-closedにする。
+3. PLAN FAILまたはPLAN CONDITIONALの間は、F1-M、外部I/O、処分flag、PRを開始しない。独立ReviewのPLAN/IMPLEMENTATION双方PASS後だけ、Review側が次の手続きを判断する。
+
 ## 3. 受入基準（今回）
 
 - [ ] `<APPROVED_SCOPE>`、`<OWNER>`、`<BASE_COMMIT>`、`<BASE_BRANCH>` の実値が承認記録に置換されている。
 - [ ] DG-07、外部専門家、社内責任者 gate がPASSになっている。
-- [x] inventoryにDB table/column、file/object、AI payload、owner/purpose/trigger/retention/hold/disposition/provider/evidenceが載っている。未確定はUNKNOWN/PROVISIONALと明示している。
+- [ ] inventoryにDB table/column、file/object、AI payload、owner/purpose/trigger/retention/hold/disposition/provider/evidenceが載り、全migration/entity/providerのcoverage hash・生成証跡が揃っている。現状は明示row未整備の対象が残るためUNKNOWN/BLOCKED。
+- [x] 機械的coverage scannerを追加し、未マップ対象が候補化されず、coverage不完全時に非0終了することを確認した。
 - [x] dry-runがno-writeでcandidate/blocked/unknownを説明し、fixtureでhold、audit、同姓同名、scope外、unknownを扱う。
 - [x] 通常checkoutを変更せず、専用worktree/branchで作業した。
 - [ ] F1以降のDDL、provider、dashboard、DSAR export、処分batch、restore/evidenceはgate完了後の別incrementとする。

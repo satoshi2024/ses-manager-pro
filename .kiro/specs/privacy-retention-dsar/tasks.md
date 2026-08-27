@@ -2,7 +2,7 @@
 
 ## 停止条件
 
-DG-07、外部専門家gate、社内責任者gate、approved scope/owner/baseのいずれかが未確定なら、`0` と `D0` までで停止する。F1以降のチェックは、gate証跡が追加されたtaskでのみ更新する。
+DG-07、外部専門家gate、社内責任者gate、approved scope/owner/base、またはmechanical coverageのいずれかが未確定なら、`0` と `D0` までで停止する。F1以降のチェックは、gate証跡が追加されたtaskでのみ更新する。placeholder、口頭説明、wildcard/group表記は承認/coverage証跡とみなさない。
 
 ## 0. legal / PII inventory
 
@@ -17,6 +17,18 @@ DG-07、外部専門家gate、社内責任者gate、approved scope/owner/baseの
   - **Implementation**: requirements/designに未置換placeholder、NF-07 CANDIDATE、DG-07未完、外部/社内gate未完、処分flag OFFを固定する。
   - **Test requirements**: 通常checkoutが変更されていないこと、専用worktree/branch/base/remote/statusを記録すること。
   - **Demo**: F1〜Mが未完了であるcompletion mappingを示す。
+
+- [x] **0.3 migration/entity/provider mechanical coverage**
+  - **Objective**: wildcardで完了扱いせず、全migration table/column、entity、provider/gateway/file/AI egress・log・cache・index・export・backup・replica候補を再走査する。
+  - **Implementation**: `tools/privacy-retention-dsar/inventory-coverage.ps1` を追加し、inventoryの明示table reference、source manifest hash、inventory hash、件数、未マップtableをstdoutへ出す。DB/file/AIの未確定はUNKNOWN/BLOCKEDとする。
+  - **Test requirements**: scannerがwrite/provider call 0で、unmapped対象がある現状はexit code 2となること、全source hashと生成結果が再現できることを確認する。
+  - **Demo**: migration 116 file / 180 table / 4,220 CREATE column / 114 ALTER column record、entity 176 table、provider候補123 fileを出力し、未マップを候補化しない。
+
+- [ ] **0.4 coverage closure**
+  - **Objective**: 全migration/entity/providerの明示inventory rowとresult evidenceを揃える。
+  - **Implementation**: 各table/column/providerへ owner、purpose、trigger、policy version、legal hold、disposition、DSAR provider、result evidenceを付与する。unknownは人の確認までBLOCKEDとする。
+  - **Test requirements**: scanner exit code 0、unmapped=0、inventory/source hash固定、AI egress/log/cache/file/index/exportおよびbackup/replicaのcoverageを独立Reviewで確認する。
+  - **Demo**: coverageがexit code 0になるまでF1以降を開始しない。
 
 ## D0. read-only dry-run（今回の完了範囲）
 

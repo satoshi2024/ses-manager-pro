@@ -2,16 +2,18 @@
 
 開始時base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`
 fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（base drift。`<BASE_COMMIT>`未確定のためrebaseなし）
+承認scope/Privacy owner/approved Base branch/SHA: 実在するdecision evidence未提供。上記origin/mainは技術比較境界であり承認済みBaseではない。
 実装branch: `codex/privacy-retention-dsar`
 通常checkout: `C:\work\ses-manager-pro`（変更しない）
 
 | 要件/task | evidence | 検証/Demo | status |
 |---|---|---|---|
-| PR-R1 / 0.1 | `pii-inventory.md` | DB/file/AI、owner/purpose/trigger/retention/hold/disposition/providerをstatic evidenceとunknown/provisional付きで確認 | COMPLETE（discovery） |
-| PR-R1.2 | `pii-inventory.md` §4、`design.md` §4 | unapproved retentionを法的確定とせず、NULL/未確定を候補外にする | COMPLETE（discovery） |
+| PR-R1 / 0.1 | `pii-inventory.md` | DB/file/AI、owner/purpose/trigger/retention/hold/disposition/providerをstatic evidenceとunknown/provisional付きで確認 | INCOMPLETE（明示coverage未完） |
+| PR-R1.2 | `pii-inventory.md` §4、`design.md` §4 | unapproved retentionを法的確定とせず、NULL/未確定を候補外にする | COMPLETE（discovery boundaryのみ） |
 | PR-R2 / D0.1 | `read-only-dry-run.ps1`、`dry-run.md` | fixtureでcandidate/blocked/unknownを出力、providerCallCount=0 | COMPLETE（offline） |
 | PR-R2.3 | fixture hold/legal-retention/audit/active-business/same-name/scope-out | blockerをBLOCKEDとして説明し、scope外providerを呼ばない | COMPLETE（offline） |
 | PR-R2.4 | invalid identity/disposition fixtures、script allow-list | `UNVERIFIED`はBLOCKED、未知dispositionはUNKNOWNで、raw PII keyは拒否 | COMPLETE（offline） |
+| PR-R1.3 mechanical coverage | `inventory-coverage.ps1`、`coverage-evidence.md`、`pii-inventory.md` §4 | migration 116/180/4,220/114（CREATE/ALTER）、entity 176、provider候補123、unmappedは非0終了・UNKNOWN/BLOCKED | BLOCKED（unmapped 78、exit 2、inventory `b0760b7337380f018f79bd7d07e6bf5c7e83e454c0a9bb123031b48a52ed6548`、source `6137cb504d8e17290727249de4d4808052d6c5d41c92c59ec25ac13f8a8d4cc3`） |
 | PR-R3 | `requirements.md` §2 PR-R3、`design.md` §5 | identity/third-party redaction/export/providerを未実装・fail-closedとして明示 | SPEC ONLY |
 | PR-R4 | `requirements.md` §2 PR-R4、`tasks.md` F1〜M | DG-07未完、flag OFF、処分経路なしを確認 | BLOCKED BY GATE |
 | approved plan | `plan.md` | 推奨順0→F1→F2→A1→A2→B1→B2→Mを記載。承認入力未置換のためNOT_APPROVED | BLOCKED BY GATE |

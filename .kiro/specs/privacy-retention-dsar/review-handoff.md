@@ -5,6 +5,7 @@
 - Review対象: `origin/codex/privacy-retention-dsar` のdispatch時点のbranch tip。remote Headを正本とし、dispatch時に `git ls-remote` で取得したSHAとworktree HEADを一致確認して記録する（特定の過去Headを最新とみなさない）。
 - 開始時Base/merge-base: `0333b0a4afadef42639bad27e1ae443758f9804f`。
 - fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`。`<BASE_COMMIT>/<BASE_BRANCH>` が未置換のためbase driftを解消せず、rebase/取り込みを行っていない。
+- approved Base branch/SHA: **未提供**。上記 `origin/main@f131f51c50dbfb68ffc8e71878da52947560c80e` は技術比較用の観測値であり、承認証跡ではない。承認記録が到着するまでPLAN FAIL/hard stopを維持する。
 - Worktree: `C:\work\ses-manager-pro-privacy-retention-dsar`。
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。
@@ -23,6 +24,8 @@
 8. `.kiro/specs/privacy-retention-dsar/review-ledger.md`
 9. `tools/privacy-retention-dsar/read-only-dry-run.ps1`
 10. `tools/privacy-retention-dsar/dry-run-fixture.json`
+11. `.kiro/specs/privacy-retention-dsar/coverage-evidence.md`
+12. `tools/privacy-retention-dsar/inventory-coverage.ps1`（read-only source coverage、未マップ時exit 2）
 
 ## Review request
 
@@ -31,6 +34,7 @@
 - unresolved placeholderが残る状態で処分実装へ進んでいないか。
 - DG-07、外部専門家、社内責任者、backup/recovery、identity/security、audit、legal document、recruiting retention、AI G10 gateの未完了を正しく停止理由にしているか。
 - inventoryのtable/column/file/AI payload漏れ、owner/purpose/trigger/retention/hold/disposition/providerのunknown扱いが妥当か。
+- 全migration/entity/providerのcoverage件数、inventory/source hash、生成証跡、unmapped対象のUNKNOWN/BLOCKED扱いを確認する。
 
 ### IMPLEMENTATION Review
 
