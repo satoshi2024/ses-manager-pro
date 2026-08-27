@@ -40,6 +40,10 @@
   - Objective: 管理者有効化のscheduleをShedLock＋DB CASで実行し、system principalからsnapshot生成・DocumentService登録・recipient scope再確認・通知outbox配布まで接続する。
   - Evidence: `ReportScheduleServiceImpl`、`ReportScheduleMapper`、`ManagementReportScheduler`、`ReportDeliveryServiceImpl`、delivery API。tokenはhashのみ保存、期限7日、download前password再認証10分、権限・組織scopeを再検証、retry/DLQ/manual replayを実装。
   - Demo: 同一scheduleのCAS二重claim、PARTIAL run配布停止、期限切れlink拒否、再認証後のdownload、notification dedupeをテストする。
-- [ ] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
+- [x] M: contract test、月末境界、desktop/390px、restore、配布障害訓練、base/head 証拠。required gatesをskip 0で実施する。
+  - Objective: 同一immutable snapshot契約、月末・Asia/Tokyo境界、二重起動・retry・DLQ、recipient scope変更、document restore、画面responsive、backup/recoveryの受入証拠を固定する。
+  - Evidence: `ReportSnapshotServiceImplTest` 4/4、`ReportDeliveryServiceImplTest` 6/6、`ManagementReportSchedulerTest` 2/2、`ReportDocumentServiceImplTest` 2/2、`ActionPermissionResolverTest` 11/11、`AllMappersSchemaSweepTest` 174/174、合同targeted gate 199/199、`MobileResponsiveLayoutTest` 29/29、MySQL V112 smoke 5/5、performance 1/1 (p95=68ms)。backup unit各suiteはfailures=0、backup integrationはskip 0でSUCCESS（RPO/RTO、restore、cutover rollback、secret scanを含む）。
+  - Boundary/incident evidence: 月末 `2026-08-01..31`、Asia/Tokyo、速報の `GENERATED_AT` cutoff、確定の月次締め拒否、同一run retry再利用、明示regenerationの親run記録、scope変更download拒否、delivery attempt 5のDLQ、manual replay、期限切れlink拒否、recipient preview hashを検証した。
+  - Demo: `/management-reports` のdesktop/390px DOM/responsive検証は `MobileResponsiveLayoutTest` 29/29。専用browser testはJava 21のloopback制約でTomcat起動前に再現失敗し、スクリーンショットは生成されなかったため、Mの環境制約として記録する。document restoreはbackup integrationのrestore/validate-restoreとcutover rollbackで証明する。
 
 各完了taskは独立commitしてremoteへpushし、completion matrixへBase/Head、テスト、Demo、rollbackを記録する。実装対話ではPRを作成しない。

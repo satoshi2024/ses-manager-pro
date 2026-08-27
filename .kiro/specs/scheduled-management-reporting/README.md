@@ -2,13 +2,14 @@
 
 ## 開工判定
 
-- 状態: `APPROVED / IMPLEMENTING`
+- 状態: `APPROVED / IMPLEMENTED / INDEPENDENT_REVIEW_PENDING`
 - Approved report/recipient: 管理者（全社）およびマネージャー（許可された組織scope）
 - Owner: 管理者（経営管理責任者）
 - Base policy: 再開時にfetchした最新 `origin/main`
 - 実観測 Base: `origin/main` / `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 実装 branch: `codex/scheduled-management-reporting`
 - 専用 worktree: `C:\work\ses-scheduled-management-reporting`
+- 実装確認Head: `c0634abff78afcbfb2bf31fe7257a66e41367702`（completion matrix更新前）
 
 NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売上、粗利、売上予測、稼働率、Bench、管理会計、Cash Flow、AR aging、BP支払予定、契約終了・更新見込みとし、NF-02 PASSまではServiceDesk/SLAを含めない。timezoneは`Asia/Tokyo`、snapshot/document保持は7年、PDF/XLSX/CSVは同一immutable snapshotから生成する。
 
@@ -44,4 +45,4 @@ NF-10/DG-10 は2026-08-28に承認済みである。月次reportの対象は売�
 - 配布はnotification outbox経由のアプリ内通知＋期限付きlinkのみ。メール添付は使用しない。recipient previewを生成前に必須とし、生成時/download時のscope検証、期限切れ時の再認可、download時再認証を行う。
 - schedulerは明示system principalを使用し、HTTP sessionに依存しない。既存正本service/DTOを利用し、report独自SQL・集計式・丸めを作らない。
 
-承認済みplan/spec/tasksへ昇格済みであり、F1以降を実装する。実装対話ではPRを作成しない。Review用のbase/head、task対応、テスト証拠は`completion-matrix.md`に集約する。
+承認済みplan/spec/tasksへ昇格済みであり、F1/F2/A1/B1/B2/Mを実装・検証済みである。実装対話ではPRを作成しない。Review用のbase/head、task対応、テスト証拠は`completion-matrix.md`に集約する。Java 21 loopback制約により全面fast/MySQL/browserの一部既存HTTPテストは環境エラーとなるため、feature-specific green、targeted MySQL smoke、responsive DOM、backup/recoveryの証跡と分離して記録する。
