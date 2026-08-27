@@ -2,18 +2,24 @@
 # Static validation of task-definition.prod.json — no AWS API calls.
 param(
   [string]$EvidenceRoot = '',
-  [switch]$EfsNegativeSelfTestOnly
+  [string]$TaskDefinitionPath = '',
+  [switch]$EfsNegativeSelfTestOnly,
+  [switch]$SkipInlineNegativeSelfTest
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$TdPath = Join-Path $PSScriptRoot '..\task-definition.prod.json'
+$TdPath = if ($TaskDefinitionPath) {
+  (Resolve-Path $TaskDefinitionPath).Path
+} else {
+  (Resolve-Path (Join-Path $PSScriptRoot '..\task-definition.prod.json')).Path
+}
 $gitSha = (git -C $RepoRoot rev-parse HEAD).Trim()
 if (-not $EvidenceRoot) {
   $EvidenceRoot = Join-Path $RepoRoot ".kiro\reviews\production-acceptance\$gitSha\offline-ecs-simulation"
 }
 
-function Assert-EfsRootDirectoryRule([object]$efsCfg, [switch]$ExpectFail) {
+function Assert-EfsRootDirectoryRule([object]$efsCfg) {
   $lines = New-Object System.Collections.Generic.List[string]
   $ap = $efsCfg.authorizationConfig.accessPointId
   $rd = $efsCfg.rootDirectory
@@ -22,36 +28,128 @@ function Assert-EfsRootDirectoryRule([object]$efsCfg, [switch]$ExpectFail) {
     if ($null -eq $rd -or [string]$rd -eq '' -or [string]$rd -eq '/') {
       $lines.Add("PASS accessPointId=$ap rootDirectory='$rd' (absent or /)")
     } else {
-      $lines.Add("FAIL accessPointId=$ap rootDirectory='$rd' must be absent or / only")
-      if (-not $ExpectFail) { throw "invalid EFS rootDirectory with accessPointId: $rd" }
-      return $lines
+      # Always throw — never suppress. Fail-closed for ECS Access Point rule.
+      throw "invalid EFS rootDirectory with accessPointId: $rd"
     }
   } else {
     $lines.Add("INFO no accessPointId — rootDirectory rules not applied")
   }
-  if ($ExpectFail) { throw 'negative case unexpectedly passed' }
   return $lines
 }
 
-if ($EfsNegativeSelfTestOnly) {
-  New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
-  $neg = New-Object System.Collections.Generic.List[string]
-  $bad = [pscustomobject]@{
-    authorizationConfig = @{ accessPointId = 'fsap-TEST' }
-    rootDirectory         = '/ses-manager/uploads'
-  }
-  $threw = $false
-  try {
-    Assert-EfsRootDirectoryRule $bad -ExpectFail | Out-Null
-  } catch {
-    $threw = $true
-    $neg.Add("PASS negative: rootDirectory=/ses-manager/uploads rejected")
-    $neg.Add($_.Exception.Message)
-  }
-  if (-not $threw) { throw 'EFS negative self-test did not fail on /ses-manager/uploads' }
+function Invoke-NegativeEfsSelfTest([string]$OutEvidenceRoot) {
+  New-Item -ItemType Directory -Force -Path $OutEvidenceRoot | Out-Null
   $utf8 = New-Object System.Text.UTF8Encoding $false
-  [System.IO.File]::WriteAllText((Join-Path $EvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
-  Write-Host 'EFS negative self-test PASS'
+  $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ses-efs-neg-" + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+  try {
+    $tmpTd = Join-Path $tmpDir 'task-definition.bad.json'
+    $badJson = @'
+{
+  "family": "ses-manager-prod-neg",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "ses-manager",
+      "image": "ACCOUNT_ID.dkr.ecr.ap-northeast-1.amazonaws.com/ses-manager-pro@sha256:IMAGE_DIGEST",
+      "essential": true,
+      "readonlyRootFilesystem": true,
+      "linuxParameters": { "initProcessEnabled": true },
+      "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+      "environment": [{ "name": "SPRING_PROFILES_ACTIVE", "value": "prod" }],
+      "secrets": [],
+      "mountPoints": [
+        { "sourceVolume": "tmp", "containerPath": "/tmp", "readOnly": false },
+        { "sourceVolume": "uploads", "containerPath": "/app/uploads", "readOnly": false }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ses-manager-prod",
+          "awslogs-region": "ap-northeast-1",
+          "awslogs-stream-prefix": "ses",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health/liveness >/dev/null || exit 1"],
+        "interval": 30, "timeout": 5, "retries": 3, "startPeriod": 180
+      }
+    }
+  ],
+  "volumes": [
+    { "name": "tmp" },
+    {
+      "name": "uploads",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "fs-PLACEHOLDER",
+        "rootDirectory": "/ses-manager/uploads",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "fsap-PLACEHOLDER",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
+  "_offlineAcceptanceNotes": {
+    "albTargetGroupHealthCheck": { "path": "/actuator/health/readiness" }
+  }
+}
+'@
+    [System.IO.File]::WriteAllText($tmpTd, $badJson, $utf8)
+
+    $outFile = Join-Path $tmpDir 'child-out.txt'
+    $errFile = Join-Path $tmpDir 'child-err.txt'
+    $p = Start-Process -FilePath 'pwsh' -ArgumentList @(
+      '-NoProfile', '-File', $PSCommandPath,
+      '-TaskDefinitionPath', $tmpTd,
+      '-EvidenceRoot', (Join-Path $tmpDir 'child-ev'),
+      '-SkipInlineNegativeSelfTest'
+    ) -Wait -PassThru -NoNewWindow `
+      -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+    $validatorExit = $p.ExitCode
+    $childOut = ''
+    if (Test-Path $outFile) { $childOut += [System.IO.File]::ReadAllText($outFile) }
+    if (Test-Path $errFile) { $childOut += "`n" + [System.IO.File]::ReadAllText($errFile) }
+
+    $rejectionObserved = ($validatorExit -ne 0)
+    $msgMatch = ($childOut -match 'invalid EFS rootDirectory with accessPointId')
+    $accepted = ($childOut -match 'task-definition static validation PASS')
+
+    $neg = New-Object System.Collections.Generic.List[string]
+    $neg.Add("validatorExit=$validatorExit")
+    $neg.Add("rejectionObserved=$rejectionObserved")
+    $neg.Add("exceptionMessageMatch=$msgMatch")
+    $neg.Add('--- child output ---')
+    $neg.Add($childOut.Trim())
+
+    if ($accepted -or (-not $rejectionObserved) -or (-not $msgMatch)) {
+      [System.IO.File]::WriteAllText((Join-Path $OutEvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
+      throw "EFS negative gate FAIL-CLOSED: illegal rootDirectory accepted or exception missing (exit=$validatorExit match=$msgMatch)"
+    }
+
+    $neg.Insert(0, 'PASS negative: rootDirectory=/ses-manager/uploads rejected (subprocess exit non-0 + invalid EFS rootDirectory)')
+    [System.IO.File]::WriteAllText((Join-Path $OutEvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
+    return @{
+      validatorExit = $validatorExit
+      rejectionObserved = $rejectionObserved
+      childOut = $childOut
+      exceptionMessage = ([regex]::Match($childOut, 'invalid EFS rootDirectory with accessPointId[^\r\n]*')).Value
+    }
+  } finally {
+    Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+if ($EfsNegativeSelfTestOnly) {
+  $result = Invoke-NegativeEfsSelfTest -OutEvidenceRoot $EvidenceRoot
+  Write-Host "EFS negative self-test PASS (child validatorExit=$($result.validatorExit))"
   exit 0
 }
 
@@ -105,19 +203,8 @@ Ok 'ECR push/registryDigest=OUT-OF-SCOPE (no AWS account)'
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllLines((Join-Path $EvidenceRoot 'task-definition-validation.txt'), $lines.ToArray(), $utf8)
 
-# inline negative self-test output
-$neg = New-Object System.Collections.Generic.List[string]
-$bad = [pscustomobject]@{
-  authorizationConfig = @{ accessPointId = 'fsap-TEST' }
-  rootDirectory         = '/ses-manager/uploads'
+if (-not $SkipInlineNegativeSelfTest) {
+  $null = Invoke-NegativeEfsSelfTest -OutEvidenceRoot $EvidenceRoot
 }
-try {
-  Assert-EfsRootDirectoryRule $bad -ExpectFail | Out-Null
-  throw 'negative self-test did not fail'
-} catch {
-  $neg.Add('PASS negative: rootDirectory=/ses-manager/uploads must fail when accessPointId set')
-  $neg.Add($_.Exception.Message)
-}
-[System.IO.File]::WriteAllText((Join-Path $EvidenceRoot 'efs-validation-negative.txt'), ($neg -join "`n"), $utf8)
 
 Write-Host 'task-definition static validation PASS'
