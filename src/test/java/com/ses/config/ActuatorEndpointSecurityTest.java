@@ -49,17 +49,9 @@ class ActuatorEndpointSecurityTest {
 
     @Test
     void health_匿名で最小情報のみ返す_内部詳細を漏らさない() throws Exception {
-        // 集約 health は mail 等の indicator 次第で UP(200) / DOWN(503) になり得る。
-        // 本検証の要点は「匿名で到達でき、status 以外の内部詳細を返さない」こと。
         mockMvc.perform(get("/actuator/health"))
-                .andExpect(status().is(org.hamcrest.Matchers.anyOf(
-                        org.hamcrest.Matchers.is(200),
-                        org.hamcrest.Matchers.is(503))))
-                .andExpect(jsonPath("$.status").exists())
-                .andExpect(jsonPath("$.status").value(org.hamcrest.Matchers.anyOf(
-                        org.hamcrest.Matchers.is("UP"),
-                        org.hamcrest.Matchers.is("DOWN"),
-                        org.hamcrest.Matchers.is("OUT_OF_SERVICE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"))
                 // show-details/show-components=never のため component 詳細は返さない
                 .andExpect(jsonPath("$.components").doesNotExist())
                 .andExpect(jsonPath("$.details").doesNotExist());
