@@ -38,6 +38,8 @@ fetch後の現在 `origin/main`: `f131f51c50dbfb68ffc8e71878da52947560c80e`（ba
 | compliance history inventory | `ab06e0a3098e4e072cdee0d6b75f9ec439189bed` | `origin/codex/privacy-retention-dsar` | pushed |
 | reviewer qualification inventory | `a05ad24203110090afdd69d2248e054133cf29b9` | `origin/codex/privacy-retention-dsar` | pushed |
 | reviewer adoption inventory | `64e33cbc54720264f785c8030b99fa3630a23a95` | `origin/codex/privacy-retention-dsar` | pushed |
+| mechanical inventory coverage | `950d3c7126ac45f85cf2286fbab31eec1f011472` | `origin/codex/privacy-retention-dsar` | pushed |
+| delta gate traceability alignment | `0a66604c198ffda361544e070cffefcd79295f27` | `origin/codex/privacy-retention-dsar` | pushed |
 
 ## D0 actual verification
 
