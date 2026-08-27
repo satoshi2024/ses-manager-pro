@@ -33,6 +33,7 @@ public class PwaClientMutationLedgerService {
     private final PwaCanonicalizer canonicalizer;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final PwaMutationMetrics metrics;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Claim claim(PwaMutationCommand command, String clientRequestId, String payloadHash,
@@ -63,6 +64,7 @@ public class PwaClientMutationLedgerService {
             row.setCreatedAt(LocalDateTime.now(clock));
             try {
                 mapper.insert(row);
+                metrics.increment("claimed", command.screen());
                 return Claim.newClaim(row.getId(), context);
             } catch (DuplicateKeyException duplicate) {
                 existing = mapper.selectByUserAndClientRequest(context.userId(), clientRequestId);
@@ -84,6 +86,7 @@ public class PwaClientMutationLedgerService {
             throw new PwaConflictException("pwa.idempotencyPayloadMismatch", data);
         }
         if (COMPLETED.equals(existing.getStatus())) {
+            metrics.increment("replay", command.screen());
             return Claim.replay(existing.getId(), context, readResponse(existing.getResponseJson()));
         }
         throw new PwaConflictException("pwa.mutationInProgress", Map.of(
@@ -99,6 +102,7 @@ public class PwaClientMutationLedgerService {
             row.setResponseJson(objectMapper.writeValueAsString(responseData));
             row.setCompletedAt(LocalDateTime.now(clock));
             mapper.updateById(row);
+            metrics.increment("completed", row.getScreen());
         } catch (Exception e) {
             throw new IllegalStateException("PWA command結果の保存に失敗しました", e);
         }
@@ -107,7 +111,10 @@ public class PwaClientMutationLedgerService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void abandon(Long mutationId) {
         PwaClientMutation row = mapper.selectById(mutationId);
-        if (row != null && PROCESSING.equals(row.getStatus())) mapper.deleteById(mutationId);
+        if (row != null && PROCESSING.equals(row.getStatus())) {
+            mapper.deleteById(mutationId);
+            metrics.increment("abandoned", row.getScreen());
+        }
     }
 
     private JsonNode readResponse(String responseJson) {

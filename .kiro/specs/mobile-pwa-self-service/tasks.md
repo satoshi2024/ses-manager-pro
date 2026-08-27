@@ -123,7 +123,7 @@ timesheet、attendance、expense、change-requestのshell navigationを390×844�
 
 各対象画面で入力→offline保存→再起動→online同期→server ack、stale conflict→manual reapplyを実行する。
 
-## Task B1 — Update、cleanup、monitoring、recovery
+## Task B1 — Update、cleanup、monitoring、recovery `[x]`
 
 ### Objective
 

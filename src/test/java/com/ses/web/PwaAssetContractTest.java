@@ -67,6 +67,18 @@ class PwaAssetContractTest {
         assertThat(queue).doesNotContain("password", "bankAccount", "receiptBlob");
     }
 
+    @Test
+    void server側retentionと監視はpayloadやuser識別子をtagへ出さない() throws Exception {
+        String scheduler = Files.readString(Path.of(
+                "src/main/java/com/ses/service/pwa/PwaClientMutationCleanupScheduler.java"), StandardCharsets.UTF_8);
+        String metrics = Files.readString(Path.of(
+                "src/main/java/com/ses/service/pwa/PwaMutationMetrics.java"), StandardCharsets.UTF_8);
+
+        assertThat(scheduler).contains("queue-retention-days", "deleteOlderThan", "PWA mutation ledger cleanup completed");
+        assertThat(metrics).contains("ses.pwa.mutations", "outcome", "screen");
+        assertThat(metrics).doesNotContain("userId", "payload", "userScope");
+    }
+
     private String read(String name) throws Exception {
         return Files.readString(STATIC_ROOT.resolve(name), StandardCharsets.UTF_8);
     }
