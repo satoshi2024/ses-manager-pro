@@ -36,6 +36,7 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
     private final EngineerMapper engineerMapper;
     private final SysUserMapper sysUserMapper;
     private final LifecycleScopeService scopeService;
+    private final com.ses.mapper.DocumentMapper documentMapper;
 
     @Override
     @Transactional
@@ -111,6 +112,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
 
         // 証跡リンク登録 (DOCUMENT_LINK時など)
         if (cmd != null && cmd.getDocumentId() != null) {
+            com.ses.entity.Document doc = documentMapper.selectById(cmd.getDocumentId());
+            if (doc == null) {
+                throw BusinessException.of(400, "error.document.notFound", "指定された文書が見つかりません: " + cmd.getDocumentId());
+            }
             LifecycleEvidenceLink link = LifecycleEvidenceLink.builder()
                     .taskId(taskId)
                     .documentId(cmd.getDocumentId())
