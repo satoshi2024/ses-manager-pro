@@ -9,6 +9,7 @@ $validator = Join-Path $PSScriptRoot 'gate-evidence-validator.ps1'
 $fixture = Join-Path $PSScriptRoot 'gate-evidence-missing-fixture.json'
 $output = & pwsh -NoProfile -File $validator `
     -GateMode DEV_0_D0 `
+    -AllowDetachedReviewWorktree `
     -WorktreePath $root 2>&1 | Out-String
 $exitCode = $LASTEXITCODE
 
@@ -38,6 +39,7 @@ if (Test-Path -LiteralPath $missingEvidencePath) {
 }
 $missingOutput = & pwsh -NoProfile -File $validator `
     -GateMode DEV_0_D0 `
+    -AllowDetachedReviewWorktree `
     -DevEvidencePath $missingEvidencePath `
     -WorktreePath $root 2>&1 | Out-String
 $missingExitCode = $LASTEXITCODE
@@ -51,6 +53,7 @@ if (@($missingResult.blockers.code) -notcontains 'DEV_GATE_EVIDENCE_MISSING') {
 
 $fullOutput = & pwsh -NoProfile -File $validator `
     -GateMode FULL_FEATURE_PRODUCTION `
+    -AllowDetachedReviewWorktree `
     -EvidencePath $missingEvidencePath `
     -WorktreePath $root 2>&1 | Out-String
 $fullExitCode = $LASTEXITCODE

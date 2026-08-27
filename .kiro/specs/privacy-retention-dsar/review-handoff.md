@@ -10,7 +10,7 @@
 - Normal checkout: `C:\work\ses-manager-pro`。既存のuntracked `.kiro/reviews/production-acceptance/` は変更していない。
 - Remote: `origin = https://github.com/satoshi2024/ses-manager-pro.git`。
 - Branch: `codex/privacy-retention-dsar`。force pushなし。
-- 最新handoff candidate Head: `8ab88d8adf1c499fd0542180a9a367298a56b881`（DEV-0/D0 scope-only delta Review対象。remote一致確認後に独立Reviewへ渡す）。
+- Handoff candidate Head: tracked docsへ固定せず、dispatch時の `git ls-remote origin refs/heads/codex/privacy-retention-dsar` とReview worktree HEADを一致確認して外部Review recordへbindする（DEV-0/D0 scope-only）。
 - PR: implementation dialogueでは作成しない。PLAN/IMPLEMENTATION双方PASS後にReview側が判断する。
 
 ## External Review provenance boundary

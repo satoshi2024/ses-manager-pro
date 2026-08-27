@@ -60,6 +60,6 @@ DEV decision: `NF07-DEV-GATE-20260828` / `APPROVED_DEV_ONLY` / Owner role `Proje
 
 独立Reviewへ渡すものは、最終remote Head、DEV-only approved plan/spec/tasks、completion mapping、DEV gate evidence、Full gate blocker、dry-run実行結果である。実装対話からPRは作成しない。DEV-0/D0 scopeのPLAN/IMPLEMENTATION双方PASS後もFull Feature/ProductionはBLOCKEDであり、PR作成を依頼しない。
 
-## 最新DEV-0/D0検証（実装側claim）
+## DEV-0/D0検証（実装側claim）
 
-2026-08-28、remote Head `8ab88d8adf1c499fd0542180a9a367298a56b881`、専用worktree clean、local/remote一致で再実行した。DEV validatorは exit `0` / `DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW`、Full validatorは exit `2` / `HARD_STOP`。coverageは180 table、unclassified 0、policy UNKNOWN 78、structural missing/extra 0、dry-runはcandidate 1 / blocked 6 / unknown 2、providerCallCount/writeCount 0である。これは実装側の検証claimであり、独立Implementation Reviewのverdictではない。
+remote Headはcommitのたびに変化するため、最新SHAをtracked documentへ固定しない。dispatch時に `git ls-remote origin refs/heads/codex/privacy-retention-dsar` とReview worktree HEADを外部handoffへbindする。validatorはDEV modeで exit `0` / `DEV_ONLY_AUTHORIZED_REQUIRES_INDEPENDENT_REVIEW`、Full modeで exit `2` / `HARD_STOP`を返す。coverageは180 table、unclassified 0、policy UNKNOWN 78、structural missing/extra 0、dry-runはcandidate 1 / blocked 6 / unknown 2、providerCallCount/writeCount 0である。これは実装側の検証claimであり、独立Implementation Reviewのverdictではない。

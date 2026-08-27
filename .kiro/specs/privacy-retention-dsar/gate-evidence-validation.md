@@ -72,6 +72,8 @@ pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator.ps1
 pwsh -NoProfile -File .\tools\privacy-retention-dsar\gate-evidence-validator-test.ps1
 ```
 
+独立Review worktreeはdetachedになるため、Review側でvalidator testを実行する場合は`-AllowDetachedReviewWorktree`を付ける。detachedを許可しても、対象Headとremote branchの一致、clean worktree、scope制限を別途検証し、一致しない場合はHARD_STOPにする。実装branchでの通常実行はこのswitchを付けず、expected branchを必須とする。
+
 現branchにはDEV decision evidenceだけを配置し、Fullのapproved policy/scope、正式Privacy Owner、approved Base、DG-07等の証跡は配置していない。テストはDEV modeの限定authorization、DEV evidence欠落、Full evidence欠落を分離して検証する。現在のpolicy unknown 78件はFull GateをBLOCKEDに保つため、DEV modeのexit `0`をFullの完了とは扱わない。
 
 ## provenance境界

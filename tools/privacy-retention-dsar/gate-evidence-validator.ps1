@@ -12,7 +12,8 @@ param(
     [string]$ReviewLedgerPath = '.kiro/specs/privacy-retention-dsar/review-ledger.md',
     [string]$WorktreePath = '.',
     [string]$ExpectedBranch = 'codex/privacy-retention-dsar',
-    [string]$ExpectedRemote = 'origin'
+    [string]$ExpectedRemote = 'origin',
+    [switch]$AllowDetachedReviewWorktree
 )
 
 Set-StrictMode -Version Latest
@@ -379,7 +380,11 @@ try {
     $remoteUrl = Invoke-Git -CurrentWorktree $resolvedWorktree -Arguments @('config', '--get', "remote.$ExpectedRemote.url")
     $remoteLine = Invoke-Git -CurrentWorktree $resolvedWorktree -Arguments @('ls-remote', $ExpectedRemote, "refs/heads/$ExpectedBranch")
     $remoteHead = ($remoteLine -split "`t")[0].Trim()
-    if ($branch -ne $ExpectedBranch) {
+    $isDetached = [string]::IsNullOrWhiteSpace($branch)
+    if ($isDetached -and -not $AllowDetachedReviewWorktree) {
+        Add-Blocker -Blockers $blockers -Code 'WORKTREE_DETACHED_NOT_ALLOWED' -Reason 'detached worktree is accepted only when explicitly running a Review validation'
+    }
+    elseif (-not $isDetached -and $branch -ne $ExpectedBranch) {
         Add-Blocker -Blockers $blockers -Code 'WORKTREE_BRANCH_MISMATCH' -Reason "expected $ExpectedBranch but found $branch"
     }
     if (-not [string]::IsNullOrWhiteSpace($worktreeStatus)) {
@@ -416,6 +421,7 @@ $result = [ordered]@{
         remote = $ExpectedRemote
         remoteUrl = $remoteUrl
         remoteHead = $remoteHead
+        detached = [string]::IsNullOrWhiteSpace($branch)
         clean = [string]::IsNullOrWhiteSpace($worktreeStatus)
     }
     providerCallCount = 0
