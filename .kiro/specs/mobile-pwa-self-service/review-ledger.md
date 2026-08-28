@@ -50,8 +50,8 @@ Self-review notes:
 | A1 Mobile shell | COMPLETED | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | MobileResponsiveLayoutTest (28), PwaAssetContractTest (4); 44px touch target, focus-visible, modal focus restore, offline/online status |
 | A2 Draft/Queue/Conflict | COMPLETED | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | pwa-queue.js; single queue store; allowed mutation adapters; 30-day cleanup; same-resource version advancement; conflict panel; PwaAssetContractTest (6); browser run attempted but SW/Tomcat loopback blocker recorded below |
 | B1 Update/Cleanup/Monitoring | COMPLETED | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | PwaClientMutationCleanupSchedulerTest; server 30-day ledger cleanup; Micrometer outcome/screen metrics without user/payload tags; SW old-cache cleanup/update prompt |
-| Review hardening | COMPLETED | 4bf26819〜db2da655 | db2da65505088759c558c288540a69e221514479 | payload allow-list/PII境界、409差分・再取得・手動再適用、日次row差分、署名付きopaque lease、scope lease更新とrecord retentionの分離、期限切れERROR payload削除、method/path/ID/operation検証、V113 operation境界、V112旧hash互換とoperation再束縛、実HTTPを含むMySQL実domain競合/rollback、scope更新後replay、動的no-store、同一user scope再束縛、atomic cursor更新を追加 |
-| M Integrated gate | PARTIAL_WITH_ENVIRONMENT_BLOCKER | 未完了（Task MのBrowser実測待ち） | db2da65505088759c558c288540a69e221514479 | 対象契約gate 41/0/0/0、PWA専用MySQL実domain gate 5/0/0/0、migration smoke 5/0/0/0、legacy hash fixtureを含むledger gate 7/0/0/0、node --check PASS。実Browser/CacheStorage/IndexedDBは環境blockerで未実施 |
+| Review hardening | COMPLETED | 4bf26819〜06ed1471 | 06ed147103dc12a0b9a4d393a762cc1b480d9344 | payload allow-list/PII境界、409差分・再取得・手動再適用、日次row差分、署名付きopaque lease、scope lease更新とrecord retentionの分離、期限切れERROR payload削除、method/path/ID/operation検証、V113 operation境界、V112旧hash互換とoperation再束縛、実HTTPを含むMySQL実domain競合/rollback、scope更新後replay、動的no-store、同一user scope再束縛、atomic cursor更新、selectByUserAndClientRequestのFOR UPDATE解除によるInnoDB gap lock deadlock解消を追加 |
+| M Integrated gate | PARTIAL_WITH_ENVIRONMENT_BLOCKER | 未完了（Task MのBrowser実測待ち） | 06ed147103dc12a0b9a4d393a762cc1b480d9344 | 対象契約gate 42/0/0/0、PWA専用MySQL実domain gate 5/0/0/0、migration smoke 5/0/0/0、legacy hash fixtureを含むledger gate 7/0/0/0、node --check PASS。実Browser/CacheStorage/IndexedDBは環境blockerで未実施 |
 
 ## 4. Completion matrix
 
@@ -59,7 +59,7 @@ Self-review notes:
 |---|---|---|---|---|
 | PW-R1 SW/cache/no-store | service-worker.js allow-list、PwaNoStoreFilter、network-only | PwaAssetContractTest 7、PwaNoStoreFilterTest 3 | IAB/Chrome static probeでSW API非公開、CacheStorage実測は未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R2 draft/queue | user-scoped単一queue store、30日retention、offline対象allow-list、online flush、期限payload除去、ERROR payload/hash/conflict除去 | PwaAssetContractTest 7、PwaCanonicalizerTest、PwaUserContextServiceTest 3、queue JS syntax/contract | 実Browserのoffline→online/再起動はTomcat loopback blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
-| PW-R3 idempotency/version | V112 ledger + V113 operation境界、同hash replay、異hash/stale version 409、scope更新後replay、V112旧hashの同一operation再束縛、既存domain service/CAS再利用、同transaction rollback | PwaClientMutationLedgerServiceTest 7、PwaMutationApiControllerTest 5、PWA専用MySQL実domain gate 5 | MySQL 8 Testcontainersでclaim race、scope更新後同hash replay、expense同一baseVersionの片側409/非上書き、ledger+業務行rollback、実HTTP controller更新、V113 operation列適用を実測 | AUTOMATED_PASS / BROWSER_PARTIAL |
+| PW-R3 idempotency/version | V112 ledger + V113 operation境界、同hash replay、異hash/stale version 409、scope更新後replay、V112旧hashの同一operation再束縛、既存domain service/CAS再利用、同transaction rollback、InnoDB gap lock deadlock解消 | PwaClientMutationLedgerServiceTest 7、PwaMutationApiControllerTest 5、PWA専用MySQL実domain gate 5 | MySQL 8 Testcontainersでclaim race、scope更新後同hash replay、expense同一baseVersionの片側409/非上書き、ledger+業務行rollback、実HTTP controller更新、V113 operation列適用を実測（5/0/0/0 PASS） | AUTOMATED_PASS / BROWSER_PARTIAL |
 | PW-R4 session/user boundary | 署名付きopaque userScope、同一user lease再利用/期限後再束縛、logout/user switch clear、expiry pause、context mismatch fail-closed | PwaUserContextServiceTest 3、PwaAssetContractTest 7、bundle/JS contract、portal regression | A logout→B login/session expiryはapp起動 blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R5 conflict UX | resource/resourceId/fieldsのserver/client diff表示、対象日次row正規化、CONFLICT停止、no-store再取得、確認付きmanual reapply、LWW禁止 | PwaMutationApiControllerTest 3、PwaAssetContractTest 7 | 実409画面操作はapp起動 blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R6 390px/accessibility | responsive shell、touch/focus/aria/status | MobileResponsiveLayoutTest 28、PwaAssetContractTest 7 | IAB/Chromeで390×844 viewport、DPR 1.25を確認。app画面操作は未実行 | PARTIAL |
@@ -71,11 +71,11 @@ Self-review notes:
 Implementation completion時に次を埋める。Browser実測不能項目は未実施として残し、PASSとは記載しない。
 
 - Base SHA: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
-- Remote Head SHA（ledger更新前の実装検証値）: `db2da65505088759c558c288540a69e221514479`
-- `git diff --stat Base..Head`: `63 files changed, 4364 insertions(+), 61 deletions(-)`（このledger更新commit後に再確認する）
-- remote branch verification（ledger更新前の記録）: `git ls-remote origin refs/heads/codex/mobile-pwa-self-service` = `db2da65505088759c558c288540a69e221514479`; local HEADも同値。
+- Remote Head SHA（ledger更新前の実装検証値）: `06ed147103dc12a0b9a4d393a762cc1b480d9344`
+- `git diff --stat Base..Head`: `63 files changed, 4371 insertions(+), 61 deletions(-)`（このledger更新commit後に再確認する）
+- remote branch verification（ledger更新前の記録）: `git ls-remote origin refs/heads/codex/mobile-pwa-self-service` = `06ed147103dc12a0b9a4d393a762cc1b480d9344`; local HEADも同値。
 - clean worktree verification（記録時）: `git status --short --branch` はbranch tracking行のみで差分なし。
-- fast/MySQL/performance test result: 最新PWA対象契約gate `41/0/0/0`、PWA専用MySQL実domain gate `5/0/0/0`、MySQL migration契約`5/0/0/0`、performance`1/0/0/0`。全体gateの制約は下記summary。
+- fast/MySQL/performance test result: 最新PWA対象契約gate `42/0/0/0`、PWA専用MySQL実domain gate `5/0/0/0`、MySQL migration契約`5/0/0/0`、performance`1/0/0/0`。全体gateの制約は下記summary。
 - CacheStorage inspection artifact: `BLOCKED/未実行`。IAB/Chrome surfaceが`navigator.serviceWorker === undefined`で、アプリTomcatもJDK 21 loopback errorで起動不可。
 - 390×844 artifact: IAB/Chrome static probeで`innerWidth=390, innerHeight=844, devicePixelRatio=1.25`を確認。実アプリ画面は未実行。
 - offline→online artifact: `BLOCKED/未実行`（同上）。
@@ -89,14 +89,14 @@ Implementation completion時に次を埋める。Browser実測不能項目は未
 
 ## 6. Latest independent Review result
 
-- Review対象SHA: `db2da65505088759c558c288540a69e221514479`（このledger更新前）。
+- Review対象SHA: `06ed147103dc12a0b9a4d393a762cc1b480d9344`（このledger更新前）。
 - 判定: `PLAN FAIL` / `IMPLEMENTATION FAIL`、`P0=0`。コード上の残存P1/P2はなし。
 - 必須残件P1: Task Mの実Browser証拠（390×844実画面、offline→online、再起動、session expiry、SW update、CacheStorage禁止route 0件、50ms double-click、A logout→B login、実409 conflict UI）が環境blockerで未実施。
 - 前回のledger不整合P2は本更新で修正対象とし、次のremote Headで再Reviewする。
 
 ### Automated/Browser evidence summary
 
-- 最新対象契約gate: `mvn test -Dtest=PwaUserContextServiceTest,PwaAssetContractTest,PwaCanonicalizerTest,PwaClientMutationLedgerServiceTest,PwaMutationApiControllerTest,PwaNoStoreFilterTest,ApiAuditFilterTest,MyTimesheetJsContractTest,TestIsolationAuditTest -Dsurefire.runOrder=alphabetical` → 41 tests / 0 failures / 0 errors / 0 skipped。
+- 最新対象契約gate: `mvn test -Dtest=PwaUserContextServiceTest,PwaAssetContractTest,PwaCanonicalizerTest,PwaClientMutationLedgerServiceTest,PwaMutationApiControllerTest,PwaNoStoreFilterTest,ApiAuditFilterTest,MyTimesheetJsContractTest,TestIsolationAuditTest,PwaClientMutationCleanupSchedulerTest -Dsurefire.runOrder=alphabetical` → 42 tests / 0 failures / 0 errors / 0 skipped。
 - 既存PWA関連を含むcombined gate: 216 tests / 0 failures / 0 errors / 0 skipped。
 - PWA MySQL並行/domain gate: `mvn test -Pmysql-tests -Dtest=PwaClientMutationLedgerMySqlConcurrencyTest -Dsurefire.runOrder=alphabetical` → 5 / 0 / 0 / 0。MySQL 8 Testcontainersで二writerのclaim/conflict/DB一行、scope更新後同hash replay、実expense domainのstale 409/非上書き、ledger+業務行rollback、実HTTP controller経路でのledger・expense同一transaction完了を確認。
 - MySQL migration契約: `mvn test -Pmysql-tests -Dtest=FlywaySelfServiceSchemaSmokeTest,FlywayV110AdminBoundaryUpgradeSmokeTest` → 5 / 0 / 0 / 0。
