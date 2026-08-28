@@ -37,6 +37,16 @@ public interface ExternalAccountService extends IService<ExternalAccountReferenc
     ExternalAccountReference confirmRevoke(Long id, Long actorUserId);
 
     /**
+     * 外部アカウントの失効要求を送信する（冪等性キー付与・タイムアウト時はPENDING_CONFIRMATIONへ）
+     */
+    ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId);
+
+    /**
+     * 失効確認待ち（PENDING_CONFIRMATION）の定期ポーリング・リトライジョブを実行する
+     */
+    int processPendingRevokePollJob();
+
+    /**
      * 外部アカウントのステータスを変更する
      */
     ExternalAccountReference changeStatus(Long id, String status, Long actorUserId);

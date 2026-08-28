@@ -17,9 +17,10 @@ import org.springframework.stereotype.Component;
 public class AssetLifecycleScheduler {
 
     private final AssetAlertService assetAlertService;
+    private final com.ses.service.ExternalAccountService externalAccountService;
 
     /**
-     * 毎日午前9時に返却期限超過およびリース満了接近を監視
+     * 毎日午前9時に返却期限超過およびリース満了接近を監視し、未確認失効の定期ポーリングを実行
      */
     @Scheduled(cron = "0 0 9 * * ?")
     public void runDailyAssetChecks() {
@@ -27,7 +28,9 @@ public class AssetLifecycleScheduler {
         try {
             int overdueCount = assetAlertService.checkOverdueAssignments();
             int leaseCount = assetAlertService.checkExpiringLeases();
-            log.info("Daily asset check finished: overdueAlerts={}, leaseAlerts={}", overdueCount, leaseCount);
+            int polledCount = externalAccountService.processPendingRevokePollJob();
+            log.info("Daily asset check finished: overdueAlerts={}, leaseAlerts={}, polledRevokes={}",
+                    overdueCount, leaseCount, polledCount);
         } catch (Exception e) {
             log.error("Failed to execute daily asset lifecycle check job", e);
         }

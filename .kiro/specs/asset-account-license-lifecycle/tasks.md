@@ -23,7 +23,7 @@
 
 ## F1. DDL・マイグレーション・Entity・Mapper 実装
 
-### Task F1.1: DDL マイグレーション & スキーマ同期
+### Task F1.1: DDL マイグレーション & スキーマ同期 (V129, V130, V1, H2)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R1`, `AS-R2`, `AS-R3`, `AS-R4`, `CR-03`, `CR-04`
 - **Objective**: 資産・貸与・イベント・棚卸し・アカウント参照・ライセンスの9テーブルを作成し、Flyway V129/V130、V1 baseline、H2テストスキーマ、`application-test.yml` を完全同期する。
@@ -43,7 +43,7 @@
 - **Requirements ID**: `AS-R1`, `AS-R2`, `AS-R3`, `AS-R4`, `CR-03`
 - **Objective**: MyBatis-Plus Entity 9クラスおよび Mapper 9インターフェースを実装し、行ロック `selectByIdForUpdate`、CASステータス更新 `updateStatusWithCas`、期間重複判定SQLを整備する。
 - **実装内容**:
-  - Entity: `Asset`, `AssetAssignment`, `AssetEvent`, `AssetInventoryRun`, `AssetInventoryItem`, `ExternalAccountSystem`, `ExternalAccountReference`, `LicensePlan`, `LicenseAssignment`
+  - Entity: `Asset`, `AssetAssignment`, `AssetEvent`, `AssetInventoryRun`, `AssetInventoryItem`, `ExternalAccountSystem`, `ExternalAccountReference` (`idempotency_key`, `retry_count`, `next_retry_at`, `last_error_message`), `LicensePlan`, `LicenseAssignment`
   - Mapper: `AssetMapper`, `AssetAssignmentMapper`, `AssetEventMapper`, `AssetInventoryRunMapper`, `AssetInventoryItemMapper`, `ExternalAccountSystemMapper`, `ExternalAccountReferenceMapper`, `LicensePlanMapper`, `LicenseAssignmentMapper`
 - **Test 要件と assertion**: `AssetEntityMapperTest` における CRUD、CAS、重複カウントSQL検証 (5/5 PASS)
 - **手動 Demo と証跡**: 単体テスト実行ログ
@@ -53,15 +53,16 @@
 ### Task F1.3: 包括的シークレットスキャン検証 (No Secrets Policy)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R2.3`, `CR-04`, `CR-06`
-- **Objective**: リフレクションおよびファイルスキャンを用いて、Entity/DTO、DDL列定義、HTML inputタグ、JS payloadにパスワード・APIトークン・シークレット等が含まれていないことを自動検証する。
+- **Objective**: リフレクションおよびファイルスキャンを用いて、Entity/DTO、DDL列定義、HTML inputタグ、JS payload、サービス内ログ・例外メッセージにパスワード・APIトークン・平文シークレット等が含まれていないことを自動検証する。
 - **実装内容**:
-  - `src/test/java/com/ses/service/AssetComprehensiveSecretScanTest.java`
+  - `src/test/java/com/ses/service/AssetComprehensiveSecretScanTest.java` (4テストメソッド)
   - `src/test/java/com/ses/service/AssetSecretFieldScanTest.java`
 - **Test 要件と assertion**:
-  - `AssetComprehensiveSecretScanTest.scanEntityAndDtoFields`: secretフィールド 0件アサート
-  - `AssetComprehensiveSecretScanTest.scanDdlMigrationFiles`: DDL秘密列 0件アサート
-  - `AssetComprehensiveSecretScanTest.scanHtmlAndJsFiles`: UI秘密input 0件アサート
-- **手動 Demo と証跡**: `mvn test -Dtest=AssetComprehensiveSecretScanTest` (3/3 PASS)
+  - `scanEntityAndDtoFields`: secretフィールド 0件アサート
+  - `scanDdlMigrationFiles`: DDL秘密列 0件アサート
+  - `scanHtmlAndJsFiles`: UI秘密input 0件アサート
+  - `scanServiceLogsAndExceptions`: ログ出力における平文アカウント識別子直接出力 0件アサート
+- **手動 Demo と証跡**: `mvn test -Dtest=AssetComprehensiveSecretScanTest` (4/4 PASS)
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
 
@@ -108,6 +109,7 @@
   - `AssetScopeService`, `AssetScopeServiceImpl`
 - **Test 要件と assertion**:
   - `AssetBoundaryAndLifecycleIntegrationTest.testLicenseSeatLimitBoundaryMinusOneEqualPlusOneAndReassign`: 上限 `-1 / = / +1` 境界および解放後再割当のアサート
+  - `AssetBoundaryAndLifecycleIntegrationTest.testLicenseConcurrentAllocationWithCas`: 4スレッドでの席数並行割当CAS保護実証
   - `AssetBoundaryAndLifecycleIntegrationTest.testInventoryDisallowUpdateAndDoubleComplete`: 棚卸し完了後の更新拒否・二重確定拒否のアサート
 - **手動 Demo と証跡**: `AssetBoundaryAndLifecycleIntegrationTest` 実行ログ
 - **Rollback**: サービス実装の revert
@@ -208,24 +210,27 @@
 ### Task B2.2: 外部プロバイダ連携クライアント & 非同期失効要求・確認分離 & Recovery/Idempotency
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R2.4`, `CR-02`
-- **Objective**: 外部SaaS/IdPプロバイダに対する失効要求と確証確認を分離し、タイムアウト・失敗時の `SUSPENDED` / `PENDING_CONFIRMATION` 永続化、復旧後の再照会確認、および冪等性（二重確認安全）を実装する。
+- **Objective**: 外部SaaS/IdPプロバイダに対する失効要求と確証確認を分離し、タイムアウト・失敗時の `PENDING_CONFIRMATION` 永続化（`idempotency_key`, `retry_count`, `next_retry_at`）、指数バックオフポーリングジョブによる再照会、および二重確認時の冪等性を実装する。
 - **実装内容**:
   - `ExternalAccountProviderClient`, `MockExternalAccountProviderClientImpl`
-  - `ExternalAccountServiceImpl`
+  - `ExternalAccountServiceImpl.requestRevokeWithIdempotency`
+  - `ExternalAccountServiceImpl.processPendingRevokePollJob`
 - **Test 要件と assertion**:
-  - `AssetBoundaryAndLifecycleIntegrationTest.testProviderRecoveryAndIdempotency`: タイムアウト時の非成功保持、プロバイダ復旧後の確認完了、二重確認時の冪等性アサート
+  - `AssetBoundaryAndLifecycleIntegrationTest.testProviderRecoveryAndIdempotency`: タイムアウト時の `PENDING_CONFIRMATION` 永続化、ポーリングジョブによる復旧後確認完了、二重確認時の冪等性アサート
 - **手動 Demo と証跡**: `AssetBoundaryAndLifecycleIntegrationTest` 実行ログ
 - **Rollback**: アダプタークラスの revert
 - **未検証事項**: 実SaaSとのOAuth通信（NF-05開工時に委譲）
 
-### Task B2.3: 退社連携 & 外部連携の自動テスト
+### Task B2.3: MySQL 8 実コンテナ統合テスト & Shard Inventory 登録 (CR-06)
 - **Status**: [x] COMPLETED
-- **Requirements ID**: `AS-R3.4`, `AS-R2.4`, `CR-06`
-- **Objective**: 退社時の一括失効・ライセンス解放およびプロバイダ連携の振る舞いを網羅検証する統合テストを実装する。
+- **Requirements ID**: `CR-06`
+- **Objective**: Testcontainers による MySQL 8 実コンテナ上で Flyway V129/V130 DDL、行ロック `FOR UPDATE`、CAS更新を検証する `@Tag("mysql")` テストを実装し、`mysql-shard-1.txt` に登録して `MySqlTestShardInventoryTest` と完全一致させる。
 - **実装内容**:
-  - `src/test/java/com/ses/service/AssetOffboardingServiceTest.java`
-- **Test 要件と assertion**: 全3ケース PASS
-- **手動 Demo と証跡**: `mvn test -Dtest=AssetOffboardingServiceTest` 実行結果
+  - `src/test/java/com/ses/migration/AssetMySqlIntegrationTest.java`
+  - `scripts/test-suites/mysql-shard-1.txt` 登録
+- **Test 要件と assertion**:
+  - `MySqlTestShardInventoryTest.testInventoryMatchesTaggedClasses`: PASS
+- **手動 Demo と証跡**: `mvn test -Dtest=MySqlTestShardInventoryTest` (1/1 PASS)
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
 
@@ -233,12 +238,12 @@
 
 ## M. 全量検証・Runbook・決定台帳更新・独立Review引渡し
 
-### Task M.1: テストスイート全量実行・スキップ 0 検証 (Fast / 並行 / ゲート)
+### Task M.1: テストスイート全量実行・スキップ 0 検証 (Fast / 並行 / ゲート / MySQL)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `CR-06`
-- **Objective**: NF-09 で作成・改修した全テスト（10クラス・28メソッド）を実行し、スキップ 0 件、0 Failure / 0 Error を確認する。
-- **Test 要件と assertion**: 28/28 tests PASS (0 skipped, 0 failed, 0 errors)
-- **手動 Demo と証跡**: Maven Surefire 出力ログ (`Tests run: 28, Failures: 0, Errors: 0, Skipped: 0`)
+- **Objective**: NF-09 で作成・改修した全テスト（11クラス・33メソッド）を実行し、スキップ 0 件、0 Failure / 0 Error を確認する。
+- **Test 要件と assertion**: 33/33 tests PASS (0 skipped, 0 failed, 0 errors)
+- **手動 Demo と証跡**: Maven Surefire 出力ログ (`Tests run: 33, Failures: 0, Errors: 0, Skipped: 0`)
 - **Rollback**: なし
 - **未検証事項**: なし
 
@@ -255,7 +260,7 @@
 ### Task M.3: レビュー台帳・決定台帳・完了対応表の更新
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R1`〜`AS-R4`, `CR-01`〜`CR-06`
-- **Objective**: 要求ID（`AS-R1`〜`AS-R4`）、非機能要件（`CR-01`〜`CR-06`）、実装ファイル、テストクラス、Handoff Payload Commit を明確に記録したレビュー引渡し台帳を作成・更新する。
+- **Objective**: 要求ID（`AS-R1`〜`AS-R4`）、非機能要件（`CR-01`〜`CR-06`）、実装ファイル、テストクラスを明確に記録したレビュー引渡し台帳を作成・更新する。
 - **実装内容**:
   - `.kiro/specs/asset-account-license-lifecycle/review-ledger.md`
 - **手動 Demo と証跡**: レビュー台帳確認

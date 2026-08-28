@@ -122,8 +122,12 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     assignee_type VARCHAR(32) NOT NULL COMMENT 'ENGINEER, USER',
     assignee_id BIGINT NOT NULL COMMENT '要員IDまたはユーザーID',
     permission_level VARCHAR(64) COMMENT '権限区分: ADMIN, DEVELOPER, MEMBER, READONLY',
-    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, SUSPENDED, REVOKED, EXCEPTION_HOLD',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, SUSPENDED, REVOKED, PENDING_CONFIRMATION, UNKNOWN, EXCEPTION_HOLD',
     provisioned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '発行/割当日時',
+    idempotency_key VARCHAR(128) COMMENT '失効要求冪等性キー',
+    retry_count INT NOT NULL DEFAULT 0 COMMENT 'ポーリング/リトライ回数',
+    next_retry_at DATETIME COMMENT '次回ポーリング予定日時',
+    last_error_message VARCHAR(500) COMMENT '直近エラー要約 (秘密値非含有)',
     revoke_requested_at DATETIME COMMENT '失効要求送信日時',
     revoke_confirmed_at DATETIME COMMENT '失効完了確認日時 (NULL=失効未確認)',
     revoke_confirmed_by BIGINT COMMENT '失効確認者ユーザーID',
@@ -133,9 +137,11 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0,
+    UNIQUE KEY uq_ext_idempotency (idempotency_key),
     INDEX idx_ext_acc_target (assignee_type, assignee_id),
     INDEX idx_ext_acc_system (system_id, status),
-    INDEX idx_ext_acc_status (status, revoke_confirmed_at)
+    INDEX idx_ext_acc_status (status, revoke_confirmed_at),
+    INDEX idx_ext_acc_retry (status, next_retry_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部アカウント参照台帳 (秘密非保存)';
 
 CREATE TABLE IF NOT EXISTS m_license_plan (

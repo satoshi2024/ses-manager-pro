@@ -22,8 +22,8 @@ public class MockExternalAccountProviderClientImpl implements ExternalAccountPro
         if (accountRef == null) return false;
         log.info("Mock external revoke request sent: id={}, identifier={}",
                 accountRef.getId(), accountRef.getAccountIdentifier());
-        // デフォルトでは PENDING または CONFIRMED
-        mockStatusMap.put(accountRef.getId(), RevokeConfirmationStatus.CONFIRMED);
+        // 既にテスト用にモックステータスがセットされていなければデフォルトで CONFIRMED
+        mockStatusMap.putIfAbsent(accountRef.getId(), RevokeConfirmationStatus.CONFIRMED);
         return true;
     }
 

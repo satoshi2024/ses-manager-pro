@@ -27,4 +27,9 @@ public interface AssetScopeService {
      * 特定のユーザーID（内部ユーザー）に対するアクセス権を検証
      */
     void assertAccessibleUser(Long userId);
+
+    /**
+     * 特定の資産に対するアクセス権限を判定
+     */
+    boolean isAccessible(Long assetId, String role, Long actorUserId);
 }

@@ -45,16 +45,35 @@ public class ExternalAccountReference extends BaseEntity {
     private String permissionLevel;
 
     /**
-     * ステータス: ACTIVE, SUSPENDED, REVOKED, EXCEPTION_HOLD
+     * ステータス: ACTIVE, SUSPENDED, REVOKED, PENDING_CONFIRMATION, UNKNOWN, EXCEPTION_HOLD
      */
-    @Builder.Default
-    private String status = "ACTIVE";
+    private String status;
 
     /**
      * 発行/割当日時
      */
+    private LocalDateTime provisionedAt;
+
+    /**
+     * 失効要求冪等性キー
+     */
+    private String idempotencyKey;
+
+    /**
+     * リトライ・ポーリング回数
+     */
     @Builder.Default
-    private LocalDateTime provisionedAt = LocalDateTime.now();
+    private Integer retryCount = 0;
+
+    /**
+     * 次回ポーリング予定日時
+     */
+    private LocalDateTime nextRetryAt;
+
+    /**
+     * 直近エラー要約 (秘密非含有)
+     */
+    private String lastErrorMessage;
 
     /**
      * 失効要求送信日時

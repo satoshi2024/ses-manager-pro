@@ -86,15 +86,24 @@ public class AssetScopeServiceImpl implements AssetScopeService {
 
     @Override
     public void assertAccessibleUser(Long userId) {
-        if (userId == null) {
-            return;
-        }
         if (hasFullAccess()) {
             return;
         }
-        SysUser current = getCurrentUser();
-        if (current == null || !current.getId().equals(userId)) {
-            throw new BusinessException(403, "指定されたユーザーの資産データへのアクセス権限がありません。");
+        SysUser user = getCurrentUser();
+        if (user == null || !user.getId().equals(userId)) {
+            throw new BusinessException(403, "指定されたユーザーへのアクセス権限がありません。");
         }
+    }
+
+    @Override
+    public boolean isAccessible(Long assetId, String role, Long actorUserId) {
+        if ("管理者".equals(role) || "HR".equals(role)) {
+            return true;
+        }
+        if ("要員".equals(role)) {
+            // 要員は管理者直接資産への全体アクセスは不可
+            return false;
+        }
+        return false;
     }
 }

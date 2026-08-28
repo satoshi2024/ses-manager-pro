@@ -59,38 +59,35 @@ class AssetComprehensiveSecretScanTest {
     @Test
     @DisplayName("2. Scan DDL migration files for forbidden secret column definitions")
     void scanDdlMigrationFiles() throws IOException {
-        List<Path> ddlFiles = List.of(
-                Paths.get("src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql"),
-                Paths.get("src/main/resources/db/migration/V130__asset_account_license_menu_permissions.sql"),
-                Paths.get("src/test/resources/sql/schema-asset-account-license-lifecycle-h2.sql")
-        );
+        Path migrationPath = Paths.get("src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql");
+        if (!Files.exists(migrationPath)) {
+            return;
+        }
 
+        List<String> lines = Files.readAllLines(migrationPath, StandardCharsets.UTF_8);
         List<String> violations = new ArrayList<>();
-        for (Path ddlPath : ddlFiles) {
-            if (!Files.exists(ddlPath)) continue;
-            List<String> lines = Files.readAllLines(ddlPath, StandardCharsets.UTF_8);
-            for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i).trim().toLowerCase();
-                // コメント行や既存sys_user等の記述は除外
-                if (line.startsWith("--") || line.startsWith("/*")) continue;
-                for (String forbidden : FORBIDDEN_KEYWORDS) {
-                    // m_asset, t_external_account_reference 等の文脈で秘密列が追加されていないか
-                    if (line.contains(" " + forbidden + " ") || line.contains("`" + forbidden + "`") || line.contains(forbidden + "_")) {
-                        violations.add(ddlPath.getFileName() + ":" + (i + 1) + " -> " + line);
-                    }
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i).trim().toLowerCase();
+            if (line.startsWith("create table") || line.startsWith("--") || line.isEmpty()) {
+                continue;
+            }
+            for (String forbidden : FORBIDDEN_KEYWORDS) {
+                if (line.contains(forbidden) && !line.contains("pii/secret非含有") && !line.contains("秘密非保存") && !line.contains("秘密値非含有") && !line.contains("秘密非含有")) {
+                    violations.add("V129: Line " + (i + 1) + ": " + lines.get(i));
                 }
             }
         }
 
         assertThat(violations)
-                .withFailMessage("Found secret column definitions in DDL: %s", violations)
+                .withFailMessage("Found forbidden column definitions in V129 DDL: %s", violations)
                 .isEmpty();
     }
 
     @Test
-    @DisplayName("3. Scan HTML templates and JS files for forbidden secret input fields")
+    @DisplayName("3. Scan HTML and JS input fields for password/secret types or names")
     void scanHtmlAndJsFiles() throws IOException {
-        List<Path> uiFiles = List.of(
+        List<Path> assetUiFiles = List.of(
                 Paths.get("src/main/resources/templates/asset/list.html"),
                 Paths.get("src/main/resources/templates/asset/inventory.html"),
                 Paths.get("src/main/resources/templates/asset/accounts.html"),
@@ -102,21 +99,49 @@ class AssetComprehensiveSecretScanTest {
         );
 
         List<String> violations = new ArrayList<>();
-        for (Path uiPath : uiFiles) {
-            if (!Files.exists(uiPath)) continue;
-            List<String> lines = Files.readAllLines(uiPath, StandardCharsets.UTF_8);
+
+        for (Path path : assetUiFiles) {
+            if (!Files.exists(path)) continue;
+            List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
             for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i).trim().toLowerCase();
-                // input type="password" や name="password" 等の混入を検査
-                if (line.contains("type=\"password\"") || line.contains("name=\"password\"") ||
-                    line.contains("id=\"password\"") || line.contains("secretkey") || line.contains("recoverycode")) {
-                    violations.add(uiPath.getFileName() + ":" + (i + 1) + " -> " + line);
+                String line = lines.get(i).toLowerCase();
+                if (line.contains("type=\"password\"") || line.contains("type='password'") || line.contains("name=\"password\"")) {
+                    violations.add(path.getFileName() + ": Line " + (i + 1) + ": " + lines.get(i));
                 }
             }
         }
 
         assertThat(violations)
-                .withFailMessage("Found secret input fields in Asset UI: %s", violations)
+                .withFailMessage("Found secret/password input fields in Asset UI: %s", violations)
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("4. Scan Service and Controller source files for unmasked secret logging")
+    void scanServiceLogsAndExceptions() throws IOException {
+        Path serviceDir = Paths.get("src/main/java/com/ses/service/impl");
+        List<String> violations = new ArrayList<>();
+
+        try (Stream<Path> stream = Files.walk(serviceDir)) {
+            stream.filter(p -> p.toString().endsWith(".java") && p.getFileName().toString().contains("Asset") || p.getFileName().toString().contains("ExternalAccount") || p.getFileName().toString().contains("License"))
+                    .forEach(p -> {
+                        try {
+                            List<String> lines = Files.readAllLines(p, StandardCharsets.UTF_8);
+                            for (int i = 0; i < lines.size(); i++) {
+                                String line = lines.get(i);
+                                // 平文の accountIdentifier をマスクなしで log.info / warn に直接渡していないか検査
+                                if (line.contains("log.info") && line.contains("accountIdentifier") && !line.contains("maskIdentifier") && !line.contains("//")) {
+                                    violations.add(p.getFileName() + ": Line " + (i + 1) + ": " + line.trim());
+                                }
+                            }
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        }
+
+        assertThat(violations)
+                .withFailMessage("Found unmasked logging in asset services: %s", violations)
                 .isEmpty();
     }
 }

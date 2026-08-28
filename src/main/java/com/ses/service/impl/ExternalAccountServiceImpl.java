@@ -10,6 +10,7 @@ import com.ses.entity.ExternalAccountSystem;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.service.ExternalAccountService;
+import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,8 +25,20 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountReferenceMapper, ExternalAccountReference> implements ExternalAccountService {
 
-    private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
     private final ExternalAccountSystemMapper externalAccountSystemMapper;
+    private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
+    private final ExternalAccountProviderClient providerClient;
+
+    private static String maskIdentifier(String id) {
+        if (!StringUtils.hasText(id)) return "***";
+        int atIndex = id.indexOf('@');
+        if (atIndex > 2) {
+            return id.substring(0, 2) + "***" + id.substring(atIndex);
+        } else if (id.length() > 4) {
+            return id.substring(0, 2) + "***" + id.substring(id.length() - 2);
+        }
+        return "***";
+    }
 
     @Override
     @Transactional
@@ -58,11 +71,12 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
                 .permissionLevel(permissionLevel)
                 .status("ACTIVE")
                 .provisionedAt(LocalDateTime.now())
+                .retryCount(0)
                 .build();
         save(ref);
 
         log.info("External account reference registered: id={}, system={}, identifier={}",
-                ref.getId(), system.getSystemCode(), accountIdentifier);
+                ref.getId(), system.getSystemCode(), maskIdentifier(accountIdentifier));
         return ref;
     }
 
@@ -98,14 +112,79 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
             return current;
         }
 
-        int updated = externalAccountReferenceMapper.confirmRevokeWithCas(
-                id, LocalDateTime.now(), actorUserId, current.getVersion());
-        if (updated == 0) {
-            throw new BusinessException(409, "アカウント参照情報が他で更新されました。再読み込みしてください。");
+        LocalDateTime confirmedAt = LocalDateTime.now();
+        int rows = externalAccountReferenceMapper.confirmRevokeWithCas(id, confirmedAt, actorUserId, current.getVersion());
+        if (rows == 0) {
+            throw new BusinessException("失効確認の排他更新に失敗しました。他の操作と競合した可能性があります。");
         }
 
+        current.setStatus("REVOKED");
+        current.setRevokeConfirmedAt(confirmedAt);
+        current.setRevokeConfirmedBy(actorUserId);
         log.info("External account reference confirmed revoked: id={}, actorUserId={}", id, actorUserId);
+        return current;
+    }
+
+    @Override
+    @Transactional
+    public ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId) {
+        ExternalAccountReference current = getById(id);
+        if (current == null) {
+            throw new BusinessException("指定されたアカウント参照が見つかりません。");
+        }
+        if ("REVOKED".equals(current.getStatus())) {
+            return current;
+        }
+
+        if (StringUtils.hasText(idempotencyKey)) {
+            current.setIdempotencyKey(idempotencyKey);
+        }
+        current.setStatus("PENDING_CONFIRMATION");
+        current.setRevokeRequestedAt(LocalDateTime.now());
+        current.setRetryCount(0);
+        current.setNextRetryAt(LocalDateTime.now());
+        updateById(current);
+
+        // プロバイダへ失効リクエスト
+        boolean sent = providerClient.requestRevoke(current);
+        if (sent) {
+            ExternalAccountProviderClient.RevokeConfirmationStatus conf = providerClient.checkRevokeConfirmation(current);
+            if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
+                confirmRevoke(id, actorUserId);
+            }
+        }
         return getById(id);
+    }
+
+    @Override
+    @Transactional
+    public int processPendingRevokePollJob() {
+        LocalDateTime now = LocalDateTime.now();
+        List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectList(
+                new LambdaQueryWrapper<ExternalAccountReference>()
+                        .in(ExternalAccountReference::getStatus, List.of("PENDING_CONFIRMATION", "SUSPENDED"))
+                        .and(w -> w.isNull(ExternalAccountReference::getNextRetryAt)
+                                .or(ow -> ow.le(ExternalAccountReference::getNextRetryAt, now)))
+        );
+
+        int processed = 0;
+        for (ExternalAccountReference ref : pendingList) {
+            ExternalAccountProviderClient.RevokeConfirmationStatus status = providerClient.checkRevokeConfirmation(ref);
+            if (status == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
+                confirmRevoke(ref.getId(), 1L);
+                processed++;
+            } else {
+                // 指数バックオフ
+                int retries = ref.getRetryCount() != null ? ref.getRetryCount() + 1 : 1;
+                ref.setRetryCount(retries);
+                long backoffMinutes = Math.min(1440, (long) Math.pow(2, Math.min(retries, 8)) * 5);
+                ref.setNextRetryAt(now.plusMinutes(backoffMinutes));
+                ref.setLastErrorMessage("Provider revoke pending confirmation (retry=" + retries + ")");
+                updateById(ref);
+            }
+        }
+        log.info("Pending revoke polling job processed: count={}, confirmed={}", pendingList.size(), processed);
+        return processed;
     }
 
     @Override
@@ -114,9 +193,6 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
         ExternalAccountReference current = getById(id);
         if (current == null) {
             throw new BusinessException("指定されたアカウント参照が見つかりません。");
-        }
-        if ("REVOKED".equals(status)) {
-            return confirmRevoke(id, actorUserId);
         }
         current.setStatus(status);
         updateById(current);
@@ -131,18 +207,14 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     @Override
     public List<ExternalAccountSystem> getAllSystems() {
         return externalAccountSystemMapper.selectList(new LambdaQueryWrapper<ExternalAccountSystem>()
-                .eq(ExternalAccountSystem::getIsActive, 1)
-                .orderByAsc(ExternalAccountSystem::getId));
+                .eq(ExternalAccountSystem::getIsActive, 1));
     }
 
     @Override
     @Transactional
     public ExternalAccountSystem saveSystem(ExternalAccountSystem system) {
-        if (!StringUtils.hasText(system.getSystemCode())) {
-            throw new BusinessException("システムコードは必須です。");
-        }
-        if (!StringUtils.hasText(system.getSystemName())) {
-            throw new BusinessException("システム名称は必須です。");
+        if (system == null) {
+            throw new BusinessException("外部システム情報は必須です。");
         }
         if (system.getId() == null) {
             externalAccountSystemMapper.insert(system);
@@ -155,20 +227,20 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     @Override
     public IPage<ExternalAccountReference> searchAccounts(int page, int size, Long systemId, String assigneeType, Long assigneeId, String status) {
         Page<ExternalAccountReference> pageable = new Page<>(page, size);
-        LambdaQueryWrapper<ExternalAccountReference> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<ExternalAccountReference> query = new LambdaQueryWrapper<>();
         if (systemId != null) {
-            wrapper.eq(ExternalAccountReference::getSystemId, systemId);
+            query.eq(ExternalAccountReference::getSystemId, systemId);
         }
         if (StringUtils.hasText(assigneeType)) {
-            wrapper.eq(ExternalAccountReference::getAssigneeType, assigneeType);
+            query.eq(ExternalAccountReference::getAssigneeType, assigneeType);
         }
         if (assigneeId != null) {
-            wrapper.eq(ExternalAccountReference::getAssigneeId, assigneeId);
+            query.eq(ExternalAccountReference::getAssigneeId, assigneeId);
         }
         if (StringUtils.hasText(status)) {
-            wrapper.eq(ExternalAccountReference::getStatus, status);
+            query.eq(ExternalAccountReference::getStatus, status);
         }
-        wrapper.orderByDesc(ExternalAccountReference::getId);
-        return page(pageable, wrapper);
+        query.orderByDesc(ExternalAccountReference::getId);
+        return externalAccountReferenceMapper.selectPage(pageable, query);
     }
 }
