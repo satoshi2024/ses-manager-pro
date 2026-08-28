@@ -31,6 +31,9 @@ public interface ProjectPositionEventMapper {
     @Select("SELECT * FROM t_project_position_event WHERE position_id = #{positionId} ORDER BY occurred_at, id")
     List<ProjectPositionEvent> selectByPositionId(@Param("positionId") Long positionId);
 
+    @Select("SELECT * FROM t_project_position_event WHERE project_id = #{projectId} ORDER BY position_id, occurred_at, id")
+    List<ProjectPositionEvent> selectByProjectId(@Param("projectId") Long projectId);
+
     @Select("SELECT * FROM t_project_position_event WHERE position_id = #{positionId} AND effective_to IS NULL "
             + "ORDER BY id DESC LIMIT 1")
     ProjectPositionEvent selectOpenEvent(@Param("positionId") Long positionId);

@@ -23,6 +23,7 @@
 | F1-5 | `e7d3b36d` | V119 | assessment/decision event DDL | FlywayCertificationLearningSkillGapSchemaSmokeTest | V115-V119 MySQL smoke | [x] |
 | F2-1 | `ff8165ea` | V120 | 資格record lifecycle、event冪等、期限90/60/30、証憑pin/legal hold、PII permission seed | CertificationExpiryServiceTest、EngineerCertificationLifecycleServiceTest、CertificationEvidenceValidatorTest、FileScopeValidationServiceTest、AppConfigClockTest、EngineerCertificationServiceTest | 固定Clockで当日境界、訂正・取消・renew・CAS・証憑否定系を確認 | [x] |
 | F2-2 | `d74ae5af` | V121 | training plan/enrollment lifecycle、既存ExpenseRequest/Approval正本、締めガード、plan event監査 | TrainingPlanServiceTest、ExpenseRequestFlowIntegrationTest、RouteResolverServiceTest | NULL/0/threshold±1、自己承認拒否、CAS、実費差額、締め済み月の経費正本更新拒否、承認後completionを確認 | [x] |
+| F2-3 | `TBD` | V122 | event-only as-of supply/demand、taxonomy alias、unknown、PROJECT/POSITION/COMBINED precedence、snapshot replay、BP write-path集約 | SkillGapServiceImplTest、SkillGapTaxonomyResolverTest、EngineerSkillServiceImplTest、ProjectSkillServiceImplTest、FlywayCertificationLearningSkillGapSchemaSmokeTest | feature開始日前のunavailable、期間inclusive、DELETE当日/翌日、同義/未知、0件、replay、V122 MySQL schema、共通event writer経由を確認 | [x] |
 
 ## F1 Implementation Review受領・F2持越し契約
 

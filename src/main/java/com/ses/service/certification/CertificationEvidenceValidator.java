@@ -10,6 +10,8 @@ import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import org.springframework.stereotype.Service;
 
+import java.util.Objects;
+
 /** 資格eventへ保存する証憑版をtyped link・hash・scan状態で固定する。 */
 @Service
 public class CertificationEvidenceValidator {
@@ -48,7 +50,9 @@ public class CertificationEvidenceValidator {
         boolean linked = documentLinkMapper.selectList(new QueryWrapper<DocumentLink>()
                         .eq("document_id", documentId).eq("target_type", "CERTIFICATION_RECORD")
                         .eq("target_id", certificationRecordId))
-                .stream().anyMatch(link -> !Integer.valueOf(1).equals(link.getDeletedFlag()));
+                .stream().anyMatch(link -> "CERTIFICATION_RECORD".equals(link.getTargetType())
+                        && Objects.equals(certificationRecordId, link.getTargetId())
+                        && !Integer.valueOf(1).equals(link.getDeletedFlag()));
         if (!linked) {
             throw BusinessException.of(403, "certification.evidence.linkRequired");
         }

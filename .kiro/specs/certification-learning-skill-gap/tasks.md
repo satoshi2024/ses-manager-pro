@@ -91,11 +91,11 @@
   - Test: `TrainingPlanServiceTest`でNULL/0/threshold−1/threshold/threshold＋1、予定額snapshotと実費差額、追加expense approval、締め済み月、route不在、申請者自己承認、CAS競合、approval後completionを確認。`ExpenseRequestFlowIntegrationTest`等の既存経費回帰も実行し、**締め済み月のamount/関連/支払変更拒否（経費正本経由）**を確認した。
   - Demo: threshold等値の申請が既存expense approvalへ進み、申請者がapproveできず、expense承認・会計/支払条件を満たした後のみcompletionできることをテストで実演した。0円は理由付きで即時承認され、正の費用はplan費用snapshotを実費で上書きしないことも確認した。
 
-- [ ] **Task F2-3: as-of skill gap serviceを実装する**
+- [x] **Task F2-3: as-of skill gap serviceを実装する**
   - Objective: project/position期間、skill level、evidence count、unknown/synonym、0件を説明可能に比較する。
-  - Implementation: F1-4のeventフック完了後にのみ有効。`SkillTagResolver`の未知自動作成を需要計算へ使わない。
-  - Test: supply/demand effective as-of、履歴欠落、同義tag、未知skill、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、snapshot replay、AI停止時rule fallback、**replaceSkills後のevent残存**、**position delete後のas-of**。
-  - Demo: AI providerを停止してもgapが表示され、AIはcourse候補のみで評価/配置を確定しないことを確認する。
+  - Implementation: `SkillGapServiceImpl`（commit `TBD`）は`t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`だけを読み、current projectionから過去を補完しない。feature開始日前・履歴欠落は`historical_data_unavailable`、PROJECT/ POSITION/ COMBINEDのsource precedenceと案件期間inclusiveを結果へ残す。V122の`t_skill_tag_alias`と`SkillGapTaxonomyResolver`は承認済みsynonymだけをcanonical IDへ解決し、未知skillをmasterへ自動作成しない。`t_skill_gap_snapshot`へsource version/taxonomy version/result hash/jsonを保存し、replayはhash検証後にsnapshotだけから復元する。BP要員化のskill writeも`EngineerSkillService.replaceSkills`へ集約し、event insert迂回を防止した。
+  - Test: `SkillGapServiceImplTest`（supply/demand effective as-of、履歴欠落、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、DELETE当日/翌日、snapshot replay）、`SkillGapTaxonomyResolverTest`（同義tag、未知skill、自動master化なし）、`EngineerSkillServiceImplTest`/`ProjectSkillServiceImplTest`（replaceSkills後のevent残存）、`FlywayCertificationLearningSkillGapSchemaSmokeTest`（V122 MySQL schema）、`MigrationScriptIntegrityTest`を実行した。AIはこのTaskのgap計算へ依存させず、AI停止時もrule結果を維持する契約をF2-5/B2へ接続した。
+  - Demo: 固定ClockとV122 event fixtureで、feature開始日前はcurrent rowが存在してもunavailable、DELETE当日は削除状態を需要に戻さず翌日もcurrent fallbackなし、同義tagはcanonical表示、未知skillはunknown gap、COMBINEDはPROJECTを優先しposition-onlyを追加、replayはsource queryなしで同一hashを返すことをテストで実演した。
 
 - [ ] **Task F2-4: 期限schedulerと通知母集団を実装する**
   - Objective: 複数JVM再実行でもsemantic expiry noticeを重複発行せず、退職・休職・account未link・manager変更を正しく扱う。

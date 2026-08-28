@@ -59,7 +59,7 @@ class TrainingPlanServiceTest {
     }
 
     @Test
-    void 0円はexpenseを作らず人の理由付き確認だけでapprovedになる() {
+    void test0円はexpenseを作らず人の理由付き確認だけでapprovedになる() {
         LearningPlan plan = draft(1L, BigDecimal.ZERO);
         when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(1);
@@ -109,7 +109,7 @@ class TrainingPlanServiceTest {
         doThrow(BusinessException.of(400, "error.closing.hardLocked"))
                 .when(monthlyClosingService).assertOpenForUpdate("2026-08");
         assertThrows(BusinessException.class, () -> service.createDraft(plan, 7L));
-        verify(planMapper, never()).insert(any());
+        verify(planMapper, never()).insert(any(LearningPlan.class));
     }
 
     @Test
@@ -118,6 +118,7 @@ class TrainingPlanServiceTest {
         plan.setStatus(TrainingPlanService.PLAN_SUBMITTED);
         plan.setExpenseRequestId(50L);
         plan.setApprovalRequestId(70L);
+        plan.setCreatedByUserId(7L);
         plan.setVersion(1);
         when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         assertThrows(BusinessException.class, () -> service.approve(1L, 1, 7L, "自己承認"));
@@ -170,7 +171,7 @@ class TrainingPlanServiceTest {
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("150")));
 
         assertThrows(BusinessException.class, () -> service.linkExpense(90L, 50L, 7L, "実費差額"));
-        verify(enrollmentExpenseMapper, never()).insert(any());
+        verify(enrollmentExpenseMapper, never()).insert(any(com.ses.entity.TrainingEnrollmentExpense.class));
     }
 
     @Test

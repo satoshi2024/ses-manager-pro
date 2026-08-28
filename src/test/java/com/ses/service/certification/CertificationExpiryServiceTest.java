@@ -23,7 +23,7 @@ class CertificationExpiryServiceTest {
     private EngineerCertificationMapper mapper;
 
     @Test
-    void 90_60_30当日だけ候補になり前後日はならない() {
+    void test90_60_30当日だけ候補になり前後日はならない() {
         CertificationExpiryService service = new CertificationExpiryServiceImpl(mapper);
         LocalDate today = LocalDate.of(2026, 8, 28);
         EngineerCertification record = active(10L, today.plusDays(90));

@@ -211,6 +211,25 @@ CREATE TABLE IF NOT EXISTS t_training_enrollment_expense (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_enrollment_expense
     ON t_training_enrollment_expense(tenant_id, enrollment_id, expense_request_id, deleted_flag);
 
+-- ---- F2-3: 承認済みskill synonym ----
+CREATE TABLE IF NOT EXISTS t_skill_tag_alias (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+    alias_name VARCHAR(100) NOT NULL,
+    normalized_alias VARCHAR(100) NOT NULL,
+    canonical_skill_id BIGINT NOT NULL,
+    valid_from DATE NULL,
+    valid_to DATE NULL,
+    approved_by BIGINT NULL,
+    approved_at TIMESTAMP NULL,
+    version INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_alias_active
+    ON t_skill_tag_alias(tenant_id, normalized_alias, deleted_flag);
+
 -- ---- F1-4: effective history・gap snapshot ----
 CREATE TABLE IF NOT EXISTS t_engineer_skill_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
