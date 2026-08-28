@@ -110,7 +110,7 @@
 
 ## F1 Implementation Review受領・F2持越し（2026-08-28）
 
-独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2着手が許可された。F1本体Headは`2f7bbac0`、F2完了時点の現worktree local/remote Headは`9972dfc9`、現行migrationはV124（F2はV120〜V124）である。A1/A2/B1/B2/M、PR、merge、branch削除は引き続き禁止する。
+独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2着手が許可された。F1本体Headは`2f7bbac0`、F2完了時点の現worktree local/remote Headは`f2ce7a99`、現行migrationはV124（F2はV120〜V124）である。A1/A2/B1/B2/M、PR、merge、branch削除は引き続き禁止する。
 
 ### 持越し項目のF2接続
 
