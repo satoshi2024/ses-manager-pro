@@ -91,6 +91,12 @@
                         <span th:text="#{menu.lifecycle}">ライフサイクル管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('certification-learning-skill-gap')}">
+                    <a th:href="@{/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/certification-learning-skill-gap') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-mortarboard me-2"></i>
+                        <span>資格・学習・スキルギャップ</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">
                     <a th:href="@{/customer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/customer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-building me-2"></i>

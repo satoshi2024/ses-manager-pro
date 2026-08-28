@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>資格・学習・スキルギャップ - SES Manager Pro</title>
+    <style>
+        .cert-gap-table th, .cert-gap-table td { white-space: nowrap; }
+        .cert-gap-summary { min-width: 180px; }
+        @media (max-width: 390px) {
+            .cert-gap-actions .btn-label, .cert-gap-table .optional-column { display: none; }
+            .cert-gap-table th, .cert-gap-table td { font-size: .78rem; }
+            .cert-gap-filter .col-6 { padding-left: .35rem; padding-right: .35rem; }
+            .cert-gap-header { align-items: flex-start !important; gap: .5rem; }
+            .cert-gap-header h2 { font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 cert-gap-header">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-mortarboard me-2 text-primary"></i>資格・学習・スキルギャップ</h2>
+        <div class="cert-gap-actions">
+            <button type="button" class="btn btn-outline-secondary border-dark text-muted" onclick="exportCertificationLearningGap()">
+                <i class="bi bi-filetype-csv me-1"></i><span class="btn-label">CSV出力</span>
+            </button>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="cert-gap-filter" class="row g-3 align-items-end cert-gap-filter" onsubmit="event.preventDefault(); loadCertificationLearningGap(1);">
+                <div class="col-6 col-md-2">
+                    <label for="cert-gap-name" class="form-label text-muted small">要員名</label>
+                    <input id="cert-gap-name" class="form-control bg-dark border-secondary text-light" type="search" maxlength="100">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label for="cert-gap-status" class="form-label text-muted small">要員状態</label>
+                    <select id="cert-gap-status" class="form-select bg-dark border-secondary text-light">
+                        <option value="">すべて</option><option value="稼動中">稼動中</option><option value="Bench">Bench</option>
+                        <option value="提案中">提案中</option><option value="退場予定">退場予定</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label for="cert-gap-lifecycle" class="form-label text-muted small">ライフサイクル</label>
+                    <select id="cert-gap-lifecycle" class="form-select bg-dark border-secondary text-light">
+                        <option value="">すべて</option><option value="ACTIVE">在籍</option><option value="ON_LEAVE">休職</option><option value="RESIGNED">退職</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label for="cert-gap-asof" class="form-label text-muted small">基準日</label>
+                    <input id="cert-gap-asof" class="form-control bg-dark border-secondary text-light" type="date">
+                </div>
+                <div class="col-6 col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-filter me-1"></i>絞り込み</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover table-striped mb-0 align-middle cert-gap-table">
+                    <thead class="table-dark-header border-bottom border-dark">
+                    <tr>
+                        <th class="ps-4">要員</th><th>状態</th><th>ライフサイクル</th>
+                        <th>資格</th><th>学習計画</th><th>gap</th><th class="text-end pe-4">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody id="cert-gap-table-body"><tr><td colspan="7" class="text-center text-muted py-4">読み込み中...</td></tr></tbody>
+                </table>
+            </div>
+            <div class="card-footer border-dark bg-transparent py-3 d-flex justify-content-between align-items-center">
+                <div id="cert-gap-page-info" class="text-muted small ps-2"></div>
+                <nav aria-label="ページ移動"><ul id="cert-gap-pagination" class="pagination pagination-sm mb-0 pe-2"></ul></nav>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="cert-gap-detail-modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content bg-card border-dark">
+            <div class="modal-header border-dark"><h5 id="cert-gap-detail-title" class="modal-title text-light">詳細</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="閉じる"></button></div>
+            <div id="cert-gap-detail-body" class="modal-body text-light"></div>
+        </div></div>
+    </div>
+</div>
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/certification-learning-skill-gap.js}"></script>
+</th:block>
+</body>
+</html>
