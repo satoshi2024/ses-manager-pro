@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>貸与資産・アカウント - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid p-4">
+
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold mb-0 text-white"><i class="bi bi-laptop me-2"></i>貸与資産・外部アカウント</h4>
+            <p class="text-muted small mb-0">現在あなたに貸与・付与されている端末・アカウント・ライセンスの一覧です</p>
+        </div>
+        <div>
+            <button class="btn btn-outline-danger btn-sm" id="btnOpenLostModal">
+                <i class="bi bi-exclamation-triangle me-1"></i>端末・資産の紛失報告
+            </button>
+        </div>
+    </div>
+
+    <!-- 貸与端末・ハードウェア資産カード -->
+    <div class="card bg-secondary border-secondary mb-4">
+        <div class="card-header border-secondary">
+            <span class="fw-bold text-white"><i class="bi bi-pc-display me-1"></i>貸与PC・ハードウェア資産</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead class="table-dark text-secondary small">
+                        <tr>
+                            <th>資産タグ</th>
+                            <th>資産名称</th>
+                            <th>区分</th>
+                            <th>シリアルNo</th>
+                            <th>貸与開始日</th>
+                            <th>返却予定日</th>
+                            <th>ステータス</th>
+                        </tr>
+                    </thead>
+                    <tbody id="myAssetTableBody">
+                        <tr><td colspan="7" class="text-center py-4 text-muted">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- 外部アカウント参照 -->
+        <div class="col-md-6">
+            <div class="card bg-secondary border-secondary h-100">
+                <div class="card-header border-secondary">
+                    <span class="fw-bold text-white"><i class="bi bi-shield-lock me-1"></i>付与アカウント (SaaS / IdP)</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover mb-0 align-middle small">
+                            <thead class="table-dark text-secondary">
+                                <tr>
+                                    <th>システムID</th>
+                                    <th>アカウント識別子</th>
+                                    <th>権限レベル</th>
+                                    <th>状態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="myAccountTableBody">
+                                <tr><td colspan="4" class="text-center py-4 text-muted">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ライセンス割当 -->
+        <div class="col-md-6">
+            <div class="card bg-secondary border-secondary h-100">
+                <div class="card-header border-secondary">
+                    <span class="fw-bold text-white"><i class="bi bi-key me-1"></i>有償ライセンス割当</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-hover mb-0 align-middle small">
+                            <thead class="table-dark text-secondary">
+                                <tr>
+                                    <th>プランID</th>
+                                    <th>割当日</th>
+                                    <th>状態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="myLicenseTableBody">
+                                <tr><td colspan="3" class="text-center py-4 text-muted">読み込み中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 紛失報告モーダル -->
+    <div class="modal fade" id="lostModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-secondary text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-1"></i>資産紛失・盗難の緊急報告</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="lostForm">
+                    <div class="modal-body">
+                        <div class="alert alert-danger small mb-3">
+                            紛失または盗難に気づいた場合は速やかに報告してください。管理者およびセキュリティ担当へ緊急アラートが通知されます。
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">紛失した資産 <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm bg-dark text-white border-secondary" id="lostAssetSelect" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">発生日時・場所・状況詳細 <span class="text-danger">*</span></label>
+                            <textarea class="form-control form-control-sm bg-dark text-white border-secondary"
+                                      id="lostIncidentDetails" rows="4" required
+                                      placeholder="例: 2026/04/15 20:00頃、帰宅途中の電車内（JR山手線）にて紛失。警察に遺失届提出済み（受理番号: 12345）。"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-danger btn-sm">緊急紛失報告を送信</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/my-assets.js}"></script>
+</th:block>
+</body>
+</html>
