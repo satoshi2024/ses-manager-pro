@@ -47,31 +47,31 @@
 
 ## F1. 資格/course/plan/enrollment DDL（PLAN PASS 後）
 
-- [ ] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
+- [x] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
   - Objective: 資格名、issuer、code、期限規則、engineer取得状態、番号参照、versionを正規化する。
   - Implementation: 最新 migration **V115+**（Base 取り込み後 `V114` の次）、V1/H2専用schema/entity/mapperを同期し、PII field（DG-03-1: AES-256-GCM **または** token のいずれか一つに列形を固定）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
   - Test: empty DB/MySQL migration、H2 context、duplicate取得、code NULL、issuer別code、名称alias/merge、renew、nullable/期限、PII DTO非漏えい。
   - Demo: HRがmasterを登録し、本人申請がpendingで保存され、承認前activeにならないことを確認する。
 
-- [ ] **Task F1-2: certification eventと証憑参照を追加する**
+- [x] **Task F1-2: certification eventと証憑参照を追加する**
   - Objective: submit/verify/correct/cancelのappend-only履歴とDocumentLink参照を定義する。
   - Implementation: `CERTIFICATION_EVIDENCE`＋`CERTIFICATION_RECORD` typed linkだけを使い、generic `ENGINEER` linkが混在してもrestricted policyを優先する。eventへexact document version ID/hashを記録し、DocumentService/FileScopeValidationService/FileReferenceProviderの既存境界に接続する。raw file pathを持たない。**`FileScopeValidationService`に`CERTIFICATION_EVIDENCE`専用分岐を`document-archive`より前に追加**し、empty-link許可・admin bypass・generic OR-unionを資格証憑では禁止する（design §3.6）。
   - Test: duplicate event、correct/cancel理由、scope外、未scan、unknown file、legal hold、mixed link OR-union迂回拒否、exact version/CLEAN検証、**empty-link、ENGINEER-only mixed link、admin bypass、version/hash不一致**。
   - Demo: CLEAN証憑だけが対象取得recordのdetail/downloadに出て、scope外roleでは404/403相当で漏えいしないことを確認する。
 
-- [ ] **Task F1-3: course、plan、enrollment DDL/entityを追加する**
+- [x] **Task F1-3: course、plan、enrollment DDL/entityを追加する**
   - Objective: course catalog、canonical target skill、learning goal、enrollment/result/certificateを正規化する。
   - Implementation: `m_skill_tag` FKを使い、course-skill/plan-skill joinを作る。planのplanned cost snapshotと`t_training_enrollment_expense`を持つが、actual cost/paymentは`t_expense_request`へ委譲する。`t_training_history`は再利用しない。
   - Test: JPY/期間/capacity、NULL/0、税込、state version、cancel/correct、certificate document reference、training historyとの分離、expense relationの重複防止。
   - Demo: HRがcourseを登録し、本人/上長がplan/enrollmentを作り、完了前後のdetailが状態機械どおりに変わることを確認する。
 
-- [ ] **Task F1-4: supply/demandのeffective historyとgap snapshot DDLを追加する**
+- [x] **Task F1-4: supply/demandのeffective historyとgap snapshot DDLを追加する**
   - Objective: current-onlyの既存skill/positionを過去as-ofへ遡及適用せず、source versionとsnapshotで再現可能にする。
   - Implementation: `t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`、`t_skill_gap_snapshot`を追加候補として確定し、current projectionと同一transactionで履歴を登録する。履歴欠落期間は`historical_data_unavailable`とする。**必須フック:** `EngineerSkillServiceImpl.replaceSkills`、`ProjectSkillServiceImpl.replaceSkills`、`PositionServiceImpl.create`/`update`/`changeStatus`/`delete`を同一Taskの変更対象に含める。`delete`は物理削除前にposition eventへclose/cancelled snapshotを記録し、過去as-ofをcurrent補完しない（inventory §5.4、design §3.4）。
   - Test: effective period overlap、訂正・supersedes、project/position precedence、feature開始日前のas-of、snapshot hash/version、MySQL concurrency、**既存PUT skills後にeventが残り過去as-ofがcurrentに置換されないこと**、**position delete後のas-ofがhistorical_data_unavailableまたは明示cancelledでcurrent補完しないこと**。
   - Demo: 現在値を変更しても過去snapshotのgap結果が変わらず、履歴のない過去指定は安全にdegradedとなることを確認する。
 
-- [ ] **Task F1-5: 評価proposal・人の確定・決定監査DDLを追加する**
+- [x] **Task F1-5: 評価proposal・人の確定・決定監査DDLを追加する**
   - Objective: 本人自己評価、上長提案、HR確定、AI候補、人の最終決定を別recordで監査する。
   - Implementation: `t_engineer_skill_assessment`と`t_learning_decision_event`を追加候補とし、AI candidateから公式skill/placementへの直接FK・遷移を作らない。
   - Test: SELF/MANAGER/HR_FINALの分離、actor/reason/effective period、AI accept/reject、adverse-use flag、AI-only finalization拒否。
