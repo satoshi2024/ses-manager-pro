@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Feature | `NF-04 mobile-pwa-self-service` |
-| Status | APPROVED / IMPLEMENTED / REVIEW HANDOFF READY（Browser環境証拠はBLOCKED） |
+| Status | APPROVED / IMPLEMENTED / INDEPENDENT REVIEW FAIL（Task MのBrowser環境証拠はBLOCKED） |
 | Owner | 管理者（プロジェクト責任者） |
 | Approved scope | Chrome/Edge/Safari現行・直前、Android Chrome、iOS Safari、install任意、pushなし、承認済みoffline/cache/idempotency/version/retention/user boundary |
 | Base branch | `origin/main` |
@@ -29,7 +29,7 @@
 - [x] same ID/same hash replay、same ID/different hash 409、stale version 409、no LWWが固定されている。
 - [x] user A logout→B login、session expiry、shared deviceをfail-closed条件としている。
 - [x] attendance/expenseの既存domain service・計算を再利用し、PWA独自計算を持たない。
-- [x] 390×844、offline recovery、SW update、double-click、CacheStorageの実測証拠がTask Mにある。
+- [ ] 390×844、offline recovery、SW update、double-click、CacheStorageの実測証拠がTask Mにある。
 - [x] migrationは実装開始時の最新+1を使用し、既存migrationを変更しない。
 - [x] implementation dialogではPR/mergeを行わない。
 
@@ -50,8 +50,8 @@ Self-review notes:
 | A1 Mobile shell | COMPLETED | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | 215600ea74c30cc6587f08f7fe1bb3ccf48df65c | MobileResponsiveLayoutTest (28), PwaAssetContractTest (4); 44px touch target, focus-visible, modal focus restore, offline/online status |
 | A2 Draft/Queue/Conflict | COMPLETED | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | 0003b54251d826d0fb10bfc40cddf8acbe2c98db | pwa-queue.js; single queue store; allowed mutation adapters; 30-day cleanup; same-resource version advancement; conflict panel; PwaAssetContractTest (6); browser run attempted but SW/Tomcat loopback blocker recorded below |
 | B1 Update/Cleanup/Monitoring | COMPLETED | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | 45b0a1b1e2c1619972609655a786c9109f8e0ac7 | PwaClientMutationCleanupSchedulerTest; server 30-day ledger cleanup; Micrometer outcome/screen metrics without user/payload tags; SW old-cache cleanup/update prompt |
-| Review hardening | COMPLETED | 4bf26819〜1396f0d0 | 1396f0d0b9d2a0e0170e3e315645e349eae31722 | payload allow-list/PII境界、409差分・再取得・手動再適用、日次row差分、署名付きopaque lease、scope lease更新とrecord retentionの分離、期限切れERROR payload削除、method/path/ID/operation検証、V113 operation境界、実HTTPを含むMySQL実domain競合/rollback、scope更新後replay、動的no-store、同一user scope再束縛、atomic cursor更新を追加 |
-| M Integrated gate | PARTIAL_WITH_ENVIRONMENT_BLOCKER | 未完了（Task MのBrowser実測待ち） | 1396f0d0b9d2a0e0170e3e315645e349eae31722 | 対象契約gate 40/0/0/0、PWA専用MySQL実domain gate 5/0/0/0、migration smoke 5/0/0/0、node --check PASS。実Browser/CacheStorage/IndexedDBは環境blockerで未実施 |
+| Review hardening | COMPLETED | 4bf26819〜db2da655 | db2da65505088759c558c288540a69e221514479 | payload allow-list/PII境界、409差分・再取得・手動再適用、日次row差分、署名付きopaque lease、scope lease更新とrecord retentionの分離、期限切れERROR payload削除、method/path/ID/operation検証、V113 operation境界、V112旧hash互換とoperation再束縛、実HTTPを含むMySQL実domain競合/rollback、scope更新後replay、動的no-store、同一user scope再束縛、atomic cursor更新を追加 |
+| M Integrated gate | PARTIAL_WITH_ENVIRONMENT_BLOCKER | 未完了（Task MのBrowser実測待ち） | db2da65505088759c558c288540a69e221514479 | 対象契約gate 41/0/0/0、PWA専用MySQL実domain gate 5/0/0/0、migration smoke 5/0/0/0、legacy hash fixtureを含むledger gate 7/0/0/0、node --check PASS。実Browser/CacheStorage/IndexedDBは環境blockerで未実施 |
 
 ## 4. Completion matrix
 
@@ -59,7 +59,7 @@ Self-review notes:
 |---|---|---|---|---|
 | PW-R1 SW/cache/no-store | service-worker.js allow-list、PwaNoStoreFilter、network-only | PwaAssetContractTest 7、PwaNoStoreFilterTest 3 | IAB/Chrome static probeでSW API非公開、CacheStorage実測は未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R2 draft/queue | user-scoped単一queue store、30日retention、offline対象allow-list、online flush、期限payload除去、ERROR payload/hash/conflict除去 | PwaAssetContractTest 7、PwaCanonicalizerTest、PwaUserContextServiceTest 3、queue JS syntax/contract | 実Browserのoffline→online/再起動はTomcat loopback blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
-| PW-R3 idempotency/version | V112 ledger + V113 operation境界、同hash replay、異hash/stale version 409、scope更新後replay、既存domain service/CAS再利用、同transaction rollback | PwaClientMutationLedgerServiceTest 6、PwaMutationApiControllerTest 5、PWA専用MySQL実domain gate 5 | MySQL 8 Testcontainersでclaim race、scope更新後同hash replay、expense同一baseVersionの片側409/非上書き、ledger+業務行rollback、実HTTP controller更新、V113 operation列適用を実測 | AUTOMATED_PASS / BROWSER_PARTIAL |
+| PW-R3 idempotency/version | V112 ledger + V113 operation境界、同hash replay、異hash/stale version 409、scope更新後replay、V112旧hashの同一operation再束縛、既存domain service/CAS再利用、同transaction rollback | PwaClientMutationLedgerServiceTest 7、PwaMutationApiControllerTest 5、PWA専用MySQL実domain gate 5 | MySQL 8 Testcontainersでclaim race、scope更新後同hash replay、expense同一baseVersionの片側409/非上書き、ledger+業務行rollback、実HTTP controller更新、V113 operation列適用を実測 | AUTOMATED_PASS / BROWSER_PARTIAL |
 | PW-R4 session/user boundary | 署名付きopaque userScope、同一user lease再利用/期限後再束縛、logout/user switch clear、expiry pause、context mismatch fail-closed | PwaUserContextServiceTest 3、PwaAssetContractTest 7、bundle/JS contract、portal regression | A logout→B login/session expiryはapp起動 blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R5 conflict UX | resource/resourceId/fieldsのserver/client diff表示、対象日次row正規化、CONFLICT停止、no-store再取得、確認付きmanual reapply、LWW禁止 | PwaMutationApiControllerTest 3、PwaAssetContractTest 7 | 実409画面操作はapp起動 blockerで未実行 | AUTOMATED_PASS / BROWSER_BLOCKED |
 | PW-R6 390px/accessibility | responsive shell、touch/focus/aria/status | MobileResponsiveLayoutTest 28、PwaAssetContractTest 7 | IAB/Chromeで390×844 viewport、DPR 1.25を確認。app画面操作は未実行 | PARTIAL |
@@ -71,11 +71,11 @@ Self-review notes:
 Implementation completion時に次を埋める。Browser実測不能項目は未実施として残し、PASSとは記載しない。
 
 - Base SHA: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
-- Remote Head SHA（ledger更新commit直前の実装検証値）: `1396f0d0b9d2a0e0170e3e315645e349eae31722`
-- `git diff --stat Base..Head`: `63 files changed, 4306 insertions(+), 61 deletions(-)`
-- remote branch verification（記録時）: `git ls-remote origin refs/heads/codex/mobile-pwa-self-service` = `1396f0d0b9d2a0e0170e3e315645e349eae31722`; local HEADも同値。
+- Remote Head SHA（ledger更新前の実装検証値）: `db2da65505088759c558c288540a69e221514479`
+- `git diff --stat Base..Head`: `63 files changed, 4364 insertions(+), 61 deletions(-)`（このledger更新commit後に再確認する）
+- remote branch verification（ledger更新前の記録）: `git ls-remote origin refs/heads/codex/mobile-pwa-self-service` = `db2da65505088759c558c288540a69e221514479`; local HEADも同値。
 - clean worktree verification（記録時）: `git status --short --branch` はbranch tracking行のみで差分なし。
-- fast/MySQL/performance test result: 最新PWA対象契約gate `40/0/0/0`、PWA専用MySQL実domain gate `5/0/0/0`、MySQL migration契約`5/0/0/0`、performance`1/0/0/0`。全体gateの制約は下記summary。
+- fast/MySQL/performance test result: 最新PWA対象契約gate `41/0/0/0`、PWA専用MySQL実domain gate `5/0/0/0`、MySQL migration契約`5/0/0/0`、performance`1/0/0/0`。全体gateの制約は下記summary。
 - CacheStorage inspection artifact: `BLOCKED/未実行`。IAB/Chrome surfaceが`navigator.serviceWorker === undefined`で、アプリTomcatもJDK 21 loopback errorで起動不可。
 - 390×844 artifact: IAB/Chrome static probeで`innerWidth=390, innerHeight=844, devicePixelRatio=1.25`を確認。実アプリ画面は未実行。
 - offline→online artifact: `BLOCKED/未実行`（同上）。
@@ -86,6 +86,13 @@ Implementation completion時に次を埋める。Browser実測不能項目は未
 - 409 server/client diff artifact: `BLOCKED/未実行`（同上）。controller stale conflict testとqueue conflict rendering、server再取得・確認付きreapplyは自動/静的テストで確認。
 - IndexedDB prohibited-data inspection: `BLOCKED/未実行`。queue allow-list/minimal payload/no forbidden fieldを静的契約で確認。
 - completion matrix: 本文4節。Browser項目は未実施をPASSに昇格していない。
+
+## 6. Latest independent Review result
+
+- Review対象SHA: `db2da65505088759c558c288540a69e221514479`（このledger更新前）。
+- 判定: `PLAN FAIL` / `IMPLEMENTATION FAIL`、`P0=0`。コード上の残存P1/P2はなし。
+- 必須残件P1: Task Mの実Browser証拠（390×844実画面、offline→online、再起動、session expiry、SW update、CacheStorage禁止route 0件、50ms double-click、A logout→B login、実409 conflict UI）が環境blockerで未実施。
+- 前回のledger不整合P2は本更新で修正対象とし、次のremote Headで再Reviewする。
 
 ### Automated/Browser evidence summary
 
