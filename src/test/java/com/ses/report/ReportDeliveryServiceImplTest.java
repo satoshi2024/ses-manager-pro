@@ -12,6 +12,7 @@ import com.ses.entity.ReportDelivery;
 import com.ses.entity.ReportRun;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportDeliveryMapper;
+import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.DocumentService;
@@ -23,6 +24,8 @@ import com.ses.service.report.impl.ReportDeliveryServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -43,6 +46,7 @@ class ReportDeliveryServiceImplTest {
 
     private ReportRunMapper runMapper;
     private ReportDeliveryMapper deliveryMapper;
+    private NotificationOutboxMapper notificationOutboxMapper;
     private SysUserMapper userMapper;
     private ReportRecipientPreviewService previewService;
     private ReportSnapshotService snapshotService;
@@ -56,6 +60,7 @@ class ReportDeliveryServiceImplTest {
     void setUp() {
         runMapper = mock(ReportRunMapper.class);
         deliveryMapper = mock(ReportDeliveryMapper.class);
+        notificationOutboxMapper = mock(NotificationOutboxMapper.class);
         userMapper = mock(SysUserMapper.class);
         previewService = mock(ReportRecipientPreviewService.class);
         snapshotService = mock(ReportSnapshotService.class);
@@ -65,7 +70,7 @@ class ReportDeliveryServiceImplTest {
         when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyString())).thenReturn(99L);
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
-        service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, userMapper, previewService,
+        service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
                 snapshotService, documentService, archiveService, notificationService, passwordEncoder, new ObjectMapper());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
@@ -174,6 +179,40 @@ class ReportDeliveryServiceImplTest {
     }
 
     @Test
+    void downloadはownerと別の許可済みmanagerにも利用させる() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("2", "N/A",
+                        List.of(new SimpleGrantedAuthority("ROLE_マネージャー"))));
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(2L);
+        delivery.setDocumentId(20L);
+        delivery.setDocumentVersionNo(1);
+        delivery.setLinkTokenHash(sha256("token"));
+        delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
+        delivery.setReauthRequired(1);
+        delivery.setReauthenticatedAt(LocalDateTime.now());
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        ReportRun run = readyRun();
+        run.setScopeOwnerType("ORGANIZATION");
+        run.setScopeOwnerId(1L);
+        run.setOrganizationScopeJson("{\"companyWide\":false,\"organizationIds\":[10],\"directUserIds\":[]}");
+        when(runMapper.selectById(10L)).thenReturn(run);
+        when(previewService.previewForRun(run)).thenReturn(preview(
+                new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "recipient-scope")));
+        when(archiveService.getVersionStorageKey(20L, 1)).thenReturn("published/report.pdf");
+        when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("pdf".getBytes(StandardCharsets.UTF_8)));
+
+        ReportDownload result = service.download(7L, "token", "PDF");
+
+        assertThat(result.getFileName()).isEqualTo("management-report.pdf");
+        verify(snapshotService).scopeSnapshotOf(run);
+        verify(snapshotService, never()).assertAccessible(run);
+        verify(archiveService).download(20L, 1);
+    }
+
+    @Test
     void retryが5回到達時にdeliveryをDLQへ移す() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
@@ -189,19 +228,42 @@ class ReportDeliveryServiceImplTest {
         verifyNoInteractions(previewService, notificationService);
     }
 
-    @Test
-    void retryはENQUEUEDまたはPROCESSING中のdeliveryを再送しない() {
+    @ParameterizedTest
+    @ValueSource(strings = {"ENQUEUED", "PROCESSING", "PENDING", "SENT"})
+    void retryはdispatch中または完了済みdeliveryを再送しない(String status) {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
         delivery.setAttemptCount(1);
-        delivery.setDeliveryStatus("ENQUEUED");
+        delivery.setDeliveryStatus(status);
         when(deliveryMapper.selectById(7L)).thenReturn(delivery);
 
         service.retry(7L);
 
-        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
+        assertThat(delivery.getDeliveryStatus()).isEqualTo(status);
         verify(deliveryMapper, never()).updateById(any(ReportDelivery.class));
-        verifyNoInteractions(previewService, notificationService);
+        verifyNoInteractions(previewService, notificationService, notificationOutboxMapper);
+    }
+
+    @Test
+    void retryはRETRYの既存outboxを再利用し新しい通知を発行しない() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(2L);
+        delivery.setAttemptCount(2);
+        delivery.setDeliveryStatus("RETRY");
+        delivery.setNotificationOutboxId(88L);
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(previewService.previewForRun(any())).thenReturn(
+                preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+        when(notificationOutboxMapper.requeueReport(88L)).thenReturn(1);
+
+        service.retry(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
+        verify(notificationOutboxMapper).requeueReport(88L);
+        verifyNoInteractions(notificationService);
     }
 
     @Test
@@ -225,6 +287,25 @@ class ReportDeliveryServiceImplTest {
         assertThat(delivery.getAttemptCount()).isEqualTo(1);
         verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
                 contains("/download?token="), any(), eq("management-report"));
+    }
+
+    @Test
+    void manualReplayはDLQの既存outboxを再利用しdedupe衝突を起こさない() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setAttemptCount(5);
+        delivery.setDeliveryStatus("FAILED");
+        delivery.setNotificationOutboxId(88L);
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(notificationOutboxMapper.replayReport(88L)).thenReturn(1);
+
+        service.manualReplay(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
+        assertThat(delivery.getAttemptCount()).isEqualTo(5);
+        verify(notificationOutboxMapper).replayReport(88L);
+        verify(deliveryMapper).updateById(delivery);
+        verifyNoInteractions(notificationService, previewService, runMapper);
     }
 
     private ReportRecipientPreviewResult preview(ReportRecipientPreview recipient) {

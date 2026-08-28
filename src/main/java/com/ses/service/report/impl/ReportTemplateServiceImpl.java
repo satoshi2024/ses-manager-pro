@@ -102,6 +102,45 @@ public class ReportTemplateServiceImpl implements ReportTemplateService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public ReportTemplateVersion updateVersion(Long versionId, ReportTemplateVersionCreateRequest request) {
+        ReportTemplateVersion version = versionMapper.selectById(versionId);
+        if (version == null) {
+            throw BusinessException.of(404, "error.managementReport.templateVersionNotFound");
+        }
+        if (!"DRAFT".equals(version.getStatus())) {
+            throw BusinessException.of(409, "error.managementReport.publishedVersionImmutable");
+        }
+        if (request == null) {
+            throw BusinessException.of(400, "error.managementReport.templateVersionInvalid");
+        }
+        if (request.getSectionConfigJson() != null && !request.getSectionConfigJson().isBlank()) {
+            version.setSectionConfigJson(request.getSectionConfigJson().trim());
+        }
+        if (request.getFormatConfigJson() != null && !request.getFormatConfigJson().isBlank()) {
+            version.setFormatConfigJson(request.getFormatConfigJson().trim());
+        }
+        if (request.getRecipientConfigJson() != null && !request.getRecipientConfigJson().isBlank()) {
+            version.setRecipientConfigJson(request.getRecipientConfigJson().trim());
+        }
+        if (request.getScopeConfigJson() != null && !request.getScopeConfigJson().isBlank()) {
+            version.setScopeConfigJson(request.getScopeConfigJson().trim());
+        }
+        if (request.getTimezoneId() != null && !request.getTimezoneId().isBlank()) {
+            version.setTimezoneId(request.getTimezoneId().trim());
+        }
+        if (request.getRetentionYears() != null) {
+            version.setRetentionYears(request.getRetentionYears());
+        }
+        if (!DEFAULT_TIMEZONE.equals(version.getTimezoneId()) || version.getRetentionYears() == null
+                || version.getRetentionYears() != 7) {
+            throw BusinessException.of(400, "error.managementReport.policyFixed");
+        }
+        versionMapper.updateById(version);
+        return version;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public ReportTemplateVersion publishVersion(Long versionId) {
         ReportTemplateVersion version = versionMapper.selectById(versionId);
         if (version == null) {

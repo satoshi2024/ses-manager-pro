@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,6 +65,12 @@ public class ManagementReportApiController {
         return ApiResult.success(templateService.publishVersion(versionId));
     }
 
+    @PutMapping("/versions/{versionId}")
+    public ApiResult<ReportTemplateVersion> updateVersion(@PathVariable Long versionId,
+                                                          @RequestBody ReportTemplateVersionCreateRequest request) {
+        return ApiResult.success(templateService.updateVersion(versionId, request));
+    }
+
     @PostMapping("/runs")
     public ApiResult<ReportGenerationResult> generate(@RequestBody ReportRunRequest request) {
         if (request == null || request.recipientPreviewHash() == null
@@ -86,13 +93,14 @@ public class ManagementReportApiController {
     public ApiResult<ReportGenerationResult> regenerate(@PathVariable Long runId) {
         ReportRun previous = snapshotService.findRun(runId);
         snapshotService.assertAccessible(previous);
-        ReportRecipientPreviewResult preview = recipientPreviewService.previewForScope(
-                previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
-                snapshotService.scopeSnapshotOf(previous));
+        // 再生成では元runのscopeをそのまま母集団にせず、現在principalのscopeでpreviewを取り直す。
+        // generate側も直前に現在scopeを再解決し、異動済みentity IDを再利用しない。
+        ReportRecipientPreviewResult preview = recipientPreviewService.preview(
+                previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()));
         return ApiResult.success(snapshotService.generate(new ReportGenerationCommand(
                 previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
                 previous.getCutoffKind(), true, previous.getScheduleId(), false, null,
-                previous.getId(), preview.getPreviewHash(), snapshotService.scopeSnapshotOf(previous))));
+                previous.getId(), preview.getPreviewHash(), null)));
     }
 
     @GetMapping("/runs/{runId}")

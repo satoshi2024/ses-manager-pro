@@ -41,4 +41,18 @@ public interface NotificationOutboxMapper extends BaseMapper<NotificationOutbox>
     int markResult(@Param("id") Long id, @Param("status") String status,
                    @Param("nextAttemptAt") LocalDateTime nextAttemptAt,
                    @Param("lastError") String lastError);
+
+    /** report deliveryの通常retry用。既存outboxを再利用し、通知行を増やさない。 */
+    @Update("UPDATE t_notification_outbox "
+            + "SET status = 'PENDING', next_attempt_at = CURRENT_TIMESTAMP, "
+            + "locked_at = NULL, last_error = NULL, sent_at = NULL "
+            + "WHERE id = #{id} AND status IN ('RETRY','FAILED')")
+    int requeueReport(@Param("id") Long id);
+
+    /** DLQ manual replay用。outboxの試行回数だけを新しい配送世代として再開する。 */
+    @Update("UPDATE t_notification_outbox "
+            + "SET status = 'PENDING', attempt_count = 0, next_attempt_at = CURRENT_TIMESTAMP, "
+            + "locked_at = NULL, last_error = NULL, sent_at = NULL "
+            + "WHERE id = #{id} AND status IN ('RETRY','FAILED')")
+    int replayReport(@Param("id") Long id);
 }

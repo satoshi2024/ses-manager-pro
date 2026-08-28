@@ -206,10 +206,12 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         }
 
         LocalDateTime asOfAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
-        ReportScopeSnapshot scope = command.scopeSnapshot() == null
-                ? resolveScope(permissionAsOf) : command.scopeSnapshot();
+        // 渡されたscopeはowner/previewの境界確認にだけ使い、entity ID母集団は必ず生成直前に
+        // 現在principalから再解決する。scheduleや再生成要求が保持する古いID集合をそのまま
+        // ReportScopeContextへ入れると、異動済みengineer/contract/invoiceが混入する。
+        ReportScopeSnapshot scope = resolveScope(permissionAsOf);
         if (command.scopeSnapshot() != null) {
-            assertGenerationScope(scope, permissionAsOf);
+            assertGenerationScope(command.scopeSnapshot(), permissionAsOf);
         }
 
         // generation直前に同一principalでrecipient scopeを再評価する。APIからhashが渡された場合は
@@ -217,7 +219,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         ReportRecipientPreviewResult preview = command.scopeSnapshot() == null
                 ? recipientPreviewService.preview(command.templateVersionId(), target)
                 : recipientPreviewService.previewForScope(command.templateVersionId(), target,
-                command.scopeSnapshot());
+                scope);
         if (command.recipientPreviewHash() != null
                 && !command.recipientPreviewHash().equals(preview.getPreviewHash())) {
             throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
@@ -278,7 +280,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 continue;
             }
             try {
-                SectionValue value = ReportScopeContext.with(command.scopeSnapshot(),
+                SectionValue value = ReportScopeContext.with(scope,
                         () -> loadSection(sectionKey, target, sourceCache, scope));
                 saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo,
                         attemptStartedAt);

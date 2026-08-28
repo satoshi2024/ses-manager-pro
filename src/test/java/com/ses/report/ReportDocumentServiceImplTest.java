@@ -2,6 +2,8 @@ package com.ses.report;
 
 import com.ses.common.util.PdfFontUtils;
 import com.ses.dto.report.ReportDocumentArtifact;
+import com.ses.dto.dashboard.DashboardSummaryDto;
+import com.ses.dto.export.MonthlyRevenueDto;
 import com.ses.entity.Document;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.ReportRun;
@@ -10,6 +12,9 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.report.impl.ReportDocumentServiceImpl;
+import com.ses.service.billing.MonthlyRevenueCalcService;
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +83,21 @@ class ReportDocumentServiceImplTest {
 
     @Test
     void snapshot値を画面と全形式exportで同じvalueJsonとして扱う() throws Exception {
+        MonthlyRevenueCalcService.MonthlyAmount canonical =
+                new MonthlyRevenueCalcService.MonthlyAmount(123456L, 30000L, true);
+        DashboardSummaryDto screen = DashboardSummaryDto.builder()
+                .charts(DashboardSummaryDto.ChartsDto.builder()
+                        .revenue(DashboardSummaryDto.RevenueChartDto.builder()
+                                .labels(List.of("8月"))
+                                .sales(List.of(canonical.getSales()))
+                                .profit(List.of(canonical.getProfit()))
+                                .isActual(List.of(canonical.isHasActual()))
+                                .build())
+                        .build())
+                .build();
+        MonthlyRevenueDto export = MonthlyRevenueDto.builder()
+                .label("2026年8月").sales(canonical.getSales()).profit(canonical.getProfit())
+                .isActual(canonical.isHasActual()).build();
         ReportSectionSnapshot metric = new ReportSectionSnapshot();
         metric.setSectionKey("sales");
         metric.setSectionStatus("SUCCEEDED");
@@ -85,23 +105,34 @@ class ReportDocumentServiceImplTest {
         metric.setConfirmation("速報");
         metric.setDataAsOfAt(LocalDateTime.of(2026, 8, 31, 23, 59));
         metric.setSnapshotHash("metric-hash");
-        metric.setValueJson("{\"revenue\":123456,\"grossProfit\":30000}");
+        metric.setValueJson("{\"sales\":123456,\"grossProfit\":30000,\"isActual\":true}");
         when(snapshotService.listSections(10L)).thenReturn(List.of(metric));
 
         byte[] csv = service.render(10L, "CSV");
         byte[] xlsx = service.render(10L, "XLSX");
+        byte[] pdf = service.render(10L, "PDF");
         String uiJs = new ClassPathResource("static/js/modules/management-reports.js")
                 .getContentAsString(StandardCharsets.UTF_8);
         String uiHtml = new ClassPathResource("templates/management-reports/index.html")
                 .getContentAsString(StandardCharsets.UTF_8);
 
+        assertThat(screen.getCharts().getRevenue().getSales().get(0)).isEqualTo(export.getSales());
+        assertThat(screen.getCharts().getRevenue().getProfit().get(0)).isEqualTo(export.getProfit());
+        assertThat(screen.getCharts().getRevenue().getIsActual().get(0)).isEqualTo(export.isActual());
         assertThat(new String(csv, StandardCharsets.UTF_8)).contains("123456", "30000");
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsx))) {
             assertThat(workbook.getSheetAt(0).getRow(4).getCell(6).getStringCellValue())
                     .isEqualTo(metric.getValueJson());
         }
+        try (PdfReader reader = new PdfReader(pdf)) {
+            assertThat(new PdfTextExtractor(reader).getTextFromPage(1)).contains("123456", "30000");
+        }
         assertThat(uiJs).contains("s.valueJson || ''");
+        assertThat(uiJs).contains("openReportVersionModal", "editReportVersion", "publishReportVersion");
+        assertThat(uiJs).contains("/api/management-reports/templates/${reportVersionTemplateId}/versions");
+        assertThat(uiJs).contains("/api/management-reports/versions/${editingReportVersionId}");
         assertThat(uiHtml).contains("<th>value</th>");
+        assertThat(uiHtml).contains("report-version-list", "save-report-version");
     }
 
     @Test

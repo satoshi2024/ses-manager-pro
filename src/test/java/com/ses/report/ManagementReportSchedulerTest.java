@@ -14,7 +14,6 @@ import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -57,7 +56,7 @@ class ManagementReportSchedulerTest {
         when(mapper.selectDue(any(), eq(50))).thenReturn(List.of(schedule));
         when(mapper.claimDue(eq(5L), eq(scheduledAt), any(), any())).thenReturn(0);
 
-        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, new ObjectMapper()).dispatchDue();
+        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
         verifyNoInteractions(snapshotService, deliveryService);
     }
@@ -73,7 +72,7 @@ class ManagementReportSchedulerTest {
         when(closingService.isClosed("2026-08")).thenReturn(false);
         when(snapshotService.generate(any())).thenReturn(new ReportGenerationResult(
                 new ReportRun() {{ setId(11L); setStatus("PARTIAL"); }}, List.of(), false));
-        ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService, new ObjectMapper());
+        ManagementReportScheduler scheduler = new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService);
 
         scheduler.runOne(schedule, scheduledAt);
 
@@ -81,7 +80,7 @@ class ManagementReportSchedulerTest {
                 && command.principalUserId().equals(1L)
                 && command.period().toString().equals("2026-08")
                 && command.cutoffKind().equals("速報")
-                && command.scopeSnapshot().isCompanyWide()));
+                && command.scopeSnapshot() == null));
         verifyNoInteractions(deliveryService);
     }
 
@@ -98,8 +97,7 @@ class ManagementReportSchedulerTest {
         when(closingService.isClosed("2026-08")).thenReturn(false);
         when(snapshotService.generate(any())).thenThrow(new IllegalStateException("source unavailable"));
 
-        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService,
-                new ObjectMapper()).dispatchDue();
+        new ManagementReportScheduler(mapper, snapshotService, deliveryService, closingService).dispatchDue();
 
         verify(mapper).markFailure(eq(5L), any(), any(), eq(scheduledAt),
                 eq("SCHEDULE_GENERATION_FAILED"), contains("source unavailable"));

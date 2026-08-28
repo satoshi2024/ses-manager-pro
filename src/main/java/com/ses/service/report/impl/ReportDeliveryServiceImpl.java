@@ -16,6 +16,7 @@ import com.ses.entity.SysUser;
 import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDeliveryService;
@@ -48,6 +49,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private static final int REAUTH_MINUTES = 10;
     private final ReportRunMapper runMapper;
     private final ReportDeliveryMapper deliveryMapper;
+    private final NotificationOutboxMapper notificationOutboxMapper;
     private final SysUserMapper sysUserMapper;
     private final ReportRecipientPreviewService recipientPreviewService;
     private final ReportSnapshotService snapshotService;
@@ -124,7 +126,10 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
         ReportRun run = runMapper.selectById(delivery.getRunId());
-        snapshotService.assertAccessible(run);
+        // 配布runのowner参照認可と、配布先本人のdownload認可は別物である。
+        // ownerと別のmanagerでも、preview時にowner scopeを包含していた本人なら利用できる。
+        // ここでは保存scopeのhashだけを検証し、owner本人であることは要求しない。
+        snapshotService.scopeSnapshotOf(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         boolean stillAllowed = preview.getRecipients().stream().anyMatch(item ->
                 userId.equals(item.getRecipientUserId()) && "ALLOW".equals(item.getScopeDecision()));
@@ -192,6 +197,19 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             deliveryMapper.updateById(delivery);
             return;
         }
+        // outboxのRETRYは既存行を再利用する。新しい通知を発行すると旧outboxと新outboxが
+        // 同じrun/recipientを指し、二重通知または古いlinkの通知が発生する。
+        if (delivery.getNotificationOutboxId() != null) {
+            if (notificationOutboxMapper.requeueReport(delivery.getNotificationOutboxId()) == 0) {
+                return;
+            }
+            delivery.setDeliveryStatus("ENQUEUED");
+            delivery.setLastErrorCode(null);
+            delivery.setLastErrorMessage(null);
+            deliveryMapper.updateById(delivery);
+            return;
+        }
+        // 旧データにoutbox idが無い場合だけ互換用に新規発行する。
         ReportDocumentArtifact artifact = new ReportDocumentArtifact(run.getId(), "PDF", null, null, null);
         issue(run, delivery, recipient, artifact);
     }
@@ -201,6 +219,22 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     public void manualReplay(Long deliveryId) {
         requireAdmin();
         ReportDelivery delivery = findRequired(deliveryId);
+        if (!"FAILED".equals(delivery.getDeliveryStatus())) {
+            return;
+        }
+        // DLQ replayも同じnotification/outboxを再利用する。delivery attemptは監査用に保持し、
+        // outboxのattemptだけをreplay世代として0へ戻すため、dedupe keyの再衝突を起こさない。
+        if (delivery.getNotificationOutboxId() != null) {
+            if (notificationOutboxMapper.replayReport(delivery.getNotificationOutboxId()) == 0) {
+                return;
+            }
+            delivery.setDeliveryStatus("ENQUEUED");
+            delivery.setLastErrorCode(null);
+            delivery.setLastErrorMessage(null);
+            deliveryMapper.updateById(delivery);
+            return;
+        }
+        // outbox導入前のlegacy deliveryだけは既存互換の新規発行へフォールバックする。
         delivery.setAttemptCount(0);
         delivery.setDeliveryStatus("RETRY");
         delivery.setLastErrorCode(null);

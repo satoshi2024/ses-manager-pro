@@ -1,11 +1,16 @@
 let reportTemplates = [];
 let reportVersions = [];
 let reportTemplateModal = null;
+let reportVersionModal = null;
+let reportVersionTemplateId = null;
+let editingReportVersionId = null;
 
 $(function () {
     reportTemplateModal = new bootstrap.Modal(document.getElementById('report-template-modal'));
+    reportVersionModal = new bootstrap.Modal(document.getElementById('report-version-modal'));
     $('#new-template-button').on('click', () => reportTemplateModal.show());
     $('#save-report-template').on('click', createReportTemplate);
+    $('#save-report-version').on('click', saveReportVersion);
     $('#report-run-form').on('submit', generateReport);
     loadReportTemplates();
 });
@@ -16,7 +21,7 @@ function loadReportTemplates() {
         reportTemplates = res.data || [];
         const html = reportTemplates.length === 0
             ? '<div class="text-muted small">テンプレートがありません。作成してください。</div>'
-            : reportTemplates.map(t => `<button class="btn btn-outline-light btn-sm w-100 text-start mb-2" onclick="loadReportVersions(${t.id})">${SES.escapeHtml(t.templateName)} <span class="text-muted">(${SES.escapeHtml(t.status)})</span></button>`).join('');
+            : reportTemplates.map(t => `<div class="d-flex gap-2 mb-2"><button class="btn btn-outline-light btn-sm flex-grow-1 text-start" onclick="loadReportVersions(${t.id})">${SES.escapeHtml(t.templateName)} <span class="text-muted">(${SES.escapeHtml(t.status)})</span></button><button class="btn btn-outline-info btn-sm" onclick="openReportVersionModal(${t.id})">version作成</button></div>`).join('');
         $('#report-template-list').html(html);
         if (reportTemplates.length > 0) loadReportVersions(reportTemplates[0].id);
     });
@@ -25,10 +30,66 @@ function loadReportTemplates() {
 function loadReportVersions(templateId) {
     $.get(`/api/management-reports/templates/${templateId}/versions`, function (res) {
         if (res.code !== 200) { Toast.error(res.message); return; }
-        reportVersions = (res.data || []).filter(v => v.status === 'PUBLISHED');
-        $('#report-version').html(reportVersions.length === 0
+        reportVersions = res.data || [];
+        const publishedVersions = reportVersions.filter(v => v.status === 'PUBLISHED');
+        $('#report-version-list').html(reportVersions.length === 0
+            ? '<div class="text-muted small">versionがありません。version作成からdraftを作成してください。</div>'
+            : reportVersions.map(v => `<div class="d-flex align-items-center justify-content-between gap-2 small mb-2"><span class="text-white">v${v.versionNo} <span class="text-muted">(${SES.escapeHtml(v.status)})</span></span><span class="d-flex gap-1">${v.status === 'DRAFT' ? `<button class="btn btn-outline-light btn-sm" onclick="editReportVersion(${v.id})">編集</button><button class="btn btn-outline-success btn-sm" onclick="publishReportVersion(${v.id})">公開</button>` : ''}</span></div>`).join(''));
+        $('#report-version').html(publishedVersions.length === 0
             ? '<option value="">公開済みversionなし</option>'
-            : reportVersions.map(v => `<option value="${v.id}">v${v.versionNo} (${v.status})</option>`).join(''));
+            : publishedVersions.map(v => `<option value="${v.id}">v${v.versionNo} (${v.status})</option>`).join(''));
+    });
+}
+
+function openReportVersionModal(templateId) {
+    reportVersionTemplateId = templateId;
+    editingReportVersionId = null;
+    $('#report-version-modal-title').text('テンプレートversionを作成');
+    $('#save-report-version').text('versionを作成');
+    $('#report-version-sections').val('');
+    $('#report-version-recipients').val('');
+    reportVersionModal.show();
+}
+
+function editReportVersion(versionId) {
+    const version = reportVersions.find(v => Number(v.id) === Number(versionId));
+    if (!version || version.status !== 'DRAFT') { Toast.error('公開済みversionは編集できません。'); return; }
+    reportVersionTemplateId = version.templateId;
+    editingReportVersionId = version.id;
+    $('#report-version-modal-title').text(`v${version.versionNo}を編集`);
+    $('#save-report-version').text('versionを保存');
+    $('#report-version-sections').val(version.sectionConfigJson || '');
+    $('#report-version-recipients').val(version.recipientConfigJson || '');
+    reportVersionModal.show();
+}
+
+function saveReportVersion() {
+    if (!reportVersionTemplateId) { Toast.error('テンプレートを選択してください。'); return; }
+    const body = {
+        sectionConfigJson: $('#report-version-sections').val(),
+        recipientConfigJson: $('#report-version-recipients').val()
+    };
+    const isEdit = Boolean(editingReportVersionId);
+    $.ajax({
+        url: isEdit ? `/api/management-reports/versions/${editingReportVersionId}` : `/api/management-reports/templates/${reportVersionTemplateId}/versions`,
+        method: isEdit ? 'PUT' : 'POST', contentType: 'application/json', data: JSON.stringify(body),
+        success: function (res) {
+            if (res.code !== 200) { Toast.error(res.message); return; }
+            reportVersionModal.hide();
+            Toast.success(isEdit ? 'versionを保存しました。' : 'draft versionを作成しました。公開して利用してください。');
+            loadReportVersions(reportVersionTemplateId);
+        }
+    });
+}
+
+function publishReportVersion(versionId) {
+    Swal.fire({title: 'versionを公開しますか？', text: '公開後は変更できません。', icon: 'warning', showCancelButton: true, confirmButtonText: '公開', cancelButtonText: 'キャンセル'}).then(result => {
+        if (!result.isConfirmed) return;
+        $.ajax({url: `/api/management-reports/versions/${versionId}/publish`, method: 'POST', success: function (res) {
+            if (res.code !== 200) { Toast.error(res.message); return; }
+            Toast.success('versionを公開しました。');
+            loadReportVersions(res.data.templateId);
+        }});
     });
 }
 

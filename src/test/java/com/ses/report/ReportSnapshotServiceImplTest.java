@@ -63,6 +63,7 @@ class ReportSnapshotServiceImplTest {
     private MonthlyClosingService monthlyClosingService;
     private ReportRecipientPreviewService recipientPreviewService;
     private OrganizationScopeService scopeService;
+    private SysUserMapper userMapper;
     private ReportSnapshotServiceImpl service;
     private ReportRun currentRun;
     private final Map<String, ReportSectionSnapshot> snapshots = new HashMap<>();
@@ -73,7 +74,7 @@ class ReportSnapshotServiceImplTest {
         runMapper = mock(ReportRunMapper.class);
         sectionAttemptMapper = mock(ReportSectionAttemptMapper.class);
         sectionMapper = mock(ReportSectionSnapshotMapper.class);
-        SysUserMapper userMapper = mock(SysUserMapper.class);
+        userMapper = mock(SysUserMapper.class);
         scopeService = mock(OrganizationScopeService.class);
         monthlyClosingService = mock(MonthlyClosingService.class);
         dashboardService = mock(DashboardService.class);
@@ -241,5 +242,27 @@ class ReportSnapshotServiceImplTest {
         when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(11L));
         assertThatThrownBy(() -> service.assertAccessible(result.getRun()))
                 .hasMessageContaining("error.managementReport.scopeChanged");
+    }
+
+    @Test
+    void scheduledRunはschedule作成時のentity集合ではなくprincipalの現在scopeを再解決する() {
+        com.ses.entity.SysUser manager = new com.ses.entity.SysUser();
+        manager.setId(7L);
+        manager.setRole("マネージャー");
+        manager.setStatus(1);
+        when(userMapper.selectById(7L)).thenReturn(manager);
+        when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(20L));
+        when(scopeService.allowedDirectUserIds(any())).thenReturn(Set.of(21L));
+        when(scopeService.allowedEngineerIds(any())).thenReturn(Set.of(22L));
+        when(scopeService.allowedContractIds(any())).thenReturn(Set.of(23L));
+        when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(24L));
+
+        ReportGenerationResult result = service.generate(ReportGenerationCommand.scheduled(
+                3L, YearMonth.of(2026, 8), "速報", 5L, 7L));
+
+        assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
+        assertThat(result.getRun().getOrganizationScopeJson()).contains("\"organizationIds\":[20]");
+        assertThat(result.getRun().getOrganizationScopeJson()).contains("\"engineerIds\":[22]");
+        assertThat(result.getRun().getOrganizationScopeJson()).doesNotContain("30", "40", "50");
     }
 }

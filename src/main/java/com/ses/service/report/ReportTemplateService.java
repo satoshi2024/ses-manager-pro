@@ -12,6 +12,7 @@ public interface ReportTemplateService {
     List<ReportTemplateVersion> listVersions(Long templateId);
     ReportTemplate createTemplate(String key, String name);
     ReportTemplateVersion createVersion(Long templateId, ReportTemplateVersionCreateRequest request);
+    ReportTemplateVersion updateVersion(Long versionId, ReportTemplateVersionCreateRequest request);
     ReportTemplateVersion publishVersion(Long versionId);
     ReportTemplateVersion getPublishedVersion(Long versionId);
 }
