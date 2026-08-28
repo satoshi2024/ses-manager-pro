@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-1〜A2のMySQL smoke。V116〜V127のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-1〜A2のMySQL smoke。V116〜V128のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -29,7 +29,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V116からV127のNF03_shapeがMySQLで成立する() throws Exception {
+    void V116からV128のNF03_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("127", latestVersion, "最新マイグレーションバージョンは127であること");
+            assertEquals("128", latestVersion, "最新マイグレーションバージョンは128であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
