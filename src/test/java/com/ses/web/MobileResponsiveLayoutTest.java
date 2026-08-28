@@ -74,7 +74,8 @@ class MobileResponsiveLayoutTest {
             "/ai/evaluation",
             // order-acceptance-workflow(S09) の新規ページ（R09-P2-07）
             "/sales-order",
-            "/acceptance"
+            "/acceptance",
+            "/management-reports"
     };
 
     private String render(String uri) throws Exception {
@@ -82,6 +83,18 @@ class MobileResponsiveLayoutTest {
                 .andExpect(status().isOk())
                 .andReturn();
         return result.getResponse().getContentAsString();
+    }
+
+    @Test
+    void 定期管理レポート画面に配布操作とサイドバー導線がある() throws Exception {
+        String html = readCss("templates/management-reports/index.html");
+        String sidebar = readCss("templates/layout/sidebar.html");
+        String js = readCss("static/js/modules/management-reports.js");
+
+        assertThat(sidebar).contains("management-report").contains("menu.managementReport");
+        assertThat(html).contains("id=\"reportDeliverBtn\"").contains("id=\"report-run-history\"");
+        assertThat(js).contains("/api/management-reports/runs/").contains("/deliver")
+                .contains("cancelDelivery").contains("/api/management-reports/runs");
     }
 
     private String readCss(String path) throws IOException {
@@ -106,7 +119,8 @@ class MobileResponsiveLayoutTest {
             "/ai/matching",
             "/ai/evaluation",
             "/sales-order",
-            "/acceptance"
+            "/acceptance",
+            "/management-reports"
     })
     void 全ページにモバイル用レイアウト部品が差し込まれている(String uri) throws Exception {
         String html = render(uri);

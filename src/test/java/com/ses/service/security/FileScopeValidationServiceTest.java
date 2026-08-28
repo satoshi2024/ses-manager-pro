@@ -2,18 +2,25 @@ package com.ses.service.security;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpAvailabilityIngestion;
+import com.ses.entity.Document;
+import com.ses.entity.DocumentVersion;
 import com.ses.entity.ProjectIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
+import com.ses.mapper.DocumentLinkMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.MenuCacheService;
+import com.ses.service.EngineerAccountLinkService;
+import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.impl.FileScopeValidationService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -22,6 +29,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
+import java.time.Clock;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,8 +58,36 @@ class FileScopeValidationServiceTest {
     @Mock private DataScopeService dataScopeService;
     @Mock private MenuCacheService menuCacheService;
     @Mock private ObjectProvider<MenuCacheService> menuCacheServiceProvider;
+    @Mock private ObjectProvider<DocumentVersionMapper> documentVersionMapperProvider;
+    @Mock private DocumentVersionMapper documentVersionMapper;
+    @Mock private ObjectProvider<DocumentLinkMapper> documentLinkMapperProvider;
+    @Mock private ObjectProvider<DocumentMapper> documentMapperProvider;
+    @Mock private DocumentMapper documentMapper;
+    @Mock private ObjectProvider<EngineerAccountLinkService> engineerAccountLinkServiceProvider;
+    @Mock private ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    @Mock private ObjectProvider<AuthorizationService> authorizationServiceProvider;
+    @Mock private Clock clock;
 
-    @InjectMocks private FileScopeValidationService service;
+    private FileScopeValidationService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new FileScopeValidationService(
+                resumeIngestionMapper,
+                engineerMapper,
+                proposalMapper,
+                projectIngestionMapper,
+                bpAvailabilityIngestionMapper,
+                documentVersionMapperProvider,
+                documentLinkMapperProvider,
+                documentMapperProvider,
+                engineerAccountLinkServiceProvider,
+                organizationScopeServiceProvider,
+                dataScopeService,
+                menuCacheServiceProvider,
+                authorizationServiceProvider,
+                clock);
+    }
 
     @AfterEach
     void clearAuth() {
@@ -132,5 +168,24 @@ class FileScopeValidationServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.assertDownloadAllowed("unknown.png"));
         assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void 管理レポート文書は汎用Document経路からdownloadできない() {
+        noMatchOnEarlierTables();
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(9001L);
+        version.setScanStatus("CLEAN");
+        Document document = new Document();
+        document.setDocumentType("MANAGEMENT_REPORT");
+        when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
+        when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
+        when(documentMapper.selectById(9001L)).thenReturn(document);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("report-storage-key"));
+        assertEquals("error.managementReport.deliveryRequired", ex.getMessage());
     }
 }

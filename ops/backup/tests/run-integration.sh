@@ -96,7 +96,8 @@ docker run --rm --network "$NET" \
   -e REPLICA_HEARTBEAT_DIR=/work/heartbeats -e SCHEDULER_ACK_DIR=/work/scheduler \
   -e QUIESCE_DEADLINE_SECONDS=60 -e QUIESCE_STALE_SECONDS=60 \
   -e REPOSITORY_LOCK_DIR=/work/locks \
-  -e APP_COMMIT=integration -e FLYWAY_VERSION=42 -e CRITICAL_TABLES=marker_test \
+  -e APP_COMMIT=integration -e FLYWAY_VERSION=42 \
+  -e CRITICAL_TABLES=marker_test,t_report_run,t_report_section_snapshot,t_report_section_attempt,t_document,t_document_version,t_notification_outbox,t_report_delivery \
   -v "$WWORK:/work:rw" \
   ses-backup-tool:integration /usr/local/bin/integration-pitr.sh
 PITR_RC=$?
@@ -133,6 +134,7 @@ docker run --rm --network "$NET" \
   -e TARGET_SSL_CAPATH=/work/capath-tgt -e TARGET_TLS_MODE=VERIFY_CA \
   -e APP_SMOKE_SCRIPT=/work/drill-cutover-smoke.sh \
   -e DRILL_SMOKE_SCRIPT=/work/smoke.sh \
+  -e REPORT_RESTORE_EVIDENCE=/work/evidence/report-restore-contract.txt \
   -e RTO_SECONDS=14400 -e RPO_MAX_SECONDS=900 \
   -v "$WWORK:/work:rw" \
   ses-backup-tool:integration /usr/local/bin/restore-drill.sh \
@@ -182,6 +184,6 @@ fi
 echo "secret scan: 0 matches"
 
 echo "== evidence SHA =="
-(cd "$WORK/evidence" && sha256sum integration-summary.json validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt | tee "$WORK/evidence/evidence-sha.txt")
+(cd "$WORK/evidence" && sha256sum integration-summary.json validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt | tee "$WORK/evidence/evidence-sha.txt")
 
 echo "== integration suite SUCCESS（skip 0・全ステップ実実行） =="
