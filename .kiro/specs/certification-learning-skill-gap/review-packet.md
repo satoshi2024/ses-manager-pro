@@ -14,7 +14,7 @@
 | Worktree | `C:\work\ses-certification-learning-skill-gap` |
 | Branch | `codex/certification-learning-skill-gap` |
 | Normal checkout | `C:\work\ses-manager-pro`（変更なし） |
-| Final local/remote HEAD | `FINAL_DOCS_HEAD_TO_BE_PINNED` |
+| Final local/remote HEAD | このpacketを含む最終docs pin commit（Review時は`git rev-parse HEAD`とremote branchで照合） |
 | Latest origin/main | `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | merge-base | `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | PR / merge / branch delete | すべて未実施。ReviewのPLAN/IMPLEMENTATION双方PASS後のみPR対象 |
@@ -40,7 +40,7 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | B2 | `0168e8ea` | staffing as-of、rule gap、AI candidate-only接続 |
 | B2 docs | `86f17498` | B2 receipt・completion証拠 |
 | M code/test fix | `4ba1738c4e5afe6ad3839afe1e681a9621326846` | V127へ同期したV110 latest migration assertion |
-| M docs | `FINAL_DOCS_HEAD_TO_BE_PINNED` | tasks/completion/remediation/Review packet最終固定 |
+| M docs | このpacketを含む最終docs pin commit | tasks/completion/remediation/Review packet最終固定 |
 
 変更ファイルは225件（コード、migration、H2 schema、tests、templates/static、spec/receipt docs）。Mでは既存本体を変更せず、最終証拠docsを追加・更新した。
 

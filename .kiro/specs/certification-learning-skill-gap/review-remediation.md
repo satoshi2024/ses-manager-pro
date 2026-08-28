@@ -147,7 +147,7 @@ A2の本人APIは`engineerId`をbody/pathからscope根拠として使わず、`
 
 ## M完了・最終handoff（2026-08-28）
 
-MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9621326846`を対象に完了した。最終docs commit後のremote HEADはReview packetの固定値を正本とする。
+MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9621326846`を対象に完了した。最終docs pin commitを含むremote HEADはReview packetと`git rev-parse HEAD`の照合値を正本とする。
 
 | 項目 | 証拠・結果 |
 |---|---|
