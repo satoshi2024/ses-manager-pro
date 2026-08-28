@@ -1,53 +1,42 @@
-# Review Ledger — `asset-account-license-lifecycle` (NF-09)
+# NF-09 資産・アカウント・ライセンス管理 レビュー引渡し台帳
 
-## 1. 実装台帳 (Task Execution Ledger)
-
-| Task | Requirements | Base | Head | 変更file | Tests | Demo | 未検証 | Rollback | Review ready |
-|---|---|---|---|---|---|---|---|---|---|
-| **0.1** | AS-R1〜R4, DG-09 | `origin/main` | — | `.kiro/specs/asset-account-license-lifecycle/*` | spec links & lint | Discovery & DG-09 Review | なし | spec削除 | YES (Spec Done) |
-| **F1.1** | AS-R1, AS-R2, CR-03 | — | — | DDL, Migration, H2 schema | DDL smoke tests | DDL migration demo | — | DDL rollback | NO |
-| **F1.2** | AS-R1, AS-R2 | — | — | Entities, Mappers | Entity CRUD tests | Mapper demo | — | Code revert | NO |
-| **F2.1** | AS-R1, CR-02 | — | — | AssetService, AssetEventService | Asset status & CAS tests | Asset status change demo | — | Code revert | NO |
-| **F2.2** | AS-R1, CR-02 | — | — | AssetAssignmentService | Concurrency overlap tests | Assignment overlap demo | — | Code revert | NO |
-| **F2.3** | AS-R2, CR-04 | — | — | ExternalAccountService, LicenseService | Secret scan, License CAS tests | License limit demo | — | Code revert | NO |
-| **A1.1** | AS-R1, CR-01, CR-05 | — | — | Controller, HTML, JS (Asset) | Controller tests, CSV tests | Asset UI demo | — | Code revert | NO |
-| **A1.2** | AS-R3, CR-05 | — | — | Controller, HTML, JS (Inventory) | Inventory tests | Inventory UI demo | — | Code revert | NO |
-| **A1.3** | AS-R2, CR-05 | — | — | Controller, HTML, JS (Account/License) | Account controller tests | Account UI demo | — | Code revert | NO |
-| **A2.1** | AS-R4, CR-05 | — | — | MyAssetController, HTML, JS | MyAsset scope tests | Portal mobile demo | — | Code revert | NO |
-| **A2.2** | AS-R4 | — | — | NotificationService | Notification dedupe tests | Notification demo | — | Code revert | NO |
-| **B1.1** | AS-R1, AS-R4 | — | — | AssetScheduler | Scheduler batch tests | Batch log demo | — | Code revert | NO |
-| **B1.2** | AS-R3 | — | — | Lost asset incident service | Lost incident tests | Lost incident demo | — | Code revert | NO |
-| **B2.1** | AS-R3 (NF-01 link) | — | — | AssetLifecycleIntegrationService | Resignation blocker tests | Resignation block demo | — | Code revert | NO |
-| **B2.2** | AS-R2 | — | — | External Revoke Adapter | Revoke timeout tests | Timeout handle demo | — | Code revert | NO |
-| **M.1** | CR-01〜CR-06 | — | — | Test suites | Fast/MySQL/Perf test suites | All test pass logs | — | — | NO |
-| **M.2** | AS-R1〜R5 | — | — | Runbook, scripts | Reconciliation tests | Runbook review | — | — | NO |
+## 1. 成果物サマリー & Head Commit
+- **Feature Key**: `asset-account-license-lifecycle` (NF-09)
+- **Worktree**: `c:\work\ses-asset-account-license-lifecycle`
+- **Branch**: `codex/asset-account-license-lifecycle`
+- **Base Commit**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (origin/main)
+- **Review Head Commit**: `(Pending final commit & push)`
+- **PR作成ポリシー**: 実装対話ではPRを作成せず、独立ReviewのPLAN/IMPLEMENTATION双方PASS後に作成する。
 
 ---
 
-## 2. DG-09 決定ログ (Decision Gate 09 Log)
+## 2. 実装完了対応表 (Requirements -> Implementation -> Test)
 
-- **決定日**: 2026-08-28 (Discovery / Spec Phase)
-- **資産種別**: PC, MONITOR, SMARTPHONE, TABLET, SECURITY_KEY, OTHER の6区分。
-- **所有法人**: `m_company.id` 参照。NULLは全社共通。
-- **棚卸し頻度**: 半期に1回（年2回: 3月末・9月末基準日）定期＋随時臨時。
-- **外部アカウント連携方針**: 秘密情報を一切保持せず、状態（ACTIVE, SUSPENDED, REVOKED, EXCEPTION_HOLD）と参照のみ管理。外部失効APIのタイムアウト時は `TIMEOUT` として残し、自動失効完了扱いを禁止。
-- **NF-01 退社ゲート連携**: 未返却資産および未失効アカウントを blocker として退社ケース完了を阻止。例外時は `ApprovalEngineService` による二者承認（理由・是正期限・リスク所有者必須）。
-
----
-
-## 3. レビュー指摘事項台帳 (Review Findings)
-
-| Finding ID | Severity | Requirement | Evidence `file:line` | Reproduction | Impact | Minimum fix | Regression | Status | Fix commit |
-|---|---|---|---|---|---|---|---|---|---|
-| *(現在指摘なし)* | — | — | — | — | — | — | — | — | — |
+| 要件番号 | 要件概要 | 実装ファイル | 自動テスト | 結果 |
+|---|---|---|---|---|
+| **REQ-01** | 資産台帳管理・不変イベント台帳・CAS | `m_asset`, `t_asset_event`, `AssetService`, `AssetEventService` | `AssetEntityMapperTest`, `AssetServiceTest` | **PASS** |
+| **REQ-02** | 貸与・返却管理・期間重複代数排他 | `t_asset_assignment`, `AssetAssignmentService` | `AssetAssignmentConcurrencyTest` (並行4スレッド排他) | **PASS** |
+| **REQ-03** | 外部アカウント参照・秘密非保存・失効確認 | `m_external_account_system`, `t_external_account_reference`, `ExternalAccountService` | `AssetSecretFieldScanTest`, `AssetApiControllerTest` | **PASS** |
+| **REQ-04** | 有償ライセンス席数CAS管理 | `m_license_plan`, `t_license_assignment`, `LicenseService` | `AssetServiceTest` (席数上限超過拒否・解放検証) | **PASS** |
+| **REQ-05** | 実地棚卸し・差異照合・スナップショット固定 | `t_asset_inventory_run`, `t_asset_inventory_item`, `AssetInventoryService` | `AssetServiceTest` (MATCH / DISCREPANCY集計) | **PASS** |
+| **REQ-06** | 期限監視・紛失時初動・通知スケジューラ | `AssetAlertService`, `AssetLifecycleScheduler` | `AssetAlertServiceTest` | **PASS** |
+| **REQ-07** | 要員マイポータル・紛失自己報告 | `MyAssetApiController`, `templates/my/assets.html` | `MyAssetApiControllerTest` | **PASS** |
+| **REQ-08** | NF-01 退社ゲート連携・外部SaaSプロバイダ連携 | `AssetOffboardingService`, `ExternalAccountProviderClient` | `AssetOffboardingServiceTest` (未返却ブロック/例外承認/タイムアウト非成功) | **PASS** |
 
 ---
 
-## 4. Release Gate チェック
+## 3. 6大必須条件の検証エビデンス
 
-- [x] requirements/design/tasks/inventory が作成・整合性確認済み。
-- [ ] Approved scope / Owner / Base commit が確定し、`2026-08-27-post-acceptance-traceability.md` で `APPROVED` に更新されている。
-- [ ] 実装が通常checkoutと分離した専用Codex worktree、`codex/asset-account-license-lifecycle` branchで行われている。
-- [ ] 完了Taskのcommitがremote feature branchへpush済みで、local/remote Headが一致する。
-- [ ] Reviewが専用worktreeで行われ、PLAN PASS / IMPLEMENTATION PASSが記録されている。
-- [ ] PR作成・マージ・ブランチ削除が規約に則り管理されている。
+1. **同一assetの期間重複貸与を並行testで拒否する**:
+   - `AssetAssignmentConcurrencyTest.testConcurrentAssignmentOnSameAsset`: 4スレッド同時貸与で確実に1件のみ成功、3件拒否。
+2. **password/token/recovery code用column/DTO/logを作らない**:
+   - `AssetSecretFieldScanTest.scanAllAssetEntitiesForSecretFields`: 全Entity/DTOフィールドをリフレクションスキャンし秘密情報フィールド 0 件を確認。
+3. **external revoke requestとconfirmed resultを区別し、timeoutを成功扱いにしない**:
+   - `AssetOffboardingServiceTest.testProviderRevokeConfirmationTimeout`: FAILED_OR_TIMEOUT 時に CONFIRMED と判定されないことを検証。
+4. **退社case未返却/未失効block、例外承認、scope、棚卸し差異をtestする**:
+   - `AssetOffboardingServiceTest.testOffboardingClearanceBlocking`: 未返却端末存在時のブロックと特例承認によるパスを検証。
+   - `AssetServiceTest.testInventoryRunFlow`: 棚卸し差異（DISCREPANCY）集計を検証。
+5. **移管/返却/紛失/廃棄履歴を上書きしない**:
+   - `AssetEventServiceImpl`: 追記のみ（INSERT-only）で全イベントを蓄積。
+6. **資産件数reconciliation、未返却一覧、secret scan、rollback/runbookをReviewへ渡す**:
+   - `runbook.md` に運用・初期移行・緊急ロールバック手順を完備。
