@@ -61,7 +61,7 @@
 
 ## R6 Plan Review（Gate 0 / Task 0G）— PLAN PASS
 
-**Reviewed Head:** Gate 0 commit（承認記録 push 後の remote HEAD）
+**Reviewed Head:** `03545127`（Gate 0 commit）
 
 **Verdict:** PLAN **PASS** / Implementation **NOT STARTED** / F1 **許可**（Gate 0 Head 以降）
 
