@@ -39,7 +39,7 @@ public interface ExpenseRequestService {
     record ExpenseRequestDto(
             Long id, String expenseNo, LocalDate expenseDate, String category, BigDecimal amount,
             Long customerId, Long projectId, String description, Long receiptDocumentId,
-            Integer receiptVersionNo,
+            Integer receiptVersionNo, Integer version,
             String status, Long approvalRequestId, String approvalStatus,
             LocalDateTime paidAt, LocalDateTime createdAt, Long engineerId, String engineerName) {
     }

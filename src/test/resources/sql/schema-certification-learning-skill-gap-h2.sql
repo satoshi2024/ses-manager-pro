@@ -1,6 +1,6 @@
 -- ===================================================================
 -- H2 Schema for NF-03 certification / learning / skill-gap (F1-1〜F1-5)
--- MySQL migration V115〜V119 のDDL相当（H2方言）
+-- MySQL migration V116〜V120 のDDL相当（H2方言）
 -- ===================================================================
 
 -- ---- F1-1: 資格master・engineer取得record ----

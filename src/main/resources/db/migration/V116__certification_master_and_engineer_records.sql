@@ -1,5 +1,5 @@
 -- ===================================================================
--- V115: NF-03 F1-1 資格master・engineer取得record（PII: AES-256-GCM）
+-- V116: NF-03 F1-1 資格master・engineer取得record（PII: AES-256-GCM）
 -- ===================================================================
 
 CREATE TABLE IF NOT EXISTS m_certification (

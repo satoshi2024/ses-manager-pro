@@ -1,6 +1,6 @@
 -- ===================================================================
--- V124: NF-03 F2 training relation tablesのMyBatis監査timestamp補正
--- 適用済みV117は編集せず、entity/BaseMapperが要求する列を追加する。
+-- V125: NF-03 F2 training relation tablesのMyBatis監査timestamp補正
+-- 適用済みV118は編集せず、entity/BaseMapperが要求する列を追加する。
 -- ===================================================================
 
 ALTER TABLE t_training_course_skill

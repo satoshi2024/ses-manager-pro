@@ -211,7 +211,7 @@ class TrainingPlanServiceTest {
     private ExpenseRequestService.ExpenseRequestDto expenseDto(Long id, Long approval, String status,
                                                                 BigDecimal amount) {
         return new ExpenseRequestService.ExpenseRequestDto(id, "EX-" + id, LocalDate.of(2026, 8, 1),
-                ExpenseRequestService.CATEGORY_TRAINING, amount, null, null, "training", null, null,
+                ExpenseRequestService.CATEGORY_TRAINING, amount, null, null, "training", null, null, null,
                 status, approval, status, null, null, 20L, "要員");
     }
 

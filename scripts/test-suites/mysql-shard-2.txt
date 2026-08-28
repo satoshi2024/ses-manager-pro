@@ -15,3 +15,4 @@ FreeeConcurrentRefreshTest
 OptimisticLockCoreEntitiesMySqlTest
 OptimisticLockHttpConcurrentMySqlTest
 OperationalBoundaryMySqlIntegrationTest
+PwaClientMutationLedgerMySqlConcurrencyTest

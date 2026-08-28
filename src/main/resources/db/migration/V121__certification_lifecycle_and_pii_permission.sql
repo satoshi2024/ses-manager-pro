@@ -1,5 +1,5 @@
 -- ===================================================================
--- V120: NF-03 F2-1 資格record lifecycle、event冪等key、PII action seed
+-- V121: NF-03 F2-1 資格record lifecycle、event冪等key、PII action seed
 -- ===================================================================
 
 ALTER TABLE t_certification_event

@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title layout:title-pattern="$CONTENT_TITLE | $LAYOUT_TITLE" th:text="#{app.title}">SES Manager Pro</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="manifest" href="/manifest.webmanifest">
     
     <!-- Bootstrap 5 CSS -->
     <link href="/lib/bootstrap/bootstrap.min.css" rel="stylesheet">
@@ -34,6 +35,26 @@
     
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1060; pointer-events: none;"></div>
+
+    <!-- 要員PWAの未送信queue/競合。業務データのキャッシュではなく、最小commandの状態だけを表示する。 -->
+    <div sec:authorize="hasRole('要員')" id="pwa-queue-panel" class="pwa-queue-panel no-print" hidden>
+        <div class="d-flex align-items-center justify-content-between gap-2 pb-1 border-bottom border-secondary mb-1">
+            <div class="d-flex align-items-center gap-2">
+                <span class="bi bi-cloud-arrow-up fs-5" aria-hidden="true"></span>
+                <span class="fw-bold small" id="pwa-queue-title">同期キュー</span>
+            </div>
+            <div class="d-flex align-items-center gap-1">
+                <button type="button" id="pwa-sync-now" class="btn btn-sm btn-outline-primary py-0 px-2">同期</button>
+                <button type="button" id="pwa-panel-toggle" class="btn btn-sm btn-outline-secondary py-0 px-2" aria-expanded="true" aria-controls="pwa-panel-body" title="表示切替">
+                    <span class="bi bi-chevron-down" id="pwa-panel-toggle-icon" aria-hidden="true"></span>
+                </button>
+            </div>
+        </div>
+        <div id="pwa-panel-body">
+            <div id="pwa-queue-status" role="status" aria-live="polite" class="small"></div>
+            <div id="pwa-conflicts" class="mt-2"></div>
+        </div>
+    </div>
 
     <!-- Password Change Modal -->
     <div class="modal fade" id="passwordChangeModal" tabindex="-1" aria-hidden="true">
@@ -130,6 +151,7 @@
     <!-- Custom JS -->
     <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()},v=${#dates.createNow().getTime()})}"></script>
     <script th:src="@{/js/common.js}"></script>
+    <script th:src="@{/js/pwa-queue.js}"></script>
     <script th:src="@{/js/profile.js}"></script>
     
     <!-- Additional JS from specific pages -->

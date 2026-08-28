@@ -89,7 +89,7 @@
 - `CERTIFICATION_PII` production 保持は NF-07。開発継続可、本番有効化は停止。
 - DG-03-1 は AES-256-GCM **または** token — **F1-1 で列形を一つに固定**すること。
 - FileScope empty-link/admin bypass は現行コードに残存。F1-2 で `CERTIFICATION_EVIDENCE` 専用分岐を `document-archive` より前に実装（契約維持）。
-- latest Flyway **V114**。F1 は **V115+**。
+- merge後のlatest Flywayはmain V115（PWA）＋NF-03 V116〜V125。NF-03は **V116+**。
 
 ### Next wave
 
@@ -110,7 +110,7 @@
 
 ## F1 Implementation Review受領・F2持越し（2026-08-28）
 
-独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2着手が許可された。F1本体Headは`2f7bbac0`、F2完了時点の現worktree local/remote Headは`f2ce7a99`、現行migrationはV124（F2はV120〜V124）である。A1/A2/B1/B2/M、PR、merge、branch削除は引き続き禁止する。
+独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2着手が許可された。mainのV115（PWA）を保持してNF-03をV116〜V125へ順延した。F1本体Headは`2f7bbac0`、F2完了時点の実装Headは`f2ce7a99`、現行migrationはV125（F2はV121〜V125）である。A1/A2/B1/B2/M、PR、merge、branch削除は引き続き禁止する。
 
 ### 持越し項目のF2接続
 
@@ -122,6 +122,6 @@
 | 証憑version pin | event記録のdocument version ID/hashと要求版を完全一致、CLEAN必須 | `completion-matrix.md`、F2-1/M | 未検証 |
 | production `certification.pii.view` permission seed | production seed、未seed時full reveal fail closed、role別実API確認 | `completion-matrix.md`、F2-1/M | 未検証 |
 | BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、F2-3/M | 未検証 |
-| PR前最新`origin/main`取り込み・migration衝突 | PR直前にfetch＋最新base取り込み、V120+とのmigration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | F2中は未実施 |
+| PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V125へ順延。M開始時にも再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | A1前の初回衝突解消済み。M再確認待ち |
 
-この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2完了時点の基準は現worktree V124であり、最新`origin/main`の再取り込みはPR前gateで行う。
+この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2完了時点の基準はmain V115＋現worktree V116〜V125であり、M開始時にも最新`origin/main`を再fetchして追加衝突を確認する。

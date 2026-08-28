@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-1: V115 資格master/engineer取得recordの MySQL smoke。
+ * NF-03 F1-1: V116 資格master/engineer取得recordの MySQL smoke。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -29,7 +29,7 @@ class FlywayCertificationF11SchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V115_certification_tables_exist_on_mysql() throws Exception {
+    void V116_certification_tables_exist_on_mysql() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -40,7 +40,7 @@ class FlywayCertificationF11SchemaSmokeTest {
              Statement statement = connection.createStatement()) {
             String latest = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latest) >= 115);
+            assertTrue(Integer.parseInt(latest) >= 116);
 
             for (String table : new String[]{"m_certification", "m_certification_alias", "t_engineer_certification"}) {
                 assertTrue(queryInt(statement,

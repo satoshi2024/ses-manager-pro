@@ -48,6 +48,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(toHttpStatus(e.getCode())).body(ApiResult.<Void>error(e.getCode(), message));
     }
 
+    /** PWAの競合はclient/server差分をdataへ返し、クライアントがlast-write-winsを選べないようにする。 */
+    @ExceptionHandler(PwaConflictException.class)
+    public ResponseEntity<ApiResult<Object>> handlePwaConflict(PwaConflictException e) {
+        log.warn("PWA command競合: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResult<>(409, e.getMessage(), e.getData()));
+    }
+
     /**
      * バリデーション例外のハンドリング
      * リクエストボディのバリデーションエラーを処理する

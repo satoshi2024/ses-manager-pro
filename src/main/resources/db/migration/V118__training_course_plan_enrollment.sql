@@ -1,5 +1,5 @@
 -- ===================================================================
--- V117: NF-03 F1-3 course・learning plan・enrollment DDL
+-- V118: NF-03 F1-3 course・learning plan・enrollment DDL
 -- ===================================================================
 
 CREATE TABLE IF NOT EXISTS m_training_course (

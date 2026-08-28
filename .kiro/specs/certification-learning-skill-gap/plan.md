@@ -27,7 +27,7 @@ Gate 0 は production の NF-03 実装変更なし（Base merge のみ）。Task
 
 ## Gate 1: F1 DDL（PLAN PASS 後）
 
-資格 master、engineer 取得 record、append-only event、course、course-skill、learning plan、plan-skill、enrollment、effective history、assessment、decision event を確定する。migration 番号は **V115+**（Base 取り込み後 latest `V114` の次）。V1/H2 専用 schema/entity 同期を設計に従って実施。PII field、自然同一性、continuity/current unique、version/CAS、exact document version、expense relation を先に固定する。
+資格 master、engineer 取得 record、append-only event、course、course-skill、learning plan、plan-skill、enrollment、effective history、assessment、decision event を確定する。mainのV115を保持し、NF-03 migration番号は **V116+**（承認Baseからの次）。V1/H2 専用 schema/entity 同期を設計に従って実施。PII field、自然同一性、continuity/current unique、version/CAS、exact document version、expense relation を先に固定する。
 
 ## Gate 2: F2 service（F1 後）
 

@@ -375,7 +375,7 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
                 engineer.getPrefecture(), engineer.getRailwayCompany(), engineer.getEmploymentType(), engineer.getStatus(),
                 engineer.getExpectedUnitPrice(), engineer.getAvailableDate(), engineer.getExperienceYears(),
                 engineer.getJapaneseLevel(), engineer.getResumeSummary(), email, phone, skills, careers, salesName, salesUserId,
-                contracts, pending);
+                contracts, pending, engineer.getVersion());
     }
 
     @Override

@@ -49,7 +49,7 @@
 
 - [x] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
   - Objective: 資格名、issuer、code、期限規則、engineer取得状態、番号参照、versionを正規化する。
-  - Implementation: 最新 migration **V115+**（Base 取り込み後 `V114` の次）、V1/H2専用schema/entity/mapperを同期し、PII field（DG-03-1: AES-256-GCM **または** token のいずれか一つに列形を固定）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
+  - Implementation: mainのV115を保持し、NF-03最新 migration **V116+**、V1/H2専用schema/entity/mapperを同期する。PII field（DG-03-1: AES-256-GCM **または** token のいずれか一つに列形を固定）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
   - Test: empty DB/MySQL migration、H2 context、duplicate取得、code NULL、issuer別code、名称alias/merge、renew、nullable/期限、PII DTO非漏えい。
   - Demo: HRがmasterを登録し、本人申請がpendingで保存され、承認前activeにならないことを確認する。
 
@@ -81,7 +81,7 @@
 
 - [x] **Task F2-1: 資格履歴・期限・通知判定serviceを実装する**
   - Objective: 90/60/30境界、取消、訂正、重複取得、idempotent通知を実現する。
-  - Implementation: `ff8165ea`。V120でevent idempotency keyと`certification.pii.view` seedを追加。`EngineerCertificationServiceImpl`へverify/reject/correct/cancel/renewのrow lock＋version CAS、append-only event、duplicate acquisition拒否を実装し、`CertificationExpiryService`／`CertificationExpiryNotificationService`で期限当日を含む90/60/30のsemantic keyを判定する。`CertificationEvidenceValidator`と`FileScopeValidationService`でtyped link、exact version/hash、CLEAN、legal holdをfail closedにする。共通ClockをAsia/Tokyoへ固定した。
+  - Implementation: `ff8165ea`。V121でevent idempotency keyと`certification.pii.view` seedを追加。`EngineerCertificationServiceImpl`へverify/reject/correct/cancel/renewのrow lock＋version CAS、append-only event、duplicate acquisition拒否を実装し、`CertificationExpiryService`／`CertificationExpiryNotificationService`で期限当日を含む90/60/30のsemantic keyを判定する。`CertificationEvidenceValidator`と`FileScopeValidationService`でtyped link、exact version/hash、CLEAN、legal holdをfail closedにする。共通ClockをAsia/Tokyoへ固定した。
   - Test: `CertificationExpiryServiceTest`（90/60/30当日・前後、expires_on当日、revisionを含まないsemantic key、cancelled/recipient未解決）、`EngineerCertificationLifecycleServiceTest`（verify/correct/cancel/renew、理由、重複、CAS）、`CertificationEvidenceValidatorTest`（typed link、版/hash、scan、generic link）、`FileScopeValidationServiceTest`（legal hold）、`AppConfigClockTest`、既存`EngineerCertificationServiceTest`。対象Mavenテスト全件PASS。
   - Demo: 固定日`2026-08-28`でexpiryを90/60/30日に切り替え、当日だけ候補となり前後日は候補外、訂正でrevisionだけ変えてもsemantic keyが同一、期限日当日はACTIVE・翌日からEXPIRED、cancel/renew/CAS/証憑否定系が確認できることをテストで実演した。
 
@@ -93,9 +93,9 @@
 
 - [x] **Task F2-3: as-of skill gap serviceを実装する**
   - Objective: project/position期間、skill level、evidence count、unknown/synonym、0件を説明可能に比較する。
-  - Implementation: `SkillGapServiceImpl`（commit `f5e69182`）は`t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`だけを読み、current projectionから過去を補完しない。feature開始日前・履歴欠落は`historical_data_unavailable`、PROJECT/ POSITION/ COMBINEDのsource precedenceと案件期間inclusiveを結果へ残す。V122の`t_skill_tag_alias`と`SkillGapTaxonomyResolver`は承認済みsynonymだけをcanonical IDへ解決し、未知skillをmasterへ自動作成しない。`t_skill_gap_snapshot`へsource version/taxonomy version/result hash/jsonを保存し、replayはhash検証後にsnapshotだけから復元する。BP要員化のskill writeも`EngineerSkillService.replaceSkills`へ集約し、event insert迂回を防止した。
-  - Test: `SkillGapServiceImplTest`（supply/demand effective as-of、履歴欠落、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、DELETE当日/翌日、snapshot replay）、`SkillGapTaxonomyResolverTest`（同義tag、未知skill、自動master化なし）、`EngineerSkillServiceImplTest`/`ProjectSkillServiceImplTest`（replaceSkills後のevent残存）、`FlywayCertificationLearningSkillGapSchemaSmokeTest`（V122 MySQL schema）、`MigrationScriptIntegrityTest`を実行した。AIはこのTaskのgap計算へ依存させず、AI停止時もrule結果を維持する契約をF2-5/B2へ接続した。
-  - Demo: 固定ClockとV122 event fixtureで、feature開始日前はcurrent rowが存在してもunavailable、DELETE当日は削除状態を需要に戻さず翌日もcurrent fallbackなし、同義tagはcanonical表示、未知skillはunknown gap、COMBINEDはPROJECTを優先しposition-onlyを追加、replayはsource queryなしで同一hashを返すことをテストで実演した。
+  - Implementation: `SkillGapServiceImpl`（commit `f5e69182`）は`t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`だけを読み、current projectionから過去を補完しない。feature開始日前・履歴欠落は`historical_data_unavailable`、PROJECT/ POSITION/ COMBINEDのsource precedenceと案件期間inclusiveを結果へ残す。V123の`t_skill_tag_alias`と`SkillGapTaxonomyResolver`は承認済みsynonymだけをcanonical IDへ解決し、未知skillをmasterへ自動作成しない。`t_skill_gap_snapshot`へsource version/taxonomy version/result hash/jsonを保存し、replayはhash検証後にsnapshotだけから復元する。BP要員化のskill writeも`EngineerSkillService.replaceSkills`へ集約し、event insert迂回を防止した。
+  - Test: `SkillGapServiceImplTest`（supply/demand effective as-of、履歴欠落、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、DELETE当日/翌日、snapshot replay）、`SkillGapTaxonomyResolverTest`（同義tag、未知skill、自動master化なし）、`EngineerSkillServiceImplTest`/`ProjectSkillServiceImplTest`（replaceSkills後のevent残存）、`FlywayCertificationLearningSkillGapSchemaSmokeTest`（V123 MySQL schema）、`MigrationScriptIntegrityTest`を実行した。AIはこのTaskのgap計算へ依存させず、AI停止時もrule結果を維持する契約をF2-5/B2へ接続した。
+  - Demo: 固定ClockとV123 event fixtureで、feature開始日前はcurrent rowが存在してもunavailable、DELETE当日は削除状態を需要に戻さず翌日もcurrent fallbackなし、同義tagはcanonical表示、未知skillはunknown gap、COMBINEDはPROJECTを優先しposition-onlyを追加、replayはsource queryなしで同一hashを返すことをテストで実演した。
 
 - [x] **Task F2-4: 期限schedulerと通知母集団を実装する**
   - Objective: 複数JVM再実行でもsemantic expiry noticeを重複発行せず、退職・休職・account未link・manager変更を正しく扱う。
@@ -105,7 +105,7 @@
 
 - [x] **Task F2-5: 本人/上長/HR評価とAI候補契約を実装する**
   - Objective: AIがskill評価・配置・採否・不利益判断を確定できないことをservice/API/監査で保証する。
-  - Implementation: `78bbfcef`＋V124補正commit。`SkillAssessmentService`はSELF/MANAGER/HR_FINALを別operationとして受け、SELF/MANAGERはPROPOSED＋decision eventだけ、HR_FINALだけが`EngineerSkillService.replaceSkills`経由で公式projectionを更新する。人のactor/reasonを必須化し、AI相当のassessment typeを入力させない。`AiLearningCandidateService`は`LEARNING_CANDIDATE` artifact/runの`aiRunId`、rule gap snapshot ID、as-of、allowlist、期限を候補へ保持し、AIはcourse ID候補だけをallowlist内で返す。timeout/error・run監査欠落はDEGRADEDへfallbackし、rule gapを維持する。accept/rejectは期限内の人のdecision eventだけを追加し、評価・配置・採否・adverse stateを変更しない。V124でF1 training relation table 3表の`updated_at`をMyBatis生成列・MySQL・H2へ同期する。
+  - Implementation: `78bbfcef`＋V125補正commit。`SkillAssessmentService`はSELF/MANAGER/HR_FINALを別operationとして受け、SELF/MANAGERはPROPOSED＋decision eventだけ、HR_FINALだけが`EngineerSkillService.replaceSkills`経由で公式projectionを更新する。人のactor/reasonを必須化し、AI相当のassessment typeを入力させない。`AiLearningCandidateService`は`LEARNING_CANDIDATE` artifact/runの`aiRunId`、rule gap snapshot ID、as-of、allowlist、期限を候補へ保持し、AIはcourse ID候補だけをallowlist内で返す。timeout/error・run監査欠落はDEGRADEDへfallbackし、rule gapを維持する。accept/rejectは期限内の人のdecision eventだけを追加し、評価・配置・採否・adverse stateを変更しない。V125でF1 training relation table 3表の`updated_at`をMyBatis生成列・MySQL・H2へ同期する。
   - Test: `SkillAssessmentServiceImplTest`（SELF/MANAGERの公式projection非変更、本人/manager/HR権限、AI相当level・理由なし拒否、HR_FINALのみ共通skill service更新）、`AiLearningCandidateServiceImplTest`（AI停止、provider error、timeout、allowlist/run ID、human accept/reject、期限切れ、RULE_ONLY accept拒否、監査event）と`MigrationScriptIntegrityTest`、`MessageBundleConsistencyTest`、`AllMappersSchemaSweepTest`、`FlywayCertificationLearningSkillGapSchemaSmokeTest`を実行した。SELF/MANAGERは`EngineerSkill` currentへ書かず、staffing/sales/exportは同projectionのみを読む契約をservice境界で固定した。
   - Demo: AI timeout/errorでも同じrule gapとas-ofを返し、AI成功候補はallowlist内courseだけを返す。候補のaccept/rejectは`source_id=aiRunId`の人の監査eventを残すが、公式skill/配置/採否を変更しない。期限後・AI停止時のcandidate受諾とAI-only確定は拒否されることをテストで実演した。
 

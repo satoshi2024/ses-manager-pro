@@ -516,7 +516,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         return new ExpenseRequestDto(
                 expense.getId(), expense.getExpenseNo(), expense.getExpenseDate(), expense.getCategory(),
                 expense.getAmount(), expense.getCustomerId(), expense.getProjectId(), expense.getDescription(),
-                expense.getReceiptDocumentId(), receiptVersionNo, expense.getStatus(),
+                expense.getReceiptDocumentId(), receiptVersionNo, expense.getVersion(), expense.getStatus(),
                 expense.getApprovalRequestId(),
                 approval == null ? null : approval.getStatus(), expense.getPaidAt(),
                 expense.getCreatedAt(), expense.getEngineerId(), engineerName);
