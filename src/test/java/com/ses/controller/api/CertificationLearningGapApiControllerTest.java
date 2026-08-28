@@ -7,6 +7,7 @@ import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.service.certificationlearninggap.CertificationLearningGapQueryService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapTrainingApprovalService;
 import com.ses.service.certificationlearninggap.CertificationEvidenceAccessService;
+import com.ses.service.certificationlearninggap.CertificationLearningGapAiService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -30,7 +31,7 @@ class CertificationLearningGapApiControllerTest {
     private final CertificationLearningGapQueryService queryService = mock(CertificationLearningGapQueryService.class);
     private final CertificationLearningGapApiController controller = new CertificationLearningGapApiController(
             queryService, mock(CertificationLearningGapTrainingApprovalService.class),
-            mock(CertificationEvidenceAccessService.class));
+            mock(CertificationEvidenceAccessService.class), mock(CertificationLearningGapAiService.class));
     private final Authentication authentication = new TestingAuthenticationToken("100", "n", "ROLE_HR");
 
     @Test

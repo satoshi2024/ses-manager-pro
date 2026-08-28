@@ -9,7 +9,7 @@
 
     function params() {
         const result = { current: pageData ? pageData.current : 1, size: pageSize };
-        const fields = { engineerName: value('cert-gap-name'), engineerStatus: value('cert-gap-status'), lifecycleState: value('cert-gap-lifecycle'), asOf: value('cert-gap-asof') };
+        const fields = { engineerName: value('cert-gap-name'), engineerStatus: value('cert-gap-status'), lifecycleState: value('cert-gap-lifecycle'), asOf: value('cert-gap-asof'), projectId: value('cert-gap-project'), demandSource: value('cert-gap-demand') };
         Object.keys(fields).forEach(function (key) { if (fields[key]) result[key] = fields[key]; });
         return result;
     }
@@ -89,11 +89,25 @@
         }).join('');
         const plans = (row.trainings || []).map(function (item) { return '<tr><td>' + esc(item.title || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc(item.courseName || '-') + '</td></tr>'; }).join('');
         const gaps = (row.skillGaps || []).map(function (item) { return '<li>' + esc(item.canonicalName || item.requestedName || item.key) + '：' + (item.gap ? 'gap' : '充足') + (item.unknown ? '（未知skill）' : '') + '</li>'; }).join('');
-        return '<p class="text-muted">状態: ' + esc(row.engineerStatus || '-') + ' / ライフサイクル: ' + lifecycleLabel(row.lifecycleState) + '</p>'
+        const aiButton = value('cert-gap-project') ? '<button type="button" class="btn btn-sm btn-outline-warning mb-3" onclick="showCertificationLearningGapAiCandidate(' + row.engineerId + ')"><i class="bi bi-stars me-1"></i>AI候補を表示</button>' : '';
+        return '<p class="text-muted">状態: ' + esc(row.engineerStatus || '-') + ' / ライフサイクル: ' + lifecycleLabel(row.lifecycleState) + '</p>' + aiButton
             + '<h6>資格履歴</h6><div class="table-responsive"><table class="table table-dark table-sm"><thead><tr><th>資格</th><th>状態</th><th>期限</th><th>番号</th><th>証憑</th></tr></thead><tbody>' + (certs || '<tr><td colspan="5">資格履歴なし</td></tr>') + '</tbody></table></div>'
             + '<h6 class="mt-4">学習計画・受講</h6><div class="table-responsive"><table class="table table-dark table-sm"><thead><tr><th>計画</th><th>状態</th><th>コース</th></tr></thead><tbody>' + (plans || '<tr><td colspan="3">学習計画なし</td></tr>') + '</tbody></table></div>'
             + '<h6 class="mt-4">skill gap</h6><ul>' + (gaps || '<li>gapデータなし</li>') + '</ul>';
     }
+
+    window.showCertificationLearningGapAiCandidate = async function (engineerId) {
+        const projectId = value('cert-gap-project');
+        if (!projectId) return;
+        const query = { projectId: projectId, asOf: value('cert-gap-asof'), demandSource: value('cert-gap-demand') };
+        Object.keys(query).forEach(function (key) { if (!query[key]) delete query[key]; });
+        try {
+            const result = await SES.api.get('/api/certification-learning-gap/' + encodeURIComponent(engineerId) + '/ai-candidates', query);
+            const candidate = result.aiCandidate;
+            const rule = result.ruleGap || {};
+            Swal.fire({ title: '学習course候補', html: '<p>rule gap: ' + esc(rule.status || '-') + '</p><p>as-of: ' + esc(rule.asOf || '-') + '</p><p>候補: ' + esc(candidate ? (candidate.aiSuggestedCourseIds || []).join(', ') : 'AI停止または履歴不足') + '</p><p class="text-muted small">AIは評価・配置・採否を確定しません。</p>', confirmButtonText: '閉じる' });
+        } catch (e) { /* 共通APIエラーを表示済み */ }
+    };
 
     window.exportCertificationLearningGap = async function () {
         const query = params(); delete query.current; delete query.size;

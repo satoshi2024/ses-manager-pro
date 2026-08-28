@@ -52,6 +52,16 @@
                     <input id="cert-gap-asof" class="form-control bg-dark border-secondary text-light" type="date">
                 </div>
                 <div class="col-6 col-md-2">
+                    <label for="cert-gap-project" class="form-label text-muted small">案件ID（gap/AI）</label>
+                    <input id="cert-gap-project" class="form-control bg-dark border-secondary text-light" type="number" min="1">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label for="cert-gap-demand" class="form-label text-muted small">需要source</label>
+                    <select id="cert-gap-demand" class="form-select bg-dark border-secondary text-light">
+                        <option value="COMBINED">案件＋position</option><option value="PROJECT">案件</option><option value="POSITION">position</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
                     <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-filter me-1"></i>絞り込み</button>
                 </div>
             </form>

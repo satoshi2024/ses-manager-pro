@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
+import com.ses.dto.certificationlearninggap.CertificationLearningGapAiView;
 import com.ses.entity.LearningPlan;
 import com.ses.service.SkillGapService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapQueryService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapTrainingApprovalService;
+import com.ses.service.certificationlearninggap.CertificationLearningGapAiService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -37,6 +39,7 @@ public class CertificationLearningGapApiController {
     private final CertificationLearningGapQueryService queryService;
     private final CertificationLearningGapTrainingApprovalService trainingApprovalService;
     private final com.ses.service.certificationlearninggap.CertificationEvidenceAccessService evidenceAccessService;
+    private final CertificationLearningGapAiService aiService;
 
     @GetMapping
     public ApiResult<Page<CertificationLearningGapRow>> page(
@@ -112,6 +115,18 @@ public class CertificationLearningGapApiController {
                 .contentType(StringUtils.hasText(evidence.contentType())
                         ? MediaType.parseMediaType(evidence.contentType()) : MediaType.APPLICATION_OCTET_STREAM)
                 .body(new InputStreamResource(evidence.content()));
+    }
+
+    @GetMapping("/{engineerId}/ai-candidates")
+    public ApiResult<CertificationLearningGapAiView> aiCandidates(@PathVariable Long engineerId,
+                                                                  @RequestParam Long projectId,
+                                                                  @RequestParam(required = false) LocalDate asOf,
+                                                                  @RequestParam(required = false) LocalDate periodFrom,
+                                                                  @RequestParam(required = false) LocalDate periodTo,
+                                                                  @RequestParam(required = false) SkillGapService.DemandSource demandSource,
+                                                                  Authentication authentication) {
+        return ApiResult.success(aiService.suggest(engineerId, projectId, asOf, periodFrom, periodTo,
+                demandSource, com.ses.common.util.SecurityUtils.currentUserId(), authentication));
     }
 
     @GetMapping("/export")
