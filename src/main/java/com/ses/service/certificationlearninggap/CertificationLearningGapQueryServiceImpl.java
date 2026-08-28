@@ -8,6 +8,7 @@ import com.ses.dto.certificationlearninggap.CertificationLearningGapCertificatio
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapTrainingDto;
+import com.ses.dto.certificationlearninggap.CertificationEvidenceView;
 import com.ses.dto.skillgap.SkillGapRequest;
 import com.ses.dto.skillgap.SkillGapResult;
 import com.ses.entity.Certification;
@@ -18,6 +19,8 @@ import com.ses.entity.LifecycleCase;
 import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingEnrollment;
 import com.ses.mapper.CertificationMapper;
+import com.ses.mapper.DocumentLinkMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.LearningPlanMapper;
 import com.ses.mapper.LifecycleCaseMapper;
@@ -72,6 +75,8 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private final LifecycleCaseMapper lifecycleCaseMapper;
     private final SkillGapService skillGapService;
     private final CertificationNumberCryptoService numberCryptoService;
+    private final DocumentLinkMapper documentLinkMapper;
+    private final DocumentVersionMapper documentVersionMapper;
 
     @Override
     public Page<CertificationLearningGapRow> page(CertificationLearningGapFilter filter, long current, long size,
@@ -294,7 +299,21 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
         return new CertificationLearningGapCertificationDto(record.getId(), record.getCertificationId(),
                 master == null ? null : master.getDisplayName(), record.getAcquiredOn(), record.getExpiresOn(),
                 record.getRecordState(), effectiveState, record.getCurrentFlag(), record.getCertificateNumberMasked(), raw,
-                canViewFullNumber);
+                canViewFullNumber, evidenceViews(record.getId()));
+    }
+
+    private List<CertificationEvidenceView> evidenceViews(Long recordId) {
+        if (recordId == null) {
+            return List.of();
+        }
+        return documentLinkMapper.selectList(new LambdaQueryWrapper<com.ses.entity.DocumentLink>()
+                        .eq(com.ses.entity.DocumentLink::getTargetType, "CERTIFICATION_RECORD")
+                        .eq(com.ses.entity.DocumentLink::getTargetId, recordId))
+                .stream().map(com.ses.entity.DocumentLink::getDocumentId).filter(Objects::nonNull).distinct()
+                .map(documentVersionMapper::findLatestByDocumentId).filter(Objects::nonNull)
+                .map(version -> new CertificationEvidenceView(version.getDocumentId(), version.getId(), version.getVersionNo(),
+                        version.getOriginalName(), version.getSha256(), version.getScanStatus()))
+                .toList();
     }
 
     private Map<Long, String> lifecycleStates(Set<Long> engineerIds) {

@@ -1,6 +1,7 @@
 package com.ses.dto.certificationlearninggap;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /** 資格recordの画面応答。暗号化列は含めず、raw番号は権限付きdetail/listに限る。 */
 public record CertificationLearningGapCertificationDto(
@@ -14,5 +15,6 @@ public record CertificationLearningGapCertificationDto(
         Integer currentFlag,
         String certificateNumberMasked,
         String certificateNumber,
-        boolean canViewFullNumber) {
+        boolean canViewFullNumber,
+        List<CertificationEvidenceView> evidences) {
 }

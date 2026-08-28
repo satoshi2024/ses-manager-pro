@@ -5,6 +5,8 @@ import com.ses.common.result.ApiResult;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.service.certificationlearninggap.CertificationLearningGapQueryService;
+import com.ses.service.certificationlearninggap.CertificationLearningGapTrainingApprovalService;
+import com.ses.service.certificationlearninggap.CertificationEvidenceAccessService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.TestingAuthenticationToken;
@@ -26,7 +28,9 @@ import static org.mockito.Mockito.when;
 class CertificationLearningGapApiControllerTest {
 
     private final CertificationLearningGapQueryService queryService = mock(CertificationLearningGapQueryService.class);
-    private final CertificationLearningGapApiController controller = new CertificationLearningGapApiController(queryService);
+    private final CertificationLearningGapApiController controller = new CertificationLearningGapApiController(
+            queryService, mock(CertificationLearningGapTrainingApprovalService.class),
+            mock(CertificationEvidenceAccessService.class));
     private final Authentication authentication = new TestingAuthenticationToken("100", "n", "ROLE_HR");
 
     @Test

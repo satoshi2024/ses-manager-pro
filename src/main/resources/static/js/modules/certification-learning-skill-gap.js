@@ -80,12 +80,17 @@
     function detailHtml(row) {
         const certs = (row.certifications || []).map(function (item) {
             const number = item.certificateNumber ? esc(item.certificateNumber) : esc(item.certificateNumberMasked || '未登録');
-            return '<tr><td>' + esc(item.certificationDisplayName || '-') + '</td><td>' + esc(item.effectiveState || item.recordState || '-') + '</td><td>' + esc(item.expiresOn || '-') + '</td><td>' + number + '</td></tr>';
+            const evidences = (item.evidences || []).map(function (evidence) {
+                return '<a class="d-block" href="/api/certification-learning-gap/' + encodeURIComponent(row.engineerId)
+                    + '/certifications/' + encodeURIComponent(item.id) + '/evidence/' + encodeURIComponent(evidence.documentId)
+                    + '/versions/' + encodeURIComponent(evidence.versionNo) + '/download">' + esc(evidence.originalName || '証憑') + '</a>';
+            }).join('');
+            return '<tr><td>' + esc(item.certificationDisplayName || '-') + '</td><td>' + esc(item.effectiveState || item.recordState || '-') + '</td><td>' + esc(item.expiresOn || '-') + '</td><td>' + number + '</td><td>' + (evidences || '-') + '</td></tr>';
         }).join('');
         const plans = (row.trainings || []).map(function (item) { return '<tr><td>' + esc(item.title || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc(item.courseName || '-') + '</td></tr>'; }).join('');
         const gaps = (row.skillGaps || []).map(function (item) { return '<li>' + esc(item.canonicalName || item.requestedName || item.key) + '：' + (item.gap ? 'gap' : '充足') + (item.unknown ? '（未知skill）' : '') + '</li>'; }).join('');
         return '<p class="text-muted">状態: ' + esc(row.engineerStatus || '-') + ' / ライフサイクル: ' + lifecycleLabel(row.lifecycleState) + '</p>'
-            + '<h6>資格履歴</h6><div class="table-responsive"><table class="table table-dark table-sm"><thead><tr><th>資格</th><th>状態</th><th>期限</th><th>番号</th></tr></thead><tbody>' + (certs || '<tr><td colspan="4">資格履歴なし</td></tr>') + '</tbody></table></div>'
+            + '<h6>資格履歴</h6><div class="table-responsive"><table class="table table-dark table-sm"><thead><tr><th>資格</th><th>状態</th><th>期限</th><th>番号</th><th>証憑</th></tr></thead><tbody>' + (certs || '<tr><td colspan="5">資格履歴なし</td></tr>') + '</tbody></table></div>'
             + '<h6 class="mt-4">学習計画・受講</h6><div class="table-responsive"><table class="table table-dark table-sm"><thead><tr><th>計画</th><th>状態</th><th>コース</th></tr></thead><tbody>' + (plans || '<tr><td colspan="3">学習計画なし</td></tr>') + '</tbody></table></div>'
             + '<h6 class="mt-4">skill gap</h6><ul>' + (gaps || '<li>gapデータなし</li>') + '</ul>';
     }

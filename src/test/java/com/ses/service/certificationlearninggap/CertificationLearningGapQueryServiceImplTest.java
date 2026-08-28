@@ -6,6 +6,8 @@ import com.ses.entity.Certification;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCertification;
 import com.ses.mapper.CertificationMapper;
+import com.ses.mapper.DocumentLinkMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.LearningPlanMapper;
 import com.ses.mapper.LifecycleCaseMapper;
@@ -56,6 +58,8 @@ class CertificationLearningGapQueryServiceImplTest {
     @Mock private LifecycleCaseMapper lifecycleCaseMapper;
     @Mock private SkillGapService skillGapService;
     @Mock private CertificationNumberCryptoService numberCryptoService;
+    @Mock private DocumentLinkMapper documentLinkMapper;
+    @Mock private DocumentVersionMapper documentVersionMapper;
 
     private CertificationLearningGapQueryServiceImpl service;
     private final Authentication authentication = new TestingAuthenticationToken("100", "n", "ROLE_HR");
@@ -65,13 +69,14 @@ class CertificationLearningGapQueryServiceImplTest {
         service = new CertificationLearningGapQueryServiceImpl(engineerService, dataScopeService,
                 organizationScopeService, authorizationService, certificationRecordMapper, certificationMapper,
                 learningPlanMapper, enrollmentMapper, courseMapper, lifecycleCaseMapper, skillGapService,
-                numberCryptoService);
+                numberCryptoService, documentLinkMapper, documentVersionMapper);
         when(dataScopeService.isScoped()).thenReturn(false);
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
         when(certificationRecordMapper.selectList(any())).thenReturn(List.of());
         when(learningPlanMapper.selectList(any())).thenReturn(List.of());
         when(enrollmentMapper.selectList(any())).thenReturn(List.of());
         when(lifecycleCaseMapper.selectList(any())).thenReturn(List.of());
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
         when(authorizationService.isAllowed(any(), any())).thenReturn(false);
     }
 

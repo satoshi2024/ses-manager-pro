@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,6 +39,7 @@ import java.util.List;
 public class MyCertificationLearningGapApiController {
 
     private final CertificationLearningGapSelfService selfService;
+    private final com.ses.service.certificationlearninggap.CertificationEvidenceAccessService evidenceAccessService;
 
     @GetMapping
     public ApiResult<CertificationSelfDashboard> dashboard() {
@@ -52,6 +54,18 @@ public class MyCertificationLearningGapApiController {
     @GetMapping("/certifications/{recordId}")
     public ApiResult<CertificationSelfView> certification(@PathVariable Long recordId) {
         return ApiResult.success(selfService.certification(userId(), recordId));
+    }
+
+    @GetMapping("/certifications/{recordId}/evidence/{documentId}/versions/{versionNo}/download")
+    public ResponseEntity<InputStreamResource> downloadEvidence(@PathVariable Long recordId,
+                                                                @PathVariable Long documentId,
+                                                                @PathVariable Integer versionNo) {
+        var evidence = evidenceAccessService.downloadForSelf(userId(), recordId, documentId, versionNo);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + safeFileName(evidence.fileName()) + "\"")
+                .contentType(StringUtils.hasText(evidence.contentType())
+                        ? MediaType.parseMediaType(evidence.contentType()) : MediaType.APPLICATION_OCTET_STREAM)
+                .body(new InputStreamResource(evidence.content()));
     }
 
     @PostMapping("/certifications")
@@ -169,6 +183,7 @@ public class MyCertificationLearningGapApiController {
     private String reason(PlanCommand command) { return command == null ? null : command.reason(); }
     private String value(Object value) { return value == null ? "" : value.toString(); }
     private String csv(String value) { return !StringUtils.hasText(value) ? "" : "\"" + value.replace("\"", "\"\"") + "\""; }
+    private String safeFileName(String value) { return StringUtils.hasText(value) ? value.replaceAll("[\\\\\"\\r\\n]", "_") : "evidence.bin"; }
 
     public record CertificationApplyRequest(Long engineerId, Long certificationId, LocalDate acquiredOn,
                                             LocalDate expiresOn, String certificateNumber) { }

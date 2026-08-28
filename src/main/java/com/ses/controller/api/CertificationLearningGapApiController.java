@@ -4,17 +4,22 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
+import com.ses.entity.LearningPlan;
 import com.ses.service.SkillGapService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapQueryService;
+import com.ses.service.certificationlearninggap.CertificationLearningGapTrainingApprovalService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.security.core.Authentication;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,6 +35,8 @@ import java.util.List;
 public class CertificationLearningGapApiController {
 
     private final CertificationLearningGapQueryService queryService;
+    private final CertificationLearningGapTrainingApprovalService trainingApprovalService;
+    private final com.ses.service.certificationlearninggap.CertificationEvidenceAccessService evidenceAccessService;
 
     @GetMapping
     public ApiResult<Page<CertificationLearningGapRow>> page(
@@ -76,6 +83,37 @@ public class CertificationLearningGapApiController {
                 lifecycleState, certificationState, asOf, projectId, demandSource), authentication));
     }
 
+    @PostMapping("/training-plans/{planId}/approve")
+    public ApiResult<LearningPlan> approveTrainingPlan(@PathVariable Long planId,
+                                                       @RequestBody(required = false) ApprovalCommand command,
+                                                       Authentication authentication) {
+        return ApiResult.success(trainingApprovalService.approve(planId, version(command),
+                com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication));
+    }
+
+    @PostMapping("/training-plans/{planId}/reject")
+    public ApiResult<LearningPlan> rejectTrainingPlan(@PathVariable Long planId,
+                                                      @RequestBody ApprovalCommand command,
+                                                      Authentication authentication) {
+        return ApiResult.success(trainingApprovalService.reject(planId, version(command),
+                com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication));
+    }
+
+    @GetMapping("/{engineerId}/certifications/{recordId}/evidence/{documentId}/versions/{versionNo}/download")
+    public ResponseEntity<InputStreamResource> downloadEvidence(@PathVariable Long engineerId,
+                                                                @PathVariable Long recordId,
+                                                                @PathVariable Long documentId,
+                                                                @PathVariable Integer versionNo,
+                                                                Authentication authentication) {
+        var evidence = evidenceAccessService.downloadForManagement(engineerId, recordId, documentId, versionNo,
+                authentication);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + safeFileName(evidence.fileName()) + "\"")
+                .contentType(StringUtils.hasText(evidence.contentType())
+                        ? MediaType.parseMediaType(evidence.contentType()) : MediaType.APPLICATION_OCTET_STREAM)
+                .body(new InputStreamResource(evidence.content()));
+    }
+
     @GetMapping("/export")
     public ResponseEntity<byte[]> export(@RequestParam(required = false) Long engineerId,
                                          @RequestParam(required = false) String engineerName,
@@ -117,4 +155,13 @@ public class CertificationLearningGapApiController {
         if (!StringUtils.hasText(value)) return "";
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
+
+    private String safeFileName(String value) {
+        return StringUtils.hasText(value) ? value.replaceAll("[\\\\\"\\r\\n]", "_") : "evidence.bin";
+    }
+
+    private Integer version(ApprovalCommand command) { return command == null ? null : command.expectedVersion(); }
+    private String comment(ApprovalCommand command) { return command == null ? null : command.comment(); }
+
+    public record ApprovalCommand(Integer expectedVersion, String comment) { }
 }
