@@ -96,7 +96,7 @@ Implementation completion時に次を埋める。Browser実測不能項目は未
 
 ### Automated/Browser evidence summary
 
-- 最新対象契約gate: `mvn test -Dtest=PwaUserContextServiceTest,PwaAssetContractTest,PwaCanonicalizerTest,PwaClientMutationLedgerServiceTest,PwaMutationApiControllerTest,PwaNoStoreFilterTest,ApiAuditFilterTest,MyTimesheetJsContractTest,TestIsolationAuditTest -Dsurefire.runOrder=alphabetical` → 40 tests / 0 failures / 0 errors / 0 skipped。
+- 最新対象契約gate: `mvn test -Dtest=PwaUserContextServiceTest,PwaAssetContractTest,PwaCanonicalizerTest,PwaClientMutationLedgerServiceTest,PwaMutationApiControllerTest,PwaNoStoreFilterTest,ApiAuditFilterTest,MyTimesheetJsContractTest,TestIsolationAuditTest -Dsurefire.runOrder=alphabetical` → 41 tests / 0 failures / 0 errors / 0 skipped。
 - 既存PWA関連を含むcombined gate: 216 tests / 0 failures / 0 errors / 0 skipped。
 - PWA MySQL並行/domain gate: `mvn test -Pmysql-tests -Dtest=PwaClientMutationLedgerMySqlConcurrencyTest -Dsurefire.runOrder=alphabetical` → 5 / 0 / 0 / 0。MySQL 8 Testcontainersで二writerのclaim/conflict/DB一行、scope更新後同hash replay、実expense domainのstale 409/非上書き、ledger+業務行rollback、実HTTP controller経路でのledger・expense同一transaction完了を確認。
 - MySQL migration契約: `mvn test -Pmysql-tests -Dtest=FlywaySelfServiceSchemaSmokeTest,FlywayV110AdminBoundaryUpgradeSmokeTest` → 5 / 0 / 0 / 0。
