@@ -107,7 +107,7 @@ public class FileScopeValidationService {
 
         // 6. t_document_version の法定文書台帳ファイル (R5.2 & R5.3)
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
-        DocumentVersion documentVersion = versionMapper != null
+            DocumentVersion documentVersion = versionMapper != null
                 ? versionMapper.selectOne(new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"))
                 : null;
         if (documentVersion != null) {
@@ -175,6 +175,14 @@ public class FileScopeValidationService {
                 throw BusinessException.of(403, "error.forbidden");
             }
             if ("CERTIFICATION_EVIDENCE".equals(documentType)) {
+                // 資格証憑は保持中のdownload/exportを許可しない契約。汎用文書台帳の
+                // legal hold（通常は廃棄だけを止める）より厳しい専用境界を先に適用する。
+                com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+                com.ses.entity.Document document = documentMapper == null
+                        ? null : documentMapper.selectById(documentVersion.getDocumentId());
+                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())) {
+                    throw BusinessException.of(403, "error.file.legalHoldActive");
+                }
                 assertCertificationEvidenceAllowed(documentVersion, expectedDocumentVersionId, expectedHash);
                 return;
             }

@@ -336,4 +336,19 @@ class FileScopeValidationServiceTest {
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "abc123"));
     }
+
+    @Test
+    void 資格証憑はlegal_hold中のdownloadを拒否する() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence-held.pdf", "abc123");
+        Document held = new Document();
+        held.setDocumentType("CERTIFICATION_EVIDENCE");
+        held.setLegalHoldFlag(1);
+        when(documentMapper.selectById(9100L)).thenReturn(held);
+        loginAs("HR");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence-held.pdf", 100L, "abc123"));
+        assertEquals("error.file.legalHoldActive", ex.getMessage());
+    }
 }

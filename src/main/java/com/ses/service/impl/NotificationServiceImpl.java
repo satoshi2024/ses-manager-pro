@@ -150,6 +150,7 @@ public class NotificationServiceImpl implements NotificationService {
             case "CHANGE_REQUEST_APPLIED" -> "myProfile";
             case "EXPENSE_ACCOUNTING_SENT", "EXPENSE_PAID" -> "myExpenses";
             case "SURVEY_CAMPAIGN" -> "mySurveys";
+            case "CERTIFICATION_EXPIRY" -> "engineer";
             default -> null;
         };
     }

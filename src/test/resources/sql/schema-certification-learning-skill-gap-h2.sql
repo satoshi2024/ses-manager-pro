@@ -87,8 +87,11 @@ CREATE TABLE IF NOT EXISTS t_certification_event (
     evidence_document_id BIGINT NULL,
     evidence_document_version_id BIGINT NULL,
     evidence_document_hash VARCHAR(64) NULL,
+    idempotency_key VARCHAR(255) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_cert_event_idempotency
+    ON t_certification_event(tenant_id, idempotency_key);
 
 INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
 SELECT 'CERTIFICATION_EVIDENCE', '資格証憑', 'INCOMING', 7, 'TRANSACTION_DATE', 1

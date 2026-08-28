@@ -35,5 +35,7 @@ public class CertificationEvent implements Serializable {
     private Long evidenceDocumentId;
     private Long evidenceDocumentVersionId;
     private String evidenceDocumentHash;
+    /** 同一業務eventの再実行を収束させる冪等key。revisionや期限を含める。 */
+    private String idempotencyKey;
     private LocalDateTime createdAt;
 }
