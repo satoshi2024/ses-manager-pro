@@ -561,6 +561,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
                         .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                .andExpect(status().isForbidden());
 
         // 6. 管理者は DocumentLink 経由でも全件アクセス可能
         assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "管理者", 1L))
@@ -590,6 +593,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                         .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
                         .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
                 .andExpect(status().isForbidden());
     }
