@@ -15,8 +15,8 @@
 | Base branch | `origin/main` |
 | Base commit | `76e45340a23cfee964fac778b7b4d856fa2c9e7b` |
 | 旧 merge-base | `455fc92e` — **承認 Base として使用しない** |
-| Base 取り込み | `origin/main` を feature branch へ merge（merge commit は Gate 0 前段） |
-| 承認 commit | Gate 0 commit（本 Decision 記録の commit SHA） |
+| Base 取り込み merge commit | `5d4b5c2791e63297cc2f83d323d50a94db329646` |
+| 承認 commit | `03545127dcd2aa6f6fae78af11544426ccfe7ad7`（Gate 0） |
 | Owner 識別ポリシー | `DG-03-DEV-20260828`（別 Decision。本 Decision とは分離） |
 
 ## Approved scope（in scope）

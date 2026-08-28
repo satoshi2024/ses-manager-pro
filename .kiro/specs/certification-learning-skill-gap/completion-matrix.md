@@ -7,8 +7,9 @@
 | traceability | `APPROVED`（DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`） |
 | OwnerRef | `PROJECT_OWNER` |
 | 承認 Base | `origin/main@76e45340` |
-| Base merge | `origin/main` 取り込み済み（Gate 0 前段） |
-| Gate 0 承認 commit | Gate 0 push 後の remote HEAD |
+| Base merge commit | `5d4b5c27` |
+| Gate 0 承認 commit | `03545127` |
+| remote HEAD | `1f459267`（SHA 追記後） |
 | production 変更（NF-03） | なし（Base merge のみ）。F1 未着手 |
 | worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
