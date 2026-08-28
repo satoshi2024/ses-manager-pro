@@ -19,6 +19,7 @@ import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentTypeMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.AssetScopeService;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
@@ -71,6 +72,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     /** FileScope の RECEIPT/CRA 規則を list/detail で再利用（規則自体は広げない）。 */
     private final ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     private final ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    private final AssetScopeService assetScopeService;
 
     private static final String DEFAULT_TENANT_ID = "default";
     private static final Set<String> HASH_CLAIM_DOCUMENT_TYPES = Set.of(
@@ -946,7 +948,13 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             try {
                 String type = link.getTargetType();
                 Long targetId = link.getTargetId();
-                if ("CUSTOMER".equals(type)) {
+                if ("ASSET_ASSIGNMENT".equals(type)) {
+                    if (assetScopeService != null
+                            && assetScopeService.isAccessibleByDocumentLink(doc.getId(), SecurityUtils.currentRole(), SecurityUtils.currentUserId())) {
+                        anyAllowed = true;
+                        break;
+                    }
+                } else if ("CUSTOMER".equals(type)) {
                     dataScopeService.assertAllowedCustomer(targetId);
                     anyAllowed = true;
                     break;
@@ -1024,6 +1032,22 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         }
         if ("営業".equals(role)) {
             wrapper.ne(Document::getDocumentType, "CHANGE_REQUEST_ATTACHMENT");
+        }
+
+        // NF-09の資産証跡は、既存DataScopeが無効でもAssetScopeServiceを独立した同一境界として適用する。
+        if (assetScopeService != null && Set.of("営業", "マネージャー", "要員").contains(role)) {
+            List<Long> assetDocumentIds = assetScopeService.getAccessibleAssetDocumentIds(role, SecurityUtils.currentUserId());
+            if (assetDocumentIds == null || assetDocumentIds.isEmpty()) {
+                wrapper.ne(Document::getDocumentType, "ASSET_ASSIGNMENT");
+                if (assetDocumentIds != null && assetDocumentIds.isEmpty()) {
+                    // ASSET_ASSIGNMENTに限らず、下の既存DataScope条件へ進む。資産文書だけは0件にする。
+                    wrapper.and(w -> w.ne(Document::getDocumentType, "ASSET_ASSIGNMENT")
+                            .or().in(Document::getId, List.of(-1L)));
+                }
+            } else {
+                wrapper.and(w -> w.ne(Document::getDocumentType, "ASSET_ASSIGNMENT")
+                        .or().in(Document::getId, assetDocumentIds));
+            }
         }
 
         boolean isHr = com.ses.common.util.SecurityUtils.isHrRole();

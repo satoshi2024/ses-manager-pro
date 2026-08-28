@@ -11,6 +11,8 @@ import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,6 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -83,6 +87,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
     private ExternalAccountProviderClient providerClient;
+
+    @Autowired
+    private MockMvc mockMvc;
 
     @Test
     @DisplayName("Boundary 1: Re-assign immediately after return succeeds")
@@ -329,53 +336,64 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     private com.ses.mapper.DocumentLinkMapper documentLinkMapper;
 
     @Autowired
+    private com.ses.mapper.DocumentMapper documentMapper;
+
+    @Autowired
     private SysUserMapper sysUserMapper;
 
     @Autowired
     private EngineerAccountLinkService engineerAccountLinkService;
 
+    @Autowired
+    private com.ses.service.impl.AssetScopeServiceImpl assetScopeServiceImpl;
+
+    @Autowired
+    private OrganizationUnitMapper organizationUnitMapper;
+
+    @Autowired
+    private UserOrganizationMapper userOrganizationMapper;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
+    private EngineerSalesMapper engineerSalesMapper;
+
     @Test
-    @DisplayName("Boundary 6: Multi-corporation & Organization Unit Scope Isolation (法人A/B・営業・要員分離)")
+    @DisplayName("Boundary 6: 営業・要員 Fail-Closed Scope 検証（担当外要員・別法人は拒否）")
     void testOrganizationScopeAndMultiCorporationIsolation() {
-        // 1. 法人A (companyId=10L) と 法人B (companyId=20L) の資産作成
-        Asset assetCorpA = Asset.builder()
-                .assetTag("AST-CORP-A-999")
+        // 1. 法人A資産と法人B資産を作成
+        Asset assetA = Asset.builder()
+                .assetTag("AST-SCOPE-A-001")
                 .assetName("Corp A MacBook Pro")
                 .category("PC")
-                .ownerCompanyId(10L)
+                .ownerCompanyId(100L)
                 .status("IN_STOCK")
                 .build();
-        assetService.createAsset(assetCorpA, 1L);
+        assetService.createAsset(assetA, 1L);
 
-        Asset assetCorpB = Asset.builder()
-                .assetTag("AST-CORP-B-999")
+        Asset assetB = Asset.builder()
+                .assetTag("AST-SCOPE-B-001")
                 .assetName("Corp B ThinkPad")
                 .category("PC")
-                .ownerCompanyId(20L)
+                .ownerCompanyId(200L)
                 .status("IN_STOCK")
                 .build();
-        assetService.createAsset(assetCorpB, 1L);
+        assetService.createAsset(assetB, 1L);
 
-        // 2. 営業ユーザーと要員ユーザー作成
-        SysUser userSalesA = SysUser.builder()
-                .username("sales.user.a")
-                .password("pass")
-                .role("営業")
-                .status(1)
-                .build();
-        sysUserMapper.insert(userSalesA);
+        // 2. 管理者/HR: 両法人の全資産を閲覧可能
+        assertThat(assetScopeService.isAccessible(assetA.getId(), "管理者", 1L)).isTrue();
+        assertThat(assetScopeService.isAccessible(assetB.getId(), "管理者", 1L)).isTrue();
+        assertThat(assetScopeService.isAccessible(assetA.getId(), "HR", 1L)).isTrue();
+        assertThat(assetScopeService.isAccessible(assetB.getId(), "HR", 1L)).isTrue();
 
-        // 3. 管理者/HRは全資産を閲覧可能
-        assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "管理者", 1L)).isTrue();
-        assertThat(assetScopeService.isAccessible(assetCorpB.getId(), "管理者", 1L)).isTrue();
-
-        // 4. 要員A (engineerId=8801L) に貸与
+        // 3. 要員Aに資産Aを貸与し、要員Aユーザーと要員Bユーザーを登録
         AssetAssignment asA = assetAssignmentService.createAssignment(
-                assetCorpA.getId(), "ENGINEER", 8801L, LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
+                assetA.getId(), "ENGINEER", 8801L,
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
 
-        // 要員Aのユーザーとリンク
         SysUser userEngA = SysUser.builder()
-                .username("eng8801")
+                .username("eng-scope-8801")
                 .password("pass")
                 .role("要員")
                 .status(1)
@@ -383,9 +401,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         sysUserMapper.insert(userEngA);
         engineerAccountLinkService.link(8801L, userEngA.getId(), 1L);
 
-        // 要員Bのユーザー (engineerId=8802L)
         SysUser userEngB = SysUser.builder()
-                .username("eng8802")
+                .username("eng-scope-8802")
                 .password("pass")
                 .role("要員")
                 .status(1)
@@ -393,29 +410,112 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         sysUserMapper.insert(userEngB);
         engineerAccountLinkService.link(8802L, userEngB.getId(), 1L);
 
-        // 5. 要員スコープ検証: 要員Aは自己貸与資産のみ可視、他要員の貸与資産・未貸与資産は不可視
-        assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "要員", userEngA.getId())).isTrue();
-        assertThat(assetScopeService.isAccessible(assetCorpB.getId(), "要員", userEngA.getId())).isFalse();
-        assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "要員", userEngB.getId())).isFalse();
+        // 4. 要員スコープ: 自己 ACTIVE 貸与資産のみ可視、他要員への貸与・未貸与・別法人資産は不可視
+        assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
+                .as("要員Aは自己貸与資産Aに可視").isTrue();
+        assertThat(assetScopeService.isAccessible(assetB.getId(), "要員", userEngA.getId()))
+                .as("要員Aは法人B資産Bに不可視").isFalse();
+        assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngB.getId()))
+                .as("要員Bは要員Aへの貸与資産Aに不可視（Fail-Closed）").isFalse();
+
+        // 5. 返却後は要員Aも資産Aへのアクセスが不可（ACTIVE貸与なし）
+        assetAssignmentService.returnAssignment(asA.getId(), LocalDate.now(), null, "返却", 1L);
+        assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
+                .as("返却後は要員Aも資産Aへ不可視").isFalse();
     }
 
     @Test
-    @DisplayName("Boundary 7: Document evidence scope & DocumentLink linkage verification")
-    void testDocumentEvidenceScopeRejection() {
+    @DisplayName("Boundary 6-B: 営業/マネージャーの法人・組織scopeは所有法人と担当要員の両方でfail-closed")
+    void testSalesAndManagerScopeUsesOwnerCompanyAndManagedOrganization() {
+        String suffix = Long.toString(System.nanoTime());
+        long legalA = 91001L;
+        long legalB = 91002L;
+
+        OrganizationUnit orgA = OrganizationUnit.builder()
+                .legalEntityId(legalA).code("ASSET-SCOPE-A-" + suffix).name("資産Scope法人A")
+                .type("DEPARTMENT").validFrom(LocalDate.of(2026, 1, 1)).status("有効").build();
+        OrganizationUnit orgB = OrganizationUnit.builder()
+                .legalEntityId(legalB).code("ASSET-SCOPE-B-" + suffix).name("資産Scope法人B")
+                .type("DEPARTMENT").validFrom(LocalDate.of(2026, 1, 1)).status("有効").build();
+        organizationUnitMapper.insert(orgA);
+        organizationUnitMapper.insert(orgB);
+
+        Engineer engineerA = Engineer.builder().fullName("資産Scope要員A-" + suffix)
+                .employmentType("正社員").status("稼動中").organizationId(orgA.getId()).build();
+        Engineer engineerB = Engineer.builder().fullName("資産Scope要員B-" + suffix)
+                .employmentType("正社員").status("稼動中").organizationId(orgB.getId()).build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+
+        SysUser sales = SysUser.builder().username("asset-sales-" + suffix).password("pass").role("営業").status(1).build();
+        SysUser manager = SysUser.builder().username("asset-manager-" + suffix).password("pass").role("マネージャー").status(1).build();
+        sysUserMapper.insert(sales);
+        sysUserMapper.insert(manager);
+        userOrganizationMapper.insert(UserOrganization.builder().userId(sales.getId()).organizationId(orgA.getId())
+                .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
+        userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId()).organizationId(orgA.getId())
+                .primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
+        engineerSalesMapper.insert(EngineerSales.builder().engineerId(engineerA.getId()).salesUserId(sales.getId())
+                .primaryFlag(1).assignedAt(LocalDate.of(2026, 1, 1)).build());
+
+        Asset assignedA = Asset.builder().assetTag("AST-SCOPE-SALES-A-" + suffix).assetName("法人A貸与")
+                .category("PC").ownerCompanyId(legalA).status("IN_STOCK").build();
+        Asset assignedB = Asset.builder().assetTag("AST-SCOPE-SALES-B-" + suffix).assetName("法人B貸与")
+                .category("PC").ownerCompanyId(legalB).status("IN_STOCK").build();
+        Asset unassignedA = Asset.builder().assetTag("AST-SCOPE-SALES-U-A-" + suffix).assetName("法人A未貸与")
+                .category("MONITOR").ownerCompanyId(legalA).status("IN_STOCK").build();
+        Asset unassignedB = Asset.builder().assetTag("AST-SCOPE-SALES-U-B-" + suffix).assetName("法人B未貸与")
+                .category("MONITOR").ownerCompanyId(legalB).status("IN_STOCK").build();
+        assetService.createAsset(assignedA, 1L);
+        assetService.createAsset(assignedB, 1L);
+        assetService.createAsset(unassignedA, 1L);
+        assetService.createAsset(unassignedB, 1L);
+        assetAssignmentService.createAssignment(assignedA.getId(), "ENGINEER", engineerA.getId(),
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "A", 1L);
+        assetAssignmentService.createAssignment(assignedB.getId(), "ENGINEER", engineerB.getId(),
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "B", 1L);
+
+        assertThat(assetScopeService.isAccessible(assignedA.getId(), "営業", sales.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(assignedB.getId(), "営業", sales.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "営業", sales.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(unassignedB.getId(), "営業", sales.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(assignedA.getId(), "マネージャー", manager.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(assignedB.getId(), "マネージャー", manager.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "マネージャー", manager.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(unassignedB.getId(), "マネージャー", manager.getId())).isFalse();
+    }
+
+    @Test
+    @DisplayName("Boundary 7: DocumentLink 登録と isAccessibleByDocumentLink でのスコープ導出・別要員拒否")
+    void testDocumentEvidenceScopeRejection() throws Exception {
+        long engineerAId = 18801L;
+        long engineerBId = 18802L;
+        String suffix = Long.toString(System.nanoTime());
+
+        // 1. 実在文書を登録し、資産を要員Aに貸与する
         Asset asset = Asset.builder()
-                .assetTag("AST-DOCLINK-001")
+                .assetTag("AST-DOCLINK-SCOPE-001")
                 .assetName("Evidence Test MacBook")
                 .category("PC")
-                .ownerCompanyId(10L)
+                .ownerCompanyId(100L)
                 .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
 
-        Long evidenceDocId = 9991L;
-
-        // 1. 貸与（証跡DocId=9991Lを指定）
+        Document evidence = new Document();
+        evidence.setTenantId("default");
+        evidence.setDocumentType("INTERNAL");
+        evidence.setTitle("資産受渡証跡");
+        evidence.setDirection("INTERNAL");
+        evidence.setStatus("DRAFT");
+        evidence.setCurrency("JPY");
+        evidence.setLegalHoldFlag(0);
+        evidence.setVersion(1L);
+        documentMapper.insert(evidence);
+        Long evidenceDocId = evidence.getId();
         AssetAssignment assignment = assetAssignmentService.createAssignment(
-                asset.getId(), "ENGINEER", 8801L, LocalDate.now(), LocalDate.now().plusMonths(1), evidenceDocId, "受領書添付", 1L);
+                asset.getId(), "ENGINEER", engineerAId,
+                LocalDate.now(), LocalDate.now().plusMonths(1), evidenceDocId, "受領書添付", 1L);
         assertThat(assignment.getHandoverEvidenceDocId()).isEqualTo(evidenceDocId);
 
         // 2. t_document_link に ASSET_ASSIGNMENT リンクが登録されていることを検証
@@ -427,25 +527,130 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(links.get(0).getTargetType()).isEqualTo("ASSET_ASSIGNMENT");
         assertThat(links.get(0).getTargetId()).isEqualTo(assignment.getId());
 
-        // 3. 返却時（返却証跡DocId=9992Lを指定）
-        Long returnDocId = 9992L;
-        AssetAssignment returned = assetAssignmentService.returnAssignment(
-                assignment.getId(), LocalDate.now(), returnDocId, "返却受領書添付", 1L);
-        assertThat(returned.getReturnEvidenceDocId()).isEqualTo(returnDocId);
-
-        List<Long> returnLinkedDocs = documentLinkMapper.findDocumentIdsByTarget("ASSET_ASSIGNMENT", assignment.getId());
-        assertThat(returnLinkedDocs).contains(evidenceDocId, returnDocId);
-
-        // 4. 無関係な要員・担当外ユーザーからのアクセス拒否を検証
-        SysUser foreignUser = SysUser.builder()
-                .username("foreign.user")
+        // 3. 要員Aユーザーを作成してリンク
+        SysUser userEngA = SysUser.builder()
+                .username("eng-doclink-8801-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
-        sysUserMapper.insert(foreignUser);
+        sysUserMapper.insert(userEngA);
+        engineerAccountLinkService.link(engineerAId, userEngA.getId(), 1L);
 
-        boolean isPermitted = assetScopeService.isAccessible(asset.getId(), "要員", foreignUser.getId());
-        assertThat(isPermitted).isFalse();
+        // 4. 要員Aは DocumentLink 経由で証跡文書へアクセス可能（自己貸与中）
+        assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngA.getId()))
+                .as("要員Aは自己貸与の証跡文書へアクセス可能").isTrue();
+
+        // 5. 要員Bは DocumentLink 経由での証跡文書アクセスが拒否される（担当外）
+        SysUser userEngB = SysUser.builder()
+                .username("eng-doclink-8802-" + suffix)
+                .password("pass")
+                .role("要員")
+                .status(1)
+                .build();
+        sysUserMapper.insert(userEngB);
+        engineerAccountLinkService.link(engineerBId, userEngB.getId(), 1L);
+
+        assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngB.getId()))
+                .as("要員Bは他要員の貸与証跡文書へアクセス不可（Fail-Closed）").isFalse();
+
+        // Document APIも実在Document -> DocumentLink -> assignment -> assetの認可を通る。
+        mockMvc.perform(get("/api/documents/" + evidenceDocId)
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/documents/" + evidenceDocId)
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                .andExpect(status().isForbidden());
+
+        // 6. 管理者は DocumentLink 経由でも全件アクセス可能
+        assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "管理者", 1L))
+                .as("管理者は常に証跡文書へアクセス可能").isTrue();
+
+        // 7. 返却時の証跡文書も t_document_link に登録される
+        Document returnEvidence = new Document();
+        returnEvidence.setTenantId("default");
+        returnEvidence.setDocumentType("INTERNAL");
+        returnEvidence.setTitle("資産返却証跡");
+        returnEvidence.setDirection("INTERNAL");
+        returnEvidence.setStatus("DRAFT");
+        returnEvidence.setCurrency("JPY");
+        returnEvidence.setLegalHoldFlag(0);
+        returnEvidence.setVersion(1L);
+        documentMapper.insert(returnEvidence);
+        Long returnDocId = returnEvidence.getId();
+        AssetAssignment returned = assetAssignmentService.returnAssignment(
+                assignment.getId(), LocalDate.now(), returnDocId, "返却受領書添付", 1L);
+        assertThat(returned.getReturnEvidenceDocId()).isEqualTo(returnDocId);
+
+        List<Long> allLinkedDocs = documentLinkMapper.findDocumentIdsByTarget("ASSET_ASSIGNMENT", assignment.getId());
+        assertThat(allLinkedDocs).contains(evidenceDocId, returnDocId);
+        // 返却後も旧assignmentの本人には自分の受領証跡だけを再表示できるが、他要員へ継承しない。
+        assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngA.getId())).isTrue();
+        mockMvc.perform(get("/api/documents/" + evidenceDocId)
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/documents/" + evidenceDocId)
+                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("Boundary 8: 論理削除安全条件 (Soft Delete Invariants) — ACTIVE貸与・未失効アカウント・未解放ライセンスは論理削除不可")
+    void testSoftDeleteInvariants() {
+        // 1. ACTIVE貸与中の資産は論理削除できない
+        Asset asset = Asset.builder()
+                .assetTag("AST-SOFTDEL-001")
+                .assetName("Soft Delete Test PC")
+                .category("PC")
+                .status("IN_STOCK")
+                .build();
+        assetService.createAsset(asset, 1L);
+
+        assetAssignmentService.createAssignment(
+                asset.getId(), "ENGINEER", 8801L,
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与", 1L);
+
+        // ACTIVE貸与が存在する状態での論理削除は Business Exception で拒否される
+        assertThatThrownBy(() -> assetService.softDeleteAsset(asset.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("未返却貸与");
+
+        // 2. 未失効アカウントは論理削除できない
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("SOFTDEL_SYSTEM_" + System.nanoTime())
+                .systemName("Soft Delete Test System")
+                .systemType("SAAS_MAIL")
+                .build();
+        externalAccountSystemMapper.insert(system);
+
+        ExternalAccountReference ref = externalAccountService.createAccountReference(
+                system.getId(), "softdel@test.jp", "ENGINEER", 8801L, "MEMBER", 1L);
+        assertThat(ref.getStatus()).isEqualTo("ACTIVE");
+
+        // ACTIVE状態のアカウントは論理削除不可
+        assertThatThrownBy(() -> externalAccountService.softDeleteAccount(ref.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("ACTIVE");
+
+        // 3. 資産廃棄は deleted_flag ではなく DISPOSED 状態遷移で表現する
+        Asset asset2 = Asset.builder()
+                .assetTag("AST-DISPOSED-001")
+                .assetName("Disposed Test PC")
+                .category("PC")
+                .status("IN_STOCK")
+                .build();
+        assetService.createAsset(asset2, 1L);
+
+        // DISPOSED 遷移 + イベント記録
+        assetService.disposeAsset(asset2.getId(), "廃棄処分", 1L);
+        Asset disposed = assetService.getById(asset2.getId());
+        assertThat(disposed.getStatus()).isEqualTo("DISPOSED");
+        assertThat(disposed.getDeletedFlag()).as("DISPOSED資産はdeleted_flag=0のまま履歴を保持").isEqualTo(0);
+
+        // t_asset_event に廃棄イベントが追記されている
+        Long disposeEventCount = assetEventMapper.selectCount(new LambdaQueryWrapper<AssetEvent>()
+                .eq(AssetEvent::getAssetId, asset2.getId())
+                .eq(AssetEvent::getEventType, "DISPOSED"));
+        assertThat(disposeEventCount).isGreaterThanOrEqualTo(1);
     }
 }

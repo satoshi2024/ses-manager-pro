@@ -1,6 +1,7 @@
 package com.ses.controller.api;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.Asset;
@@ -9,6 +10,7 @@ import com.ses.entity.AssetEvent;
 import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetEventService;
 import com.ses.service.AssetService;
+import com.ses.service.AssetScopeService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class AssetApiController {
     private final AssetService assetService;
     private final AssetEventService assetEventService;
     private final AssetAssignmentService assetAssignmentService;
+    private final AssetScopeService assetScopeService;
 
     @GetMapping
     public ApiResult<IPage<Asset>> list(
@@ -40,7 +43,8 @@ public class AssetApiController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long ownerCompanyId) {
-        IPage<Asset> result = assetService.searchAssets(page, size, keyword, category, status, ownerCompanyId);
+        IPage<Asset> result = assetService.searchAssetsScoped(page, size, keyword, category, status, ownerCompanyId,
+                assetScopeService.getAccessibleAssetIds(SecurityUtils.currentRole(), SecurityUtils.currentUserId()));
         return ApiResult.success(result);
     }
 
@@ -50,6 +54,7 @@ public class AssetApiController {
         if (asset == null) {
             return ApiResult.error(404, "資産が見つかりません。");
         }
+        assertAccessible(id);
         return ApiResult.success(asset);
     }
 
@@ -94,18 +99,21 @@ public class AssetApiController {
         Long currentUserId = SecurityUtils.currentUserId();
         String details = req != null ? req.getReason() : null;
         Long evidenceDocId = req != null ? req.getEvidenceDocId() : null;
+        assertAccessible(id);
         Asset lost = assetService.reportLost(id, details, currentUserId, evidenceDocId);
         return ApiResult.success(lost);
     }
 
     @GetMapping("/{id}/events")
     public ApiResult<List<AssetEvent>> getEvents(@PathVariable Long id) {
+        assertAccessible(id);
         List<AssetEvent> events = assetEventService.getEventsByAssetId(id);
         return ApiResult.success(events);
     }
 
     @GetMapping("/{id}/assignments")
     public ApiResult<List<AssetAssignment>> getAssignments(@PathVariable Long id) {
+        assertAccessible(id);
         List<AssetAssignment> assignments = assetAssignmentService.getAssignmentHistoryByAssetId(id);
         return ApiResult.success(assignments);
     }
@@ -117,7 +125,8 @@ public class AssetApiController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long ownerCompanyId,
             HttpServletResponse response) throws IOException {
-        IPage<Asset> page = assetService.searchAssets(1, 10000, keyword, category, status, ownerCompanyId);
+        IPage<Asset> page = assetService.searchAssetsScoped(1, 10000, keyword, category, status, ownerCompanyId,
+                assetScopeService.getAccessibleAssetIds(SecurityUtils.currentRole(), SecurityUtils.currentUserId()));
         List<Asset> records = page.getRecords();
 
         response.setContentType("text/csv; charset=UTF-8");
@@ -150,6 +159,12 @@ public class AssetApiController {
     private String escapeCsv(String value) {
         if (value == null) return "";
         return value.replace("\"", "\"\"");
+    }
+
+    private void assertAccessible(Long assetId) {
+        if (!assetScopeService.isAccessible(assetId, SecurityUtils.currentRole(), SecurityUtils.currentUserId())) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
     }
 
     @Data

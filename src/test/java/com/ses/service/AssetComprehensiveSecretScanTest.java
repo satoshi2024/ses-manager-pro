@@ -116,42 +116,108 @@ class AssetComprehensiveSecretScanTest {
     }
 
     @Test
-    @DisplayName("4. Scan Service, Controller & Exception source files for unmasked secret logging & exception leakage")
-    void scanServiceLogsAndExceptions() throws IOException {
-        List<Path> scanDirs = List.of(
-                Paths.get("src/main/java/com/ses/service/impl"),
-                Paths.get("src/main/java/com/ses/controller/api")
-        );
+    @DisplayName("4. 全src/main/java配下の全Javaファイルに対して、unmaskedシークレットロギング・例外メッセージ・監査payload漏洩を検査する（P1-03対応）")
+    void scanAllJavaSourcesForSecretLeakage() throws IOException {
+        // 全 src/main/java 配下の .java ファイルを走査
+        Path rootSrc = Paths.get("src/main/java");
         List<String> violations = new ArrayList<>();
 
-        for (Path dir : scanDirs) {
-            if (!Files.exists(dir)) continue;
-            try (Stream<Path> stream = Files.walk(dir)) {
-                stream.filter(p -> p.toString().endsWith(".java") && (p.getFileName().toString().contains("Asset") || p.getFileName().toString().contains("ExternalAccount") || p.getFileName().toString().contains("License")))
-                        .forEach(p -> {
-                            try {
-                                List<String> lines = Files.readAllLines(p, StandardCharsets.UTF_8);
-                                for (int i = 0; i < lines.size(); i++) {
-                                    String line = lines.get(i);
-                                    // ログ出力の検査
-                                    if ((line.contains("log.info") || line.contains("log.warn") || line.contains("log.error") || line.contains("log.debug"))
-                                            && line.contains("accountIdentifier") && !line.contains("maskIdentifier") && !line.contains("//")) {
-                                        violations.add(p.getFileName() + ": Line " + (i + 1) + " (Log): " + line.trim());
-                                    }
-                                    // 例外メッセージの検査
-                                    if (line.contains("throw new BusinessException") && (line.contains("password") || line.contains("token") || line.contains("secret"))) {
-                                        violations.add(p.getFileName() + ": Line " + (i + 1) + " (Exception): " + line.trim());
-                                    }
-                                }
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-            }
+        if (!Files.exists(rootSrc)) {
+            throw new IOException("src/main/java が存在しないためsecret scanを実行できません");
+        }
+
+        try (Stream<Path> stream = Files.walk(rootSrc)) {
+            stream.filter(p -> p.toString().endsWith(".java"))
+                    .forEach(p -> {
+                        try {
+                            scanJavaSource(p, violations);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
 
         assertThat(violations)
-                .withFailMessage("Found unmasked logging or secret leakage in asset services/controllers: %s", violations)
+                .withFailMessage("全src/main/java配下のJavaファイルでシークレット漏洩が検出されました: %s", violations)
                 .isEmpty();
+    }
+
+    /**
+     * キーワードを含む日本語の状態メッセージを漏洩と誤判定しないため、文字列リテラルを除去した
+     * Java呼出し単位で実値の式だけを検査する。括弧を数えるためmultilineのログ・例外・payloadも対象になる。
+     */
+    private static void scanJavaSource(Path path, List<String> violations) throws IOException {
+        String source = Files.readString(path, StandardCharsets.UTF_8);
+        scanInvocations(path, source, "\\blog\\.(info|warn|error|debug|trace)\\b", "LOG_SECRET", violations);
+        scanInvocations(path, source, "\\bthrow\\s+new\\s+[A-Za-z0-9_$.]*Exception\\b", "EXCEPTION_SECRET", violations);
+        scanInvocations(path, source,
+                "(?:putPayload|addPayload|setAuditPayload|auditPayload|auditLog|recordAudit)\\s*\\(",
+                "AUDIT_SECRET", violations);
+    }
+
+    private static void scanInvocations(Path path, String source, String startRegex, String kind,
+                                        List<String> violations) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(startRegex).matcher(source);
+        while (matcher.find()) {
+            int open = source.indexOf('(', matcher.end() - 1);
+            if (open < 0) {
+                continue;
+            }
+            int close = matchingParen(source, open);
+            if (close < 0) {
+                continue;
+            }
+            String arguments = withoutCommentsAndStrings(source.substring(open + 1, close));
+            if (containsUnmaskedSensitiveValue(arguments)) {
+                int line = 1;
+                for (int i = 0; i < matcher.start(); i++) {
+                    if (source.charAt(i) == '\n') line++;
+                }
+                violations.add(path + ": Line " + line + " (" + kind + "): "
+                        + source.substring(matcher.start(), Math.min(close + 1, source.length())).replace('\n', ' ').trim());
+            }
+        }
+    }
+
+    private static int matchingParen(String source, int open) {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '(') {
+                depth++;
+            } else if (c == ')' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static String withoutCommentsAndStrings(String source) {
+        return source
+                .replaceAll("(?s)/\\*.*?\\*/", " ")
+                .replaceAll("(?m)//.*$", " ")
+                .replaceAll("(?s)\\\"(?:\\\\.|[^\\\"\\\\])*\\\"", " ")
+                .replaceAll("(?s)'(?:\\\\.|[^'\\\\])*'", " ");
+    }
+
+    private static boolean containsUnmaskedSensitiveValue(String source) {
+        String candidate = source
+                .replaceAll("(?i)\\b(?:mask|redact|hash|digest|sanitize|scrub)[A-Za-z0-9_]*\\s*\\([^()]*\\)", " ");
+        java.util.regex.Pattern sensitive = java.util.regex.Pattern.compile(
+                "(?i)(?<![A-Za-z0-9_])(password|passwd|accountIdentifier|accessToken|refreshToken|bearerToken|"
+                        + "clientSecret|apiKey|privateKey|recoveryCode|secretValue|credential|token|secret)(?![A-Za-z0-9_])");
+        java.util.regex.Pattern getter = java.util.regex.Pattern.compile(
+                "(?i)\\bget(?:Password|Passwd|Token|Secret|ApiKey|PrivateKey|RecoveryCode|Credential)\\s*\\(");
+        return sensitive.matcher(candidate).find() || getter.matcher(candidate).find();
     }
 }

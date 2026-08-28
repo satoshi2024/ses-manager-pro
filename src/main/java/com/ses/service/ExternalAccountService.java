@@ -70,4 +70,29 @@ public interface ExternalAccountService extends IService<ExternalAccountReferenc
      * アカウント参照の検索（ページネーション）
      */
     IPage<ExternalAccountReference> searchAccounts(int page, int size, Long systemId, String assigneeType, Long assigneeId, String status);
+
+    /** 認可済み要員ID集合をSQL条件として適用した一覧検索。null=全件、空=0件。 */
+    IPage<ExternalAccountReference> searchAccountsScoped(int page, int size, Long systemId,
+                                                         String assigneeType, Long assigneeId, String status,
+                                                         List<Long> accessibleEngineerIds);
+
+    /**
+     * 外部アカウントを台帳から論理削除する。
+     * AS-R1.5(b): ACTIVE/SUSPENDED/PENDING_CONFIRMATION 状態の場合は BusinessException を送出する（Fail-Closed）。
+     *
+     * @throws com.ses.common.exception.BusinessException 未失効状態の場合
+     */
+    void softDeleteAccount(Long id);
+
+    /**
+     * 外部アカウント参照を新規登録する（registerAccountReference の別名）
+     */
+    default ExternalAccountReference createAccountReference(Long systemId,
+                                                            String accountIdentifier,
+                                                            String assigneeType,
+                                                            Long assigneeId,
+                                                            String permissionLevel,
+                                                            Long actorUserId) {
+        return registerAccountReference(systemId, accountIdentifier, assigneeType, assigneeId, permissionLevel, actorUserId);
+    }
 }

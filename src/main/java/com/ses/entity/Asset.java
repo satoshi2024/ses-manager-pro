@@ -40,7 +40,7 @@ public class Asset extends BaseEntity {
     private String category;
 
     /**
-     * 所有法人ID (m_company.id)
+     * 所有法人ID (m_organization_unit.legal_entity_id)
      */
     private Long ownerCompanyId;
 

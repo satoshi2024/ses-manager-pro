@@ -65,6 +65,7 @@ class DocumentServiceImplTest {
     @Mock ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
     @Mock ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     @Mock ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    @Mock com.ses.service.AssetScopeService assetScopeService;
 
     DocumentServiceImpl sut;
 
@@ -105,7 +106,8 @@ class DocumentServiceImplTest {
                 documentHashClaimMapper,
                 authorizationServiceProvider,
                 engineerAccountLinkServiceProvider,
-                organizationScopeServiceProvider);
+                organizationScopeServiceProvider,
+                assetScopeService);
     }
 
     @AfterEach

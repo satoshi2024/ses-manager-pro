@@ -141,6 +141,14 @@ public final class ActionPermissionResolver {
         if (resource == null) {
             return null;
         }
+        // 資産貸与証跡のdetail/downloadはDocumentLinkをserviceで再認可する本人向けaction。
+        // 要員のpermission groupはmy.*のみを持つため、通常のdocument.view/file.downloadへ
+        // 置き換えず、同じ本人向けactionで入口だけを開ける。
+        if ("GET".equals(method)
+                && (uri.matches("/api/documents/\\d+")
+                || uri.matches("/api/documents/\\d+/versions/\\d+/download"))) {
+            return "my.asset.view";
+        }
         if (isExportPath(uri)) {
             return "export.execute";
         }

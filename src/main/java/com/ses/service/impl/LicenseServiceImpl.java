@@ -162,6 +162,12 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
 
     @Override
     public IPage<LicensePlan> searchPlans(int page, int size, String keyword, String status) {
+        return searchPlansScoped(page, size, keyword, status, null);
+    }
+
+    @Override
+    public IPage<LicensePlan> searchPlansScoped(int page, int size, String keyword, String status,
+                                                List<Long> accessiblePlanIds) {
         Page<LicensePlan> pageable = new Page<>(page, size);
         LambdaQueryWrapper<LicensePlan> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
@@ -171,7 +177,28 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
         if (StringUtils.hasText(status)) {
             wrapper.eq(LicensePlan::getStatus, status);
         }
+        if (accessiblePlanIds != null) {
+            if (accessiblePlanIds.isEmpty()) {
+                wrapper.eq(LicensePlan::getId, -1L);
+            } else {
+                wrapper.in(LicensePlan::getId, accessiblePlanIds);
+            }
+        }
         wrapper.orderByDesc(LicensePlan::getId);
         return page(pageable, wrapper);
+    }
+
+    @Override
+    @Transactional
+    public void softDeleteAssignment(Long assignmentId) {
+        LicenseAssignment assignment = licenseAssignmentMapper.selectByIdForUpdate(assignmentId);
+        if (assignment == null) {
+            return;
+        }
+        if ("ACTIVE".equals(assignment.getStatus()) || assignment.getReleasedDate() == null) {
+            throw new BusinessException("未解放ライセンス割当は論理削除できません。先にライセンスを解放してください。");
+        }
+        licenseAssignmentMapper.deleteById(assignmentId);
+        log.info("License assignment soft-deleted: assignmentId={}", assignmentId);
     }
 }

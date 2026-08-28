@@ -3,9 +3,11 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.common.exception.BusinessException;
 import com.ses.entity.LicenseAssignment;
 import com.ses.entity.LicensePlan;
 import com.ses.service.LicenseService;
+import com.ses.service.AssetScopeService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,7 @@ import java.util.List;
 public class LicenseApiController {
 
     private final LicenseService licenseService;
+    private final AssetScopeService assetScopeService;
 
     @GetMapping("/plans")
     public ApiResult<IPage<LicensePlan>> listPlans(
@@ -30,7 +33,8 @@ public class LicenseApiController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status) {
-        IPage<LicensePlan> plans = licenseService.searchPlans(page, size, keyword, status);
+        IPage<LicensePlan> plans = licenseService.searchPlansScoped(page, size, keyword, status,
+                assetScopeService.getAccessibleLicensePlanIds(SecurityUtils.currentRole(), SecurityUtils.currentUserId()));
         return ApiResult.success(plans);
     }
 
@@ -44,6 +48,7 @@ public class LicenseApiController {
 
     @GetMapping("/plans/{planId}/assignments")
     public ApiResult<List<LicenseAssignment>> getAssignments(@PathVariable Long planId) {
+        assertAccessiblePlan(planId);
         List<LicenseAssignment> list = licenseService.getAssignmentsByPlanId(planId);
         return ApiResult.success(list);
     }
@@ -84,5 +89,13 @@ public class LicenseApiController {
     @Data
     public static class LicenseReleaseRequest {
         private LocalDate releasedDate;
+    }
+
+    private void assertAccessiblePlan(Long planId) {
+        List<Long> allowed = assetScopeService.getAccessibleLicensePlanIds(
+                SecurityUtils.currentRole(), SecurityUtils.currentUserId());
+        if (allowed != null && !allowed.contains(planId)) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
     }
 }

@@ -3,8 +3,15 @@ package com.ses.service;
 import com.ses.BaseIntegrationTest;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
+import com.ses.entity.EngineerAccountLink;
+import com.ses.entity.Notification;
+import com.ses.entity.SysUser;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.NotificationMapper;
+import com.ses.mapper.SysUserMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +36,31 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
     @Autowired
     private AssetMapper assetMapper;
 
+    @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
+    private NotificationMapper notificationMapper;
+
     @Test
     @DisplayName("Check overdue assignments: alert count > 0 for past expected return date")
     void testCheckOverdueAssignments() {
+        SysUser engineerUser = SysUser.builder()
+                .username("asset-alert-" + System.nanoTime())
+                .password("test")
+                .realName("資産通知テスト要員")
+                .role("要員")
+                .status(1)
+                .build();
+        sysUserMapper.insert(engineerUser);
+        EngineerAccountLink accountLink = new EngineerAccountLink();
+        accountLink.setEngineerId(101L);
+        accountLink.setSysUserId(engineerUser.getId());
+        engineerAccountLinkMapper.insert(accountLink);
+
         Asset asset = Asset.builder()
                 .assetTag("AST-ALERT-001")
                 .assetName("Overdue Test Device")
@@ -56,6 +85,10 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
 
         List<AssetAssignment> overdueList = assetAlertService.getOverdueAssignments();
         assertThat(overdueList).isNotEmpty();
+        assertThat(notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
+                .eq(Notification::getRecipientUserId, engineerUser.getId())
+                .eq(Notification::getType, "ASSET_OVERDUE")))
+                .hasSize(1);
     }
 
     @Test

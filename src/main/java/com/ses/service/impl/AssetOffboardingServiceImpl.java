@@ -18,6 +18,7 @@ import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -88,7 +89,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     }
 
     @Override
-    @Transactional
+    /** DB状態を先に確定し、provider I/OはDBトランザクション外で実行する。 */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void triggerOffboardingRevocations(Long engineerId, Long actorUserId) {
         log.info("Triggering offboarding revocations for engineerId={}, actorUserId={}", engineerId, actorUserId);
 

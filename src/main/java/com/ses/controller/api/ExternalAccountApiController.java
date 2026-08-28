@@ -6,6 +6,7 @@ import com.ses.common.util.SecurityUtils;
 import com.ses.entity.ExternalAccountReference;
 import com.ses.entity.ExternalAccountSystem;
 import com.ses.service.ExternalAccountService;
+import com.ses.service.AssetScopeService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import java.util.List;
 public class ExternalAccountApiController {
 
     private final ExternalAccountService externalAccountService;
+    private final AssetScopeService assetScopeService;
 
     @GetMapping
     public ApiResult<IPage<ExternalAccountReference>> search(
@@ -31,7 +33,9 @@ public class ExternalAccountApiController {
             @RequestParam(required = false) String assigneeType,
             @RequestParam(required = false) Long assigneeId,
             @RequestParam(required = false) String status) {
-        IPage<ExternalAccountReference> result = externalAccountService.searchAccounts(page, size, systemId, assigneeType, assigneeId, status);
+        IPage<ExternalAccountReference> result = externalAccountService.searchAccountsScoped(page, size, systemId,
+                assigneeType, assigneeId, status,
+                assetScopeService.getAccessibleEngineerIds(SecurityUtils.currentRole(), SecurityUtils.currentUserId()));
         return ApiResult.success(result);
     }
 

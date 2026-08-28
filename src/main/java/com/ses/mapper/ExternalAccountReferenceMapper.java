@@ -13,6 +13,9 @@ import java.util.List;
 @Mapper
 public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccountReference> {
 
+    @Select("SELECT * FROM t_external_account_reference WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    ExternalAccountReference selectByIdForUpdate(@Param("id") Long id);
+
     @Select("SELECT * FROM t_external_account_reference " +
             "WHERE assignee_type = #{assigneeType} AND assignee_id = #{assigneeId} " +
             "  AND status != 'REVOKED' AND deleted_flag = 0")

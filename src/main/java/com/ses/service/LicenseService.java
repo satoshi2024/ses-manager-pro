@@ -49,4 +49,11 @@ public interface LicenseService extends IService<LicensePlan> {
      * プラン一覧検索（ページネーション）
      */
     IPage<LicensePlan> searchPlans(int page, int size, String keyword, String status);
+
+    /** 認可済みプランID集合をSQL条件として適用した一覧検索。null=全件、空=0件。 */
+    IPage<LicensePlan> searchPlansScoped(int page, int size, String keyword, String status,
+                                         List<Long> accessiblePlanIds);
+
+    /** ライセンス割当を台帳から論理削除する。未解放の割当は削除不可。 */
+    void softDeleteAssignment(Long assignmentId);
 }

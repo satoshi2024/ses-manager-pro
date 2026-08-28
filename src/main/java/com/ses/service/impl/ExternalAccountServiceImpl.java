@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -126,7 +127,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId) {
         ExternalAccountReference current = getById(id);
         if (current == null) {
@@ -157,7 +158,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int processPendingRevokePollJob() {
         LocalDateTime now = LocalDateTime.now();
         List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectList(
@@ -226,6 +227,13 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
 
     @Override
     public IPage<ExternalAccountReference> searchAccounts(int page, int size, Long systemId, String assigneeType, Long assigneeId, String status) {
+        return searchAccountsScoped(page, size, systemId, assigneeType, assigneeId, status, null);
+    }
+
+    @Override
+    public IPage<ExternalAccountReference> searchAccountsScoped(int page, int size, Long systemId,
+                                                                String assigneeType, Long assigneeId, String status,
+                                                                List<Long> accessibleEngineerIds) {
         Page<ExternalAccountReference> pageable = new Page<>(page, size);
         LambdaQueryWrapper<ExternalAccountReference> query = new LambdaQueryWrapper<>();
         if (systemId != null) {
@@ -240,7 +248,33 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
         if (StringUtils.hasText(status)) {
             query.eq(ExternalAccountReference::getStatus, status);
         }
+        if (accessibleEngineerIds != null) {
+            if (accessibleEngineerIds.isEmpty()) {
+                query.eq(ExternalAccountReference::getId, -1L);
+            } else {
+                query.eq(ExternalAccountReference::getAssigneeType, "ENGINEER")
+                        .in(ExternalAccountReference::getAssigneeId, accessibleEngineerIds);
+            }
+        }
         query.orderByDesc(ExternalAccountReference::getId);
         return externalAccountReferenceMapper.selectPage(pageable, query);
+    }
+
+    @Override
+    @Transactional
+    public void softDeleteAccount(Long id) {
+        // AS-R1.5(b): ACTIVE/SUSPENDED/PENDING_CONFIRMATION 状態の場合は論理削除を禁止する
+        ExternalAccountReference ref = externalAccountReferenceMapper.selectByIdForUpdate(id);
+        if (ref == null) return;
+        String st = ref.getStatus();
+        boolean confirmed = ref.getRevokeConfirmedAt() != null;
+        if (("ACTIVE".equals(st) || "SUSPENDED".equals(st) || "PENDING_CONFIRMATION".equals(st)
+                || "UNKNOWN".equals(st)) && !confirmed) {
+            throw new BusinessException(
+                    "未失効（ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN）の外部アカウントは論理削除できません（AS-R1.5(b)）。" +
+                            "先に失効確認（REVOKED）またはEXCEPTION_HOLD処理を行ってください。");
+        }
+        removeById(id);
+        log.info("ExternalAccountReference soft-deleted: id={}", id);
     }
 }

@@ -41,8 +41,27 @@ public interface AssetService extends IService<Asset> {
      */
     IPage<Asset> searchAssets(int page, int size, String keyword, String category, String status, Long ownerCompanyId);
 
+    /** 認可済みID集合をSQL条件として適用した一覧検索。null=全件、空=0件。 */
+    IPage<Asset> searchAssetsScoped(int page, int size, String keyword, String category, String status,
+                                    Long ownerCompanyId, List<Long> accessibleAssetIds);
+
     /**
      * 資産タグで1件取得
      */
     Asset getByAssetTag(String assetTag);
+
+    /**
+     * 資産を廃棄済みにする（エビデンス文書なし版）
+     */
+    default Asset disposeAsset(Long assetId, String reason, Long actorUserId) {
+        return disposeAsset(assetId, reason, actorUserId, null);
+    }
+
+    /**
+     * 資産を台帳から論理削除する。
+     * AS-R1.5(a): ACTIVE貸与が存在する場合は BusinessException を送出する（Fail-Closed）。
+     *
+     * @throws com.ses.common.exception.BusinessException ACTIVE貸与中の場合
+     */
+    void softDeleteAsset(Long assetId);
 }

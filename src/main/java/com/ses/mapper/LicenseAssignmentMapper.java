@@ -11,6 +11,20 @@ import java.util.List;
 @Mapper
 public interface LicenseAssignmentMapper extends BaseMapper<LicenseAssignment> {
 
+    @Select("SELECT * FROM t_license_assignment WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    LicenseAssignment selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("""
+            <script>
+            SELECT DISTINCT plan_id FROM t_license_assignment
+            WHERE deleted_flag = 0 AND assignee_type = 'ENGINEER'
+              AND status = 'ACTIVE' AND released_date IS NULL
+              AND assignee_id IN
+              <foreach collection="engineerIds" item="engineerId" open="(" separator="," close=")">#{engineerId}</foreach>
+            </script>
+            """)
+    List<Long> selectActivePlanIdsByEngineerIds(@Param("engineerIds") List<Long> engineerIds);
+
     @Select("SELECT * FROM t_license_assignment " +
             "WHERE assignee_type = #{assigneeType} AND assignee_id = #{assigneeId} " +
             "  AND status = 'ACTIVE' AND deleted_flag = 0")

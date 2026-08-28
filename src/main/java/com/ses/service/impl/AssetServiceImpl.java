@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Asset;
+import com.ses.entity.AssetAssignment;
+import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.service.AssetEventService;
 import com.ses.service.AssetService;
@@ -15,12 +17,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements AssetService {
 
     private final AssetMapper assetMapper;
+    private final AssetAssignmentMapper assetAssignmentMapper;
     private final AssetEventService assetEventService;
 
     @Override
@@ -221,6 +226,12 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
 
     @Override
     public IPage<Asset> searchAssets(int page, int size, String keyword, String category, String status, Long ownerCompanyId) {
+        return searchAssetsScoped(page, size, keyword, category, status, ownerCompanyId, null);
+    }
+
+    @Override
+    public IPage<Asset> searchAssetsScoped(int page, int size, String keyword, String category, String status,
+                                           Long ownerCompanyId, List<Long> accessibleAssetIds) {
         Page<Asset> pageable = new Page<>(page, size);
         LambdaQueryWrapper<Asset> wrapper = new LambdaQueryWrapper<>();
 
@@ -240,6 +251,13 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         if (ownerCompanyId != null) {
             wrapper.eq(Asset::getOwnerCompanyId, ownerCompanyId);
         }
+        if (accessibleAssetIds != null) {
+            if (accessibleAssetIds.isEmpty()) {
+                wrapper.eq(Asset::getId, -1L);
+            } else {
+                wrapper.in(Asset::getId, accessibleAssetIds);
+            }
+        }
 
         wrapper.orderByDesc(Asset::getId);
         return page(pageable, wrapper);
@@ -252,5 +270,27 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         }
         return getOne(new LambdaQueryWrapper<Asset>()
                 .eq(Asset::getAssetTag, assetTag.trim()), false);
+    }
+
+    @Override
+    @Transactional
+    public void softDeleteAsset(Long assetId) {
+        Asset current = assetMapper.selectByIdForUpdate(assetId);
+        if (current == null) {
+            return;
+        }
+        Long activeCount = assetAssignmentMapper.selectCount(new LambdaQueryWrapper<AssetAssignment>()
+                .eq(AssetAssignment::getAssetId, assetId)
+                .in(AssetAssignment::getStatus, "ACTIVE", "OVERDUE")
+                .isNull(AssetAssignment::getActualReturnDate));
+        if (activeCount != null && activeCount > 0) {
+            throw new BusinessException(
+                    "未返却貸与が存在する資産を論理削除することはできません（AS-R1.5(a)）。先に貸与を返却またはWAIVED処理してください。");
+        }
+        if (!"DISPOSED".equals(current.getStatus())) {
+            throw new BusinessException("資産の論理削除はDISPOSED状態でのみ実行できます。廃棄は削除ではなく状態遷移として記録してください。");
+        }
+        removeById(assetId);
+        log.info("Asset soft-deleted: assetId={}", assetId);
     }
 }
