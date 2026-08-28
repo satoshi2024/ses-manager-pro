@@ -22,6 +22,31 @@
 | F1-4 | `24577fd4`〜`3784a6a0` | V118 | skill/position events、service フック、`EffectiveIntervalSupport` | EngineerSkill/ProjectSkill/Position interval tests | replaceSkills で interval 閉鎖・supersedes | [x] |
 | F1-5 | `e7d3b36d` | V119 | assessment/decision event DDL | FlywayCertificationLearningSkillGapSchemaSmokeTest | V115-V119 MySQL smoke | [x] |
 
+## F1 Implementation Review受領・F2持越し契約
+
+| 項目 | 受領値 |
+|---|---|
+| Plan Review | **PASS**（R7） |
+| F1 Implementation Review | **PASS** |
+| F1本体 Head | `2f7bbac0` |
+| 現worktree local/remote Head | `f73fcbc23852daa75f8224f8cc411418db4938f1` |
+| F2〜M | `NOT STARTED`（F2着手許可） |
+| 現行migration | V119 |
+| F2 migration | V120+ |
+| PR/merge/branch削除 | 禁止。M＋独立Implementation Review PASS後のみPR対象 |
+
+## Review持越し項目（F2契約へ接続）
+
+| 持越し | 対応Task | 必須契約・証拠 | status |
+|---|---|---|---|
+| `TYPE_DELETE`／DELETE当日as-of | F2-3、M | delete前にcancel/close eventを記録し、DELETE当日をeffective intervalに含める。削除後のcurrent rowを過去補完に使わない。DELETE当日・前日・翌日のas-of testを残す | [ ] |
+| feature開始日前のposition update | F2-3、M | feature開始日前に有効なposition historyがない場合は`historical_data_unavailable`。現行positionを過去へ遡及適用しない。開始日前update fixtureをMySQLで確認 | [ ] |
+| legal hold | F2-1、M | `CERTIFICATION_EVIDENCE`のdownload/export/disposalをlegal hold中はfail closed。DocumentServiceとFileScopeValidationServiceの両方でholdを再検証 | [ ] |
+| 証憑version pin | F2-1、M | certification eventの`document_version_id`・hashと要求版を完全一致させ、CLEAN以外/version mismatch/hash mismatchを拒否 | [ ] |
+| production `certification.pii.view` permission seed | F2-1、M | production migration/seedでpermission group/actionを登録し、role別full/masked/omitを実APIで確認。未seed時はfull revealをfail closed | [ ] |
+| BP/別write pathのevent insert迂回防止 | F2-3、M | `EngineerSkillServiceImpl`、`ProjectSkillServiceImpl`、`PositionServiceImpl`の全create/update/status/delete経路を共通event writerへ集約し、直接mapper更新を回帰検出 | [ ] |
+| PR前の最新`origin/main`取り込み・migration衝突再確認 | M／PR前gate | PR作成前に`git fetch origin`後の最新baseを専用worktreeへ取り込み、V120+とbase側migrationの衝突、schema/H2同期、Base..Head差分を再確認。F2中は未実施 | [ ] |
+
 ## 未検証（F2 以降）
 
 - 資格 API/UI、90/60/30 scheduler E2E
@@ -29,6 +54,7 @@
 - 複数 JVM 通知 dedupe
 - production `certification.pii.view` 権限 seed
 - NF-07 `CERTIFICATION_PII` 保持年数
+- P2-F1-14〜16: DELETE 当日 as-of、開始日前 position update、main 再取り込み（上表へ接続済み）
 
 ## Rollback
 

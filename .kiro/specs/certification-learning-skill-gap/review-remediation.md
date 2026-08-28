@@ -107,3 +107,21 @@
 - 確認済み: 独立 Plan Review PASS（Head `4e171f19`）、Gate 0 Decision、traceability `APPROVED`、Base merge、spec 静的整合、`git diff --check`。
 - 未確認: NF-03 production implementation、Maven/MySQL、scheduler E2E、Document download E2E、browser Demo。
 - Implementation Review は F1〜M 完了後に開始する。
+
+## F1 Implementation Review受領・F2持越し（2026-08-28）
+
+独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2〜Mは`NOT STARTED`、F2着手が許可された。F1本体Headは`2f7bbac0`、現worktreeのlocal/remote Headは`f73fcbc23852daa75f8224f8cc411418db4938f1`、現行migrationはV119、F2はV120+を使用する。PR、merge、branch削除は引き続き禁止する。
+
+### 持越し項目のF2接続
+
+| 持越し | F2契約 | 対応箇所 | 状態 |
+|---|---|---|---|
+| `TYPE_DELETE`／DELETE当日as-of | delete前cancel/close event、DELETE当日をeffective intervalに含め、削除後current fallbackを禁止 | `completion-matrix.md`、F2-3/M | 未検証 |
+| feature開始日前position update | history欠落時`historical_data_unavailable`、現行positionの過去補完禁止 | `completion-matrix.md`、F2-3/M | 未検証 |
+| legal hold | certification evidenceのdownload/export/disposalをhold中fail closed、DocumentService/FileScope双方で再検証 | `completion-matrix.md`、F2-1/M | 未検証 |
+| 証憑version pin | event記録のdocument version ID/hashと要求版を完全一致、CLEAN必須 | `completion-matrix.md`、F2-1/M | 未検証 |
+| production `certification.pii.view` permission seed | production seed、未seed時full reveal fail closed、role別実API確認 | `completion-matrix.md`、F2-1/M | 未検証 |
+| BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、F2-3/M | 未検証 |
+| PR前最新`origin/main`取り込み・migration衝突 | PR直前にfetch＋最新base取り込み、V120+とのmigration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | F2中は未実施 |
+
+この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2実装中の基準は現worktree V119／V120+であり、最新`origin/main`の再取り込みはPR前gateで行う。
