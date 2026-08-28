@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -73,9 +74,12 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
 
         List<EngineerSkill> existing = list(new LambdaQueryWrapper<EngineerSkill>()
                 .eq(EngineerSkill::getEngineerId, engineerId));
+        Map<Long, Long> supersedesBySkillId = new HashMap<>();
         for (EngineerSkill skill : existing) {
-            appendSkillEvent(skill, EngineerSkillEvent.TYPE_CLOSE, effectiveDate, effectiveDate,
-                    actorUserId, actorRole, occurredAt);
+            Long closedEventId = closeOpenSkillEvent(engineerId, skill.getSkillId(), effectiveDate);
+            if (closedEventId != null) {
+                supersedesBySkillId.put(skill.getSkillId(), closedEventId);
+            }
         }
 
         remove(new LambdaQueryWrapper<EngineerSkill>().eq(EngineerSkill::getEngineerId, engineerId));
@@ -92,13 +96,32 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
         saveBatch(distinctSkills);
 
         for (EngineerSkill skill : distinctSkills) {
+            assertNoOpenSkillEvent(engineerId, skill.getSkillId());
             appendSkillEvent(skill, EngineerSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    actorUserId, actorRole, occurredAt);
+                    supersedesBySkillId.get(skill.getSkillId()), actorUserId, actorRole, occurredAt);
+        }
+    }
+
+    private Long closeOpenSkillEvent(Long engineerId, Long skillId, LocalDate closeDate) {
+        EngineerSkillEvent open = engineerSkillEventMapper.selectOpenEvent(engineerId, skillId);
+        if (open == null) {
+            return null;
+        }
+        int rows = engineerSkillEventMapper.closeOpenEvent(open.getId(), closeDate);
+        if (rows != 1) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+        }
+        return open.getId();
+    }
+
+    private void assertNoOpenSkillEvent(Long engineerId, Long skillId) {
+        if (engineerSkillEventMapper.selectOpenEvent(engineerId, skillId) != null) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
     }
 
     private void appendSkillEvent(EngineerSkill skill, String eventType, LocalDate effectiveFrom,
-                                  LocalDate effectiveTo, Long actorUserId, String actorRole,
+                                  LocalDate effectiveTo, Long supersedesEventId, Long actorUserId, String actorRole,
                                   LocalDateTime occurredAt) {
         EngineerSkillEvent event = new EngineerSkillEvent();
         event.setTenantId(DEFAULT_TENANT);
@@ -110,6 +133,7 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
         event.setEventType(eventType);
         event.setEffectiveFrom(effectiveFrom);
         event.setEffectiveTo(effectiveTo);
+        event.setSupersedesEventId(supersedesEventId);
         event.setActorUserId(actorUserId);
         event.setActorRoleSnapshot(actorRole);
         event.setOccurredAt(occurredAt);

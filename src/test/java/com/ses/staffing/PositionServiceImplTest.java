@@ -1,6 +1,8 @@
 package com.ses.staffing;
 
 import com.ses.entity.ProjectPosition;
+import com.ses.entity.ProjectPositionEvent;
+import com.ses.mapper.ProjectPositionEventMapper;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.PositionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,8 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
@@ -30,6 +34,9 @@ class PositionServiceImplTest {
 
     @Autowired
     private ProjectPositionMapper positionMapper;
+
+    @Autowired
+    private ProjectPositionEventMapper projectPositionEventMapper;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -86,6 +93,44 @@ class PositionServiceImplTest {
         ProjectPosition updated = positionService.update(patch);
         assertNull(updated.getEndDate());
         assertNull(positionMapper.selectById(created.getId()).getEndDate());
+    }
+
+    @Test
+    void deleteは先行snapshotを閉じてからDELETEイベントを記録する() {
+        ProjectPosition created = positionService.create(position("P1"));
+        positionService.delete(created.getId());
+
+        List<ProjectPositionEvent> events = projectPositionEventMapper.selectByPositionId(created.getId());
+        assertEquals(2, events.size());
+        ProjectPositionEvent create = events.get(0);
+        assertEquals(ProjectPositionEvent.TYPE_CREATE, create.getEventType());
+        assertNotNull(create.getEffectiveTo());
+        ProjectPositionEvent delete = events.get(1);
+        assertEquals(ProjectPositionEvent.TYPE_DELETE, delete.getEventType());
+        assertNotNull(delete.getEffectiveTo());
+    }
+
+    @Test
+    void updateは先行snapshotを閉じてから新snapshotを記録する() {
+        ProjectPosition created = positionService.create(position("P1"));
+
+        ProjectPosition patch = new ProjectPosition();
+        patch.setId(created.getId());
+        patch.setPositionNo(created.getPositionNo());
+        patch.setRoleName("更新後ロール");
+        patch.setRequiredCount(created.getRequiredCount());
+        patch.setAllocationPercent(created.getAllocationPercent());
+        patch.setStartDate(created.getStartDate());
+        patch.setEndDate(created.getEndDate());
+        patch.setVersion(created.getVersion());
+
+        positionService.update(patch);
+
+        List<ProjectPositionEvent> events = projectPositionEventMapper.selectByPositionId(created.getId());
+        assertEquals(2, events.size());
+        assertNotNull(events.get(0).getEffectiveTo());
+        assertNull(events.get(1).getEffectiveTo());
+        assertEquals(ProjectPositionEvent.TYPE_UPDATE, events.get(1).getEventType());
     }
 
     private ProjectPosition position(String no) {

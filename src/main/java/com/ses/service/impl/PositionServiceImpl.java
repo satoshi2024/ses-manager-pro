@@ -83,6 +83,7 @@ public class PositionServiceImpl implements PositionService {
         }
         ProjectPosition updated = positionMapper.selectById(position.getId());
         LocalDate effectiveFrom = updated.getStartDate() != null ? updated.getStartDate() : LocalDate.now(clock);
+        closeOpenPositionEvent(updated.getId(), effectiveFrom);
         appendPositionEvent(updated, ProjectPositionEvent.TYPE_UPDATE, effectiveFrom, null);
         return updated;
     }
@@ -116,6 +117,7 @@ public class PositionServiceImpl implements PositionService {
         }
         ProjectPosition updated = positionMapper.selectById(id);
         LocalDate effectiveFrom = LocalDate.now(clock);
+        closeOpenPositionEvent(id, effectiveFrom);
         appendPositionEvent(updated, ProjectPositionEvent.TYPE_STATUS_CHANGE, effectiveFrom, null);
         return updated;
     }
@@ -128,6 +130,7 @@ public class PositionServiceImpl implements PositionService {
             throw BusinessException.of(400, "error.staffing.positionFilled");
         }
         LocalDate closeDate = LocalDate.now(clock);
+        closeOpenPositionEvent(id, closeDate);
         appendPositionEvent(existing, ProjectPositionEvent.TYPE_DELETE, closeDate, closeDate);
         positionMapper.deleteById(id);
     }
@@ -142,6 +145,17 @@ public class PositionServiceImpl implements PositionService {
         return positionMapper.selectList(new LambdaQueryWrapper<ProjectPosition>()
                 .eq(ProjectPosition::getProjectId, projectId)
                 .orderByAsc(ProjectPosition::getPositionNo));
+    }
+
+    private void closeOpenPositionEvent(Long positionId, LocalDate closeDate) {
+        ProjectPositionEvent open = projectPositionEventMapper.selectOpenEvent(positionId);
+        if (open == null) {
+            return;
+        }
+        int rows = projectPositionEventMapper.closeOpenEvent(open.getId(), closeDate);
+        if (rows != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
     }
 
     private void appendPositionEvent(ProjectPosition position, String eventType,

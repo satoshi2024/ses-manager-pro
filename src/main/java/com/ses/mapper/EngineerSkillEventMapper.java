@@ -6,7 +6,9 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Mapper
@@ -25,4 +27,11 @@ public interface EngineerSkillEventMapper {
 
     @Select("SELECT * FROM t_engineer_skill_event WHERE engineer_id = #{engineerId} ORDER BY occurred_at, id")
     List<EngineerSkillEvent> selectByEngineerId(@Param("engineerId") Long engineerId);
+
+    @Select("SELECT * FROM t_engineer_skill_event WHERE engineer_id = #{engineerId} AND skill_id = #{skillId} "
+            + "AND event_type = 'OPEN' AND effective_to IS NULL ORDER BY id DESC LIMIT 1")
+    EngineerSkillEvent selectOpenEvent(@Param("engineerId") Long engineerId, @Param("skillId") Long skillId);
+
+    @Update("UPDATE t_engineer_skill_event SET effective_to = #{effectiveTo} WHERE id = #{eventId} AND effective_to IS NULL")
+    int closeOpenEvent(@Param("eventId") Long eventId, @Param("effectiveTo") LocalDate effectiveTo);
 }

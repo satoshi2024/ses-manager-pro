@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -73,9 +74,12 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
 
         List<ProjectSkill> existing = list(new LambdaQueryWrapper<ProjectSkill>()
                 .eq(ProjectSkill::getProjectId, projectId));
+        Map<Long, Long> supersedesBySkillId = new HashMap<>();
         for (ProjectSkill skill : existing) {
-            appendSkillEvent(skill, ProjectSkillEvent.TYPE_CLOSE, effectiveDate, effectiveDate,
-                    actorUserId, actorRole, occurredAt);
+            Long closedEventId = closeOpenSkillEvent(projectId, skill.getSkillId(), effectiveDate);
+            if (closedEventId != null) {
+                supersedesBySkillId.put(skill.getSkillId(), closedEventId);
+            }
         }
 
         remove(new LambdaQueryWrapper<ProjectSkill>().eq(ProjectSkill::getProjectId, projectId));
@@ -92,13 +96,32 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
         saveBatch(distinctSkills);
 
         for (ProjectSkill skill : distinctSkills) {
+            assertNoOpenSkillEvent(projectId, skill.getSkillId());
             appendSkillEvent(skill, ProjectSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    actorUserId, actorRole, occurredAt);
+                    supersedesBySkillId.get(skill.getSkillId()), actorUserId, actorRole, occurredAt);
+        }
+    }
+
+    private Long closeOpenSkillEvent(Long projectId, Long skillId, LocalDate closeDate) {
+        ProjectSkillEvent open = projectSkillEventMapper.selectOpenEvent(projectId, skillId);
+        if (open == null) {
+            return null;
+        }
+        int rows = projectSkillEventMapper.closeOpenEvent(open.getId(), closeDate);
+        if (rows != 1) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+        }
+        return open.getId();
+    }
+
+    private void assertNoOpenSkillEvent(Long projectId, Long skillId) {
+        if (projectSkillEventMapper.selectOpenEvent(projectId, skillId) != null) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
     }
 
     private void appendSkillEvent(ProjectSkill skill, String eventType, LocalDate effectiveFrom,
-                                  LocalDate effectiveTo, Long actorUserId, String actorRole,
+                                  LocalDate effectiveTo, Long supersedesEventId, Long actorUserId, String actorRole,
                                   LocalDateTime occurredAt) {
         ProjectSkillEvent event = new ProjectSkillEvent();
         event.setTenantId(DEFAULT_TENANT);
@@ -110,6 +133,7 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
         event.setEventType(eventType);
         event.setEffectiveFrom(effectiveFrom);
         event.setEffectiveTo(effectiveTo);
+        event.setSupersedesEventId(supersedesEventId);
         event.setActorUserId(actorUserId);
         event.setActorRoleSnapshot(actorRole);
         event.setOccurredAt(occurredAt);
