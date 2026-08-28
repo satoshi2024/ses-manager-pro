@@ -15,6 +15,17 @@
    - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。
 4. **ライセンス席数 CAS（Compare-And-Swap）**:
    - `m_license_plan.allocated_count` は席数上限 `seat_limit` を超えない条件付きCAS更新でアトミックに管理されます。
+5. **所有法人と認可スコープ**:
+   - `m_asset.owner_company_id` は会社マスタの新設IDではなく、既存 `m_organization_unit.legal_entity_id` の法人IDを保持します。
+   - 管理者・HRは全件、マネージャーは管理組織の子孫組織とDataScopeの共通集合、営業は現行担当要員、要員は本人に限定します。許可対象が空の場合は全件許可へフォールバックしません。
+   - 資産一覧・詳細・イベント・貸与履歴・CSV・通知・要員ポータル・外部アカウント・ライセンス・証跡文書で同じスコープを適用します。
+6. **論理削除の安全条件**:
+   - 未返却貸与（`status IN ('ACTIVE','OVERDUE')` かつ `actual_return_date IS NULL`）がある資産は削除できません。廃棄は `DISPOSED` のイベントを追記してから論理削除します。
+   - 外部アカウントは `ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` かつ `revoke_confirmed_at IS NULL` の間は削除できません。`EXCEPTION_HOLD` は承認済み例外としてのみ許可します。
+   - ライセンスは `ACTIVE` または `released_date IS NULL` の間は削除できません。解放後は `RELEASED` と日付を履歴として保持します。
+7. **外部連携の正本とトランザクション境界**:
+   - MDMは端末状態、IdP/SaaSはアカウント失効状態の外部正本です。DBは参照・要求・確認結果・再試行の証跡正本です。
+   - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、タイムアウトや失敗は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。
 
 ---
 
@@ -30,6 +41,45 @@ Flyway マイグレーションにより自動適用されます。
 2. 「資産新規登録」より社内PC・ディスプレイ・モバイル端末等の管理タグ（例: `AST-PC-2026-0001`）とシリアル番号、保管場所を登録。
 3. `/asset/accounts` より、現在利用中の外部SaaSシステム（Google Workspace, Microsoft 365, GitHub, Slack 等）およびライセンスプランを登録。
 4. 要員・社員との貸与紐付けを実施。
+
+### 2.3 移行後の照合
+初回移行後とリリース前に、バックアップ取得済みの読み取り専用接続で次の照合を行います。件数が想定と異なる場合は登録・削除を止め、差異を棚卸し明細として解消してから再実行します。
+
+```sql
+-- 有効資産の状態別件数
+SELECT status, COUNT(*) AS asset_count
+FROM m_asset
+WHERE deleted_flag = 0
+GROUP BY status
+ORDER BY status;
+
+-- 未返却一覧（削除・退社完了判定に使用）
+SELECT a.id, a.asset_tag, a.asset_name, a.status,
+       aa.assignee_type, aa.assignee_id, aa.start_date,
+       aa.expected_return_date, aa.actual_return_date
+FROM m_asset a
+JOIN t_asset_assignment aa ON aa.asset_id = a.id
+WHERE a.deleted_flag = 0
+  AND aa.deleted_flag = 0
+  AND aa.status IN ('ACTIVE', 'OVERDUE')
+  AND aa.actual_return_date IS NULL
+ORDER BY aa.expected_return_date, a.asset_tag;
+
+-- 失効未確認アカウント
+SELECT id, system_id, assignee_type, assignee_id, status,
+       revoke_requested_at, revoke_confirmed_at, external_sync_status
+FROM t_external_account_reference
+WHERE deleted_flag = 0
+  AND status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN')
+  AND revoke_confirmed_at IS NULL;
+
+-- 未解放ライセンス
+SELECT id, plan_id, assignee_type, assignee_id,
+       assigned_date, released_date, status
+FROM t_license_assignment
+WHERE deleted_flag = 0
+  AND (status = 'ACTIVE' OR released_date IS NULL);
+```
 
 ---
 
@@ -57,6 +107,16 @@ Flyway マイグレーションにより自動適用されます。
 3. `AssetAlertService` が管理者・HR・セキュリティ担当者へ緊急通知を一斉配信。
 4. 外部アカウントの即時無効化（`/asset/accounts` から手動失効または連携失効）を実施。
 
+### 3.5 失効要求・確認・タイムアウト対応
+- `revoke_requested_at` は外部へ要求を送信した時刻、`revoke_confirmed_at` は外部状態を確認できた時刻です。要求送信だけで `REVOKED` と判定しません。
+- `FAILED_OR_TIMEOUT`、ネットワークエラー、プロバイダ停止時は `status=PENDING_CONFIRMATION`、`external_sync_status=TIMEOUT` または `SYNC_FAILED` とし、`next_retry_at` に従ってポーリングします。
+- 確認成功時だけ `REVOKED` と `revoke_confirmed_at` を記録します。失効確認が取れない退社caseはブロックを維持します。
+
+### 3.6 棚卸し差異の扱い
+- `MATCH` は台帳と現物が一致した場合だけ登録します。
+- `DISCREPANCY` / `MISSING` / `UNREGISTERED` は差異理由と是正措置を必須とし、棚卸し完了後の明細は変更できません。
+- 差異が解消するまで資産の廃棄・再貸与・退社完了処理を実行せず、棚卸しrunと不変イベント台帳を照合します。
+
 ---
 
 ## 4. 障害対応 & ロールバック手順（Rollback Runbook）
@@ -66,7 +126,13 @@ Flyway マイグレーションにより自動適用されます。
   ```bash
   git revert <merge-commit-hash>
   ```
-- スキーマの切り戻しが必要な場合（緊急時）:
+- 本番スキーマは通常、DROPで切り戻しません。まず書き込みを停止し、DBバックアップとFlyway履歴を保全したうえで、承認済みの前方互換Flyway修正またはバックアップ時点への復旧を選択します。復旧後は下記の件数照合、未返却一覧、失効未確認一覧、ライセンス未解放一覧を再実行します。
+- 復旧手順（DBA承認・バックアップ検証済みの場合）:
+  1. 対象DBのフルバックアップと `flyway_schema_history` を保存。
+  2. アプリをメンテナンスモードにし、外部プロバイダの失効要求ジョブを停止。
+  3. 承認済みバックアップを別名DBへリストアし、件数・イベント・未返却一覧を照合。
+  4. 検証済みの場合だけ本番DBへ切替え、Flyway checksum と smoke test を確認。
+- 下記のDDL削除は、データ消失を伴うため、本番の通常ロールバックには使用せず、バックアップ取得済みの隔離検証DBでのみ使用します。
   ```sql
   DROP TABLE IF EXISTS t_license_assignment;
   DROP TABLE IF EXISTS m_license_plan;
@@ -80,6 +146,7 @@ Flyway マイグレーションにより自動適用されます。
   DELETE FROM t_role_menu WHERE menu_id IN (SELECT id FROM m_menu WHERE menu_key IN ('asset-management', 'my-assets'));
   DELETE FROM m_menu WHERE menu_key IN ('asset-management', 'my-assets');
   ```
+- `t_asset_event` と貸与・アカウント・ライセンス履歴は監査対象のため、ロールバックで上書き・物理削除しません。誤登録は訂正イベントまたは後続状態で補正します。
 
 ---
 
@@ -90,3 +157,13 @@ Flyway マイグレーションにより自動適用されます。
 | `ASSET_OVERDUE` | 返却予定日 < 当日 かつ status=ACTIVE | 管理者 / HR | 貸与先要員・担当営業へ督促 |
 | `ASSET_LEASE_EXPIRING` | リース満了日 <= 当日+30日 | 管理者 / 総務 | リース延長または返却・買替手続き |
 | `ASSET_LOST_INCIDENT` | 紛失報告API実行時 | 全管理者 / HR | SaaSアカウント即時停止、端末位置特定 |
+| `ASSET_REVOKE_PENDING` | `PENDING_CONFIRMATION` が再試行期限超過 | 管理者 / HR / セキュリティ | プロバイダ状態を手動確認し、確認結果を記録 |
+| `ASSET_INVENTORY_DISCREPANCY` | `DISCREPANCY` / `MISSING` が未解消 | 管理者 / 総務 | 差異理由・是正措置・証跡を登録 |
+
+## 6. Review提出物チェックリスト
+
+- 資産状態別件数と未返却一覧のreconciliation結果。
+- 失効未確認アカウント・未解放ライセンス一覧。
+- 全Java secret scan結果（秘密値・パスワード・token・recovery codeの列/DTO/ログなし）。
+- 外部要求とconfirmed resultの分離、timeout非成功のテスト結果。
+- バックアップ復旧・前方互換移行・隔離DB限定DROPのロールバック手順。
