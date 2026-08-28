@@ -85,11 +85,11 @@
   - Test: `CertificationExpiryServiceTest`（90/60/30当日・前後、expires_on当日、revisionを含まないsemantic key、cancelled/recipient未解決）、`EngineerCertificationLifecycleServiceTest`（verify/correct/cancel/renew、理由、重複、CAS）、`CertificationEvidenceValidatorTest`（typed link、版/hash、scan、generic link）、`FileScopeValidationServiceTest`（legal hold）、`AppConfigClockTest`、既存`EngineerCertificationServiceTest`。対象Mavenテスト全件PASS。
   - Demo: 固定日`2026-08-28`でexpiryを90/60/30日に切り替え、当日だけ候補となり前後日は候補外、訂正でrevisionだけ変えてもsemantic keyが同一、期限日当日はACTIVE・翌日からEXPIRED、cancel/renew/CAS/証憑否定系が確認できることをテストで実演した。
 
-- [ ] **Task F2-2: training plan/enrollment/approval serviceを実装する**
+- [x] **Task F2-2: training plan/enrollment/approval serviceを実装する**
   - Objective: state transitionと費用threshold、既存approval engine、自己承認拒否を接続する。
-  - Implementation: **選択肢 A（DG-03-5）:** `ExpenseRequestServiceImpl` へ `MonthlyClosingService.assertOpenForUpdate` を接続（design §3.7）。
-  - Test: NULL/0/threshold−1/threshold/threshold＋1、予定額snapshotと実費差額、追加expense approval、締め済み月、route不在、申請者自己承認、CAS競合、approval後completion、**締め済み月のamount/関連/支払変更拒否（経費正本経由）**。
-  - Demo: threshold等値の申請がapprovalへ進み、申請者がapproveできず、承認後のみcompletionできることを確認する。
+  - Implementation: `d74ae5af`。**選択肢 A（DG-03-5）**として既存`ExpenseRequestService`を費用・承認・支払の正本にし、`TrainingPlanServiceImpl`がplan/enrollmentの状態とappend-only eventだけを所有する。`ExpenseRequestServiceImpl`、会計送信、BP支払連携の全更新経路から`MonthlyClosingService.assertOpenForUpdate`を呼び、planには予定額snapshotとexpense request/approval requestの関連を保持する。NULL/負数/小数、0円理由、自己承認、row lock＋version CAS、実費差額、締め済み月をfail closedにした。
+  - Test: `TrainingPlanServiceTest`でNULL/0/threshold−1/threshold/threshold＋1、予定額snapshotと実費差額、追加expense approval、締め済み月、route不在、申請者自己承認、CAS競合、approval後completionを確認。`ExpenseRequestFlowIntegrationTest`等の既存経費回帰も実行し、**締め済み月のamount/関連/支払変更拒否（経費正本経由）**を確認した。
+  - Demo: threshold等値の申請が既存expense approvalへ進み、申請者がapproveできず、expense承認・会計/支払条件を満たした後のみcompletionできることをテストで実演した。0円は理由付きで即時承認され、正の費用はplan費用snapshotを実費で上書きしないことも確認した。
 
 - [ ] **Task F2-3: as-of skill gap serviceを実装する**
   - Objective: project/position期間、skill level、evidence count、unknown/synonym、0件を説明可能に比較する。
