@@ -157,7 +157,7 @@ MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9
 | worktree / branch | `C:\work\ses-certification-learning-skill-gap` / `codex/certification-learning-skill-gap`。通常checkoutは変更なし。最終fetch時にworktree clean、local/remote HEAD一致。 |
 | main取り込み | `origin/main=a3454c086c6d17f94f96ced4175adec932f071b7`、merge-baseも同SHA。main V115を保持し、NF-03はV116〜V128へ順延。migration integrityとMySQL/H2 smoke PASS。 |
 | fast | `mvn -q test`: 3051 run / 2 failures / 11 errors / 0 skipped。既存baselineおよびWindows loopback失敗のみ。NF-03対象reportはfailure/error 0。 |
-| MySQL | 旧M時点の履歴値は89 run / 0 failure / 1 error / 0 skipped。remediation後の全体再実行値は下記追補へ固定する。 |
+| MySQL | 旧M時点の履歴値とremediation後の再実行はいずれも89 run / 0 failure / 1 error / 0 skipped。唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopback。 |
 | performance | remediation後`mvn -q test -Pperformance-tests`: 1 run / 0 failure / 0 error / 0 skipped、p95=74ms。 |
 | H2/migration | `MigrationScriptIntegrityTest` 28件、`AllMappersSchemaSweepTest` 188件、合計216件PASS。修正後MySQL feature smoke 6件PASS。 |
 | feature regression | 資格lifecycle/PII/通知、DocumentLink/FileScope、training/Expense/Approval、skill-gap taxonomy/as-of、AI candidate、A1/A2/B1/B2 service/API/UI contractを全件PASS。 |
@@ -192,7 +192,7 @@ MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9
 | P1-M-02 | training course masterの登録・更新・skill target管理のHTTP/UIがない | `17d944f1`で`TrainingCourseMasterService`、canonical skill検証・relation置換、管理API/UIを追加 | CLOSED pending independent re-review |
 | P1-A2-01 | 本人画面に証憑upload、withdraw/resubmit、plan submit/enrollがない | `50cb8f2d`でcatalog select、multipart upload、detail status action、cancel/resubmit、plan submit/withdraw/resubmit、enrollment操作を接続 | CLOSED pending independent re-review |
 
-`66eda6f9`は既存`ExpenseRequestService`の`研修費`カテゴリをV128で許可し、学習planの費用正本を新設しない互換修正。`f8a5b125`はMySQL smokeでV128の正本DDLを確認するテストを固定した。
+`66eda6f9`は既存`ExpenseRequestService`の`研修費`カテゴリをV128で許可し、学習planの費用正本を新設しない互換修正。`f8a5b125`はMySQL smoke検証を追加し、`8c461dbc`で`SHOW CREATE TABLE`を用いる正本DDL確認へ修正した。
 
 ### 再実装の検証
 
@@ -204,4 +204,4 @@ MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9
 
 ### 現時点の未検証と次gate
 
-remediation後のfast/performanceは再実行済み（fast 3060 run / 2 failures / 16 errors / 0 skipped、performance 1 run / 0 failure / 0 error / 0 skipped、p95=74ms）。全MySQL最終集計は実行完了後にこの文書へ追補する。証憑binary本文のBrowser採取と独立Implementation再Reviewは未実施であり、再Reviewでは今回のcommit以降のHTTP/UI write path、V128、既存F1/F2回帰、role/population/PII/DocumentLink境界を同一clean Headで再確認する。PASS前はPRを作成しない。
+remediation後のfast/performance/MySQLは再実行済み（fast 3060 run / 2 failures / 16 errors / 0 skipped、performance 1 run / 0 failure / 0 error / 0 skipped、p95=74ms、MySQL 89 run / 0 failure / 1 error / 0 skipped）。MySQLの唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopbackであり、NF-03 feature/migration reportはfailure/error/skipなし。証憑binary本文のBrowser採取と独立Implementation再Reviewは未実施であり、再Reviewでは今回のcommit以降のHTTP/UI write path、V128、既存F1/F2回帰、role/population/PII/DocumentLink境界を同一clean Headで再確認する。PASS前はPRを作成しない。

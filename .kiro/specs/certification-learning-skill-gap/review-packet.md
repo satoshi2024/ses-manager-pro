@@ -47,6 +47,7 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | Expense compatibility | `66eda6f9` | V128で既存ExpenseRequestの`研修費`科目を許可 |
 | MySQL smoke assertion | `f8a5b125`、`8c461dbc` | V128の正本DDLに対するMySQL smoke検証を固定し、`SHOW CREATE TABLE`検証へ修正 |
 | remediation docs | `d2965f19` | 独立Review FAILとA1/A2修正範囲をtasks/matrix/remediation/packetへ記録 |
+| remediation gate evidence | `80bfe417` | fast/performance再実行結果とMySQL再実行中の証拠をdocsへ同期 |
 | remediation docs | このpacketを含むdocs commit | tasks/completion/remediation/Review packetを独立Review FAILと修正証拠に同期 |
 
 変更ファイルはBaseからのdiffで再計算する。今回の追加はA1/A2のproduction HTTP/UI、V128 migration/H2/schema smoke、tests、spec/receipt docsであり、旧Mの完了宣言は独立Review FAILにより最終証拠として扱わない。
@@ -64,7 +65,7 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | gate | command / result | 判定 |
 |---|---|---|
 | fast（remediation後） | `mvn -q test` → 3060 run / 2 failures / 16 errors / 0 skipped。既存baseline・H2共有fixture・Windows loopback環境制約。NF-03対象report failure/error=0。 | feature regressionはPASS。全体は環境baseline付き |
-| MySQL（remediation後） | `mvn -q test -Pmysql-tests` → 実行完了後のMaven最終集計を下記追補へ固定 | 下記追補参照 |
+| MySQL（remediation後） | `mvn -q test -Pmysql-tests` → Maven最終集計 `89 run / 0 failure / 1 error / 0 skipped`、exit 1。唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopback。NF-03 feature/migration reportはfailure/error/skipなし | feature evidenceはPASS、全体は既存環境error付き |
 | performance（remediation後） | `mvn -q test -Pperformance-tests` → 1 run / 0 failure / 0 error / 0 skipped、p95=74ms | PASS |
 | feature regression | 資格lifecycle、expiry、PII、Document/FileScope、Expense/Approval、skill-gap、AI、A1/A2/B1/B2 API/service/UI contractの選択suiteは全report 0 failure/error/skip | PASS |
 | H2/migration | 28 + 188 = 216件 | PASS |
@@ -104,7 +105,7 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 
 ## Residual unverified items
 
-- fast/performanceはremediation後に再実行済み。fastは3060 run / 2 failures / 16 errors / 0 skipped、performanceは1 run / 0 failure / 0 error / 0 skipped（p95=74ms）。既存baseline・環境制約の詳細と、MySQL最終集計は下記追補へ固定する。
+- fast/performance/MySQLはremediation後に再実行済み。fastは3060 run / 2 failures / 16 errors / 0 skipped、performanceは1 run / 0 failure / 0 error / 0 skipped（p95=74ms）、MySQLは89 run / 0 failure / 1 error / 0 skipped。既存baseline・環境制約の詳細を下記へ固定する。
 - 証憑binary本文のdownload file採取は未取得。typed authorizationとexact pin/CLEAN/legal holdは検証済み。
 - NF-07の`CERTIFICATION_PII` production retention/disposalは対象外。承認なしに本番有効化しない。
 - 非0円training approvalのBrowser成功は未検証。既存approval route fixtureが未seedのため400であり、研修費INSERTのDB CHECK違反ではない。
@@ -127,6 +128,6 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | Browser management | adminが資格master/courseを登録、本人証憑をdetailからverifyし、資格`ACTIVE`を確認 |
 | Browser self-service | catalog select、DRAFT申請、証憑1件、cancel/resubmit、0円plan`APPROVED`、course enrollment`PLANNED`を確認 |
 | known limitation | 非0円planはapproval route fixture未seedで400。V128により`研修費`のExpenseRequest INSERTは通過し、DB CHECK違反500ではない |
-| remaining gate | 独立再Review、証憑binary本文採取。MySQL全体集計は実行完了後に下記へ固定 |
+| remaining gate | 独立再Review、証憑binary本文採取 |
 
 このpacketは旧Mの自己判定を再Review PASSとみなさず、上記remediationの独立再Reviewへ引き渡す。独立再ReviewのPLAN/IMPLEMENTATION双方PASS前はPRを作成しない。

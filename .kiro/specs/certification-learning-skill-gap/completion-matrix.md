@@ -85,11 +85,11 @@ main V115は別featureのため変更せず、NF-03 migration V125〜V116を逆�
 |---|---|---|---|
 | A1-R 資格master/course master、資格verify/reject HTTP/UI | `17d944f1` | 管理API/UI、`CertificationLearningGapWriteApiControllerTest`、`CertificationMasterServiceImplTest`、`TrainingCourseMasterServiceImplTest`、UI contract、Browserでmaster/course登録とverify後`ACTIVE` | [x] 実装済み・独立再Review待ち |
 | A2-R 本人catalog、証憑upload、status、withdraw/resubmit、plan/enroll UI | `50cb8f2d` | `MyCertificationLearningGapUiContractTest`、self-service回帰、Browserで証憑1件、cancel/resubmit、0円plan`APPROVED`、enrollment`PLANNED` | [x] 実装済み・独立再Review待ち |
-| ExpenseRequest互換 | `66eda6f9`、`f8a5b125` | V128、H2 schema、MySQL V128 smoke、正本DDLの`研修費`CHECK検証 | [x] |
+| ExpenseRequest互換 | `66eda6f9`、`f8a5b125`、`8c461dbc` | V128、H2 schema、MySQL V128 smoke、正本DDLの`研修費`CHECK検証。`8c461dbc`で`SHOW CREATE TABLE`検証へ修正 | [x] |
 
-今回のclean選択suiteはexit 0、V128適用後の`FlywayCertificationLearningSkillGapSchemaSmokeTest`は1件PASS。非0円Browser planは、既存approval route fixtureが未seedのため400（route未設定）まで確認し、DB 500ではないことを記録した。全fast/MySQL/performance gateと独立再Reviewは未実施である。
+今回のclean選択suiteはexit 0、V128適用後の`FlywayCertificationLearningSkillGapSchemaSmokeTest`は1件PASS。remediation後のfastは3060 run / 2 failures / 16 errors / 0 skipped、performanceは1 run / 0 failure / 0 error / 0 skipped（p95=74ms）、MySQLは89 run / 0 failure / 1 error / 0 skipped（唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopback）である。非0円Browser planは、既存approval route fixtureが未seedのため400（route未設定）まで確認し、DB 500ではないことを記録した。独立再Reviewは未実施である。
 
-remediation後の全体ゲートは、fast `3060 run / 2 failures / 16 errors / 0 skipped`、performance `1 run / 0 failure / 0 error / 0 skipped（p95=74ms）`、MySQLは実行完了後のMaven最終集計をReview packetへ同期する。いずれも独立再Reviewを代替せず、Task Mは再Review PASSまで未完了とする。
+remediation後の全体ゲートは、fast `3060 run / 2 failures / 16 errors / 0 skipped`、performance `1 run / 0 failure / 0 error / 0 skipped（p95=74ms）`、MySQL `89 run / 0 failure / 1 error / 0 skipped`（exit 1）である。MySQL唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopbackで、NF-03 feature/migration reportはfailure/error/skipなし。いずれも独立再Reviewを代替せず、Task Mは再Review PASSまで未完了とする。
 
 ### 再実装後のrollback
 
