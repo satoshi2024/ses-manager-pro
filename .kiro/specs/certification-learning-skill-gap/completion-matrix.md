@@ -11,14 +11,15 @@
 | base | `origin/main` / `455fc92e` |
 | PR | 作成しない |
 
-Review remediation status: P1-02〜P1-07、P2-01〜P2-02はcandidate spec/taskへ具体化中。P1-01（Owner、approved scope、DG-03、Baseの実承認）は実装AIが代行できない外部blockerであり、traceabilityを `APPROVED` へ変更していない。
+Review remediation status: R1（P1-02〜P1-07、P2-01〜P2-02）とR2（P1-08〜P1-10、P2-03〜P2-06）をcandidate spec/taskへ具体化済み。P1-01（Owner、approved scope、DG-03、Baseの実承認）は実装AIが代行できない外部blockerであり、traceabilityを `APPROVED` へ変更していない。
 
 ## Task対応
 
 | Task | 要件 | 成果物/実装 | test | Demo | status |
 |---|---|---|---|---|---|
 | 0 | 全体準備、重複回避、DG-03 table | `inventory.md`、`requirements.md`、`design.md`、`plan.md`、`tasks.md` | `git diff --check`、production変更なし、traceability再確認 | worktree/remote/base、source inventory、未決事項を確認 | [x] |
-| 0R | Review P1/P2 remediation | `inventory.md`、`requirements.md`、`design.md`、`tasks.md`、`review-remediation.md` | spec内ID整合、production変更なし | 指摘1行ごとの対応表と外部blocker確認 | [x] |
+| 0R | Review P1/P2 remediation (R1) | `review-remediation.md` + spec更新 | spec内ID整合、production変更なし | 指摘1行ごとの対応表と外部blocker確認 | [x] |
+| 0R-2 | Review R2 remediation | `inventory.md` §5.4/§5.5、`design.md` §3.4/§3.6-§3.9、`tasks.md` F1-2/F1-4/F2-2〜4/B1、`review-remediation.md` R2表 | 実在ファイル参照、R8残留なし、`git diff --check` | P1-08〜10・P2-03〜06の1行対応、F1禁止継続 | [x] |
 | F1-1 | R1/R5 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |
 | F1-2 | R1/R5/R6 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |
 | F1-3 | R2/R5 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |

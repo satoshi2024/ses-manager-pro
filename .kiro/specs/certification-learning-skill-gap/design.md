@@ -61,6 +61,8 @@ rule-based calculatorを常に実行し、次のsourceをcanonical IDへ解決�
 
 既存の`t_engineer_skill`と`t_project_skill`はcurrent projectionとして維持し、同じtransactionでappend-onlyのskill eventを登録する。eventは`effective_from`、`effective_to`、source version、actor、reason、`supersedes_event_id`を持ち、重なる有効期間はrow lockとservice validationで拒否する。`t_project_position`も変更ごとのposition eventに`skills_json`とrequired fieldsをsnapshotする。
 
+as-of queryは**eventのみ**を読み、current projectionへの黙ったfallbackを禁止する（既存書込みフックは`inventory.md` §5.4 / F1-4参照）。
+
 as-of queryは次の順で実行する。
 
 1. requestが指定した`as_of`またはtarget periodをLocalDateとして確定する。
@@ -83,7 +85,16 @@ feature有効化より前の期間にeventがない場合は`historical_data_una
 
 `CERTIFICATION_EVIDENCE`文書は`CERTIFICATION_RECORD` linkのみを認可根拠とする。既存DocumentLinkの一般文書向けOR-unionを資格証憑へ適用しない。資格証憑文書に誤って`ENGINEER`等のgeneric linkが混在していても、restricted policyを先に評価し、generic linkはgrantに使わない。資格証憑の登録serviceはgeneric linkを作らず、typed linkがなければverified/download可能状態にしない。
 
-eventには`evidence_document_id`、`evidence_document_version_id`、version hashを保存し、download/export時にDocumentLinkのrecord owner、要求version、tenant、hash、scan status=CLEAN、retention/legal hold、menu＋DataScopeを再検証する。version不一致、unknown stored name、未scan、REJECTED、linkなしはfail closedする。FileScopeValidationServiceのtarget resolverはこの順序を明示的に実装し、DocumentLink OR-unionに戻らない。
+eventには`evidence_document_id`、`evidence_document_version_id`、version hashを保存し、download/export時にDocumentLinkのrecord owner、要求version、tenant、hash、scan status=CLEAN、retention/legal hold、menu＋DataScopeを再検証する。version不一致、unknown stored name、未scan、REJECTED、linkなしはfail closedする。
+
+**FileScopeValidationServiceの必須補正（P1-09）:** 現状の`document-archive`経路は、非管理者でlinkが空なら許可し、管理者はlink検査をbypassする。`CERTIFICATION_EVIDENCE`は`RECEIPT`/`CHANGE_REQUEST_ATTACHMENT`と同様に、**`document-archive`判定より前**の専用分岐とする。
+
+1. `documentTypeOf`が`CERTIFICATION_EVIDENCE`のとき、typed `CERTIFICATION_RECORD` linkが**1件以上**あり、要求record ownerがDataScope内であること。link空・generic `ENGINEER`のみ・未知`target_type`は403。
+2. 管理者ロールでも資格証憑はadmin bypassを使わない（restricted policy優先）。
+3. eventに保存した`evidence_document_version_id`/hashと要求versionが一致し、scan=CLEANでないと拒否。
+4. mixed link（`ENGINEER`＋`CERTIFICATION_RECORD`）ではgeneric linkをgrantに使わず、typed linkだけで判定する。
+
+否定系test（F1-2/B1）: empty-link、ENGINEER-only mixed link、admin bypass、storedName直指定、version/hash不一致、scan未完了。
 
 ### 3.7 研修費用と既存経費正本
 
@@ -91,19 +102,59 @@ eventには`evidence_document_id`、`evidence_document_version_id`、version has
 
 amountは税込JPYでNULL不可、0円planは`ZERO_COST_CONFIRMED` eventと人の確認だけを残し、既存expense requestは作成しない。actualのexpenseは既存ExpenseRequestが要求する正のamountを使う。approved plan budgetを超えるactualは、差額expenseの既存approvalまたは新plan amendmentを経由し、無承認でenrollmentへ加算しない。expense日付のwork monthが締め済みなら`MonthlyClosingService.assertOpenForUpdate`で関連・金額・支払状態の変更を拒否する。
 
+**経費締めの共有境界（P1-10、Owner/FinanceがDG-03で選択）:** 現状`ExpenseRequestServiceImpl`（create/update/submit/paid遷移）は`assertOpenForUpdate`を呼ばない。NF-03だけenrollment側で締めると「実費正本は経費」と矛盾する。承認後は次のいずれかを採用し、tasksにファイル名を固定する。
+
+| 選択肢 | 変更対象 | 効果 |
+|---|---|---|
+| **A（推奨）** | `ExpenseRequestServiceImpl`のamount/日付/関連/支払変更パス全体 | 研修費を含む全経費で締め済み月を拒否。S14経費と単一正本 |
+| **B** | 研修専用wrapper＋既存`/api/my/expenses`の更新拒否を別Task | 経費本体は据え置き。二重経路の監査コスト増 |
+
+いずれもF2-2/B1のtestに「締め済み月のamount/関連/支払変更拒否」を含める。reopenは既存月次締めworkflowのみ。
+
 ### 3.8 scheduler、timezone、通知対象
 
-通知判定は注入`Clock`を使用し、tenant timezone設定がある場合はそれを正本、テストと既定環境はAsia/Tokyoとする。semantic keyは`CERT_EXPIRY:recordId:effectiveExpiryDate:thresholdDays:recipientUserId`とし、record revision、表示文言、無関係な訂正を含めない。expiry dateが変わったときだけ新semantic keyを許可する。
+通知判定は注入`Clock`を使用する。**Clock正本（P2-04）:** `AppConfig.clock()`の`Clock.systemDefaultZone()`に依存しない。資格期限・90/60/30・as-of LocalDateは次の単一Beanから取得する。
+
+| 項目 | 候補正本 | 備考 |
+|---|---|---|
+| tenant timezone設定 | `m_system_config`のtenant TZ（存在時） | 未設定時は`Asia/Tokyo` |
+| Spring `Clock` Bean | `TenantClock`（新規）または既存`Clock`を`ZoneId.of("Asia/Tokyo")`固定へ変更 | platform-invariantsのTokyo直書き禁止に従い、zoneはBean/設定から解決 |
+| テスト | `@MockBean Clock`または固定`Clock.fixed` | JVM default zoneに依存しない |
+
+`StaffingClock`等の個別Jackson TZ設定と混在させず、資格/通知/as-of gapは上記Clockを共有する。
+
+semantic keyは`CERT_EXPIRY:recordId:effectiveExpiryDate:thresholdDays:recipientUserId`とし、record revision、表示文言、無関係な訂正を含めない。expiry dateが変わったときだけ新semantic keyを許可する。
 
 既存`t_notification.dedupe_key`のDB uniqueが複数JVMの最終防衛線になる。insertのduplicateは対象keyを再読して`DEDUPED`として扱い、例外を成功に握りつぶさない。outboxを使う場合はcommit後にclaimし、claim競合とlease回復をテストする。
 
 通知recipientはdispatch時点で解決してuser IDを保存する。退社完了・休職中・無効accountの本人には通常90/60/30を送らず、manager変更後に旧managerへ再送しない。managerはdispatch時点の有効org/DataScope内、HRは既存HR scope内だけを対象にする。account未linkは本人recipientを作らず、manager/HRへの通知可否を同じscope policyで判定する。復職時は過去の90/60/30をbackfillせず、残日数に対する`REINSTATEMENT`を一回だけsemantic keyで発行する。
+
+**通知対象母集団resolver（P2-05）:** dispatch時点で単一の`CertificationNotificationPopulationResolver`（仮称）が判定する。`Engineer.status`単独とNF-01 lifecycle caseの優先を混在させない。
+
+| 条件 | 正本（優先順） | 期限通知recipient | 履歴閲覧（list/detail） |
+|---|---|---|---|
+| 退社完了 | NF-01 `t_lifecycle_case`で`RESIGNATION`が完了、またはaccount無効化済み | 本人・旧managerへ送らない | role scopeに従い保持可（R4） |
+| 休職中 | NF-01 `LEAVE` caseが進行中または休職確定 | 本人へ90/60/30を送らない。manager/HRはscope内のみ | 本人・HRは閲覧可、通知とは分離 |
+| 復職 | `LEAVE` case完了＋有効account | 過去分再送せず`REINSTATEMENT` 1件 | 通常populationへ復帰 |
+| account未link | `EngineerAccountLink`なし | 本人recipientを作らない | engineer scopeのみ |
+
+`Engineer.status`（Bench等）は表示用。通知除外の最終判定はlifecycle effective state＋account linkとする。
 
 ### 3.9 本人評価・上長提案・HR確定
 
 `t_engineer_skill_assessment`はSELF、MANAGER、HR_FINALを別recordとして保存する。SELFは本人提案、MANAGERはレビュー/提案、HR_FINALだけが承認されたeffective skill projectionへ反映可能である。learning planではgoal skill、deadline、attainment criteriaについて本人提出と上長合意を別versionで保持し、合意前に公式skillへ反映しない。
 
 AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻、as-of、taxonomy version、allowlist、candidate hash、human accept/reject、期限を記録する。AI candidateのacceptはlearning suggestionを作るだけで、assessment、placement、採否、昇格、給与、不利益判断のstate transitionを呼べない。人が確定した場合は`t_learning_decision_event`へdecision domain、source type/id、human actor、reason、snapshot hash、adverse-use flagをappendする。adverse decisionではAI candidateをsole sourceにせず、既存HR/legal workflowと人の明示確定を要求する。
+
+**SELF/MANAGER評価の可視境界（P2-06）:** SELF/MANAGERは公式skill projection・配置・給与・採否に使わない。HR_FINALだけが`t_engineer_skill` currentへ反映可能。
+
+| assessment type | list/detail | export | staffing/sales画面 | 公式projectionへ |
+|---|---|---|---|---|
+| SELF | 本人・上長（レビュー用）・HR | 本人exportのみ（mask policy） | **出さない**（候補ラベル義務なし） | 不可 |
+| MANAGER | 上長・HR | org∩DataScope内のみ | **出さない** | 不可（HR_FINAL待ち） |
+| HR_FINAL | HR/admin | HR scope | 公式skillとして既存画面へ | 可（human actor必須） |
+
+SELFをstaffing gap・配置候補・commission計算の入力に使うことは禁止。異議申立てフローはOwner/HR承認後に別specへ委譲可。
 
 ## 4. Decision tables
 
@@ -122,7 +173,7 @@ AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻
 |---|---|---|---|---|
 | upload/register | `target_type=CERTIFICATION_RECORD`、target_id=取得record | owner engineer scope、`CERTIFICATION_EVIDENCE`、DocumentService、CLEAN、FileReferenceProvider登録 | `ENGINEER` linkだけ、unknown target、未scan、scope外 | 正式enumはOwner承認対象 |
 | list/detail | recordに紐づくtyped DocumentLink | same effective population、restricted policy、legal hold/retention、record state | generic linkだけ、linkなし、mixed linkでrestrictedを迂回 | 複数証憑のprimary ruleはlatest verified exact version |
-| download | typed linkからownerとexact versionを解決 | FileScopeValidationService、eventのdocument_version_id/hashと完全一致、scan=CLEAN、menu＋DataScope | stored name unknown、CLEAN以外、scope外、version不一致 | resolverの正式実装はOwner承認対象 |
+| download | typed linkからownerとexact versionを解決 | FileScopeValidationService専用分岐（`document-archive`より前）、eventのdocument_version_id/hashと完全一致、scan=CLEAN、menu＋DataScope | stored name unknown、CLEAN以外、scope外、version不一致、**link空、ENGINEER-only、admin bypass** | resolverの正式実装はOwner承認対象 |
 | export | raw file・storage key・document IDは出さずmetadata/link statusだけ | UIと同一population/scope | UIで見えないrecord/file | Ownerが監査用IDを別途許可するか |
 
 ### 4.3 skill taxonomy・同義語・未知skill
@@ -156,7 +207,7 @@ AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻
 | thresholdと等しい | approval required | deny | route snapshot | `m_approval_route.min_amount` inclusive |
 | threshold＋1 | approval required | deny | candidate不在はfail closed | chain（org manager→finance/admin候補） |
 | approved budget超のactual | 差額expenseまたはplan amendmentを新規approval | requesterは承認不可 | approved snapshotを上書きしない | tolerance=0候補 |
-| closed work month | expense金額/関連/支払状態変更不可 | N/A | `assertOpenForUpdate`拒否 | reopen権限/理由 |
+| closed work month | expense金額/関連/支払状態変更不可 | N/A | `assertOpenForUpdate`拒否（`ExpenseRequestServiceImpl`共有化が前提。design §3.7選択肢A/B） | reopen権限/理由 |
 
 ### 4.6 AI候補と人の確定境界
 
@@ -168,6 +219,7 @@ AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻
 | placement/assignment | existing business approval | prohibited | authorized workflow | no AI final action |
 | adverse personnel decision | not applicable | prohibited as sole source | explicit human/legal policy process | `adverse_use_flag`、AI source禁止 |
 | AI unavailable | return gap | empty/degraded | can continue | timeout/error/auditを保存、gapは欠落させない |
+| SELF/MANAGER assessment表示 | 公式skillとは別record | suggest only | HR/manager review | staffing/sales/exportへ出さない。公式はHR_FINALのみ |
 
 ## 5. 必須のdecision/time/scope/state tables
 

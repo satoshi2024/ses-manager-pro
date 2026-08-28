@@ -107,7 +107,7 @@ F1のmigration番号は、実装開始時にそのbranchの最新migrationを再
 
 - `t_engineer_skill`と`t_project_skill`はcurrent projectionとして残し、書込みtransactionごとにそれぞれのappend-only eventへeffective rowを記録する。履歴がない期間をcurrent rowで補完しない。
 - `t_project_position`もupdateごとにposition eventを記録する。feature有効化前の期間にeventが存在しない場合は `historical_data_unavailable` を返し、現在値を過去へ遡及適用しない。
-- `PROJECT`分析は`t_project_skill`を正本、`POSITION`分析はposition eventの`skills_json`を正本とする。`COMBINED`では同一project・canonical skillについて`t_project_skill`を優先し、position側の追加skillだけを加える。source IDとprecedenceを結果へ残す。
+- `PROJECT`分析のas-of正本は`t_project_skill_event`（current projectionは`t_project_skill`）。`POSITION`分析のas-of正本は`t_project_position_event`の`skills_json`。`COMBINED`では同一project・canonical skillについてproject skill eventを優先し、position側の追加skillだけを加える。source IDとprecedenceを結果へ残す。
 - 月次締め・export・再現要求は`t_skill_gap_snapshot`を必須とし、interactive queryは指定as-ofのeffective eventを読む。snapshotはsource of truthではない。
 
 ### 5.2 DocumentLinkのrestricted scope
@@ -120,6 +120,25 @@ F1のmigration番号は、実装開始時にそのbranchの最新migrationを再
 - 資格の`CORRECTED`はcurrent statusではなくevent type。訂正後のcurrent stateはACTIVE/EXPIRED/CANCELLED等を独立に導出し、renewはcontinuity groupを持つ新recordとする。
 - 期限通知keyはsemantic expiry date＋threshold＋recipientを使い、無関係なrevision番号を含めない。Asia/Tokyoの注入Clock、退職・休職・account未link、manager変更、複数JVM unique競合を対象母集団表とtestで固定する。
 - 本人自己評価、上長提案、HR確定を別assessmentとして保存する。AIは候補・説明だけを返し、human decision eventなしに`t_engineer_skill`、配置、採否、adverse decisionを変更しない。
+
+### 5.4 既存skill/position書込み経路（as-of eventフック対象）
+
+NF-03のas-of eventは、新APIだけでなく**既存の全置換・更新経路**と同一transactionで履歴を残す。現状は物理delete→insertのため、event DDLだけでは履歴が消える。
+
+| 経路 | 実装ファイル | 呼出元（代表） | F1-4/F2-3での必須フック |
+|---|---|---|---|
+| engineer skill全置換 | `EngineerSkillServiceImpl.replaceSkills` | `EngineerSkillApiController`、`EngineerChangeRequestApprovalAdapter`、`ResumeIngestionServiceImpl` | supply event append。delete前のeffective close＋insert後のopen event |
+| project skill全置換 | `ProjectSkillServiceImpl.replaceSkills` | `ProjectSkillApiController`、`ProjectServiceImpl`、`ProjectIngestionServiceImpl` | project skill event append（同上） |
+| position更新 | `PositionServiceImpl.create` / `update` / `changeStatus` | staffing API | position eventへ`skills_json`・期間・statusをsnapshot |
+
+engineer-skill-career / staffing-capacity-planning との**共有境界**としてOwner承認が必要。承認後は上記3サービスを変更対象に含め、新規専用APIだけにeventを閉じ込めない。
+
+### 5.5 FileScope・経費の既存ギャップ（計画上の穴）
+
+| 領域 | 現状（base `455fc92e`） | NF-03での必須補正 |
+|---|---|---|
+| 資格証憑download | `FileScopeValidationService`は`RECEIPT`等の専用分岐の後、`document-archive`経路でlink空なら非管理者を許可、管理者はlink検査をbypass | `CERTIFICATION_EVIDENCE`を`document-archive`より前の専用分岐へ。empty-link・admin bypass・generic `ENGINEER` linkをgrantに使わない |
+| 経費締め | `ExpenseRequestServiceImpl`はamount≤0を拒否するが`MonthlyClosingService.assertOpenForUpdate`未接続 | 研修費を含む全経費の締め境界を共有化（design §3.7のOwner選択） |
 
 ## 6. 承認が必要なDG-03
 

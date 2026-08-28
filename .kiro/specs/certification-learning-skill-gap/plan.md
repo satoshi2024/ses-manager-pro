@@ -18,6 +18,9 @@ Review remediationでは、承認前に次の候補契約を曖昧なまま残�
 - `CORRECTED`は資格current statusではなくevent。renewはcontinuity groupの新record、EXPIREDはas-ofから導出する。
 - notification keyはsemantic expiry date＋threshold＋recipient、注入Clock、lifecycle/active account population、DB unique＋outbox claimを使う。
 - SELF/MANAGER/HR_FINAL assessmentと人のdecision eventを分離し、AI candidateから評価・配置・採否・不利益判断への直接遷移を禁止する。
+- 既存skill/position書込み（`EngineerSkillServiceImpl`/`ProjectSkillServiceImpl`/`PositionServiceImpl`）をas-of eventの必須フック対象とする。
+- `FileScopeValidationService`へ`CERTIFICATION_EVIDENCE`専用分岐を追加し、empty-link・admin bypassを資格証憑で禁止する。
+- 経費締めは`ExpenseRequestServiceImpl`共有化（選択肢A）または研修wrapper（選択肢B）をDG-03でOwner/Financeが選択する。
 
 ## Gate 1: F1 DDL（承認後のみ）
 

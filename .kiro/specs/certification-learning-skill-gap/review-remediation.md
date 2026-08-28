@@ -2,9 +2,9 @@
 
 ## 判定の前提
 
-直近Reviewの判定はPLAN `FAIL`、Implementationは未着手です。本書はcandidate specの補正内容を記録するものであり、Review PASSやNF-03 `APPROVED`を宣言しません。中央traceabilityを実装AIが書き換えず、production変更も行いません。
+直近Review（Head `928ea518`）の判定はPLAN `FAIL`、Implementation `NOT STARTED`です。本書はcandidate specの補正内容を記録するものであり、Review PASSやNF-03 `APPROVED`を宣言しません。中央traceabilityを実装AIが書き換えず、production変更も行いません。
 
-## 指摘との対応
+## R1 Review（Task 0R）指摘との対応
 
 | finding | 補正内容 | 参照 | 残るgate |
 |---|---|---|---|
@@ -18,15 +18,30 @@
 | NF03-PLAN-P2-01 | 未定義のR8参照を削除し、AI・人の確定境界を正式なR7として追加。tasks/matrixをR3/R7へ同期 | `requirements.md` R7、`tasks.md`、`completion-matrix.md` | re-reviewでID整合を再確認 |
 | NF03-PLAN-P2-02 | `issuer_key`、`external_code_key`、`name_key`、NULL codeでも非NULLの`identity_key`、alias、merge reviewを定義。同じskill masterへ資格を登録しない | `design.md` §2/§3.5、`inventory.md` 新設候補 | issuer/name normalizationとmerge権限をOwner承認 |
 
+## R2 Review（Task 0R-2）指摘との対応
+
+| finding | 補正内容 | 参照 | 残るgate |
+|---|---|---|---|
+| NF03-PLAN-P1-01 | **OPEN**（変更なし） | 中央台帳 NF-03 `CANDIDATE` | Owner実承認。実装AI不可 |
+| NF03-PLAN-P1-02〜07 | **SPEC_ADDRESSED / 未承認**（R1と同内容。R2で再確認） | 各§参照 | Owner承認＋実装証明 |
+| NF03-PLAN-P2-01 | **VERIFIED_CLOSED（spec）** | R7正規化、R8残留なし | — |
+| NF03-PLAN-R2-P1-08 | 既存`replaceSkills`/position更新をF1-4/F2-3の必須変更対象にファイル名付きで追加。物理delete→insertとeventの同一txを明記 | `inventory.md` §5.4、`design.md` §3.4、`tasks.md` F1-4/F2-3 | engineer-skill-career/staffing共有境界のOwner承認、実装test |
+| NF03-PLAN-R2-P1-09 | `FileScopeValidationService`へ`CERTIFICATION_EVIDENCE`専用分岐（`document-archive`より前）。empty-link・admin bypass・ENGINEER-only mixed link拒否をF1-2/B1 testに列挙 | `inventory.md` §5.5、`design.md` §3.6/§4.2、`tasks.md` F1-2/B1 | enum承認、E2E否定系 |
+| NF03-PLAN-R2-P1-10 | 経費締めを`ExpenseRequestServiceImpl`共有化（選択肢A推奨）または研修wrapper（選択肢B）としてdesign §3.7に明記。F2-2 testに締め済み月拒否を固定 | `design.md` §3.7/§4.5、`tasks.md` F2-2 | Owner/FinanceがA/BをDG-03で選択 |
+| NF03-PLAN-R2-P2-03 | READMEをTask 0+0R+0R-2完了に更新。migrationは着手時latest+1再確認。inventory §5.1のPROJECT正本をevent表記へ統一 | `README.md`、`inventory.md` §5.1 | F1着手時の実採番 |
+| NF03-PLAN-R2-P2-04 | Clock正本を`TenantClock`候補＋Asia/Tokyoへ固定。`AppConfig.systemDefaultZone`非依存をdesign §3.8に明記 | `design.md` §3.8、`tasks.md` F2-4 | tenant TZ設定のOwner承認 |
+| NF03-PLAN-R2-P2-05 | `CertificationNotificationPopulationResolver`候補。NF-01 lifecycle case優先、通知除外と履歴閲覧を分離 | `design.md` §3.8 | lifecycle状態式のOwner承認 |
+| NF03-PLAN-R2-P2-06 | SELF/MANAGERをstaffing/sales/exportへ出さない。HR_FINALのみ公式projection。decision table §4.6に追加 | `design.md` §3.9/§4.6 | 異議申立てはOwner/HR |
+
 ## 再Reviewの開始条件
 
-1. Ownerが実名・実値でapproved scope、Base、対象資格範囲、PII表示/保持、証憑target/scope、taxonomy alias/unknown、as-of event/snapshot、費用route/threshold、AI/human境界を承認する。
+1. Ownerが実名・実値でapproved scope、Base、対象資格範囲、PII表示/保持、証憑target/scope、taxonomy alias/unknown、as-of event/snapshot、費用route/threshold（締め選択肢A/B含む）、AI/human境界を承認する。
 2. 中央traceabilityのNF-03を `APPROVED` に更新し、Decision、決定者、決定日、KPIを記録する。
-3. 本specの候補表を承認値へ更新し、`tasks.md`のTask 0Rを完了できる証拠を付ける。
+3. 本specの候補表を承認値へ更新し、Task 0R-2までの文書補正を確認する。
 4. その後にだけF1を開始する。F1以降のtest/Demoが実装されるまでImplementation Reviewは開始しない。
 
 ## 現時点の証拠境界
 
-- 確認済み: 専用worktree、remote base/head、`git diff --check`、inventory/spec文書の静的整合。
+- 確認済み: 専用worktree、remote base/head、`git diff --check`、inventory/spec文書の静的整合、R2 findingの1行対応表。
 - 未確認: production implementation、Maven/MySQL、scheduler実行、複数JVM、Document download E2E、threshold fixture、AI timeout、browser Demo。
 - したがって本書はPLAN失敗を解消したという意味ではなく、次回PLAN Reviewで再判定可能な設計差分を準備したものとする。
