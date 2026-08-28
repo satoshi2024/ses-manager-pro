@@ -31,13 +31,22 @@
 | NF03-PLAN-R2-P2-03 | READMEをTask 0+0R+0R-2完了に更新。migrationは着手時latest+1再確認。inventory §5.1のPROJECT正本をevent表記へ統一 | `README.md`、`inventory.md` §5.1 | F1着手時の実採番 |
 | NF03-PLAN-R2-P2-04 | Clock正本を`TenantClock`候補＋Asia/Tokyoへ固定。`AppConfig.systemDefaultZone`非依存をdesign §3.8に明記 | `design.md` §3.8、`tasks.md` F2-4 | tenant TZ設定のOwner承認 |
 | NF03-PLAN-R2-P2-05 | `CertificationNotificationPopulationResolver`候補。NF-01 lifecycle case優先、通知除外と履歴閲覧を分離 | `design.md` §3.8 | lifecycle状態式のOwner承認 |
-| NF03-PLAN-R2-P2-06 | SELF/MANAGERをstaffing/sales/exportへ出さない。HR_FINALのみ公式projection。decision table §4.6に追加 | `design.md` §3.9/§4.6 | 異議申立てはOwner/HR |
+| NF03-PLAN-R2-P2-06 | SELF/MANAGERをstaffing/sales/exportへ出さない。HR_FINALのみ公式projection。decision table §4.6に追加 | `design.md` §3.9/§4.6、`tasks.md` F2-5/A1 | 異議申立てはOwner/HR |
+
+## R3 Review（Task 0R-3）指摘との対応
+
+| finding | 補正内容 | 参照 | 残るgate |
+|---|---|---|---|
+| NF03-PLAN-P1-01 | **OPEN**（変更なし） | 中央台帳 `CANDIDATE` | Owner実承認 |
+| NF03-PLAN-R2-P2-03 | **CLOSED（spec）** | README/completion-matrix/plan Gate 0を0R-3まで反映。design §3.4手順3を`t_project_skill_event`/`t_project_position_event`表記へ統一 | — |
+| NF03-PLAN-R3-P2-08 | `PositionServiceImpl.delete`をinventory §5.4・F1-4/F2-3フック表に追加。delete前close/cancelled event、as-ofはcurrent補完禁止 | `inventory.md` §5.4、`tasks.md` F1-4/F2-3、`plan.md` | 実装test（F1以降） |
+| NF03-PLAN-R2-P2-06（残） | F2-5/A1 testにSELFがstaffing/salesに出ないことを明記 | `tasks.md` F2-5/A1 | 実装test |
 
 ## 再Reviewの開始条件
 
 1. Ownerが実名・実値でapproved scope、Base、対象資格範囲、PII表示/保持、証憑target/scope、taxonomy alias/unknown、as-of event/snapshot、費用route/threshold（締め選択肢A/B含む）、AI/human境界を承認する。
 2. 中央traceabilityのNF-03を `APPROVED` に更新し、Decision、決定者、決定日、KPIを記録する。
-3. 本specの候補表を承認値へ更新し、Task 0R-2までの文書補正を確認する。
+3. 本specの候補表を承認値へ更新し、Task 0R-3までの文書補正を確認する。
 4. その後にだけF1を開始する。F1以降のtest/Demoが実装されるまでImplementation Reviewは開始しない。
 
 ## 現時点の証拠境界

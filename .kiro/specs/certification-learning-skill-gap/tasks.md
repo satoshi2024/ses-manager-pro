@@ -24,6 +24,13 @@
   - Demo: R2 finding（P1-08〜10、P2-03〜06）をremediation表で1行ずつ確認し、F1禁止が継続していることを確認する。
   - 判定: 文書補正Task。PLAN PASS・F1着手許可ではない。
 
+- [x] **Task 0R-3: R3 PLAN Review指摘をcandidate specへ反映する**
+  - Objective: P2-03残件（matrix/plan Gate 0/design §3.4手順3）とP2-08（`PositionServiceImpl.delete`）を閉じ、P2-06のSELF非表示testをtasksへ接続する。
+  - Implementation: `completion-matrix.md`、`plan.md`、`design.md` §3.4、`inventory.md` §5.4、`tasks.md` F1-4/F2-3/F2-5/A1、`review-remediation.md` R3表を更新。production変更なし。
+  - Test: P2-03/P2-08の1行対応、PROJECT正本がevent表記で一貫、`git diff --check`成功。
+  - Demo: R3 findingをremediation表で確認し、P1-01外部blockerとF1禁止が継続していることを確認する。
+  - 判定: 文書補正Task。PLAN PASS・F1着手許可ではない。
+
 ## F1. 資格/course/plan/enrollment DDL（承認後のみ）
 
 - [ ] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
@@ -46,8 +53,8 @@
 
 - [ ] **Task F1-4: supply/demandのeffective historyとgap snapshot DDLを追加する**
   - Objective: current-onlyの既存skill/positionを過去as-ofへ遡及適用せず、source versionとsnapshotで再現可能にする。
-  - Implementation: `t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`、`t_skill_gap_snapshot`を追加候補として確定し、current projectionと同一transactionで履歴を登録する。履歴欠落期間は`historical_data_unavailable`とする。**必須フック:** `EngineerSkillServiceImpl.replaceSkills`、`ProjectSkillServiceImpl.replaceSkills`、`PositionServiceImpl.create`/`update`/`changeStatus`を同一Taskの変更対象に含め、engineer-skill-career/staffingとの共有境界としてOwner承認を得る（inventory §5.4、design §3.4）。
-  - Test: effective period overlap、訂正・supersedes、project/position precedence、feature開始日前のas-of、snapshot hash/version、MySQL concurrency、**既存PUT skills後にeventが残り過去as-ofがcurrentに置換されないこと**。
+  - Implementation: `t_engineer_skill_event`、`t_project_skill_event`、`t_project_position_event`、`t_skill_gap_snapshot`を追加候補として確定し、current projectionと同一transactionで履歴を登録する。履歴欠落期間は`historical_data_unavailable`とする。**必須フック:** `EngineerSkillServiceImpl.replaceSkills`、`ProjectSkillServiceImpl.replaceSkills`、`PositionServiceImpl.create`/`update`/`changeStatus`/`delete`を同一Taskの変更対象に含める。`delete`は物理削除前にposition eventへclose/cancelled snapshotを記録し、過去as-ofをcurrent補完しない（inventory §5.4、design §3.4）。
+  - Test: effective period overlap、訂正・supersedes、project/position precedence、feature開始日前のas-of、snapshot hash/version、MySQL concurrency、**既存PUT skills後にeventが残り過去as-ofがcurrentに置換されないこと**、**position delete後のas-ofがhistorical_data_unavailableまたは明示cancelledでcurrent補完しないこと**。
   - Demo: 現在値を変更しても過去snapshotのgap結果が変わらず、履歴のない過去指定は安全にdegradedとなることを確認する。
 
 - [ ] **Task F1-5: 評価proposal・人の確定・決定監査DDLを追加する**
@@ -72,7 +79,7 @@
 - [ ] **Task F2-3: as-of skill gap serviceを実装する**
   - Objective: project/position期間、skill level、evidence count、unknown/synonym、0件を説明可能に比較する。
   - Implementation: F1-4のeventフック完了後にのみ有効。`SkillTagResolver`の未知自動作成を需要計算へ使わない。
-  - Test: supply/demand effective as-of、履歴欠落、同義tag、未知skill、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、snapshot replay、AI停止時rule fallback、**replaceSkills後のevent残存**。
+  - Test: supply/demand effective as-of、履歴欠落、同義tag、未知skill、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、snapshot replay、AI停止時rule fallback、**replaceSkills後のevent残存**、**position delete後のas-of**。
   - Demo: AI providerを停止してもgapが表示され、AIはcourse候補のみで評価/配置を確定しないことを確認する。
 
 - [ ] **Task F2-4: 期限schedulerと通知母集団を実装する**
@@ -84,14 +91,14 @@
 - [ ] **Task F2-5: 本人/上長/HR評価とAI候補契約を実装する**
   - Objective: AIがskill評価・配置・採否・不利益判断を確定できないことをservice/API/監査で保証する。
   - Implementation: SELF/MANAGER/HR_FINALを別DTO・権限・eventへ分離し、人のactor/reasonを必須化する。AI timeout/error/低信頼はcandidateだけdegradedにし、rule gapを維持する。
-  - Test: AI-only transition拒否、human accept/reject、adverse source禁止、allowlist、timeout/circuit、監査event。
+  - Test: AI-only transition拒否、human accept/reject、adverse source禁止、allowlist、timeout/circuit、監査event、**SELF/MANAGER assessmentがstaffing/sales API・画面に出ないこと**（design §3.9/§4.6）。
   - Demo: AI timeoutと候補acceptの両方で、公式skill/配置/採否が自動変更されないことを確認する。
 
 ## A1. HR/manager UI（承認後のみ）
 
 - [ ] **Task A1: HR/manager資格・training・gap list/detailを実装する**
   - Objective: role別に同じpopulationをlist/detail/count/exportで表示する。
-  - Test: manager org∩DataScope、HR、admin、scope外、退職/休職の閲覧と通知除外、番号mask、empty state、390px、safePage。
+  - Test: manager org∩DataScope、HR、admin、scope外、退職/休職の閲覧と通知除外、番号mask、empty state、390px、safePage、**SELF assessmentがstaffing board/heatmapに表示されないこと**。
   - Demo: 同一filterでlist/detail/exportの対象IDが一致し、document/PII fieldだけpolicyどおり差異があることを確認する。
 
 ## A2. 本人申請・学習計画（承認後のみ）

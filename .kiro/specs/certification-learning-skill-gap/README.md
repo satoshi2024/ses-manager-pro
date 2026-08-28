@@ -29,6 +29,6 @@
 - [requirements.md](requirements.md): 承認前のcandidate requirementsと受入条件。
 - [design.md](design.md): candidate設計、scope、as-of、state、PII、DocumentLink、approval、AI境界。
 - [plan.md](plan.md): 0→F1→F2→A1→A2→B1→B2→Mの実装順とゲート。
-- [tasks.md](tasks.md): spec-driven task一覧。現時点で完了はTask 0・0R・0R-2（文書のみ）。
+- [tasks.md](tasks.md): spec-driven task一覧。現時点で完了はTask 0・0R・0R-2・0R-3（文書のみ）。
 - [completion-matrix.md](completion-matrix.md): 要件・task・証拠・Demoの対応表。
 - [review-remediation.md](review-remediation.md): 今回のPLAN Review指摘への対応状況と、外部承認が必要な残件。

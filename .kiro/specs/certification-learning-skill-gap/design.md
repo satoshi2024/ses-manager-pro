@@ -67,7 +67,7 @@ as-of queryは次の順で実行する。
 
 1. requestが指定した`as_of`またはtarget periodをLocalDateとして確定する。
 2. supply/demandのeffective eventだけをSQLで抽出し、履歴のない過去をcurrent projectionで補完しない。
-3. `PROJECT`はproject skill、`POSITION`はposition skill、`COMBINED`はproject skillを同一canonical skillの優先sourceとしてposition-only skillを追加する。
+3. `PROJECT`は`t_project_skill_event`、`POSITION`は`t_project_position_event`、`COMBINED`は同一canonical skillについてproject skill eventを優先しposition-only skillを追加する。
 4. unknown、alias、source ID、precedence、使用versionをresultへ残す。
 5. monthly close、export、replayは`snapshot`のsource version/hashを再利用し、snapshotがなければreplay不可として明示する。
 

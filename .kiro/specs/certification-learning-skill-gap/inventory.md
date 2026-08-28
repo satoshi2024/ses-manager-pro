@@ -129,7 +129,7 @@ NF-03のas-of eventは、新APIだけでなく**既存の全置換・更新経�
 |---|---|---|---|
 | engineer skill全置換 | `EngineerSkillServiceImpl.replaceSkills` | `EngineerSkillApiController`、`EngineerChangeRequestApprovalAdapter`、`ResumeIngestionServiceImpl` | supply event append。delete前のeffective close＋insert後のopen event |
 | project skill全置換 | `ProjectSkillServiceImpl.replaceSkills` | `ProjectSkillApiController`、`ProjectServiceImpl`、`ProjectIngestionServiceImpl` | project skill event append（同上） |
-| position更新 | `PositionServiceImpl.create` / `update` / `changeStatus` | staffing API | position eventへ`skills_json`・期間・statusをsnapshot |
+| position更新・削除 | `PositionServiceImpl.create` / `update` / `changeStatus` / `delete` | staffing API | `create`/`update`/`changeStatus`はposition eventへ`skills_json`・期間・statusをsnapshot。`delete`は物理削除前にclose/cancelled eventを記録し、過去as-ofをcurrentで補完しない |
 
 engineer-skill-career / staffing-capacity-planning との**共有境界**としてOwner承認が必要。承認後は上記3サービスを変更対象に含め、新規専用APIだけにeventを閉じ込めない。
 
