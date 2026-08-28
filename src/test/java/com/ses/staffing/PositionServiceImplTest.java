@@ -5,6 +5,7 @@ import com.ses.entity.ProjectPositionEvent;
 import com.ses.mapper.ProjectPositionEventMapper;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.PositionService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * P1-2: ProjectPosition.endDate（ALWAYS）の部分更新で未出現キーが NULL 上書きされないこと。
@@ -131,6 +133,48 @@ class PositionServiceImplTest {
         assertNotNull(events.get(0).getEffectiveTo());
         assertNull(events.get(1).getEffectiveTo());
         assertEquals(ProjectPositionEvent.TYPE_UPDATE, events.get(1).getEventType());
+        assertEquals(LocalDate.now(), events.get(1).getEffectiveFrom());
+    }
+
+    @Test
+    void updateは過去asOfを新snapshotで置き換えない() {
+        ProjectPosition p = position("P1");
+        p.setStartDate(LocalDate.now().minusMonths(2));
+        ProjectPosition created = positionService.create(p);
+        String originalRole = created.getRoleName();
+
+        ProjectPosition patch = new ProjectPosition();
+        patch.setId(created.getId());
+        patch.setPositionNo(created.getPositionNo());
+        patch.setRoleName("更新後ロール");
+        patch.setRequiredCount(created.getRequiredCount());
+        patch.setAllocationPercent(created.getAllocationPercent());
+        patch.setStartDate(created.getStartDate());
+        patch.setEndDate(created.getEndDate());
+        patch.setVersion(created.getVersion());
+        positionService.update(patch);
+
+        List<ProjectPositionEvent> events = projectPositionEventMapper.selectByPositionId(created.getId());
+        LocalDate pastAsOf = LocalDate.now().minusMonths(1);
+        ProjectPositionEvent activePast = activeSnapshotAt(events, pastAsOf);
+        assertNotNull(activePast);
+        assertEquals(originalRole, activePast.getRoleName());
+        assertEquals(ProjectPositionEvent.TYPE_CREATE, activePast.getEventType());
+
+        ProjectPositionEvent activeToday = activeSnapshotAt(events, LocalDate.now());
+        assertNotNull(activeToday);
+        assertEquals("更新後ロール", activeToday.getRoleName());
+        assertEquals(ProjectPositionEvent.TYPE_UPDATE, activeToday.getEventType());
+    }
+
+    private static ProjectPositionEvent activeSnapshotAt(List<ProjectPositionEvent> events, LocalDate asOf) {
+        ProjectPositionEvent active = null;
+        for (ProjectPositionEvent event : events) {
+            if (EffectiveIntervalSupport.isActiveAtAsOf(event.getEffectiveFrom(), event.getEffectiveTo(), asOf)) {
+                active = event;
+            }
+        }
+        return active;
     }
 
     private ProjectPosition position(String no) {

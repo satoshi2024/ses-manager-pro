@@ -8,6 +8,7 @@ import com.ses.entity.ProjectSkill;
 import com.ses.entity.ProjectSkillEvent;
 import com.ses.mapper.ProjectSkillEventMapper;
 import com.ses.service.ProjectSkillService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -97,17 +98,28 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
 
         for (ProjectSkill skill : distinctSkills) {
             assertNoOpenSkillEvent(projectId, skill.getSkillId());
+            Long supersedesId = resolveSupersedesEventId(projectId, skill.getSkillId(), supersedesBySkillId);
             appendSkillEvent(skill, ProjectSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    supersedesBySkillId.get(skill.getSkillId()), actorUserId, actorRole, occurredAt);
+                    supersedesId, actorUserId, actorRole, occurredAt);
         }
     }
 
-    private Long closeOpenSkillEvent(Long projectId, Long skillId, LocalDate closeDate) {
+    private Long resolveSupersedesEventId(Long projectId, Long skillId, Map<Long, Long> closedInTx) {
+        Long supersedesId = closedInTx.get(skillId);
+        if (supersedesId != null) {
+            return supersedesId;
+        }
+        ProjectSkillEvent lastClosed = projectSkillEventMapper.selectLastClosedOpenEvent(projectId, skillId);
+        return lastClosed != null ? lastClosed.getId() : null;
+    }
+
+    private Long closeOpenSkillEvent(Long projectId, Long skillId, LocalDate changeDate) {
         ProjectSkillEvent open = projectSkillEventMapper.selectOpenEvent(projectId, skillId);
         if (open == null) {
             return null;
         }
-        int rows = projectSkillEventMapper.closeOpenEvent(open.getId(), closeDate);
+        LocalDate closeTo = EffectiveIntervalSupport.closeEffectiveTo(open.getEffectiveFrom(), changeDate);
+        int rows = projectSkillEventMapper.closeOpenEvent(open.getId(), closeTo);
         if (rows != 1) {
             throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }

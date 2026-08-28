@@ -8,6 +8,7 @@ import com.ses.entity.EngineerSkill;
 import com.ses.entity.EngineerSkillEvent;
 import com.ses.mapper.EngineerSkillEventMapper;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -97,17 +98,28 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
 
         for (EngineerSkill skill : distinctSkills) {
             assertNoOpenSkillEvent(engineerId, skill.getSkillId());
+            Long supersedesId = resolveSupersedesEventId(engineerId, skill.getSkillId(), supersedesBySkillId);
             appendSkillEvent(skill, EngineerSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    supersedesBySkillId.get(skill.getSkillId()), actorUserId, actorRole, occurredAt);
+                    supersedesId, actorUserId, actorRole, occurredAt);
         }
     }
 
-    private Long closeOpenSkillEvent(Long engineerId, Long skillId, LocalDate closeDate) {
+    private Long resolveSupersedesEventId(Long engineerId, Long skillId, Map<Long, Long> closedInTx) {
+        Long supersedesId = closedInTx.get(skillId);
+        if (supersedesId != null) {
+            return supersedesId;
+        }
+        EngineerSkillEvent lastClosed = engineerSkillEventMapper.selectLastClosedOpenEvent(engineerId, skillId);
+        return lastClosed != null ? lastClosed.getId() : null;
+    }
+
+    private Long closeOpenSkillEvent(Long engineerId, Long skillId, LocalDate changeDate) {
         EngineerSkillEvent open = engineerSkillEventMapper.selectOpenEvent(engineerId, skillId);
         if (open == null) {
             return null;
         }
-        int rows = engineerSkillEventMapper.closeOpenEvent(open.getId(), closeDate);
+        LocalDate closeTo = EffectiveIntervalSupport.closeEffectiveTo(open.getEffectiveFrom(), changeDate);
+        int rows = engineerSkillEventMapper.closeOpenEvent(open.getId(), closeTo);
         if (rows != 1) {
             throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }

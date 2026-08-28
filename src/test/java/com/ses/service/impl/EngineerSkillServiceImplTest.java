@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.entity.EngineerSkill;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -102,8 +103,10 @@ public class EngineerSkillServiceImplTest {
         engineerSkillService.replaceSkills(engineerId, List.of());
         List<com.ses.entity.EngineerSkillEvent> afterClear = engineerSkillEventMapper.selectByEngineerId(engineerId);
         assertEquals(1, afterClear.size());
-        assertNotNull(afterClear.get(0).getEffectiveTo());
-        assertTrue(noActiveOpenEvent(afterClear, 10L, LocalDate.now()));
+        LocalDate today = LocalDate.now();
+        assertEquals(today.minusDays(1), afterClear.get(0).getEffectiveTo());
+        assertTrue(noActiveOpenEvent(afterClear, 10L, today));
+        assertTrue(noActiveOpenEvent(afterClear, 10L, today.plusDays(1)));
 
         EngineerSkill reopened = new EngineerSkill();
         reopened.setSkillId(10L);
@@ -142,7 +145,7 @@ public class EngineerSkillServiceImplTest {
         return events.stream()
                 .noneMatch(event -> "OPEN".equals(event.getEventType())
                         && skillId.equals(event.getSkillId())
-                        && !event.getEffectiveFrom().isAfter(asOf)
-                        && (event.getEffectiveTo() == null || !event.getEffectiveTo().isBefore(asOf)));
+                        && EffectiveIntervalSupport.isActiveAtAsOf(
+                                event.getEffectiveFrom(), event.getEffectiveTo(), asOf));
     }
 }

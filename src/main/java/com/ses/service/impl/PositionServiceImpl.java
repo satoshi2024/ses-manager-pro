@@ -11,6 +11,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProjectPositionEventMapper;
 import com.ses.mapper.ProjectPositionMapper;
 import com.ses.service.staffing.PositionService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,9 +83,9 @@ public class PositionServiceImpl implements PositionService {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         ProjectPosition updated = positionMapper.selectById(position.getId());
-        LocalDate effectiveFrom = updated.getStartDate() != null ? updated.getStartDate() : LocalDate.now(clock);
-        closeOpenPositionEvent(updated.getId(), effectiveFrom);
-        appendPositionEvent(updated, ProjectPositionEvent.TYPE_UPDATE, effectiveFrom, null);
+        LocalDate changeDate = LocalDate.now(clock);
+        closeOpenPositionEvent(updated.getId(), changeDate);
+        appendPositionEvent(updated, ProjectPositionEvent.TYPE_UPDATE, changeDate, null);
         return updated;
     }
 
@@ -147,12 +148,13 @@ public class PositionServiceImpl implements PositionService {
                 .orderByAsc(ProjectPosition::getPositionNo));
     }
 
-    private void closeOpenPositionEvent(Long positionId, LocalDate closeDate) {
+    private void closeOpenPositionEvent(Long positionId, LocalDate changeDate) {
         ProjectPositionEvent open = projectPositionEventMapper.selectOpenEvent(positionId);
         if (open == null) {
             return;
         }
-        int rows = projectPositionEventMapper.closeOpenEvent(open.getId(), closeDate);
+        LocalDate closeTo = EffectiveIntervalSupport.closeEffectiveTo(open.getEffectiveFrom(), changeDate);
+        int rows = projectPositionEventMapper.closeOpenEvent(open.getId(), closeTo);
         if (rows != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }

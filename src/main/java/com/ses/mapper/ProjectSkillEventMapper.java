@@ -34,4 +34,8 @@ public interface ProjectSkillEventMapper {
 
     @Update("UPDATE t_project_skill_event SET effective_to = #{effectiveTo} WHERE id = #{eventId} AND effective_to IS NULL")
     int closeOpenEvent(@Param("eventId") Long eventId, @Param("effectiveTo") LocalDate effectiveTo);
+
+    @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} AND skill_id = #{skillId} "
+            + "AND event_type = 'OPEN' AND effective_to IS NOT NULL ORDER BY id DESC LIMIT 1")
+    ProjectSkillEvent selectLastClosedOpenEvent(@Param("projectId") Long projectId, @Param("skillId") Long skillId);
 }
