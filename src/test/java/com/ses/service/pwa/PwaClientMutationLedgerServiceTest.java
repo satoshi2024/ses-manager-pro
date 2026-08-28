@@ -131,6 +131,8 @@ class PwaClientMutationLedgerServiceTest {
         PwaMutationCommand command = new PwaMutationCommand(
                 "expense:PUT:/api/my/pwa/expenses/drafts/1", "expense", "2026-08", 2, payload);
         String scope = "scope-legacy";
+        assertThat(command.legacyPayloadHash(canonicalizer))
+                .isEqualTo("368a9731bfdd1593e89a29771b422ccf4c189b541d3bb64da30835fa70d23fb8");
         PwaUserContextService.CurrentContext context =
                 new PwaUserContextService.CurrentContext(7L, 9L, scope);
         when(userContextService.assertCurrent(scope)).thenReturn(context);
