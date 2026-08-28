@@ -2,13 +2,13 @@
 
 ## 判定の前提
 
-直近Review（Head `aeab4077`）の判定はPLAN `FAIL`（P1-01: approved scope・Base・DG-03 実値未承認）、Implementation `NOT STARTED`です。開発段階 OwnerRef=`PROJECT_OWNER`（DecisionId `DG-03-DEV-20260828`）は Task 0R-4 で確定したが、**NF-03 `APPROVED` には遷移していない**。
+直近Review（Head `34f20724`）の判定はPLAN `FAIL`、Implementation `NOT STARTED`です。**PLAN FAIL の理由は実名欠如ではない。** 未達は approved scope、承認 Base SHA、DG-03 業務実値、Status=`APPROVED` のみ。開発段階 OwnerRef=`PROJECT_OWNER`（DecisionId `DG-03-DEV-20260828`、承認 commit `34f20724`）は責任主体識別として **VERIFIED_CLOSED**。
 
 ## R1 Review（Task 0R）指摘との対応
 
 | finding | 補正内容 | 参照 | 残るgate |
 |---|---|---|---|
-| NF03-PLAN-P1-01 | `CANDIDATE`維持。Gate は**責任主体を一意に識別できる OwnerRef**（開発段階 `PROJECT_OWNER`）と approved scope・DG-03 実値・Base SHA・承認 commit の記録を要求。個人の実名は記録しない | `owner-policy.md`、`README.md`、`plan.md` §変更許可ゲート | approved scope・Base・DG-03 実値承認後に traceability `APPROVED` |
+| NF03-PLAN-P1-01 | `CANDIDATE`維持。Gate は**責任主体を一意に識別できる OwnerRef**（開発段階 `PROJECT_OWNER`）と approved scope・DG-03 実値・Base SHA・承認 commit の記録を要求。個人の実名は記録しない | `owner-policy.md`、`README.md`、`plan.md` §変更許可ゲート | **P1-01a（OwnerRef）:** VERIFIED_CLOSED。**P1-01b（scope/Base/DG-03実値/`APPROVED`）:** OPEN |
 | NF03-PLAN-P1-02 | supplyは`t_engineer_skill_event`/`t_project_skill_event`、demandは`t_project_position_event`を追加候補とし、current projectionを過去へ遡及適用しない。PROJECT/POSITION/COMBINED precedence、履歴欠落、monthly snapshotを定義 | `inventory.md` §5.1、`design.md` §3.4/§4.4、F1-4/F2-3 | Ownerがevent/snapshot migration scopeとbackfill開始日を承認 |
 | NF03-PLAN-P1-03 | `CERTIFICATION_EVIDENCE`＋`CERTIFICATION_RECORD` typed linkだけを認可根拠とし、generic `ENGINEER` linkを作らない。mixed-link時はrestricted priority、eventのexact version/hash、CLEAN、FileScopeValidationServiceを必須化 | `inventory.md` §5.2、`design.md` §3.6/§4.2、F1-2/B1 | legal-document側の正式enum・resolver契約を承認し、実装・E2Eで証明 |
 | NF03-PLAN-P1-04 | plan planned costは申請snapshot、actual cost/payment/accountingは既存`t_expense_request`/outboxの正本。enrollmentはrelationだけを持つ。NULL/0、税込、差額再承認、締め済み月、支払所有者を定義 | `inventory.md` §2/§5.3、`requirements.md` R2、`design.md` §3.7/§4.5、F1-3/F2-2 | `m_approval_route.min_amount`、zero-cost、tolerance、reopen権限をOwner/Financeが承認 |
@@ -47,6 +47,17 @@
 | finding | 補正内容 | 参照 | 残るgate |
 |---|---|---|---|
 | 開発段階 Owner 表現 | OwnerRef=`PROJECT_OWNER`、実名非記録、承認証跡フィールドを `owner-policy.md` に確定。Gate 文言を OwnerRef へ統一 | `owner-policy.md`、README、plan、completion-matrix、中央 traceability DG-03 | **NF-03 は `CANDIDATE` 維持**。approved scope・Base・DG-03 実値承認後に `APPROVED` |
+
+## R5 Review（Head `34f20724`）— P1-01 分割判定
+
+| P1-01 部分 | Status | 証跡 |
+|---|---|---|
+| P1-01a 責任主体識別（OwnerRef） | **VERIFIED_CLOSED** | OwnerRef=`PROJECT_OWNER`、OwnerType=`ROLE`、DecisionId=`DG-03-DEV-20260828`、決定日=2026-08-28、承認 commit=`34f20724`。`owner-policy.md`、中央台帳、traceability DG-03 と一致。実名の追記なし |
+| P1-01b approved scope / 承認 Base SHA / DG-03 業務実値 / `APPROVED` | **OPEN** | Status=`CANDIDATE`。scope・DG-03（6項目＋経費締め A/B）未確定。技術比較 base `455fc92e` のみで承認 Base SHA 未記録 |
+
+**Review 評価ルール（開発段階）:** 個人の実名は要求せず、欠如を PLAN FAIL 理由にしない。責任主体は OwnerRef、承認証跡は DecisionId・決定日・OwnerRef・対象 scope・Base SHA・承認 commit。
+
+`DG-03-DEV-20260828` は Owner 識別ポリシーの Decision であり、資格 PII・証憑 enum・taxonomy・as-of・費用締め・AI/human の業務 Decision ではない。
 
 ## 再Reviewの開始条件
 

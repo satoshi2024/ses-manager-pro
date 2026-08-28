@@ -43,13 +43,22 @@
 | 決定者の実名を記録 | **OwnerRef**・DecisionId・決定日・承認 commit を記録 |
 | `<OWNER>` 個人名 placeholder | `OwnerRef=PROJECT_OWNER`（開発段階） |
 
-## 5. `APPROVED` への遷移条件（未達）
+## 5. `APPROVED` への遷移条件（未達 — P1-01b OPEN）
 
 次が揃った時点で、中央 traceability の NF-03 を `CANDIDATE` → `APPROVED` に更新し、Owner 列を `PROJECT_OWNER` とする。
 
 1. approved scope の実値
-2. Base branch / Base SHA の実値
+2. **承認** Base branch / Base SHA の実値（技術比較用 merge-base とは別に記録）
 3. DG-03 の6 decision 実値（資格 PII、証憑 enum、taxonomy、as-of、費用締め **A or B**、AI/human 境界）
 4. 上記を DecisionId・決定日・OwnerRef・承認 commit で traceability へ記録
 
-本ポリシー（`DG-03-DEV-20260828`）の採用だけでは `APPROVED` にしない。
+本ポリシー（`DG-03-DEV-20260828`、commit `34f20724`）の採用だけでは `APPROVED` にしない（P1-01a は閉じ、P1-01b は未達）。
+
+## 6. Review 判定（Head `34f20724`）
+
+| ルール | 内容 |
+|---|---|
+| 実名 | 開発段階では要求しない。欠如を PLAN FAIL 理由にしない |
+| 責任主体 | 一意な OwnerRef（`PROJECT_OWNER`）で充足 |
+| P1-01a | **VERIFIED_CLOSED**（本 Decision の証跡） |
+| P1-01b | **OPEN**（approved scope・承認 Base SHA・DG-03 業務実値・`APPROVED`） |

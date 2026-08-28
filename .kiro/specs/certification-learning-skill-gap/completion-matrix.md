@@ -12,7 +12,7 @@
 | base | `origin/main` / `455fc92e` |
 | PR | 作成しない |
 
-Review remediation status: R1〜R3文書補正済み。開発段階 OwnerRef=`PROJECT_OWNER`（`DG-03-DEV-20260828`）を確定。P1-01は approved scope・Base SHA・DG-03 実値未承認のため OPEN（`APPROVED` には未遷移）。
+Review remediation status: P1-01a（OwnerRef）**VERIFIED_CLOSED**（`34f20724`）。P1-01b（approved scope・承認 Base SHA・DG-03 業務実値・`APPROVED`）**OPEN**。PLAN FAIL は P1-01b のみ。
 
 ## Task対応
 

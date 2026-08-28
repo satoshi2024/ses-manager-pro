@@ -4,7 +4,7 @@
 
 このspecはNF-03の準備成果物です。2026-08-28時点のtraceabilityは **`CANDIDATE`** である。approved scope・Base SHA・DG-03 実値は未承認のため、F1 以降と PR は禁止のままである。
 
-直近Review（Head `aeab4077` 時点）はPLAN `FAIL`（P1-01: scope/Base/DG-03 実値未承認）、Implementation `NOT STARTED`。Task 0R-3 までの文書補正は完了している。
+直近Review（Head `34f20724`）: PLAN `FAIL`（**P1-01b** のみ: scope・承認 Base SHA・DG-03 実値・`APPROVED` 未達）。**実名欠如は FAIL 理由にしない。** P1-01a（OwnerRef=`PROJECT_OWNER`）は VERIFIED_CLOSED。
 
 - 承認前にproduction code、migration、test、seed dataを変更しない。
 - `tasks.md` は成功条件を証拠で確認できたTaskだけを `[x]` にする。

@@ -59,4 +59,4 @@ mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates�
 
 承認証跡は **DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit** で追跡する。本番移行時の実ユーザー対応は repository 外で解決する。
 
-P1-01は実装AIが解決できない外部gateである。**OwnerRef=`PROJECT_OWNER` の開発ポリシー（`DG-03-DEV-20260828`）は確定済みだが、approved scope・Base・DG-03 実値の承認と traceability `APPROVED` 更新は未達。** 上記が揃った後、Reviewを再実行する。
+P1-01は実装AIが解決できない外部gateである。**P1-01a（OwnerRef）** は `DG-03-DEV-20260828` / commit `34f20724` で **VERIFIED_CLOSED**。**P1-01b** は approved scope・承認 Base SHA・DG-03 業務実値・traceability `APPROVED` が未達のため **OPEN**。実名欠如は PLAN FAIL 理由にしない。
