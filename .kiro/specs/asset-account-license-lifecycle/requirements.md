@@ -22,6 +22,13 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 2. THE 貸与（Assignment） SHALL 対象資産、貸与先区分（`assignee_type`: `ENGINEER: 要員`, `USER: 内部ユーザー`）、貸与先ID（`assignee_id`）、貸与開始日（`start_date`）、返却予定日（`expected_return_date`）、実際の返却日（`actual_return_date`）、受渡し証跡文書ID（`handover_evidence_doc_id` / 既存 `DocumentLink` 連携）、返却証跡文書ID（`return_evidence_doc_id` / 既存 `DocumentLink` 連携）、および状態（`ACTIVE`, `RETURNED`, `OVERDUE`, `WAIVED`）を保持する。
 3. **期間重複貸与の絶対拒否と返却直後再貸与**: THE システム SHALL 同一資産に対して期間が重複する貸与（`actual_return_date` が NULL のアクティブ貸与が存在する状態での新規貸与、または指定期間が既存貸与区間と重複する貸与）を、DB制約およびトランザクション境界（行ロック `FOR UPDATE` + 期間重複判定）で確実に拒否（Fail-Closed）する。返却完了（`actual_return_date` 設定、ステータス `IN_STOCK` 復帰）直後の別要員への再貸与は正常に許可する。並行リクエストに対してもCAS/行ロックにより1件のみを成功させ、重複貸与を成立させない。
 4. **履歴の不変性 (Immutable Event History)**: THE システム SHALL 資産の登録、貸与、返却、移管、修理出入、紛失報告、リモートワイプ確認、廃棄等の全イベントを、改ざん不能な追記専用台帳（`t_asset_event`）へ記録する。過去のイベント履歴の上書き・物理削除は禁止する。
+5. **論理削除の安全条件 (Soft Delete Invariants)**: THE システム SHALL 以下の安全条件を遵守する。
+   - (a) **未返却貸与中の資産を論理削除してはならない**: `status IN ('ACTIVE', 'OVERDUE') AND actual_return_date IS NULL` の `t_asset_assignment` が存在する資産を `deleted_flag = 1` にすること（管理者操作を含む）は禁止する。論理削除前に必ず返却完了（`RETURNED`）または承認済みWAIVEDへの状態遷移が必要である。
+   - (b) **未失効アカウントを論理削除してはならない**: `status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN') AND revoke_confirmed_at IS NULL` の `t_external_account_reference` を `deleted_flag = 1` にすることは禁止する。失効確認（`revoke_confirmed_at IS NOT NULL`）または既存ApprovalEngineで承認された `EXCEPTION_HOLD` 状態への遷移が必要である。
+   - (c) **未解放ライセンス割当を論理削除してはならない**: `status = 'ACTIVE' OR released_date IS NULL` の `t_license_assignment` を `deleted_flag = 1` にすることは禁止する。ライセンス解放（`status = 'RELEASED'` かつ `released_date` 設定）が必要である。
+   - (d) **論理削除後も退社ブロッカー・期間排他・席数集計に影響しない**: MyBatis-Plus のグローバル論理削除フィルタ（`deleted_flag = 0`）により、上記 (a)〜(c) の条件違反によって論理削除された行が退社ゲート検査・期間重複チェック・`allocated_count` 計算から除外されることがないよう、論理削除前バリデーションで違反を事前に阻止する。
+   - (e) **資産廃棄は削除ではなく DISPOSED 状態遷移である**: `m_asset` の `deleted_flag` は管理者の明示的な台帳整理のみに使用し、資産廃棄は必ず `status = DISPOSED` への状態遷移 + イベント記録で表現する。
+   - (f) **貸与・account・licenseの歴史は終端状態で保持する**: `RETURNED`, `REVOKED`, `released_date IS NOT NULL` 等の終端状態に達した行は論理削除せず台帳上に残留させ、`t_asset_event` および `t_document_link` からの参照可能性を維持する。
 
 ---
 
@@ -54,8 +61,8 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 
 1. **認可母集団 (Data Scope)**:
    - 管理者 (`ROLE_管理者`): 全法人・全部署の全資産・外部アカウント・ライセンス・棚卸しを管理・閲覧・更新・エクスポート可能。
-   - マネージャー (`ROLE_マネージャー`): 管轄組織配下の要員に貸与されている資産および外部アカウントを閲覧可能。
-   - HR / 営業 (`ROLE_HR`, `ROLE_営業`): 既存 DataScope に準拠し、担当要員の貸与資産・アカウントを閲覧可能。
+   - マネージャー (`ROLE_マネージャー`): 管轄組織配下の要員に貸与されている資産および外部アカウントを閲覧可能。`owner_company_id` がNULLなら共有資産、非NULLなら管轄組織の `legal_entity_id` と一致する資産だけを許可する。
+   - HR / 営業 (`ROLE_HR`, `ROLE_営業`): 既存 DataScope に準拠し、担当要員の貸与資産・アカウントを閲覧可能。営業は現任 `t_engineer_sales` の担当要員を母集団とし、担当要員が解決できない場合は0件（fail-closed）とする。
    - 要員本人 (`ROLE_要員`): `/my/assets` および `/api/my/assets/**` において、自分自身に現在貸与されている資産情報、返却期日、およびアカウント参照のみを閲覧可能。内部原価、他者の貸与情報、全社資産台帳を閲覧・推測できない。
 2. **通知機能**: THE システム SHALL 資産返却期日の接近（7日前/3日前/当日）、返却期日超過（超過当日/毎週リマインド）、棚卸し期限接近、および外部アカウント失効未確認を、重複排除キー（Deduplication Key）を用いて対象者および管理担当者へ通知する。
 3. **監査ログ**: THE システム SHALL 資産の新規登録、属性更新、貸与、返却、紛失、廃棄、アカウント発行/失効確認の全操作を `t_asset_event` および `t_audit_log` に記録する。
@@ -64,7 +71,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 
 ## 3. 非機能要件・受入基準 (Non-Functional Requirements & Acceptance Criteria)
 
-1. **CR-01 認証・認可**: Spring Security の既存セッション/CSRF保護を適用し、画面・API・CSVエクスポート・通知・要員ポータルで同一のスコープ解決（`AssetScopeService`）を適用する。
+1. **CR-01 認証・認可**: Spring Security の既存セッション/CSRF保護を適用し、画面・API・CSVエクスポート・通知・要員ポータルで同一のスコープ解決（`AssetScopeService`）を適用する。資産APIの一覧・詳細・イベント・貸与履歴・CSV、外部アカウント/ライセンスの担当者別参照、およびDocument APIの詳細・downloadは、取得後のJava filterではなくSQL母集団または対象IDの認可検査を先に行う。未認証・未紐付け・空の許可集合を全件扱いしない。
 2. **CR-02 状態・競合・冪等性**:
    - 資産ステータス変更および貸与更新はバージョン楽観ロック（CAS）により保護する。
    - 同一資産への並行貸与リクエストに対して、マルチスレッド並行テストで確実に1件のみが成功し他方が409/業務例外で拒否されることを実証する。

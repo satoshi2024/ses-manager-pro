@@ -32,6 +32,46 @@
 
 ---
 
+## 1.5 論理削除の安全条件設計（AS-R1.5 対応）
+
+MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `removeById()` 呼び出しは論理削除（`deleted_flag = 1`）となり、以降の SELECT から自動的に除外される。これにより**退社ゲート・期間排他・ライセンス席数集計が実行時に誤った判断を行う可能性**がある。これを防ぐため以下の設計制約を適用する。
+
+### 1.5.1 論理削除前バリデーション（Fail-Closed）
+
+| 操作対象 | 禁止条件 | 拒否メソッド | 例外 |
+|---|---|---|---|
+| `m_asset` | `t_asset_assignment.status IN ('ACTIVE','OVERDUE') AND actual_return_date IS NULL` のレコードが存在する | `AssetService.softDeleteAsset(id)` | `BusinessException("未返却貸与が存在する...")` |
+| `t_external_account_reference` | `status IN ('ACTIVE','SUSPENDED','PENDING_CONFIRMATION','UNKNOWN') AND revoke_confirmed_at IS NULL` | `ExternalAccountService.softDeleteAccount(id)` | `BusinessException("未失効...")` |
+| `t_license_assignment` | `status = 'ACTIVE' OR released_date IS NULL` | `LicenseService.softDeleteAssignment(id)` | `BusinessException("未解放ライセンス...")` |
+
+論理削除操作は上記バリデーションを通過した場合のみ実行する。バリデーションは `@Transactional` スコープ内で行い、同時削除による TOCTOU を防ぐ。
+
+### 1.5.2 廃棄 vs 論理削除
+
+- **資産廃棄**: `AssetService.changeStatus(id, "DISPOSED", ...)` を使用。`t_asset_event` に `DISPOSED` イベントを追記し、`deleted_flag` は `0` のままとする（台帳上の証跡を維持する）。
+- **台帳整理（論理削除）**: 管理者が廃棄後の不要な資産マスタを台帳から物理的に見えなくする目的でのみ使用可能。`DISPOSED` 状態かつ ACTIVE 貸与ゼロの場合のみ許可。
+
+### 1.5.3 終端状態の保持
+
+`RETURNED` / `REVOKED` / `released_date IS NOT NULL` に達したレコードは論理削除せず台帳上に残留させる。`t_asset_event` および `t_document_link` からのリンクは `deleted_flag` に関係なく参照可能性を維持するため、履歴参照 API では `selectByIdIgnoreDelete` 相当のクエリを使用すること。
+
+---
+
+## 1.6 認可スコープ契約（P1-01 / P1-02 / P1-05 是正）
+
+`owner_company_id` は存在しない `m_company` の行IDではなく、既存 `m_organization_unit.legal_entity_id` と同じ法人スコープ値である。資産テーブルに新しい法人マスタや法人認可表は追加しない。NULLは全社共有を表すが、スコープユーザーの許可集合が空の場合にNULL資産を全件公開する意味ではない。
+
+| actor | 許可資産の導出 | fail-closed 条件 |
+|---|---|---|
+| 管理者 / HR | 全資産 | なし（メニュー権限は別ゲート） |
+| 営業 | 現任 `t_engineer_sales.sales_user_id = actor` の要員に対する未返却貸与、かつ owner法人がNULLまたはactorの主所属法人 | actorがDBで解決できない、担当要員0名、非NULL法人が不一致 |
+| マネージャー | 管轄組織の要員に対する未返却貸与、かつ owner法人がNULLまたは管轄組織の法人 | 所属/管理組織が解決できない、許可要員0名、非NULL法人が不一致 |
+| 要員 | 自身の貸与記録にリンクされた証跡文書、ポータルは自身の現在貸与のみ | ログイン要員リンクなし、他要員の資産、管理台帳API |
+
+一覧・count・detail・event・assignment history・CSV・通知・外部アカウント/ライセンスの担当者参照はこの同一母集団を使う。`DocumentLink(ASSET_ASSIGNMENT)` は実在する `t_document` → assignment → asset を検証し、リンクされたassignmentの記録上のassignee（要員自身）または現在の資産スコープが許可される場合だけ詳細/downloadを許可する。返却・移管で新しいassignmentが作られた場合、旧assignmentの文書権限は旧assigneeにのみ再評価され、新assigneeへ暗黙継承しない。
+
+---
+
 ## 2. データモデル・DDL設計
 
 ### 2.1 資産マスタ (`m_asset`)
@@ -43,7 +83,7 @@ CREATE TABLE m_asset (
     serial_no VARCHAR(128) COMMENT '製造番号/シリアルNo',
     asset_name VARCHAR(128) NOT NULL COMMENT '資産名称 (例: ThinkPad T14 Gen4)',
     category VARCHAR(32) NOT NULL COMMENT '資産区分: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER',
-    owner_company_id BIGINT COMMENT '所有法人ID (m_company.id)',
+    owner_company_id BIGINT COMMENT '所有法人のlegal_entity_id（m_organization_unit.legal_entity_id）。NULLは全社共有。m_companyは作らない',
     status VARCHAR(32) NOT NULL DEFAULT 'IN_STOCK' COMMENT 'IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, LOST, DISPOSED, RESERVED',
     location VARCHAR(128) COMMENT '保管場所/拠点',
     purchase_date DATE COMMENT '取得日',

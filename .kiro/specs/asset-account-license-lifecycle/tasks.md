@@ -2,6 +2,29 @@
 
 ---
 
+## Review follow-up（第4回Review P1是正）
+
+### Task R4.1: scope / DocumentLink / soft-delete 契約の再確定
+- **Status**: [ ] IN PROGRESS
+- **Objective**: `owner_company_id` の実体（`m_organization_unit.legal_entity_id`）を確定し、法人A/B・営業・マネージャー・要員の許可/拒否を同一スコープで定義する。存在しないDocument IDやリンク有無だけでDocumentアクセスを許可しない。論理削除は未返却貸与・未失効アカウント・未解放ライセンスを回避できない。
+- **Test requirements**: 実在 `t_document` と `ASSET_ASSIGNMENT` link を作り、detail/download/list の無関係要員403、返却/移管後の旧assignment文書再評価、法人A/B・管理組織・営業担当外・空集合のfail-closedを検証する。各削除条件とDISPOSED/REVOKED/RELEASED履歴保持を検証する。
+- **Demo / rollback**: `mvn -Dtest=AssetBoundaryAndLifecycleIntegrationTest,AssetApiRoleScopeIntegrationTest,DocumentApiControllerTest test`。失敗時は本Taskの実装・テスト・spec変更のみrevertする。
+
+### Task R4.2: 全Java secret scan とCR-01 consumer coverage
+- **Status**: [ ] IN PROGRESS
+- **Objective**: `src/main/java` 全Javaを対象に、ログ文言のキーワードではなく未マスクのsecret/PII値の式・multiline呼出し・監査payloadを検出する。資産/アカウント/ライセンスの一覧・詳細・event/history・CSV・通知・portalで同一scopeを適用する。
+- **Test requirements**: 既存の正当な状態ラベルを誤検知せず、`accountIdentifier` 等の未マスク値・例外連結・audit payloadを検出する静的テストを実行する。sales/manager/engineer/adminの肯定・否定系を各consumerで確認する。
+- **Demo / rollback**: secret scan と role-scope integration test の実行ログを台帳へ記録する。失敗時は対象変更をrevertする。
+
+### Task R4.3: independent evidence / M handoff
+- **Status**: [ ] PENDING
+- **Objective**: fast/MySQL実測を同一remote Headで再実行し、reconciliation・未返却一覧・secret scan結果・rollback/runbookをReviewへ引き渡す。証跡の未実測をPASSと記録しない。
+- **Test requirements**: Fast/MySQL各gateのskip=0、migration適用、並行貸与、license CAS、provider timeout、offboarding blocker/exception、inventory discrepancyを記録する。
+- **Demo / rollback**: `git ls-remote` と検証ログのHead一致を示す。runbookに手順・バックアップ復旧・ロールバック境界を残す。
+- **Rollback**: Review handoffのみ取り消す場合は台帳修正、実装を戻す場合はTask R4.1/R4.2のコミットを個別revertする。
+
+---
+
 ## 0. インベントリ調査 & DG-09 決定台帳の確定
 
 ### Task 0.1: 要件・設計・不変条件の策定と DG-09 決定台帳の作成

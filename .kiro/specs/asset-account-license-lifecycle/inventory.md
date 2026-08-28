@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **要員マスタ** | `t_engineer`, `EngineerService` | 貸与先 (`assignee_type = 'ENGINEER'`, `assignee_id = engineer.id`) | 退社ステータス (`status = '退社'`) との整合性確認 |
 | **内部ユーザー** | `sys_user`, `SysUserService` | 貸与先 (`assignee_type = 'USER'`, `assignee_id = sys_user.id`) | ユーザー無効化 (`status = 0`) 時の資産・アカウント確認 |
-| **法人・組織** | `m_company`, `m_organization` | 資産所有法人 (`owner_company_id`), 費用負担組織 (`cost_center_id`) | 法人別資産集計、組織別ライセンス費用配賦 |
+| **法人・組織** | `m_organization_unit` | 資産所有法人 (`owner_company_id` = `legal_entity_id`), 費用負担組織 (`cost_center_id`) | 法人別資産集計、組織別ライセンス費用配賦 |
 | **法定文書・証跡** | `t_document`, `DocumentService` | 受渡し・返却時の受領書・誓約書 (`handover_evidence_doc_id`, `return_evidence_doc_id`) | `DocumentLink` 構造に準拠、独自ファイル保存カラムを作らない |
 | **退社ワークフロー** | `engineer-lifecycle-workflow` (NF-01) | 退社ゲートでの未返却資産・未失効アカウント blocker 検査 | `RESIGN_ASSET_RETURN` 阻害タスクの判定元データとして提供 |
 | **内部統制・承認** | `ApprovalEngineService` | 資産未返却・アカウント未失効のまま退社させる場合の例外承認 | `RequestType = LIFECYCLE_EXCEPTION`, 二者承認 |
@@ -25,7 +25,7 @@
   - `SECURITY_KEY`: FIDO2/Passkey ハードウェアトークン
   - `OTHER`: ポケットWi-Fi、周辺機器、その他
 - **所有法人 (`owner_company_id`)**:
-  - `m_company` テーブルの法人IDを外部キーとして参照。NULLの場合は「全社共通（自社保有）」として扱う。
+  - `m_company` は存在しないため新設せず、`m_organization_unit.legal_entity_id` と同値の法人スコープ値を保持する。NULLの場合は「全社共通（自社保有）」として扱うが、空の許可集合を全件公開に使わない。
 - **棚卸し頻度**:
   - 定期棚卸しは **半期に1回（年2回: 3月末・9月末基準日）** を標準とし、任意タイミングでの臨時棚卸しも実施可能とする。
 
