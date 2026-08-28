@@ -14,7 +14,7 @@
 | T1 | NF-10 inventory、正本再利用、scope/time/document/outbox/backup 対応 | 完了 | `inventory.md`、`requirements.md`、`design.md` | `86826538` |
 | T2 | sample snapshot spec | 完了 | `sample-snapshot-spec.md`、actual/forecast、cutoff、timezone、freshness、scope、source hash、section status | `86826538` |
 | T3 | 最新Base取り込みとapproved plan/spec/tasks昇格 | 完了 | `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、中央traceability、承認済みspec | `a86af3f30f89feff28e88bf4dda5e10974852cdd` |
-| F1 | template/version/schedule/run/snapshot/delivery DDL | 完了 | `V112__scheduled_management_reporting.sql`、`V113__scheduled_management_report_audit.sql`、H2 schema、7 entity/mapper | `9b342c79d8495ce52e81d1c2a862d603f3b8581a` / `b4b8c3b1`。compile成功、AllMappersSchemaSweepTest 175/175、fresh/legacy MySQL migration smoke 5/5 |
+| F1 | template/version/schedule/run/snapshot/delivery DDL | 完了 | `V112`/`V113`/`V114`、H2 schema、7 entity/mapper | `9b342c79` / `b4b8c3b1` / `e6a9ea27`。AllMappersSchemaSweepTest 175/175、MySQL Flyway smoke latest=114 |
 | F2 | snapshot orchestration | 完了 | `ReportSnapshotServiceImpl`、`ReportRecipientPreviewServiceImpl`、保存scope、明示system principal、再生成version、生成直前の現在entity scope再解決、現在日付での再認可、append-only section attempt監査 | `fde702a1` / `573cf60b` / `19f1aacb` / `b4b8c3b1` / `88cc779f`、snapshot 7/7、recipient scope 2/2、合同gate 256/256 |
 | A1 | template/preview/run UI | 完了 | `ManagementReportApiController`、`management-reports/index.html`、draft version作成/編集/公開、静的role境界、preview hash必須、画面ID契約 | `fde702a1` / `c7d73a43` / `88cc779f`、`MobileResponsiveLayoutTest` 29/29、`ReportTemplateServiceImplTest` 2/2 |
 | B1 | document | 完了 | `ReportDocumentServiceImpl`、PDF/XLSX/CSV renderer、DocumentService登録API | `b36f91a7`、`ReportDocumentServiceImplTest` 3/3 |
@@ -29,7 +29,7 @@
 - 観測 base: `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 承認Base: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 取り込みcommit: `a86af3f30f89feff28e88bf4dda5e10974852cdd`
-- 実装fix milestone remote Head: `e6a9ea279bf3a4c51a2dbaf8c5b090b085d83396`（Review P1指摘修正。取消/配信UI/UtilizationCalcService確定口径/V114 lease/contract test/document TX分離）。
+- 実装fix milestone remote Head: handoff直前の `git ls-remote origin refs/heads/codex/scheduled-management-reporting` 観測値（Flyway smoke 114 pin含む）。
 - Review 入力: 本ディレクトリの承認済みrequirements/design/tasks、inventory、sample snapshot
 - Review 判定: 実装対話ではPRを作成しない。上記のapproved plan/spec/tasksと本completion matrixを独立Reviewへ渡し、PLAN/IMPLEMENTATIONの双方PASS後だけPR作成可否を判断する。
 
@@ -44,7 +44,7 @@
 - snapshot/retry/regeneration: 同一run retryは成功sectionを再生成せず、明示regenerationは新version/runと親runを作り、schedule初回実行は保存cronの次回発火時刻から開始する。section failureは`PARTIAL`/配布停止。
 - scheduler/delivery: ShedLock＋DB CASの二重claim、preview hash、scope変更download拒否、期限切れlink、再認証、attempt 5のDLQ、manual replay、notification dedupeを検証。delivery previewは保存済みdelivery tokenを必須とし、enqueue直後は`ENQUEUED`、outbox dispatcherのSENT/RETRY/FAILEDをdeliveryへ同期する。section retryはV113のappend-only attemptへ保持する。
 - document/backup: PDF/XLSX/CSVは同一snapshot入力、backup integrationのrestore、validate-restore、target marker、cutover rollback、RPO/RTO (`rpo_ok=true`, `rto_ok=true`)、secret scan 0を確認。NF-10固有restore smokeで`t_report_run` snapshot version/scope hash、section snapshot/append-only attempt、Document/DocumentVersion hash/version、outbox/delivery linkを復元後に検証した。integration evidence SHAは `c31a8fea8bc6e94267c03326bb5fd9990292b2201bddf619210ff49cdd4b9aaa`（summary）、`d783cf369c8bfa8812a57d6d870c5512b5709db6c8fd504c36c0194970aa3afe`（validate）、`e119f02f146a35ef582dce7f3e9541602b1b5d6a0051b8091ee6c804cc6627cd`（restore）、`2c0a0061ae9f2a492429c5da4d14d68440b7ba13a299bbfd5569a466fee47ef1`（NF-10 report restore contract）。
-- UI/performance: `MobileResponsiveLayoutTest` 29/29、`ReportTemplateServiceImplTest` 2/2、performance 1/1（直近証跡`p95=64ms`）。専用browser testはJava 21のloopback制約でTomcat起動前に失敗し、desktop/390px screenshotは未生成。既存loopback系を含むfull fast/MySQL実行は同じ環境制約で赤となったが、feature-specific failuresは0、V112/V113 MySQL smokeは5/5。画面のversion作成/編集/公開とpreview/run DOM ID契約は`managementReportApp`、`reportPreviewBtn`、`runResult`に統一済み。
+- UI/performance: `MobileResponsiveLayoutTest` 30/30、`ReportTemplateServiceImplTest` 2/2、performance 1/1（直近証跡`p95=64ms`）。専用browser testはJava 21のloopback制約でTomcat起動前に失敗し、desktop/390px screenshotは未生成。feature-specific failuresは0、V112–V114 MySQL Flyway smokeはlatest=114で5/5。
 - backup unit: preflight 59、quiesce/lock/uploads 45、full backup/manifest 36、binlog 61、watermark 29、restore flow 31、restore plan 44、restore validation 32、cutover/rollback 31、retention 55、target guard 22、harness 8（各 `failures=0`）。
 
 ## Rollback

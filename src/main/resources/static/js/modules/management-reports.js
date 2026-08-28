@@ -79,13 +79,19 @@ function viewRun(runId) {
     });
 }
 
+function isReportAdmin() {
+    const raw = $('#managementReportApp').attr('data-admin');
+    return raw === 'true' || raw === true;
+}
+
 function loadDeliveries(runId) {
     $.get(`/api/management-reports/runs/${runId}/deliveries`, function (res) {
         if (res.code !== 200) return;
         const deliveries = res.data || [];
         if (deliveries.length === 0) return;
+        const admin = isReportAdmin();
         const rows = deliveries.map(d => `<div class="small text-muted">delivery #${d.id}: ${SES.escapeHtml(d.deliveryStatus || '')} / recipient=${d.recipientUserId}
-            ${d.deliveryStatus !== 'CANCELLED' ? `<button class="btn btn-outline-danger btn-sm ms-2" onclick="cancelDelivery(${d.id}, ${runId})">取消</button>` : ''}</div>`).join('');
+            ${admin && d.deliveryStatus !== 'CANCELLED' ? `<button class="btn btn-outline-danger btn-sm ms-2" onclick="cancelDelivery(${d.id}, ${runId})">取消</button>` : ''}</div>`).join('');
         $('#runResult').append(`<div class="mt-2">${rows}</div>`);
     });
 }

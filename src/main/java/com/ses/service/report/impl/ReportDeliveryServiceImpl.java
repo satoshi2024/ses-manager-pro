@@ -79,7 +79,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             for (ReportRecipientPreview recipient : preview.getRecipients()) {
                 if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
                 ReportDelivery delivery = find(runId, recipient.getRecipientUserId());
-                if (delivery != null) {
+                if (delivery != null && !"CANCELLED".equals(delivery.getDeliveryStatus())) {
                     deliveries.add(delivery);
                     continue;
                 }

@@ -55,10 +55,10 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=113（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version=114（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("113", latestVersion, "最新のマイグレーションバージョンは113であること");
+            assertEquals("114", latestVersion, "最新のマイグレーションバージョンは114であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -74,6 +74,8 @@ class FlywaySelfServiceSchemaSmokeTest {
             assertColumnExists(statement, "m_report_template_version", "updated_at");
             assertColumnExists(statement, "m_report_schedule", "scope_hash");
             assertColumnExists(statement, "m_report_schedule", "retry_scheduled_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
             assertColumnExists(statement, "t_report_run", "snapshot_version");
             assertColumnExists(statement, "t_report_delivery", "reauth_required");
             assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
@@ -301,7 +303,7 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("113", latestVersion, "legacy DBの最新マイグレーションバージョンは113であること");
+            assertEquals("114", latestVersion, "legacy DBの最新マイグレーションバージョンは114であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -315,6 +317,8 @@ class FlywaySelfServiceSchemaSmokeTest {
                 assertTableExists(statement, table);
             }
             assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
+            assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
             assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
             assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");

@@ -132,6 +132,36 @@ class ReportDeliveryServiceImplTest {
     }
 
     @Test
+    void deliverはCANCELLEDの既存deliveryを再issueする() {
+        ReportRun run = readyRun();
+        when(runMapper.selectById(10L)).thenReturn(run);
+        ReportRecipientPreview recipient = new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope");
+        when(previewService.previewForRun(run)).thenReturn(preview(recipient));
+        ReportDelivery existing = new ReportDelivery();
+        existing.setId(71L);
+        existing.setRunId(10L);
+        existing.setRecipientUserId(2L);
+        existing.setDeliveryStatus("CANCELLED");
+        existing.setAttemptCount(1);
+        when(deliveryMapper.selectOne(any())).thenReturn(existing);
+        Document document = new Document();
+        document.setId(20L);
+        DocumentVersion version = new DocumentVersion();
+        version.setVersionNo(1);
+        when(documentRegistrar.registerArtifact(10L, "PDF"))
+                .thenReturn(new ReportDocumentArtifact(10L, "PDF", "hash", document, version));
+
+        ReportDeliveryResult result = service.deliver(10L, "preview-hash");
+
+        assertThat(result.getDeliveries()).hasSize(1);
+        assertThat(result.getDeliveries().get(0).getDeliveryStatus()).isEqualTo("ENQUEUED");
+        assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
+        verify(deliveryMapper, atLeastOnce()).updateById(existing);
+        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+                contains("/download?token="), any(), eq("management-report"));
+    }
+
+    @Test
     void downloadRejectsExpiredLinkBeforeOpeningDocument() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
