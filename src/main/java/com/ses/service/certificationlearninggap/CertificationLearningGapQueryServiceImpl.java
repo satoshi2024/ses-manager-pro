@@ -299,7 +299,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
         return new CertificationLearningGapCertificationDto(record.getId(), record.getCertificationId(),
                 master == null ? null : master.getDisplayName(), record.getAcquiredOn(), record.getExpiresOn(),
                 record.getRecordState(), effectiveState, record.getCurrentFlag(), record.getCertificateNumberMasked(), raw,
-                canViewFullNumber, evidenceViews(record.getId()));
+                canViewFullNumber, record.getVersion(), evidenceViews(record.getId()));
     }
 
     private List<CertificationEvidenceView> evidenceViews(Long recordId) {

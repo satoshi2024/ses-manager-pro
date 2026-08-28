@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security"
       layout:decorate="~{layout/base}">
 <head>
     <title>資格・学習・スキルギャップ - SES Manager Pro</title>
@@ -18,6 +19,8 @@
 </head>
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
+    <span sec:authorize="hasAnyRole('管理者','HR')" id="cert-gap-cert-write" class="d-none"></span>
+    <span sec:authorize="hasAnyRole('管理者','HR','マネージャー')" id="cert-gap-training-write" class="d-none"></span>
     <div class="d-flex justify-content-between align-items-center mb-4 cert-gap-header">
         <h2 class="h3 mb-0 text-light"><i class="bi bi-mortarboard me-2 text-primary"></i>資格・学習・スキルギャップ</h2>
         <div class="cert-gap-actions">
@@ -91,9 +94,27 @@
     <div class="modal fade" id="cert-gap-detail-modal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content bg-card border-dark">
             <div class="modal-header border-dark"><h5 id="cert-gap-detail-title" class="modal-title text-light">詳細</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="閉じる"></button></div>
-            <div id="cert-gap-detail-body" class="modal-body text-light"></div>
+    <div id="cert-gap-detail-body" class="modal-body text-light"></div>
         </div></div>
     </div>
+
+    <div sec:authorize="hasAnyRole('管理者','HR')" id="cert-gap-catalog-panel" class="row g-3 mt-1">
+        <div class="col-12 col-xl-6">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-header border-dark text-light d-flex justify-content-between align-items-center"><span>資格master</span><button type="button" class="btn btn-sm btn-outline-primary" onclick="openCertificationMasterForm()">新規登録</button></div>
+                <div class="table-responsive"><table class="table table-dark table-sm mb-0"><thead><tr><th>資格名</th><th>発行元</th><th>期限</th><th>状態</th><th></th></tr></thead><tbody id="cert-gap-master-body"></tbody></table></div>
+            </div>
+        </div>
+        <div class="col-12 col-xl-6">
+            <div class="card bg-card border-dark shadow-sm">
+                <div class="card-header border-dark text-light d-flex justify-content-between align-items-center"><span>研修course catalog</span><button type="button" class="btn btn-sm btn-outline-primary" onclick="openTrainingCourseForm()">新規登録</button></div>
+                <div class="table-responsive"><table class="table table-dark table-sm mb-0"><thead><tr><th>course</th><th>提供元</th><th>費用</th><th>対象canonical skill</th><th></th></tr></thead><tbody id="cert-gap-course-body"></tbody></table></div>
+            </div>
+        </div>
+    </div>
+
+    <div sec:authorize="hasAnyRole('管理者','HR')" class="modal fade" id="cert-gap-master-modal" tabindex="-1" aria-hidden="true"><div class="modal-dialog"><div class="modal-content bg-card border-dark"><div class="modal-header border-dark"><h5 class="modal-title text-light">資格master</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="cert-gap-master-id" type="hidden"><input id="cert-gap-master-name" class="form-control mb-2" placeholder="資格名" required><input id="cert-gap-master-issuer" class="form-control mb-2" placeholder="発行元"><input id="cert-gap-master-code" class="form-control mb-2" placeholder="外部資格コード"><select id="cert-gap-master-expiry-type" class="form-select mb-2"><option value="NONE">期限なし</option><option value="FIXED_MONTHS">取得日から月数</option></select><input id="cert-gap-master-expiry-months" class="form-control mb-2" type="number" min="1" placeholder="期限月数"><input id="cert-gap-master-rule-version" class="form-control mb-2" type="number" min="1" value="1" placeholder="規則version"><select id="cert-gap-master-active" class="form-select"><option value="1">有効</option><option value="0">無効</option></select></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="saveCertificationMaster()">保存</button></div></div></div></div>
+    <div sec:authorize="hasAnyRole('管理者','HR')" class="modal fade" id="cert-gap-course-modal" tabindex="-1" aria-hidden="true"><div class="modal-dialog modal-lg"><div class="modal-content bg-card border-dark"><div class="modal-header border-dark"><h5 class="modal-title text-light">研修course catalog</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="cert-gap-course-id" type="hidden"><div class="row g-2"><div class="col-md-6"><input id="cert-gap-course-name" class="form-control" placeholder="course名" required></div><div class="col-md-6"><input id="cert-gap-course-provider" class="form-control" placeholder="提供元" required></div><div class="col-md-4"><input id="cert-gap-course-cost" class="form-control" type="number" min="0" step="1" placeholder="税込費用（円）" required></div><div class="col-md-4"><input id="cert-gap-course-period" class="form-control" type="number" min="0" placeholder="期間（日）"></div><div class="col-md-4"><input id="cert-gap-course-capacity" class="form-control" type="number" min="0" placeholder="定員"></div></div><textarea id="cert-gap-course-description" class="form-control my-2" placeholder="説明"></textarea><label for="cert-gap-course-skills" class="form-label text-muted small">対象canonical skill（複数選択）</label><select id="cert-gap-course-skills" class="form-select" multiple size="8"></select></div><div class="modal-footer"><button type="button" class="btn btn-primary" onclick="saveTrainingCourse()">保存</button></div></div></div></div>
 </div>
 <th:block layout:fragment="page-js">
     <script th:src="@{/js/modules/certification-learning-skill-gap.js}"></script>

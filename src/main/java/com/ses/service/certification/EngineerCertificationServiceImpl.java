@@ -340,6 +340,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                 .expiresOn(record.getExpiresOn())
                 .recordState(record.getRecordState())
                 .currentFlag(record.getCurrentFlag())
+                .version(record.getVersion())
                 .certificateNumberMasked(canViewFullNumber && StringUtils.hasText(plaintextIfAllowed)
                         ? plaintextIfAllowed : masked)
                 .canViewFullNumber(canViewFullNumber)

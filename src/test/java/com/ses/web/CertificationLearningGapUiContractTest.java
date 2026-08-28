@@ -23,6 +23,12 @@ class CertificationLearningGapUiContractTest {
         assertTrue(js.contains("/api/certification-learning-gap"));
         assertTrue(js.contains("/api/certification-learning-gap/"));
         assertTrue(js.contains("/api/certification-learning-gap/export"));
+        assertTrue(js.contains("masters/certifications"));
+        assertTrue(js.contains("masters/courses"));
+        assertTrue(js.contains("verifyCertificationRecord"));
+        assertTrue(js.contains("rejectCertificationRecord"));
+        assertTrue(html.contains("cert-gap-catalog-panel"));
+        assertTrue(html.contains("cert-gap-course-skills"));
         assertTrue(js.contains("SES.escapeHtml"));
     }
 }

@@ -19,6 +19,7 @@ public class EngineerCertificationViewDto {
     private LocalDate expiresOn;
     private String recordState;
     private Integer currentFlag;
+    private Integer version;
     private String certificateNumberMasked;
     private boolean canViewFullNumber;
 }

@@ -16,5 +16,6 @@ public record CertificationLearningGapCertificationDto(
         String certificateNumberMasked,
         String certificateNumber,
         boolean canViewFullNumber,
+        Integer version,
         List<CertificationEvidenceView> evidences) {
 }
