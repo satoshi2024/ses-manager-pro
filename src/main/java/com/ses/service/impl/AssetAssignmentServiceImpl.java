@@ -28,6 +28,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
     private final AssetAssignmentMapper assetAssignmentMapper;
     private final AssetMapper assetMapper;
     private final AssetEventService assetEventService;
+    private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
 
     @Override
     @Transactional
@@ -82,6 +83,15 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
                 .createdBy(actorUserId)
                 .build();
         save(assignment);
+
+        // DocumentLink 連携（受渡証跡）
+        if (handoverEvidenceDocId != null) {
+            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
+            link.setDocumentId(handoverEvidenceDocId);
+            link.setTargetType("ASSET_ASSIGNMENT");
+            link.setTargetId(assignment.getId());
+            documentLinkMapper.insert(link);
+        }
 
         // 4. 資産ステータスを ASSIGNED に更新
         int updated = assetMapper.updateStatusWithCas(assetId, "IN_STOCK", "ASSIGNED", asset.getVersion());
@@ -141,6 +151,15 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
             assignment.setNote(StringUtils.hasText(assignment.getNote()) ? assignment.getNote() + " / " + note : note);
         }
         updateById(assignment);
+
+        // DocumentLink 連携（返却証跡）
+        if (returnEvidenceDocId != null) {
+            com.ses.entity.DocumentLink link = new com.ses.entity.DocumentLink();
+            link.setDocumentId(returnEvidenceDocId);
+            link.setTargetType("ASSET_ASSIGNMENT");
+            link.setTargetId(assignment.getId());
+            documentLinkMapper.insert(link);
+        }
 
         // 3. 資産ステータスを IN_STOCK に復帰（現在 ASSIGNED の場合のみ）
         if ("ASSIGNED".equals(asset.getStatus())) {

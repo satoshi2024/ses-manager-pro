@@ -325,39 +325,127 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(waivedResult.isWaived()).isTrue();
     }
 
+    @Autowired
+    private com.ses.mapper.DocumentLinkMapper documentLinkMapper;
+
+    @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private EngineerAccountLinkService engineerAccountLinkService;
+
     @Test
-    @DisplayName("Boundary 6: Multi-corporation & Organization Unit Scope Isolation")
+    @DisplayName("Boundary 6: Multi-corporation & Organization Unit Scope Isolation (法人A/B・営業・要員分離)")
     void testOrganizationScopeAndMultiCorporationIsolation() {
+        // 1. 法人A (companyId=10L) と 法人B (companyId=20L) の資産作成
         Asset assetCorpA = Asset.builder()
-                .assetTag("AST-CORP-A-001")
+                .assetTag("AST-CORP-A-999")
                 .assetName("Corp A MacBook Pro")
                 .category("PC")
+                .ownerCompanyId(10L)
                 .status("IN_STOCK")
                 .build();
         assetService.createAsset(assetCorpA, 1L);
 
-        // 管理者 / 本部スコープでのアクセス可否確認
+        Asset assetCorpB = Asset.builder()
+                .assetTag("AST-CORP-B-999")
+                .assetName("Corp B ThinkPad")
+                .category("PC")
+                .ownerCompanyId(20L)
+                .status("IN_STOCK")
+                .build();
+        assetService.createAsset(assetCorpB, 1L);
+
+        // 2. 営業ユーザーと要員ユーザー作成
+        SysUser userSalesA = SysUser.builder()
+                .username("sales.user.a")
+                .password("pass")
+                .role("営業")
+                .status(1)
+                .build();
+        sysUserMapper.insert(userSalesA);
+
+        // 3. 管理者/HRは全資産を閲覧可能
         assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "管理者", 1L)).isTrue();
+        assertThat(assetScopeService.isAccessible(assetCorpB.getId(), "管理者", 1L)).isTrue();
+
+        // 4. 要員A (engineerId=8801L) に貸与
+        AssetAssignment asA = assetAssignmentService.createAssignment(
+                assetCorpA.getId(), "ENGINEER", 8801L, LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
+
+        // 要員Aのユーザーとリンク
+        SysUser userEngA = SysUser.builder()
+                .username("eng8801")
+                .password("pass")
+                .role("要員")
+                .status(1)
+                .build();
+        sysUserMapper.insert(userEngA);
+        engineerAccountLinkService.link(8801L, userEngA.getId(), 1L);
+
+        // 要員Bのユーザー (engineerId=8802L)
+        SysUser userEngB = SysUser.builder()
+                .username("eng8802")
+                .password("pass")
+                .role("要員")
+                .status(1)
+                .build();
+        sysUserMapper.insert(userEngB);
+        engineerAccountLinkService.link(8802L, userEngB.getId(), 1L);
+
+        // 5. 要員スコープ検証: 要員Aは自己貸与資産のみ可視、他要員の貸与資産・未貸与資産は不可視
+        assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "要員", userEngA.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(assetCorpB.getId(), "要員", userEngA.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(assetCorpA.getId(), "要員", userEngB.getId())).isFalse();
     }
 
     @Test
-    @DisplayName("Boundary 7: Document evidence scope & invalid organization access rejection")
+    @DisplayName("Boundary 7: Document evidence scope & DocumentLink linkage verification")
     void testDocumentEvidenceScopeRejection() {
         Asset asset = Asset.builder()
-                .assetTag("AST-EVID-001")
-                .assetName("Evidence Device")
+                .assetTag("AST-DOCLINK-001")
+                .assetName("Evidence Test MacBook")
                 .category("PC")
+                .ownerCompanyId(10L)
                 .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
 
-        // 貸与（証跡DocId=8888L）
-        AssetAssignment assignment = assetAssignmentService.createAssignment(
-                asset.getId(), "ENGINEER", 8888L, LocalDate.now(), LocalDate.now().plusMonths(1), 8888L, "受領書添付", 1L);
-        assertThat(assignment.getHandoverEvidenceDocId()).isEqualTo(8888L);
+        Long evidenceDocId = 9991L;
 
-        // 異なる要員/無関係なユーザーによるスコープ検証
-        boolean isPermitted = assetScopeService.isAccessible(asset.getId(), "要員", 9999L);
+        // 1. 貸与（証跡DocId=9991Lを指定）
+        AssetAssignment assignment = assetAssignmentService.createAssignment(
+                asset.getId(), "ENGINEER", 8801L, LocalDate.now(), LocalDate.now().plusMonths(1), evidenceDocId, "受領書添付", 1L);
+        assertThat(assignment.getHandoverEvidenceDocId()).isEqualTo(evidenceDocId);
+
+        // 2. t_document_link に ASSET_ASSIGNMENT リンクが登録されていることを検証
+        List<Long> linkedDocIds = documentLinkMapper.findDocumentIdsByTarget("ASSET_ASSIGNMENT", assignment.getId());
+        assertThat(linkedDocIds).contains(evidenceDocId);
+
+        List<DocumentLink> links = documentLinkMapper.findByDocumentId(evidenceDocId);
+        assertThat(links).isNotEmpty();
+        assertThat(links.get(0).getTargetType()).isEqualTo("ASSET_ASSIGNMENT");
+        assertThat(links.get(0).getTargetId()).isEqualTo(assignment.getId());
+
+        // 3. 返却時（返却証跡DocId=9992Lを指定）
+        Long returnDocId = 9992L;
+        AssetAssignment returned = assetAssignmentService.returnAssignment(
+                assignment.getId(), LocalDate.now(), returnDocId, "返却受領書添付", 1L);
+        assertThat(returned.getReturnEvidenceDocId()).isEqualTo(returnDocId);
+
+        List<Long> returnLinkedDocs = documentLinkMapper.findDocumentIdsByTarget("ASSET_ASSIGNMENT", assignment.getId());
+        assertThat(returnLinkedDocs).contains(evidenceDocId, returnDocId);
+
+        // 4. 無関係な要員・担当外ユーザーからのアクセス拒否を検証
+        SysUser foreignUser = SysUser.builder()
+                .username("foreign.user")
+                .password("pass")
+                .role("要員")
+                .status(1)
+                .build();
+        sysUserMapper.insert(foreignUser);
+
+        boolean isPermitted = assetScopeService.isAccessible(asset.getId(), "要員", foreignUser.getId());
         assertThat(isPermitted).isFalse();
     }
 }

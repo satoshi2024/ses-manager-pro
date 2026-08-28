@@ -3,7 +3,6 @@ package com.ses.service;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
@@ -15,7 +14,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DisplayName("Comprehensive Secret Scan Test (DDL・Entity・DTO・HTML・JS・Log 秘密非保存全方位スキャン)")
+@DisplayName("Comprehensive Secret Scan Test (DDL・Entity・DTO・HTML・JS・Log・Exception 秘密非保存全方位スキャン)")
 class AssetComprehensiveSecretScanTest {
 
     private static final List<String> FORBIDDEN_KEYWORDS = List.of(
@@ -117,31 +116,42 @@ class AssetComprehensiveSecretScanTest {
     }
 
     @Test
-    @DisplayName("4. Scan Service and Controller source files for unmasked secret logging")
+    @DisplayName("4. Scan Service, Controller & Exception source files for unmasked secret logging & exception leakage")
     void scanServiceLogsAndExceptions() throws IOException {
-        Path serviceDir = Paths.get("src/main/java/com/ses/service/impl");
+        List<Path> scanDirs = List.of(
+                Paths.get("src/main/java/com/ses/service/impl"),
+                Paths.get("src/main/java/com/ses/controller/api")
+        );
         List<String> violations = new ArrayList<>();
 
-        try (Stream<Path> stream = Files.walk(serviceDir)) {
-            stream.filter(p -> p.toString().endsWith(".java") && p.getFileName().toString().contains("Asset") || p.getFileName().toString().contains("ExternalAccount") || p.getFileName().toString().contains("License"))
-                    .forEach(p -> {
-                        try {
-                            List<String> lines = Files.readAllLines(p, StandardCharsets.UTF_8);
-                            for (int i = 0; i < lines.size(); i++) {
-                                String line = lines.get(i);
-                                // 平文の accountIdentifier をマスクなしで log.info / warn に直接渡していないか検査
-                                if (line.contains("log.info") && line.contains("accountIdentifier") && !line.contains("maskIdentifier") && !line.contains("//")) {
-                                    violations.add(p.getFileName() + ": Line " + (i + 1) + ": " + line.trim());
+        for (Path dir : scanDirs) {
+            if (!Files.exists(dir)) continue;
+            try (Stream<Path> stream = Files.walk(dir)) {
+                stream.filter(p -> p.toString().endsWith(".java") && (p.getFileName().toString().contains("Asset") || p.getFileName().toString().contains("ExternalAccount") || p.getFileName().toString().contains("License")))
+                        .forEach(p -> {
+                            try {
+                                List<String> lines = Files.readAllLines(p, StandardCharsets.UTF_8);
+                                for (int i = 0; i < lines.size(); i++) {
+                                    String line = lines.get(i);
+                                    // ログ出力の検査
+                                    if ((line.contains("log.info") || line.contains("log.warn") || line.contains("log.error") || line.contains("log.debug"))
+                                            && line.contains("accountIdentifier") && !line.contains("maskIdentifier") && !line.contains("//")) {
+                                        violations.add(p.getFileName() + ": Line " + (i + 1) + " (Log): " + line.trim());
+                                    }
+                                    // 例外メッセージの検査
+                                    if (line.contains("throw new BusinessException") && (line.contains("password") || line.contains("token") || line.contains("secret"))) {
+                                        violations.add(p.getFileName() + ": Line " + (i + 1) + " (Exception): " + line.trim());
+                                    }
                                 }
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
                             }
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
+                        });
+            }
         }
 
         assertThat(violations)
-                .withFailMessage("Found unmasked logging in asset services: %s", violations)
+                .withFailMessage("Found unmasked logging or secret leakage in asset services/controllers: %s", violations)
                 .isEmpty();
     }
 }

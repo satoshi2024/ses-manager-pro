@@ -53,7 +53,7 @@
 ### Task F1.3: 包括的シークレットスキャン検証 (No Secrets Policy)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R2.3`, `CR-04`, `CR-06`
-- **Objective**: リフレクションおよびファイルスキャンを用いて、Entity/DTO、DDL列定義、HTML inputタグ、JS payload、サービス内ログ・例外メッセージにパスワード・APIトークン・平文シークレット等が含まれていないことを自動検証する。
+- **Objective**: リフレクションおよびファイル走査を用いて、Entity/DTO、DDL列定義、HTML inputタグ、JS payload、サービス・コントローラー内ログ・例外メッセージにパスワード・APIトークン・平文シークレット等が含まれていないことを自動検証する。
 - **実装内容**:
   - `src/test/java/com/ses/service/AssetComprehensiveSecretScanTest.java` (4テストメソッド)
   - `src/test/java/com/ses/service/AssetSecretFieldScanTest.java`
@@ -61,25 +61,27 @@
   - `scanEntityAndDtoFields`: secretフィールド 0件アサート
   - `scanDdlMigrationFiles`: DDL秘密列 0件アサート
   - `scanHtmlAndJsFiles`: UI秘密input 0件アサート
-  - `scanServiceLogsAndExceptions`: ログ出力における平文アカウント識別子直接出力 0件アサート
+  - `scanServiceLogsAndExceptions`: 全Javaファイル走査で平文アカウント識別子直接ログ出力・例外シークレット漏洩 0件アサート
 - **手動 Demo と証跡**: `mvn test -Dtest=AssetComprehensiveSecretScanTest` (4/4 PASS)
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
 
 ---
 
-## F2. ドメインサービス & 期間排他 & 席数CAS & イベント台帳
+## F2. ドメインサービス & 期間排他 & 席数CAS & イベント台帳 & DocumentLink
 
-### Task F2.1: 資産管理サービス & 不変イベント台帳
+### Task F2.1: 資産管理サービス & 不変イベント台帳 & DocumentLink 連携
 - **Status**: [x] COMPLETED
-- **Requirements ID**: `AS-R1.1`, `AS-R1.4`, `AS-R4.3`
-- **Objective**: 資産CRUD、ステータス6区分CAS（`IN_STOCK`, `ASSIGNED`, `UNDER_MAINTENANCE`, `LOST`, `DISPOSED`, `RESERVED`）、および改ざん不能な追記専用イベント台帳（`t_asset_event`）を実装する。
+- **Requirements ID**: `AS-R1.1`, `AS-R1.4`, `AS-R4.3`, `CR-03`
+- **Objective**: 資産CRUD、ステータス6区分CAS（`IN_STOCK`, `ASSIGNED`, `UNDER_MAINTENANCE`, `LOST`, `DISPOSED`, `RESERVED`）、改ざん不能な追記専用イベント台帳（`t_asset_event`）、および証跡文書の `DocumentLink` (`t_document_link`) 登録を実装する。
 - **実装内容**:
   - `AssetService`, `AssetServiceImpl`
   - `AssetEventService`, `AssetEventServiceImpl`
+  - `AssetAssignmentServiceImpl` (受渡・返却証跡の `t_document_link` 登録)
 - **Test 要件と assertion**:
   - `AssetServiceTest.testAssetLifecycleAndEventHistory`: 資産作成・ステータス更新に伴い `t_asset_event` に追記ログが確実に生成されることのアサート
-- **手動 Demo と証跡**: テスト実行ログ (`Asset event recorded: assetId=...`)
+  - `AssetBoundaryAndLifecycleIntegrationTest.testDocumentEvidenceScopeRejection`: `t_document_link` 登録と無関係要員からのアクセス拒否アサート
+- **手動 Demo と証跡**: テスト実行ログ
 - **Rollback**: サービス実装の revert
 - **未検証事項**: なし
 
@@ -230,7 +232,11 @@
   - `scripts/test-suites/mysql-shard-1.txt` 登録
 - **Test 要件と assertion**:
   - `MySqlTestShardInventoryTest.testInventoryMatchesTaggedClasses`: PASS
-- **手動 Demo と証跡**: `mvn test -Dtest=MySqlTestShardInventoryTest` (1/1 PASS)
+  - `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest`: **3/3 PASS (0 failure, 0 error, 0 skipped)**
+- **手動 Demo と証跡**:
+  - `AssetMySqlIntegrationTest.testAssetCreationAndRowLockOnMySQL`: PASS
+  - `AssetMySqlIntegrationTest.testAssetAssignmentLifecycleOnMySQL`: PASS
+  - `AssetMySqlIntegrationTest.testExternalAccountAndLicenseCasOnMySQL`: PASS
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
 
@@ -241,9 +247,13 @@
 ### Task M.1: テストスイート全量実行・スキップ 0 検証 (Fast / 並行 / ゲート / MySQL)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `CR-06`
-- **Objective**: NF-09 で作成・改修した全テスト（11クラス・33メソッド）を実行し、スキップ 0 件、0 Failure / 0 Error を確認する。
-- **Test 要件と assertion**: 33/33 tests PASS (0 skipped, 0 failed, 0 errors)
-- **手動 Demo と証跡**: Maven Surefire 出力ログ (`Tests run: 33, Failures: 0, Errors: 0, Skipped: 0`)
+- **Objective**: NF-09 で作成・改修した全テスト（Fast 11クラス33メソッド + MySQL 1クラス3メソッド）を実行し、スキップ 0 件、0 Failure / 0 Error を確認する。
+- **Test 要件と assertion**:
+  - Fast Suite: 33/33 tests PASS (0 skipped, 0 failed, 0 errors)
+  - MySQL Gate: 3/3 tests PASS (0 skipped, 0 failed, 0 errors)
+- **手動 Demo と証跡**:
+  - Maven Surefire 出力ログ (`Tests run: 33, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire MySQL プロファイル出力ログ (`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`)
 - **Rollback**: なし
 - **未検証事項**: なし
 

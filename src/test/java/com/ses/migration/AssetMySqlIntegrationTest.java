@@ -53,6 +53,7 @@ class AssetMySqlIntegrationTest {
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
         registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
     }
 
     @Autowired
