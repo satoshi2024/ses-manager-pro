@@ -5,13 +5,14 @@
 | 項目 | 値 |
 |---|---|
 | traceability | `CANDIDATE`（`2026-08-27-post-acceptance-traceability.md` NF-03） |
-| production変更 | なし。Task 0/0R/0R-2/0R-3はspec文書のみ |
+| OwnerRef（開発段階） | `PROJECT_OWNER`（`owner-policy.md` / DecisionId `DG-03-DEV-20260828`） |
+| production変更 | なし。Task 0/0R/0R-2/0R-3/0R-4はspec文書のみ |
 | worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
 | base | `origin/main` / `455fc92e` |
 | PR | 作成しない |
 
-Review remediation status: R1（P1-02〜P1-07、P2-01〜P2-02）、R2（P1-08〜P1-10、P2-03〜P2-06）、R3（P2-03残件・P2-08）をcandidate spec/taskへ具体化済み。P1-01は外部blockerのまま。
+Review remediation status: R1〜R3文書補正済み。開発段階 OwnerRef=`PROJECT_OWNER`（`DG-03-DEV-20260828`）を確定。P1-01は approved scope・Base SHA・DG-03 実値未承認のため OPEN（`APPROVED` には未遷移）。
 
 ## Task対応
 
@@ -21,6 +22,7 @@ Review remediation status: R1（P1-02〜P1-07、P2-01〜P2-02）、R2（P1-08〜
 | 0R | Review P1/P2 remediation (R1) | `review-remediation.md` + spec更新 | spec内ID整合、production変更なし | 指摘1行ごとの対応表と外部blocker確認 | [x] |
 | 0R-2 | Review R2 remediation | `inventory.md` §5.4/§5.5、`design.md` §3.4/§3.6-§3.9、`tasks.md` F1-2/F1-4/F2-2〜4/B1、`review-remediation.md` R2表 | 実在ファイル参照、R8残留なし、`git diff --check` | P1-08〜10・P2-03〜06の1行対応、F1禁止継続 | [x] |
 | 0R-3 | Review R3 remediation | `completion-matrix.md`、`plan.md` Gate 0、`design.md` §3.4手順3、`inventory.md` §5.4 delete、`tasks.md` F1-4/F2-3/F2-5/A1、`review-remediation.md` R3表 | P2-03/P2-08対応、`git diff --check` | R3 finding 1行対応、F1禁止継続 | [x] |
+| 0R-4 | 開発段階 Owner ポリシー | `owner-policy.md`、README/plan/review-remediation/completion-matrix/中央traceability の OwnerRef 表現統一 | 実名非記録、OwnerRef=`PROJECT_OWNER`、`git diff --check`、NF-03は`CANDIDATE`維持 | OwnerポリシーとP1-01残gateの分離を確認 | [x] |
 | F1-1 | R1/R5 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |
 | F1-2 | R1/R5/R6 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |
 | F1-3 | R2/R5 | 未着手（承認待ち） | 未着手 | 未着手 | [ ] |
@@ -39,4 +41,4 @@ Review remediation status: R1（P1-02〜P1-07、P2-01〜P2-02）、R2（P1-08〜
 
 ## 完了判定
 
-Taskを `[x]` にするには、対応する実装commit、required testの実行結果、Demo evidence、scope/PII/document/approval/AI境界の証拠をこの表へ追記する。F1以降はNF-03の `APPROVED` とDG-03のdecision確定が先行条件である。Task 0/0R/0R-2/0R-3の文書補正が`[x]`であっても、PLAN PASSやproduction実装開始を意味しない。
+Taskを `[x]` にするには、対応する実装commit、required testの実行結果、Demo evidence、scope/PII/document/approval/AI境界の証拠をこの表へ追記する。F1以降はNF-03の `APPROVED` とDG-03のdecision実値確定が先行条件である。Task 0/0R/0R-2/0R-3/0R-4の文書補正が`[x]`であっても、PLAN PASSやproduction実装開始を意味しない。

@@ -8,7 +8,7 @@
 4. 重複master回避、PII、DocumentLink、taxonomy、as-of、費用approval、AI境界をdecision tableにする。
 5. `tasks.md` と完了対応表を作成する。
 
-Gate 0はproduction変更なし、文書の自己検証、Task 0/0R/0R-2/0R-3のcommit/pushまでで完了とする。
+Gate 0はproduction変更なし、文書の自己検証、Task 0/0R/0R-2/0R-3/0R-4のcommit/pushまでで完了とする。
 
 Review remediationでは、承認前に次の候補契約を曖昧なまま残さない。
 
@@ -50,11 +50,13 @@ mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates�
 
 以下が全て実値で `APPROVED` になるまでGate 1以降に進まない。candidate方針を文書へ書いたことは承認の代替ではない。
 
-- NF-03 traceability status
-- approved scope
-- Owner
-- base commit/branch
-- DG-03の6 decision（番号、証憑、taxonomy、as-of、費用、AI）
+- NF-03 traceability status（`CANDIDATE` → `APPROVED`）
+- approved scope（実値）
+- **OwnerRef**（開発段階は `PROJECT_OWNER`。個人の実名は記録しない — [owner-policy.md](owner-policy.md)）
+- base commit/branch（承認 Base SHA）
+- DG-03の6 decision実値（番号、証憑、taxonomy、as-of、費用締め **A or B**、AI）
 - Review/統合担当が要求する追加acceptance criteria
 
-P1-01は実装AIが解決できない外部gateである。Ownerが中央traceabilityへ決定者・決定日・scope・baseを記録した後、Reviewを再実行する。
+承認証跡は **DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit** で追跡する。本番移行時の実ユーザー対応は repository 外で解決する。
+
+P1-01は実装AIが解決できない外部gateである。**OwnerRef=`PROJECT_OWNER` の開発ポリシー（`DG-03-DEV-20260828`）は確定済みだが、approved scope・Base・DG-03 実値の承認と traceability `APPROVED` 更新は未達。** 上記が揃った後、Reviewを再実行する。

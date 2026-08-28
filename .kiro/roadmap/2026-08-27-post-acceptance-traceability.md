@@ -24,7 +24,7 @@
 |---|---|---|---|---|---|---|---|
 | NF-01 | `engineer-lifecycle-workflow` | PASS | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 独立Review PASS (Stage A/B 合格)。PR #85 更新済み。要員の入社・配属・異動・休職・復職・退社ワークフロー、退社ゲート9項目、SoD例外承認確立 | 2026-08-27 |
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
-| NF-03 | `certification-learning-skill-gap` | CANDIDATE | 未定 | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | 未決定 | 未定 |
+| NF-03 | `certification-learning-skill-gap` | CANDIDATE | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | OwnerRef確定（`DG-03-DEV-20260828`）。approved scope・DG-03実値・承認Base SHA未承認 | 未定 |
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
@@ -68,6 +68,23 @@
 - 対象資格、期限、証憑、研修費承認。
 - skill gapの正本となる案件需要期間とskill taxonomy。
 - 本人評価・上長評価・AI候補の表示/利用境界。
+
+#### 開発段階 Owner ポリシー（DecisionId `DG-03-DEV-20260828`、2026-08-28）
+
+| 項目 | 値 |
+|---|---|
+| OwnerRef | `PROJECT_OWNER` |
+| OwnerDisplayName | `プロジェクト責任者` |
+| OwnerType | `ROLE` |
+| ApprovalMode | `ROLE_BASED_DEV` |
+
+- 個人の実名を repository、`.kiro`、commit、test fixture へ記録しない。
+- Gate は**責任主体を一意に識別できる OwnerRef**を要求する（開発段階は `PROJECT_OWNER`）。
+- 承認証跡は DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit で追跡する。
+- 本番移行時の実ユーザー対応は repository 外の組織管理・監査システムで解決する。
+- **本ポリシーの採用だけでは NF-03 を `APPROVED` にしない。** approved scope、Base SHA、DG-03 実値（6項目＋経費締め A or B）が承認された時点で、Status を `APPROVED` に更新し Owner=`PROJECT_OWNER` とする。
+
+詳細: `.kiro/specs/certification-learning-skill-gap/owner-policy.md`
 
 ### DG-04 NF-04
 

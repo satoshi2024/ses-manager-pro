@@ -31,6 +31,13 @@
   - Demo: R3 findingをremediation表で確認し、P1-01外部blockerとF1禁止が継続していることを確認する。
   - 判定: 文書補正Task。PLAN PASS・F1着手許可ではない。
 
+- [x] **Task 0R-4: 開発段階 Owner ポリシーを文書化する**
+  - Objective: 実名をrepositoryに記録せず、OwnerRef=`PROJECT_OWNER`で責任主体を管理する開発ポリシーをGate表現へ統一する。
+  - Implementation: `owner-policy.md`を新設し、README、plan、review-remediation、completion-matrix、中央traceabilityのOwner/ Gate文言を「OwnerRefが必要」へ揃える。DecisionId=`DG-03-DEV-20260828`。production変更なし。
+  - Test: 実名がspec/commitに追加されていないこと、OwnerRef定数の一致、`git diff --check`成功、NF-03が`CANDIDATE`のままであること。
+  - Demo: owner-policyと中央台帳のOwnerRefが一致し、`APPROVED`へ遷移していないことを確認する。
+  - 判定: Ownerポリシー確定。approved scope・Base・DG-03実値の承認と`APPROVED`遷移は別gate。
+
 ## F1. 資格/course/plan/enrollment DDL（承認後のみ）
 
 - [ ] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
