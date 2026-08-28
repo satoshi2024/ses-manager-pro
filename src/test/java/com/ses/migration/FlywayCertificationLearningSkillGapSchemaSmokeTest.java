@@ -65,6 +65,10 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertIndexExists(statement, "t_skill_tag_alias", "uk_skill_alias_active");
             assertForeignKeyExists(statement, "t_certification_event", "fk_cert_event_record");
             assertForeignKeyExists(statement, "t_training_enrollment_expense", "fk_enroll_expense_request");
+            String expenseCategoryCheck = queryString(statement,
+                    "SELECT check_clause FROM information_schema.check_constraints "
+                            + "WHERE constraint_schema=DATABASE() AND constraint_name='chk_expense_category'");
+            assertTrue(expenseCategoryCheck.contains("研修費"), "既存ExpenseRequestの研修費カテゴリが許可されること");
 
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM m_document_type WHERE code='CERTIFICATION_EVIDENCE'"),
