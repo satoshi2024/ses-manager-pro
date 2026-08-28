@@ -30,6 +30,9 @@ public class EngineerSkillServiceImplTest {
     @Autowired
     private EngineerSkillService engineerSkillService;
 
+    @Autowired
+    private com.ses.mapper.EngineerSkillEventMapper engineerSkillEventMapper;
+
     @Test
     public void testReplaceSkills() {
         Long engineerId = 1L;
@@ -77,6 +80,24 @@ public class EngineerSkillServiceImplTest {
                         .eq(EngineerSkill::getEngineerId, engineerId)
         );
         assertEquals(0, afterEmpty.size());
+    }
+
+    @Test
+    public void replaceSkills_writesOpenAndCloseEvents() {
+        Long engineerId = 1L;
+        EngineerSkill skill = new EngineerSkill();
+        skill.setSkillId(10L);
+        skill.setProficiency("上級");
+        engineerSkillService.replaceSkills(engineerId, List.of(skill));
+
+        List<com.ses.entity.EngineerSkillEvent> afterInsert = engineerSkillEventMapper.selectByEngineerId(engineerId);
+        assertEquals(1, afterInsert.size());
+        assertEquals("OPEN", afterInsert.get(0).getEventType());
+
+        engineerSkillService.replaceSkills(engineerId, List.of());
+        List<com.ses.entity.EngineerSkillEvent> afterClear = engineerSkillEventMapper.selectByEngineerId(engineerId);
+        assertEquals(2, afterClear.size());
+        assertTrue(afterClear.stream().anyMatch(e -> "CLOSE".equals(e.getEventType())));
     }
 
     @Test
