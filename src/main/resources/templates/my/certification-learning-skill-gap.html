@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>資格・学習計画（本人）</title>
+    <style>
+        .my-cert-table th, .my-cert-table td { white-space: nowrap; }
+        @media (max-width: 390px) {
+            .my-cert-header h2 { font-size: 1.1rem; }
+            .my-cert-table th, .my-cert-table td { font-size: .78rem; }
+            .my-cert-table .optional-column { display: none; }
+            .my-cert-actions .btn-label { display: none; }
+        }
+    </style>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 my-cert-header">
+        <h2 class="h3 mb-0 text-light"><i class="bi bi-mortarboard me-2 text-primary"></i>資格・学習計画</h2>
+        <div class="my-cert-actions d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button" onclick="exportMyCertificationLearningGap()"><i class="bi bi-filetype-csv"></i><span class="btn-label ms-1">本人出力</span></button>
+            <button class="btn btn-primary" type="button" onclick="openMyCertificationApply()"><i class="bi bi-plus-lg"></i><span class="btn-label ms-1">資格を申請</span></button>
+        </div>
+    </div>
+    <div id="my-cert-error" class="alert alert-danger d-none"></div>
+    <div class="row g-3">
+        <div class="col-12 col-xl-6">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark text-light">資格履歴</div>
+                <div class="table-responsive"><table class="table table-dark table-hover mb-0 my-cert-table"><thead><tr><th>資格</th><th>取得日</th><th>期限</th><th>状態</th><th class="optional-column">証憑</th><th></th></tr></thead><tbody id="my-cert-rows"></tbody></table></div>
+                <div id="my-cert-empty" class="alert alert-secondary m-3 d-none">資格履歴はありません。</div>
+            </div>
+        </div>
+        <div class="col-12 col-xl-6">
+            <div class="card bg-card border-dark shadow-sm h-100">
+                <div class="card-header border-dark text-light d-flex justify-content-between"><span>学習計画</span><button class="btn btn-sm btn-outline-primary" type="button" onclick="openMyPlanForm()">新規作成</button></div>
+                <div id="my-plan-list" class="card-body"></div>
+                <div id="my-plan-empty" class="alert alert-secondary m-3 d-none">学習計画はありません。</div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="my-cert-apply-modal" tabindex="-1" aria-hidden="true"><div class="modal-dialog"><div class="modal-content bg-card border-dark"><div class="modal-header border-dark"><h5 class="modal-title text-light">資格取得申請</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="my-certification-id" class="form-control mb-2" type="number" placeholder="資格master ID"><input id="my-cert-acquired-on" class="form-control mb-2" type="date"><input id="my-cert-expires-on" class="form-control mb-2" type="date"><input id="my-cert-number" class="form-control" type="text" maxlength="200" placeholder="資格番号（任意）"></div><div class="modal-footer"><button class="btn btn-primary" type="button" onclick="submitMyCertificationApply()">申請</button></div></div></div></div>
+    <div class="modal fade" id="my-plan-modal" tabindex="-1" aria-hidden="true"><div class="modal-dialog"><div class="modal-content bg-card border-dark"><div class="modal-header border-dark"><h5 class="modal-title text-light">学習計画</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="my-plan-title" class="form-control mb-2" placeholder="計画名"><textarea id="my-plan-goal" class="form-control mb-2" placeholder="目的"></textarea><textarea id="my-plan-criteria" class="form-control mb-2" placeholder="達成基準"></textarea><input id="my-plan-cost" class="form-control" type="number" min="0" step="1" placeholder="予定費用（円）"></div><div class="modal-footer"><button class="btn btn-primary" type="button" onclick="submitMyPlan()">下書き保存</button></div></div></div></div>
+</div>
+<th:block layout:fragment="page-js"><script th:src="@{/js/modules/my-certification-learning-skill-gap.js}"></script></th:block>
+</body>
+</html>

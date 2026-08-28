@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-1〜A1のMySQL smoke。V116〜V126のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-1〜A2のMySQL smoke。V116〜V127のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -29,7 +29,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V116からV126のNF03_shapeがMySQLで成立する() throws Exception {
+    void V116からV127のNF03_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("126", latestVersion, "最新マイグレーションバージョンは126であること");
+            assertEquals("127", latestVersion, "最新マイグレーションバージョンは127であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -81,6 +81,13 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
                             + "WHERE m.menu_key='certification-learning-skill-gap' "
                             + "AND rm.role IN ('管理者','HR','マネージャー')"),
                     "資格・学習・skill gap role menu seed");
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_menu WHERE menu_key='myCertificationLearningGap'"),
+                    "本人資格・学習計画menu seed");
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM t_role_menu rm JOIN m_menu m ON m.id=rm.menu_id "
+                            + "WHERE m.menu_key='myCertificationLearningGap' AND rm.role='要員'"),
+                    "本人資格・学習計画role menu seed");
         }
     }
 

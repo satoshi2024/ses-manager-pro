@@ -64,6 +64,11 @@
                         <i class="bi bi-receipt me-2"></i><span th:text="#{menu.myExpenses}">経費申請</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myCertificationLearningGap')}">
+                    <a th:href="@{/my/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/certification-learning-skill-gap') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-mortarboard me-2"></i><span>資格・学習計画</span>
+                    </a>
+                </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myOneOnOnes')}">
                     <a th:href="@{/my/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/one-on-ones') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-chat-dots me-2"></i><span th:text="#{menu.myOneOnOnes}">1on1</span>
