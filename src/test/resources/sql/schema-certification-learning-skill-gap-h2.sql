@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS t_training_course_skill (
     target_level VARCHAR(20) NULL,
     required_flag TINYINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_course_skill ON t_training_course_skill(tenant_id, course_id, skill_id, deleted_flag);
@@ -175,6 +176,7 @@ CREATE TABLE IF NOT EXISTS t_learning_plan_skill (
     target_level VARCHAR(20) NULL,
     target_date DATE NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_plan_skill ON t_learning_plan_skill(tenant_id, plan_id, skill_id, deleted_flag);
@@ -206,6 +208,7 @@ CREATE TABLE IF NOT EXISTS t_training_enrollment_expense (
     expense_request_id BIGINT NOT NULL,
     relation_reason VARCHAR(200) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_enrollment_expense

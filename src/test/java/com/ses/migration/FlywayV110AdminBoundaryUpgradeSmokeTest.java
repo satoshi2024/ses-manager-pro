@@ -133,7 +133,7 @@ class FlywayV110AdminBoundaryUpgradeSmokeTest {
         toLatest.validate();
 
         try (Connection conn = MYSQL.createConnection(""); Statement st = conn.createStatement()) {
-            assertEquals("123", queryString(st,
+            assertEquals("124", queryString(st,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL "
                             + "ORDER BY installed_rank DESC LIMIT 1"));
             assertPostConditions(st, salesGroupId, customGroupId,

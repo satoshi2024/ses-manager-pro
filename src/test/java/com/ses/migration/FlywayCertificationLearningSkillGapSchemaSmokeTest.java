@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-2〜F2-5のMySQL smoke。V116〜V123のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-2〜F2-5のMySQL smoke。V116〜V124のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -29,7 +29,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V116からV123のNF03_shapeがMySQLで成立する() throws Exception {
+    void V116からV124のNF03_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("123", latestVersion, "最新マイグレーションバージョンは123であること");
+            assertEquals("124", latestVersion, "最新マイグレーションバージョンは124であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -56,6 +56,9 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "t_certification_event", "evidence_document_hash");
             assertColumnExists(statement, "t_project_position_event", "skills_json");
             assertColumnExists(statement, "t_skill_gap_snapshot", "result_hash");
+            assertColumnExists(statement, "t_training_course_skill", "updated_at");
+            assertColumnExists(statement, "t_learning_plan_skill", "updated_at");
+            assertColumnExists(statement, "t_training_enrollment_expense", "updated_at");
             assertIndexExists(statement, "t_training_course_skill", "uk_course_skill");
             assertIndexExists(statement, "t_learning_plan_skill", "uk_plan_skill");
             assertIndexExists(statement, "t_training_enrollment_expense", "uk_enrollment_expense");
