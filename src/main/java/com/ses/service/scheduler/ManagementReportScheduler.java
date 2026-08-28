@@ -4,6 +4,8 @@ import com.ses.common.exception.BusinessException;
 import com.ses.entity.ReportSchedule;
 import com.ses.mapper.ReportScheduleMapper;
 import com.ses.service.MonthlyClosingService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.dto.report.ReportGenerationCommand;
@@ -19,62 +21,79 @@ import java.time.YearMonth;
 import java.util.List;
 
 /**
- * scheduleはShedLockとDBのnext_run_at CASを併用し、HTTP sessionを使わずsystem principalで実行する。
+ * scheduleはShedLockとDBのprocessing leaseを併用し、HTTP sessionを使わずsystem principalで実行する。
+ * claim時はnext_run_atを進めず、成功時のみ次回cronへ進める。
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ManagementReportScheduler {
 
-    private static final String TIMEZONE = "Asia/Tokyo";
+    private static final String TENANT_ID = "default";
+    private static final int PROCESSING_LEASE_MINUTES = 30;
+
     private final ReportScheduleMapper scheduleMapper;
     private final ReportSnapshotService snapshotService;
     private final ReportDeliveryService deliveryService;
     private final MonthlyClosingService monthlyClosingService;
+    private final AccountingTimezoneResolver timezoneResolver;
 
-    @Scheduled(cron = "${management-report.schedule-cron:0 * * * * *}", zone = TIMEZONE)
+    @Scheduled(cron = "${management-report.schedule-cron:0 * * * * *}", zone = "Asia/Tokyo")
     @SchedulerLock(name = "managementReportScheduleDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT10M")
     public void dispatchDue() {
-        LocalDateTime now = LocalDateTime.now(ZoneId.of(TIMEZONE));
-        List<ReportSchedule> due = scheduleMapper.selectDue(now, 50);
-        for (ReportSchedule schedule : due) {
-            LocalDateTime expected = schedule.getNextRunAt();
-            if (expected == null) continue;
-            LocalDateTime logicalRunAt = schedule.getRetryScheduledAt() != null
-                    && !schedule.getRetryScheduledAt().isAfter(now)
-                    && schedule.getLastRunAt() != null
-                    ? schedule.getLastRunAt() : expected;
-            LocalDateTime next = nextRun(schedule, logicalRunAt);
-            if (scheduleMapper.claimDue(schedule.getId(), expected, next, now) != 1) continue;
-            try {
-                runOneInternal(schedule, logicalRunAt);
-                scheduleMapper.markSuccess(schedule.getId(), next, logicalRunAt);
-            } catch (Exception ex) {
-                LocalDateTime retryAt = now.plusMinutes(retryDelayMinutes(schedule));
-                scheduleMapper.markFailure(schedule.getId(), next, retryAt, logicalRunAt,
-                        "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
-                log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={}",
-                        schedule.getId(), retryAt, ex);
+        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
+        AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+            LocalDateTime now = LocalDateTime.now(zone);
+            LocalDateTime staleBefore = now.minusMinutes(PROCESSING_LEASE_MINUTES);
+            List<ReportSchedule> due = scheduleMapper.selectDue(now, staleBefore, 50);
+            for (ReportSchedule schedule : due) {
+                LocalDateTime expected = schedule.getNextRunAt();
+                LocalDateTime logicalRunAt = resolveLogicalRunAt(schedule, now);
+                if (logicalRunAt == null) continue;
+                if (scheduleMapper.claimDue(schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
+                    continue;
+                }
+                try {
+                    runOneInternal(schedule, logicalRunAt);
+                    scheduleMapper.markSuccess(schedule.getId(), nextRun(schedule, logicalRunAt), logicalRunAt);
+                } catch (Exception ex) {
+                    LocalDateTime retryAt = now.plusMinutes(retryDelayMinutes(schedule));
+                    scheduleMapper.markFailure(schedule.getId(), retryAt, logicalRunAt,
+                            "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
+                    log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={}",
+                            schedule.getId(), retryAt, ex);
+                }
             }
-        }
+        });
     }
 
     public void runOne(ReportSchedule schedule, LocalDateTime scheduledAt) {
-        try {
-            runOneInternal(schedule, scheduledAt);
-        } catch (Exception ex) {
-            // 単体呼出しでは呼出元へ例外を返さず、dispatchDueがDB retry状態を管理する。
-            log.error("[定期管理レポート] schedule実行失敗: scheduleId={}", schedule.getId(), ex);
+        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
+        AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+            try {
+                runOneInternal(schedule, scheduledAt);
+            } catch (Exception ex) {
+                log.error("[定期管理レポート] schedule実行失敗: scheduleId={}", schedule.getId(), ex);
+            }
+        });
+    }
+
+    private LocalDateTime resolveLogicalRunAt(ReportSchedule schedule, LocalDateTime now) {
+        if (schedule.getProcessingLogicalRunAt() != null
+                && schedule.getProcessingClaimedAt() != null
+                && schedule.getProcessingClaimedAt().isBefore(now.minusMinutes(PROCESSING_LEASE_MINUTES))) {
+            return schedule.getProcessingLogicalRunAt();
         }
+        if (schedule.getRetryScheduledAt() != null && !schedule.getRetryScheduledAt().isAfter(now)
+                && schedule.getLastRunAt() != null) {
+            return schedule.getLastRunAt();
+        }
+        return schedule.getNextRunAt();
     }
 
     private void runOneInternal(ReportSchedule schedule, LocalDateTime scheduledAt) {
         YearMonth target = YearMonth.from(scheduledAt).minusMonths(1);
         String cutoff = monthlyClosingService.isClosed(target.toString()) ? "確定" : "速報";
-        // schedule作成時のentity ID集合は監査用の境界であり、生成時の母集団ではない。
-        // ownerの明示system principalへ切り替えた後、snapshot serviceが現在の組織権限から
-        // engineer/contract/invoice集合を再解決してrunへ固定する。異動済みentityを
-        // schedule作成時の保存IDから再利用すると、managerの現在scope外データを混入させる。
         var result = snapshotService.generate(ReportGenerationCommand.scheduled(
                 schedule.getTemplateVersionId(), target, cutoff, schedule.getId(), schedule.getCreatedBy()));
         if (result.getRun() == null || !"SUCCEEDED".equals(result.getRun().getStatus())) {
@@ -84,17 +103,16 @@ public class ManagementReportScheduler {
     }
 
     private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt) {
-        // V112適用前から残るscheduleを即時に壊さない。新規作成はservice側でcronを必ず検証する。
+        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
         if (schedule.getCronExpression() == null || schedule.getCronExpression().isBlank()) {
             return logicalRunAt.plusMonths(1);
         }
-        if (!TIMEZONE.equals(schedule.getTimezoneId())) {
+        if (!zone.getId().equals(schedule.getTimezoneId())) {
             throw BusinessException.of(400, "error.managementReport.policyFixed");
         }
         try {
             var next = org.springframework.scheduling.support.CronExpression.parse(schedule.getCronExpression())
-                    .next(logicalRunAt.atZone(ZoneId.of(schedule.getTimezoneId() == null
-                            ? TIMEZONE : schedule.getTimezoneId())));
+                    .next(logicalRunAt.atZone(zone));
             if (next == null) throw new IllegalArgumentException("cron has no next execution");
             return next.toLocalDateTime();
         } catch (IllegalArgumentException ex) {
@@ -112,5 +130,4 @@ public class ManagementReportScheduler {
         if (message == null || message.isBlank()) return "定期レポート生成に失敗しました";
         return message.length() > 450 ? message.substring(0, 450) : message;
     }
-
 }

@@ -4,6 +4,8 @@ let reportTemplateModal = null;
 let reportVersionModal = null;
 let reportVersionTemplateId = null;
 let editingReportVersionId = null;
+let lastGeneratedRunId = null;
+let lastPreviewHash = null;
 
 $(function () {
     reportTemplateModal = new bootstrap.Modal(document.getElementById('report-template-modal'));
@@ -12,7 +14,10 @@ $(function () {
     $('#save-report-template').on('click', createReportTemplate);
     $('#save-report-version').on('click', saveReportVersion);
     $('#report-run-form').on('submit', generateReport);
+    $('#reportDeliverBtn').on('click', deliverReport);
+    $('#report-run-refresh').on('click', loadRunHistory);
     loadReportTemplates();
+    loadRunHistory();
 });
 
 function loadReportTemplates() {
@@ -38,6 +43,50 @@ function loadReportVersions(templateId) {
         $('#report-version').html(publishedVersions.length === 0
             ? '<option value="">公開済みversionなし</option>'
             : publishedVersions.map(v => `<option value="${v.id}">v${v.versionNo} (${v.status})</option>`).join(''));
+    });
+}
+
+function loadRunHistory() {
+    $.get('/api/management-reports/runs?limit=20', function (res) {
+        if (res.code !== 200) {
+            $('#report-run-history').html(`<tr><td colspan="5" class="text-danger">${SES.escapeHtml(res.message || '読み込み失敗')}</td></tr>`);
+            return;
+        }
+        const runs = res.data || [];
+        $('#report-run-history').html(runs.length === 0
+            ? '<tr><td colspan="5" class="text-muted">runがありません。</td></tr>'
+            : runs.map(run => `<tr>
+                <td>${run.id}</td>
+                <td>${SES.escapeHtml(run.periodFrom || '')}～${SES.escapeHtml(run.periodTo || '')}</td>
+                <td>${SES.escapeHtml(run.cutoffKind || '')}</td>
+                <td><span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status || '')}</span></td>
+                <td class="d-flex flex-wrap gap-1">
+                    <button class="btn btn-outline-light btn-sm" onclick="viewRun(${run.id})">表示</button>
+                    ${run.status === 'SUCCEEDED' ? `<button class="btn btn-outline-success btn-sm" onclick="deliverRun(${run.id})">配布</button>` : ''}
+                </td>
+            </tr>`).join(''));
+    });
+}
+
+function viewRun(runId) {
+    $.get(`/api/management-reports/runs/${runId}`, function (res) {
+        if (res.code !== 200) { Toast.error(res.message); return; }
+        lastGeneratedRunId = runId;
+        $('#reportDeliverBtn').prop('disabled', res.data.run.status !== 'SUCCEEDED');
+        $('#runResult').html(`<span class="badge ${res.data.run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(res.data.run.status)}</span> run=${runId}`);
+        renderReportSections(res.data.sections || []);
+        loadDeliveries(runId);
+    });
+}
+
+function loadDeliveries(runId) {
+    $.get(`/api/management-reports/runs/${runId}/deliveries`, function (res) {
+        if (res.code !== 200) return;
+        const deliveries = res.data || [];
+        if (deliveries.length === 0) return;
+        const rows = deliveries.map(d => `<div class="small text-muted">delivery #${d.id}: ${SES.escapeHtml(d.deliveryStatus || '')} / recipient=${d.recipientUserId}
+            ${d.deliveryStatus !== 'CANCELLED' ? `<button class="btn btn-outline-danger btn-sm ms-2" onclick="cancelDelivery(${d.id}, ${runId})">取消</button>` : ''}</div>`).join('');
+        $('#runResult').append(`<div class="mt-2">${rows}</div>`);
     });
 }
 
@@ -119,6 +168,7 @@ function generateReport(event) {
         data: JSON.stringify({period: period}),
         success: function (preview) {
             if (preview.code !== 200) { $('#runResult').text(preview.message || 'recipient previewに失敗しました。'); return; }
+            lastPreviewHash = preview.data.previewHash;
             const allowed = (preview.data.recipients || []).filter(r => r.scopeDecision === 'ALLOW').length;
             $('#runResult').html(`<div class="small text-muted mb-2">recipient preview: ${allowed}件を許可。snapshotを生成中...</div>`);
             $.ajax({
@@ -127,13 +177,49 @@ function generateReport(event) {
         success: function (res) {
             if (res.code !== 200) { $('#runResult').text(res.message || '生成に失敗しました。'); return; }
             const run = res.data.run;
+            lastGeneratedRunId = run.id;
+            $('#reportDeliverBtn').prop('disabled', run.status !== 'SUCCEEDED');
             $('#runResult').html(`<span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status)}</span> run=${run.id} / period=${SES.escapeHtml(run.periodFrom || '')}～${SES.escapeHtml(run.periodTo || '')} / cutoff=${SES.escapeHtml(run.cutoffKind || '')} / timezone=${SES.escapeHtml(run.timezoneId)} / dataAsOf=${SES.escapeHtml(run.dataAsOfAt || '')}`);
             renderReportSections(res.data.sections || []);
+            loadRunHistory();
         },
         error: function () { $('#runResult').text('snapshot生成の通信に失敗しました。'); }
             });
         },
         error: function () { $('#runResult').text('recipient previewの通信に失敗しました。'); }
+    });
+}
+
+function deliverReport() {
+    if (!lastGeneratedRunId) { Toast.error('先にSUCCEEDEDのrunを生成してください。'); return; }
+    deliverRun(lastGeneratedRunId, lastPreviewHash);
+}
+
+function deliverRun(runId, previewHash) {
+    const query = previewHash ? `?previewHash=${encodeURIComponent(previewHash)}` : '';
+    $.ajax({
+        url: `/api/management-reports/runs/${runId}/deliver${query}`,
+        method: 'POST',
+        success: function (res) {
+            if (res.code !== 200) { Toast.error(res.message); return; }
+            Toast.success(`配布を開始しました（${(res.data.deliveries || []).length}件）。`);
+            viewRun(runId);
+        }
+    });
+}
+
+function cancelDelivery(deliveryId, runId) {
+    Swal.fire({title: '配布を取消しますか？', text: 'linkは直ちに失効します。', icon: 'warning', showCancelButton: true, confirmButtonText: '取消', cancelButtonText: '戻る'}).then(result => {
+        if (!result.isConfirmed) return;
+        $.ajax({
+            url: `/api/management-reports/deliveries/${deliveryId}/cancel`,
+            method: 'POST',
+            success: function (res) {
+                if (res.code !== 200) { Toast.error(res.message); return; }
+                Toast.success('配布を取消しました。');
+                viewRun(runId);
+            }
+        });
     });
 }
 

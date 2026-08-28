@@ -18,8 +18,10 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDocumentService;
+import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.report.impl.ReportDeliveryServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +53,7 @@ class ReportDeliveryServiceImplTest {
     private ReportRecipientPreviewService previewService;
     private ReportSnapshotService snapshotService;
     private ReportDocumentService documentService;
+    private ReportDeliveryDocumentRegistrar documentRegistrar;
     private DocumentService archiveService;
     private NotificationService notificationService;
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -65,13 +68,18 @@ class ReportDeliveryServiceImplTest {
         previewService = mock(ReportRecipientPreviewService.class);
         snapshotService = mock(ReportSnapshotService.class);
         documentService = mock(ReportDocumentService.class);
+        documentRegistrar = mock(ReportDeliveryDocumentRegistrar.class);
         archiveService = mock(DocumentService.class);
         notificationService = mock(NotificationService.class);
         when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyString())).thenReturn(99L);
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
+        AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
+        when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
+        when(timezoneResolver.now("default")).thenAnswer(invocation -> LocalDateTime.now());
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
-                snapshotService, documentService, archiveService, notificationService, passwordEncoder, new ObjectMapper());
+                snapshotService, documentService, documentRegistrar, archiveService, notificationService, passwordEncoder,
+                new ObjectMapper(), timezoneResolver);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
@@ -93,7 +101,7 @@ class ReportDeliveryServiceImplTest {
         DocumentVersion version = new DocumentVersion();
         version.setVersionNo(1);
         ReportDocumentArtifact artifact = new ReportDocumentArtifact(10L, "PDF", "hash", document, version);
-        when(documentService.register(10L, "PDF")).thenReturn(artifact);
+        when(documentRegistrar.registerArtifact(10L, "PDF")).thenReturn(artifact);
 
         ReportDeliveryResult result = service.deliver(10L, "preview-hash");
 
@@ -119,7 +127,7 @@ class ReportDeliveryServiceImplTest {
         ReportDeliveryResult result = service.deliver(10L, "preview-hash");
 
         assertThat(result.getDeliveries()).containsExactly(existing);
-        verify(documentService, never()).register(anyLong(), anyString());
+        verify(documentRegistrar, never()).registerArtifact(anyLong(), anyString());
         verifyNoInteractions(notificationService);
     }
 
@@ -306,6 +314,28 @@ class ReportDeliveryServiceImplTest {
         verify(notificationOutboxMapper).replayReport(88L);
         verify(deliveryMapper).updateById(delivery);
         verifyNoInteractions(notificationService, previewService, runMapper);
+    }
+
+    @Test
+    void cancelはtokenを失効させdownloadを拒否する() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(1L);
+        delivery.setLinkTokenHash(sha256("token"));
+        delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
+        delivery.setDeliveryStatus("ENQUEUED");
+        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+
+        service.cancel(7L);
+
+        assertThat(delivery.getDeliveryStatus()).isEqualTo("CANCELLED");
+        assertThat(delivery.getLinkTokenHash()).isNull();
+        verify(deliveryMapper).updateById(delivery);
+
+        assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+                .hasMessageContaining("error.managementReport.deliveryCancelled");
+        verifyNoInteractions(archiveService);
     }
 
     private ReportRecipientPreviewResult preview(ReportRecipientPreview recipient) {

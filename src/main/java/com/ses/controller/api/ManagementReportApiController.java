@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import java.time.YearMonth;
 import java.util.List;
@@ -101,6 +102,11 @@ public class ManagementReportApiController {
                 previous.getTemplateVersionId(), YearMonth.from(previous.getPeriodFrom()),
                 previous.getCutoffKind(), true, previous.getScheduleId(), false, null,
                 previous.getId(), preview.getPreviewHash(), null)));
+    }
+
+    @GetMapping("/runs")
+    public ApiResult<List<ReportRun>> listRuns(@RequestParam(defaultValue = "20") int limit) {
+        return ApiResult.success(snapshotService.listRecentRuns(limit));
     }
 
     @GetMapping("/runs/{runId}")

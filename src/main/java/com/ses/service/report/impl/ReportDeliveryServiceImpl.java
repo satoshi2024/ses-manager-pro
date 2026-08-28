@@ -21,8 +21,11 @@ import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportDocumentService;
+import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -43,7 +46,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
-    private static final String TIMEZONE = "Asia/Tokyo";
+    private static final String TENANT_ID = "default";
     private static final int MAX_ATTEMPTS = 5;
     private static final int LINK_DAYS = 7;
     private static final int REAUTH_MINUTES = 10;
@@ -54,39 +57,46 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private final ReportRecipientPreviewService recipientPreviewService;
     private final ReportSnapshotService snapshotService;
     private final ReportDocumentService reportDocumentService;
+    private final ReportDeliveryDocumentRegistrar documentRegistrar;
     private final DocumentService documentService;
     private final NotificationService notificationService;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
+    private final AccountingTimezoneResolver timezoneResolver;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public ReportDeliveryResult deliver(Long runId, String previewHash) {
-        ReportRun run = runMapper.selectById(runId);
-        requireReady(run);
-        snapshotService.assertAccessible(run);
-        ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
-        if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
-            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
-        }
-        ReportDocumentArtifact artifact = null;
-        List<ReportDelivery> deliveries = new ArrayList<>();
-        for (ReportRecipientPreview recipient : preview.getRecipients()) {
-            if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
-            ReportDelivery delivery = find(runId, recipient.getRecipientUserId());
-            // deliverは同一run/recipientの既存deliveryを再送しない。
-            // ENQUEUED/PROCESSING/RETRYを新attemptへ進めるとoutbox通知が重複するため、
-            // 再送はretry/manual-replayの明示操作へ限定する。
-            if (delivery != null) {
-                deliveries.add(delivery);
-                continue;
+        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, tenantZone(), () -> {
+            ReportRun run = runMapper.selectById(runId);
+            requireReady(run);
+            snapshotService.assertAccessible(run);
+            ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+            if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
+                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
             }
-            if (artifact == null) {
-                artifact = reportDocumentService.register(runId, "PDF");
+            ReportDocumentArtifact artifact = null;
+            List<ReportDelivery> deliveries = new ArrayList<>();
+            for (ReportRecipientPreview recipient : preview.getRecipients()) {
+                if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
+                ReportDelivery delivery = find(runId, recipient.getRecipientUserId());
+                if (delivery != null) {
+                    deliveries.add(delivery);
+                    continue;
+                }
+                if (artifact == null) {
+                    artifact = documentRegistrar.registerArtifact(runId, "PDF");
+                }
+                deliveries.add(issueTransactional(run, delivery, recipient, artifact));
             }
-            deliveries.add(issue(run, delivery, recipient, artifact));
-        }
-        return new ReportDeliveryResult(preview, deliveries);
+            return new ReportDeliveryResult(preview, deliveries);
+        });
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected ReportDelivery issueTransactional(ReportRun run, ReportDelivery existing,
+                                                  ReportRecipientPreview recipient,
+                                                  ReportDocumentArtifact artifact) {
+        return issue(run, existing, recipient, artifact);
     }
 
     @Override
@@ -112,6 +122,9 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         Long userId = currentUserId();
         if (!userId.equals(delivery.getRecipientUserId())) {
             throw BusinessException.of(403, "error.managementReport.scopeDenied");
+        }
+        if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
+            throw BusinessException.of(403, "error.managementReport.deliveryCancelled");
         }
         if (token == null || delivery.getLinkTokenHash() == null
                 || !sha256(token).equals(delivery.getLinkTokenHash())) {
@@ -243,6 +256,33 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         retry(deliveryId);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancel(Long deliveryId) {
+        requireAdmin();
+        ReportDelivery delivery = findRequired(deliveryId);
+        if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
+            return;
+        }
+        delivery.setDeliveryStatus("CANCELLED");
+        delivery.setLinkExpiresAt(now());
+        delivery.setLinkTokenHash(null);
+        delivery.setLastErrorCode("DELIVERY_CANCELLED");
+        delivery.setLastErrorMessage("管理者により取消されました");
+        deliveryMapper.updateById(delivery);
+    }
+
+    @Override
+    public List<ReportDelivery> listByRun(Long runId) {
+        ReportRun run = runMapper.selectById(runId);
+        if (run == null) {
+            throw BusinessException.of(404, "error.managementReport.runNotFound");
+        }
+        snapshotService.assertAccessible(run);
+        return deliveryMapper.selectList(new QueryWrapper<ReportDelivery>()
+                .eq("run_id", runId).orderByAsc("id"));
+    }
+
     private ReportDelivery issue(ReportRun run, ReportDelivery existing,
                                  ReportRecipientPreview recipient, ReportDocumentArtifact artifact) {
         ReportDelivery delivery = existing == null ? new ReportDelivery() : existing;
@@ -325,7 +365,11 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private LocalDateTime now() {
-        return LocalDateTime.now(ZoneId.of(TIMEZONE));
+        return timezoneResolver.now(TENANT_ID);
+    }
+
+    private ZoneId tenantZone() {
+        return timezoneResolver.resolve(TENANT_ID);
     }
 
     private String toJson(Object value) {

@@ -16,13 +16,16 @@ import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
 import com.ses.dto.report.ReportScopeSnapshot;
 import com.ses.dto.report.ReportSectionKey;
-import com.ses.dto.salesperformance.SalesPerformanceDto;
+import com.ses.entity.Contract;
+import com.ses.entity.Engineer;
 import com.ses.entity.ReportRun;
 import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportRunMapper;
+import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ReportSectionAttemptMapper;
 import com.ses.mapper.ReportSectionSnapshotMapper;
 import com.ses.mapper.ReportTemplateVersionMapper;
@@ -31,8 +34,11 @@ import com.ses.service.DashboardService;
 import com.ses.service.InvoiceService;
 import com.ses.service.ManagementAccountingService;
 import com.ses.service.MonthlyClosingService;
-import com.ses.service.SalesPerformanceService;
+import com.ses.service.SystemConfigService;
+import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.billing.CashFlowForecastScope;
 import com.ses.service.security.OrganizationScopeService;
@@ -60,9 +66,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * 正本serviceの戻り値をreport section snapshotへ固定する実装。
@@ -74,7 +82,6 @@ import java.util.function.Supplier;
 public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private static final String TENANT_ID = "default";
-    private static final String TIMEZONE = "Asia/Tokyo";
     private static final String SNAPSHOT_SCHEMA = "report-1.0";
     private static final String POLICY_VERSION = "scope-policy-approved-1";
     private static final String ADAPTER_VERSION = "scheduled-management-reporting-f2-1";
@@ -87,13 +94,17 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     private final OrganizationScopeService organizationScopeService;
     private final MonthlyClosingService monthlyClosingService;
     private final DashboardService dashboardService;
+    private final UtilizationCalcService utilizationCalcService;
     private final UtilizationForecastService utilizationForecastService;
+    private final EngineerMapper engineerMapper;
+    private final ContractMapper contractMapper;
+    private final SystemConfigService systemConfigService;
     private final CashFlowForecastService cashFlowForecastService;
     private final ManagementAccountingService managementAccountingService;
-    private final SalesPerformanceService salesPerformanceService;
     private final InvoiceService invoiceService;
     private final ObjectMapper objectMapper;
     private final ReportRecipientPreviewService recipientPreviewService;
+    private final AccountingTimezoneResolver timezoneResolver;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -125,6 +136,24 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     }
 
     @Override
+    public List<ReportRun> listRecentRuns(int limit) {
+        requireReportRole();
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        QueryWrapper<ReportRun> query = new QueryWrapper<ReportRun>()
+                .eq("tenant_id", TENANT_ID)
+                .orderByDesc("id")
+                .last("LIMIT " + safeLimit);
+        if ("マネージャー".equals(SecurityUtils.currentRole())) {
+            Long userId = SecurityUtils.currentUserId();
+            if (userId == null) {
+                throw BusinessException.of(403, "error.managementReport.roleDenied");
+            }
+            query.eq("scope_owner_id", userId).eq("scope_owner_type", "ORGANIZATION");
+        }
+        return runMapper.selectList(query);
+    }
+
+    @Override
     public void assertAccessible(ReportRun run) {
         if (run == null) {
             throw BusinessException.of(404, "error.managementReport.runNotFound");
@@ -150,7 +179,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             JsonNode saved = objectMapper.readTree(savedScope.getJson());
             Set<Long> savedOrganizations = readLongSet(saved.path("organizationIds"));
             Set<Long> savedDirectUsers = readLongSet(saved.path("directUserIds"));
-            LocalDate asOf = LocalDate.now(ZoneId.of(TIMEZONE));
+            LocalDate asOf = LocalDate.now(tenantZone());
             Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
             Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
             if (currentOrganizations == null || currentDirectUsers == null
@@ -190,10 +219,12 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     }
 
     private ReportGenerationResult generateInternal(ReportGenerationCommand command) {
+        ZoneId zone = tenantZone();
+        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
         YearMonth target = command.period();
         LocalDate periodFrom = target.atDay(1);
         LocalDate periodTo = target.atEndOfMonth();
-        LocalDate permissionAsOf = LocalDate.now(ZoneId.of(TIMEZONE));
+        LocalDate permissionAsOf = LocalDate.now(zone);
         String cutoffKind = normalizeCutoff(command.cutoffKind());
         boolean confirmed = "MONTHLY_CLOSING".equals(cutoffKind);
         if (confirmed && !monthlyClosingService.isClosed(target.toString())) {
@@ -205,7 +236,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
 
-        LocalDateTime asOfAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
+        LocalDateTime asOfAt = LocalDateTime.now(zone);
         // 渡されたscopeはowner/previewの境界確認にだけ使い、entity ID母集団は必ず生成直前に
         // 現在principalから再解決する。scheduleや再生成要求が保持する古いID集合をそのまま
         // ReportScopeContextへ入れると、異動済みengineer/contract/invoiceが混入する。
@@ -256,7 +287,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setPeriodTo(periodTo);
             run.setCutoffKind(cutoffKind);
             run.setAsOfAt(asOfAt);
-            run.setTimezoneId(TIMEZONE);
+            run.setTimezoneId(zone.getId());
             run.setDataAsOfAt(asOfAt);
             run.setStatus("PENDING");
             run.setSnapshotSchemaVersion(SNAPSHOT_SCHEMA);
@@ -275,13 +306,13 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         boolean hasFailure = false;
         for (String sectionKey : sectionKeys) {
             ReportSectionSnapshot existing = findSection(run.getId(), sectionKey);
-            LocalDateTime attemptStartedAt = LocalDateTime.now(ZoneId.of(TIMEZONE));
+            LocalDateTime attemptStartedAt = LocalDateTime.now(zone);
             if (existing != null && "SUCCEEDED".equals(existing.getSectionStatus())) {
                 continue;
             }
             try {
                 SectionValue value = ReportScopeContext.with(scope,
-                        () -> loadSection(sectionKey, target, sourceCache, scope));
+                        () -> loadSection(sectionKey, target, sourceCache, scope, confirmed));
                 saveSection(run, existing, sectionKey, value, confirmed, asOfAt, periodFrom, periodTo,
                         attemptStartedAt);
             } catch (Exception ex) {
@@ -292,13 +323,14 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         }
 
         run.setStatus(hasFailure ? "PARTIAL" : "SUCCEEDED");
-        run.setGeneratedAt(LocalDateTime.now(ZoneId.of(TIMEZONE)));
+        run.setGeneratedAt(LocalDateTime.now(zone));
         if (hasFailure) {
             run.setFailureCode("SECTION_FAILED");
             run.setFailureMessage("1つ以上のsection生成に失敗したため配布を停止しました");
         }
         runMapper.updateById(run);
         return new ReportGenerationResult(run, listSectionsWithoutLookup(run.getId()), false);
+        });
     }
 
     private void saveSection(ReportRun run, ReportSectionSnapshot existing, String sectionKey,
@@ -335,7 +367,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         } else {
             sectionMapper.updateById(snapshot);
         }
-        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(ZoneId.of(TIMEZONE)));
+        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(tenantZone()));
     }
 
     private void saveFailedSection(ReportRun run, ReportSectionSnapshot existing, String sectionKey,
@@ -372,7 +404,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         } else {
             sectionMapper.updateById(snapshot);
         }
-        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(ZoneId.of(TIMEZONE)));
+        insertAttempt(run, snapshot, attemptNo, attemptStartedAt, LocalDateTime.now(tenantZone()));
     }
 
     /** 現在のsection状態とは別に、各attemptを追記して失敗理由とhashを監査可能にする。 */
@@ -406,7 +438,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private SectionValue loadSection(String sectionKey, YearMonth target,
                                      Map<String, JsonNode> sourceCache,
-                                     ReportScopeSnapshot scope) {
+                                     ReportScopeSnapshot scope, boolean confirmed) {
         return switch (sectionKey) {
             case ReportSectionKey.SALES, ReportSectionKey.GROSS_PROFIT -> {
                 JsonNode source = sourceCache.computeIfAbsent("dashboard",
@@ -422,13 +454,36 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 yield new SectionValue(source, value, "予測",
                         DashboardService.class.getSimpleName(), DashboardSummaryDto.class.getName());
             }
-            case ReportSectionKey.UTILIZATION, ReportSectionKey.BENCH, ReportSectionKey.CONTRACT_RENEWAL_OUTLOOK -> {
+            case ReportSectionKey.UTILIZATION, ReportSectionKey.BENCH -> {
+                if (confirmed) {
+                    UtilizationCalcService.UtilizationSnapshot snapshot = loadUtilizationActual(target);
+                    Map<String, Object> value = new LinkedHashMap<>();
+                    value.put("month", target.toString());
+                    if (ReportSectionKey.UTILIZATION.equals(sectionKey)) {
+                        value.put("utilizationRate", snapshot.getUtilizationRate());
+                        value.put("workingCount", snapshot.getWorkingCount());
+                        value.put("benchCount", snapshot.getBenchCount());
+                        value.put("totalCount", snapshot.getTotalCount());
+                    } else {
+                        value.put("benchCount", snapshot.getBenchCount());
+                        value.put("totalCount", snapshot.getTotalCount());
+                    }
+                    JsonNode source = objectMapper.valueToTree(snapshot);
+                    yield new SectionValue(source, objectMapper.valueToTree(value), "実績",
+                            UtilizationCalcService.class.getSimpleName(),
+                            UtilizationCalcService.UtilizationSnapshot.class.getName());
+                }
                 JsonNode source = sourceCache.computeIfAbsent("utilization",
                         ignored -> objectMapper.valueToTree(utilizationForecastService.getForecast(target, 1)));
-                JsonNode value = switch (sectionKey) {
-                    case ReportSectionKey.UTILIZATION, ReportSectionKey.BENCH -> source.path("monthlyForecasts");
-                    default -> source.path("rolloffEngineers");
-                };
+                JsonNode value = ReportSectionKey.UTILIZATION.equals(sectionKey)
+                        ? source.path("monthlyForecasts") : source.path("monthlyForecasts");
+                yield new SectionValue(source, value, "予測",
+                        UtilizationForecastService.class.getSimpleName(), UtilizationForecastDto.class.getName());
+            }
+            case ReportSectionKey.CONTRACT_RENEWAL_OUTLOOK -> {
+                JsonNode source = sourceCache.computeIfAbsent("utilization",
+                        ignored -> objectMapper.valueToTree(utilizationForecastService.getForecast(target, 1)));
+                JsonNode value = source.path("rolloffEngineers");
                 yield new SectionValue(source, value, "予測",
                         UtilizationForecastService.class.getSimpleName(), UtilizationForecastDto.class.getName());
             }
@@ -453,6 +508,34 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             }
             default -> throw BusinessException.of(400, "error.managementReport.sectionNotAccepted");
         };
+    }
+
+    /** Dashboard KPIと同一のUtilizationCalcService口径で実績稼働/Benchを取得する。 */
+    private UtilizationCalcService.UtilizationSnapshot loadUtilizationActual(YearMonth target) {
+        QueryWrapper<Engineer> engineerQuery = new QueryWrapper<>();
+        if (!organizationScopeService.hasFullAccess()) {
+            Set<Long> allowedEngineerIds = organizationScopeService.allowedEngineerIds(target.atEndOfMonth());
+            if (allowedEngineerIds.isEmpty()) {
+                return new UtilizationCalcService.UtilizationSnapshot(0, 0, 0, 0.0);
+            }
+            engineerQuery.in("id", allowedEngineerIds);
+        }
+        List<Engineer> engineers = engineerMapper.selectList(engineerQuery);
+        Set<Long> engineerIds = engineers.stream().map(Engineer::getId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, List<Contract>> contractsByEngineer = engineerIds.isEmpty()
+                ? Map.of()
+                : contractMapper.selectList(new QueryWrapper<Contract>()
+                        .in("status", UtilizationCalcService.targetContractStatuses())
+                        .in("engineer_id", engineerIds))
+                .stream()
+                .filter(contract -> contract.getEngineerId() != null)
+                .collect(Collectors.groupingBy(Contract::getEngineerId));
+        return utilizationCalcService.calc(target, engineers, contractsByEngineer,
+                UtilizationCalcService.resolveAssumeRenew(systemConfigService));
+    }
+
+    private ZoneId tenantZone() {
+        return timezoneResolver.resolve(TENANT_ID);
     }
 
     /** Dashboardの既存chart値から対象月だけを取り出す。report側で売上式を再計算しない。 */

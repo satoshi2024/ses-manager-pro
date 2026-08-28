@@ -6,9 +6,13 @@ import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
 import com.ses.entity.ReportRun;
+import com.ses.entity.Contract;
+import com.ses.entity.Engineer;
 import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
+import com.ses.mapper.ContractMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.ReportSectionAttemptMapper;
 import com.ses.mapper.ReportSectionSnapshotMapper;
@@ -18,8 +22,10 @@ import com.ses.service.DashboardService;
 import com.ses.service.InvoiceService;
 import com.ses.service.ManagementAccountingService;
 import com.ses.service.MonthlyClosingService;
-import com.ses.service.SalesPerformanceService;
+import com.ses.service.SystemConfigService;
+import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.impl.ReportSnapshotServiceImpl;
@@ -64,6 +70,11 @@ class ReportSnapshotServiceImplTest {
     private ReportRecipientPreviewService recipientPreviewService;
     private OrganizationScopeService scopeService;
     private SysUserMapper userMapper;
+    private UtilizationCalcService utilizationCalcService;
+    private EngineerMapper engineerMapper;
+    private ContractMapper contractMapper;
+    private SystemConfigService systemConfigService;
+    private AccountingTimezoneResolver timezoneResolver;
     private ReportSnapshotServiceImpl service;
     private ReportRun currentRun;
     private final Map<String, ReportSectionSnapshot> snapshots = new HashMap<>();
@@ -78,17 +89,23 @@ class ReportSnapshotServiceImplTest {
         scopeService = mock(OrganizationScopeService.class);
         monthlyClosingService = mock(MonthlyClosingService.class);
         dashboardService = mock(DashboardService.class);
+        utilizationCalcService = mock(UtilizationCalcService.class);
         UtilizationForecastService utilizationService = mock(UtilizationForecastService.class);
+        engineerMapper = mock(EngineerMapper.class);
+        contractMapper = mock(ContractMapper.class);
+        systemConfigService = mock(SystemConfigService.class);
+        timezoneResolver = mock(AccountingTimezoneResolver.class);
+        when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
+        when(timezoneResolver.now("default")).thenReturn(java.time.LocalDateTime.of(2026, 8, 31, 12, 0));
         CashFlowForecastService cashFlowService = mock(CashFlowForecastService.class);
         ManagementAccountingService accountingService = mock(ManagementAccountingService.class);
-        SalesPerformanceService salesPerformanceService = mock(SalesPerformanceService.class);
         InvoiceService invoiceService = mock(InvoiceService.class);
         recipientPreviewService = mock(ReportRecipientPreviewService.class);
 
         service = new ReportSnapshotServiceImpl(templateVersionMapper, runMapper, sectionAttemptMapper, sectionMapper,
-                userMapper, scopeService, monthlyClosingService, dashboardService, utilizationService,
-                cashFlowService, accountingService, salesPerformanceService, invoiceService,
-                new ObjectMapper(), recipientPreviewService);
+                userMapper, scopeService, monthlyClosingService, dashboardService, utilizationCalcService,
+                utilizationService, engineerMapper, contractMapper, systemConfigService, cashFlowService,
+                accountingService, invoiceService, new ObjectMapper(), recipientPreviewService, timezoneResolver);
 
         ReportTemplateVersion version = new ReportTemplateVersion();
         version.setId(3L);
@@ -264,5 +281,29 @@ class ReportSnapshotServiceImplTest {
         assertThat(result.getRun().getOrganizationScopeJson()).contains("\"organizationIds\":[20]");
         assertThat(result.getRun().getOrganizationScopeJson()).contains("\"engineerIds\":[22]");
         assertThat(result.getRun().getOrganizationScopeJson()).doesNotContain("30", "40", "50");
+    }
+
+    @Test
+    void 確定runの稼働率sectionはUtilizationCalcServiceの実績口径を使う() {
+        ReportTemplateVersion version = templateVersionMapper.selectById(3L);
+        version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
+        when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
+        when(scopeService.hasFullAccess()).thenReturn(true);
+        Engineer engineer = new Engineer();
+        engineer.setId(1L);
+        when(engineerMapper.selectList(any())).thenReturn(List.of(engineer));
+        when(contractMapper.selectList(any())).thenReturn(List.of(new Contract() {{ setEngineerId(1L); }}));
+        when(systemConfigService.getString(any(), any())).thenReturn("true");
+        when(utilizationCalcService.calc(any(), any(), any(), any(Boolean.class)))
+                .thenReturn(new UtilizationCalcService.UtilizationSnapshot(8, 2, 10, 80.0));
+
+        ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
+                3L, YearMonth.of(2026, 8), "確定"));
+
+        assertThat(result.getSections()).singleElement().satisfies(section -> {
+            assertThat(section.getFactType()).isEqualTo("実績");
+            assertThat(section.getCanonicalService()).isEqualTo("UtilizationCalcService");
+            assertThat(section.getValueJson()).contains("80.0", "\"workingCount\":8");
+        });
     }
 }

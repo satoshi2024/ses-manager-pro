@@ -17,6 +17,9 @@ public interface ReportSnapshotService {
 
     List<ReportSectionSnapshot> listSections(Long runId);
 
+    /** 直近run一覧。マネージャーは自分のscope owner分のみ。 */
+    List<ReportRun> listRecentRuns(int limit);
+
     /** 現在principalがrunの保存済み組織scopeを参照できるかを検証する。 */
     void assertAccessible(ReportRun run);
 

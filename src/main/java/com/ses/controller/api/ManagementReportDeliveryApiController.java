@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /** 管理レポートdelivery API。token/scope/再認証の判定はserviceへ集約する。 */
 @RestController
 @RequestMapping("/api/management-reports")
@@ -71,6 +73,17 @@ public class ManagementReportDeliveryApiController {
     public ApiResult<Boolean> manualReplay(@PathVariable Long deliveryId) {
         deliveryService.manualReplay(deliveryId);
         return ApiResult.success(true);
+    }
+
+    @PostMapping("/deliveries/{deliveryId}/cancel")
+    public ApiResult<Boolean> cancel(@PathVariable Long deliveryId) {
+        deliveryService.cancel(deliveryId);
+        return ApiResult.success(true);
+    }
+
+    @GetMapping("/runs/{runId}/deliveries")
+    public ApiResult<List<com.ses.entity.ReportDelivery>> deliveries(@PathVariable Long runId) {
+        return ApiResult.success(deliveryService.listByRun(runId));
     }
 
     public record ReauthenticateRequest(String password) {

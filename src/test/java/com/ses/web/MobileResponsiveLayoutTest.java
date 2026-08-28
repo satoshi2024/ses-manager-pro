@@ -85,6 +85,18 @@ class MobileResponsiveLayoutTest {
         return result.getResponse().getContentAsString();
     }
 
+    @Test
+    void 定期管理レポート画面に配布操作とサイドバー導線がある() throws Exception {
+        String html = readCss("templates/management-reports/index.html");
+        String sidebar = readCss("templates/layout/sidebar.html");
+        String js = readCss("static/js/modules/management-reports.js");
+
+        assertThat(sidebar).contains("management-report").contains("menu.managementReport");
+        assertThat(html).contains("id=\"reportDeliverBtn\"").contains("id=\"report-run-history\"");
+        assertThat(js).contains("/api/management-reports/runs/").contains("/deliver")
+                .contains("cancelDelivery").contains("/api/management-reports/runs");
+    }
+
     private String readCss(String path) throws IOException {
         return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8).replace("\r\n", "\n");
     }

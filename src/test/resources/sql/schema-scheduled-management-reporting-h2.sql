@@ -63,6 +63,8 @@ CREATE TABLE m_report_schedule (
     scope_policy_version VARCHAR(100),
     scope_hash VARCHAR(128),
     retry_scheduled_at TIMESTAMP,
+    processing_logical_run_at TIMESTAMP,
+    processing_claimed_at TIMESTAMP,
     failure_count INT NOT NULL DEFAULT 0,
     last_error_code VARCHAR(100),
     last_error_message VARCHAR(500),
@@ -75,6 +77,7 @@ CREATE TABLE m_report_schedule (
 );
 CREATE UNIQUE INDEX uk_report_schedule_lock_key ON m_report_schedule(tenant_id, lock_key);
 CREATE INDEX idx_report_schedule_due ON m_report_schedule(enabled, next_run_at, deleted_flag);
+CREATE INDEX idx_report_schedule_processing ON m_report_schedule(enabled, processing_claimed_at, deleted_flag);
 
 CREATE TABLE t_report_run (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
