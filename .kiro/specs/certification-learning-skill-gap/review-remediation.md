@@ -110,7 +110,7 @@
 
 ## F1 Implementation Review受領・F2持越し（2026-08-28）
 
-独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2〜Mは`NOT STARTED`、F2着手が許可された。F1本体Headは`2f7bbac0`、現worktreeのlocal/remote Headは`f73fcbc23852daa75f8224f8cc411418db4938f1`、現行migrationはV119、F2はV120+を使用する。PR、merge、branch削除は引き続き禁止する。
+独立ReviewのF1 Implementation **PASS**を正式に受領した。Plan Review R7も**PASS**であり、F2着手が許可された。F1本体Headは`2f7bbac0`、F2完了時点の現worktree local/remote Headは`9972dfc9`、現行migrationはV124（F2はV120〜V124）である。A1/A2/B1/B2/M、PR、merge、branch削除は引き続き禁止する。
 
 ### 持越し項目のF2接続
 
@@ -124,4 +124,4 @@
 | BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、F2-3/M | 未検証 |
 | PR前最新`origin/main`取り込み・migration衝突 | PR直前にfetch＋最新base取り込み、V120+とのmigration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | F2中は未実施 |
 
-この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2実装中の基準は現worktree V119／V120+であり、最新`origin/main`の再取り込みはPR前gateで行う。
+この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2完了時点の基準は現worktree V124であり、最新`origin/main`の再取り込みはPR前gateで行う。
