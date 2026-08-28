@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS t_learning_plan (
     planned_start_on DATE NULL,
     planned_end_on DATE NULL,
     planned_cost_jpy DECIMAL(12,0) NULL,
+    expense_request_id BIGINT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
     approval_request_id BIGINT NULL,
     version INT NOT NULL DEFAULT 0,
@@ -148,6 +149,23 @@ CREATE TABLE IF NOT EXISTS t_learning_plan (
     updated_by BIGINT NULL,
     deleted_flag INT NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS t_learning_plan_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
+    plan_id BIGINT NOT NULL,
+    source_type VARCHAR(40) NOT NULL,
+    source_id BIGINT NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    amount_snapshot DECIMAL(12,0) NULL,
+    actor_user_id BIGINT NULL,
+    reason VARCHAR(2000) NULL,
+    occurred_at TIMESTAMP NOT NULL,
+    idempotency_key VARCHAR(255) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_learning_plan_event_idempotency
+    ON t_learning_plan_event(tenant_id, idempotency_key);
 
 CREATE TABLE IF NOT EXISTS t_learning_plan_skill (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

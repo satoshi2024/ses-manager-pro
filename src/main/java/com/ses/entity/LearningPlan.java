@@ -23,6 +23,8 @@ public class LearningPlan extends BaseEntity {
     private LocalDate plannedStartOn;
     private LocalDate plannedEndOn;
     private BigDecimal plannedCostJpy;
+    /** 実費の正本。金額・承認・会計・支払statusはExpenseRequestが所有する。 */
+    private Long expenseRequestId;
     private String status;
     private Long approvalRequestId;
     @Version
