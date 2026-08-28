@@ -55,16 +55,35 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=111（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version=114（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("111", latestVersion, "最新のマイグレーションバージョンは111であること");
+            assertEquals("114", latestVersion, "最新のマイグレーションバージョンは114であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
                     "t_one_on_one_request", "m_survey_template", "t_survey_campaign", "t_survey_response"}) {
                 assertTableExists(statement, table);
             }
+            for (String table : new String[]{
+                    "m_report_template", "m_report_template_version", "m_report_schedule",
+                    "t_report_run", "t_report_section_snapshot", "t_report_section_attempt",
+                    "t_report_delivery"}) {
+                assertTableExists(statement, table);
+            }
+            assertColumnExists(statement, "m_report_template_version", "updated_at");
+            assertColumnExists(statement, "m_report_schedule", "scope_hash");
+            assertColumnExists(statement, "m_report_schedule", "retry_scheduled_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
+            assertColumnExists(statement, "t_report_run", "snapshot_version");
+            assertColumnExists(statement, "t_report_delivery", "reauth_required");
+            assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
+            assertIndexExists(statement, "t_report_run", "uk_report_run_key");
+            assertIndexExists(statement, "t_report_section_snapshot", "uk_report_section_snapshot");
+            assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
+            assertIndexExists(statement, "t_report_delivery", "uk_report_delivery_dedupe");
+            assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             // t_document_linkにskill sheet確認列が追加されていること（design §1/§6.1）
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
@@ -284,13 +303,24 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("111", latestVersion, "legacy DBの最新マイグレーションバージョンは111であること");
+            assertEquals("114", latestVersion, "legacy DBの最新マイグレーションバージョンは114であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
                     "t_one_on_one_request", "m_survey_template", "t_survey_campaign", "t_survey_response"}) {
                 assertTableExists(statement, table);
             }
+            for (String table : new String[]{
+                    "m_report_template", "m_report_template_version", "m_report_schedule",
+                    "t_report_run", "t_report_section_snapshot", "t_report_section_attempt",
+                    "t_report_delivery"}) {
+                assertTableExists(statement, table);
+            }
+            assertColumnExists(statement, "t_report_delivery", "notification_outbox_id");
+            assertColumnExists(statement, "m_report_schedule", "processing_logical_run_at");
+            assertColumnExists(statement, "m_report_schedule", "processing_claimed_at");
+            assertIndexExists(statement, "t_report_section_attempt", "idx_report_section_attempt_run");
+            assertIndexExists(statement, "t_report_delivery", "idx_report_delivery_outbox");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_at");
             assertColumnExists(statement, "t_document_link", "skill_sheet_confirmed_version");
             assertEquals(1, queryInt(statement,
@@ -377,6 +407,9 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .dataSource(HISTORICAL_V105_1_MYSQL.getJdbcUrl(), HISTORICAL_V105_1_MYSQL.getUsername(), HISTORICAL_V105_1_MYSQL.getPassword())
                 .locations("classpath:db/migration")
                 .target("105.2")
+                // historical fixture作成時にJava migration 74.3が解決対象外になった場合も、
+                // V105.2への順方向遷移で未適用の過去migrationを実行して検証を継続する。
+                .outOfOrder(true)
                 .load()
                 .migrate();
 

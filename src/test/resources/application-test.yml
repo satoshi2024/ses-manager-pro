@@ -56,6 +56,7 @@ spring:
         - classpath:sql/schema-ai-feedback-h2.sql
         - classpath:sql/schema-optimistic-lock-core-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
+        - classpath:sql/schema-scheduled-management-reporting-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

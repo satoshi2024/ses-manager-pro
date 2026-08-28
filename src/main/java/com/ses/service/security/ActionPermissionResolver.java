@@ -60,6 +60,9 @@ public final class ActionPermissionResolver {
             Map.entry("leave", "leave"),
             Map.entry("lifecycle", "lifecycle"),
             Map.entry("management-accounting", "management-accounting"),
+            // 定期管理レポート(NF-10)。V112のm_menu/api_prefixと対にして、
+            // 未登録rootが管理者を含む全roleで403になることを防ぐ。
+            Map.entry("management-reports", "management-report"),
             Map.entry("monthly-closing", "monthly-closing"),
             Map.entry("my", "my"),
             Map.entry("notifications", "notifications"),

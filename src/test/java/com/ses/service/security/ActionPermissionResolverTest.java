@@ -20,6 +20,15 @@ class ActionPermissionResolverTest {
     }
 
     @Test
+    void 定期管理レポートApiは既知のreportActionへ解決される() {
+        assertEquals("management-report.view",
+                ActionPermissionResolver.resolve("GET", "/api/management-reports/runs/10"));
+        assertEquals("management-report.create",
+                ActionPermissionResolver.resolve("POST", "/api/management-reports/runs"));
+        assertTrue(ActionPermissionResolver.isKnownAction("management-report.view"));
+    }
+
+    @Test
     void 未登録業務Apiはactionを生成せず未知として扱う() {
         assertNull(ActionPermissionResolver.resolve("GET", "/api/users-archive"));
         assertNull(ActionPermissionResolver.resolve("POST", "/api/future-sensitive"));

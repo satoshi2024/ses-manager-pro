@@ -19,6 +19,16 @@ public interface NotificationService {
         publishToUser(userId, type, title, message, linkUrl, dedupeKey);
     }
 
+    /**
+     * 通知outboxへ登録したIDを返すreport等の監査連携用経路。
+     * 既存通知実装との互換性のため、未対応実装はnullを返す。
+     */
+    default Long publishToUserAndGetOutboxId(Long userId, String type, String title, String message,
+                                               String linkUrl, String dedupeKey, String menuKey) {
+        publishToUser(userId, type, title, message, linkUrl, dedupeKey, menuKey);
+        return null;
+    }
+
     /** 組織固有の全体通知。organizationId=nullはプラットフォーム共通通知に限定する。 */
     void publishToOrganization(Long organizationId, String type, String title, String message,
                                String linkUrl, String dedupeKey);

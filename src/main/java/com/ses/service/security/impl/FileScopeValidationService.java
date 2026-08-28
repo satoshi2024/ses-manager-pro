@@ -109,6 +109,11 @@ public class FileScopeValidationService {
             // 本人/管理者/マネージャー（配下）のみで、営業・HRは不可視（給与・経費は営業不可視）。
             // CHANGE_REQUEST_ATTACHMENT（変更申請添付）は本人/HR/管理者/マネージャー（組織scope∩DataScope）のみ。
             String documentType = documentTypeOf(documentVersion.getDocumentId());
+            // 管理レポートはrecipient deliveryのtoken/期限/再認証/scopeを必須とし、
+            // 汎用文書台帳downloadからの迂回を許可しない。
+            if ("MANAGEMENT_REPORT".equals(documentType)) {
+                throw BusinessException.of(403, "error.managementReport.deliveryRequired");
+            }
             if ("PRIVATE_NOTE".equals(documentType)) {
                 String role = SecurityUtils.currentRole();
                 if ("HR".equals(role)) {

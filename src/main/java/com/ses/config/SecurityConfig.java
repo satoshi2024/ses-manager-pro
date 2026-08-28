@@ -167,6 +167,12 @@ public class SecurityConfig {
                     "/api/audit-logs/**",
                     "/api/autocomplete/users"
                 ).hasRole("管理者")
+                .requestMatchers("/api/management-reports/schedules/*/enable",
+                        "/api/management-reports/schedules/*/disable")
+                .hasRole("管理者")
+                // 定期管理レポートは管理者・マネージャーのみ。section/scopeの再検証はserviceで行う。
+                .requestMatchers("/management-reports/**", "/api/management-reports/**")
+                .hasAnyRole("管理者", "マネージャー")
                 // HR/マネージャーに開放済みの運用導線。管理者境界とは分離して定義する。
                 .requestMatchers(
                     "/api/work-records/confirm",

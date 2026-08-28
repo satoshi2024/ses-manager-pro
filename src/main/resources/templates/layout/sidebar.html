@@ -280,6 +280,13 @@
                     </a>
                 </li>
 
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('management-report')}">
+                    <a th:href="@{/management-reports}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/management-reports') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-file-earmark-bar-graph me-2"></i>
+                        <span th:text="#{menu.managementReport}">定期管理レポート</span>
+                    </a>
+                </li>
+
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('monthly-closing')}">
                     <a th:href="@{/monthly-closing}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/monthly-closing') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-calendar-check me-2"></i>
