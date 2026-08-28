@@ -62,4 +62,5 @@ F1 着手には Gate 0 Head での **PLAN Review PASS** が追加条件。
 | Review | Head | PLAN | 備考 |
 |---|---|---|---|
 | R5 | `34f20724` | FAIL | P1-01b OPEN のみ |
-| R6 | Gate 0 commit | PASS | 本 Decision 記録後（review-remediation.md R6 節） |
+| R6 | `03545127` | PASS（実装側自己判定・参考） | Task 0G |
+| R7 | `4e171f19` | **PASS**（独立 Plan Review） | 正本。F1 許可 |

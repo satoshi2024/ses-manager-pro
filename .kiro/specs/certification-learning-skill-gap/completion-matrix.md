@@ -9,14 +9,16 @@
 | 承認 Base | `origin/main@76e45340` |
 | Base merge commit | `5d4b5c27` |
 | Gate 0 承認 commit | `03545127` |
-| remote HEAD | `1f459267`（SHA 追記後） |
+| remote HEAD | `4e171f19` |
+| Plan Review | **PASS**（独立 Review、Head `4e171f19`） |
+| Implementation Review | **NOT STARTED** |
 | production 変更（NF-03） | なし（Base merge のみ）。F1 未着手 |
 | worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
 | migration（F1 開始時） | `V115+`（現行 latest `V114`） |
 | PR | 作成しない |
 
-Review remediation: P1-01 **VERIFIED_CLOSED**（0G）。P1-02〜P1-10 は承認値反映済み — 実装証明は F1〜M。PLAN Review R6 は Gate 0 Head で再判定。
+Review remediation: P1-01 **VERIFIED_CLOSED**（独立 Plan Review、Head `4e171f19`）。P1-02〜P1-10 は APPROVED（spec）— 実装証明は F1〜M。
 
 ## Task対応
 

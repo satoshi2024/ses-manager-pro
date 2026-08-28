@@ -2,7 +2,7 @@
 
 ## 判定の前提
 
-直近 Review（Gate 0 / Task 0G）: **PLAN `PASS`**、Implementation `NOT STARTED`。OwnerRef=`PROJECT_OWNER`、DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`、Base `76e45340`、traceability `APPROVED`。
+直近 Review（独立 Plan Review、Head `4e171f19`）: 総合 **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED**。F1 許可（開工対話）。
 
 ## R1 Review（Task 0R）指摘との対応
 
@@ -59,50 +59,42 @@
 
 `DG-03-DEV-20260828` は Owner 識別ポリシーの Decision。業務 Decision は `DG-03-SCOPE-APPROVAL-20260828-01`（approval-decision.md）。
 
-## R6 Plan Review（Gate 0 / Task 0G）— PLAN PASS
+## R6 実装側自己判定（Gate 0 / Task 0G）— 参考
 
-**Reviewed Head:** `03545127`（Gate 0 commit）
+**Reviewed Head:** `03545127`（Gate 0 承認 commit）
 
-**Verdict:** PLAN **PASS** / Implementation **NOT STARTED** / F1 **許可**（Gate 0 Head 以降）
+実装対話での自己判定。**独立 Review は本節を採用せず**、下記 R7（Head `4e171f19`）を正とする。
 
-### P1 finding 最終状態
+## R7 独立 Plan Review（Head `4e171f19`）— PLAN PASS
 
-| finding | Status | 証跡 |
-|---|---|---|
-| P1-01a OwnerRef | VERIFIED_CLOSED | `DG-03-DEV-20260828` |
-| P1-01b scope/Base/DG-03/`APPROVED` | VERIFIED_CLOSED | `DG-03-SCOPE-APPROVAL-20260828-01`、`approval-decision.md`、中央台帳 `APPROVED`、Base `76e45340` merge |
-| P1-02 as-of event/snapshot | APPROVED（spec） | DG-03-4、design §3.4、F1-4 — 実装証明は F1+ |
-| P1-03 証憑 typed resolver | APPROVED（spec） | DG-03-2、design §3.6、F1-2 — enum/E2E は F1+ |
-| P1-04 経費正本 | APPROVED（spec） | DG-03-5 選択肢 A、`ExpenseRequestServiceImpl`、F2-2 |
-| P1-05 資格 state/CAS | APPROVED（spec） | design §3.5、F1-1/F2-1 |
-| P1-06 通知 dedupe/lifecycle | APPROVED（spec） | approval-decision 通知節、design §3.8、F2-4 |
-| P1-07 assessment/AI 境界 | APPROVED（spec） | DG-03-6、design §3.9、F1-5/F2-5 |
-| P1-08 skill write フック | APPROVED（spec） | inventory §5.4、F1-4/F2-3 |
-| P1-09 FileScope 分岐 | APPROVED（spec） | design §3.6、F1-2/B1 |
-| P1-10 経費締め A | APPROVED（spec） | DG-03-5、design §3.7、F2-2 |
+**Reviewed Head:** `4e171f196e861a3fd849db3aa9f98c1981a6d747`（remote と一致）
 
-### P2 finding 最終状態
+**Verdict:** 総合 Review **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED** / F1 **許可**（開工対話で。本 Review 対話では実装しない）
 
-| finding | Status |
+**検証:** merge parents `2abd4efc` + `76e45340`、merge-base `76e45340`、`git diff --check origin/main...HEAD` = 0、`gh pr list` 空。
+
+### P1-01（閉鎖）
+
+| 部分 | Status |
 |---|---|
-| P2-01 R7 正規化 | VERIFIED_CLOSED（spec） |
-| P2-02 資格 identity | APPROVED（spec） |
-| P2-03 README/matrix 同期 | VERIFIED_CLOSED |
-| P2-04 Clock/TZ | APPROVED（spec）— Asia/Tokyo |
-| P2-05 lifecycle population | APPROVED（spec） |
-| P2-06 SELF 非表示 | VERIFIED_CLOSED（spec） |
-| P2-08 position delete フック | VERIFIED_CLOSED（spec） |
+| P1-01a OwnerRef | VERIFIED_CLOSED |
+| P1-01b scope/Base/DG-03/`APPROVED` | VERIFIED_CLOSED |
 
-### 残リスク（PLAN FAIL 理由ではない）
+### P1-02〜P1-10 / P2
 
-- NF-07 未決定: `CERTIFICATION_PII` production 保持年数 — **開発継続可、production 有効化のみ gate**
-- Implementation 未着手: F1〜M の test/Demo/CI 証明は Implementation Review 対象
-- `certification.pii.view` 権限 seed: F1 で追加予定
+**APPROVED（spec）** または **VERIFIED_CLOSED（spec）**。REGRESSED なし。実装証明は F1〜M。
+
+### 残リスク（PLAN FAIL ではない）
+
+- `CERTIFICATION_PII` production 保持は NF-07。開発継続可、本番有効化は停止。
+- DG-03-1 は AES-256-GCM **または** token — **F1-1 で列形を一つに固定**すること。
+- FileScope empty-link/admin bypass は現行コードに残存。F1-2 で `CERTIFICATION_EVIDENCE` 専用分岐を `document-archive` より前に実装（契約維持）。
+- latest Flyway **V114**。F1 は **V115+**。
 
 ### Next wave
 
-- **F1 開始: YES**（PLAN PASS 後）
-- **PR: NOT CREATED**（M + Implementation Review PASS まで禁止）
+- **F1 開始: YES**（開工対話）
+- **PR: NOT CREATED**（M + Implementation Review PASS まで）
 
 ## 再Reviewの開始条件（Implementation）
 
@@ -112,6 +104,6 @@
 
 ## 現時点の証拠境界
 
-- 確認済み: Gate 0 承認 Decision、traceability `APPROVED`、Base `76e45340` merge、spec 静的整合、PLAN Review R6 **PASS**、`git diff --check`。
+- 確認済み: 独立 Plan Review PASS（Head `4e171f19`）、Gate 0 Decision、traceability `APPROVED`、Base merge、spec 静的整合、`git diff --check`。
 - 未確認: NF-03 production implementation、Maven/MySQL、scheduler E2E、Document download E2E、browser Demo。
 - Implementation Review は F1〜M 完了後に開始する。

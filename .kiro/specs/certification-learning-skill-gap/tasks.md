@@ -49,7 +49,7 @@
 
 - [ ] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
   - Objective: 資格名、issuer、code、期限規則、engineer取得状態、番号参照、versionを正規化する。
-  - Implementation: 最新 migration **V115+**（Base 取り込み後 `V114` の次）、V1/H2専用schema/entity/mapperを同期し、PII field（AES-256-GCM/token）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
+  - Implementation: 最新 migration **V115+**（Base 取り込み後 `V114` の次）、V1/H2専用schema/entity/mapperを同期し、PII field（DG-03-1: AES-256-GCM **または** token のいずれか一つに列形を固定）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
   - Test: empty DB/MySQL migration、H2 context、duplicate取得、code NULL、issuer別code、名称alias/merge、renew、nullable/期限、PII DTO非漏えい。
   - Demo: HRがmasterを登録し、本人申請がpendingで保存され、承認前activeにならないことを確認する。
 
