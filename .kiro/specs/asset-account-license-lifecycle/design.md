@@ -44,7 +44,7 @@ CREATE TABLE m_asset (
     asset_name VARCHAR(128) NOT NULL COMMENT '資産名称 (例: ThinkPad T14 Gen4)',
     category VARCHAR(32) NOT NULL COMMENT '資産区分: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER',
     owner_company_id BIGINT COMMENT '所有法人ID (m_company.id)',
-    status VARCHAR(32) NOT NULL DEFAULT 'IN_STOCK' COMMENT 'IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, DISPOSED, LOST',
+    status VARCHAR(32) NOT NULL DEFAULT 'IN_STOCK' COMMENT 'IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, LOST, DISPOSED, RESERVED',
     location VARCHAR(128) COMMENT '保管場所/拠点',
     purchase_date DATE COMMENT '取得日',
     purchase_price DECIMAL(12, 2) COMMENT '取得価格 (円)',
@@ -72,8 +72,8 @@ CREATE TABLE t_asset_assignment (
     start_date DATE NOT NULL COMMENT '貸与開始日',
     expected_return_date DATE COMMENT '返却予定日',
     actual_return_date DATE COMMENT '実際の返却日 (NULL=現在貸与中)',
-    handover_evidence_doc_id BIGINT COMMENT '受渡し証跡文書ID (t_document.id)',
-    return_evidence_doc_id BIGINT COMMENT '返却証跡文書ID (t_document.id)',
+    handover_evidence_doc_id BIGINT COMMENT '受渡し証跡文書ID (既存 DocumentLink 連携)',
+    return_evidence_doc_id BIGINT COMMENT '返却証跡文書ID (既存 DocumentLink 連携)',
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, RETURNED, OVERDUE, WAIVED',
     note VARCHAR(500) COMMENT '貸与メモ',
     version INT NOT NULL DEFAULT 0 COMMENT '楽観ロック用バージョン',
@@ -329,25 +329,27 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 
 ## 6. NF-01 退社ゲート連携インターフェース契約
 
-### 6.1 `AssetLifecycleIntegrationService`
-`engineer-lifecycle-workflow` の退社ケース完了時、以下のメソッドを通じて blocker 判定を行う:
+### 6.1 `AssetOffboardingService`
+`engineer-lifecycle-workflow` の退社ケース完了時、以下のメソッドを通じて 3大 blocker（未返却端末、未失効アカウント、未解放ライセンス）判定を行う:
 
 ```java
-public interface AssetLifecycleIntegrationService {
+public interface AssetOffboardingService {
     /**
-     * 要員の未返却資産および未失効外部アカウントの検証
+     * 要員の未返却資産、未失効外部アカウント、および未解放有償ライセンスの検証
      * @param engineerId 対象要員ID
-     * @return Blocker判定結果 (未返却件数、未失効件数、詳細リスト)
+     * @return クリアランス判定結果 (未返却数、未失効数、未解放数、詳細リスト、免除フラグ)
      */
-    ResignationAssetBlockerSummary checkResignationBlockers(Long engineerId);
+    OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId);
 
     /**
-     * 例外承認適用によるBlocker解除記録
-     * @param engineerId 対象要員ID
-     * @param approvalRequestId 承認申請ID (ApprovalEngine)
-     * @param reason 例外理由
+     * 退社確定時の一括無効化トリガー（アカウント失効要求・ライセンス解放）
      */
-    void applyResignationExceptionWaive(Long engineerId, Long approvalRequestId, String reason);
+    void triggerOffboardingRevocations(Long engineerId, Long actorUserId);
+
+    /**
+     * 例外承認適用によるBlocker解除記録 (ApprovalEngine / RequestType = LIFECYCLE_EXCEPTION)
+     */
+    void approveOffboardingWaiver(Long engineerId, String reason, Long approvalRequestId, Long actorUserId);
 }
 ```
 

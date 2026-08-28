@@ -103,6 +103,11 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
             throw new BusinessException("指定された棚卸し明細が見つかりません。");
         }
 
+        AssetInventoryRun run = getById(item.getInventoryRunId());
+        if (run != null && "COMPLETED".equals(run.getStatus())) {
+            throw new BusinessException("完了済みの棚卸し明細は変更できません。");
+        }
+
         if (!StringUtils.hasText(discrepancyType)) {
             discrepancyType = "MATCH";
         }
@@ -124,10 +129,10 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
     public AssetInventoryRun completeInventoryRun(Long runId, Long actorUserId) {
         AssetInventoryRun run = getById(runId);
         if (run == null) {
-            throw new BusinessException("指定された棚卸しデータが見つかりません。");
+            throw new BusinessException("指定された棚卸し計画が見つかりません。");
         }
         if ("COMPLETED".equals(run.getStatus())) {
-            return run;
+            throw new BusinessException("既に完了済みの棚卸しです。");
         }
 
         // 明細の集計

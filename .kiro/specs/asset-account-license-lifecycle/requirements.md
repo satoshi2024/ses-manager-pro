@@ -18,9 +18,9 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 
 ### AS-R1 資産管理と貸与・返却・イベント台帳 (Asset & Assignment Lifecycle)
 
-1. THE 管理者 SHALL 資産タグ（`asset_tag` / 全社一意）、シリアル番号（`serial_no`）、資産名称、資産区分（`category`: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER）、所有法人（`owner_company_id`）、ステータス（`status`: `IN_STOCK: 保管中`, `ASSIGNED: 貸与中`, `UNDER_MAINTENANCE: 修理/保守中`, `DISPOSED: 廃棄済`, `LOST: 紛失`）、保管場所（`location`）、取得日、保証期限、リース満了日、および備考を管理できる。
-2. THE 貸与（Assignment） SHALL 対象資産、貸与先区分（`assignee_type`: `ENGINEER: 要員`, `USER: 内部ユーザー`）、貸与先ID（`assignee_id`）、貸与開始日（`start_date`）、返却予定日（`expected_return_date`）、実際の返却日（`actual_return_date`）、受渡し証跡文書ID（`handover_evidence_doc_id` / `DocumentLink`）、返却証跡文書ID（`return_evidence_doc_id` / `DocumentLink`）、および状態（`ACTIVE`, `RETURNED`, `OVERDUE`, `WAIVED`）を保持する。
-3. **期間重複貸与の絶対拒否 (Overlap Rejection)**: THE システム SHALL 同一資産に対して期間が重複する貸与（`actual_return_date` が NULL のアクティブ貸与が存在する状態での新規貸与、または指定期間が既存貸与区間と重複する貸与）を、DB制約およびトランザクション境界で確実に拒否（Fail-Closed）する。並行リクエストに対してもCAS/行ロックにより1件のみを成功させ、重複貸与を成立させない。
+1. THE 管理者 SHALL 資産タグ（`asset_tag` / 全社一意）、シリアル番号（`serial_no`）、資産名称、資産区分（`category`: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER）、所有法人（`owner_company_id`）、ステータス（`status`: `IN_STOCK: 保管中`, `ASSIGNED: 貸与中`, `UNDER_MAINTENANCE: 修理/保守中`, `LOST: 紛失`, `DISPOSED: 廃棄済`, `RESERVED: 予約済`）、保管場所（`location`）、取得日、保証期限、リース満了日、および備考を管理できる。
+2. THE 貸与（Assignment） SHALL 対象資産、貸与先区分（`assignee_type`: `ENGINEER: 要員`, `USER: 内部ユーザー`）、貸与先ID（`assignee_id`）、貸与開始日（`start_date`）、返却予定日（`expected_return_date`）、実際の返却日（`actual_return_date`）、受渡し証跡文書ID（`handover_evidence_doc_id` / 既存 `DocumentLink` 連携）、返却証跡文書ID（`return_evidence_doc_id` / 既存 `DocumentLink` 連携）、および状態（`ACTIVE`, `RETURNED`, `OVERDUE`, `WAIVED`）を保持する。
+3. **期間重複貸与の絶対拒否と返却直後再貸与**: THE システム SHALL 同一資産に対して期間が重複する貸与（`actual_return_date` が NULL のアクティブ貸与が存在する状態での新規貸与、または指定期間が既存貸与区間と重複する貸与）を、DB制約およびトランザクション境界（行ロック `FOR UPDATE` + 期間重複判定）で確実に拒否（Fail-Closed）する。返却完了（`actual_return_date` 設定、ステータス `IN_STOCK` 復帰）直後の別要員への再貸与は正常に許可する。並行リクエストに対してもCAS/行ロックにより1件のみを成功させ、重複貸与を成立させない。
 4. **履歴の不変性 (Immutable Event History)**: THE システム SHALL 資産の登録、貸与、返却、移管、修理出入、紛失報告、リモートワイプ確認、廃棄等の全イベントを、改ざん不能な追記専用台帳（`t_asset_event`）へ記録する。過去のイベント履歴の上書き・物理削除は禁止する。
 
 ---
@@ -28,24 +28,25 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 ### AS-R2 外部アカウント参照・秘密非保存・外部失効確認・ライセンス (Account & License Lifecycle)
 
 1. THE 管理者 SHALL 外部システム（`m_external_account_system`: Google Workspace, GitHub, Slack, AWS, Microsoft 365, MDM等）の識別子、名称、システム種別、認可方式を管理できる。
-2. THE 外部アカウント参照（`t_external_account_reference`） SHALL 外部システムID、外部アカウント識別子（メールアドレス、ユーザー名、または外部ID）、紐付け対象（要員IDまたはユーザーID）、権限レベル（`ADMIN`, `MEMBER`, `READONLY` 等）、ステータス（`ACTIVE: 有効`, `SUSPENDED: 停止中`, `REVOKED: 失効済`, `EXCEPTION_HOLD: 例外保留`）、発行日、失効要求日時（`revoke_requested_at`）、失効確認日時（`revoke_confirmed_at`）、および確認者（`revoke_confirmed_by`）を保持する。
-3. **秘密情報の絶対非保存 (No Secrets Stored)**: THE システム SHALL 外部アカウントのパスワード、APIトークン、クライアントシークレット、リカバリーコード、暗号化キーを格納するテーブル列、DTOフィールド、ログ出力、Entityを一切作成しない。外部認証はIdP/SSOおよびOAuth2 PKCE等の標準プロトコルに委ね、本システムはアカウントの「参照（Reference）」と「ライフサイクル状態（State）」のみを管理する。
-4. **外部失効要求と確認の分離 (Revoke Request vs. Confirmation)**: 外部プロバイダー（IdP/MDM/SaaS）に対する失効連携において、THE システム SHALL 失効要求（`REQUESTED`）と失効完了確認（`CONFIRMED`）を別個のタイムスタンプとステータスで管理する。外部APIのタイムアウト、通信障害、または未確認応答（5xx/429）が発生した場合、THE システム SHALL 失効を「完了」とみなさず `UNKNOWN` / `PENDING_CONFIRMATION` として要確認キューに留め、手動確認または定期リトライを要求する。
-5. THE ライセンス管理（`m_license_plan`, `t_license_assignment`） SHALL プラン名、プロバイダー、総ライセンス数（`seat_limit`）、割当済数（`allocated_count`）、1席あたり費用、費用負担組織（`cost_center_id`）、および有効期限を管理する。割当数が上限に達した場合、THE システム SHALL 新規割当を拒否または管理者へ警告を発する。
+2. THE 外部アカウント参照（`t_external_account_reference`） SHALL 外部システムID、外部アカウント識別子（メールアドレス、ユーザー名、または外部ID）、紐付け対象（要員IDまたはユーザーID）、権限レベル（`ADMIN`, `MEMBER`, `READONLY` 等）、ステータス（`ACTIVE: 有効`, `SUSPENDED: 停止中`, `REVOKED: 失効済`, `PENDING_CONFIRMATION: 失効確認待ち`, `UNKNOWN: 状態不明`, `EXCEPTION_HOLD: 例外保留`）、発行日、失効要求日時（`revoke_requested_at`）、失効確認日時（`revoke_confirmed_at`）、および確認者（`revoke_confirmed_by`）を保持する。
+3. **秘密情報の絶対非保存 (Comprehensive No-Secrets Policy)**: THE システム SHALL 外部アカウントのパスワード、APIトークン、クライアントシークレット、リカバリーコード、暗号化キーを格納するテーブル列、DTOフィールド、ログ出力、例外メッセージ、監査payload、HTML/JS入力フォームを一切作成・受容・出力しない。外部認証はIdP/SSOおよびOAuth2 PKCE等の標準プロトコルに委ね、本システムはアカウントの「参照（Reference）」と「ライフサイクル状態（State）」のみを管理する。
+4. **外部失効要求と確認の分離 & Recovery/Idempotency**: 外部プロバイダー（IdP/MDM/SaaS）に対する失効連携において、THE システム SHALL 失効要求（`REQUESTED`）と失効完了確認（`CONFIRMED`）を別個のタイムスタンプとステータスで管理する。失効要求時は冪等性キー（`idempotency_key`）を付与し、二重revokeを防止する。外部APIのタイムアウト、通信障害、または未確認応答（5xx/429）が発生した場合、THE システム SHALL 失効を「完了」とみなさず `PENDING_CONFIRMATION` / `UNKNOWN` として永続化し、指数バックオフによる定期リトライ・ポーリングジョブで再照会する。
+5. **有償ライセンス席数管理 & CAS保護**: THE ライセンス管理（`m_license_plan`, `t_license_assignment`） SHALL プラン名、プロバイダー、総ライセンス数（`seat_limit`）、割当済数（`allocated_count`）、1席あたり費用、費用負担組織（`cost_center_id`）、および有効期限を管理する。割当時は `allocated_count < seat_limit` のCAS更新で原子保護し、上限 `-1 / = / +1` の境界を厳格に制御する。上限到達時の新規割当拒否、解放後の再割当成功、並行割当での席数完全性を保証する。
 
 ---
 
 ### AS-R3 棚卸し・紛失インシデント・退社ゲート連携 (Inventory, Incident & Resignation Gate)
 
 1. THE 管理者 SHALL 定期（半期/年次）または臨時の棚卸し（`t_asset_inventory_run`）を開始できる。
-2. THE 棚卸し明細（`t_asset_inventory_item`） SHALL 理論上の保管場所/貸与先（`expected`）と実地確認結果（`observed`）、確認者、確認日時、差異区分（`MATCH: 一致`, `DISCREPANCY: 差異あり`, `MISSING: 所在不明`, `UNREGISTERED: 未登録資産`）、差異理由、および是正措置（再割当、返却、紛失処理等）を記録する。
-3. **紛失インシデント追跡 (Lost Asset Incident)**: 資産の紛失が報告された場合、THE システム SHALL ステータスを `LOST` に変更し、インシデント起票日時、リモートワイプ実施/確認状態、警察届出番号、保険申請状況、および関連文書リンク（始末書・インシデント報告書）を追跡可能にする。
+2. THE 棚卸し明細（`t_asset_inventory_item`） SHALL 理論上の保管場所/貸与先（`expected`）と実地確認結果（`observed`）、確認者、確認日時、差異区分（`MATCH: 一致`, `DISCREPANCY: 差異あり`, `MISSING: 所在不明`, `UNREGISTERED: 未登録資産`）、差異理由、および是正措置を記録する。棚卸し確定（`COMPLETED`）後の明細更新および二重確定は厳格に拒否する。
+3. **紛失インシデント追跡 (Lost Asset Incident)**: 資産の紛失が報告された場合、THE システム SHALL ステータスを `LOST` に変更し、インシデント起票日時、リモートワイプ実施/確認状態、警察届出番号、保険申請状況、および関連文書リンクを追跡可能にし、関係者へ緊急アラートを即時一斉配信する。
 4. **退社ゲート連携 (NF-01 Link Contract)**: 
-   - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の残存アイテムを blocker として検出・報告する:
+   - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の **3大残存アイテム** を blocker として検出・報告する:
      - (a) 未返却貸与資産（`status = ACTIVE` または `actual_return_date IS NULL`）
-     - (b) 未失効外部アカウント（`status = ACTIVE` または `revoke_confirmed_at IS NULL`）
+     - (b) 未失効外部アカウント（`status IN ('ACTIVE', 'SUSPENDED')` または `revoke_confirmed_at IS NULL`）
+     - (c) 未解放有償ライセンス（`status = 'ACTIVE'` または `released_date IS NULL`）
    - WHEN 上記の blocker が1件でも存在する場合、THE システム SHALL 退社ケースの通常完了を確実に阻止（Block）する。
-   - WHEN 業務上の正当な理由で未返却/未失効のまま退社ケースを完了させる場合、THE システム SHALL 申請者単独の操作を禁止し、既存の承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）による例外申請（理由、是正期限、リスク所有者）の承認を必須とする。
+   - WHEN 業務上の正当な理由で未返却/未失効/未解放のまま退社ケースを完了させる場合、THE システム SHALL 申請者単独の操作を禁止し、既存の承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）による例外申請（理由、是正期限、リスク所有者）の承認を必須とする。退社確定時は一括無効化トリガーを実行する。退社手続き中の担当変更・移管時も不変台帳へ排他記録する。
 
 ---
 

@@ -35,6 +35,9 @@ public class AssetAlertServiceImpl implements AssetAlertService {
 
         int alertCount = 0;
         for (AssetAssignment as : activeList) {
+            as.setStatus("OVERDUE");
+            assetAssignmentMapper.updateById(as);
+
             Asset asset = assetMapper.selectById(as.getAssetId());
             String assetTag = asset != null ? asset.getAssetTag() : "ID#" + as.getAssetId();
             String dedupeKey = "asset:overdue:" + as.getId() + ":" + today;
@@ -50,7 +53,30 @@ public class AssetAlertServiceImpl implements AssetAlertService {
             alertCount++;
         }
 
-        log.info("Overdue asset assignments check completed: found={}", alertCount);
+        // 7日前 / 3日前 / 当日 接近通知
+        List<Integer> reminderDays = List.of(0, 3, 7);
+        for (int days : reminderDays) {
+            LocalDate targetDate = today.plusDays(days);
+            List<AssetAssignment> upcomingList = assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
+                    .eq(AssetAssignment::getStatus, "ACTIVE")
+                    .eq(AssetAssignment::getExpectedReturnDate, targetDate));
+
+            for (AssetAssignment assignment : upcomingList) {
+                String dedupeKey = "asset:reminder:" + assignment.getId() + ":" + days + ":" + today;
+                String title = days == 0 ? "【返却期日】本日が貸与資産の返却期日です" : String.format("【返却リマインド】資産返却期日まであと%d日です", days);
+                String content = String.format("貸与資産ID#%d の返却期日は %s です。", assignment.getAssetId(), targetDate);
+                notificationService.publish(
+                        "ASSET_RETURN_REMINDER",
+                        title,
+                        content,
+                        "/asset/list",
+                        dedupeKey,
+                        "asset-management"
+                );
+            }
+        }
+
+        log.info("Overdue and upcoming asset assignments check completed: found={}", alertCount);
         return alertCount;
     }
 
@@ -60,36 +86,37 @@ public class AssetAlertServiceImpl implements AssetAlertService {
         LocalDate today = LocalDate.now();
         LocalDate threshold = today.plusDays(30);
 
-        List<Asset> expiringAssets = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
+        List<Asset> expiringList = assetMapper.selectList(new LambdaQueryWrapper<Asset>()
                 .ne(Asset::getStatus, "DISPOSED")
                 .isNotNull(Asset::getLeaseExpiry)
                 .between(Asset::getLeaseExpiry, today, threshold));
 
         int alertCount = 0;
-        for (Asset a : expiringAssets) {
-            String dedupeKey = "asset:lease-expiry:" + a.getId() + ":" + today.getYear() + "-" + today.getMonthValue();
+        for (Asset asset : expiringList) {
+            String dedupeKey = "asset:lease-expiring:" + asset.getId() + ":" + asset.getLeaseExpiry();
             notificationService.publish(
                     "ASSET_LEASE_EXPIRING",
-                    "【リース満了接近】資産「" + a.getAssetTag() + "」のリース期間が30日以内に満了します",
-                    "資産名: " + a.getAssetName() + "、満了日: " + a.getLeaseExpiry(),
+                    "【リース満了予告】資産「" + asset.getAssetTag() + "」のリース満了日が近づいています",
+                    "資産名: " + asset.getAssetName() + "、リース満了日: " + asset.getLeaseExpiry() + " (30日以内)",
                     "/asset/list",
                     dedupeKey,
                     "asset-management"
             );
             alertCount++;
         }
-
         log.info("Expiring leases check completed: found={}", alertCount);
         return alertCount;
     }
 
     @Override
+    @Transactional
     public void notifyLostAssetIncident(Asset asset, String incidentDetails, Long reporterUserId) {
+        if (asset == null) return;
         String dedupeKey = "asset:lost:" + asset.getId() + ":" + System.currentTimeMillis();
         notificationService.publish(
                 "ASSET_LOST_INCIDENT",
-                "【緊急: 資産紛失インシデント】資産「" + asset.getAssetTag() + " (" + asset.getAssetName() + ")」の紛失が報告されました",
-                "報告者ID: " + reporterUserId + "、詳細: " + incidentDetails,
+                "【緊急: 資産紛失インシデント】資産「" + asset.getAssetTag() + "」の紛失が報告されました",
+                "報告者ID: " + reporterUserId + "、詳細: " + incidentDetails + "。直ちに外部アカウント停止およびリモートワイプ等の初動対応を実施してください。",
                 "/asset/list",
                 dedupeKey,
                 "asset-management"
@@ -101,9 +128,9 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     public List<AssetAssignment> getOverdueAssignments() {
         LocalDate today = LocalDate.now();
         return assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
-                .eq(AssetAssignment::getStatus, "ACTIVE")
-                .isNotNull(AssetAssignment::getExpectedReturnDate)
-                .lt(AssetAssignment::getExpectedReturnDate, today)
-                .orderByAsc(AssetAssignment::getExpectedReturnDate));
+                .and(w -> w.eq(AssetAssignment::getStatus, "OVERDUE")
+                        .or(ow -> ow.eq(AssetAssignment::getStatus, "ACTIVE")
+                                .isNotNull(AssetAssignment::getExpectedReturnDate)
+                                .lt(AssetAssignment::getExpectedReturnDate, today))));
     }
 }
