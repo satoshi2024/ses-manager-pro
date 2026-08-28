@@ -64,6 +64,10 @@ public class ExpenseAccountingJobScheduler {
     private final Clock clock;
     private final PlatformTransactionManager transactionManager;
 
+    /** 会計連携済への遷移も経費正本の支払関連writeとして締めを再検証する。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
+
     private TransactionTemplate requiresNewTx() {
         TransactionTemplate tt = new TransactionTemplate(transactionManager);
         tt.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -237,6 +241,9 @@ public class ExpenseAccountingJobScheduler {
         requiresNewTx().executeWithoutResult(st -> {
             LocalDateTime now = LocalDateTime.now(clock);
             ExpenseRequest expense = claimed.expense();
+            if (monthlyClosingService != null && expense.getExpenseDate() != null) {
+                monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expense.getExpenseDate()).toString());
+            }
             int version = expense.getVersion() == null ? 0 : expense.getVersion();
             int expUpdated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
                     .eq("id", expense.getId())

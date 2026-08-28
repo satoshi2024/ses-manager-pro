@@ -19,9 +19,10 @@ public interface ExpenseRequestService {
 
     String CATEGORY_TRANSPORT = "交通費";
     String CATEGORY_REIMBURSEMENT = "立替経費";
+    String CATEGORY_TRAINING = "研修費";
 
     /** 本人が指定できる科目allowlist（design §4）。任意の科目codeを受け付けない。 */
-    Set<String> CATEGORIES = Set.of(CATEGORY_TRANSPORT, CATEGORY_REIMBURSEMENT);
+    Set<String> CATEGORIES = Set.of(CATEGORY_TRANSPORT, CATEGORY_REIMBURSEMENT, CATEGORY_TRAINING);
 
     String STATUS_DRAFT = "下書き";
     String STATUS_APPLIED = "申請中";
@@ -83,6 +84,9 @@ public interface ExpenseRequestService {
     Page<ExpenseRequestDto> pageManagement(String engineerName, String status, long current, long size);
 
     ExpenseRequestDto detailManagement(Long id);
+
+    /** training serviceが実費statusを確認するための正本取得。金額を別管理しない。 */
+    com.ses.entity.ExpenseRequest getEntity(Long id);
 
     /** 会計連携済→支払済（状態CAS）。支払い通知EXPENSE_PAIDを本人へ発行する。 */
     ExpenseRequestDto markPaid(Long id);

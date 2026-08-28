@@ -176,6 +176,9 @@ public class SecurityConfig {
                 // 定期管理レポートは管理者・マネージャーのみ。section/scopeの再検証はserviceで行う。
                 .requestMatchers("/management-reports/**", "/api/management-reports/**")
                 .hasAnyRole("管理者", "マネージャー")
+                // 資格・学習・skill gapの管理導線。本人申請はA2の /api/my/** へ分離する。
+                .requestMatchers("/certification-learning-skill-gap/**", "/api/certification-learning-gap/**")
+                .hasAnyRole("管理者", "HR", "マネージャー")
                 // HR/マネージャーに開放済みの運用導線。管理者境界とは分離して定義する。
                 .requestMatchers(
                     "/api/work-records/confirm",

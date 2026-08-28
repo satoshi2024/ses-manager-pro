@@ -198,6 +198,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         if (expense.getExpenseDate() == null) {
             throw new BusinessException(400, "経費発生日は必須です (id=" + expenseRequestId + ")");
         }
+        monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expense.getExpenseDate()).toString());
 
         if (!"承認済".equals(expense.getStatus())) {
             throw new BusinessException(400, "承認済の経費申請のみ会計連携可能です (現在: " + expense.getStatus() + ")");
@@ -419,6 +420,10 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                 CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
 
                 if (result.isSuccess()) {
+                    if (canonical.getExpenseDate() != null) {
+                        monthlyClosingService.assertOpenForUpdate(
+                                java.time.YearMonth.from(canonical.getExpenseDate()).toString());
+                    }
                     // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
                     int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
                             .set(ExpenseRequest::getStatus, "会計連携済")

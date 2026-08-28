@@ -70,6 +70,10 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     private final OrganizationScopeService organizationScopeService;
     private final java.time.Clock clock;
 
+    /** 締め済み月の経費変更を全write pathで拒否する共通guard。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.MonthlyClosingService monthlyClosingService;
+
     // ----------------------------------------------------------------
     // 本人
     // ----------------------------------------------------------------
@@ -91,6 +95,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     @Transactional(rollbackFor = Exception.class)
     public ExpenseRequestDto createDraft(Long engineerId, ExpenseDraftCommand command) {
         validateDraft(command);
+        assertOpenForExpenseDate(command.expenseDate());
         ExpenseRequest expense = ExpenseRequest.builder()
                 .engineerId(engineerId)
                 .expenseDate(command.expenseDate())
@@ -114,6 +119,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (!STATUS_DRAFT.equals(expense.getStatus())) {
             throw BusinessException.of(400, "error.expense.invalidTransition", expense.getStatus(), STATUS_DRAFT);
         }
+        assertOpenForExpenseDate(expense.getExpenseDate());
+        assertOpenForExpenseDate(command.expenseDate());
         int version = value(expense.getVersion());
         int updated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
                 .eq("id", id)
@@ -140,6 +147,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (!STATUS_DRAFT.equals(expense.getStatus())) {
             throw BusinessException.of(400, "error.expense.invalidTransition", expense.getStatus(), STATUS_DRAFT);
         }
+        assertOpenForExpenseDate(expense.getExpenseDate());
         // 論理削除。添付済み領収書は文書台帳（t_document）の資産のため削除しない。
         expenseRequestMapper.deleteById(id);
     }
@@ -151,6 +159,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (!STATUS_DRAFT.equals(expense.getStatus())) {
             throw BusinessException.of(400, "error.expense.invalidTransition", expense.getStatus(), STATUS_DRAFT);
         }
+        assertOpenForExpenseDate(expense.getExpenseDate());
         // 申請受付（snapshot内で下書き遷移を検証。engine.requestは冪等キーで二重申請を返す）。
         ApprovalRequest approval = approvalTargetAdapterRegistry.request(
                 ExpenseRequestApprovalAdapter.REQUEST_TYPE, "EXPENSE_REQUEST", id,
@@ -193,6 +202,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (!STATUS_APPLIED.equals(expense.getStatus())) {
             throw BusinessException.of(400, "error.expense.invalidTransition", expense.getStatus(), STATUS_APPLIED);
         }
+        assertOpenForExpenseDate(expense.getExpenseDate());
         if (expense.getApprovalRequestId() == null) {
             throw BusinessException.of(400, "error.expense.notReturned");
         }
@@ -211,6 +221,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                                            InputStream content) {
         ExpenseRequest expense = requireOwned(engineerId, id);
         assertReceiptChangeable(expense);
+        assertOpenForExpenseDate(expense.getExpenseDate());
         if (originalName == null || originalName.isBlank()
                 || contentType == null || contentType.isBlank()) {
             throw BusinessException.of(400, "error.expense.receiptRequired");
@@ -348,6 +359,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
             throw BusinessException.of(400, "error.expense.invalidTransition",
                     expense.getStatus(), STATUS_PAID);
         }
+        assertOpenForExpenseDate(expense.getExpenseDate());
         int version = value(expense.getVersion());
         int updated = expenseRequestMapper.update(null, new UpdateWrapper<ExpenseRequest>()
                 .eq("id", id)
@@ -383,6 +395,12 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         }
     }
 
+    private void assertOpenForExpenseDate(LocalDate expenseDate) {
+        if (monthlyClosingService != null && expenseDate != null) {
+            monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expenseDate).toString());
+        }
+    }
+
     /** 承認済以降の領収書差替え・内容変更を拒否する（R3.3）。 */
     private void assertReceiptChangeable(ExpenseRequest expense) {
         if (!STATUS_DRAFT.equals(expense.getStatus()) && !STATUS_APPLIED.equals(expense.getStatus())) {
@@ -409,6 +427,12 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
             throw BusinessException.of(404, "error.expense.notFound");
         }
         return expense;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ExpenseRequest getEntity(Long id) {
+        return require(id);
     }
 
     /** 管理画面の母集団（design §6.2決定表）: 管理者=全件(null)、マネージャー=組織scope∩DataScope。 */

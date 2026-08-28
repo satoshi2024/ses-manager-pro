@@ -8,6 +8,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.ZoneId;
 
 /**
  * アプリケーション共通のBean定義。
@@ -20,7 +21,9 @@ public class AppConfig {
      */
     @Bean
     public Clock clock() {
-        return Clock.systemDefaultZone();
+        // 資格期限・as-of・通知境界はJVMの実行環境に依存させず、tenant設定の未設定時既定値
+        // と同じAsia/Tokyoで一貫させる。テストではClock beanを固定値へ差し替える。
+        return Clock.system(ZoneId.of("Asia/Tokyo"));
     }
 
     /**

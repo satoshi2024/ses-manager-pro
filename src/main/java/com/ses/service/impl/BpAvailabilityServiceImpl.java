@@ -6,8 +6,8 @@ import com.ses.entity.BpAvailability;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerSkill;
 import com.ses.mapper.BpAvailabilityMapper;
-import com.ses.mapper.EngineerSkillMapper;
 import com.ses.service.BpAvailabilityService;
+import com.ses.service.EngineerSkillService;
 import com.ses.service.EngineerService;
 import com.ses.service.SkillTagResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper, BpAvailability> implements BpAvailabilityService {
 
     private final EngineerService engineerService;
-    private final EngineerSkillMapper engineerSkillMapper;
+    private final EngineerSkillService engineerSkillService;
     private final SkillTagResolver skillTagResolver;
     private final ObjectMapper objectMapper;
 
@@ -56,16 +56,20 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
         if (availability.getSkillsJson() != null && !availability.getSkillsJson().isBlank()) {
             try {
                 List<String> skills = objectMapper.readValue(availability.getSkillsJson(), new TypeReference<List<String>>() {});
+                List<EngineerSkill> engineerSkills = new java.util.ArrayList<>();
                 for (String skill : skills) {
                     Long skillId = skillTagResolver.resolveOrCreate(skill);
                     EngineerSkill engSkill = new EngineerSkill();
-                    engSkill.setEngineerId(engineer.getId());
                     engSkill.setSkillId(skillId);
                     engSkill.setProficiency("中級"); // Default value
-                    engineerSkillMapper.insert(engSkill);
+                    engineerSkills.add(engSkill);
                 }
+                engineerSkillService.replaceSkills(engineer.getId(), engineerSkills);
             } catch (Exception e) {
-                // Ignore parse error
+                if (e instanceof BusinessException businessException) {
+                    throw businessException;
+                }
+                throw BusinessException.of(400, "error.bpAvailability.skillsInvalid");
             }
         }
         

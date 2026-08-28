@@ -125,4 +125,60 @@ class ComplianceGateMenuPermissionTest {
         assertEquals(200, response.getStatus());
         verify(chain).doFilter(any(), any());
     }
+
+    @Test
+    void certificationLearningGapはHRマネージャー管理者だけがmenu境界を通れる() throws Exception {
+        Menu menu = new Menu();
+        menu.setMenuKey("certification-learning-skill-gap");
+        menu.setPathPrefix("/certification-learning-skill-gap");
+        menu.setApiPrefix("/api/certification-learning-gap");
+        for (String role : java.util.List.of("管理者", "HR", "マネージャー")) {
+            tearDown();
+            MenuCacheService menuCache = mock(MenuCacheService.class);
+            AuthorizationService authorizationService = mock(AuthorizationService.class);
+            com.ses.service.AuditLogService auditLogService = mock(com.ses.service.AuditLogService.class);
+            when(menuCache.getAllMenus()).thenReturn(java.util.List.of(menu));
+            when(menuCache.getMenuKeysByRole(role)).thenReturn(java.util.List.of(menu.getMenuKey()));
+            when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("certification-learning-gap.view")))
+                    .thenReturn(true);
+            MenuPermissionFilter filter = filter(menuCache, authorizationService, auditLogService);
+            authenticate("8", role);
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/certification-learning-gap");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+            filter.doFilter(request, response, chain);
+
+            assertEquals(200, response.getStatus(), "role=" + role);
+            verify(chain).doFilter(any(), any());
+        }
+    }
+
+    @Test
+    void certificationLearningGapは営業要員から到達できない() throws Exception {
+        Menu menu = new Menu();
+        menu.setMenuKey("certification-learning-skill-gap");
+        menu.setPathPrefix("/certification-learning-skill-gap");
+        menu.setApiPrefix("/api/certification-learning-gap");
+        for (String role : java.util.List.of("営業", "要員")) {
+            tearDown();
+            MenuCacheService menuCache = mock(MenuCacheService.class);
+            AuthorizationService authorizationService = mock(AuthorizationService.class);
+            com.ses.service.AuditLogService auditLogService = mock(com.ses.service.AuditLogService.class);
+            when(menuCache.getAllMenus()).thenReturn(java.util.List.of(menu));
+            when(menuCache.getMenuKeysByRole(role)).thenReturn(java.util.List.of());
+            when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("certification-learning-gap.view")))
+                    .thenReturn(false);
+            MenuPermissionFilter filter = filter(menuCache, authorizationService, auditLogService);
+            authenticate("8", role);
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/certification-learning-gap");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+            filter.doFilter(request, response, chain);
+
+            assertEquals(403, response.getStatus(), "role=" + role);
+            verify(chain, never()).doFilter(any(), any());
+        }
+    }
 }

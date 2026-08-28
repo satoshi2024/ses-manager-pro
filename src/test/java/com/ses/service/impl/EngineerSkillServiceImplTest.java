@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.entity.EngineerSkill;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -10,8 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.ses.common.exception.BusinessException;
@@ -29,6 +33,9 @@ public class EngineerSkillServiceImplTest {
 
     @Autowired
     private EngineerSkillService engineerSkillService;
+
+    @Autowired
+    private com.ses.mapper.EngineerSkillEventMapper engineerSkillEventMapper;
 
     @Test
     public void testReplaceSkills() {
@@ -80,6 +87,42 @@ public class EngineerSkillServiceImplTest {
     }
 
     @Test
+    public void replaceSkills_closesOpenIntervalAndSetsSupersedes() {
+        Long engineerId = 1L;
+        EngineerSkill skill = new EngineerSkill();
+        skill.setSkillId(10L);
+        skill.setProficiency("上級");
+        engineerSkillService.replaceSkills(engineerId, List.of(skill));
+
+        List<com.ses.entity.EngineerSkillEvent> afterInsert = engineerSkillEventMapper.selectByEngineerId(engineerId);
+        assertEquals(1, afterInsert.size());
+        com.ses.entity.EngineerSkillEvent open = afterInsert.get(0);
+        assertEquals("OPEN", open.getEventType());
+        assertNull(open.getEffectiveTo());
+
+        engineerSkillService.replaceSkills(engineerId, List.of());
+        List<com.ses.entity.EngineerSkillEvent> afterClear = engineerSkillEventMapper.selectByEngineerId(engineerId);
+        assertEquals(1, afterClear.size());
+        LocalDate today = LocalDate.now();
+        assertEquals(today.minusDays(1), afterClear.get(0).getEffectiveTo());
+        assertTrue(noActiveOpenEvent(afterClear, 10L, today));
+        assertTrue(noActiveOpenEvent(afterClear, 10L, today.plusDays(1)));
+
+        EngineerSkill reopened = new EngineerSkill();
+        reopened.setSkillId(10L);
+        reopened.setProficiency("中級");
+        engineerSkillService.replaceSkills(engineerId, List.of(reopened));
+
+        List<com.ses.entity.EngineerSkillEvent> afterReopen = engineerSkillEventMapper.selectByEngineerId(engineerId);
+        assertEquals(2, afterReopen.size());
+        com.ses.entity.EngineerSkillEvent closed = afterReopen.get(0);
+        com.ses.entity.EngineerSkillEvent reopenedOpen = afterReopen.get(1);
+        assertEquals("OPEN", reopenedOpen.getEventType());
+        assertEquals(closed.getId(), reopenedOpen.getSupersedesEventId());
+        assertNull(reopenedOpen.getEffectiveTo());
+    }
+
+    @Test
     public void testReplaceSkills_nullSkillIdThrowsException() {
         Long engineerId = 1L;
 
@@ -95,5 +138,14 @@ public class EngineerSkillServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> engineerSkillService.replaceSkills(engineerId, skills));
         assertTrue(ex.getMessage().contains("error.skill.notFound"));
+    }
+
+    private static boolean noActiveOpenEvent(List<com.ses.entity.EngineerSkillEvent> events, Long skillId,
+                                             LocalDate asOf) {
+        return events.stream()
+                .noneMatch(event -> "OPEN".equals(event.getEventType())
+                        && skillId.equals(event.getSkillId())
+                        && EffectiveIntervalSupport.isActiveAtAsOf(
+                                event.getEffectiveFrom(), event.getEffectiveTo(), asOf));
     }
 }

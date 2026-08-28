@@ -43,6 +43,10 @@ class ActionPermissionResolverTest {
                 ActionPermissionResolver.resolve("PUT", "/api/organizations/12"));
         assertEquals("invoice.view", ActionPermissionResolver.resolve("GET", "/api/invoices"));
         assertEquals("candidate.view", ActionPermissionResolver.resolve("GET", "/api/candidates/12"));
+        assertEquals("certification-learning-gap.view",
+                ActionPermissionResolver.resolve("GET", "/api/certification-learning-gap"));
+        assertEquals("export.execute",
+                ActionPermissionResolver.resolve("GET", "/api/certification-learning-gap/export"));
         assertEquals("profile.update", ActionPermissionResolver.resolve("PUT", "/api/profile/password"));
     }
 

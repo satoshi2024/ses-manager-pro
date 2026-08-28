@@ -52,7 +52,7 @@ CREATE TABLE t_expense_request (
   created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT NOT NULL DEFAULT 0,
-  CONSTRAINT chk_expense_category CHECK (category IN ('交通費', '立替経費')),
+  CONSTRAINT chk_expense_category CHECK (category IN ('交通費', '立替経費', '研修費')),
   CONSTRAINT chk_expense_status CHECK (status IN ('下書き', '申請中', '承認済', '会計連携済', '支払済')),
   CONSTRAINT chk_expense_amount CHECK (amount >= 0)
 );

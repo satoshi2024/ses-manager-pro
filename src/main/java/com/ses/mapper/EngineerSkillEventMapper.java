@@ -1,0 +1,41 @@
+package com.ses.mapper;
+
+import com.ses.entity.EngineerSkillEvent;
+import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
+
+import java.time.LocalDate;
+import java.util.List;
+
+@Mapper
+public interface EngineerSkillEventMapper {
+
+    @Insert("INSERT INTO t_engineer_skill_event "
+            + "(tenant_id, engineer_id, engineer_skill_id, skill_id, proficiency, experience_years, event_type, "
+            + "effective_from, effective_to, supersedes_event_id, actor_user_id, actor_role_snapshot, reason, "
+            + "occurred_at, created_at) VALUES "
+            + "(#{event.tenantId}, #{event.engineerId}, #{event.engineerSkillId}, #{event.skillId}, "
+            + "#{event.proficiency}, #{event.experienceYears}, #{event.eventType}, #{event.effectiveFrom}, "
+            + "#{event.effectiveTo}, #{event.supersedesEventId}, #{event.actorUserId}, #{event.actorRoleSnapshot}, "
+            + "#{event.reason}, #{event.occurredAt}, #{event.createdAt})")
+    @Options(useGeneratedKeys = true, keyProperty = "event.id")
+    int insertEvent(@Param("event") EngineerSkillEvent event);
+
+    @Select("SELECT * FROM t_engineer_skill_event WHERE engineer_id = #{engineerId} ORDER BY occurred_at, id")
+    List<EngineerSkillEvent> selectByEngineerId(@Param("engineerId") Long engineerId);
+
+    @Select("SELECT * FROM t_engineer_skill_event WHERE engineer_id = #{engineerId} AND skill_id = #{skillId} "
+            + "AND event_type = 'OPEN' AND effective_to IS NULL ORDER BY id DESC LIMIT 1")
+    EngineerSkillEvent selectOpenEvent(@Param("engineerId") Long engineerId, @Param("skillId") Long skillId);
+
+    @Update("UPDATE t_engineer_skill_event SET effective_to = #{effectiveTo} WHERE id = #{eventId} AND effective_to IS NULL")
+    int closeOpenEvent(@Param("eventId") Long eventId, @Param("effectiveTo") LocalDate effectiveTo);
+
+    @Select("SELECT * FROM t_engineer_skill_event WHERE engineer_id = #{engineerId} AND skill_id = #{skillId} "
+            + "AND event_type = 'OPEN' AND effective_to IS NOT NULL ORDER BY id DESC LIMIT 1")
+    EngineerSkillEvent selectLastClosedOpenEvent(@Param("engineerId") Long engineerId, @Param("skillId") Long skillId);
+}

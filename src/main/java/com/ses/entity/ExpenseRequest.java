@@ -36,7 +36,7 @@ public class ExpenseRequest extends BaseEntity {
     /** 経費発生日 */
     private LocalDate expenseDate;
 
-    /** 交通費/立替経費（本人は任意の科目codeを送れない。design §4） */
+    /** 交通費/立替経費/研修費（本人は任意の科目codeを送れない。design §4） */
     private String category;
 
     /** 金額（円） */

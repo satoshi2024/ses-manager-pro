@@ -7,12 +7,14 @@ import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.Engineer;
+import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.entity.Proposal;
 import com.ses.entity.ResumeIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
@@ -45,6 +47,7 @@ public class FileScopeValidationService {
     private final DataScopeService dataScopeService;
     private final ObjectProvider<MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
+    private final ObjectProvider<EngineerCertificationMapper> engineerCertificationMapperProvider;
     private final java.time.Clock clock;
 
     /** 注文文書（SALES_ORDER link）のscope解決用。テストスライス互換のため任意注入。 */
@@ -52,6 +55,16 @@ public class FileScopeValidationService {
     private com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     public void assertDownloadAllowed(String storedName) {
+        assertDownloadAllowed(storedName, null, null);
+    }
+
+    /**
+     * 資格証憑などexact document version/hash検証が必要な場合に使用する。
+     *
+     * @param expectedDocumentVersionId eventに保存したt_document_version.id（nullなら検証しない）
+     * @param expectedHash eventに保存したSHA-256 hex（nullなら検証しない）
+     */
+    public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
         // 1. t_resume_ingestion の原本ファイル
         ResumeIngestion ingestion = resumeIngestionMapper.selectOne(
                 new QueryWrapper<ResumeIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
@@ -94,7 +107,7 @@ public class FileScopeValidationService {
 
         // 6. t_document_version の法定文書台帳ファイル (R5.2 & R5.3)
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
-        DocumentVersion documentVersion = versionMapper != null
+            DocumentVersion documentVersion = versionMapper != null
                 ? versionMapper.selectOne(new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"))
                 : null;
         if (documentVersion != null) {
@@ -160,6 +173,18 @@ public class FileScopeValidationService {
                 }
                 // 営業・その他・本人以外は不可視
                 throw BusinessException.of(403, "error.forbidden");
+            }
+            if ("CERTIFICATION_EVIDENCE".equals(documentType)) {
+                // 資格証憑は保持中のdownload/exportを許可しない契約。汎用文書台帳の
+                // legal hold（通常は廃棄だけを止める）より厳しい専用境界を先に適用する。
+                com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+                com.ses.entity.Document document = documentMapper == null
+                        ? null : documentMapper.selectById(documentVersion.getDocumentId());
+                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())) {
+                    throw BusinessException.of(403, "error.file.legalHoldActive");
+                }
+                assertCertificationEvidenceAllowed(documentVersion, expectedDocumentVersionId, expectedHash);
+                return;
             }
 
             // P1-03: メニュー権限判定
@@ -276,6 +301,55 @@ public class FileScopeValidationService {
         }
         // 営業・HR・その他はdecision table §6.2により不可視（給与・経費は営業不可視）
         return false;
+    }
+
+    /**
+     * 資格証憑（CERTIFICATION_EVIDENCE）の専用scope。
+     * typed {@code CERTIFICATION_RECORD} linkのみを認可根拠とし、管理者bypass・empty-link・
+     * ENGINEER-only mixed linkを拒否する（design §3.6）。
+     */
+    private void assertCertificationEvidenceAllowed(DocumentVersion documentVersion,
+                                                    Long expectedDocumentVersionId,
+                                                    String expectedHash) {
+        if (expectedDocumentVersionId != null && !expectedDocumentVersionId.equals(documentVersion.getId())) {
+            throw BusinessException.of(403, "error.file.versionMismatch");
+        }
+        if (expectedHash != null && !expectedHash.equalsIgnoreCase(documentVersion.getSha256())) {
+            throw BusinessException.of(403, "error.file.hashMismatch");
+        }
+
+        DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+        EngineerCertificationMapper certificationMapper = engineerCertificationMapperProvider.getIfAvailable();
+        if (linkMapper == null || certificationMapper == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+
+        List<DocumentLink> links = linkMapper.selectList(
+                new QueryWrapper<DocumentLink>().eq("document_id", documentVersion.getDocumentId()));
+        List<DocumentLink> certificationLinks = links.stream()
+                .filter(link -> "CERTIFICATION_RECORD".equals(link.getTargetType()))
+                .toList();
+        if (certificationLinks.isEmpty()) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+
+        boolean anyAllowed = false;
+        for (DocumentLink link : certificationLinks) {
+            try {
+                EngineerCertification record = certificationMapper.selectById(link.getTargetId());
+                if (record == null) {
+                    continue;
+                }
+                dataScopeService.assertAllowedEngineer(record.getEngineerId());
+                anyAllowed = true;
+                break;
+            } catch (BusinessException ignored) {
+                // generic ENGINEER link等は評価せず、typed linkのみで判定（mixed link対策）
+            }
+        }
+        if (!anyAllowed) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
     }
 
     /** マネージャー（組織scope ∩ DataScope）の配下か判定する。 */

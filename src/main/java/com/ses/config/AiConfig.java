@@ -49,6 +49,12 @@ public class AiConfig {
      */
     private boolean externalSendEnabled = false;
 
+    /** skill learning candidateのprovider timeout。gapのrule計算を待たせない。 */
+    private long learningCandidateTimeoutMs = 2000;
+
+    /** AI候補を人が判断できる有効期間（分）。期限後のaccept/rejectは拒否する。 */
+    private long learningCandidateTtlMinutes = 60;
+
     private Retention retention = new Retention();
     private Evaluation evaluation = new Evaluation();
 
