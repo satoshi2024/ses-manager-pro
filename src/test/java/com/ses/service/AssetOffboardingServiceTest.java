@@ -12,6 +12,8 @@ import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -85,6 +87,7 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @DisplayName("Trigger offboarding revocations: accounts revoked and licenses released")
     void testTriggerOffboardingRevocations() {
         Long engineerId = 9902L;

@@ -14,7 +14,6 @@ import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetOffboardingService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
-import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,7 +39,6 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     private final AssetAssignmentService assetAssignmentService;
     private final ExternalAccountService externalAccountService;
     private final LicenseService licenseService;
-    private final ExternalAccountProviderClient providerClient;
 
     // 例外免除メモリ台帳（承認ID・理由保持）
     private final Map<Long, WaiverRecord> waiverCache = new ConcurrentHashMap<>();
@@ -97,18 +95,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         // 1. 外部アカウントの失効要求
         List<ExternalAccountReference> activeAccounts = externalAccountReferenceMapper.selectActiveByAssignee("ENGINEER", engineerId);
         for (ExternalAccountReference acc : activeAccounts) {
-            acc.setStatus("SUSPENDED");
-            acc.setRevokeRequestedAt(LocalDateTime.now());
-            externalAccountReferenceMapper.updateById(acc);
-
-            // プロバイダへ失効送信
-            boolean requested = providerClient.requestRevoke(acc);
-            if (requested) {
-                ExternalAccountProviderClient.RevokeConfirmationStatus conf = providerClient.checkRevokeConfirmation(acc);
-                if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
-                    externalAccountReferenceMapper.confirmRevokeWithCas(acc.getId(), LocalDateTime.now(), actorUserId, acc.getVersion() + 1);
-                }
-            }
+            // 要求送信・確認・タイムアウト再試行の契約を共通サービスへ委譲する。
+            externalAccountService.requestRevokeWithIdempotency(acc.getId(), acc.getIdempotencyKey(), actorUserId);
         }
 
         // 2. 有償ライセンスの一括解放
