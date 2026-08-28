@@ -205,3 +205,15 @@ MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9
 ### 現時点の未検証と次gate
 
 remediation後のfast/performance/MySQLは再実行済み（fast 3060 run / 2 failures / 16 errors / 0 skipped、performance 1 run / 0 failure / 0 error / 0 skipped、p95=74ms、MySQL 89 run / 0 failure / 1 error / 0 skipped）。MySQLの唯一のerrorは既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopbackであり、NF-03 feature/migration reportはfailure/error/skipなし。証憑binary本文のBrowser採取と独立Implementation再Reviewは未実施であり、再Reviewでは今回のcommit以降のHTTP/UI write path、V128、既存F1/F2回帰、role/population/PII/DocumentLink境界を同一clean Headで再確認する。PASS前はPRを作成しない。
+
+## 再実装後の最終handoff（2026-08-28）
+
+| 項目 | 値 |
+|---|---|
+| final local/remote Head | `ac99c73ba39ada1656ed8420ba18187c3f0651ad`（一致） |
+| approved Base / merge-base | `76e45340a23cfee964fac778b7b4d856fa2c9e7b` / `a3454c086c6d17f94f96ced4175adec932f071b7` |
+| migration | main V115を保持、NF-03 V116〜V128。V128は既存ExpenseRequestの`研修費`CHECKを許可 |
+| test gates | fast 3060 run / 2 failures / 16 errors / 0 skipped、MySQL 89 run / 0 failure / 1 error / 0 skipped、performance 1 run / 0 failure / 0 error / 0 skipped（p95=74ms） |
+| MySQL known error | 既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopback。NF-03 feature/migration reportはfailure/error/skipなし |
+| Browser | admin master/course登録、本人catalog・証憑upload・cancel/resubmit、0円plan APPROVED、enrollment PLANNED、admin verify後ACTIVEを確認 |
+| remaining | 独立Implementation再Review、証憑binary本文採取。PR/merge/branch削除は未実施 |
