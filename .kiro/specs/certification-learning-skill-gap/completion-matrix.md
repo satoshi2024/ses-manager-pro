@@ -34,7 +34,7 @@
 | Plan Review | **PASS**（R7） |
 | F1 Implementation Review | **PASS** |
 | F1本体 Head | `2f7bbac0` |
-| 現worktree local/remote Head | `f2ce7a992d69fd9f6f7654ba4fb9e9b6d69d8a4c` |
+| F2実装完了時点のworktree local/remote Head | `f2ce7a992d69fd9f6f7654ba4fb9e9b6d69d8a4c` |
 | F2〜M | `F2完了`（A1/A2/B1/B2/Mは未着手） |
 | 現行migration | V124 |
 | F2 migration | V120〜V124 |
