@@ -129,8 +129,11 @@
 
 ## B1. 通知・承認・document（承認後のみ）
 
-- [ ] **Task B1: 期限通知、費用approval、証憑download/exportを実装する**
+- [x] **Task B1: 期限通知、費用approval、証憑download/exportを実装する**
   - Objective: recipient user ID、approval route、DocumentLink/FileScopeValidationServiceをつなぐ。
+  - Implementation: `151346ed`。管理側training approvalを可視population確認後に既存`TrainingPlanService`へ委譲し、ExpenseRequest/Approval/MonthlyClosingの正本を複製しない。管理側・本人側の資格証憑downloadを追加し、URLのengineer/record、`CERTIFICATION_RECORD` typed link、指定version、CLEAN、hash、legal holdを毎回検証してから既存FileScopeへ渡す。A1 detailへ版metadataとdownload linkを接続し、filenameをheader injectionから保護した。
+  - Evidence: `CertificationEvidenceAccessServiceTest`、`CertificationLearningGapTrainingApprovalServiceTest`、`CertificationExpiryNotificationSchedulerTest`、`FileScopeValidationServiceTest`、`CertificationLearningGapQueryServiceImplTest`ほかのB1 targeted suiteがPASS。90/60/30・semantic key、DB/outbox dedupe、threshold/NULL/0/実費差額/締め済み月/自己承認（F2回帰）、typed/empty/ENGINEER-only/mixed link、admin bypass、version/hash mismatch、CLEAN/legal holdを確認した。
+  - Demo: scheduler再実行は既存notification正本のsemantic keyへ収束し、証憑downloadはrecord scopeと版/hashを通過した場合だけstreamを返すこと、manager/HR approvalは可視母集団確認後に既存approval routeへ進むことをテストで実演した。実Browserのdownload/approval操作はMで再確認する。
   - Test: 90/60/30、semantic key重複、複数JVM claim、threshold−1/等値/＋1、NULL/0/実費差額、締め済み月、自己承認、scan/legal hold/unknown、mixed link、**empty-link、ENGINEER-only、admin bypass、version/hash不一致**、同一scope。
   - Demo: scheduler再実行後も通知/eventが重複せず、download/exportがUIと同じscopeで拒否されることを確認する。
 

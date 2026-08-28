@@ -136,3 +136,7 @@ F2 Implementation PASS（P0/P1=0）を受領後、A1→A2の連続実装を行�
 | A2 | `CertificationLearningGapSelfServiceImplTest`、`MyCertificationLearningGapUiContractTest`、`MigrationScriptIntegrityTest`ほか | targeted suite PASS。approval待ち・download E2E・実BrowserはB1/Mで確認 |
 
 A2の本人APIは`engineerId`をbody/pathからscope根拠として使わず、`EngineerAccountLinkService`の現在linkだけを正本にする。証憑はDocumentService登録時に`CERTIFICATION_RECORD` targetを付け、返却値からstorage keyとraw資格番号を除外する。A1/A2ともMでdesktop/390px Browser Demoと全受入条件の横断回帰を行う。
+
+### B1 receipt
+
+`151346ed`でB1を実装しremoteへpushした。training approvalはA1と同一のvisible populationを先に確認して既存`TrainingPlanService`へ委譲し、費用・承認・支払の正本を増やしていない。証憑downloadは管理側と本人側の両APIでtyped `CERTIFICATION_RECORD` link、指定version、CLEAN、version ID/hash、legal hold、FileScopeをfail closedで検証する。`CertificationEvidenceAccessServiceTest`と`CertificationLearningGapTrainingApprovalServiceTest`、F2の通知/FileScope/費用回帰がPASSし、empty-link、ENGINEER-only、mixed-link、admin bypass、版/hash不一致を回帰した。UIのdownload/approval操作と実BrowserはMに残す。
