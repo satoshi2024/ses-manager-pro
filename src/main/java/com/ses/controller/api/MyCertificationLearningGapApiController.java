@@ -9,6 +9,8 @@ import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.LearningPlan;
+import com.ses.entity.Certification;
+import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingEnrollment;
 import com.ses.service.certificationlearninggap.CertificationLearningGapSelfService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -49,6 +51,16 @@ public class MyCertificationLearningGapApiController {
     @GetMapping("/certifications")
     public ApiResult<List<CertificationSelfView>> certifications() {
         return ApiResult.success(selfService.certifications(userId()));
+    }
+
+    @GetMapping("/catalog/certifications")
+    public ApiResult<List<Certification>> certificationCatalog() {
+        return ApiResult.success(selfService.availableCertificationMasters());
+    }
+
+    @GetMapping("/catalog/courses")
+    public ApiResult<List<TrainingCourse>> courseCatalog() {
+        return ApiResult.success(selfService.availableTrainingCourses());
     }
 
     @GetMapping("/certifications/{recordId}")

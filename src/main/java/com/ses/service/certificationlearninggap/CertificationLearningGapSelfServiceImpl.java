@@ -91,6 +91,20 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
     }
 
     @Override
+    public List<Certification> availableCertificationMasters() {
+        return certificationMasterMapper.selectList(new LambdaQueryWrapper<Certification>()
+                .eq(Certification::getActiveFlag, 1)
+                .orderByAsc(Certification::getDisplayName).orderByAsc(Certification::getId));
+    }
+
+    @Override
+    public List<TrainingCourse> availableTrainingCourses() {
+        return courseMapper.selectList(new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getActiveFlag, 1)
+                .orderByAsc(TrainingCourse::getName).orderByAsc(TrainingCourse::getId));
+    }
+
+    @Override
     public EngineerCertificationViewDto applyCertification(Long actorUserId, Long ignoredEngineerId, Long certificationId,
                                                            LocalDate acquiredOn, LocalDate expiresOn,
                                                            String certificateNumberPlaintext) {

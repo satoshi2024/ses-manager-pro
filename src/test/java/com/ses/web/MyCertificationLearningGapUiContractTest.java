@@ -18,7 +18,15 @@ class MyCertificationLearningGapUiContractTest {
         assertTrue(html.contains("max-width: 390px"));
         assertTrue(html.contains("my-cert-empty"));
         assertTrue(html.contains("my-plan-empty"));
+        assertTrue(html.contains("my-cert-evidence-file"));
+        assertTrue(html.contains("my-certification-id"));
+        assertTrue(html.contains("my-plan-start"));
         assertTrue(js.contains("/api/my/certification-learning-gap"));
+        assertTrue(js.contains("FormData"));
+        assertTrue(js.contains("/evidence"));
+        assertTrue(js.contains("/submit"));
+        assertTrue(js.contains("/enrollments"));
+        assertTrue(js.contains("catalog/certifications"));
         assertTrue(js.contains("SES.escapeHtml"));
         assertTrue(!js.contains("engineerId:"), "本人UIはengineerIdを入力・送信しない");
     }

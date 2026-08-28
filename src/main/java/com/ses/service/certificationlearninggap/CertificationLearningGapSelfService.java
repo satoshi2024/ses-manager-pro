@@ -6,6 +6,8 @@ import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.LearningPlan;
+import com.ses.entity.Certification;
+import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingEnrollment;
 import com.ses.service.training.TrainingPlanService;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +24,10 @@ public interface CertificationLearningGapSelfService {
     List<CertificationSelfView> certifications(Long actorUserId);
 
     CertificationSelfView certification(Long actorUserId, Long recordId);
+
+    List<Certification> availableCertificationMasters();
+
+    List<TrainingCourse> availableTrainingCourses();
 
     EngineerCertificationViewDto applyCertification(Long actorUserId, Long ignoredEngineerId, Long certificationId,
                                                      LocalDate acquiredOn, LocalDate expiresOn,
