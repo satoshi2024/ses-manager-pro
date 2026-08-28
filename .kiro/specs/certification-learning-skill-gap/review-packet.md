@@ -42,7 +42,7 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | M code/test fix | `4ba1738c4e5afe6ad3839afe1e681a9621326846` | V127へ同期したV110 latest migration assertion |
 | M docs | このpacketを含む最終docs pin commit | tasks/completion/remediation/Review packet最終固定 |
 
-変更ファイルは225件（コード、migration、H2 schema、tests、templates/static、spec/receipt docs）。Mでは既存本体を変更せず、最終証拠docsを追加・更新した。
+変更ファイルは226件（コード、migration、H2 schema、tests、templates/static、spec/receipt docs。Review packet自身を含む）。Mでは既存本体を変更せず、最終証拠docsを追加・更新した。
 
 ## Migration and schema
 
