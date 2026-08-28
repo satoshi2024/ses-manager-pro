@@ -32,7 +32,7 @@
 | A2 | `5a5d8571`＋`50cb8f2d`＋`66eda6f9` | V127＋V128 | account link本人scope、資格申請/cancel/correct/resubmit、typed CLEAN証憑upload、learning plan/enrollment、本人export、本人menu、既存ExpenseRequestの研修費科目 | CertificationLearningGapSelfServiceImplTest、MyCertificationLearningGapUiContractTest、TrainingPlanServiceTest、MigrationScriptIntegrityTest、ComplianceGateMenuPermissionTest | tampered engineerId拒否、他人record拒否、証憑target type/CLEAN、plan本人ID強制、0円plan、raw番号/storage key非返却、Browserのupload/cancel/resubmit/APPROVED/enrollmentを確認 | [x] |
 | B1 | `151346ed` | 既存V121/V122/V126/V127の正本接続（追加DDLなし） | notification scheduler回帰、ExpenseRequest/Approval委譲、typed証憑download、version/hash/CLEAN/legal hold、A1 detail link | CertificationEvidenceAccessServiceTest、CertificationLearningGapTrainingApprovalServiceTest、CertificationExpiryNotificationSchedulerTest、FileScopeValidationServiceTest、TrainingPlanServiceTest、ExpenseRequestFlowIntegrationTest | semantic key/DB dedupe、threshold/NULL/0/差額/締め/自己承認、empty/ENGINEER-only/mixed/admin/version/hash/scan/legal holdを確認。実BrowserはMで確認 | [x] |
 | B2 | `0168e8ea` | 追加DDLなし（既存V119/V123/V124/V126を再利用） | staffing as-of/period/source、rule gap snapshot、active course allowlist、AI candidate-only、UI接続 | CertificationLearningGapAiServiceImplTest、SkillGapServiceImplTest、SkillGapTaxonomyResolverTest、AiLearningCandidateServiceImplTest、MigrationScriptIntegrityTest | PROJECT/POSITION/COMBINED、inclusive期間、履歴欠落/unknown/synonym/0件、snapshot、AI停止/error/timeout、公式projection非変更を確認。BrowserはMで確認 | [x] |
-| M | `4ba1738c`＋旧最終docs（superseded） | main V115保持、NF-03 V116〜V128。旧M判定は独立Review FAILで保留 | 旧全体gateは最終PASS証拠として扱わない。今回の修正後clean選択suiteとV128 MySQL smokeを再実行 | 管理master/course、本人upload/cancel/resubmit、0円plan/enrollment、verify後ACTIVEをBrowser確認 | [ ] 再Review PASS待ち |
+| M | `4ba1738c`＋旧最終docs（superseded） | main V115保持、NF-03 V116〜V128。旧M判定は独立Review FAILで保留 | 旧全体gateは最終PASS証拠として扱わない。修正後clean選択suite、fast/performance全体、V128 MySQL smokeを実行。全MySQL集計は下記追補へ固定 | 管理master/course、本人upload/cancel/resubmit、0円plan/enrollment、verify後ACTIVEをBrowser確認 | [ ] 再Review PASS待ち |
 
 ## F1 Implementation Review受領・F2持越し契約
 
@@ -63,12 +63,12 @@
 ## Mで解消した旧未検証項目
 
 - 資格 API/UI、90/60/30判定、cancel/correct/renew、証憑validator/download境界、training approval、as-of、AI fallback、list/detail/count/export/self APIは対象回帰testとBrowser Demoで確認した。
-- migration/H2は`MigrationScriptIntegrityTest` 28件＋`AllMappersSchemaSweepTest` 188件、MySQLは修正後のfeature smoke 6件および全profile 89件を実行した。
+- migration/H2は`MigrationScriptIntegrityTest` 28件＋`AllMappersSchemaSweepTest` 188件、MySQLは修正後のfeature smoke 6件および全MySQL profileを実行した。各ゲートの最終集計は下記追補へ固定する。
 - A1〜B2の画面接続はdesktop/390pxの実Browserでlist/detail/empty/CSV遷移/AI fallbackを確認し、role/population/PIIの残りはAPI/UI contractとservice回帰で確認した。
 
 ## 最終時点の残余未検証・環境制約
 
-- Windowsのloopback制約により、plain `mvn -q test`の既存baseline失敗2件・error 11件、MySQL全体の`FreeeConcurrentRefreshTest` error 1件は残る。NF-03対象reportには失敗/error/skipがない。Docker app経由のBrowser Demoは完了した。
+- Windowsのloopback・既存fixture制約により、plain `mvn -q test`の既存baseline失敗2件・error 16件、MySQL全体の環境/既存テスト結果は下記追補に記録する。NF-03対象reportには失敗/error/skipがない。Docker app経由のBrowser Demoは完了した。
 - 証憑のbinary本文をBrowser downloadファイルとして採取するE2Eは未取得。typed link、exact version/hash、CLEAN、legal hold、ENGINEER-only/mixed/empty/admin境界はservice回帰とFileScope回帰で確認し、Browserではdownload遷移を確認した。
 - `CERTIFICATION_PII`の本番保持年数・自動破棄は承認範囲外のNF-07であり、NF-07承認までは本番有効化しない。
 - 実MySQL上のAI accept/rejectを含む人の確定操作は対象service/API回帰で確認したが、AI外部provider接続はscope外。AIはcandidate-only、HR_FINALのみ公式projectionという境界を維持している。
@@ -88,6 +88,8 @@ main V115は別featureのため変更せず、NF-03 migration V125〜V116を逆�
 | ExpenseRequest互換 | `66eda6f9`、`f8a5b125` | V128、H2 schema、MySQL V128 smoke、正本DDLの`研修費`CHECK検証 | [x] |
 
 今回のclean選択suiteはexit 0、V128適用後の`FlywayCertificationLearningSkillGapSchemaSmokeTest`は1件PASS。非0円Browser planは、既存approval route fixtureが未seedのため400（route未設定）まで確認し、DB 500ではないことを記録した。全fast/MySQL/performance gateと独立再Reviewは未実施である。
+
+remediation後の全体ゲートは、fast `3060 run / 2 failures / 16 errors / 0 skipped`、performance `1 run / 0 failure / 0 error / 0 skipped（p95=74ms）`、MySQLは実行完了後のMaven最終集計をReview packetへ同期する。いずれも独立再Reviewを代替せず、Task Mは再Review PASSまで未完了とする。
 
 ### 再実装後のrollback
 

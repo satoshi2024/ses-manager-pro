@@ -152,7 +152,7 @@
 - [ ] **Task M: mandatory test/DemoとReview packetを完成する（再Review待ち）**
   - Objective: 全受入条件とpopulation一致を証拠化し、完了対応表とremote HEADをReviewへ渡す。
   - Implementation: 旧M完了宣言は独立Implementation ReviewのP1指摘によりsuperseded。mainのV115を保持し、NF-03をV116〜V128へ同期したうえで、A1/A2のHTTP・UI remediationを再検証し、再Review PASS後にこのTaskを再完了する。PR、merge、branch削除は実施していない。
-  - Test: 旧Mの全体gate結果は独立Review FAILにより最終PASS証拠として扱わない。今回の修正後は`mvn -q clean test -Dtest=...`のA1/A2・F1/F2選択suiteがexit 0、`FlywayCertificationLearningSkillGapSchemaSmokeTest`がV128を含め1件PASS。全fast/MySQL/performance gateは再Review前に同一clean Headで再実行する。
+  - Test: 旧Mの全体gate結果は独立Review FAILにより最終PASS証拠として扱わない。修正後のclean選択suiteとV128 smokeはPASS、fast全体は3060 run / 2 failures / 16 errors / 0 skipped、performanceは1 run / 0 failure / 0 error / 0 skipped（p95=74ms）。MySQL全体の最終Maven集計は実行完了後にReview packetへ固定し、独立再Review前の証拠とする。
   - Demo: 旧MのDemo宣言は独立Review FAILによりsuperseded。今回のDocker Browser DemoではHR/adminの資格master/course登録、本人の資格申請・証憑upload・cancel/resubmit、0円planのAPPROVED化・course enrollment、管理者verify後のACTIVE表示を実証した。非0円planはapproval route未seedのため400で停止することも記録した。
   - Deliverable: `review-packet.md`、`completion-matrix.md`、`review-remediation.md`をremediation証拠付きで更新・remoteへpushする。独立Implementation Reviewの再PASS後にのみPR作成工程へ引き渡す。
 
