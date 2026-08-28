@@ -21,6 +21,7 @@
 | F1-3 | `5dd9d8c7` | V117 | course/plan/enrollment DDL+entity | MigrationScriptIntegrityTest | DDL shape（MySQL smoke は F1-5 統合） | [x] |
 | F1-4 | `24577fd4`〜`3784a6a0` | V118 | skill/position events、service フック、`EffectiveIntervalSupport` | EngineerSkill/ProjectSkill/Position interval tests | replaceSkills で interval 閉鎖・supersedes | [x] |
 | F1-5 | `e7d3b36d` | V119 | assessment/decision event DDL | FlywayCertificationLearningSkillGapSchemaSmokeTest | V115-V119 MySQL smoke | [x] |
+| F2-1 | `ff8165ea` | V120 | 資格record lifecycle、event冪等、期限90/60/30、証憑pin/legal hold、PII permission seed | CertificationExpiryServiceTest、EngineerCertificationLifecycleServiceTest、CertificationEvidenceValidatorTest、FileScopeValidationServiceTest、AppConfigClockTest、EngineerCertificationServiceTest | 固定Clockで当日境界、訂正・取消・renew・CAS・証憑否定系を確認 | [x] |
 
 ## F1 Implementation Review受領・F2持越し契約
 

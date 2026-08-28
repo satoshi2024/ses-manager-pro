@@ -79,10 +79,11 @@
 
 ## F2. service（承認後のみ）
 
-- [ ] **Task F2-1: 資格履歴・期限・通知判定serviceを実装する**
+- [x] **Task F2-1: 資格履歴・期限・通知判定serviceを実装する**
   - Objective: 90/60/30境界、取消、訂正、重複取得、idempotent通知を実現する。
-  - Test: 90/60/30当日・前後、Asia/Tokyo Clock、expiry date変更を伴わない訂正で再送しないこと、expired/cancelled/superseded、renew、再実行。
-  - Demo: expiry dateを固定し、各境界で本人/上長recipientへ一度だけ通知されることを確認する。
+  - Implementation: `ff8165ea`。V120でevent idempotency keyと`certification.pii.view` seedを追加。`EngineerCertificationServiceImpl`へverify/reject/correct/cancel/renewのrow lock＋version CAS、append-only event、duplicate acquisition拒否を実装し、`CertificationExpiryService`／`CertificationExpiryNotificationService`で期限当日を含む90/60/30のsemantic keyを判定する。`CertificationEvidenceValidator`と`FileScopeValidationService`でtyped link、exact version/hash、CLEAN、legal holdをfail closedにする。共通ClockをAsia/Tokyoへ固定した。
+  - Test: `CertificationExpiryServiceTest`（90/60/30当日・前後、expires_on当日、revisionを含まないsemantic key、cancelled/recipient未解決）、`EngineerCertificationLifecycleServiceTest`（verify/correct/cancel/renew、理由、重複、CAS）、`CertificationEvidenceValidatorTest`（typed link、版/hash、scan、generic link）、`FileScopeValidationServiceTest`（legal hold）、`AppConfigClockTest`、既存`EngineerCertificationServiceTest`。対象Mavenテスト全件PASS。
+  - Demo: 固定日`2026-08-28`でexpiryを90/60/30日に切り替え、当日だけ候補となり前後日は候補外、訂正でrevisionだけ変えてもsemantic keyが同一、期限日当日はACTIVE・翌日からEXPIRED、cancel/renew/CAS/証憑否定系が確認できることをテストで実演した。
 
 - [ ] **Task F2-2: training plan/enrollment/approval serviceを実装する**
   - Objective: state transitionと費用threshold、既存approval engine、自己承認拒否を接続する。
