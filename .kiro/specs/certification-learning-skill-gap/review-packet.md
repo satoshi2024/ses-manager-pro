@@ -48,6 +48,9 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | MySQL smoke assertion | `f8a5b125`、`8c461dbc` | V128の正本DDLに対するMySQL smoke検証を固定し、`SHOW CREATE TABLE`検証へ修正 |
 | remediation docs | `d2965f19` | 独立Review FAILとA1/A2修正範囲をtasks/matrix/remediation/packetへ記録 |
 | remediation gate evidence | `80bfe417` | fast/performance再実行結果とMySQL再実行中の証拠をdocsへ同期 |
+| full gate result docs | `ac99c73b` | fast/MySQL/performanceのremediation後最終集計を同期 |
+| remediation handoff docs | `97443937` | final Head、merge-base、migration、Browser、残余未検証をhandoffへ固定 |
+| final Head pin docs | `e24131a8` | review packet/matrix/remediationのlocal/remote Headを固定 |
 | remediation docs | このpacketを含むdocs commit | tasks/completion/remediation/Review packetを独立Review FAILと修正証拠に同期 |
 
 変更ファイルはBaseからのdiffで再計算する。今回の追加はA1/A2のproduction HTTP/UI、V128 migration/H2/schema smoke、tests、spec/receipt docsであり、旧Mの完了宣言は独立Review FAILにより最終証拠として扱わない。
