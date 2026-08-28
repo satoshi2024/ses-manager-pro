@@ -140,3 +140,7 @@ A2の本人APIは`engineerId`をbody/pathからscope根拠として使わず、`
 ### B1 receipt
 
 `151346ed`でB1を実装しremoteへpushした。training approvalはA1と同一のvisible populationを先に確認して既存`TrainingPlanService`へ委譲し、費用・承認・支払の正本を増やしていない。証憑downloadは管理側と本人側の両APIでtyped `CERTIFICATION_RECORD` link、指定version、CLEAN、version ID/hash、legal hold、FileScopeをfail closedで検証する。`CertificationEvidenceAccessServiceTest`と`CertificationLearningGapTrainingApprovalServiceTest`、F2の通知/FileScope/費用回帰がPASSし、empty-link、ENGINEER-only、mixed-link、admin bypass、版/hash不一致を回帰した。UIのdownload/approval操作と実BrowserはMに残す。
+
+### B2 receipt
+
+`0168e8ea`でB2を実装しremoteへpushした。A1と同じquery serviceでmanager/HR/adminのvisible populationを確認し、`SkillGapService`のevent-only as-of結果を先に確定する。AIにはgap skillに紐づくactive course allowlistだけを渡し、RULE_ONLY/DEGRADEDでもrule gap/snapshot/as-ofを維持する。AI応答に配置・評価・採否の確定値を持たせず、UIにもcandidate-only境界を表示した。B2 targeted suiteはPASS、実Browserと全gateはMで再確認する。

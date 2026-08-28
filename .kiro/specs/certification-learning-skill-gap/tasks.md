@@ -139,8 +139,11 @@
 
 ## B2. 需要連携・AI候補（承認後のみ）
 
-- [ ] **Task B2: staffing as-ofとAI候補を接続する**
+- [x] **Task B2: staffing as-ofとAI候補を接続する**
   - Objective: project position/project skillとcanonical taxonomyを期間指定で比較し、AIをcandidate-onlyで表示する。
+  - Implementation: `0168e8ea`。`CertificationLearningGapAiService`を追加し、visible engineerをA1 query serviceで確認してからevent-only `SkillGapService`へas-of/periodFrom/periodTo/sourceを渡す。PROJECT/POSITION/COMBINED precedence、履歴欠落、unknown/synonym、snapshot IDをrule gapとして返し、gapに紐づくactive courseだけをAI allowlistにする。`AiLearningCandidateService`のRULE_ONLY/DEGRADED/AI_CANDIDATEをそのまま返し、公式skill・配置・評価・採否は更新しない。管理画面detailからAI候補を表示できるようにした。
+  - Evidence: `CertificationLearningGapAiServiceImplTest`と既存`SkillGapServiceImplTest`、`SkillGapTaxonomyResolverTest`、`AiLearningCandidateServiceImplTest`、A1 API/UI契約テスト、`MigrationScriptIntegrityTest`がPASS。期間両端、履歴欠落、0件、active course allowlist、AI停止/error/timeout時のrule gap維持、AI候補のcandidate-only契約を確認した。実BrowserはMで再確認する。
+  - Demo: 案件IDとas-of/需要sourceを指定するとrule gapのsnapshot/as-ofを表示し、AI停止・履歴不足では候補だけを落としてrule gapを維持し、AI成功時もallowlist内course IDだけを表示して「評価・配置・採否を確定しない」と明示することをテスト/UI契約で実演した。
   - Test: staffing as-of、履歴欠落、PROJECT/POSITION/COMBINED precedence、inclusive境界、同義tag、未知skill、0件、snapshot replay、AI停止/error/timeout、AIによる最終配置なし。
   - Demo: 需要期間を変えると結果が変わり、未知skillが隠れず、AI結果を無効にしてもrule gapが残ることを確認する。
 
