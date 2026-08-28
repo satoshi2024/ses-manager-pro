@@ -29,7 +29,7 @@
 - 観測 base: `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 承認Base: `455fc92e3aa259d2a93f25c6a545ca6c6af835bc`
 - 取り込みcommit: `a86af3f30f89feff28e88bf4dda5e10974852cdd`
-- 実装fix milestone remote Head: handoff直前の `git ls-remote origin refs/heads/codex/scheduled-management-reporting` 観測値（Flyway smoke 114 pin含む）。
+- 実装fix milestone remote Head: `58ae7eaa`（Flyway smoke latest=114、processing列assert、CANCELLED再配布、管理者限定取消UI）。
 - Review 入力: 本ディレクトリの承認済みrequirements/design/tasks、inventory、sample snapshot
 - Review 判定: 実装対話ではPRを作成しない。上記のapproved plan/spec/tasksと本completion matrixを独立Reviewへ渡し、PLAN/IMPLEMENTATIONの双方PASS後だけPR作成可否を判断する。
 
