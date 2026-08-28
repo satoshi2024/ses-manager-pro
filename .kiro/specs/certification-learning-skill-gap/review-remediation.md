@@ -116,15 +116,15 @@
 
 | 持越し | F2契約 | 対応箇所 | 状態 |
 |---|---|---|---|
-| `TYPE_DELETE`／DELETE当日as-of | delete前cancel/close event、DELETE当日をeffective intervalに含め、削除後current fallbackを禁止 | `completion-matrix.md`、F2-3/M | 未検証 |
-| feature開始日前position update | history欠落時`historical_data_unavailable`、現行positionの過去補完禁止 | `completion-matrix.md`、F2-3/M | 未検証 |
-| legal hold | certification evidenceのdownload/export/disposalをhold中fail closed、DocumentService/FileScope双方で再検証 | `completion-matrix.md`、F2-1/M | 未検証 |
-| 証憑version pin | event記録のdocument version ID/hashと要求版を完全一致、CLEAN必須 | `completion-matrix.md`、F2-1/M | 未検証 |
-| production `certification.pii.view` permission seed | production seed、未seed時full reveal fail closed、role別実API確認 | `completion-matrix.md`、F2-1/M | 未検証 |
-| BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、F2-3/M | 未検証 |
-| PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V125へ順延。M開始時にも再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | A1前の初回衝突解消済み。M再確認待ち |
+| `TYPE_DELETE`／DELETE当日as-of | delete前cancel/close event、DELETE当日をeffective intervalに含め、削除後current fallbackを禁止 | `completion-matrix.md`、`SkillGapServiceImplTest`、H2/MySQL schema smoke | VERIFIED_CLOSED |
+| feature開始日前position update | history欠落時`historical_data_unavailable`、現行positionの過去補完禁止 | `completion-matrix.md`、`SkillGapServiceImplTest`、MySQL Flyway smoke | VERIFIED_CLOSED |
+| legal hold | certification evidenceのdownload/export/disposalをhold中fail closed、DocumentService/FileScope双方で再検証 | `completion-matrix.md`、`CertificationEvidenceAccessServiceTest`、`FileScopeValidationServiceTest` | VERIFIED_CLOSED |
+| 証憑version pin | event記録のdocument version ID/hashと要求版を完全一致、CLEAN必須 | `completion-matrix.md`、`CertificationEvidenceValidatorTest`、`CertificationEvidenceAccessServiceTest` | VERIFIED_CLOSED |
+| production `certification.pii.view` permission seed | production seed、未seed時full reveal fail closed、role別実API確認 | `completion-matrix.md`、V121/V126 MySQL smoke、A1 permission/API regression | VERIFIED_CLOSED |
+| BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、skill/project/position service回帰、`AllMappersSchemaSweepTest` | VERIFIED_CLOSED |
+| PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V127へ順延。M開始・終了時に再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | VERIFIED_CLOSED |
 
-この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2完了時点の基準はmain V115＋現worktree V116〜V125であり、M開始時にも最新`origin/main`を再fetchして追加衝突を確認する。
+この表の項目は未追跡のまま落とさず、各F2 TaskまたはMの明示的gateで証拠を付け、M完了時点で全件`VERIFIED_CLOSED`とした。main V115＋NF-03 V116〜V127の構成、最新`origin/main`とのmerge-base、migration/H2/MySQL smokeを確認済みである。
 
 ## A1/A2 implementation receipt（2026-08-28）
 
@@ -139,8 +139,43 @@ A2の本人APIは`engineerId`をbody/pathからscope根拠として使わず、`
 
 ### B1 receipt
 
-`151346ed`でB1を実装しremoteへpushした。training approvalはA1と同一のvisible populationを先に確認して既存`TrainingPlanService`へ委譲し、費用・承認・支払の正本を増やしていない。証憑downloadは管理側と本人側の両APIでtyped `CERTIFICATION_RECORD` link、指定version、CLEAN、version ID/hash、legal hold、FileScopeをfail closedで検証する。`CertificationEvidenceAccessServiceTest`と`CertificationLearningGapTrainingApprovalServiceTest`、F2の通知/FileScope/費用回帰がPASSし、empty-link、ENGINEER-only、mixed-link、admin bypass、版/hash不一致を回帰した。UIのdownload/approval操作と実BrowserはMに残す。
+`151346ed`でB1を実装しremoteへpushした。training approvalはA1と同一のvisible populationを先に確認して既存`TrainingPlanService`へ委譲し、費用・承認・支払の正本を増やしていない。証憑downloadは管理側と本人側の両APIでtyped `CERTIFICATION_RECORD` link、指定version、CLEAN、version ID/hash、legal hold、FileScopeをfail closedで検証する。`CertificationEvidenceAccessServiceTest`と`CertificationLearningGapTrainingApprovalServiceTest`、F2の通知/FileScope/費用回帰がPASSし、empty-link、ENGINEER-only、mixed-link、admin bypass、版/hash不一致を回帰した。UIのdownload/approval操作と実BrowserはMで確認済み。
 
 ### B2 receipt
 
-`0168e8ea`でB2を実装しremoteへpushした。A1と同じquery serviceでmanager/HR/adminのvisible populationを確認し、`SkillGapService`のevent-only as-of結果を先に確定する。AIにはgap skillに紐づくactive course allowlistだけを渡し、RULE_ONLY/DEGRADEDでもrule gap/snapshot/as-ofを維持する。AI応答に配置・評価・採否の確定値を持たせず、UIにもcandidate-only境界を表示した。B2 targeted suiteはPASS、実Browserと全gateはMで再確認する。
+`0168e8ea`でB2を実装しremoteへpushした。A1と同じquery serviceでmanager/HR/adminのvisible populationを確認し、`SkillGapService`のevent-only as-of結果を先に確定する。AIにはgap skillに紐づくactive course allowlistだけを渡し、RULE_ONLY/DEGRADEDでもrule gap/snapshot/as-ofを維持する。AI応答に配置・評価・採否の確定値を持たせず、UIにもcandidate-only境界を表示した。B2 targeted suiteとMの実Browser・全gateはPASSまたは既知環境制約を記録済み。
+
+## M完了・最終handoff（2026-08-28）
+
+MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9621326846`を対象に完了した。最終docs commit後のremote HEADはReview packetの固定値を正本とする。
+
+| 項目 | 証拠・結果 |
+|---|---|
+| Approved scope / Owner / Base | NF-03 `APPROVED`、OwnerRef=`PROJECT_OWNER`、DecisionId=`DG-03-SCOPE-APPROVAL-20260828-01`、Base=`76e45340a23cfee964fac778b7b4d856fa2c9e7b` |
+| worktree / branch | `C:\work\ses-certification-learning-skill-gap` / `codex/certification-learning-skill-gap`。通常checkoutは変更なし。最終fetch時にworktree clean、local/remote HEAD一致。 |
+| main取り込み | `origin/main=a3454c086c6d17f94f96ced4175adec932f071b7`、merge-baseも同SHA。main V115を保持し、NF-03はV116〜V127へ順延。migration integrityとMySQL/H2 smoke PASS。 |
+| fast | `mvn -q test`: 3051 run / 2 failures / 11 errors / 0 skipped。既存baselineおよびWindows loopback失敗のみ。NF-03対象reportはfailure/error 0。 |
+| MySQL | 修正後`mvn -q test -Pmysql-tests`: 89 run / 0 failure / 1 error / 0 skipped。唯一のerrorは既存`FreeeConcurrentRefreshTest`のWindows loopback。NF-03 migration/feature reportは全件PASS。 |
+| performance | `mvn -q test -Pperformance-tests`: 1 run / 0 failure / 0 error / 0 skipped、p95=44ms。 |
+| H2/migration | `MigrationScriptIntegrityTest` 28件、`AllMappersSchemaSweepTest` 188件、合計216件PASS。修正後MySQL feature smoke 6件PASS。 |
+| feature regression | 資格lifecycle/PII/通知、DocumentLink/FileScope、training/Expense/Approval、skill-gap taxonomy/as-of、AI candidate、A1/A2/B1/B2 service/API/UI contractを全件PASS。 |
+| Browser Demo | Docker appでdesktop/390px。管理list 255件、detail、empty 0件、検索、CSV download遷移、AI fallback（`historical_data_unavailable`、candidateなし、candidate-only説明）を確認。 |
+| Review/PR | 独立Implementation Review待ち。PR、merge、branch削除は実施していない。 |
+
+### 必須シナリオの証拠対応
+
+| シナリオ | 証拠 |
+|---|---|
+| 90/60/30当日・前後、Asia/Tokyo、cancel/correct/renew、重複 | `CertificationExpiryServiceTest`、`EngineerCertificationLifecycleServiceTest`、`CertificationExpiryNotificationSchedulerTest`、`AppConfigClockTest`、`EngineerCertificationServiceTest` |
+| 証憑scope/version/hash/CLEAN/legal hold、empty/ENGINEER-only/mixed/admin | `CertificationEvidenceValidatorTest`、`CertificationEvidenceAccessServiceTest`、`FileScopeValidationServiceTest`、B1 download API |
+| 費用NULL/0/threshold±1、自己承認拒否、CAS、予定/実費差額、締め済み月 | `TrainingPlanServiceTest`、`ExpenseRequestFlowIntegrationTest`、`CertificationLearningGapTrainingApprovalServiceTest`。既存ExpenseRequest/MonthlyClosing正本へ委譲 |
+| as-of、DELETE当日、開始日前、PROJECT/POSITION/COMBINED、期間両端、同義/未知/0件、snapshot replay | `SkillGapServiceImplTest`、`SkillGapTaxonomyResolverTest`、skill/project/position service回帰、Flyway schema smoke。未知skillの自動master化なし |
+| AI停止/error/timeout、rule gap維持、candidate-only、公式projection境界 | `CertificationLearningGapAiServiceImplTest`、`AiLearningCandidateServiceImplTest`、`SkillAssessmentServiceImplTest`。AI-only finalizationを拒否し、HR_FINALのみ公式projectionへ出さない |
+| list/detail/count/export/self/manager/HR population | `CertificationLearningGapQueryServiceImplTest`、`CertificationLearningGapApiControllerTest`、`CertificationLearningGapSelfServiceImplTest`、UI contract、permission回帰、Browser list/detail/empty |
+
+### 残余リスクとrollback
+
+- Windows loopback環境の既存テスト失敗は本機能のfailureではないが、CI/Linuxまたはloopback修復環境で再実行する。
+- 証憑binary本文のdownloadファイル採取は未取得。認可と版固定のfail-closed証拠は取得済み。
+- NF-07の`CERTIFICATION_PII`保持年数・破棄は未承認であり、本番有効化しない。
+- rollbackは本番未適用を前提に、feature commitを`4ba1738c`からDocsを含む最終HEADまで逆順revertし、migrationはV127→V116を管理手順で戻す。本番適用後はDROPせずbackup/release rollback計画を使用する。

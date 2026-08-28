@@ -149,8 +149,9 @@
 
 ## M. 完了・Review handoff（承認後のみ）
 
-- [ ] **Task M: mandatory test/DemoとReview packetを完成する**
+- [x] **Task M: mandatory test/DemoとReview packetを完成する**
   - Objective: 全受入条件とpopulation一致を証拠化し、完了対応表とremote HEADをReviewへ渡す。
-  - Test: fast suite、MySQL suite、performance/CI相当、scope/PII/document/approval/AI回帰、migration/H2 smoke。
-  - Demo: 資格期限90/60/30、取消/訂正、重複、証憑scope、as-of/synonym/unknown/period/0件、threshold/自己承認、AI停止、list/detail/export/本人/上長/HRの全シナリオを実演する。
-  - Deliverable: M完了後にだけ `review-packet.md` を作成し、ReviewのPLAN/IMPLEMENTATION双方PASS後にPR作成工程へ引き渡す。
+  - Implementation: mainのV115を保持し、NF-03をV116〜V127へ同期。A1〜B2を個別commit・pushし、Mのテスト修正とReview packetを後続docs commitで固定した。PR、merge、branch削除は実施していない。
+  - Test: `mvn -q test` は3051件・失敗2・error 11・skip 0（既存baseline/Windows loopback環境失敗のみ、NF-03対象reportは失敗/error 0）。`mvn -q test -Pmysql-tests` は89件・失敗0・error 1・skip 0（`FreeeConcurrentRefreshTest`のWindows loopbackのみ）。performanceは1件PASS（p95 44ms）。feature回帰、H2 migration/schema 216件、修正後MySQL feature smoke 6件は全件PASS。
+  - Demo: Docker上の実Browserでdesktop/390pxを実施。管理list 255件、detail/empty、阿部検索、CSV download遷移、AI停止時のrule gap fallbackと候補非確定境界を確認した。90/60/30、cancel/correct/renew、重複、証憑scope/pin/legal hold、as-of/同義/未知/期間/0件、費用threshold/自己承認、SELF/MANAGER/HR母集団は対応testとsmokeで証拠化した。
+  - Deliverable: `review-packet.md`、`completion-matrix.md`、`review-remediation.md`を作成・remoteへpushし、ReviewのPLAN/IMPLEMENTATION双方PASS後にPR作成工程へ引き渡す。独立Reviewは未実施であり、ここではPRを作成しない。

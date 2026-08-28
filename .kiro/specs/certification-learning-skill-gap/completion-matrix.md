@@ -11,6 +11,7 @@
 | 承認 Base | `76e45340` |
 | migration | main V115（PWA）＋NF-03 V116〜V127（F1〜A2。V125はF1 training relation tableの監査timestamp補正、V126 A1、V127 A2） |
 | F2 | **完了**（F2-1〜F2-5実装・単体回帰済み。独立Review未実施） |
+| A1〜B2 | **完了**（各waveを個別commit・remote push済み。独立Review未実施） |
 
 ## F1 Task対応
 
@@ -30,6 +31,7 @@
 | A2 | `5a5d8571` | V127 | account link本人scope、資格申請/cancel/correct/resubmit、typed CLEAN証憑upload、learning plan/enrollment、本人export、本人menu | CertificationLearningGapSelfServiceImplTest、MyCertificationLearningGapUiContractTest、MigrationScriptIntegrityTest、ComplianceGateMenuPermissionTest | tampered engineerId拒否、他人record拒否、証憑target type/CLEAN、plan本人ID強制、raw番号/storage key非返却、empty/390pxを確認。approval/BrowserはB1/Mで再確認 | [x] |
 | B1 | `151346ed` | 既存V121/V122/V126/V127の正本接続（追加DDLなし） | notification scheduler回帰、ExpenseRequest/Approval委譲、typed証憑download、version/hash/CLEAN/legal hold、A1 detail link | CertificationEvidenceAccessServiceTest、CertificationLearningGapTrainingApprovalServiceTest、CertificationExpiryNotificationSchedulerTest、FileScopeValidationServiceTest、TrainingPlanServiceTest、ExpenseRequestFlowIntegrationTest | semantic key/DB dedupe、threshold/NULL/0/差額/締め/自己承認、empty/ENGINEER-only/mixed/admin/version/hash/scan/legal holdを確認。実BrowserはMで確認 | [x] |
 | B2 | `0168e8ea` | 追加DDLなし（既存V119/V123/V124/V126を再利用） | staffing as-of/period/source、rule gap snapshot、active course allowlist、AI candidate-only、UI接続 | CertificationLearningGapAiServiceImplTest、SkillGapServiceImplTest、SkillGapTaxonomyResolverTest、AiLearningCandidateServiceImplTest、MigrationScriptIntegrityTest | PROJECT/POSITION/COMBINED、inclusive期間、履歴欠落/unknown/synonym/0件、snapshot、AI停止/error/timeout、公式projection非変更を確認。BrowserはMで確認 | [x] |
+| M | `4ba1738c`＋最終docs commit（HEADはReview packetに固定） | main V115保持、V116〜V127重複なし、V110 latest assertion同期 | fast/MySQL/performance、feature回帰、H2/MySQL migration smoke、Browser desktop/390px | fast 3051 run（既知baseline 2 failures/11 errors/0 skipped）、MySQL 89 run/0 failure/1 error/0 skipped（Freee loopback環境のみ）、performance 1 run PASS（p95 44ms）、feature回帰全件PASS、H2 216件PASS、修正後MySQL feature smoke 6件PASS | Browser list/detail/empty/CSV遷移/AI fallback、390px reflow、scope/PII境界を確認。 | [x] |
 
 ## F1 Implementation Review受領・F2持越し契約
 
@@ -38,8 +40,9 @@
 | Plan Review | **PASS**（R7） |
 | F1 Implementation Review | **PASS** |
 | F1本体 Head | `2f7bbac0` |
-| F2実装完了時点のworktree local/remote Head | `f2ce7a992d69fd9f6f7654ba4fb9e9b6d69d8a4c` |
-| F2〜M | `F2完了`（A1/A2/B1/B2/Mは未着手） |
+| A1〜B2実装完了時点のworktree local/remote Head | `86f1749813669964938611b2d9412282d2aa09fe` |
+| V110 smoke期待値同期 | `4ba1738c4e5afe6ad3839afe1e681a9621326846`（V127へ更新、対象MySQL smoke PASS） |
+| F2〜B2 | `完了`（各wave個別commit済み、独立Review未実施） |
 | 現行migration | V127（main V115はPWA） |
 | F2/A1/A2 migration | V121〜V127 |
 | PR/merge/branch削除 | 禁止。M＋独立Implementation Review PASS後のみPR対象 |
@@ -48,23 +51,26 @@
 
 | 持越し | 対応Task | 必須契約・証拠 | status |
 |---|---|---|---|
-| `TYPE_DELETE`／DELETE当日as-of | F2-3、M | delete前にcancel/close eventを記録し、DELETE当日をeffective intervalに含める。削除後のcurrent rowを過去補完に使わない。DELETE当日・前日・翌日のas-of testを残す | [ ] |
-| feature開始日前のposition update | F2-3、M | feature開始日前に有効なposition historyがない場合は`historical_data_unavailable`。現行positionを過去へ遡及適用しない。開始日前update fixtureをMySQLで確認 | [ ] |
-| legal hold | F2-1、M | `CERTIFICATION_EVIDENCE`のdownload/export/disposalをlegal hold中はfail closed。DocumentServiceとFileScopeValidationServiceの両方でholdを再検証 | [ ] |
-| 証憑version pin | F2-1、M | certification eventの`document_version_id`・hashと要求版を完全一致させ、CLEAN以外/version mismatch/hash mismatchを拒否 | [ ] |
-| production `certification.pii.view` permission seed | F2-1、M | production migration/seedでpermission group/actionを登録し、role別full/masked/omitを実APIで確認。未seed時はfull revealをfail closed | [ ] |
-| BP/別write pathのevent insert迂回防止 | F2-3、M | `EngineerSkillServiceImpl`、`ProjectSkillServiceImpl`、`PositionServiceImpl`の全create/update/status/delete経路を共通event writerへ集約し、直接mapper更新を回帰検出 | [ ] |
-| PR前の最新`origin/main`取り込み・migration衝突再確認 | M／PR前gate | `origin/main@a3454c08`をmerge済み。main V115（PWA）を保持し、NF-03をV116〜V125へ順延した。M開始時に再fetchして追加衝突、schema/H2同期、Base..Head差分を再確認する | [ ] |
+| `TYPE_DELETE`／DELETE当日as-of | F2-3、M | delete前にcancel/close eventを記録し、DELETE当日をeffective intervalに含める。削除後のcurrent rowを過去補完に使わない。DELETE当日・前日・翌日のas-of testを残す | [x] `SkillGapServiceImplTest`、H2/MySQL schema smoke |
+| feature開始日前のposition update | F2-3、M | feature開始日前に有効なposition historyがない場合は`historical_data_unavailable`。現行positionを過去へ遡及適用しない。開始日前update fixtureをMySQLで確認 | [x] `SkillGapServiceImplTest`、MySQL Flyway smoke |
+| legal hold | F2-1、M | `CERTIFICATION_EVIDENCE`のdownload/export/disposalをlegal hold中はfail closed。DocumentServiceとFileScopeValidationServiceの両方でholdを再検証 | [x] `CertificationEvidenceAccessServiceTest`、`FileScopeValidationServiceTest` |
+| 証憑version pin | F2-1、M | certification eventの`document_version_id`・hashと要求版を完全一致させ、CLEAN以外/version mismatch/hash mismatchを拒否 | [x] `CertificationEvidenceValidatorTest`、`CertificationEvidenceAccessServiceTest` |
+| production `certification.pii.view` permission seed | F2-1、M | production migration/seedでpermission group/actionを登録し、role別full/masked/omitを実APIで確認。未seed時はfull revealをfail closed | [x] V121/V126 MySQL smoke、A1 permission/API regression |
+| BP/別write pathのevent insert迂回防止 | F2-3、M | `EngineerSkillServiceImpl`、`ProjectSkillServiceImpl`、`PositionServiceImpl`の全create/update/status/delete経路を共通event writerへ集約し、直接mapper更新を回帰検出 | [x] skill/project/position service回帰、`AllMappersSchemaSweepTest` |
+| PR前の最新`origin/main`取り込み・migration衝突再確認 | M／PR前gate | `origin/main@a3454c08`をmerge済み。main V115（PWA）を保持し、NF-03をV116〜V125へ順延した。M開始時に再fetchして追加衝突、schema/H2同期、Base..Head差分を再確認する | [x] M開始・終了時fetch、merge-base一致、migration integrity |
 
-## 未検証（F2 以降）
+## Mで解消した旧未検証項目
 
-- 資格 API/UI、90/60/30 scheduler E2E
-- 証憑 upload E2E（DocumentService 連携）
-- 複数 JVM 通知 dedupe
-- production `certification.pii.view` 権限 seedの実DB/API確認
-- NF-07 `CERTIFICATION_PII` 保持年数
-- F2-5 AI artifact/runの実MySQL accept/reject E2E、A1/A2/B1/B2の画面・母集団接続
-- P2-F1-14〜16: DELETE 当日 as-of、開始日前 position update、main 再取り込み（上表へ接続済み）
+- 資格 API/UI、90/60/30判定、cancel/correct/renew、証憑validator/download境界、training approval、as-of、AI fallback、list/detail/count/export/self APIは対象回帰testとBrowser Demoで確認した。
+- migration/H2は`MigrationScriptIntegrityTest` 28件＋`AllMappersSchemaSweepTest` 188件、MySQLは修正後のfeature smoke 6件および全profile 89件を実行した。
+- A1〜B2の画面接続はdesktop/390pxの実Browserでlist/detail/empty/CSV遷移/AI fallbackを確認し、role/population/PIIの残りはAPI/UI contractとservice回帰で確認した。
+
+## 最終時点の残余未検証・環境制約
+
+- Windowsのloopback制約により、plain `mvn -q test`の既存baseline失敗2件・error 11件、MySQL全体の`FreeeConcurrentRefreshTest` error 1件は残る。NF-03対象reportには失敗/error/skipがない。Docker app経由のBrowser Demoは完了した。
+- 証憑のbinary本文をBrowser downloadファイルとして採取するE2Eは未取得。typed link、exact version/hash、CLEAN、legal hold、ENGINEER-only/mixed/empty/admin境界はservice回帰とFileScope回帰で確認し、Browserではdownload遷移を確認した。
+- `CERTIFICATION_PII`の本番保持年数・自動破棄は承認範囲外のNF-07であり、NF-07承認までは本番有効化しない。
+- 実MySQL上のAI accept/rejectを含む人の確定操作は対象service/API回帰で確認したが、AI外部provider接続はscope外。AIはcandidate-only、HR_FINALのみ公式projectionという境界を維持している。
 
 ## Rollback
 
