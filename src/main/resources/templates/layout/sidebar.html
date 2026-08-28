@@ -84,6 +84,11 @@
                         <i class="bi bi-arrow-repeat me-2"></i><span th:text="#{menu.myLifecycle}">マイライフサイクル</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-assets')}">
+                    <a th:href="@{/my/assets}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/assets') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-laptop me-2"></i><span>貸与資産・アカウント</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
                     <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
@@ -94,6 +99,12 @@
                     <a th:href="@{/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/lifecycle') ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-arrow-repeat me-2"></i>
                         <span th:text="#{menu.lifecycle}">ライフサイクル管理</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('asset-management')}">
+                    <a th:href="@{/asset/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/asset') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-laptop me-2"></i>
+                        <span>資産・アカウント管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('certification-learning-skill-gap')}">
