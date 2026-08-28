@@ -329,6 +329,8 @@ ai:
   enabled: true
   provider: mock
   external-send-enabled: false
+  learning-candidate-timeout-ms: 2000
+  learning-candidate-ttl-minutes: 60
   retention:
     redacted-days: 730
     raw-prompt-days: 0

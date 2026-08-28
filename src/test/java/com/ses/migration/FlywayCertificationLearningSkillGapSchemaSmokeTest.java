@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-2〜F2-3のMySQL smoke。V116〜V122のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-2〜F2-5のMySQL smoke。V116〜V123のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -29,7 +29,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V116からV122のNF03_shapeがMySQLで成立する() throws Exception {
+    void V116からV123のNF03_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("122", latestVersion, "最新マイグレーションバージョンは122であること");
+            assertEquals("123", latestVersion, "最新マイグレーションバージョンは123であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -66,6 +66,10 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertEquals(1, queryInt(statement,
                     "SELECT COUNT(*) FROM m_document_type WHERE code='CERTIFICATION_EVIDENCE'"),
                     "CERTIFICATION_EVIDENCE文書種別seed");
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM m_ai_artifact_version WHERE use_case='LEARNING_CANDIDATE' "
+                            + "AND status='ACTIVE' AND deleted_flag=0"),
+                    "LEARNING_CANDIDATE artifact seed");
         }
     }
 
