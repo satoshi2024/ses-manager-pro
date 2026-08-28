@@ -93,6 +93,7 @@ public class MyTimesheetApiController {
             m.put("contractNo", row.getContractNo());
             m.put("projectName", row.getProjectName());
             m.put("workRecordId", row.getWorkRecordId());
+            m.put("version", row.getVersion());
             m.put("status", row.getStatus());
             Contract c = contractMapper.selectById(row.getContractId());
             if (c != null) {

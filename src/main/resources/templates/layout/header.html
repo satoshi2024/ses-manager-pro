@@ -7,7 +7,7 @@
     <header th:fragment="header" class="top-header sticky-top bg-primary border-bottom border-dark d-flex align-items-center px-4 py-2 transition-base no-print">
         
         <!-- Mobile Toggle Button -->
-        <button class="btn btn-link text-secondary hover-text-white d-lg-none me-3 p-0 border-0" id="sidebar-toggle-btn">
+        <button class="btn btn-link text-secondary hover-text-white d-lg-none me-3 p-0 border-0" id="sidebar-toggle-btn" type="button" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">
             <i class="bi bi-list fs-3"></i>
         </button>
 
@@ -20,6 +20,12 @@
 
         <!-- Right Side Tools -->
         <div class="header-tools d-flex align-items-center ms-auto gap-3">
+
+            <!-- PWA通信・同期状態。下書き/queueの詳細は要員ポータル側で表示する。 -->
+            <div id="pwa-status" class="pwa-status" role="status" aria-live="polite" data-state="online">
+                <span id="pwa-status-dot" class="pwa-status-dot" aria-hidden="true"></span>
+                <span id="pwa-status-label">オンライン</span>
+            </div>
             
             <!-- Current Date/Time -->
             <div class="datetime-display d-none d-lg-block text-muted small me-2" id="header-datetime">

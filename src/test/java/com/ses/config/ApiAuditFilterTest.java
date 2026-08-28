@@ -104,4 +104,18 @@ class ApiAuditFilterTest {
         verify(auditLogService).record(any(), eq("POST"), eq("/api/acceptances/1/document"),
                 eq(200), eq("ses-manager"), eq(true));
     }
+
+    @Test
+    void PWAの同一hashreplayは業務監査を二重記録しない() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<AuditLogService> provider = mock(ObjectProvider.class);
+        AuditLogService auditLogService = mock(AuditLogService.class);
+        when(provider.getIfAvailable()).thenReturn(auditLogService);
+        ApiAuditFilter filter = new ApiAuditFilter(provider);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/my/pwa/expenses/drafts");
+        request.setAttribute(com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE, true);
+
+        filter.doFilter(request, new MockHttpServletResponse(), (req, res) -> { });
+
+        verify(auditLogService, never()).record(any(), any(), any(), any(Integer.class), any(), any(Boolean.class));
+    }
 }

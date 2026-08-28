@@ -3,6 +3,7 @@
     const month = document.getElementById('attendanceMonth');
     const form = document.getElementById('attendanceDayForm');
     if (!month || !form) return;
+    let currentRow = null;
     const now = new Date();
     month.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     month.addEventListener('change', load);
@@ -13,9 +14,10 @@
     document.getElementById('attendanceDayBody').addEventListener('click', event => {
         const button = event.target.closest('[data-action="delete"]');
         if (!button) return;
-        fetch(`/api/my/attendance/daily?month=${encodeURIComponent(month.value)}&workDate=${encodeURIComponent(button.dataset.date)}`, {
-            method: 'DELETE', headers: SES.csrf.header()
-        }).then(read).then(handle).catch(showError);
+        pwaRequest('DELETE', {
+            month: month.value,
+            workDate: button.dataset.date
+        }).then(handleMutation).catch(showError);
     });
     load();
 
@@ -23,6 +25,7 @@
         fetch(`/api/my/attendance?month=${encodeURIComponent(month.value)}`).then(read).then(data => {
             if (data.code !== 200) return showError(data.message);
             const row = (data.data.months || [])[0];
+            currentRow = row || null;
             render(row);
         }).catch(showError);
     }
@@ -67,8 +70,7 @@
             if (start || end) breaks.push({ startTime: start || null, endTime: end || null });
         });
         const body = { workDate: value('attendanceDate'), clockIn: value('attendanceClockIn') || null, clockOut: value('attendanceClockOut') || null, breaks, workType: value('attendanceWorkType') };
-        fetch('/api/my/attendance/daily', { method: 'POST', headers: Object.assign({'Content-Type': 'application/json'}, SES.csrf.header()), body: JSON.stringify(body) })
-            .then(read).then(handle).catch(showError);
+        pwaRequest('POST', body).then(handleMutation).catch(showError);
     }
 
     function submit() {
@@ -77,6 +79,25 @@
     }
 
     function handle(data) { if (data.code !== 200) return showError(data.message); clearError(); load(); }
+    function handleMutation(result) {
+        if (result && result.conflict) {
+            showError(t('error.pwa.conflict', 'サーバー側で変更がありました。下部の競合内容を確認してください'));
+            return;
+        }
+        clearError();
+        if (result && result.queued) {
+            SES.toast.info(t('pwa.queued', '端末に保存しました。オンライン復帰後に同期します'));
+            return;
+        }
+        load();
+    }
+    function pwaRequest(method, payload) {
+        return SES.pwaQueue.request({
+            screen: 'attendance', method, path: '/api/my/pwa/attendance/daily',
+            month: month.value, baseVersion: Number(currentRow?.version || 0),
+            resourceKey: `attendance:${month.value}`, payload
+        });
+    }
     function read(response) { return response.json(); }
     function value(id) { return document.getElementById(id).value; }
     function t(key, fallback) { return SES.i18n.t(key, fallback); }

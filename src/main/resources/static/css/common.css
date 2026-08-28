@@ -561,8 +561,76 @@ a:hover {
     min-width: 0;
 }
 
+/* PWA通信状態。認証情報・業務データはここへ表示しない。 */
+.pwa-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 32px;
+    padding: 0.25rem 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.pwa-status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: 0 0 0.5rem;
+    border-radius: 50%;
+    background: var(--accent-green);
+}
+
+.pwa-status[data-state="offline"] .pwa-status-dot,
+.pwa-status[data-state="error"] .pwa-status-dot {
+    background: var(--accent-red);
+}
+
+.pwa-status[data-state="syncing"] .pwa-status-dot,
+.pwa-status[data-state="pending"] .pwa-status-dot {
+    background: var(--accent-yellow);
+}
+
+.pwa-queue-panel {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 1040;
+    width: min(30rem, calc(100vw - 2rem));
+    max-height: min(24rem, calc(100vh - 2rem));
+    overflow: auto;
+    padding: 0.5rem 0.75rem;
+    color: var(--text-primary);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1.5rem rgba(15, 23, 42, 0.25);
+}
+
+.pwa-queue-panel pre {
+    max-height: 6rem;
+    overflow: auto;
+    padding: 0.35rem 0.5rem;
+    color: var(--text-secondary);
+    background: var(--surface-bg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.75rem;
+    border-radius: 0.25rem;
+}
+
+.pwa-queue-conflict {
+    border-top: 1px solid var(--border-color);
+    padding-top: 0.5rem;
+}
+
 /* ================== SIDEBAR NAV ================== */
 .sidebar .nav-link {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
     color: var(--text-secondary);
     font-weight: 500;
     transition: var(--transition-base);
@@ -584,6 +652,11 @@ a:hover {
     font-size: 1.1rem;
     width: 24px;
     text-align: center;
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid rgba(56, 189, 248, 0.75);
+    outline-offset: 2px;
 }
 
 /* ================== UI COMPONENTS ================== */
@@ -1132,6 +1205,20 @@ input[type="date"]::-webkit-datetime-edit-text {
 
     .header-tools {
         gap: 0.25rem !important;
+    }
+
+    .pwa-status {
+        min-height: 30px;
+        padding-left: 0.45rem;
+        padding-right: 0.45rem;
+    }
+
+    .pwa-queue-panel {
+        right: 0.5rem;
+        bottom: 0.5rem;
+        width: calc(100vw - 1rem);
+        max-height: calc(50vh - 1rem);
+        max-height: calc(50dvh - 1rem);
     }
 
     .content-area .d-flex.justify-content-between.align-items-center.mb-4 > div:last-child:not(:first-child) {
