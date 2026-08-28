@@ -6,7 +6,7 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base Commit**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
 - **Implementation Code Head**: `f2e25c08003f5db9976378c3b9b4f0b2f6ef1e97`
-- **Review / Handoff Head**: `(Pending after commit & push)`
+- **Review / Handoff Head**: `9458e9253459c55b6aeaf2e1f2fca9b1959bcce5`
 - **PR作成ポリシー**: 実装対話ではPRを作成せず、独立ReviewのPLAN/IMPLEMENTATION双方PASS後に作成する。
 
 ---
