@@ -103,11 +103,11 @@
   - Test: `CertificationNotificationPopulationResolverTest`（通常、退職完了、休職、復職、account未link、as-of manager）、`CertificationExpiryNotificationSchedulerTest`（二重実行の同一semantic入力、復職key）、既存`NotificationServiceImplTest`/`NotificationOutboxServiceTest`（DB/outbox DuplicateKey収束）を実行した。Asia/Tokyo固定ClockでJVM default timezoneに依存しない。
   - Demo: 同じ資格境界をschedulerから再実行しても同じkeyだけが通知正本へ渡り、DB uniqueで2件目を収束させること、復職日はREINSTATEMENT keyだけを発行し、退職後の旧managerと本人へ通常通知しないことをテストで実演した。
 
-- [ ] **Task F2-5: 本人/上長/HR評価とAI候補契約を実装する**
+- [x] **Task F2-5: 本人/上長/HR評価とAI候補契約を実装する**
   - Objective: AIがskill評価・配置・採否・不利益判断を確定できないことをservice/API/監査で保証する。
-  - Implementation: SELF/MANAGER/HR_FINALを別DTO・権限・eventへ分離し、人のactor/reasonを必須化する。AI timeout/error/低信頼はcandidateだけdegradedにし、rule gapを維持する。
-  - Test: AI-only transition拒否、human accept/reject、adverse source禁止、allowlist、timeout/circuit、監査event、**SELF/MANAGER assessmentがstaffing/sales API・画面に出ないこと**（design §3.9/§4.6）。
-  - Demo: AI timeoutと候補acceptの両方で、公式skill/配置/採否が自動変更されないことを確認する。
+  - Implementation: `78bbfcef`。`SkillAssessmentService`はSELF/MANAGER/HR_FINALを別operationとして受け、SELF/MANAGERはPROPOSED＋decision eventだけ、HR_FINALだけが`EngineerSkillService.replaceSkills`経由で公式projectionを更新する。人のactor/reasonを必須化し、AI相当のassessment typeを入力させない。`AiLearningCandidateService`は`LEARNING_CANDIDATE` artifact/runの`aiRunId`、rule gap snapshot ID、as-of、allowlist、期限を候補へ保持し、AIはcourse ID候補だけをallowlist内で返す。timeout/error・run監査欠落はDEGRADEDへfallbackし、rule gapを維持する。accept/rejectは期限内の人のdecision eventだけを追加し、評価・配置・採否・adverse stateを変更しない。
+  - Test: `SkillAssessmentServiceImplTest`（SELF/MANAGERの公式projection非変更、本人/manager/HR権限、AI相当level・理由なし拒否、HR_FINALのみ共通skill service更新）、`AiLearningCandidateServiceImplTest`（AI停止、provider error、timeout、allowlist/run ID、human accept/reject、期限切れ、RULE_ONLY accept拒否、監査event）と`MigrationScriptIntegrityTest`、`MessageBundleConsistencyTest`を実行した。SELF/MANAGERは`EngineerSkill` currentへ書かず、staffing/sales/exportは同projectionのみを読む契約をservice境界で固定した。
+  - Demo: AI timeout/errorでも同じrule gapとas-ofを返し、AI成功候補はallowlist内courseだけを返す。候補のaccept/rejectは`source_id=aiRunId`の人の監査eventを残すが、公式skill/配置/採否を変更しない。期限後・AI停止時のcandidate受諾とAI-only確定は拒否されることをテストで実演した。
 
 ## A1. HR/manager UI（承認後のみ）
 
