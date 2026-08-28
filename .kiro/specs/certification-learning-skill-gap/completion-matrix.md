@@ -39,4 +39,4 @@ Review remediation status: R1（P1-02〜P1-07、P2-01〜P2-02）、R2（P1-08〜
 
 ## 完了判定
 
-Taskを `[x]` にするには、対応する実装commit、required testの実行結果、Demo evidence、scope/PII/document/approval/AI境界の証拠をこの表へ追記する。F1以降はNF-03の `APPROVED` とDG-03のdecision確定が先行条件である。0/0Rの文書Taskが`[x]`であっても、PLAN PASSやproduction実装開始を意味しない。
+Taskを `[x]` にするには、対応する実装commit、required testの実行結果、Demo evidence、scope/PII/document/approval/AI境界の証拠をこの表へ追記する。F1以降はNF-03の `APPROVED` とDG-03のdecision確定が先行条件である。Task 0/0R/0R-2/0R-3の文書補正が`[x]`であっても、PLAN PASSやproduction実装開始を意味しない。
