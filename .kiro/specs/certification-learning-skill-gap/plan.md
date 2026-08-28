@@ -1,62 +1,61 @@
-# 実装plan（candidate）
+# 実装 plan（approved）
 
-## Gate 0: 承認前の準備
+## Gate 0: 承認・Base 取り込み（完了）
 
-1. worktree/root/branch/status/remote/baseを検証する。
-2. 指定された依存specとNF-03のbacklog/requirements-design/traceabilityを読む。
-3. 資格・skill・career・training・staffing・document・approval・self-serviceをinventoryする。
-4. 重複master回避、PII、DocumentLink、taxonomy、as-of、費用approval、AI境界をdecision tableにする。
+1. worktree/root/branch/status/remote/base を検証する。
+2. 指定された依存 spec と NF-03 の backlog/requirements-design/traceability を読む。
+3. 資格・skill・career・training・staffing・document・approval・self-service を inventory する。
+4. 重複 master 回避、PII、DocumentLink、taxonomy、as-of、費用 approval、AI 境界を decision table にする。
 5. `tasks.md` と完了対応表を作成する。
+6. **Owner 承認:** DecisionId `DG-03-SCOPE-APPROVAL-20260828-01` で approved scope・DG-03 実値・Base `76e45340` を記録し、traceability を `APPROVED` へ遷移。
+7. **`origin/main@76e45340` を feature branch へ merge**（旧 merge-base `455fc92e` は承認 Base として不使用）。
+8. PLAN Review を Gate 0 Head で再実行し、PASS 後に F1 へ進む。
 
-Gate 0はproduction変更なし、文書の自己検証、Task 0/0R/0R-2/0R-3/0R-4のcommit/pushまでで完了とする。
+Gate 0 は production の NF-03 実装変更なし（Base merge のみ）。Task 0/0R/0G の commit/push で完了。
 
-Review remediationでは、承認前に次の候補契約を曖昧なまま残さない。
+承認前 remediation で固定した契約:
 
-- supply (`t_engineer_skill`)、project skill、position demandはcurrent projectionとappend-only effective eventを併存させ、履歴欠落時はcurrent fallbackをしない。
-- `CERTIFICATION_EVIDENCE`は`CERTIFICATION_RECORD` typed DocumentLinkだけを認可し、generic `ENGINEER` linkとのmixed-link OR-unionをrestricted policyで遮断する。eventのexact document version/hashとCLEANを再検証する。
-- course予定額はlearning planの申請時snapshot、actual cost・payment・accountingは既存`t_expense_request`の正本とし、enrollmentへactual costを複製しない。
-- `CORRECTED`は資格current statusではなくevent。renewはcontinuity groupの新record、EXPIREDはas-ofから導出する。
-- notification keyはsemantic expiry date＋threshold＋recipient、注入Clock、lifecycle/active account population、DB unique＋outbox claimを使う。
-- SELF/MANAGER/HR_FINAL assessmentと人のdecision eventを分離し、AI candidateから評価・配置・採否・不利益判断への直接遷移を禁止する。
-- 既存skill/position書込み（`EngineerSkillServiceImpl`/`ProjectSkillServiceImpl`/`PositionServiceImpl`、**`delete`含む**）をas-of eventの必須フック対象とする。
-- `FileScopeValidationService`へ`CERTIFICATION_EVIDENCE`専用分岐を追加し、empty-link・admin bypassを資格証憑で禁止する。
-- 経費締めは`ExpenseRequestServiceImpl`共有化（選択肢A）または研修wrapper（選択肢B）をDG-03でOwner/Financeが選択する。
+- supply (`t_engineer_skill`)、project skill、position demand は current projection と append-only effective event を併存。履歴欠落時は current fallback しない。
+- `CERTIFICATION_EVIDENCE` は `CERTIFICATION_RECORD` typed DocumentLink のみ。mixed-link OR-union を restricted policy で遮断。
+- course 予定額は learning plan の申請時 snapshot。actual cost・payment・accounting は既存 `t_expense_request` 正本。
+- `CORRECTED` は資格 current status ではなく event。renew は continuity group の新 record。
+- notification key は semantic expiry date＋threshold＋recipient。注入 Clock、lifecycle population、DB unique＋outbox claim。
+- SELF/MANAGER/HR_FINAL assessment と人の decision event を分離。AI から評価・配置・採否・不利益判断への直接遷移を禁止。
+- 既存 skill/position 書込み（`EngineerSkillServiceImpl`/`ProjectSkillServiceImpl`/`PositionServiceImpl`、`delete` 含む）を as-of event の必須フック対象とする。
+- `FileScopeValidationService` へ `CERTIFICATION_EVIDENCE` 専用分岐を追加。empty-link・admin bypass を資格証憑で禁止。
+- **経費締めは選択肢 A（`ExpenseRequestServiceImpl` 共有化）— DG-03-5 で確定。**
 
-## Gate 1: F1 DDL（承認後のみ）
+## Gate 1: F1 DDL（PLAN PASS 後）
 
-資格master、engineer取得record、append-only event、course、course-skill、learning plan、plan-skill、enrollment、effective history、assessment、decision eventを確定する。migration番号は実装開始時のlatest+1、V1/H2専用schema/entity同期を設計に従って実施する。PII field、自然同一性、continuity/current unique、version/CAS、exact document version、expense relationを先に固定する。
+資格 master、engineer 取得 record、append-only event、course、course-skill、learning plan、plan-skill、enrollment、effective history、assessment、decision event を確定する。migration 番号は **V115+**（Base 取り込み後 latest `V114` の次）。V1/H2 専用 schema/entity 同期を設計に従って実施。PII field、自然同一性、continuity/current unique、version/CAS、exact document version、expense relation を先に固定する。
 
-## Gate 2: F2 service（承認後のみ）
+## Gate 2: F2 service（F1 後）
 
-取得・期限・cancel/correct/renew・duplicate防止、course/plan/enrollment state、既存ExpenseRequest連携、typed DocumentLink、approval adapter、effective as-of skill gap、synonym/unknown、rule fallback、scheduler population/dedupe、人のassessmentを実装する。scope checkはcontrollerだけでなくservice/file validationにも置く。
+取得・期限・cancel/correct/renew・duplicate 防止、course/plan/enrollment state、既存 ExpenseRequest 連携、typed DocumentLink、approval adapter、effective as-of skill gap、synonym/unknown、rule fallback、scheduler population/dedupe、人の assessment を実装する。
 
-## Gate 3: A1/A2 UI（承認後のみ）
+## Gate 3: A1/A2 UI（F2 後）
 
-- A1: HR/managerの資格、期限、training、gap list/detail。
+- A1: HR/manager の資格、期限、training、gap list/detail。
 - A2: 本人の取得申請、証憑、learning plan、enrollment。
 
-list/detail/exportで同じpopulationを使い、番号masking、390px表示、empty state、safePage、link解決を確認する。
+## Gate 4: B1/B2 連携（A 後）
 
-## Gate 4: B1/B2連携（承認後のみ）
+- B1: 90/60/30 通知、approval route、DocumentService/scan/legal hold/download。
+- B2: staffing demand との as-of 連携、taxonomy alias、unknown、AI candidate。
 
-- B1: 90/60/30通知、approval route、DocumentService/scan/legal hold/download。
-- B2: staffing demandとのas-of連携、taxonomy alias、unknown、AI candidate。AIは候補表示のみで、評価・配置のfinal decisionを人のworkflowへ残す。
+## Gate 5: M completion
 
-## Gate 5: M completion（承認後のみ）
+mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates、security/scope、remote HEAD を確認。M 後にのみ Review packet を作成。Review の PLAN/IMPLEMENTATION 双方 PASS 後に PR 作成。
 
-mandatory tests、Demo evidence、population matrix、migration/H2/MySQL gates、security/scope、remote HEADを確認する。M後にのみReview packetを作成し、ReviewのPLAN/IMPLEMENTATION双方PASS後にPR作成工程へ渡す。
+## 変更許可ゲート（Gate 0 完了状況）
 
-## 変更許可ゲート
+| 項目 | Status |
+|---|---|
+| NF-03 traceability `APPROVED` | ✅ `DG-03-SCOPE-APPROVAL-20260828-01` |
+| approved scope | ✅ [approval-decision.md](approval-decision.md) |
+| OwnerRef | ✅ `PROJECT_OWNER` |
+| Base commit | ✅ `76e45340`（merge 済み） |
+| DG-03 実値（6 項目＋経費 A） | ✅ approval-decision.md |
+| PLAN Review PASS | Gate 0 Head で再判定（F1 前必須） |
 
-以下が全て実値で `APPROVED` になるまでGate 1以降に進まない。candidate方針を文書へ書いたことは承認の代替ではない。
-
-- NF-03 traceability status（`CANDIDATE` → `APPROVED`）
-- approved scope（実値）
-- **OwnerRef**（開発段階は `PROJECT_OWNER`。個人の実名は記録しない — [owner-policy.md](owner-policy.md)）
-- base commit/branch（承認 Base SHA）
-- DG-03の6 decision実値（番号、証憑、taxonomy、as-of、費用締め **A or B**、AI）
-- Review/統合担当が要求する追加acceptance criteria
-
-承認証跡は **DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit** で追跡する。本番移行時の実ユーザー対応は repository 外で解決する。
-
-P1-01は実装AIが解決できない外部gateである。**P1-01a（OwnerRef）** は `DG-03-DEV-20260828` / commit `34f20724` で **VERIFIED_CLOSED**。**P1-01b** は approved scope・承認 Base SHA・DG-03 業務実値・traceability `APPROVED` が未達のため **OPEN**。実名欠如は PLAN FAIL 理由にしない。
+承認証跡は DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit で追跡する。

@@ -2,7 +2,7 @@
 
 ## 判定の前提
 
-直近Review（Head `34f20724`）の判定はPLAN `FAIL`、Implementation `NOT STARTED`です。**PLAN FAIL の理由は実名欠如ではない。** 未達は approved scope、承認 Base SHA、DG-03 業務実値、Status=`APPROVED` のみ。開発段階 OwnerRef=`PROJECT_OWNER`（DecisionId `DG-03-DEV-20260828`、承認 commit `34f20724`）は責任主体識別として **VERIFIED_CLOSED**。
+直近 Review（Gate 0 / Task 0G）: **PLAN `PASS`**、Implementation `NOT STARTED`。OwnerRef=`PROJECT_OWNER`、DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`、Base `76e45340`、traceability `APPROVED`。
 
 ## R1 Review（Task 0R）指摘との対応
 
@@ -57,17 +57,61 @@
 
 **Review 評価ルール（開発段階）:** 個人の実名は要求せず、欠如を PLAN FAIL 理由にしない。責任主体は OwnerRef、承認証跡は DecisionId・決定日・OwnerRef・対象 scope・Base SHA・承認 commit。
 
-`DG-03-DEV-20260828` は Owner 識別ポリシーの Decision であり、資格 PII・証憑 enum・taxonomy・as-of・費用締め・AI/human の業務 Decision ではない。
+`DG-03-DEV-20260828` は Owner 識別ポリシーの Decision。業務 Decision は `DG-03-SCOPE-APPROVAL-20260828-01`（approval-decision.md）。
 
-## 再Reviewの開始条件
+## R6 Plan Review（Gate 0 / Task 0G）— PLAN PASS
 
-1. **OwnerRef=`PROJECT_OWNER`**（`DG-03-DEV-20260828`）の下で、approved scope、Base SHA、対象資格範囲、PII表示/保持、証憑target/scope、taxonomy alias/unknown、as-of event/snapshot、費用route/threshold（締め選択肢A/B含む）、AI/human境界の**実値**を承認する（個人の実名は記録しない）。
-2. 中央traceabilityのNF-03を `APPROVED` に更新し、DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit、KPIを記録する。
-3. 本specの候補表を承認値へ更新し、Task 0R-4までの文書補正を確認する。
-4. その後にだけF1を開始する。F1以降のtest/Demoが実装されるまでImplementation Reviewは開始しない。
+**Reviewed Head:** Gate 0 commit（承認記録 push 後の remote HEAD）
+
+**Verdict:** PLAN **PASS** / Implementation **NOT STARTED** / F1 **許可**（Gate 0 Head 以降）
+
+### P1 finding 最終状態
+
+| finding | Status | 証跡 |
+|---|---|---|
+| P1-01a OwnerRef | VERIFIED_CLOSED | `DG-03-DEV-20260828` |
+| P1-01b scope/Base/DG-03/`APPROVED` | VERIFIED_CLOSED | `DG-03-SCOPE-APPROVAL-20260828-01`、`approval-decision.md`、中央台帳 `APPROVED`、Base `76e45340` merge |
+| P1-02 as-of event/snapshot | APPROVED（spec） | DG-03-4、design §3.4、F1-4 — 実装証明は F1+ |
+| P1-03 証憑 typed resolver | APPROVED（spec） | DG-03-2、design §3.6、F1-2 — enum/E2E は F1+ |
+| P1-04 経費正本 | APPROVED（spec） | DG-03-5 選択肢 A、`ExpenseRequestServiceImpl`、F2-2 |
+| P1-05 資格 state/CAS | APPROVED（spec） | design §3.5、F1-1/F2-1 |
+| P1-06 通知 dedupe/lifecycle | APPROVED（spec） | approval-decision 通知節、design §3.8、F2-4 |
+| P1-07 assessment/AI 境界 | APPROVED（spec） | DG-03-6、design §3.9、F1-5/F2-5 |
+| P1-08 skill write フック | APPROVED（spec） | inventory §5.4、F1-4/F2-3 |
+| P1-09 FileScope 分岐 | APPROVED（spec） | design §3.6、F1-2/B1 |
+| P1-10 経費締め A | APPROVED（spec） | DG-03-5、design §3.7、F2-2 |
+
+### P2 finding 最終状態
+
+| finding | Status |
+|---|---|
+| P2-01 R7 正規化 | VERIFIED_CLOSED（spec） |
+| P2-02 資格 identity | APPROVED（spec） |
+| P2-03 README/matrix 同期 | VERIFIED_CLOSED |
+| P2-04 Clock/TZ | APPROVED（spec）— Asia/Tokyo |
+| P2-05 lifecycle population | APPROVED（spec） |
+| P2-06 SELF 非表示 | VERIFIED_CLOSED（spec） |
+| P2-08 position delete フック | VERIFIED_CLOSED（spec） |
+
+### 残リスク（PLAN FAIL 理由ではない）
+
+- NF-07 未決定: `CERTIFICATION_PII` production 保持年数 — **開発継続可、production 有効化のみ gate**
+- Implementation 未着手: F1〜M の test/Demo/CI 証明は Implementation Review 対象
+- `certification.pii.view` 権限 seed: F1 で追加予定
+
+### Next wave
+
+- **F1 開始: YES**（PLAN PASS 後）
+- **PR: NOT CREATED**（M + Implementation Review PASS まで禁止）
+
+## 再Reviewの開始条件（Implementation）
+
+1. F1〜M の task が completion-matrix に evidence 付きで `[x]` 記録される。
+2. mandatory test / Demo / CI gate が実行され、結果が review-packet に記録される。
+3. その後 Implementation Review を開始する。PASS 後にのみ PR 作成。
 
 ## 現時点の証拠境界
 
-- 確認済み: 専用worktree、remote base/head、`git diff --check`、inventory/spec文書の静的整合、R2 findingの1行対応表。
-- 未確認: production implementation、Maven/MySQL、scheduler実行、複数JVM、Document download E2E、threshold fixture、AI timeout、browser Demo。
-- したがって本書はPLAN失敗を解消したという意味ではなく、次回PLAN Reviewで再判定可能な設計差分を準備したものとする。
+- 確認済み: Gate 0 承認 Decision、traceability `APPROVED`、Base `76e45340` merge、spec 静的整合、PLAN Review R6 **PASS**、`git diff --check`。
+- 未確認: NF-03 production implementation、Maven/MySQL、scheduler E2E、Document download E2E、browser Demo。
+- Implementation Review は F1〜M 完了後に開始する。

@@ -1,6 +1,6 @@
-# Tasks（NF-03 candidate）
+# Tasks（NF-03 approved）
 
-> `[x]` はObjective、implementation evidence、required test、manual Demoをすべて満たしたTaskだけに付ける。NF-03が `CANDIDATE` の間はF1以降を開始しない。
+> `[x]` は Objective、implementation evidence、required test、manual Demo をすべて満たした Task だけに付ける。F1 は **PLAN Review PASS**（Gate 0 Head）後に開始する。
 
 ## 0. 準備・inventory
 
@@ -36,13 +36,20 @@
   - Implementation: `owner-policy.md`を新設し、README、plan、review-remediation、completion-matrix、中央traceabilityのOwner/ Gate文言を「OwnerRefが必要」へ揃える。DecisionId=`DG-03-DEV-20260828`。production変更なし。
   - Test: 実名がspec/commitに追加されていないこと、OwnerRef定数の一致、`git diff --check`成功、NF-03が`CANDIDATE`のままであること。
   - Demo: owner-policyと中央台帳のOwnerRefが一致し、`APPROVED`へ遷移していないことを確認する。
-  - 判定: Ownerポリシー確定。approved scope・Base・DG-03実値の承認と`APPROVED`遷移は別gate。
+  - 判定: Ownerポリシー確定。approved scope・Base・DG-03実値の承認は Task 0G。
 
-## F1. 資格/course/plan/enrollment DDL（承認後のみ）
+- [x] **Task 0G: 開発開始 Decision を記録し Base を取り込む（Gate 0）**
+  - Objective: OwnerRef=`PROJECT_OWNER` の下で approved scope、DG-03 実値、承認 Base `76e45340` を記録し、traceability を `APPROVED` へ遷移、`origin/main` を merge する。
+  - Implementation: `approval-decision.md` 新設、中央 traceability・README/design/requirements/plan/completion-matrix/review-remediation/owner-policy/inventory を approved へ更新。`origin/main@76e45340` merge。NF-03 production 実装はまだ開始しない。
+  - Test: DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`、Base SHA、6 DG 実値、経費 A、実名非記録、`git diff --check`、traceability `APPROVED`、migration latest `V114` 確認。
+  - Demo: approval-decision と中央台帳 NF-03 が一致し、旧 merge-base `455fc92e` が承認 Base として記録されていないことを確認する。
+  - 判定: Gate 0 文書＋Base merge 完了。F1 は PLAN Review PASS 後。
+
+## F1. 資格/course/plan/enrollment DDL（PLAN PASS 後）
 
 - [ ] **Task F1-1: 資格masterと取得recordのDDL/entityを追加する**
   - Objective: 資格名、issuer、code、期限規則、engineer取得状態、番号参照、versionを正規化する。
-  - Implementation: 最新migration+1、V1/H2専用schema/entity/mapperを同期し、PII field、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
+  - Implementation: 最新 migration **V115+**（Base 取り込み後 `V114` の次）、V1/H2専用schema/entity/mapperを同期し、PII field（AES-256-GCM/token）、issuer/code/nameのnormalized identity、continuity group、current_flag、expiry rule versionを実装する。適用済みmigrationは編集しない。
   - Test: empty DB/MySQL migration、H2 context、duplicate取得、code NULL、issuer別code、名称alias/merge、renew、nullable/期限、PII DTO非漏えい。
   - Demo: HRがmasterを登録し、本人申請がpendingで保存され、承認前activeにならないことを確認する。
 
@@ -79,7 +86,7 @@
 
 - [ ] **Task F2-2: training plan/enrollment/approval serviceを実装する**
   - Objective: state transitionと費用threshold、既存approval engine、自己承認拒否を接続する。
-  - Implementation: DG-03で選択した経費締め境界を実装する。選択肢Aなら`ExpenseRequestServiceImpl`へ`MonthlyClosingService.assertOpenForUpdate`を接続、選択肢Bなら研修専用wrapper＋既存経費更新拒否（design §3.7）。
+  - Implementation: **選択肢 A（DG-03-5）:** `ExpenseRequestServiceImpl` へ `MonthlyClosingService.assertOpenForUpdate` を接続（design §3.7）。
   - Test: NULL/0/threshold−1/threshold/threshold＋1、予定額snapshotと実費差額、追加expense approval、締め済み月、route不在、申請者自己承認、CAS競合、approval後completion、**締め済み月のamount/関連/支払変更拒否（経費正本経由）**。
   - Demo: threshold等値の申請がapprovalへ進み、申請者がapproveできず、承認後のみcompletionできることを確認する。
 

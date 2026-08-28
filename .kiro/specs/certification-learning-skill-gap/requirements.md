@@ -1,6 +1,6 @@
-# 要件（NF-03 candidate）
+# 要件（NF-03 approved）
 
-> 本書は承認前のcandidate requirementsです。traceabilityが `CANDIDATE` の間は受入対象ではなく、production変更の根拠にはしません。
+> 本書は DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28、OwnerRef=`PROJECT_OWNER`）に基づく承認済み requirements です。受入条件は F1〜M の test/Demo で証明します。
 
 ## R1 資格master・取得履歴・期限
 
@@ -63,7 +63,7 @@ HRはcourse/provider、費用（JPY）、期間、capacity、対象canonical ski
 - 証憑の登録はDocumentService、version、scan、retention/legal holdを通る。
 - scan statusがCLEANでないfile、unknown stored name、scope外linkはfail closed。
 - 証憑のview/download/exportは同じscope checkを通り、一般文書の複数link unionとは分離したrestricted priority ruleを適用する。
-- 資格番号は画面role別masking、list/export/AI promptのallowlistをテストで固定する。
+- 資格番号は AES-256-GCM ciphertext または token reference で保存し、plaintext を domain table に持たない。本人と `certification.pii.view` 権限を持つ HR/admin のみ full 参照可、その他は mask。list/export/notification/log/audit detail/AI prompt へ raw を出さない。retention class `CERTIFICATION_PII`。NF-03 では自動削除しない（NF-07 release gate で production 保持を決定）。
 - 資格証憑は`CERTIFICATION_EVIDENCE`＋`CERTIFICATION_RECORD` linkだけを認可根拠とし、generic `ENGINEER` linkが同じdocumentにあってもrestricted policyを優先する。eventに紐づくexact document version、hash、CLEANをdownload/export時に再検証する。
 
 ## R6 通知・監査・再実行安全性

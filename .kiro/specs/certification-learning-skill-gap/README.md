@@ -2,14 +2,26 @@
 
 ## 状態ガード
 
-このspecはNF-03の準備成果物です。2026-08-28時点のtraceabilityは **`CANDIDATE`** である。approved scope・Base SHA・DG-03 実値は未承認のため、F1 以降と PR は禁止のままである。
+NF-03 traceability は **`APPROVED`**（DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`、2026-08-28、OwnerRef=`PROJECT_OWNER`）。Gate 0（承認記録・Base 取り込み）完了後、**PLAN Review PASS** を得てから F1 を開始する。PR は M 完了＋Implementation Review PASS 後。
 
-直近Review（Head `34f20724`）: PLAN `FAIL`（**P1-01b** のみ: scope・承認 Base SHA・DG-03 実値・`APPROVED` 未達）。**実名欠如は FAIL 理由にしない。** P1-01a（OwnerRef=`PROJECT_OWNER`）は VERIFIED_CLOSED。
+- 承認前に変更していた production code / migration / test は本 feature 用ではない（Base 取り込みの merge のみ）。
+- `tasks.md` は成功条件を証拠で確認できた Task だけを `[x]` にする。
+- PR はこの実装対話では作成しない。M 完了後に Review へ remote HEAD、spec、tasks、完了対応表を渡す。
 
-- 承認前にproduction code、migration、test、seed dataを変更しない。
-- `tasks.md` は成功条件を証拠で確認できたTaskだけを `[x]` にする。
-- F1以降はNF-03のtraceabilityが `APPROVED` になり、approved scope・base・DG-03の未決事項が確定してから開始する。
-- PRはこの実装対話では作成しない。M完了後にReviewへremote HEAD、spec、tasks、完了対応表を渡す。
+## 承認 Decision
+
+| 項目 | 値 |
+|---|---|
+| DecisionId | `DG-03-SCOPE-APPROVAL-20260828-01` |
+| 決定日 | `2026-08-28` |
+| OwnerRef | `PROJECT_OWNER` |
+| OwnerType | `ROLE` |
+| ApprovalMode | `ROLE_BASED_DEV` |
+| Base branch | `origin/main` |
+| Base commit | `76e45340a23cfee964fac778b7b4d856fa2c9e7b` |
+| 旧 merge-base | `455fc92e`（承認 Base として不使用） |
+
+詳細: [approval-decision.md](approval-decision.md)
 
 ## 開発段階 Owner ポリシー
 
@@ -21,40 +33,36 @@
 | OwnerDisplayName | `プロジェクト責任者` |
 | OwnerType | `ROLE` |
 | ApprovalMode | `ROLE_BASED_DEV` |
-| DecisionId（本ポリシー） | `DG-03-DEV-20260828` |
+| DecisionId（Owner 識別） | `DG-03-DEV-20260828` |
 
 詳細: [owner-policy.md](owner-policy.md)
 
-**Gate 表現:** 「実名が必要」ではなく、**責任主体を一意に識別できる OwnerRef が必要**。承認証跡は DecisionId、決定日、対象 scope、Base SHA、承認 commit で追跡する（個人名は含めない）。
-
-**`APPROVED` 遷移:** 残りの approved scope、Base、DG-03 実値が承認された時点で、Owner=`PROJECT_OWNER` として中央台帳を `CANDIDATE` → `APPROVED` へ更新する。本ポリシー確定だけでは `APPROVED` にしない。
+**Gate 表現:** 「実名が必要」ではなく、**責任主体を一意に識別できる OwnerRef が必要**。承認証跡は DecisionId、決定日、OwnerRef、対象 scope、Base SHA、承認 commit で追跡する（個人名は含めない）。
 
 ## 実行対象
 
 | 項目 | 値 |
 |---|---|
-| 専用worktree | `C:\work\ses-certification-learning-skill-gap` |
+| 専用 worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
-| base branch | `origin/main`（開始時点で `455fc92e` へfast-forward） |
-| feature branch開始時migration | `V111__optimistic_lock_version_core_entities.sql`（base `455fc92e` 時点） |
-| `origin/main` 現行migration | `V114` 付近（`76e45340`）。F1着手時は**実装branchのlatest+1を再確認** |
-| 通常checkout | `C:\work\ses-manager-pro`。変更なしを維持 |
+| 承認 Base | `origin/main@76e45340` |
+| 現行 migration（Base 取り込み後） | `V114__report_schedule_processing_lease.sql` — F1 は **V115+** |
+| 通常 checkout | `C:\work\ses-manager-pro`。変更なしを維持 |
 
-## 未承認 placeholder（`APPROVED` まで）
+## Approved scope（要約）
 
-| 項目 | 状態 |
-|---|---|
-| approved scope | 未確定 |
-| Base commit / branch | 技術比較 base `455fc92e`（承認 Base SHA は未記録） |
-| DG-03 実値（6項目＋経費締め A/B） | 未確定 |
+**In scope:** 資格 master/取得/期限/証憑、course/plan/enrollment、既存 ExpenseRequest 研修費、90/60/30 通知、as-of skill gap、rule-based gap＋AI 候補、本人/manager/HR workflow。
+
+**Out of scope:** 外部 LMS 自動連携、AI 自動評価/配置、AI による採否・昇格・給与・不利益判断。
 
 ## 文書構成
 
-- [owner-policy.md](owner-policy.md): 開発段階 OwnerRef・承認証跡・`APPROVED` 遷移条件。
-- [inventory.md](inventory.md): 既存table/API/UI/serviceと重複master回避の調査結果。
-- [requirements.md](requirements.md): 承認前のcandidate requirementsと受入条件。
-- [design.md](design.md): candidate設計、scope、as-of、state、PII、DocumentLink、approval、AI境界。
-- [plan.md](plan.md): 0→F1→F2→A1→A2→B1→B2→Mの実装順とゲート。
-- [tasks.md](tasks.md): spec-driven task一覧。現時点で完了はTask 0・0R・0R-2・0R-3（文書のみ）。0R-4はOwnerポリシー文書化。
-- [completion-matrix.md](completion-matrix.md): 要件・task・証拠・Demoの対応表。
-- [review-remediation.md](review-remediation.md): PLAN Review指摘への対応状況。
+- [approval-decision.md](approval-decision.md): 開発開始承認 Decision 全文（DG-03-1〜6、scope、Base）。
+- [owner-policy.md](owner-policy.md): 開発段階 OwnerRef・承認証跡。
+- [inventory.md](inventory.md): 既存 table/API/UI/service と重複 master 回避の調査結果。
+- [requirements.md](requirements.md): 承認済み requirements と受入条件。
+- [design.md](design.md): 承認済み設計、scope、as-of、state、PII、DocumentLink、approval、AI 境界。
+- [plan.md](plan.md): 0→F1→F2→A1→A2→B1→B2→M の実装順とゲート。
+- [tasks.md](tasks.md): spec-driven task 一覧。
+- [completion-matrix.md](completion-matrix.md): 要件・task・証拠・Demo の対応表。
+- [review-remediation.md](review-remediation.md): PLAN Review 指摘への対応状況。

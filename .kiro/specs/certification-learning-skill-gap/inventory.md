@@ -2,7 +2,7 @@
 
 ## 1. 調査条件と結論
 
-調査対象は `origin/main` の `455fc92e` をbaseとする専用worktreeです。NF-03は `.kiro/roadmap/2026-08-27-post-acceptance-traceability.md` で `CANDIDATE` のため、production変更は行っていません。
+調査対象は `origin/main@76e45340`（承認 Base）を取り込んだ専用 worktree です。NF-03 traceability は `APPROVED`（DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`）。F1 以前の NF-03 production 変更はありません。
 
 結論は次のとおりです。
 
@@ -76,7 +76,7 @@
 
 ## 4. 新設候補と非重複ルール
 
-承認後のF1で初めてmigration/entityを確定する。現時点の候補は以下ですが、いずれも未承認です。
+承認後の F1 で初めて migration/entity を確定する。以下は Decision `DG-03-SCOPE-APPROVAL-20260828-01` に基づく設計方針です。
 
 | 候補 | 必要理由 | 既存との重複を避ける制約 |
 |---|---|---|
@@ -99,9 +99,9 @@
 
 F1のmigration番号は、実装開始時にそのbranchの最新migrationを再確認し、platform-invariantsのlatest+1規約で決める。新specはH2 replay listへMySQL migrationを追加しない。
 
-## 5. Review指摘を受けたcandidate方針
+## 5. Review指摘を受けた方針（approved）
 
-以下は実装候補を曖昧なまま残さないために本spec上で固定した方針です。ただし中央traceabilityが `CANDIDATE` のため、Owner承認までは実装契約になりません。
+以下は Decision `DG-03-SCOPE-APPROVAL-20260828-01` で承認された実装契約です。
 
 ### 5.1 as-of sourceの完全性とprecedence
 
@@ -135,7 +135,7 @@ engineer-skill-career / staffing-capacity-planning との**共有境界**とし�
 
 ### 5.5 FileScope・経費の既存ギャップ（計画上の穴）
 
-| 領域 | 現状（base `455fc92e`） | NF-03での必須補正 |
+| 領域 | 現状（Base `76e45340`） | NF-03での必須補正 |
 |---|---|---|
 | 資格証憑download | `FileScopeValidationService`は`RECEIPT`等の専用分岐の後、`document-archive`経路でlink空なら非管理者を許可、管理者はlink検査をbypass | `CERTIFICATION_EVIDENCE`を`document-archive`より前の専用分岐へ。empty-link・admin bypass・generic `ENGINEER` linkをgrantに使わない |
 | 経費締め | `ExpenseRequestServiceImpl`はamount≤0を拒否するが`MonthlyClosingService.assertOpenForUpdate`未接続 | 研修費を含む全経費の締め境界を共有化（design §3.7のOwner選択） |

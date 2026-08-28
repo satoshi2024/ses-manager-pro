@@ -1,6 +1,6 @@
-# 設計（NF-03 candidate）
+# 設計（NF-03 approved）
 
-> **承認前ガード:** traceabilityは `CANDIDATE`。以下は実装の候補であり、未確定のDG-03を勝手に決定したものではない。F1以降はOwnerが承認したdecisionを反映してから着手する。
+> **承認:** DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28）。詳細は [approval-decision.md](approval-decision.md)。
 
 ## 1. 再利用する境界
 
@@ -33,7 +33,7 @@
 | `t_skill_tag_alias` | synonym map | normalized_alias、canonical_skill_id、valid period、approved_by | alias unique、変更履歴、unknown自動master化禁止 |
 | `t_skill_gap_snapshot` | 再現用snapshot | as_of、demand_version、supply_version、taxonomy_version、result_hash、created_at | monthly close/exportでは必須、immutable。source of truthではない |
 
-番号のraw値を `certificate_number_ref` に格納する方法（暗号化、token、vault reference）はDG-03承認値に従う。ログ、通知、AI payloadには出さない。
+番号のraw値は `certificate_number_ref` に AES-256-GCM ciphertext または token reference として格納する（DG-03-1）。key version を保持し、key は DB/repository 外。ログ、通知、AI payloadには出さない。
 
 ## 3. ルール処理
 
@@ -102,14 +102,7 @@ eventには`evidence_document_id`、`evidence_document_version_id`、version has
 
 amountは税込JPYでNULL不可、0円planは`ZERO_COST_CONFIRMED` eventと人の確認だけを残し、既存expense requestは作成しない。actualのexpenseは既存ExpenseRequestが要求する正のamountを使う。approved plan budgetを超えるactualは、差額expenseの既存approvalまたは新plan amendmentを経由し、無承認でenrollmentへ加算しない。expense日付のwork monthが締め済みなら`MonthlyClosingService.assertOpenForUpdate`で関連・金額・支払状態の変更を拒否する。
 
-**経費締めの共有境界（P1-10、Owner/FinanceがDG-03で選択）:** 現状`ExpenseRequestServiceImpl`（create/update/submit/paid遷移）は`assertOpenForUpdate`を呼ばない。NF-03だけenrollment側で締めると「実費正本は経費」と矛盾する。承認後は次のいずれかを採用し、tasksにファイル名を固定する。
-
-| 選択肢 | 変更対象 | 効果 |
-|---|---|---|
-| **A（推奨）** | `ExpenseRequestServiceImpl`のamount/日付/関連/支払変更パス全体 | 研修費を含む全経費で締め済み月を拒否。S14経費と単一正本 |
-| **B** | 研修専用wrapper＋既存`/api/my/expenses`の更新拒否を別Task | 経費本体は据え置き。二重経路の監査コスト増 |
-
-いずれもF2-2/B1のtestに「締め済み月のamount/関連/支払変更拒否」を含める。reopenは既存月次締めworkflowのみ。
+**経費締め（DG-03-5 選択肢 A 採用）:** `ExpenseRequestServiceImpl` の amount/日付/関連/submit/accounting/paid 変更パス全体へ `MonthlyClosingService.assertOpenForUpdate` を接続する。研修費を含む全経費で締め済み月を拒否。enrollment 側に第二の支払 status は作らない。F2-2/B1 の test に「締め済み月の amount/関連/支払変更拒否」を含める。reopen は既存月次締め workflow のみ。
 
 ### 3.8 scheduler、timezone、通知対象
 
@@ -160,18 +153,18 @@ SELFをstaffing gap・配置候補・commission計算の入力に使うことは
 
 ### 4.1 資格番号PII分類
 
-| data | candidate classification | list/detail | export | AI/log | unresolved decision |
+| data | classification | list/detail | export | AI/log | decision |
 |---|---|---|---|---|---|
-| 資格番号raw | 個人情報・restricted（特定個人情報該当性は法務確認） | engineer本人と`certification.pii.view`を持つHR/adminのみfull候補、それ以外mask | rawはomit、maskedもscope内のみ | deny | Owner/法務承認、暗号化/token方式、retention |
+| 資格番号raw | restricted PII（AES-256-GCM または token） | 本人＋`certification.pii.view` のみ full、他 mask | raw omit | deny | DG-03-1。NF-07 で production 保持 |
 | 資格番号masked | derived restricted | scope内のみ | scope内のみ | deny | full valueを再構成できないmask方式 |
 | issuer/code/name | business data（番号と結合時はrestricted） | scope内 | scope内 | allowlist候補 | 外部コードの公開性 |
 | evidence metadata | business＋個人関連情報 | link scope内 | metadataのみ候補 | deny raw file | export項目、保管期間 |
 
 ### 4.2 証憑DocumentLinkとscope
 
-| operation | candidate link | required checks | deny condition | unresolved decision |
+| operation | link | required checks | deny condition | decision |
 |---|---|---|---|---|
-| upload/register | `target_type=CERTIFICATION_RECORD`、target_id=取得record | owner engineer scope、`CERTIFICATION_EVIDENCE`、DocumentService、CLEAN、FileReferenceProvider登録 | `ENGINEER` linkだけ、unknown target、未scan、scope外 | 正式enumはOwner承認対象 |
+| upload/register | `target_type=CERTIFICATION_RECORD`、target_id=取得record | owner engineer scope、`CERTIFICATION_EVIDENCE`、DocumentService、CLEAN、FileReferenceProvider登録 | `ENGINEER` linkだけ、unknown target、未scan、scope外 | DG-03-2。generic link 禁止 |
 | list/detail | recordに紐づくtyped DocumentLink | same effective population、restricted policy、legal hold/retention、record state | generic linkだけ、linkなし、mixed linkでrestrictedを迂回 | 複数証憑のprimary ruleはlatest verified exact version |
 | download | typed linkからownerとexact versionを解決 | FileScopeValidationService専用分岐（`document-archive`より前）、eventのdocument_version_id/hashと完全一致、scan=CLEAN、menu＋DataScope | stored name unknown、CLEAN以外、scope外、version不一致、**link空、ENGINEER-only、admin bypass** | resolverの正式実装はOwner承認対象 |
 | export | raw file・storage key・document IDは出さずmetadata/link statusだけ | UIと同一population/scope | UIで見えないrecord/file | Ownerが監査用IDを別途許可するか |
@@ -207,7 +200,7 @@ SELFをstaffing gap・配置候補・commission計算の入力に使うことは
 | thresholdと等しい | approval required | deny | route snapshot | `m_approval_route.min_amount` inclusive |
 | threshold＋1 | approval required | deny | candidate不在はfail closed | chain（org manager→finance/admin候補） |
 | approved budget超のactual | 差額expenseまたはplan amendmentを新規approval | requesterは承認不可 | approved snapshotを上書きしない | tolerance=0候補 |
-| closed work month | expense金額/関連/支払状態変更不可 | N/A | `assertOpenForUpdate`拒否（`ExpenseRequestServiceImpl`共有化が前提。design §3.7選択肢A/B） | reopen権限/理由 |
+| closed work month | expense金額/関連/支払状態変更不可 | N/A | `assertOpenForUpdate`拒否（`ExpenseRequestServiceImpl` 共有化 — DG-03-5 選択肢 A） | reopen は既存 workflow のみ |
 
 ### 4.6 AI候補と人の確定境界
 

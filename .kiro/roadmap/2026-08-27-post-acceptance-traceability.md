@@ -24,7 +24,7 @@
 |---|---|---|---|---|---|---|---|
 | NF-01 | `engineer-lifecycle-workflow` | PASS | Codex | 退社後access残存0件、期限超過率低減 | identity、organization、document、approval | 独立Review PASS (Stage A/B 合格)。PR #85 更新済み。要員の入社・配属・異動・休職・復職・退社ワークフロー、退社ゲート9項目、SoD例外承認確立 | 2026-08-27 |
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
-| NF-03 | `certification-learning-skill-gap` | CANDIDATE | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document | OwnerRef確定（`DG-03-DEV-20260828`）。approved scope・DG-03実値・承認Base SHA未承認 | 未定 |
+| NF-03 | `certification-learning-skill-gap` | APPROVED | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document、NF-01 lifecycle | `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@76e45340`。経費締めA、PII AES-256-GCM、as-of event、AI候補のみ。詳細: `.kiro/specs/certification-learning-skill-gap/approval-decision.md` | 実装・独立Review完了後 |
 | NF-04 | `mobile-pwa-self-service` | CANDIDATE | 未定 | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 未決定 | 未定 |
 | NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
@@ -84,7 +84,29 @@
 - 本番移行時の実ユーザー対応は repository 外の組織管理・監査システムで解決する。
 - **本ポリシーの採用だけでは NF-03 を `APPROVED` にしない。** approved scope、Base SHA、DG-03 実値（6項目＋経費締め A or B）が承認された時点で、Status を `APPROVED` に更新し Owner=`PROJECT_OWNER` とする。
 
-詳細: `.kiro/specs/certification-learning-skill-gap/owner-policy.md`
+#### 開発開始承認（DecisionId `DG-03-SCOPE-APPROVAL-20260828-01`、2026-08-28）
+
+| 項目 | 値 |
+|---|---|
+| OwnerRef | `PROJECT_OWNER` |
+| Base branch | `origin/main` |
+| Base commit | `76e45340a23cfee964fac778b7b4d856fa2c9e7b` |
+| 旧 merge-base | `455fc92e`（承認 Base としては不使用） |
+
+**Approved scope（要約）:** 資格 master/取得/期限/証憑、course/plan/enrollment、既存 ExpenseRequest 研修費、90/60/30 通知、as-of skill gap、rule-based gap＋AI 候補、本人/manager/HR workflow。**Out of scope:** 外部 LMS 連携、AI 自動評価/配置/採否・昇格・給与・不利益判断。
+
+| DG | 確定値 |
+|---|---|
+| DG-03-1 PII | AES-256-GCM または token reference。`certification.pii.view` で full 参照。retention `CERTIFICATION_PII`。NF-07 まで自動削除なし |
+| DG-03-2 証憑 | `CERTIFICATION_EVIDENCE`＋`CERTIFICATION_RECORD` typed resolver。admin bypass/empty-link/OR-union 禁止 |
+| DG-03-3 taxonomy | `m_skill_tag` canonical。alias は HR/admin 承認。unknown 自動登録禁止 |
+| DG-03-4 as-of | append-only event、feature 有効化日から。backfill なし。`historical_data_unavailable`。immutable snapshot |
+| DG-03-5 経費 | **選択肢 A** — `ExpenseRequestServiceImpl` 共有締め。0 円は `ZERO_COST_CONFIRMED` のみ |
+| DG-03-6 AI | rule-based primary。AI は候補/説明のみ。HR_FINAL のみ公式 skill 反映 |
+
+通知: Asia/Tokyo、90/60/30、退職除外、休職は本人停止/HR 確認、account 未 link は HR 通知、DB dedupe。異議は HR workflow。
+
+詳細: `.kiro/specs/certification-learning-skill-gap/approval-decision.md`、`.kiro/specs/certification-learning-skill-gap/owner-policy.md`
 
 ### DG-04 NF-04
 
