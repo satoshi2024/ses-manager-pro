@@ -15,7 +15,7 @@ public interface PwaClientMutationMapper extends BaseMapper<PwaClientMutation> {
     int deleteOlderThan(@Param("cutoff") java.time.LocalDateTime cutoff);
 
     @Select("SELECT * FROM t_pwa_client_mutation WHERE user_id = #{userId} "
-            + "AND client_request_id = #{clientRequestId} LIMIT 1 FOR UPDATE")
+            + "AND client_request_id = #{clientRequestId} LIMIT 1")
     PwaClientMutation selectByUserAndClientRequest(@Param("userId") Long userId,
                                                     @Param("clientRequestId") String clientRequestId);
 }
