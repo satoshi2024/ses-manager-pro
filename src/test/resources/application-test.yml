@@ -55,6 +55,7 @@ spring:
         - classpath:sql/schema-jp-pint-h2.sql
         - classpath:sql/schema-ai-feedback-h2.sql
         - classpath:sql/schema-optimistic-lock-core-h2.sql
+        - classpath:sql/schema-pwa-selfservice-h2.sql
         - classpath:sql/schema-lifecycle-workflow-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
       data-locations:
@@ -101,6 +102,8 @@ app:
     webhook-hmac-secret: test-digital-invoice-hmac-secret
   batch:
     token-secret: test-batch-token-hmac-secret
+  pwa:
+    context-secret: test-pwa-context-hmac-secret
   security:
     webhook:
       allow-loopback: true

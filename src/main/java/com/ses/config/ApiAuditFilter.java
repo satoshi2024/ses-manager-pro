@@ -66,19 +66,22 @@ public class ApiAuditFilter extends OncePerRequestFilter {
             throw e;
         } finally {
             if (isAuditTarget(request)) {
-                String username = SecurityUtils.currentUsername();
-                String method = request.getMethod();
-                String uri = request.getRequestURI();
-                int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
-                log.info("操作ログ user={} method={} uri={} status={}",
-                        username != null ? username : "-", method, uri, status);
-                if (auditLogService != null) {
-                    String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
-                            : "GET".equals(method) && isDownloadUri(uri)
-                            ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
-                            : "ses-manager";
-                    auditLogService.record(username, method, uri, status, applicationCode,
-                            status >= 200 && status < 400);
+                if (!Boolean.TRUE.equals(request.getAttribute(
+                        com.ses.service.pwa.PwaClientMutationLedgerService.REPLAY_REQUEST_ATTRIBUTE))) {
+                    String username = SecurityUtils.currentUsername();
+                    String method = request.getMethod();
+                    String uri = request.getRequestURI();
+                    int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
+                    log.info("操作ログ user={} method={} uri={} status={}",
+                            username != null ? username : "-", method, uri, status);
+                    if (auditLogService != null) {
+                        String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
+                                : "GET".equals(method) && isDownloadUri(uri)
+                                ? (status >= 400 ? "FILE_DOWNLOAD_REJECTED" : "FILE_DOWNLOAD")
+                                : "ses-manager";
+                        auditLogService.record(username, method, uri, status, applicationCode,
+                                status >= 200 && status < 400);
+                    }
                 }
             }
         }

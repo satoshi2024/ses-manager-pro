@@ -284,6 +284,11 @@ app:
   # 本番は BATCH_TOKEN_SECRET を secret store から注入すること。prod 未設定は起動 fail-fast。
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:dev-only-change-this-batch-token-secret}
+  # 要員PWAのuser scope署名。prodではPWA_CONTEXT_SECRETをsecret storeから注入する。
+  pwa:
+    context-secret: ${PWA_CONTEXT_SECRET:dev-only-change-this-pwa-context-secret}
+    queue-retention-days: ${PWA_QUEUE_RETENTION_DAYS:30}
+    cleanup-cron: ${PWA_QUEUE_CLEANUP_CRON:0 20 3 * * *}
   # ===== デジタルインボイス（JP PINT。dev/test 既定は mock。prod は application-prod.yml） =====
   digital-invoice:
     provider: ${DIGITAL_INVOICE_PROVIDER:mock}

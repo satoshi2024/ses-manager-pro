@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0d1526">
+    <title>オフライン | SES Manager Pro</title>
+    <style>
+        :root { color-scheme: dark; font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif; }
+        body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #0d1526; color: #e5e7eb; }
+        main { width: min(420px, calc(100% - 32px)); padding: 28px; box-sizing: border-box; border: 1px solid #334155; border-radius: 16px; background: #172033; text-align: center; }
+        h1 { margin: 0 0 12px; font-size: 1.35rem; }
+        p { margin: 0 0 20px; color: #cbd5e1; line-height: 1.7; }
+        button { border: 0; border-radius: 8px; padding: 11px 18px; background: #38bdf8; color: #082f49; font-weight: 700; cursor: pointer; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>現在オフラインです</h1>
+    <p>通信が回復したら再読み込みしてください。保存対象の下書きは端末内で保護されています。</p>
+    <button type="button" onclick="location.reload()">再読み込み</button>
+</main>
+</body>
+</html>

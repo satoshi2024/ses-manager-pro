@@ -58,6 +58,8 @@ app:
   # 一括操作 preview token HMAC（未設定は起動 fail-fast）
   batch:
     token-secret: ${BATCH_TOKEN_SECRET:}
+  pwa:
+    context-secret: ${PWA_CONTEXT_SECRET:}
   # デジタルインボイス（JP PINT / Peppol。sandbox 未取得時は none で fail-closed）
   digital-invoice:
     # prod 既定は mock 禁止。実 AP 配線まで none（FailClosedDigitalInvoiceProvider）。
