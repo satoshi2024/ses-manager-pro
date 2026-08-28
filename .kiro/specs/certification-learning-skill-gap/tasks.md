@@ -97,11 +97,11 @@
   - Test: `SkillGapServiceImplTest`（supply/demand effective as-of、履歴欠落、PROJECT/POSITION/COMBINED precedence、案件期間両端、0件、DELETE当日/翌日、snapshot replay）、`SkillGapTaxonomyResolverTest`（同義tag、未知skill、自動master化なし）、`EngineerSkillServiceImplTest`/`ProjectSkillServiceImplTest`（replaceSkills後のevent残存）、`FlywayCertificationLearningSkillGapSchemaSmokeTest`（V122 MySQL schema）、`MigrationScriptIntegrityTest`を実行した。AIはこのTaskのgap計算へ依存させず、AI停止時もrule結果を維持する契約をF2-5/B2へ接続した。
   - Demo: 固定ClockとV122 event fixtureで、feature開始日前はcurrent rowが存在してもunavailable、DELETE当日は削除状態を需要に戻さず翌日もcurrent fallbackなし、同義tagはcanonical表示、未知skillはunknown gap、COMBINEDはPROJECTを優先しposition-onlyを追加、replayはsource queryなしで同一hashを返すことをテストで実演した。
 
-- [ ] **Task F2-4: 期限schedulerと通知母集団を実装する**
+- [x] **Task F2-4: 期限schedulerと通知母集団を実装する**
   - Objective: 複数JVM再実行でもsemantic expiry noticeを重複発行せず、退職・休職・account未link・manager変更を正しく扱う。
-  - Implementation: 注入Clock（design §3.8のTenantClock正本）、`CertificationNotificationPopulationResolver`（lifecycle case優先、design §3.8）、recipient user ID、`t_notification.dedupe_key` unique、outbox claimを使用する。version番号だけをdedupe keyにしない。
-  - Test: same key duplicate、expiry date変更、退職完了/休職/復職、account未link、manager変更、二重scheduler claim、Asia/Tokyo境界（JVM default非依存）。
-  - Demo: 同一境界を2 schedulerから同時実行して通知1件、復職時はREINSTATEMENT 1件、旧managerへ再送なしを確認する。
+  - Implementation: `8c8997cb`。注入`Clock`の日付で`CertificationExpiryNotificationScheduler`を実行し、`CertificationNotificationPopulationResolver`がNF-01 lifecycle caseをEngineer.statusより優先してdispatch時点の本人/現manager/HRを解決する。退職完了・休職・account無効/未link・manager変更をfail closedで扱い、復職当日は`CERT_REINSTATEMENT:recordId:date:recipientId`を一度だけ発行する。通常expiry keyはrecord revisionを含めず、既存`t_notification.dedupe_key` uniqueと`t_notification_outbox` unique/claimへ渡す。
+  - Test: `CertificationNotificationPopulationResolverTest`（通常、退職完了、休職、復職、account未link、as-of manager）、`CertificationExpiryNotificationSchedulerTest`（二重実行の同一semantic入力、復職key）、既存`NotificationServiceImplTest`/`NotificationOutboxServiceTest`（DB/outbox DuplicateKey収束）を実行した。Asia/Tokyo固定ClockでJVM default timezoneに依存しない。
+  - Demo: 同じ資格境界をschedulerから再実行しても同じkeyだけが通知正本へ渡り、DB uniqueで2件目を収束させること、復職日はREINSTATEMENT keyだけを発行し、退職後の旧managerと本人へ通常通知しないことをテストで実演した。
 
 - [ ] **Task F2-5: 本人/上長/HR評価とAI候補契約を実装する**
   - Objective: AIがskill評価・配置・採否・不利益判断を確定できないことをservice/API/監査で保証する。
