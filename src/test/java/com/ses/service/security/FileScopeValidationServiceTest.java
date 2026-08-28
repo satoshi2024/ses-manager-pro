@@ -3,12 +3,15 @@ package com.ses.service.security;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.entity.Document;
+import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
@@ -66,6 +69,9 @@ class FileScopeValidationServiceTest {
     @Mock private ObjectProvider<EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     @Mock private ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
     @Mock private ObjectProvider<AuthorizationService> authorizationServiceProvider;
+    @Mock private ObjectProvider<EngineerCertificationMapper> engineerCertificationMapperProvider;
+    @Mock private EngineerCertificationMapper engineerCertificationMapper;
+    @Mock private DocumentLinkMapper documentLinkMapper;
     @Mock private Clock clock;
 
     private FileScopeValidationService service;
@@ -86,6 +92,7 @@ class FileScopeValidationServiceTest {
                 dataScopeService,
                 menuCacheServiceProvider,
                 authorizationServiceProvider,
+                engineerCertificationMapperProvider,
                 clock);
     }
 
@@ -187,5 +194,146 @@ class FileScopeValidationServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.assertDownloadAllowed("report-storage-key"));
         assertEquals("error.managementReport.deliveryRequired", ex.getMessage());
+    }
+
+    private DocumentVersion certificationEvidenceVersion(long versionId, String storageKey, String hash) {
+        DocumentVersion version = new DocumentVersion();
+        version.setId(versionId);
+        version.setDocumentId(9100L);
+        version.setStorageKey(storageKey);
+        version.setScanStatus("CLEAN");
+        version.setSha256(hash);
+        Document document = new Document();
+        document.setDocumentType("CERTIFICATION_EVIDENCE");
+        lenient().when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
+        lenient().when(documentVersionMapper.selectOne(any())).thenReturn(version);
+        lenient().when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
+        lenient().when(documentMapper.selectById(9100L)).thenReturn(document);
+        lenient().when(documentLinkMapperProvider.getIfAvailable()).thenReturn(documentLinkMapper);
+        lenient().when(engineerCertificationMapperProvider.getIfAvailable()).thenReturn(engineerCertificationMapper);
+        return version;
+    }
+
+    @Test
+    void 資格証憑はtyped_CERTIFICATION_RECORD_linkがなければ403() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of());
+        loginAs("HR");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void 資格証憑はENGINEER_linkだけでは403() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink engineerLink = new DocumentLink();
+        engineerLink.setTargetType("ENGINEER");
+        engineerLink.setTargetId(50L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(engineerLink));
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void 資格証憑は管理者でもtyped_linkとDataScopeが必要() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
+                .when(dataScopeService).assertAllowedEngineer(50L);
+        loginAs("管理者");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf"));
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void 資格証憑はmixed_linkでもCERTIFICATION_RECORDで許可() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink engineerLink = new DocumentLink();
+        engineerLink.setTargetType("ENGINEER");
+        engineerLink.setTargetId(99L);
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(engineerLink, recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        loginAs("HR");
+
+        assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf"));
+    }
+
+    @Test
+    void 資格証憑はversion不一致を拒否() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        lenient().when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        loginAs("HR");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf", 999L, null));
+        assertEquals("error.file.versionMismatch", ex.getMessage());
+    }
+
+    @Test
+    void 資格証憑はhash不一致を拒否() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        lenient().when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        loginAs("HR");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "deadbeef"));
+        assertEquals("error.file.hashMismatch", ex.getMessage());
+    }
+
+    @Test
+    void 資格証憑はCLEANかつversion_hash一致なら許可() {
+        noMatchOnEarlierTables();
+        certificationEvidenceVersion(100L, "cert-evidence.pdf", "abc123");
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setEngineerId(50L);
+        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        loginAs("HR");
+
+        assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "abc123"));
     }
 }
