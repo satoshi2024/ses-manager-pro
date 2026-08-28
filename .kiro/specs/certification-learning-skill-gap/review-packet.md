@@ -16,7 +16,7 @@
 | Worktree | `C:\work\ses-certification-learning-skill-gap` |
 | Branch | `codex/certification-learning-skill-gap` |
 | Normal checkout | `C:\work\ses-manager-pro`（変更なし） |
-| Final local/remote HEAD | `97443937d95fd551b9a06ea33ebdb77127320bc1`（local/remote一致） |
+| Final local/remote HEAD | `4e634eb2d6e1197fc7038445d5df8f47b7a4331f`（local/remote一致） |
 | Latest origin/main | `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | merge-base | `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | PR / merge / branch delete | すべて未実施。独立再ReviewのPLAN/IMPLEMENTATION双方PASS後のみPR対象 |

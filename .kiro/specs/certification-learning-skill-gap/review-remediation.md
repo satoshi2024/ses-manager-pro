@@ -210,7 +210,7 @@ remediation後のfast/performance/MySQLは再実行済み（fast 3060 run / 2 fa
 
 | 項目 | 値 |
 |---|---|
-| final local/remote Head | `97443937d95fd551b9a06ea33ebdb77127320bc1`（一致） |
+| final local/remote Head | `4e634eb2d6e1197fc7038445d5df8f47b7a4331f`（一致） |
 | approved Base / merge-base | `76e45340a23cfee964fac778b7b4d856fa2c9e7b` / `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | migration | main V115を保持、NF-03 V116〜V128。V128は既存ExpenseRequestの`研修費`CHECKを許可 |
 | test gates | fast 3060 run / 2 failures / 16 errors / 0 skipped、MySQL 89 run / 0 failure / 1 error / 0 skipped、performance 1 run / 0 failure / 0 error / 0 skipped（p95=74ms） |

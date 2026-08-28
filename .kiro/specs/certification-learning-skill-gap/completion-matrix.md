@@ -9,7 +9,7 @@
 | F1 Head | `2f7bbac0`（独立 F1 Implementation Review PASS） |
 | F1 判定 | **PASS**（P1-F1-01/02 VERIFIED_CLOSED。P2-F1-01〜17 は F2 で扱う） |
 | 承認 Base | `76e45340` |
-| Current Review handoff Head | `97443937d95fd551b9a06ea33ebdb77127320bc1`（local/remote一致） |
+| Current Review handoff Head | `4e634eb2d6e1197fc7038445d5df8f47b7a4331f`（local/remote一致） |
 | migration | main V115（PWA）＋NF-03 V116〜V128（V126 A1、V127 A2、V128 既存ExpenseRequestの研修費科目許可） |
 | F2 | **完了**（F2-1〜F2-5実装・単体回帰済み。独立Review未実施） |
 | A1/A2 remediation | **完了**（独立Review P1-M-01/P1-M-02/P1-A2-01をHTTP/UIまで修正。再Review待ち） |
