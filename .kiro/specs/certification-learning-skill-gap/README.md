@@ -46,7 +46,7 @@ NF-03 traceability は **`APPROVED`**（DecisionId `DG-03-SCOPE-APPROVAL-2026082
 | 専用 worktree | `C:\work\ses-certification-learning-skill-gap` |
 | branch | `codex/certification-learning-skill-gap` |
 | 承認 Base | `origin/main@76e45340` |
-| 現行 migration（Base 取り込み後） | mainの`V115__pwa_client_mutation_ledger.sql`を保持。NF-03は **V116+**（現行V125） |
+| 現行 migration（Base 取り込み後） | mainの`V115__pwa_client_mutation_ledger.sql`を保持。NF-03は **V116+**（現行V127） |
 | 通常 checkout | `C:\work\ses-manager-pro`。変更なしを維持 |
 
 ## Approved scope（要約）

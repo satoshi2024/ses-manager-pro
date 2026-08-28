@@ -9,7 +9,7 @@
 | F1 Head | `2f7bbac0`（独立 F1 Implementation Review PASS） |
 | F1 判定 | **PASS**（P1-F1-01/02 VERIFIED_CLOSED。P2-F1-01〜17 は F2 で扱う） |
 | 承認 Base | `76e45340` |
-| migration | main V115（PWA）＋NF-03 V116〜V125（F1〜F2-5。V125はF1 training relation tableの監査timestamp補正） |
+| migration | main V115（PWA）＋NF-03 V116〜V127（F1〜A2。V125はF1 training relation tableの監査timestamp補正、V126 A1、V127 A2） |
 | F2 | **完了**（F2-1〜F2-5実装・単体回帰済み。独立Review未実施） |
 
 ## F1 Task対応
@@ -26,6 +26,8 @@
 | F2-3 | `f5e69182` | V123 | event-only as-of supply/demand、taxonomy alias、unknown、PROJECT/POSITION/COMBINED precedence、snapshot replay、BP write-path集約 | SkillGapServiceImplTest、SkillGapTaxonomyResolverTest、EngineerSkillServiceImplTest、ProjectSkillServiceImplTest、FlywayCertificationLearningSkillGapSchemaSmokeTest | feature開始日前のunavailable、期間inclusive、DELETE当日/翌日、同義/未知、0件、replay、V123 MySQL schema、共通event writer経由を確認 | [x] |
 | F2-4 | `8c8997cb` | —（既存V4/V79通知正本） | lifecycle-aware expiry scheduler、通知母集団、復職semantic key、multi-node unique/claim | CertificationNotificationPopulationResolverTest、CertificationExpiryNotificationSchedulerTest、NotificationServiceImplTest、NotificationOutboxServiceTest | 退職/休職/復職/account未link/manager変更、二重実行、DB/outbox DuplicateKey収束、Tokyo Clockを確認 | [x] |
 | F2-5 | `78bbfcef`＋`9972dfc9` | V124〜V125 | SELF/MANAGER/HR_FINAL、公式projection境界、AI candidate-only、run/allowlist/期限、human accept/reject監査、training relation監査timestamp補正 | SkillAssessmentServiceImplTest、AiLearningCandidateServiceImplTest、MigrationScriptIntegrityTest、MessageBundleConsistencyTest、AllMappersSchemaSweepTest、FlywayCertificationLearningSkillGapSchemaSmokeTest | AI停止/error/timeoutでもrule gap維持、allowlist/run ID、期限内human accept/reject、期限切れ/AI-only拒否、公式skill/配置/採否非変更、MyBatis生成列とMySQL/H2 schema一致を確認 | [x] |
+| A1 | `f219905f` | V126 | HR/manager/adminの資格・training・gap list/detail/count/export、org∩DataScope、lifecycle、PII mask/export omit、menu/action、390px/empty | CertificationLearningGapQueryServiceImplTest、CertificationLearningGapApiControllerTest、CertificationLearningGapUiContractTest、ComplianceGateMenuPermissionTest、ActionPermissionResolverTest | 同一filterでlist/detail/count/exportのID一致、PII permission境界、SELF/MANAGER非混入、退職/休職、safePage、empty/390pxを確認。BrowserはMで再確認 | [x] |
+| A2 | `5a5d8571` | V127 | account link本人scope、資格申請/cancel/correct/resubmit、typed CLEAN証憑upload、learning plan/enrollment、本人export、本人menu | CertificationLearningGapSelfServiceImplTest、MyCertificationLearningGapUiContractTest、MigrationScriptIntegrityTest、ComplianceGateMenuPermissionTest | tampered engineerId拒否、他人record拒否、証憑target type/CLEAN、plan本人ID強制、raw番号/storage key非返却、empty/390pxを確認。approval/BrowserはB1/Mで再確認 | [x] |
 
 ## F1 Implementation Review受領・F2持越し契約
 
@@ -36,8 +38,8 @@
 | F1本体 Head | `2f7bbac0` |
 | F2実装完了時点のworktree local/remote Head | `f2ce7a992d69fd9f6f7654ba4fb9e9b6d69d8a4c` |
 | F2〜M | `F2完了`（A1/A2/B1/B2/Mは未着手） |
-| 現行migration | V125（main V115はPWA） |
-| F2 migration | V121〜V125 |
+| 現行migration | V127（main V115はPWA） |
+| F2/A1/A2 migration | V121〜V127 |
 | PR/merge/branch削除 | 禁止。M＋独立Implementation Review PASS後のみPR対象 |
 
 ## Review持越し項目（F2契約へ接続）

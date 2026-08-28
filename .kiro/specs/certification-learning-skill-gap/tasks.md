@@ -111,15 +111,19 @@
 
 ## A1. HR/manager UI（承認後のみ）
 
-- [ ] **Task A1: HR/manager資格・training・gap list/detailを実装する**
+- [x] **Task A1: HR/manager資格・training・gap list/detailを実装する**
   - Objective: role別に同じpopulationをlist/detail/count/exportで表示する。
+  - Implementation: `f219905f`。`CertificationLearningGapQueryService`へHR/admin全件、managerのorg∩DataScope、lifecycle case優先、as-of、資格・training・rule gap集約を実装し、list/detail/count/exportが同じvisible engineer ID集合を共有する。`certification.pii.view`がない場合は番号をmasked、exportはraw番号・document/storage値を含めない。`certification-learning-skill-gap` menu/actionをV126へ追加し、退職・休職・SELF/MANAGER評価をstaffing/sales/exportの公式projectionへ混入させない。list/detail modal、empty state、safePage、escapeHtml、390px CSSを追加した。
+  - Evidence: `CertificationLearningGapQueryServiceImplTest`、`CertificationLearningGapApiControllerTest`、`CertificationLearningGapUiContractTest`、`ComplianceGateMenuPermissionTest`、`ActionPermissionResolverTest`を含むA1 targeted 22 testsがPASS。manager org∩DataScope、scope外detail、番号mask/export omit、list/detail/count/export ID一致、退職・休職lifecycle、SELF/MANAGER非混入、size=0、390px/empty stateを確認した。Demoはテストで実演し、実BrowserはMで再確認する。
   - Test: manager org∩DataScope、HR、admin、scope外、退職/休職の閲覧と通知除外、番号mask、empty state、390px、safePage、**SELF assessmentがstaffing board/heatmapに表示されないこと**。
   - Demo: 同一filterでlist/detail/exportの対象IDが一致し、document/PII fieldだけpolicyどおり差異があることを確認する。
 
 ## A2. 本人申請・学習計画（承認後のみ）
 
-- [ ] **Task A2: 本人の取得申請とlearning plan/enrollment UIを実装する**
+- [x] **Task A2: 本人の取得申請とlearning plan/enrollment UIを実装する**
   - Objective: account linkから本人を解決し、証憑upload、plan、status、withdraw/resubmitを提供する。
+  - Implementation: `5a5d8571`。`CertificationLearningGapSelfService`と`/api/my/certification-learning-gap/**`を追加し、全record/plan/enrollmentのengineer IDをaccount linkから解決する。資格申請、cancel/correct/resubmit、typed `CERTIFICATION_RECORD`証憑upload、DocumentServiceのCLEAN版metadata、learning plan/enrollmentの状態操作と本人CSVを接続した。本人menu/pageとV127 role seedを追加し、raw番号/storage keyは返さない。
+  - Evidence: `CertificationLearningGapSelfServiceImplTest`、`MyCertificationLearningGapUiContractTest`、`MigrationScriptIntegrityTest`、`ComplianceGateMenuPermissionTest`等のA2 targeted suiteがPASS。tampered engineerId無視、他人record拒否、証憑target type/CLEAN metadata、plan engineerId上書き、本人export omit、empty state/390pxを確認した。approval待ち・download E2E・実BrowserはB1/Mで再確認する。
   - Test: 他人engineerId改変、attachment scope、approval待ち、cancel/correct、本人export。
   - Demo: URL/APIに他人IDを渡しても本人以外を参照できず、CLEAN証憑とplan状態がdetailに反映されることを確認する。
 

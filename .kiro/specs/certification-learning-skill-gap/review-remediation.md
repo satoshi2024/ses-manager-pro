@@ -125,3 +125,14 @@
 | PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V125へ順延。M開始時にも再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | A1前の初回衝突解消済み。M再確認待ち |
 
 この表の項目は未追跡のまま落とさず、各F2 Taskのrequired testまたはMの明示的gateで `[x]` と証拠を付ける。F2完了時点の基準はmain V115＋現worktree V116〜V125であり、M開始時にも最新`origin/main`を再fetchして追加衝突を確認する。
+
+## A1/A2 implementation receipt（2026-08-28）
+
+F2 Implementation PASS（P0/P1=0）を受領後、A1→A2の連続実装を行った。A1は`f219905f`、A2は`5a5d8571`として個別にremoteへpush済みで、現行NF-03 migrationはV127である。A1はmanager org∩DataScope、HR/admin、lifecycle、PII mask/export omit、list/detail/count/export共通母集団、SELF/MANAGER非混入を実装した。A2はaccount link本人ID強制、他人record拒否、typed `CERTIFICATION_RECORD`証憑、CLEAN版metadata、plan/enrollment状態操作、本人exportを実装した。
+
+| wave | evidence | result |
+|---|---|---|
+| A1 | `CertificationLearningGapQueryServiceImplTest`、`CertificationLearningGapApiControllerTest`、`CertificationLearningGapUiContractTest`、`ComplianceGateMenuPermissionTest`、`ActionPermissionResolverTest` | targeted 22 tests PASS。実BrowserはMで確認 |
+| A2 | `CertificationLearningGapSelfServiceImplTest`、`MyCertificationLearningGapUiContractTest`、`MigrationScriptIntegrityTest`ほか | targeted suite PASS。approval待ち・download E2E・実BrowserはB1/Mで確認 |
+
+A2の本人APIは`engineerId`をbody/pathからscope根拠として使わず、`EngineerAccountLinkService`の現在linkだけを正本にする。証憑はDocumentService登録時に`CERTIFICATION_RECORD` targetを付け、返却値からstorage keyとraw資格番号を除外する。A1/A2ともMでdesktop/390px Browser Demoと全受入条件の横断回帰を行う。
