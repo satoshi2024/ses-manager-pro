@@ -1,11 +1,13 @@
-# NF-03 Review packet（M完了）
+# NF-03 Review packet（A1/A2 remediation handoff）
+
+> 旧M完了宣言は独立Implementation Review（Head `0e3d9b69`）のP1-M-01/P1-M-02/P1-A2-01によりsuperseded。Plan Review R7はPASSを維持し、下記は修正後の独立再Review handoffである。
 
 ## Handoff status
 
 | 項目 | 値 |
 |---|---|
 | Feature | `certification-learning-skill-gap` |
-| Status | A1→A2→B1→B2→M完了、独立Implementation Review待ち |
+| Status | A1/A2 remediation完了、独立Implementation Review再Review待ち |
 | Approved scope | NF-03 `APPROVED`。資格/期限/証憑、training、既存ExpenseRequest研修費、90/60/30通知、event-based as-of skill gap、rule gap＋AI course/skill候補、本人/manager/HR workflow |
 | Out of scope | 外部LMS自動連携、AI自動評価/配置/採否・昇格・給与・不利益判断、NF-07保持年数の本番有効化 |
 | Owner | `PROJECT_OWNER` |
@@ -14,10 +16,10 @@
 | Worktree | `C:\work\ses-certification-learning-skill-gap` |
 | Branch | `codex/certification-learning-skill-gap` |
 | Normal checkout | `C:\work\ses-manager-pro`（変更なし） |
-| Final local/remote HEAD | このpacketを含む最終docs pin commit（Review時は`git rev-parse HEAD`とremote branchで照合） |
+| Final local/remote HEAD | remediation docs pin commit後に確定し、Review時は`git rev-parse HEAD`とremote branchで照合 |
 | Latest origin/main | `a3454c086c6d17f94f96ced4175adec932f071b7` |
 | merge-base | `a3454c086c6d17f94f96ced4175adec932f071b7` |
-| PR / merge / branch delete | すべて未実施。ReviewのPLAN/IMPLEMENTATION双方PASS後のみPR対象 |
+| PR / merge / branch delete | すべて未実施。独立再ReviewのPLAN/IMPLEMENTATION双方PASS後のみPR対象 |
 
 ## Commit and change inventory
 
@@ -40,17 +42,21 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | B2 | `0168e8ea` | staffing as-of、rule gap、AI candidate-only接続 |
 | B2 docs | `86f17498` | B2 receipt・completion証拠 |
 | M code/test fix | `4ba1738c4e5afe6ad3839afe1e681a9621326846` | V127へ同期したV110 latest migration assertion |
-| M docs | このpacketを含む最終docs pin commit | tasks/completion/remediation/Review packet最終固定 |
+| A1 remediation | `17d944f1` | 資格master/course master CRUD、資格verify/rejectの管理HTTP/UI、training approval操作 |
+| A2 remediation | `50cb8f2d` | 本人catalog、証憑upload、status、withdraw/resubmit、plan submit/enroll UI |
+| Expense compatibility | `66eda6f9` | V128で既存ExpenseRequestの`研修費`科目を許可 |
+| MySQL smoke assertion | `f8a5b125` | V128の正本DDLに対するMySQL smoke検証を固定 |
+| remediation docs | このpacketを含むdocs commit | tasks/completion/remediation/Review packetを独立Review FAILと修正証拠に同期 |
 
-変更ファイルは226件（コード、migration、H2 schema、tests、templates/static、spec/receipt docs。Review packet自身を含む）。Mでは既存本体を変更せず、最終証拠docsを追加・更新した。
+変更ファイルはBaseからのdiffで再計算する。今回の追加はA1/A2のproduction HTTP/UI、V128 migration/H2/schema smoke、tests、spec/receipt docsであり、旧Mの完了宣言は独立Review FAILにより最終証拠として扱わない。
 
 ## Migration and schema
 
 - `origin/main`の`V115__pwa_client_mutation_ledger.sql`は変更せず保持した。
-- NF-03のmigrationは`V116`〜`V127`へ順延し、V115との重複を解消した。
-- V116 certification master/record、V117 certification event/evidence type、V118 training、V119 skill-gap events、V120 assessment/decision、V121 lifecycle/PII permission、V122 expense relation/audit、V123 taxonomy alias、V124 AI artifact、V125 audit timestamps、V126 management menu/action、V127 self-service menu/action。
+- NF-03のmigrationは`V116`〜`V128`へ順延し、V115との重複を解消した。
+- V116 certification master/record、V117 certification event/evidence type、V118 training、V119 skill-gap events、V120 assessment/decision、V121 lifecycle/PII permission、V122 expense relation/audit、V123 taxonomy alias、V124 AI artifact、V125 audit timestamps、V126 management menu/action、V127 self-service menu/action、V128既存ExpenseRequestの研修費科目許可。
 - `MigrationScriptIntegrityTest` 28件、`AllMappersSchemaSweepTest` 188件、合計216件PASS。
-- 修正後MySQL smokeは`FlywayCertificationLearningSkillGapSchemaSmokeTest`、`FlywaySelfServiceSchemaSmokeTest`、`FlywayV110AdminBoundaryUpgradeSmokeTest`の6件PASS。latest assertionは127へ同期済み。
+- 修正後MySQL smokeは`FlywayCertificationLearningSkillGapSchemaSmokeTest`のV128検証1件PASS。V128追加前の3クラス6件実行では追加検証クエリの誤りによる1件FAILがあり、検証を`SHOW CREATE TABLE`へ修正して該当1件を再実行PASS（他5件は初回PASS）。
 
 ## Test gates
 
@@ -79,6 +85,8 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | 390px | 390x844でfiltersが2列にreflowし、tableは横方向アクセス可能 |
 | export | CSV操作でbrowser download navigation（`net::ERR_ABORTED`）を確認。Browser内でbinary file本文は採取していない |
 | AI fallback | project ID=1でAI候補を起動。`historical_data_unavailable`、as-of `2026-08-28`、`AI停止または履歴不足`、candidate-only説明を確認 |
+| remediation management write | admin Browserで資格masterとcourse（AWS canonical skill）を登録し、管理detailから本人証憑のverifyを実行。再表示後に資格`ACTIVE`、証憑リンク、`APPROVED` plan、`PLANNED` enrollmentを確認 |
+| remediation self-service | 本人Browserで資格catalog選択、DRAFT申請、証憑upload（1件）、cancel→resubmit、0円plan submit→`APPROVED`、course enrollment→`PLANNED`を確認。非0円planはapproval route未seedの400を確認 |
 
 ## Acceptance coverage
 
@@ -91,16 +99,33 @@ git diff --stat 76e45340a23cfee964fac778b7b4d856fa2c9e7b..HEAD
 | threshold−1/threshold/threshold＋1、NULL/0、予定額/実費差額、自己承認拒否、CAS、締め済み月 | `TrainingPlanServiceTest`、`ExpenseRequestFlowIntegrationTest`、training approval回帰 |
 | AI stop/error/timeout、rule gap維持、AI-only finalization拒否、SELF/MANAGER非公式、HR_FINAL公式projection | `CertificationLearningGapAiServiceImplTest`、`AiLearningCandidateServiceImplTest`、`SkillAssessmentServiceImplTest` |
 | list/detail/count/export/self/manager/HR population一致 | A1/A2 API/service/UI contracts、permission回帰、Browser list/detail/empty |
+| A1/A2 write path | `17d944f1`、`50cb8f2d`、Browser remediation evidence。資格master/course HTTP/UI、verify/reject、本人upload/status/withdraw/resubmit/plan/enrollを実装済み |
 
 ## Residual unverified items
 
-- Windows loopback failureの解消後にfast/MySQL全体を再実行すること。現時点でfeature対象reportは全件PASS。
+- Windows loopback failureの解消後にfast/MySQL全体を再実行すること。今回のclean選択suiteはPASS、全体gateは未再実行。
 - 証憑binary本文のdownload file採取は未取得。typed authorizationとexact pin/CLEAN/legal holdは検証済み。
 - NF-07の`CERTIFICATION_PII` production retention/disposalは対象外。承認なしに本番有効化しない。
+- 非0円training approvalのBrowser成功は未検証。既存approval route fixtureが未seedのため400であり、研修費INSERTのDB CHECK違反ではない。
 - 外部AI provider接続はscope外。内部timeout/error/fallbackとcandidate-only境界は検証済み。
 
 ## Rollback
 
 - 本番未適用を前提に、feature commitを最終HEADから逆順revertする。
-- migrationはV127→V116を管理手順で逆順に戻す。適用済みproductionではDROPせず、backupとrelease rollback計画を使う。
+- migrationはV128→V116を管理手順で逆順に戻す。V128は`chk_expense_category`を交通費・立替経費へ戻すdown相当を管理手順で扱い、適用済みproductionではDROPせず、backupとrelease rollback計画を使う。
 - ReviewのPLAN/IMPLEMENTATION双方PASS前はPRを作成しない。
+
+## 独立Implementation Review FAIL後の再実装handoff（2026-08-28）
+
+独立ReviewのReviewed Headは`0e3d9b699773bb168b0221f6ef6fe8bdea8707be`、判定はPlan PASS / Implementation FAIL。P1-M-01/P1-M-02/P1-A2-01を`17d944f1`、`50cb8f2d`でHTTP/UIまで修正し、`66eda6f9`（V128）と`f8a5b125`（MySQL smoke assertion）を追加した。
+
+| item | result |
+|---|---|
+| clean feature regression | `mvn -q clean test -Dtest=...`（A1/A2・F1/F2選択suite）exit 0 |
+| MySQL/Flyway | V128 migration applied; `FlywayCertificationLearningGapSchemaSmokeTest` 1 test PASS。初回3-class/6-test runの追加assertion 1 failureは`SHOW CREATE TABLE`検証へ修正し、該当testを再実行PASS。 |
+| Browser management | adminが資格master/courseを登録、本人証憑をdetailからverifyし、資格`ACTIVE`を確認 |
+| Browser self-service | catalog select、DRAFT申請、証憑1件、cancel/resubmit、0円plan`APPROVED`、course enrollment`PLANNED`を確認 |
+| known limitation | 非0円planはapproval route fixture未seedで400。V128により`研修費`のExpenseRequest INSERTは通過し、DB CHECK違反500ではない |
+| remaining gate | 全fast/MySQL/performance gate、binary download本文採取、独立再Review |
+
+このpacketは旧Mの自己判定を再Review PASSとみなさず、上記remediationの独立再Reviewへ引き渡す。独立再ReviewのPLAN/IMPLEMENTATION双方PASS前はPRを作成しない。

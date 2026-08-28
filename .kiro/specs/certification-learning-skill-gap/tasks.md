@@ -149,9 +149,25 @@
 
 ## M. 完了・Review handoff（承認後のみ）
 
-- [x] **Task M: mandatory test/DemoとReview packetを完成する**
+- [ ] **Task M: mandatory test/DemoとReview packetを完成する（再Review待ち）**
   - Objective: 全受入条件とpopulation一致を証拠化し、完了対応表とremote HEADをReviewへ渡す。
-  - Implementation: mainのV115を保持し、NF-03をV116〜V127へ同期。A1〜B2を個別commit・pushし、Mのテスト修正とReview packetを後続docs commitで固定した。PR、merge、branch削除は実施していない。
-  - Test: `mvn -q test` は3051件・失敗2・error 11・skip 0（既存baseline/Windows loopback環境失敗のみ、NF-03対象reportは失敗/error 0）。`mvn -q test -Pmysql-tests` は89件・失敗0・error 1・skip 0（`FreeeConcurrentRefreshTest`のWindows loopbackのみ）。performanceは1件PASS（p95 44ms）。feature回帰、H2 migration/schema 216件、修正後MySQL feature smoke 6件は全件PASS。
-  - Demo: Docker上の実Browserでdesktop/390pxを実施。管理list 255件、detail/empty、阿部検索、CSV download遷移、AI停止時のrule gap fallbackと候補非確定境界を確認した。90/60/30、cancel/correct/renew、重複、証憑scope/pin/legal hold、as-of/同義/未知/期間/0件、費用threshold/自己承認、SELF/MANAGER/HR母集団は対応testとsmokeで証拠化した。
-  - Deliverable: `review-packet.md`、`completion-matrix.md`、`review-remediation.md`を作成・remoteへpushし、ReviewのPLAN/IMPLEMENTATION双方PASS後にPR作成工程へ引き渡す。独立Reviewは未実施であり、ここではPRを作成しない。
+  - Implementation: 旧M完了宣言は独立Implementation ReviewのP1指摘によりsuperseded。mainのV115を保持し、NF-03をV116〜V128へ同期したうえで、A1/A2のHTTP・UI remediationを再検証し、再Review PASS後にこのTaskを再完了する。PR、merge、branch削除は実施していない。
+  - Test: 旧Mの全体gate結果は独立Review FAILにより最終PASS証拠として扱わない。今回の修正後は`mvn -q clean test -Dtest=...`のA1/A2・F1/F2選択suiteがexit 0、`FlywayCertificationLearningSkillGapSchemaSmokeTest`がV128を含め1件PASS。全fast/MySQL/performance gateは再Review前に同一clean Headで再実行する。
+  - Demo: 旧MのDemo宣言は独立Review FAILによりsuperseded。今回のDocker Browser DemoではHR/adminの資格master/course登録、本人の資格申請・証憑upload・cancel/resubmit、0円planのAPPROVED化・course enrollment、管理者verify後のACTIVE表示を実証した。非0円planはapproval route未seedのため400で停止することも記録した。
+  - Deliverable: `review-packet.md`、`completion-matrix.md`、`review-remediation.md`をremediation証拠付きで更新・remoteへpushする。独立Implementation Reviewの再PASS後にのみPR作成工程へ引き渡す。
+
+## 独立Implementation Review FAIL後のremediation（2026-08-28）
+
+- [x] **Task A1-R: 資格master・course master・資格verify/rejectのHTTP/UI経路を閉じる**
+  - Objective: HR/adminが資格masterとtraining courseを製品画面から管理し、資格申請を証憑確認・却下できる状態にする。
+  - Implementation: `17d944f1`。資格master CRUD/deactivate、資格verify/reject、course master CRUD/deactivate、canonical skill選択を管理APIと画面へ接続した。既存DocumentLink/FileScope、資格lifecycle、TrainingPlan正本を再利用し、新しい重複masterは作成していない。
+  - Test: `CertificationMasterServiceImplTest`、`TrainingCourseMasterServiceImplTest`、`CertificationLearningGapWriteApiControllerTest`、`CertificationLearningGapUiContractTest`を含む選択suiteがPASS。権限境界、重複、未知skill、verify/reject eventを回帰した。
+  - Demo: admin Browserで資格master「Browser Demo 資格」とcourse「Browser Demo Cloud Training（AWS）」を登録し、本人証憑upload後に管理者verifyを実行、detailが`ACTIVE`へ遷移することを確認した。
+
+- [x] **Task A2-R: 本人証憑・資格状態・plan/enrollment UIを閉じる**
+  - Objective: 本人が資格名選択、証憑upload、status確認、withdraw/correct/resubmit、plan submit/enrollをブラウザで完結できる状態にする。
+  - Implementation: `50cb8f2d`。本人catalog select、multipart証憑upload、detail/status操作、cancel/resubmit、plan日付、submit/withdraw/resubmit、enrollment start/complete/cancelを接続した。`66eda6f9`で既存ExpenseRequestへ渡す`研修費`科目をV128で許可し、費用正本の重複作成を避けた。
+  - Test: `MyCertificationLearningGapUiContractTest`、`CertificationLearningGapSelfServiceImplTest`、`TrainingPlanServiceTest`、`MigrationScriptIntegrityTest`等の選択suiteがPASS。本人account link固定、他人ID拒否、typed CLEAN証憑、0円、既存approval route、migration V128を確認した。
+  - Demo: 本人BrowserでDRAFT申請→証憑1件、cancel→resubmit、0円plan→`APPROVED`、course enrollment→`PLANNED`を確認した。非0円planはapproval route fixture未設定により400となり、production実装の失敗ではない環境制約としてpacketへ記録した。
+
+独立Review Head `0e3d9b69`のP1-M-01/P1-M-02/P1-A2-01は上記で製品HTTP/UIまで修正済みであり、独立再Reviewを待つ。旧Mの`[x]`自己判定は再Review PASSまで有効な完了証拠ではない。

@@ -1,5 +1,7 @@
 # PLAN Review指摘対応表
 
+> 現行判定: Plan Review R7はPASSを維持。独立Implementation Review（Head `0e3d9b69`）はP1-M-01/P1-M-02/P1-A2-01でFAIL。下記の旧M完了記録はsupersededであり、A1/A2 remediation後の独立再Reviewを待つ。
+
 ## 判定の前提
 
 直近 Review（独立 Plan Review、Head `4e171f19`）: 総合 **FAIL**（Implementation 未着手）/ Plan **PASS** / Implementation **NOT STARTED**。F1 許可（開工対話）。
@@ -122,9 +124,9 @@
 | 証憑version pin | event記録のdocument version ID/hashと要求版を完全一致、CLEAN必須 | `completion-matrix.md`、`CertificationEvidenceValidatorTest`、`CertificationEvidenceAccessServiceTest` | VERIFIED_CLOSED |
 | production `certification.pii.view` permission seed | production seed、未seed時full reveal fail closed、role別実API確認 | `completion-matrix.md`、V121/V126 MySQL smoke、A1 permission/API regression | VERIFIED_CLOSED |
 | BP/別write pathのevent insert迂回防止 | skill/project/positionの全write pathを共通event writerへ集約し、直接mapper更新を検出 | `completion-matrix.md`、skill/project/position service回帰、`AllMappersSchemaSweepTest` | VERIFIED_CLOSED |
-| PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V127へ順延。M開始・終了時に再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | VERIFIED_CLOSED |
+| PR前最新`origin/main`取り込み・migration衝突 | `origin/main@a3454c08`をA1前にmergeし、main V115（PWA）を保持してNF-03 V116〜V128へ順延。M開始・終了時に再fetchして追加migration/schema/H2衝突を再確認 | `completion-matrix.md`、M/PR前gate | VERIFIED_CLOSED |
 
-この表の項目は未追跡のまま落とさず、各F2 TaskまたはMの明示的gateで証拠を付け、M完了時点で全件`VERIFIED_CLOSED`とした。main V115＋NF-03 V116〜V127の構成、最新`origin/main`とのmerge-base、migration/H2/MySQL smokeを確認済みである。
+この表の項目は未追跡のまま落とさず、各F2 TaskまたはMの明示的gateで証拠を付けた。main V115＋NF-03 V116〜V128の構成、最新`origin/main`とのmerge-base、migration/H2/MySQL smokeを確認済みである。旧Mの完了宣言は独立Implementation Review FAILによりsupersededであり、現行statusはA1/A2 remediation後の独立再Review待ちである。
 
 ## A1/A2 implementation receipt（2026-08-28）
 
@@ -179,3 +181,27 @@ MはA1〜B2の実装完了後、同一code HEAD `4ba1738c4e5afe6ad3839afe1e681a9
 - 証憑binary本文のdownloadファイル採取は未取得。認可と版固定のfail-closed証拠は取得済み。
 - NF-07の`CERTIFICATION_PII`保持年数・破棄は未承認であり、本番有効化しない。
 - rollbackは本番未適用を前提に、feature commitを`4ba1738c`からDocsを含む最終HEADまで逆順revertし、migrationはV127→V116を管理手順で戻す。本番適用後はDROPせずbackup/release rollback計画を使用する。
+
+## 独立Implementation Review（Head `0e3d9b69`）— FAIL受領と再実装（2026-08-28）
+
+独立ReviewはPlan **PASS**、Implementation **FAIL**と判定した。P1は次の3件であり、PR・merge・branch削除は実施されていない。
+
+| finding | 指摘 | remediation | status |
+|---|---|---|---|
+| P1-M-01 | 資格master登録と証憑verify/rejectのproduction HTTP/UI経路がない | `17d944f1`で`CertificationMasterService`のCRUD/deactivate、`EngineerCertificationService`のverify/rejectを管理APIへ接続し、master/course管理画面とdetailのverify/reject操作を追加 | CLOSED pending independent re-review |
+| P1-M-02 | training course masterの登録・更新・skill target管理のHTTP/UIがない | `17d944f1`で`TrainingCourseMasterService`、canonical skill検証・relation置換、管理API/UIを追加 | CLOSED pending independent re-review |
+| P1-A2-01 | 本人画面に証憑upload、withdraw/resubmit、plan submit/enrollがない | `50cb8f2d`でcatalog select、multipart upload、detail status action、cancel/resubmit、plan submit/withdraw/resubmit、enrollment操作を接続 | CLOSED pending independent re-review |
+
+`66eda6f9`は既存`ExpenseRequestService`の`研修費`カテゴリをV128で許可し、学習planの費用正本を新設しない互換修正。`f8a5b125`はMySQL smokeでV128の正本DDLを確認するテストを固定した。
+
+### 再実装の検証
+
+- clean後のA1/A2・F1/F2選択suiteはexit 0。`FlywayCertificationLearningGapSchemaSmokeTest`はV128を含め1件PASS。
+- Docker Browserでadminが資格masterとcourse（canonical AWS target）を登録し、本人が資格master select、DRAFT申請、証憑upload（1件）、cancel/resubmit、0円plan submit（`APPROVED`）、course enrollment（`PLANNED`）を実行した。
+- admin detailでverifyを実行し、資格が`ACTIVE`、証憑リンク、0円plan/enrollmentが表示されることを確認した。
+- 非0円planは既存approval route fixture未seedのため、`研修費` INSERT後にroute未設定の400となった。V128により以前のDB CHECK違反500は解消しており、未seed routeは環境制約として再Reviewへ明記する。
+- P2のtraining approvalボタン、資格master/course UI、detail title二重escapeも同じremediationに含めた。
+
+### 現時点の未検証と次gate
+
+全fast/MySQL/performance gate、証憑binary本文のBrowser採取、独立Implementation再Reviewは未実施。再Reviewでは今回のcommit以降のHTTP/UI write path、V128、既存F1/F2回帰、role/population/PII/DocumentLink境界を同一clean Headで再確認する。PASS前はPRを作成しない。
