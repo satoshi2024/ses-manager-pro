@@ -6,7 +6,7 @@
 |---|---|
 | traceability | `APPROVED` |
 | Start Head | `c29001e3` |
-| F1 Head | `7c023147`（P1-F1-01/02 修正後） |
+| F1 Head | `e320b6a0`（P1-F1-01/02 修正後） |
 | 承認 Base | `76e45340` |
 | migration | V115〜V119（latest+1 から採番済み） |
 | F2 | 未着手（F1 完了報告後） |
