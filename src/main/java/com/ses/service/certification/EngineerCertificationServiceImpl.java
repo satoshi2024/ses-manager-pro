@@ -130,9 +130,11 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                 || CertificationRecordStates.VERIFIED.equals(record.getRecordState()))) {
             throw BusinessException.of(400, "certification.record.invalidTransition");
         }
-        if (evidenceValidator != null) {
-            evidenceValidator.validate(recordId, evidenceDocumentId, evidenceDocumentVersionId, evidenceHash);
+        requireEvidenceForVerify(evidenceDocumentId, evidenceDocumentVersionId, evidenceHash);
+        if (evidenceValidator == null) {
+            throw BusinessException.of(400, "certification.evidence.versionRequired");
         }
+        evidenceValidator.validate(recordId, evidenceDocumentId, evidenceDocumentVersionId, evidenceHash);
         Integer revision = nextRevision(record);
         update(record, CertificationRecordStates.ACTIVE, 1, record.getContinuityGroupId(),
                 record.getAcquiredOn(), record.getExpiresOn(), record.getExpiryRuleVersion(), revision, actorUserId);
@@ -307,6 +309,13 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private void requireReason(String reason) {
         if (!StringUtils.hasText(reason)) {
             throw BusinessException.of(400, "certification.record.reasonRequired");
+        }
+    }
+
+    private void requireEvidenceForVerify(Long evidenceDocumentId, Long evidenceDocumentVersionId, String evidenceHash) {
+        if (evidenceDocumentId == null || evidenceDocumentVersionId == null
+                || !StringUtils.hasText(evidenceHash)) {
+            throw BusinessException.of(400, "certification.evidence.versionRequired");
         }
     }
 

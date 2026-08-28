@@ -29,9 +29,6 @@ public class CertificationEvidenceValidator {
     }
 
     public void validate(Long certificationRecordId, Long documentId, Long documentVersionId, String expectedHash) {
-        if (documentId == null && documentVersionId == null && expectedHash == null) {
-            return;
-        }
         if (documentId == null || documentVersionId == null || expectedHash == null || expectedHash.isBlank()) {
             throw BusinessException.of(400, "certification.evidence.versionRequired");
         }

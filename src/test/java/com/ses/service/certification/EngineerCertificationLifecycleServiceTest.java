@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DuplicateKeyException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -49,7 +48,7 @@ class EngineerCertificationLifecycleServiceTest {
     }
 
     @Test
-    void verify_cancel_correct_renewは状態とeventを更新し訂正はCORRECTEDにならない() {
+    void verifyはtypedLink付き証憑検証成功後だけACTIVEになる() {
         EngineerCertification record = activeRecord();
         record.setRecordState(CertificationRecordStates.SUBMITTED);
         record.setCurrentFlag(0);
@@ -59,15 +58,40 @@ class EngineerCertificationLifecycleServiceTest {
                 .thenReturn(1);
         when(recordMapper.countNonTerminalAcquisition(any(), anyLong(), anyLong(), any(), any())).thenReturn(0L);
 
-        EngineerCertification verified = service.verify(1L, 0, 7L, null, null, null);
+        EngineerCertification verified = service.verify(1L, 0, 7L, 10L, 100L, "abc123");
         assertEquals(CertificationRecordStates.ACTIVE, verified.getRecordState());
         assertEquals(1, verified.getCurrentFlag());
-        assertEquals(1, verified.getVersion());
+        verify(evidenceValidator).validate(1L, 10L, 100L, "abc123");
 
         EngineerCertification corrected = service.correct(1L, 1, LocalDate.of(2026, 1, 2),
                 LocalDate.of(2026, 12, 31), 7L, "日付の訂正");
         assertEquals(CertificationRecordStates.ACTIVE, corrected.getRecordState());
         verify(eventMapper, org.mockito.Mockito.atLeast(2)).insertEvent(any());
+    }
+
+    @Test
+    void verifyは証憑三組nullを拒否しACTIVEにしない() {
+        EngineerCertification record = activeRecord();
+        record.setRecordState(CertificationRecordStates.SUBMITTED);
+        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.verify(1L, 0, 7L, null, null, null));
+        verify(evidenceValidator, never()).validate(anyLong(), any(), any(), any());
+        verify(recordMapper, never()).updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
+    }
+
+    @Test
+    void verifyは4引数互換serviceでも証憑なしではACTIVEにしない() {
+        EngineerCertificationService legacy = new EngineerCertificationServiceImpl(recordMapper, certificationMapper,
+                engineerMapper, cryptoService);
+        EngineerCertification record = activeRecord();
+        record.setRecordState(CertificationRecordStates.SUBMITTED);
+        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> legacy.verify(1L, 0, 7L, null, null, null));
+        verify(recordMapper, never()).updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test

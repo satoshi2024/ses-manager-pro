@@ -27,6 +27,13 @@ class CertificationEvidenceValidatorTest {
     @Mock private DocumentLinkMapper documentLinkMapper;
 
     @Test
+    void 証憑三組がすべてnullの場合は拒否する() {
+        CertificationEvidenceValidator validator = new CertificationEvidenceValidator(documentMapper,
+                documentVersionMapper, documentLinkMapper);
+        assertThrows(BusinessException.class, () -> validator.validate(20L, null, null, null));
+    }
+
+    @Test
     void typedLinkとCLEANと版hashが一致する場合だけ許可する() {
         Document document = document("CERTIFICATION_EVIDENCE");
         DocumentVersion version = version(100L, 10L, "abc123", "CLEAN");
