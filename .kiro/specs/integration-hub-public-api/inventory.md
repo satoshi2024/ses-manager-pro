@@ -147,4 +147,7 @@
 | outbound | signed payload、timestamp、provider request ID、claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ/replay |
 | inbound | signature、raw hash、timestamp、duplicate、event conflict、unique provider event ID、transaction rollback |
 | operations | key rotation、secret/PII scan、負荷、DB/worker/provider障害、restore、runbook、alert |
+| metrics | route template、method、status class、bounded outcome、client tierのみ。client/correlation/request/resource/user/IP/provider IDはlabel禁止 |
+| retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。succeeded 30日、failed/DLQ 90日、audit metadata 1年はcandidate |
+| purge | 期限境界、legal hold、再実行、部分失敗、backup/restore後purgeの証拠が必要 |
 | boundary | external callがDB transaction外、通常checkout無変更、base/head固定、push後remote/local一致 |

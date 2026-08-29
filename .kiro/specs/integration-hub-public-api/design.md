@@ -118,14 +118,34 @@ CONFLICT/DLQとする。
 
 ## 8. トランザクション・運用
 
-outbox/jobへのinsertは業務transactionのafter-commit境界へ置く。workerは短いclaim transactionをcommitして
-から外部callを行い、完了後にlease tokenとpayload hashを含むCASで結果を書き戻す。stale leaseはsafeに
-recoverし、外部providerのrequest IDとcorrelation IDを保存する。ログ、metrics、auditにはsecret、PII、
-raw request/responseを出さず、safe codeとhashの一部だけを使う。
+業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitする。業務commit後に
+callbackや別transactionでoutboxを作る方式は採用しない。workerは短いclaim/lease transactionをcommitして
+から外部callを行い、完了後にlease tokenとpayload hashを含む別の短いCAS transactionで
+SUCCEEDED、RETRYABLE、FAILED、DLQへ遷移させる。stale leaseはsafeにrecoverする。
+
+provider成功直後にworkerが停止しても、provider request ID、idempotency key、payload hash、lease世代を
+使って副作用を一件へ収束させる。同時claimは一つだけを許可し、manual replayは新しいdelivery世代として
+監査する。外部providerのrequest IDとcorrelation IDをsafe metadataとして保存する。
+
+metrics labelはroute template、HTTP method、status class、bounded outcome、client tier等の有限集合だけに
+限定する。client ID、correlation ID、request/idempotency key、resource ID、user ID、IP、provider event IDは
+labelにしない。詳細識別子はsecret/PIIを除外した監査logまたはtraceへだけ置き、label cardinality上限と
+scrape時の有限集合をテストする。
+
+payload retentionの候補は、idempotencyをcanonical digest、status、safe response snapshotだけに限定し、
+raw secret/PII requestは保存しない。inboundは署名検証中のみraw bytesをメモリで使い、永続化はraw hash、
+provider event ID、timestamp、allow-listed parsed fields、safe error codeに限定する。outboundは承認済み
+external DTO snapshotだけを保存し、internal entityとprovider raw bodyは保存しない。候補retentionは
+succeeded 30日、failed/DLQ 90日、audit metadata 1年とし、legal hold中はpurgeを停止する。期間は
+DG-05 Owner承認前の候補値である。
+
+purge jobは期限境界をUTC/Asia-Tokyoの契約に従って一度だけ判定し、legal hold、backup/restore後、
+再実行、部分失敗を安全に扱う。ログ、metrics、auditにはsecret、PII、raw request/responseを出さず、
+safe codeとhashの一部だけを使う。
 
 Mではsecurity review、負荷とrate boundary、DB/worker/provider停止、restore、key rotation/revoke、
-secret/PII scan、alert、runbook、固定remote Headを証拠化する。全テストとReviewのPLAN/IMPLEMENTATION PASS
-後のみPR作成を許可する。
+secret/PII scan、payload purge、alert、runbook、固定remote Headを証拠化する。全テストとReviewの
+PLAN/IMPLEMENTATION PASS後のみPR作成を許可する。
 
 ## 9. DG-05で確定する事項
 

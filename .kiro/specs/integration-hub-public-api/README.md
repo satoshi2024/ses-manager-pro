@@ -13,9 +13,10 @@
 - 専用worktree: C:\work\ses-manager-pro-integration-hub-public-api
 - 専用branch: codex/integration-hub-public-api
 
-この文書は、候補段階で許可されるread-only discoveryとspec作成の成果物である。DG-05、脅威モデル、
+この文書は、候補段階で許可されるread-only discovery、Review remediation、spec作成の成果物である。DG-05、脅威モデル、
 認証方式、契約SLA、公開field inventory、Owner、実値のBaseが承認されるまで、production Java、
-SQL/migration、画面、既存shared file、production test、remote pushを開始しない。
+SQL/migration、画面、既存shared file、production test、外部送信、production変更のpushを開始しない。
+明示されたReview remediationのdocs-only pushはこの停止規則の対象外である。
 
 ## 承認ゲート
 
@@ -34,7 +35,14 @@ SQL/migration、画面、既存shared file、production test、remote pushを開
 
 中央の受入後traceabilityはNF-05をCANDIDATE、Owner/Decision/再評価日を未定としている。
 DG-05欄も未決定項目だけを列挙しており、承認DecisionId、scope、Base SHAは存在しない。
-したがって候補段階の規則に従い、T0 discovery/spec作成で停止する。
+したがって候補段階の規則に従い、T0 discovery/spec作成と明示されたTask 0R remediationだけを行い、
+production実装で停止する。
+
+## Task 0R remediation
+
+ReviewのP1/P2指摘に対し、atomic outbox、非公開OpenAPI candidate、metrics cardinality、payload retention、
+review traceをspecへ反映した。対応状況はreview-remediation.mdを正本とし、SPEC_ADDRESSEDとOWNER_GATEを
+混同しない。
 
 ## 既知の重要差分
 

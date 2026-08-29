@@ -10,7 +10,8 @@ threat model、認証方式、契約SLA、public field inventoryの確定記録�
 
 | 順序 | Task | 成果物 | 開始条件 |
 |---|---|---|---|
-| 0 | threat / contract / field inventory | approval ledger、filter/secret/outbox/correlation/rate/DTO inventory | 必須。現時点でここまで |
+| 0 | threat / contract / field inventory | approval ledger、filter/secret/outbox/correlation/rate/DTO inventory | 完了。production変更なし |
+| 0R | Review remediation | atomic outbox、candidate OpenAPI、metrics cardinality、payload retention、review trace | docs-only範囲で完了。実装PASSではない |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback | DG-05、Base、Owner、schema方針承認 |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | F1完了とauth/IP承認 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | field/resource/SLA承認 |
@@ -21,6 +22,7 @@ threat model、認証方式、契約SLA、public field inventoryの確定記録�
 
 ## 完了・引き渡し条件
 
-各Taskは専用branchで検証し、Task単位のcommitを作る。pushはapproved scopeに含まれるremoteだけに限定し、
-force pushは行わない。最終remote Head、commit一覧、plan/spec/tasks、completion matrix、evidence indexを
+各Taskは専用branchで検証し、Task単位のcommitを作る。production変更のpushはapproved scopeに含まれるremoteだけに限定し、
+force pushは行わない。明示されたReview remediationのdocs-only commit/pushはレビュー証跡固定のために行う。
+最終remote Head、commit一覧、plan/spec/tasks、completion matrix、evidence indexを
 独立Reviewへ渡す。ReviewのPLAN/IMPLEMENTATION双方がPASSになるまでPRは作成しない。

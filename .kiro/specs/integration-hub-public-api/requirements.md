@@ -61,8 +61,10 @@
 3. receiverはtimestamp tolerance、provider event ID、raw body hash、tenant/client bindingで
    replayとduplicateを拒否する。同一provider event IDの再送は一度だけ処理し、別payload hashは
    conflict/DLQへ収束させる。
-4. deliveryはDB transaction内に外部HTTPを置かず、commit後のoutbox/job、claim、timeout、
-   exponential backoff+jitter、max attempts、DLQ retention、manual replayを持つ。
+4. 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitし、commit後のworkerは
+   短いclaim/lease transactionで取得する。外部HTTPはDB transaction外で実行し、結果は別の短いCAS
+   transactionでSUCCEEDED、RETRYABLE、FAILED、DLQへ遷移させる。timeout、exponential backoff+jitter、
+   max attempts、DLQ retention、manual replayを持つ。
 5. retryはnetwork/timeout/429/5xxだけを対象とし、validation/auth/permission等の4xxは無限retryしない。
    retry状態、last safe error code、next attempt、attempt count、provider request IDを保存する。
 6. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
@@ -90,6 +92,19 @@
 3. Mではsecurity review、負荷、障害訓練、key rotation、secret/PII scan、backup/restore、
    recovery、runbook、remote Head固定を完了する。
 
+## IH-R6 Metrics / payload retention
+
+1. metrics labelはroute template、HTTP method、status class、bounded outcome、client tier等の
+   有限集合に限定する。client ID、correlation ID、request/idempotency key、resource ID、user ID、
+   IP、provider event IDをlabelへ置かない。label cardinality上限と有限集合をscrape testで検証する。
+2. idempotencyはcanonical digest、status、safe response snapshotだけを保持し、raw secret/PII requestを
+   保存しない。inbound webhookは署名検証中のみraw bytesをメモリで使い、永続化はraw hash、provider
+   event ID、timestamp、allow-listed parsed fields、safe error codeに限定する。outbound webhookは
+   承認済みexternal DTO snapshotだけを保存し、internal entity/provider raw bodyを保存しない。
+3. retention候補はsucceeded 30日、failed/DLQ 90日、audit metadata 1年とする。legal hold中はpurgeを
+   停止し、最終値はDG-05 Owner承認対象とする。purge jobは期限境界、再実行、部分失敗、backup/restore後
+   のpurgeを安全に扱う。
+
 ## 受入テスト最低条件
 
 - client A/Bのresource、field、operation、data scope matrix。
@@ -99,4 +114,8 @@
 - JSON contract allow-list、entity serialization禁止、secret/PII log scan。
 - webhook署名改ざん、timestamp古い/未来、replay、duplicate、provider event conflict、
   claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ、manual replay。
+- 業務stateとoutbox rowの原子commit、provider成功直後crash、stale lease、同時claim、replayで
+  副作用が一件へ収束すること。
 - 外部callがDB transaction内で実行されないことの境界テスト。
+- metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
+- payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
