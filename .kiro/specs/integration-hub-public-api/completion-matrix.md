@@ -9,7 +9,7 @@
 | 0R-D Delta Review remediation | openapi-candidate, design, tasks, review-remediation, review-ledger | count/asOf/status-code/correlation headerの差分修正、YAML/assertion | COMPLETE（spec修正のみ） | 11ee82c1（remoteへpush済み） |
 | 0/0R/0R-D Owner Gate normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review trace、中央traceability | DG-05 DecisionId、OwnerRef、approved Base、F1 scope、auth/SLA/field/threat valuesを正本化。production変更なし | COMPLETE（docs-only gate） | 2f91e5a584c5224989780cb323e40f33fda185b6（remoteへpush済み） |
 | 0R-P R-NF05 Plan finding remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-001 rate key、P1-002 nonce ledger、P1-003 delivery分離、P1-004 retention/hold/restoreを具体化。production変更なし | SPEC_ADDRESSED（再Reviewでnonce/delivery closed、rate/retention残存） | b0151e7d8acc54da124c4464db1df263e4b3f716（remoteへpush済み） |
-| 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | COMPLETE（docs-only、再Review待ち） | commit後に固定 |
+| 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | COMPLETE（docs-only、再Review待ち） | a3b63d70f53bc799d1abcb6e26e34ad163aa9843（remoteへpush済み） |
 | F1 DDL | approval-decision, tasks, design | 未着手。PLAN PASS待ち | READY_AFTER_PLAN_PASS | — |
 | F2 security chain | tasks/design/inventory | 未着手 | DEFERRED_BY_SCOPE | — |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | candidateのみ。public endpoint未実装 | DEFERRED_BY_SCOPE | — |
@@ -34,5 +34,5 @@ Task 0R remediation: 48037c923224f684968dbaf3410cdb37307ed100
 Task 0R-D delta remediation: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
 Owner Gate normalization: 2f91e5a584c5224989780cb323e40f33fda185b6
 R-NF05 Plan remediation: b0151e7d8acc54da124c4464db1df263e4b3f716
-R-NF05 residual remediation: commit後に固定
+R-NF05 residual remediation: a3b63d70f53bc799d1abcb6e26e34ad163aa9843
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）

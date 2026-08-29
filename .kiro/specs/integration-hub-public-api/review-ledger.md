@@ -53,6 +53,8 @@
   再ReviewのPLAN PASSまではF1を開始しない。
 - R-NF05 delta Plan Review: fixed Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でPLAN FAIL（P0=0、P1=2）。
   NF05-PLAN-005/006をspec remediation後、同Reviewへ再提出する。Owner GateとNF05-PLAN-001〜004は再オープンしない。
+- R-NF05 residual remediation: a3b63d70f53bc799d1abcb6e26e34ad163aa9843でNF05-PLAN-005/006をSPEC_ADDRESSEDへ更新した。
+  再ReviewのPLAN PASSまではF1を開始しない。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。
