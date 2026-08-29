@@ -205,13 +205,6 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
         if (assignment == null) {
             return;
         }
-        if ("RELEASED".equals(assignment.getStatus()) || assignment.getReleasedDate() != null) {
-            throw new BusinessException("解放済みライセンス割当の終端履歴は論理削除できません。台帳上の履歴を保持してください。");
-        }
-        if ("ACTIVE".equals(assignment.getStatus()) || assignment.getReleasedDate() == null) {
-            throw new BusinessException("未解放ライセンス割当は論理削除できません。先にライセンスを解放してください。");
-        }
-        licenseAssignmentMapper.deleteById(assignmentId);
-        log.info("License assignment soft-deleted: assignmentId={}", assignmentId);
+        throw new BusinessException("ライセンス割当の終端履歴を含む履歴は状態（" + assignment.getStatus() + "）にかかわらず論理削除できません。台帳上の履歴を保持してください。");
     }
 }

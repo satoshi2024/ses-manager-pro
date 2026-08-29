@@ -310,22 +310,10 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void softDeleteAccount(Long id) {
-        // AS-R1.5(b): 未失効状態（UNKNOWNを含む）の論理削除を禁止する
+        // AS-R1.5(b)/(f): 外部アカウント参照は状態にかかわらず履歴台帳として保持する。
         ExternalAccountReference ref = externalAccountReferenceMapper.selectByIdForUpdate(id);
         if (ref == null) return;
         String st = ref.getStatus();
-        boolean confirmed = ref.getRevokeConfirmedAt() != null;
-        if ("REVOKED".equals(st) || confirmed) {
-            throw new BusinessException(
-                    "失効済み外部アカウントの終端履歴は論理削除できません。台帳上の履歴を保持してください。" );
-        }
-        if (("ACTIVE".equals(st) || "SUSPENDED".equals(st) || "PENDING_CONFIRMATION".equals(st)
-                || "UNKNOWN".equals(st)) && !confirmed) {
-            throw new BusinessException(
-                    "未失効（ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN）の外部アカウントは論理削除できません（AS-R1.5(b)）。" +
-                            "先に失効確認（REVOKED）またはEXCEPTION_HOLD処理を行ってください。");
-        }
-        removeById(id);
-        log.info("ExternalAccountReference soft-deleted: id={}", id);
+        throw new BusinessException("外部アカウント参照の終端履歴を含む履歴は状態（" + st + "）にかかわらず論理削除できません。台帳上の履歴を保持してください。");
     }
 }
