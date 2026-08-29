@@ -20,7 +20,7 @@ function loadTemplates() {
         sel.innerHTML = rows.map(t => `<option value="${t.id}">${SES.escapeHtml(t.title)}</option>`).join('');
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || 'サーベイテンプレートの取得に失敗しました');
+        console.error(error.message || 'サーベイテンプレートの取得に失敗しました');
     });
 }
 
@@ -46,7 +46,7 @@ function loadCampaigns() {
         }));
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || 'サーベイ一覧の取得に失敗しました');
+        console.error(error.message || 'サーベイ一覧の取得に失敗しました');
     });
 }
 
@@ -64,7 +64,7 @@ function loadAggregate(campaignId) {
         el.innerHTML = html;
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || 'サーベイ集計の取得に失敗しました');
+        console.error(error.message || 'サーベイ集計の取得に失敗しました');
     });
 }
 
@@ -95,7 +95,7 @@ async function createCampaign() {
         if (modal) modal.hide();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || 'サーベイの作成に失敗しました');
+        console.error(e.message || 'サーベイの作成に失敗しました');
     }
 }
 
@@ -119,7 +119,7 @@ async function createTemplate() {
         if (modal) modal.hide();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || 'サーベイテンプレートの作成に失敗しました');
+        console.error(e.message || 'サーベイテンプレートの作成に失敗しました');
     }
 }
 
@@ -128,7 +128,7 @@ function runSurveyAction(id, action) {
         .then(() => loadCampaigns())
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || 'サーベイの状態更新に失敗しました');
+            console.error(error.message || 'サーベイの状態更新に失敗しました');
         });
 }
 

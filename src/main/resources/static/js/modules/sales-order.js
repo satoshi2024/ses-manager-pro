@@ -10,8 +10,8 @@ const SALES_ORDER_TRANSITIONS = {
 };
 
 function showSalesOrderError(error, fallback) {
-    console.error(error);
-    SES.toast.error(error && error.message ? error.message : fallback);
+    console.error(fallback, error);
+    // double toast is prevented since SES.api already toasts
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -97,7 +97,7 @@ function addLineRow(line) {
             <input type="hidden" name="lineId" value="${line.id || ''}">
             <select class="form-select form-select-sm" name="engineerId" aria-label="${label('salesOrder.modal.line.engineer')}" required></select>
         </td>
-        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}"></select></td>
+        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}" data-selected-project="${line.projectId || ''}" data-selected-project="${line.projectId || ''}" data-selected-project="${line.projectId || ''}"></select></td>
         <td><input type="number" class="form-control form-control-sm" name="unitPrice" aria-label="${label('salesOrder.modal.line.unitPrice')}" value="${line.unitPrice || ''}" required></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" aria-label="${label('salesOrder.modal.line.settlementMin')}" value="${line.settlementMin || ''}"></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" aria-label="${label('salesOrder.modal.line.settlementMax')}" value="${line.settlementMax || ''}"></td>
@@ -139,7 +139,7 @@ async function presetFromQuotation(quotationId) {
     }
 }
 
-function openSalesOrderModal(id) {
+async function openSalesOrderModal(id) {
     const form = document.getElementById('salesOrderForm');
     form.reset();
     document.getElementById('poWarningText').style.display = 'none';
@@ -147,7 +147,8 @@ function openSalesOrderModal(id) {
     const title = document.querySelector('#salesOrderModal .modal-title');
     if (id) {
         title.textContent = SES.i18n.t('salesOrder.detail.title', '注文編集');
-        SES.api.get(`/api/sales-orders/${id}`).then(detail => {
+        try {
+            const detail = await SES.api.get(`/api/sales-orders/${id}`);
             form.id.value = detail.id;
             form.customerId.value = detail.customerId;
             form.contactId.value = detail.contactId || '';
@@ -158,15 +159,17 @@ function openSalesOrderModal(id) {
             form.startDate.value = detail.startDate || '';
             form.endDate.value = detail.endDate || '';
             form.paymentTerms.value = detail.paymentTermsSnapshot || '';
-            loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
-            loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
-            onCustomerChanged();
+            await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
+            await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
             (detail.lines || []).forEach(l => addLineRow(l));
-        }).catch(error => showSalesOrderError(error, '注文詳細の取得に失敗しました'));
+            await onCustomerChanged(detail.contactId);
+        } catch(error) {
+            showSalesOrderError(error, '注文詳細の取得に失敗しました');
+        }
     } else {
         title.textContent = SES.i18n.t('salesOrder.btn.new', '注文作成');
-        loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
-        loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
+        await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
+        await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
         addLineRow();
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal')).show();
@@ -402,7 +405,7 @@ function uploadSourceDocument(id) {
             }
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             openSalesOrderDetail(id);
-        }).catch(() => SES.toast.error(SES.i18n.t('error.networkError', '通信エラー')));
+        }).catch(() => console.error(SES.i18n.t('error.networkError', '通信エラー')));
     };
     input.click();
 }
@@ -424,7 +427,7 @@ function generateAckPdf(id) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    }).catch(e => SES.toast.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
+    }).catch(e => console.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
 }
 
 function createOrderContracts(id) {

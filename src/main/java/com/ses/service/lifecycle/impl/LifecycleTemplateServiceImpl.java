@@ -124,13 +124,18 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         Integer maxVer = templateMapper.selectMaxVersionNo(dto.getTemplateType());
         int nextVer = (maxVer != null) ? maxVer + 1 : 1;
 
+        LocalDate createValidFrom = dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now();
+        if (dto.getValidTo() != null && createValidFrom.isAfter(dto.getValidTo())) {
+            throw BusinessException.of(400, "error.lifecycle.invalidDateOrder", "開始日は終了日以前である必要があります");
+        }
+
         LifecycleTemplate entity = LifecycleTemplate.builder()
                 .templateType(dto.getTemplateType())
                 .name(dto.getName())
                 .description(dto.getDescription())
                 .versionNo(nextVer)
                 .status(dto.getStatus() != null ? dto.getStatus() : "ACTIVE")
-                .validFrom(dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now())
+                .validFrom(createValidFrom)
                 .validTo(dto.getValidTo())
                 .createdBy(userId)
                 .updatedBy(userId)

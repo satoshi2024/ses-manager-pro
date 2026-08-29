@@ -30,7 +30,7 @@ function loadInboundInvoices(page = 1) {
         }
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '受信請求書の取得に失敗しました');
+        console.error(error.message || '受信請求書の取得に失敗しました');
     });
 }
 
@@ -61,7 +61,7 @@ function reviewInvoice(id, action) {
                 return loadInboundInvoices(1);
             }).catch(error => {
                 console.error(error);
-                SES.toast.error(error.message || `${actionText}に失敗しました`);
+                console.error(error.message || `${actionText}に失敗しました`);
             });
         }
     });

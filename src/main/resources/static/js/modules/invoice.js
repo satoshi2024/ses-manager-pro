@@ -776,7 +776,7 @@ function dispatchDigitalInvoice(invoiceId) {
         return updateInvoiceSentStatus(invoiceId).then(() => loadInvoices());
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '請求書の送付処理に失敗しました。');
+        console.error(error.message || '請求書の送付処理に失敗しました。');
     });
 }
 
@@ -813,7 +813,7 @@ function viewDigitalInvoiceStatus(invoiceId) {
         });
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '送信状況の取得に失敗しました。');
+        console.error(error.message || '送信状況の取得に失敗しました。');
     });
 }
 

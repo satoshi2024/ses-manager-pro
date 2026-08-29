@@ -41,8 +41,8 @@ function loadApprovalRouteSelectOptions() {
 
 function routeNumber(value) { return value === '' ? null : Number(value); }
 function routeDate(value) { return value === '' ? null : value; }
-function routeJson(value) { try { return JSON.parse(value); } catch (e) { SES.toast.error(SES.i18n.t('approval.routes.invalidJson', 'steps JSONを確認してください')); return null; } }
-function showApprovalRoutesApiError(error, fallback) { console.error(error); SES.toast.error(error && error.message ? error.message : fallback); }
+function routeJson(value) { try { return JSON.parse(value); } catch (e) { console.error(SES.i18n.t('approval.routes.invalidJson', 'steps JSONを確認してください')); return null; } }
+function showApprovalRoutesApiError(error, fallback) { console.error(error); console.error(error && error.message ? error.message : fallback); }
 
 async function loadApprovalRoutes() {
     try { renderApprovalRoutes(await SES.api.get('/api/approval/routes')); } catch (e) { showApprovalRoutesApiError(e, SES.i18n.t('common.msg.fetchFail', 'routeの取得に失敗しました')); }

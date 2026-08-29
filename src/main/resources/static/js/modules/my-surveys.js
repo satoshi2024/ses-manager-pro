@@ -10,7 +10,7 @@ function loadCampaigns() {
         .then(list => renderCampaigns(list || []))
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || 'サーベイ一覧の取得に失敗しました');
+            console.error(error.message || 'サーベイ一覧の取得に失敗しました');
         });
 }
 
@@ -29,7 +29,7 @@ function openCampaign(campaignId) {
         .then(detail => renderDetail(detail))
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || 'サーベイ詳細の取得に失敗しました');
+            console.error(error.message || 'サーベイ詳細の取得に失敗しました');
         });
 }
 
@@ -88,6 +88,6 @@ async function submitAnswers() {
         loadCampaigns();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || 'サーベイ回答の送信に失敗しました');
+        console.error(e.message || 'サーベイ回答の送信に失敗しました');
     }
 }
