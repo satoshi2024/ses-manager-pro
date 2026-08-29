@@ -83,8 +83,8 @@ delivery rowとして作成し、元rowを再pending化しない。
 #### Retention / legal holdの保存モデル
 
 t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention_classとretention_expires_atを持つ。
-terminal stateごとの期限は、SUCCEEDED/SENT/PROCESSED/DUPLICATEを30日、FAILED/DLQ/CONFLICTを90日とする。
-IN_PROGRESS/CLAIMED/RETRY/RECEIVED/PROCESSINGはterminalになるまでpurge対象にせず、
+terminal stateごとの期限は、SUCCEEDED/PROCESSED/DUPLICATEを30日、FAILED/DLQ/CONFLICTを90日とする。
+IN_PROGRESS/CLAIMED/RETRYABLE/RECEIVED/PROCESSINGはterminalになるまでpurge対象にせず、
 audit metadataは既存監査契約のmetadata-only rowとしてcreated_at + 1年を期限にする。payloadは承認済みexternal
 DTO snapshotまたはallow-listed parsed fieldsに限り、raw request/body/provider responseは保存しない。
 
@@ -165,7 +165,8 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 
 ### 5.3 canonical state・retention・並行性
 
-状態名は以下を唯一の正本とする。別名のRETRY、RETRYABLE、SENT、EXPIREDを実装状態として追加しない。
+状態名は以下を唯一の正本とする。deliveryのretry状態はRETRYABLEとし、別名のRETRY、SENT、
+idempotencyのEXPIREDを実装状態として追加しない。
 非terminal状態はpurgeせず、terminal状態はretention tableのclassと起算点へ必ず対応させる。
 
 | 対象 | canonical enum | terminal分類・保持 | 許可遷移と競合規則 |

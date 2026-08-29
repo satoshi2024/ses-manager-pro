@@ -41,7 +41,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 
 - [ ] Objective: client、credential version、scope、idempotency、usage bucket、nonce replay ledger、
   webhook/inbound、retention hold/checkpointの保存契約を実装する。
-- Preconditions: Task 0/0R/0R-D完了、approval-decision.md、指定Base再確認、独立Plan Review PLAN PASS。
+- Preconditions: Task 0/0R/0R-D/0R-P/0R-P2完了、approval-decision.md、指定Base再確認、独立Plan Review PLAN PASS。
 - Implementation: usage bucketのDB natural keyはclient×scope×tenant×route templateに限定し、minute/day counterと
   burst token bucket（capacity 20、初期20、3秒ごとに1 token refill、clock rollback時は後戻りなし）を同じrowへ保存し、
   minute/day/burstの全条件を一つのlock/predicate transactionでconsumeする。t_api_nonce_replayはclient+nonce hash unique、TTL、bounded purgeを持つ。既存
