@@ -1,0 +1,103 @@
+# Requirements — NF-05 Integration Hub・公開API・Inbound/Outbound Webhook
+
+## 0. 状態と適用範囲
+
+本書は受入後3文書のNF-05基線を展開したDiscovery specであり、DG-05承認前の候補である。
+承認されていない値を実装上の既定値として扱わない。実装可能な候補を示すが、T0以外のcheckboxを
+完了扱いにしない。
+
+参照:
+
+- 受入後feature backlog: NF-05はread API、限定command、OAuth2または署名service account、
+  client scope、data scope、rate、IP、rotation、OpenAPI、cursor、Idempotency-Key、
+  Correlation-ID、outbox、署名、replay防止、retry/backoff、DLQ。
+- 受入後requirements/design: IH-R1〜IH-R3。
+- 受入後traceability: NF-05はCANDIDATE、DG-05未承認。
+- customer-product-expansion-2026/platform-invariants.md: transaction、scope、secret、
+  external I/O、pagination、audit、migration、性能。
+- enterprise-identity-security: client secret/tokenをログへ出さず、action permissionとfield maskingを
+  service境界で実施する。
+
+## IH-R1 Client / credential / security
+
+1. 管理者はAPI clientについて、client ID、owner、tenant/legal entity、許可scope、許可operation、
+   rate/quota、IP制限、発行時刻、expiry、revoked時刻、状態、credential世代を管理できる。
+2. API clientは内部ログインuserやportal userへ偽装しない専用principalとして認識する。
+3. credential原文は発行時に一度だけ返せる。DB、API response、監査、通常ログ、例外、metricsへ
+   secret原文を出さず、保存は既存のversion付き暗号/secret参照または一方向hashの契約に従う。
+4. rotationは旧世代を承認済みoverlap期間だけ検証可能にし、新世代発行後の旧世代失効時刻、
+   revoke、expiry、clock skewを明示する。失効・期限切れcredentialはfail-closedで拒否する。
+5. IP boundaryはtrusted proxy設定、client allow-list、IPv4/IPv6、forwarded header spoof、
+   unknown sourceを含む。未承認のX-Forwarded-Forを信頼しない。
+6. requestごとにclient、認証世代、scope decision、data scope decision、rate decision、
+   correlation ID、結果code、target分類を監査可能にする。secret、raw body、PIIは監査しない。
+7. action permissionはrole名ではなく、client scopeとcommand permissionで表す。roleは内部管理
+   principalに限る。公開APIの認可をsidebar、既存role、URL prefixだけへ依存しない。
+
+## IH-R2 External contract
+
+1. 公開APIは /external-api/v1/** のようなversion namespaceと、承認済みOpenAPI契約を持つ。
+2. responseはexternal専用DTOのallow-listだけを返し、internal entityを直接serializeしない。
+   internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
+   responseは公開field inventoryで明示承認されない限り返さない。
+3. list/detail/count/exportの認可母集団はclient scope×data scope×field permissionで同一にする。
+   count、cursor、error、empty responseから他clientの存在、件数、ID、期間、金額を推測できない。
+4. listはopaque cursor、stable sort、limit上限、cursor失効/tenant bindingを持つ。page offsetや
+   database idを外部契約へそのまま漏らさない。
+5. stable error code、correlation ID、retryable判定だけを返す。認証失敗・scope外・不存在の
+   distinctionがclient dataを推測させる場合は同一の外部エラー契約に収束させる。
+6. commandは承認済みの限定操作だけとし、万能CRUDを公開しない。Idempotency-Keyとcanonical
+   request digestを必須とする。同一key・同一payloadは最初の結果を再返却し、同一key・別payloadは
+   payload conflictとして拒否する。結果を推測させる詳細差分は返さない。
+7. external DTO contract testは、許可fieldの集合と禁止fieldの不在を反射/JSON assertionで固定する。
+   entity型、internal DTO、Lombokの自動getterに依存して公開形を生成しない。
+
+## IH-R3 Inbound / outbound webhook
+
+1. outboundはevent type、opaque event ID、created time、schema version、allow-list payload、
+   correlation ID、subscription識別子、timestamp、signatureを送信する。
+2. signatureは承認済みcanonical bytes、key version、timestamp、event ID等の署名対象を固定し、
+   constant-time検証、timestamp tolerance、subscription revoke/rotation overlapを持つ。
+3. receiverはtimestamp tolerance、provider event ID、raw body hash、tenant/client bindingで
+   replayとduplicateを拒否する。同一provider event IDの再送は一度だけ処理し、別payload hashは
+   conflict/DLQへ収束させる。
+4. deliveryはDB transaction内に外部HTTPを置かず、commit後のoutbox/job、claim、timeout、
+   exponential backoff+jitter、max attempts、DLQ retention、manual replayを持つ。
+5. retryはnetwork/timeout/429/5xxだけを対象とし、validation/auth/permission等の4xxは無限retryしない。
+   retry状態、last safe error code、next attempt、attempt count、provider request IDを保存する。
+6. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
+   auditを必須にし、同一eventを無制限に再送しない。
+7. inbound handlerの業務適用はclaim処理とtransaction境界を分離し、外部応答を待つ間に内部DB
+   transactionを保持しない。
+
+## IH-R4 Data scope / command permission
+
+1. 公開APIの母集団はtenant、legal entity、organization、customer、project、contract等の
+   clientに許可されたdata scopeでSQL境界に限定する。取得後Java filterを正本にしない。
+2. client A/Bは同一resourceへ同時アクセスしても、scope外のrow、count、cursor、export、
+   error detail、webhook payload、DLQ detailを相互に観測できない。
+3. command permissionはresource.operation単位で固定し、read scopeがcommand権限を暗黙付与しない。
+   read-only clientがcommandを実行できないことを検証する。
+4. scopeが空の場合はDBレベル0件または外部契約上同等の存在秘匿応答とする。空集合を全件として
+   解釈しない。
+
+## IH-R5 Availability / SLA / operations
+
+1. contract SLA、p95、quota、burst、version廃止期間、maintenance、障害通知、DLQ retentionは
+   DG-05で決定されるまで未確定として扱う。
+2. timeout、429、5xx、provider停止、DB障害、鍵rotation、clock skew、worker crash、DLQ滞留、
+   manual replay失敗のrunbookとalertを持つ。
+3. Mではsecurity review、負荷、障害訓練、key rotation、secret/PII scan、backup/restore、
+   recovery、runbook、remote Head固定を完了する。
+
+## 受入テスト最低条件
+
+- client A/Bのresource、field、operation、data scope matrix。
+- revoked、expired、rotation overlap、旧世代失効、IP境界、rate exact boundary、burst、retry-after。
+- Idempotency-Key同一payload再送の同結果、別payload拒否、永続化失敗、worker再起動。
+- cursor stability、limit上限、count/export/errorからの存在推測防止。
+- JSON contract allow-list、entity serialization禁止、secret/PII log scan。
+- webhook署名改ざん、timestamp古い/未来、replay、duplicate、provider event conflict、
+  claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ、manual replay。
+- 外部callがDB transaction内で実行されないことの境界テスト。
+
