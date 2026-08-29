@@ -30,7 +30,7 @@
 
 ## Evidence status
 
-- T0: read-only inventory、文書ドラフト、dedicated worktree、通常checkout非変更を確認。local Headは909bbe26eff9e3d034d23ce18dbaf7c4f14e29b3。
+- T0: read-only inventory、文書ドラフト、dedicated worktree、通常checkout非変更を確認。Discovery commit seriesはb085c47f、909bbe26、cb468f19。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。

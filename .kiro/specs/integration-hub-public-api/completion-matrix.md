@@ -19,4 +19,4 @@
 implementation commit、push済みremote Head、OpenAPI、migration、test reportは存在しない。DG-05とBaseが承認された後に
 PLAN Reviewを行い、計画PASS後に実装を開始する。PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止する。
 
-Task 0固定Head: 909bbe26eff9e3d034d23ce18dbaf7c4f14e29b3
+Task 0のDiscovery commit series: b085c47f、909bbe26、cb468f19。最終handoff Headは外部Review通知で固定する。
