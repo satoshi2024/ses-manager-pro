@@ -52,6 +52,7 @@ exportは引き続きこのimplementation scope外である。
 - Task 0R-D delta remediation commit: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
 - Owner Gate normalization commit: 2f91e5a584c5224989780cb323e40f33fda185b6
 - R-NF05 Plan Review result: 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ec、PLAN FAIL（P0=0、P1=4）
+- R-NF05 Plan remediation commit: b0151e7d8acc54da124c4464db1df263e4b3f716
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応
