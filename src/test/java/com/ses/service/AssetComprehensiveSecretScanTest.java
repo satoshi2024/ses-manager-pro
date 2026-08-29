@@ -217,7 +217,7 @@ class AssetComprehensiveSecretScanTest {
                 "(?i)(?<![A-Za-z0-9_])(password|passwd|accountIdentifier|accessToken|refreshToken|bearerToken|"
                         + "clientSecret|apiKey|privateKey|recoveryCode|secretValue|credential|token|secret)(?![A-Za-z0-9_])");
         java.util.regex.Pattern getter = java.util.regex.Pattern.compile(
-                "(?i)\\bget(?:Password|Passwd|Token|Secret|ApiKey|PrivateKey|RecoveryCode|Credential)\\s*\\(");
+                "(?i)\\bget(?:Password|Passwd|Token|Secret|ApiKey|PrivateKey|RecoveryCode|Credential|AccountIdentifier)\\s*\\(");
         return sensitive.matcher(candidate).find() || getter.matcher(candidate).find();
     }
 }

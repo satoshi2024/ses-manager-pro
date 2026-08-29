@@ -8,6 +8,7 @@ import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.EngineerSalesService;
+import com.ses.service.AssetOffboardingService;
 import com.ses.service.OrganizationService;
 import com.ses.service.portal.PortalSessionService;
 import com.ses.service.security.PersistentSessionService;
@@ -38,6 +39,7 @@ public class ResignationGateChecker {
     private final PortalSessionService portalSessionService;
     private final ExpenseRequestMapper expenseRequestMapper;
     private final LifecycleTaskMapper lifecycleTaskMapper;
+    private final AssetOffboardingService assetOffboardingService;
 
     /**
      * 退社ゲートの全項目を検証する。
@@ -133,23 +135,36 @@ public class ResignationGateChecker {
 
         // 6. 貸与資産の返却 (ASSET_RETURN)
         LifecycleTask assetTask = findTaskByCode(lcCase.getId(), "RESIGN_ASSET_RETURN");
-        boolean assetReturned = true;
+        com.ses.dto.asset.OffboardingClearanceResultDto offboarding =
+                assetOffboardingService.checkOffboardingClearance(engineerId);
+        boolean blockersClear = offboarding.getUnreturnedAssetCount() == 0
+                && offboarding.getUnrevokedAccountCount() == 0
+                && offboarding.getUnreleasedLicenseCount() == 0;
+        boolean assetReturned = false;
         boolean assetWaived = false;
-        String assetMsg = "貸与物返却確認済み";
+        String assetMsg;
         if (assetTask != null) {
             if ("COMPLETED".equals(assetTask.getStatus())) {
-                assetReturned = true;
-            } else if ("WAIVED".equals(assetTask.getStatus())) {
+                assetReturned = blockersClear;
+                assetMsg = blockersClear
+                        ? "貸与物返却確認済み（3大blockerなし）"
+                        : "貸与物返却タスクは完了していますが、未返却・未失効・未解放のblockerが残存しています";
+            } else if ("WAIVED".equals(assetTask.getStatus()) && offboarding.isWaived()) {
                 assetReturned = true;
                 assetWaived = true;
-                assetMsg = "例外承認により返却免除済み";
+                assetMsg = blockersClear
+                        ? "例外承認により返却免除済み（3大blockerなし）"
+                        : "承認済み例外により3大blockerを免除済み";
             } else {
                 assetReturned = false;
-                assetMsg = "貸与資産返却タスク（PC、スマートフォン、入館証等）が未完了です";
+                assetMsg = "貸与資産返却タスク（PC、スマートフォン、入館証等）が未完了、または3大blockerが残存しています";
             }
         } else if ("RESIGNATION".equals(lcCase.getLifecycleType())) {
             assetReturned = false;
             assetMsg = "退社案件に必須の貸与資産返却タスク(RESIGN_ASSET_RETURN)が定義されていません";
+        } else {
+            assetReturned = blockersClear;
+            assetMsg = blockersClear ? "貸与・アカウント・ライセンスのblockerなし" : "退社blockerが残存しています";
         }
         if (!assetReturned) allPassed = false;
         items.add(GateItemResult.builder()

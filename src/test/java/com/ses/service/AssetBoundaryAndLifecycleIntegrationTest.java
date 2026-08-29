@@ -82,6 +82,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     private AssetOffboardingService assetOffboardingService;
 
     @Autowired
+    private ApprovalRequestMapper approvalRequestMapper;
+
+    @Autowired
     private AssetScopeService assetScopeService;
 
     @Autowired
@@ -206,6 +209,46 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @DisplayName("Boundary 2-C: License concurrent release decrements seats once")
+    void testLicenseConcurrentReleaseDecrementsOnce() throws Exception {
+        LicensePlan plan = LicensePlan.builder()
+                .planCode("LIC-RELEASE-CONCUR-" + System.nanoTime())
+                .planName("Concurrent Release Plan")
+                .seatLimit(1)
+                .allocatedCount(0)
+                .status("ACTIVE")
+                .build();
+        licenseService.savePlan(plan, 1L);
+        LicenseAssignment assignment = licenseService.assignLicense(
+                plan.getId(), "ENGINEER", 5101L, null, LocalDate.now(), 1L);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(2);
+        AtomicInteger failures = new AtomicInteger();
+        for (int i = 0; i < 2; i++) {
+            executor.submit(() -> {
+                try {
+                    start.await();
+                    licenseService.releaseLicense(assignment.getId(), LocalDate.now(), 1L);
+                } catch (Exception e) {
+                    failures.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        done.await(5, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(failures).hasValue(0);
+        assertThat(licensePlanMapper.selectById(plan.getId()).getAllocatedCount()).isZero();
+        assertThat(licenseAssignmentMapper.selectById(assignment.getId()).getStatus()).isEqualTo("RELEASED");
+    }
+
+    @Test
     @DisplayName("Boundary 3: Inventory disallow update after complete & disallow double complete")
     void testInventoryDisallowUpdateAndDoubleComplete() {
         AssetInventoryRun run = assetInventoryService.startInventoryRun("INV-2026-Q3", "2026-Q3棚卸し", LocalDate.now(), 1L);
@@ -231,6 +274,107 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("完了済み");
         }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @DisplayName("Boundary 3-B: Inventory completion is single-winner under concurrency")
+    void testInventoryConcurrentCompletionSingleWinner() throws Exception {
+        AssetInventoryRun run = assetInventoryService.startInventoryRun(
+                "INV-CONCURRENT-" + System.nanoTime(), "並行確定棚卸し", LocalDate.now(), 1L);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(2);
+        AtomicInteger success = new AtomicInteger();
+        AtomicInteger failure = new AtomicInteger();
+        for (int i = 0; i < 2; i++) {
+            executor.submit(() -> {
+                try {
+                    start.await();
+                    assetInventoryService.completeInventoryRun(run.getId(), 1L);
+                    success.incrementAndGet();
+                } catch (Exception e) {
+                    failure.incrementAndGet();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        done.await(5, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(success).hasValue(1);
+        assertThat(failure).hasValue(1);
+        assertThat(assetInventoryRunMapper.selectById(run.getId()).getStatus()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
+    @DisplayName("Boundary 3-C: Return and waiver have one terminal winner and one event")
+    void testConcurrentReturnAndWaiveSingleTerminalEvent() throws Exception {
+        Asset asset = Asset.builder()
+                .assetTag("AST-RETURN-WAIVE-CONCUR-" + System.nanoTime())
+                .assetName("Return Waive Concurrency PC")
+                .category("PC")
+                .status("IN_STOCK")
+                .build();
+        assetService.createAsset(asset, 1L);
+        AssetAssignment assignment = assetAssignmentService.createAssignment(
+                asset.getId(), "ENGINEER", 5201L, LocalDate.now(), LocalDate.now().plusDays(30), null, "並行検証", 1L);
+        ApprovalRequest waiverApproval = ApprovalRequest.builder()
+                .requestNo("AR-RETURN-WAIVE-" + System.nanoTime())
+                .requestType("LIFECYCLE_EXCEPTION")
+                .targetType("ASSET_ASSIGNMENT")
+                .targetId(assignment.getId())
+                .applicantId(1L)
+                .payloadJson("{}")
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .version(1)
+                .build();
+        approvalRequestMapper.insert(waiverApproval);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(2);
+        AtomicInteger success = new AtomicInteger();
+        AtomicInteger failure = new AtomicInteger();
+        executor.submit(() -> {
+            try {
+                start.await();
+                assetAssignmentService.returnAssignment(assignment.getId(), LocalDate.now(), null, "返却", 1L);
+                success.incrementAndGet();
+            } catch (Exception e) {
+                failure.incrementAndGet();
+            } finally {
+                done.countDown();
+            }
+        });
+        executor.submit(() -> {
+            try {
+                start.await();
+                assetAssignmentService.waiveAssignment(assignment.getId(), "承認済み例外", waiverApproval.getId(), 1L);
+                success.incrementAndGet();
+            } catch (Exception e) {
+                failure.incrementAndGet();
+            } finally {
+                done.countDown();
+            }
+        });
+        start.countDown();
+        done.await(5, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertThat(success).hasValue(1);
+        assertThat(failure).hasValue(1);
+        AssetAssignment finalAssignment = assetAssignmentMapper.selectById(assignment.getId());
+        assertThat(finalAssignment.getStatus()).isIn("RETURNED", "WAIVED");
+        Long terminalEvents = assetEventMapper.selectCount(new LambdaQueryWrapper<AssetEvent>()
+                .eq(AssetEvent::getAssetId, asset.getId())
+                .in(AssetEvent::getEventType, List.of("RETURNED", "WAIVED")));
+        assertThat(terminalEvents).isEqualTo(1);
     }
 
     @Test
@@ -265,6 +409,16 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             assertThat(requested.getIdempotencyKey()).isEqualTo(idempotencyKey);
             assertThat(requested.getNextRetryAt()).isNotNull();
             assertThat(requested.getRevokeConfirmedAt()).isNull();
+
+            int requestCountAfterFirstSend = mockClient.getRequestCount();
+            ExternalAccountReference duplicateRequest = externalAccountService.requestRevokeWithIdempotency(
+                    ref.getId(), idempotencyKey, 1L);
+            assertThat(duplicateRequest.getIdempotencyKey()).isEqualTo(idempotencyKey);
+            assertThat(mockClient.getRequestCount()).isEqualTo(requestCountAfterFirstSend);
+            assertThatThrownBy(() -> externalAccountService.requestRevokeWithIdempotency(
+                    ref.getId(), "REVOKE-DIFFERENT-" + ref.getId(), 1L))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("別の失効要求");
 
             // 応答形式を分類できない場合だけ UNKNOWN とし、退社 blocker を維持する
             ExternalAccountReference unknownRef = ExternalAccountReference.builder()
@@ -347,7 +501,19 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(result.getUnreleasedLicenseCount()).isGreaterThanOrEqualTo(1);
         assertThat(result.getBlockingItems()).hasSize(3);
 
-        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", 7777L, 1L);
+        ApprovalRequest approval = ApprovalRequest.builder()
+                .requestNo("AR-BLK-9999")
+                .requestType("LIFECYCLE_EXCEPTION")
+                .targetType("ENGINEER")
+                .targetId(engineerId)
+                .applicantId(1L)
+                .payloadJson("{}")
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .version(1)
+                .build();
+        approvalRequestMapper.insert(approval);
+        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", approval.getId(), 1L);
         OffboardingClearanceResultDto waivedResult = assetOffboardingService.checkOffboardingClearance(engineerId);
         assertThat(waivedResult.isClearancePassed()).isTrue();
         assertThat(waivedResult.isWaived()).isTrue();

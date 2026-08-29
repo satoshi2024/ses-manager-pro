@@ -5,6 +5,7 @@ import com.ses.entity.LicenseAssignment;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -13,6 +14,14 @@ public interface LicenseAssignmentMapper extends BaseMapper<LicenseAssignment> {
 
     @Select("SELECT * FROM t_license_assignment WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     LicenseAssignment selectByIdForUpdate(@Param("id") Long id);
+
+    @Update("UPDATE t_license_assignment SET status = 'RELEASED', released_date = #{releasedDate}, "
+            + "version = version + 1, updated_at = CURRENT_TIMESTAMP "
+            + "WHERE id = #{id} AND deleted_flag = 0 AND status = 'ACTIVE' "
+            + "AND released_date IS NULL AND version = #{expectedVersion}")
+    int releaseWithCas(@Param("id") Long id,
+                       @Param("releasedDate") java.time.LocalDate releasedDate,
+                       @Param("expectedVersion") Integer expectedVersion);
 
     @Select("""
             <script>

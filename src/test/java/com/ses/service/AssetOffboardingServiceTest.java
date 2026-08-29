@@ -4,6 +4,7 @@ import com.ses.BaseIntegrationTest;
 import com.ses.dto.asset.OffboardingClearanceResultDto;
 import com.ses.entity.*;
 import com.ses.mapper.AssetAssignmentMapper;
+import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.mapper.LicenseAssignmentMapper;
@@ -43,6 +44,9 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
     private LicenseAssignmentMapper licenseAssignmentMapper;
 
     @Autowired
+    private ApprovalRequestMapper approvalRequestMapper;
+
+    @Autowired
     private LicenseService licenseService;
 
     @Autowired
@@ -77,8 +81,20 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
         assertThat(result1.getUnreturnedAssetCount()).isEqualTo(1);
         assertThat(result1.getBlockingItems()).isNotEmpty();
 
-        // 3. 例外承認を実施
-        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", 5001L, 1L);
+        // 3. 承認済みLIFECYCLE_EXCEPTIONを対象要員へ紐付けて例外承認を実施
+        ApprovalRequest approval = ApprovalRequest.builder()
+                .requestNo("AR-OFF-9901")
+                .requestType("LIFECYCLE_EXCEPTION")
+                .targetType("ENGINEER")
+                .targetId(engineerId)
+                .applicantId(1L)
+                .payloadJson("{}")
+                .routeSnapshotJson("[]")
+                .status("APPROVED")
+                .version(1)
+                .build();
+        approvalRequestMapper.insert(approval);
+        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", approval.getId(), 1L);
 
         // 4. クリアランス再チェック（例外承認によりパスすること）
         OffboardingClearanceResultDto result2 = assetOffboardingService.checkOffboardingClearance(engineerId);

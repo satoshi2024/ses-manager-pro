@@ -7,8 +7,12 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
+import com.ses.entity.ApprovalRequest;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
+import com.ses.mapper.ApprovalRequestMapper;
+import com.ses.mapper.LifecycleCaseMapper;
+import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetEventService;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +34,9 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
     private final AssetMapper assetMapper;
     private final AssetEventService assetEventService;
     private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
+    private final ApprovalRequestMapper approvalRequestMapper;
+    private final LifecycleTaskMapper lifecycleTaskMapper;
+    private final LifecycleCaseMapper lifecycleCaseMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -126,32 +133,50 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
                                             Long returnEvidenceDocId,
                                             String note,
                                             Long actorUserId) {
-        AssetAssignment assignment = getById(assignmentId);
-        if (assignment == null) {
-            throw new BusinessException("指定された貸与データが見つかりません。");
-        }
-        if (assignment.getActualReturnDate() != null || "RETURNED".equals(assignment.getStatus())) {
-            throw new BusinessException("この貸与は既に返却完了しています。");
-        }
-
         if (actualReturnDate == null) {
             actualReturnDate = LocalDate.now();
         }
 
-        // 1. 資産を行ロック
-        Asset asset = assetMapper.selectByIdForUpdate(assignment.getAssetId());
+        // 1. 常に資産→貸与の順でロックする。返却と例外免除の順序を揃え、deadlockを防止する。
+        AssetAssignment hint = assetAssignmentMapper.selectById(assignmentId);
+        if (hint == null) {
+            throw new BusinessException("指定された貸与データが見つかりません。");
+        }
+        Asset asset = assetMapper.selectByIdForUpdate(hint.getAssetId());
         if (asset == null) {
             throw new BusinessException("対象の資産が見つかりません。");
         }
 
-        // 2. 貸与レコード更新
+        AssetAssignment assignment = assetAssignmentMapper.selectByIdForUpdate(assignmentId);
+        if (assignment == null) {
+            throw new BusinessException("指定された貸与データが見つかりません。");
+        }
+        if (!asset.getId().equals(assignment.getAssetId())) {
+            throw new BusinessException(409, "貸与対象資産が変更されたため、返却を再実行してください。");
+        }
+        if (assignment.getActualReturnDate() != null || !List.of("ACTIVE", "OVERDUE").contains(assignment.getStatus())) {
+            throw new BusinessException("この貸与は既に返却または免除済みです。");
+        }
+        if (StringUtils.hasText(note)) {
+            note = StringUtils.hasText(assignment.getNote()) ? assignment.getNote() + " / " + note : note;
+        } else {
+            note = assignment.getNote();
+        }
+
+        // 2. 資産状態と貸与終端状態をともにCAS更新してから履歴を追記する。
+        int assetRows = assetMapper.updateStatusWithCas(asset.getId(), "ASSIGNED", "IN_STOCK", asset.getVersion());
+        if (assetRows != 1) {
+            throw new BusinessException(409, "資産状態の更新が競合しました。再読み込みして返却してください。");
+        }
+        int assignmentRows = assetAssignmentMapper.markReturnedWithCas(
+                assignment.getId(), actualReturnDate, returnEvidenceDocId, note, assignment.getVersion());
+        if (assignmentRows != 1) {
+            throw new BusinessException(409, "貸与状態の更新が競合しました。再読み込みして返却してください。");
+        }
         assignment.setActualReturnDate(actualReturnDate);
         assignment.setReturnEvidenceDocId(returnEvidenceDocId);
         assignment.setStatus("RETURNED");
-        if (StringUtils.hasText(note)) {
-            assignment.setNote(StringUtils.hasText(assignment.getNote()) ? assignment.getNote() + " / " + note : note);
-        }
-        updateById(assignment);
+        assignment.setNote(note);
 
         // DocumentLink 連携（返却証跡）
         if (returnEvidenceDocId != null) {
@@ -162,12 +187,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
             documentLinkMapper.insert(link);
         }
 
-        // 3. 資産ステータスを IN_STOCK に復帰（現在 ASSIGNED の場合のみ）
-        if ("ASSIGNED".equals(asset.getStatus())) {
-            assetMapper.updateStatusWithCas(asset.getId(), "ASSIGNED", "IN_STOCK", asset.getVersion());
-        }
-
-        // 4. イベント記録
+        // 3. イベント記録（状態更新が両方成功した後だけ記録する）
         assetEventService.recordEvent(
                 asset.getId(),
                 "RETURNED",
@@ -192,25 +212,43 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
                                             String reason,
                                             Long approvalRequestId,
                                             Long actorUserId) {
-        AssetAssignment assignment = getById(assignmentId);
-        if (assignment == null) {
+        // 返却と同じ資産→貸与の固定lock orderを使用する。
+        AssetAssignment hint = assetAssignmentMapper.selectById(assignmentId);
+        if (hint == null) {
             throw new BusinessException("指定された貸与データが見つかりません。");
         }
-        if ("RETURNED".equals(assignment.getStatus()) || "WAIVED".equals(assignment.getStatus())) {
+        Asset asset = assetMapper.selectByIdForUpdate(hint.getAssetId());
+        if (asset == null) {
+            throw new BusinessException("対象の資産が見つかりません。");
+        }
+        AssetAssignment assignment = assetAssignmentMapper.selectByIdForUpdate(assignmentId);
+        if (assignment == null || !asset.getId().equals(assignment.getAssetId())) {
+            throw new BusinessException(409, "貸与対象資産が変更されたため、免除を再実行してください。");
+        }
+        if (assignment.getActualReturnDate() != null || !List.of("ACTIVE", "OVERDUE").contains(assignment.getStatus())) {
             throw new BusinessException("この貸与は既に返却または免除済みです。");
         }
-
-        assignment.setStatus("WAIVED");
-        assignment.setActualReturnDate(LocalDate.now());
+        assertWaiverApproval(assignment, approvalRequestId);
+        if (!"ASSIGNED".equals(asset.getStatus())) {
+            throw new BusinessException(409, "資産状態が貸与中ではないため、免除を完了できません。");
+        }
+        LocalDate waivedDate = LocalDate.now();
+        String updatedNote = assignment.getNote();
         if (StringUtils.hasText(reason)) {
-            assignment.setNote(StringUtils.hasText(assignment.getNote()) ? assignment.getNote() + " [例外免除: " + reason + "]" : "[例外免除: " + reason + "]");
+            updatedNote = StringUtils.hasText(updatedNote) ? updatedNote + " [例外免除: " + reason + "]" : "[例外免除: " + reason + "]";
         }
-        updateById(assignment);
-
-        Asset asset = assetMapper.selectByIdForUpdate(assignment.getAssetId());
-        if (asset != null && "ASSIGNED".equals(asset.getStatus())) {
-            assetMapper.updateStatusWithCas(asset.getId(), "ASSIGNED", "IN_STOCK", asset.getVersion());
+        int assetRows = assetMapper.updateStatusWithCas(asset.getId(), "ASSIGNED", "IN_STOCK", asset.getVersion());
+        if (assetRows != 1) {
+            throw new BusinessException(409, "資産状態の更新が競合しました。免除を再実行してください。");
         }
+        int assignmentRows = assetAssignmentMapper.markWaivedWithCas(
+                assignment.getId(), waivedDate, updatedNote, assignment.getVersion());
+        if (assignmentRows != 1) {
+            throw new BusinessException(409, "貸与状態の更新が競合しました。免除を再実行してください。");
+        }
+        assignment.setStatus("WAIVED");
+        assignment.setActualReturnDate(waivedDate);
+        assignment.setNote(updatedNote);
 
         assetEventService.recordEvent(
                 assignment.getAssetId(),
@@ -226,6 +264,32 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
         );
 
         return assignment;
+    }
+
+    private void assertWaiverApproval(AssetAssignment assignment, Long approvalRequestId) {
+        if (approvalRequestId == null) {
+            throw new BusinessException(400, "貸与免除には承認済みの例外申請が必要です。");
+        }
+        ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
+        if (approval == null || !"LIFECYCLE_EXCEPTION".equals(approval.getRequestType())
+                || approval.getStatus() == null || !"APPROVED".equalsIgnoreCase(approval.getStatus())) {
+            throw new BusinessException(400, "有効な承認済み例外申請が見つかりません。");
+        }
+        boolean targetMatches = "ASSET_ASSIGNMENT".equals(approval.getTargetType())
+                && assignment.getId().equals(approval.getTargetId());
+        if (!targetMatches && "ENGINEER".equals(assignment.getAssigneeType())) {
+            targetMatches = "ENGINEER".equals(approval.getTargetType())
+                    && assignment.getAssigneeId().equals(approval.getTargetId());
+        }
+        if (!targetMatches && "LIFECYCLE_TASK".equals(approval.getTargetType()) && approval.getTargetId() != null) {
+            var task = lifecycleTaskMapper.selectById(approval.getTargetId());
+            var lcCase = task == null ? null : lifecycleCaseMapper.selectById(task.getCaseId());
+            targetMatches = task != null && "RESIGN_ASSET_RETURN".equals(task.getTaskCode())
+                    && lcCase != null && assignment.getAssigneeId().equals(lcCase.getEngineerId());
+        }
+        if (!targetMatches) {
+            throw new BusinessException(400, "例外申請の対象が指定貸与と一致しません。");
+        }
     }
 
     @Override

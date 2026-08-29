@@ -123,7 +123,8 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
     public LicenseAssignment releaseLicense(Long assignmentId,
                                             LocalDate releasedDate,
                                             Long actorUserId) {
-        LicenseAssignment assignment = licenseAssignmentMapper.selectById(assignmentId);
+        // 割当行を先にロックし、同じACTIVE割当を二つのtransactionが解放できないようにする。
+        LicenseAssignment assignment = licenseAssignmentMapper.selectByIdForUpdate(assignmentId);
         if (assignment == null) {
             throw new BusinessException("指定されたライセンス割当が見つかりません。");
         }
@@ -136,13 +137,22 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
         }
 
         LicensePlan plan = licensePlanMapper.selectByIdForUpdate(assignment.getPlanId());
-        if (plan != null) {
-            licensePlanMapper.decrementAllocatedCountWithCas(plan.getId(), plan.getVersion());
+        if (plan == null) {
+            throw new BusinessException(409, "ライセンスプランが見つからないため、解放を完了できません。");
+        }
+
+        int assignmentRows = licenseAssignmentMapper.releaseWithCas(
+                assignment.getId(), releasedDate, assignment.getVersion());
+        if (assignmentRows != 1) {
+            throw new BusinessException(409, "ライセンス割当の更新が競合しました。再読み込みして解放してください。");
+        }
+        int planRows = licensePlanMapper.decrementAllocatedCountWithCas(plan.getId(), plan.getVersion());
+        if (planRows != 1) {
+            throw new BusinessException(409, "ライセンス席数の更新が競合しました。再読み込みして解放してください。");
         }
 
         assignment.setStatus("RELEASED");
         assignment.setReleasedDate(releasedDate);
-        licenseAssignmentMapper.updateById(assignment);
 
         log.info("License released: assignmentId={}, planId={}", assignmentId, assignment.getPlanId());
         return assignment;

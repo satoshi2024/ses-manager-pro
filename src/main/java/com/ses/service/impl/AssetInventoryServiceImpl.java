@@ -98,13 +98,20 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
                                               String discrepancyReason,
                                               String resolutionAction,
                                               Long actorUserId) {
-        AssetInventoryItem item = assetInventoryItemMapper.selectById(itemId);
+        // runを先にロックする。完了確定と明細更新のlock orderを一致させ、確定後の更新を防止する。
+        AssetInventoryItem hint = assetInventoryItemMapper.selectById(itemId);
+        if (hint == null) {
+            throw new BusinessException("指定された棚卸し明細が見つかりません。");
+        }
+        AssetInventoryRun run = assetInventoryRunMapper.selectByIdForUpdate(hint.getInventoryRunId());
+        AssetInventoryItem item = assetInventoryItemMapper.selectByIdForUpdate(itemId);
         if (item == null) {
             throw new BusinessException("指定された棚卸し明細が見つかりません。");
         }
-
-        AssetInventoryRun run = getById(item.getInventoryRunId());
-        if (run != null && "COMPLETED".equals(run.getStatus())) {
+        if (run == null) {
+            throw new BusinessException("指定された棚卸し計画が見つかりません。");
+        }
+        if ("COMPLETED".equals(run.getStatus())) {
             throw new BusinessException("完了済みの棚卸し明細は変更できません。");
         }
 
@@ -127,7 +134,8 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AssetInventoryRun completeInventoryRun(Long runId, Long actorUserId) {
-        AssetInventoryRun run = getById(runId);
+        // 明細更新と同じrun行を先にロックする。二重確定と確定中の明細変更を直列化する。
+        AssetInventoryRun run = assetInventoryRunMapper.selectByIdForUpdate(runId);
         if (run == null) {
             throw new BusinessException("指定された棚卸し計画が見つかりません。");
         }

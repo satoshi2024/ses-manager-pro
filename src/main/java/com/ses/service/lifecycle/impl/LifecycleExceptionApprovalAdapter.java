@@ -12,6 +12,7 @@ import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.lifecycle.LifecycleTaskService;
+import com.ses.service.AssetOffboardingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -30,6 +31,7 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
     private final LifecycleTaskMapper taskMapper;
     private final LifecycleCaseMapper caseMapper;
     private final LifecycleTaskService taskService;
+    private final AssetOffboardingService assetOffboardingService;
     private final ObjectMapper objectMapper;
     private final com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
 
@@ -134,6 +136,15 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
         Long taskId = request.getTargetId();
         String reason = (String) payload.get("reason");
         taskService.waiveTask(taskId, request.getApplicantId(), request.getId(), reason);
+
+        LifecycleTask task = require(taskId);
+        if ("RESIGN_ASSET_RETURN".equals(task.getTaskCode())) {
+            LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
+            if (lcCase != null) {
+                assetOffboardingService.approveOffboardingWaiver(
+                        lcCase.getEngineerId(), reason, request.getId(), request.getApplicantId());
+            }
+        }
     }
 
     private LifecycleTask require(Long id) {

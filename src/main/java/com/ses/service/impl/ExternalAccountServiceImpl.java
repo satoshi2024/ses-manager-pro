@@ -137,17 +137,46 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
             return current;
         }
 
-        if (StringUtils.hasText(idempotencyKey)) {
-            current.setIdempotencyKey(idempotencyKey);
+        String requestKey = StringUtils.hasText(idempotencyKey)
+                ? idempotencyKey.trim()
+                : "asset-revoke-" + id;
+
+        ExternalAccountReference sameKey = externalAccountReferenceMapper.selectByIdempotencyKey(requestKey);
+        if (sameKey != null && !id.equals(sameKey.getId())) {
+            throw new BusinessException(409, "失効要求の冪等性キーが別のアカウントに割り当て済みです。");
         }
-        current.setStatus("PENDING_CONFIRMATION");
-        current.setRevokeRequestedAt(LocalDateTime.now());
-        current.setRetryCount(0);
-        current.setNextRetryAt(LocalDateTime.now());
-        updateById(current);
+        if (StringUtils.hasText(current.getIdempotencyKey())
+                && !requestKey.equals(current.getIdempotencyKey())) {
+            throw new BusinessException(409, "このアカウントには別の失効要求が進行中です。");
+        }
+        // 既に同じkeyで要求済みならproviderへ再送しない。確認処理はpoll jobへ委譲する。
+        if (requestKey.equals(current.getIdempotencyKey())) {
+            return current;
+        }
+
+        LocalDateTime requestedAt = LocalDateTime.now();
+        int claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt);
+        if (claimed != 1) {
+            // 同一keyの並行claimは先着だけがproviderを呼ぶ。後着はcommit済み状態を再読する。
+            ExternalAccountReference latest = getById(id);
+            if (latest != null && requestKey.equals(latest.getIdempotencyKey())) {
+                return latest;
+            }
+            throw new BusinessException(409, "失効要求の登録が他の操作と競合しました。再試行してください。");
+        }
+        current = getById(id);
 
         // プロバイダへ失効リクエスト
-        boolean sent = providerClient.requestRevoke(current);
+        boolean sent;
+        try {
+            sent = providerClient.requestRevoke(current);
+        } catch (RuntimeException ex) {
+            current.setExternalSyncStatus("SYNC_FAILED");
+            current.setLastErrorMessage("Provider revoke request failed");
+            current.setNextRetryAt(LocalDateTime.now().plusMinutes(5));
+            updateById(current);
+            return getById(id);
+        }
         if (sent) {
             ExternalAccountProviderClient.RevokeConfirmationStatus conf = providerClient.checkRevokeConfirmation(current);
             if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
@@ -155,8 +184,22 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
             } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN) {
                 current.setStatus("UNKNOWN");
                 current.setLastErrorMessage("Provider revoke response could not be classified");
+                current.setExternalSyncStatus("SYNC_FAILED");
+                updateById(current);
+            } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT) {
+                current.setStatus("PENDING_CONFIRMATION");
+                current.setLastErrorMessage("Provider revoke confirmation timed out");
+                current.setExternalSyncStatus("TIMEOUT");
+                // 初回timeoutは直後のpollを許可し、poll側で指数backoffの次回時刻を確定する。
+                current.setNextRetryAt(LocalDateTime.now());
                 updateById(current);
             }
+        } else {
+            current.setStatus("PENDING_CONFIRMATION");
+            current.setLastErrorMessage("Provider revoke request was not accepted");
+            current.setExternalSyncStatus("SYNC_FAILED");
+            current.setNextRetryAt(LocalDateTime.now());
+            updateById(current);
         }
         return getById(id);
     }

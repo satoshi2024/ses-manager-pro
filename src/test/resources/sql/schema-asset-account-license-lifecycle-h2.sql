@@ -2,6 +2,18 @@
 -- NF-09 資産・外部アカウント・ライセンス管理（H2 テストスキーマ）
 -- ===================================================================
 
+CREATE TABLE IF NOT EXISTS t_asset_offboarding_waiver (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    engineer_id BIGINT NOT NULL,
+    approval_request_id BIGINT NOT NULL UNIQUE,
+    reason VARCHAR(1000) NOT NULL,
+    approved_by BIGINT,
+    approved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS m_asset (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     asset_tag VARCHAR(64) NOT NULL UNIQUE,
