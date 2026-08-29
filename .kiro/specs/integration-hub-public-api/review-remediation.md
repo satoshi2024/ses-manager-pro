@@ -58,6 +58,7 @@ exportは引き続きこのimplementation scope外である。
 - R-NF05 Plan remediation commit: b0151e7d8acc54da124c4464db1df263e4b3f716
 - R-NF05 delta Plan Review result: 678eac3f09b7ed54419655fcf326e0b15c6d7d62、PLAN FAIL（P0=0、P1=2）
 - R-NF05 residual remediation commit: a3b63d70f53bc799d1abcb6e26e34ad163aa9843
+- R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応
