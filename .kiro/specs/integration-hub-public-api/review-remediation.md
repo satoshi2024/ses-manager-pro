@@ -41,3 +41,15 @@ usage/billing・field/resource/command・webhook signature/retry/DLQ retention�
 - Review baseline Head: 6e0f5067d9a6509775225278cc0dcfdc4d47643f
 - Task 0R remediation commit: 48037c923224f684968dbaf3410cdb37307ed100
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
+
+## Task 0R delta対応
+
+| Delta finding | 対応 | 状態 |
+|---|---|---|
+| engineer-availability countがinventoryを越える | candidate OpenAPIからcount pathを削除。inventoryのlist/detailと一致 | SPEC_ADDRESSED |
+| client指定asOfがdesignと矛盾 | 全query parameterからasOfを削除。server受信時刻をresponse/cursorへ固定する候補に統一 | SPEC_ADDRESSED |
+| HTTP statusとerror codeの未固定 | statusごとの専用error schemaとcode enum、status/code map、scope外detailの404収束候補を追加 | SPEC_ADDRESSED |
+| 成功/error responseのcorrelation header不統一 | 全GET success responseと共通error responseへX-Correlation-IDを追加 | SPEC_ADDRESSED |
+| DG-05、scope、Owner、Base、auth、SLA、field inventory | 承認記録なしのまま維持 | OWNER_GATE |
+
+Task 0R-Dもdocs-onlyであり、OpenAPI implementation、contract test、security test、F1〜MをPASS扱いにしない。

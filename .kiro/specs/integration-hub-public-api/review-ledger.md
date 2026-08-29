@@ -37,6 +37,7 @@
 - T0: read-only inventory、文書ドラフト、dedicated worktree、通常checkout非変更を確認。Discovery Review Headは6e0f5067。
 - Task 0R: atomic outbox、candidate OpenAPI、metrics cardinality、payload retention、review traceをdocs-onlyでSPEC_ADDRESSED。
   remediation commitは48037c923224f684968dbaf3410cdb37307ed100。
+- Task 0R-D: count/asOf/status-code/correlation headerのdelta指摘をdocs-onlyでSPEC_ADDRESSED。実装とOwner Gateは未完了。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。

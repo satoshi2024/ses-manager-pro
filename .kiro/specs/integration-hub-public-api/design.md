@@ -90,12 +90,16 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 
 version namespaceは/external-api/v1/**とし、OpenAPIを手書きまたは生成物として固定する。responseは専用
 external DTOのみを使い、entityの継承、reflectionによる自動全field変換、Mapの透過返却を禁止する。
-cursorはopaqueで、scope/client/as-of/sort/filterへbindする。countとexportはlistと同一predicateを使い、
+clientからas-ofを指定するquery parameterはcandidateでは公開しない。list/detail/countのas-ofはrequest受信時の
+server clockで固定し、responseとopaque cursorへだけ反映する。cursorはscope/client/as-of/sort/filterへbindする。
+countとexportはlistと同一predicateを使い、
 権限外件数、存在判定、ページ境界から他client dataを推測できないようにする。
 
 error bodyはstable code、message、correlationId、必要最小限のfield errorのみとし、stack、SQL、内部ID、
-provider本文、DLQ内部理由を出さない。認証失敗、scope不足、存在しないresourceの区別はresourceごとに
-非列挙方針を固定する。
+provider本文、DLQ内部理由を出さない。candidate status/code mappingは400=RequestInvalidまたはCursorInvalid、
+401=AuthenticationFailed、403=ForbiddenScope、404=ResourceNotFound、429=RateLimited、
+500=InternalErrorに限定する。scope外detailと不存在detailは404/ResourceNotFoundへ収束させる候補とし、
+list/countはscope適用後の母集団だけを返す。最終non-enumeration規則はOwner Gateである。
 
 commandはIdempotency-Keyを必須とし、正規化したrequest bodyとendpoint/clientを含むdigestを保存する。
 同じkey・同じdigestは保存済み結果を返し、同じkey・別digestはconflictを返す。並行requestは一つだけ

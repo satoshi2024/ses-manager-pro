@@ -26,6 +26,16 @@ Base branch、Base commitのうち一つでも未承認・未提供なら、prod
 - Demo: atomic outboxの同一DB transaction、claim/HTTP/CAS分離、bounded metrics、candidate retention、
   default-deny command/exportを独立Reviewが確認できる。
 
+## Task 0R-D: Task 0R delta Review remediation（spec only）
+
+- [x] Objective: count surface、client指定asOf、status/code mapping、response correlation headerのdelta指摘を解消する。
+- Implementation: engineer-availability count endpointと全client指定asOf parameterを削除し、status別error
+  schema、scope外detailの404収束候補、全成功/error responseのX-Correlation-IDをopenapi-candidateへ反映する。
+- Test requirements: YAML parse、GET-only path数、engineer count不存在、AsOf query parameter不存在、
+  status別code enum、全response correlation header、production source/migration/test差分0。
+- Demo: inventoryのoperation表とcandidate OpenAPIのpath/parameter/error/header集合が一致し、未承認のまま
+  公開許可・実装PASSへ昇格していないことを確認する。
+
 ## Task F1: client / credential / scope / idempotency DDL
 
 - [ ] Objective: client、credential version、scope、idempotency、usage bucket、webhook/inboundの保存契約を実装する。

@@ -16,6 +16,16 @@ info:
   x-version-retirement-policy: >
     Candidate rule only: deprecation noticeは後継versionとmigration planを添えて180日以上前に通知し、
     retirementはDG-05 Owner承認とsecurity review PASS後にだけ行う。最終SLAは未承認。
+  x-error-status-code-map:
+    '400': [REQUEST_INVALID, CURSOR_INVALID]
+    '401': [AUTHENTICATION_FAILED]
+    '403': [FORBIDDEN_SCOPE]
+    '404': [RESOURCE_NOT_FOUND]
+    '429': [RATE_LIMITED]
+    '500': [INTERNAL_ERROR]
+  x-non-enumeration-rule: >
+    Scope外のdetail targetは存在しないtargetと同じ404/RESOURCE_NOT_FOUNDへ収束させる候補。
+    list/countではscope外rowを母集団へ含めず、error、cursor、件数から存在を推測できないようにする。
 servers:
   - url: https://api.example.invalid
     description: Candidate placeholder server; production endpoint is not approved.
@@ -36,7 +46,6 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
@@ -70,7 +79,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/PublicEngineerId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
@@ -93,39 +101,6 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
-  /external-api/v1/engineer-availability/count:
-    get:
-      tags: [engineer-availability]
-      operationId: countEngineerAvailability
-      summary: Count candidate engineer availability
-      security:
-        - publicClientAuthentication: []
-      x-required-client-scope: integration.availability.read
-      x-data-scope: tenant + legal entity + engineer allow-list
-      x-command-permission: integration.engineer-availability.read
-      description: >
-        Count uses exactly the list predicate and must not reveal scope-excluded population.
-        Final non-enumeration behavior is DG-05 Owner approval gate.
-      parameters:
-        - $ref: '#/components/parameters/CorrelationId'
-        - $ref: '#/components/parameters/AsOf'
-      responses:
-        '200':
-          description: Candidate count response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CountResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '429':
-          $ref: '#/components/responses/RateLimited'
-        '500':
-          $ref: '#/components/responses/ServerError'
   /external-api/v1/projects:
     get:
       tags: [project]
@@ -140,10 +115,12 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -171,10 +148,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/PublicProjectId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -203,10 +182,12 @@ paths:
       x-command-permission: integration.project.read
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -235,10 +216,12 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -266,10 +249,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/PublicContractId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -298,10 +283,12 @@ paths:
       x-command-permission: integration.contract-status.read
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -330,10 +317,12 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -361,10 +350,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/PublicInvoiceId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -393,10 +384,12 @@ paths:
       x-command-permission: integration.invoice-status.read
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
-        - $ref: '#/components/parameters/AsOf'
       responses:
         '200':
           description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
           content:
             application/json:
               schema:
@@ -451,14 +444,6 @@ components:
       description: >
         Opaque cursor bound server-side to client, granted scope, data scope, tenant, as-of, filter, stable sort,
         and expiry. Database IDs and offset state are not public contract.
-    AsOf:
-      name: asOf
-      in: query
-      required: false
-      schema:
-        type: string
-        format: date-time
-      description: Candidate server-time snapshot binding. Timezone and historical policy are unapproved.
     PublicEngineerId:
       name: publicEngineerId
       in: path
@@ -505,31 +490,45 @@ components:
   responses:
     BadRequest:
       description: Stable validation error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/BadRequestError'
     Unauthorized:
       description: Stable authentication error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/UnauthorizedError'
     Forbidden:
       description: Stable authorization error with non-enumeration policy
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/ForbiddenError'
     NotFound:
-      description: Stable non-enumerating resource error
+      description: Stable non-enumerating resource error for nonexistent or scope-excluded targets
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/NotFoundError'
     RateLimited:
       description: Stable rate limit error
       headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
         Retry-After:
           schema:
             type: integer
@@ -537,13 +536,16 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/RateLimitedError'
     ServerError:
       description: Stable safe server error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ApiError'
+            $ref: '#/components/schemas/ServerError'
   schemas:
     EngineerAvailability:
       type: object
@@ -768,23 +770,18 @@ components:
         asOf:
           type: string
           format: date-time
-    ApiError:
+    BadRequestError:
       type: object
       additionalProperties: false
       required: [code, message, correlationId, retryable]
+      x-status-code: 400
+      x-allowed-error-codes: [REQUEST_INVALID, CURSOR_INVALID]
       x-allow-list-fields: [code, message, correlationId, retryable, fieldErrors]
       x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
       properties:
         code:
           type: string
-          enum:
-            - AUTHENTICATION_FAILED
-            - FORBIDDEN_SCOPE
-            - RESOURCE_NOT_FOUND
-            - REQUEST_INVALID
-            - CURSOR_INVALID
-            - RATE_LIMITED
-            - INTERNAL_ERROR
+          enum: [REQUEST_INVALID, CURSOR_INVALID]
         message:
           type: string
           maxLength: 256
@@ -808,3 +805,108 @@ components:
               code:
                 type: string
                 maxLength: 64
+    UnauthorizedError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 401
+      x-allowed-error-codes: [AUTHENTICATION_FAILED]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [AUTHENTICATION_FAILED]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    ForbiddenError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 403
+      x-allowed-error-codes: [FORBIDDEN_SCOPE]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [FORBIDDEN_SCOPE]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    NotFoundError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 404
+      x-allowed-error-codes: [RESOURCE_NOT_FOUND]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [RESOURCE_NOT_FOUND]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    RateLimitedError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 429
+      x-allowed-error-codes: [RATE_LIMITED]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [RATE_LIMITED]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    ServerError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 500
+      x-allowed-error-codes: [INTERNAL_ERROR]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [INTERNAL_ERROR]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean

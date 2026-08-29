@@ -43,8 +43,11 @@
 3. list/detail/count/exportの認可母集団はclient scope×data scope×field permissionで同一にする。
    count、cursor、error、empty responseから他clientの存在、件数、ID、期間、金額を推測できない。
 4. listはopaque cursor、stable sort、limit上限、cursor失効/tenant bindingを持つ。page offsetや
-   database idを外部契約へそのまま漏らさない。
-5. stable error code、correlation ID、retryable判定だけを返す。認証失敗・scope外・不存在の
+   database idを外部契約へそのまま漏らさない。client指定asOf queryはcandidateでは公開せず、
+   request受信時server clockでas-ofを固定してresponse/cursorへbindする。
+5. HTTP statusごとのstable error code集合、correlation ID、retryable判定だけを返す。candidate mappingは
+   400=request/cursor invalid、401=authentication failed、403=forbidden scope、404=resource not found、
+   429=rate limited、500=internal errorに限定する。認証失敗・scope外・不存在の
    distinctionがclient dataを推測させる場合は同一の外部エラー契約に収束させる。
 6. commandは承認済みの限定操作だけとし、万能CRUDを公開しない。Idempotency-Keyとcanonical
    request digestを必須とする。同一key・同一payloadは最初の結果を再返却し、同一key・別payloadは
