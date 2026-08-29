@@ -403,12 +403,13 @@ function renderEngineers(records) {
                 <td class="text-light">${SES.escapeHtml(eng.primarySalesUserName || '-')}</td>
                 <td>${eng.retentionHighRisk ? '<span class="badge bg-danger">' + SES.i18n.t('engineerFollowup.riskLevel.high') + ' (' + eng.retentionRiskScore + ')</span>' : '<span class="text-muted small">' + (eng.retentionRiskScore != null ? eng.retentionRiskScore : '-') + '</span>'}</td>
                 <td class="text-end pe-4">
-                    <div class="btn-group btn-group-sm" role="group">
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><div class="btn-group btn-group-sm" role="group">
                         <a href="/engineer/detail?id=${eng.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
                         <button type="button" class="btn btn-outline-info text-info border-info" onclick="editEngineer(${eng.id})"><i class="bi bi-pencil"></i></button>
                         <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteEngineer(${eng.id})"><i class="bi bi-trash"></i></button>
                     </div>
-                </td>
+                </div>
+</td>
             </tr>
         `;
         tbody.append(tr);

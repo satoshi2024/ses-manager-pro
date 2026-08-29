@@ -14,7 +14,10 @@ function load(p) {
         status: document.getElementById('searchStatus').value || '',
         current: page.current, size: page.size
     };
-    SES.api.get('/api/one-on-ones', params).then(d => { page = { current: d.current, size: d.size, total: d.total }; render(d.records || []); }).catch(() => {});
+    SES.api.get('/api/one-on-ones', params).then(d => { page = { current: d.current, size: d.size, total: d.total }; render(d.records || []); }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '1on1一覧の取得に失敗しました');
+    });
 }
 
 function render(rows) {
@@ -77,18 +80,33 @@ function openDetail(id) {
         const btn = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
         btn('btn-schedule', () => {
             const date = document.getElementById('schedule-date').value;
-            SES.api.post('/api/one-on-ones/' + r.id + '/schedule', { scheduledAt: date }).then(() => { load(page.current); openDetail(r.id); });
+            runOneOnOneAction(r.id, 'schedule', { scheduledAt: date });
         });
         btn('btn-complete', () => {
             const note = document.getElementById('done-note').value;
-            SES.api.post('/api/one-on-ones/' + r.id + '/complete', { employeeVisibleNote: note }).then(() => { load(page.current); openDetail(r.id); });
+            runOneOnOneAction(r.id, 'complete', { employeeVisibleNote: note });
         });
         btn('btn-cancel', () => {
-            SES.api.post('/api/one-on-ones/' + r.id + '/cancel', { reason: '管理側取消' }).then(() => { load(page.current); openDetail(r.id); });
+            runOneOnOneAction(r.id, 'cancel', { reason: '管理側取消' });
         });
         btn('btn-private', () => {
             const note = document.getElementById('private-note').value;
-            SES.api.post('/api/one-on-ones/' + r.id + '/private-note', { note }).then(() => { load(page.current); openDetail(r.id); });
+            runOneOnOneAction(r.id, 'private-note', { note });
         });
-    }).catch(() => {});
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '1on1詳細の取得に失敗しました');
+    });
+}
+
+function runOneOnOneAction(id, action, payload) {
+    SES.api.post('/api/one-on-ones/' + encodeURIComponent(id) + '/' + action, payload)
+        .then(() => {
+            load(page.current);
+            openDetail(id);
+        })
+        .catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '1on1の更新に失敗しました');
+        });
 }

@@ -9,7 +9,7 @@
     
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h4 class="text-white fw-bold mb-1"><i class="bi bi-envelope-paper me-2 text-accent-blue"></i><th:block th:text="#{emailTemplate.title}">メールテンプレート管理</th:block></h4>
+            <h4 class="fw-bold mb-1"><i class="bi bi-envelope-paper me-2 text-accent-blue"></i><th:block th:text="#{emailTemplate.title}">メールテンプレート管理</th:block></h4>
             <p class="text-muted small mb-0" th:text="#{emailTemplate.subtitle}">提案・面接依頼・フォローアップなどの定型文管理</p>
         </div>
         <div>
@@ -20,11 +20,11 @@
     </div>
 
     <!-- Table -->
-    <div class="card bg-card border-dark shadow-sm">
+    <div class="card bg-card border-theme shadow-sm">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-dark table-hover table-striped mb-0 align-middle">
-                    <thead class="table-secondary border-dark">
+                <table class="table table-theme table-hover table-striped mb-0 align-middle">
+                    <thead class="table-theme-header border-theme">
                         <tr>
                             <th class="px-4 py-3 text-muted small text-uppercase" style="width: 25%;" th:text="#{emailTemplate.table.templateName}">テンプレート名</th>
                             <th class="py-3 text-muted small text-uppercase" style="width: 15%;" th:text="#{emailTemplate.table.type}">種類</th>
@@ -43,10 +43,10 @@
     <!-- Modal for Create/Edit -->
     <div class="modal fade" id="templateModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
-            <div class="modal-content bg-card border-dark shadow-lg">
-                <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold" id="modal-title" th:text="#{emailTemplate.modal.title.edit}">テンプレート編集</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            <div class="modal-content bg-card border-theme shadow-lg">
+                <div class="modal-header border-theme bg-tertiary">
+                    <h5 class="modal-title fw-bold" id="modal-title" th:text="#{emailTemplate.modal.title.edit}">テンプレート編集</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="閉じる"></button>
                 </div>
                 <div class="modal-body p-4">
                     <form id="template-form">
@@ -55,11 +55,11 @@
                         <div class="row g-3 mb-3">
                             <div class="col-md-8">
                                 <label class="form-label text-muted small"><th:block th:text="#{emailTemplate.table.templateName}">テンプレート名</th:block> <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control form-control-dark bg-secondary text-white border-dark" id="template-name" required>
+                                <input type="text" class="form-control border-theme" id="template-name" required>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label text-muted small"><th:block th:text="#{emailTemplate.table.type}">種類</th:block> <span class="text-danger">*</span></label>
-                                <select class="form-select form-select-dark bg-secondary text-white border-dark" id="template-type" required>
+                                <select class="form-select border-theme" id="template-type" required>
                                     <option value="提案" th:text="#{emailTemplate.type.proposal}">提案</option>
                                     <option value="面接依頼" th:text="#{emailTemplate.type.interview}">面接依頼</option>
                                     <option value="お礼" th:text="#{emailTemplate.type.thanks}">お礼</option>
@@ -71,21 +71,21 @@
 
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{emailTemplate.table.subject}">件名</th:block> <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control form-control-dark bg-secondary text-white border-dark" id="subject-template" required>
+                            <input type="text" class="form-control border-theme" id="subject-template" required>
                             <div class="form-text text-muted small mt-1"><th:block th:text="#{emailTemplate.hint.variables1}">利用可能な変数: {customer_name}, {engineer_name}, {project_name}</th:block></div>
                         </div>
 
                         <div class="mb-3">
                             <label class="form-label text-muted small"><th:block th:text="#{emailTemplate.label.body}">本文</th:block> <span class="text-danger">*</span></label>
-                            <textarea class="form-control form-control-dark bg-secondary text-white border-dark font-monospace" id="body-template" rows="10" required></textarea>
+                            <textarea class="form-control border-theme font-monospace" id="body-template" rows="10" required></textarea>
                             <div class="form-text text-muted small mt-1">
                                 <th:block th:text="#{emailTemplate.hint.variables1}">利用可能な変数: {customer_name}, {engineer_name}, {project_name}</th:block>, {sender_name}
                             </div>
                         </div>
                     </form>
                 </div>
-                <div class="modal-footer border-dark bg-dark">
-                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
+                <div class="modal-footer border-theme bg-tertiary">
+                    <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-theme" data-bs-dismiss="modal" th:text="#{common.btn.cancel}">キャンセル</button>
                     <button type="button" class="btn btn-primary bg-gradient-blue border-0 shadow-sm px-4" onclick="saveTemplate()">
                         <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.btn.save}">保存</th:block>
                     </button>

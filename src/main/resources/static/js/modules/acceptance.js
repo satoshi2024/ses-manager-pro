@@ -32,6 +32,9 @@ function loadSelectOptions(url, sel, valueField, labelFn) {
             opt.textContent = labelFn(r);
             sel.appendChild(opt);
         });
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '選択肢の取得に失敗しました');
     });
 }
 
@@ -81,6 +84,9 @@ function loadAcceptances(page, targetAcceptanceId) {
                 highlighted.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         }
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '検収一覧の取得に失敗しました');
     });
 }
 
@@ -114,18 +120,39 @@ function actionButtons(r) {
     return html;
 }
 
+// 検収書登録はmultipart送信のため、JSONレスポンスを直接検証するfetchを使用する。
+async function uploadAcceptanceDocument(acceptanceId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`/api/acceptances/${encodeURIComponent(acceptanceId)}/document`, {
+        method: 'POST',
+        headers: { 'X-XSRF-TOKEN': SES.csrf.token() },
+        body: formData
+    });
+    const result = await response.json();
+    if (!response.ok || result.code !== 200) {
+        throw new Error(result.message || '処理に失敗しました。');
+    }
+}
+
 document.addEventListener('click', (e) => {
     if (e.target.closest('.btn-submit')) {
         const btn = e.target.closest('.btn-submit');
         SES.api.post('/api/acceptances/submit', { contractId: btn.dataset.contract, workMonth: btn.dataset.month }).then(() => {
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             loadAcceptances(1);
+        }).catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '提出に失敗しました');
         });
     } else if (e.target.closest('.btn-accept')) {
         const btn = e.target.closest('.btn-accept');
         SES.api.post(`/api/acceptances/${btn.dataset.id}/accept`, { customerContactId: null }).then(() => {
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             loadAcceptances(1);
+        }).catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '検収に失敗しました');
         });
     } else if (e.target.closest('.btn-reject')) {
         const btn = e.target.closest('.btn-reject');
@@ -134,17 +161,26 @@ document.addEventListener('click', (e) => {
         SES.api.post(`/api/acceptances/${btn.dataset.id}/reject`, { comment }).then(() => {
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             loadAcceptances(1);
+        }).catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '差戻しに失敗しました');
         });
     } else if (e.target.closest('.btn-resubmit')) {
         const btn = e.target.closest('.btn-resubmit');
         SES.api.post(`/api/acceptances/${btn.dataset.id}/resubmit`, {}).then(() => {
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             loadAcceptances(1);
+        }).catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '再提出に失敗しました');
         });
     } else if (e.target.closest('.btn-cancel-approval')) {
         const btn = e.target.closest('.btn-cancel-approval');
         SES.api.post(`/api/acceptances/${btn.dataset.id}/cancel-approval`, { reason: '' }).then(() => {
             SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
+        }).catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '承認申請に失敗しました');
         });
     } else if (e.target.closest('.btn-doc-upload')) {
         const btn = e.target.closest('.btn-doc-upload');
@@ -153,20 +189,13 @@ document.addEventListener('click', (e) => {
         input.accept = '.pdf,.png,.jpg,.jpeg';
         input.onchange = () => {
             if (!input.files.length) return;
-            const formData = new FormData();
-            formData.append('file', input.files[0]);
-            fetch(`/api/acceptances/${btn.dataset.id}/document`, {
-                method: 'POST',
-                headers: { 'X-XSRF-TOKEN': SES.csrf.token() },
-                body: formData
-            }).then(res => res.json()).then(result => {
-                if (result.code !== 200) {
-                    SES.toast.error(result.message || '処理に失敗しました。');
-                    return;
-                }
+            uploadAcceptanceDocument(btn.dataset.id, input.files[0]).then(() => {
                 SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
                 loadAcceptances(1);
-            }).catch(() => SES.toast.error(SES.i18n.t('error.networkError', '通信エラー')));
+            }).catch(error => {
+                console.error(error);
+                SES.toast.error(error.message || SES.i18n.t('error.networkError', '通信エラー'));
+            });
         };
         input.click();
     }

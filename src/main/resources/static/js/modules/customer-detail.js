@@ -66,7 +66,7 @@ function renderContacts(contacts) {
         <td>${SES.escapeHtml([c.department, c.position].filter(Boolean).join(' / ') || '-')}</td>
         <td class="font-monospace">${SES.escapeHtml(c.email || '-')}<br><span class="text-muted small">${SES.escapeHtml(c.phone || '')}</span></td>
         <td><span class="badge ${c.status === '有効' ? 'bg-success' : 'bg-secondary'}">${SES.escapeHtml(SES.i18n.e('customerContactStatus', c.status) || '-')}</span></td>
-        <td class="text-end"><button class="btn btn-sm btn-outline-info" onclick="openContactModal(${c.id})"><i class="bi bi-pencil"></i></button>${c.status === '有効' ? `<button class="btn btn-sm btn-outline-danger ms-1" onclick="retireContact(${c.id}, ${c.version || 1})"><i class="bi bi-person-dash"></i></button>` : ''}</td>
+        <td class="text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" title="${SES.i18n.t('common.edit', '編集')}" aria-label="${SES.i18n.t('common.edit', '編集')}" onclick="openContactModal(${c.id})"><i class="bi bi-pencil" aria-hidden="true"></i></button>${c.status === '有効' ? `<button class="btn btn-sm btn-outline-danger" title="${SES.i18n.t('customer.contacts.retire', '担当者を退任')}" aria-label="${SES.i18n.t('customer.contacts.retire', '担当者を退任')}" onclick="retireContact(${c.id}, ${c.version || 1})"><i class="bi bi-person-dash" aria-hidden="true"></i></button>` : ''}</div></td>
     </tr>`).join(''));
 }
 
@@ -193,9 +193,9 @@ function renderActivities(records) {
 
         let completeBtn = '';
         if (isOverdue) {
-            completeBtn = `<button class="btn btn-sm btn-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-success" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         } else if (act.completedFlag === 0 && act.nextActionDate) {
-            completeBtn = `<button class="btn btn-sm btn-outline-success ms-2" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
+            completeBtn = `<button class="btn btn-sm btn-outline-success" onclick="completeActivity(${act.id}, ${act.version || 1})"><i class="bi bi-check-lg me-1"></i>${SES.i18n.t('customer.activity.markCompleted')}</button>`;
         }
 
         html += `
@@ -213,10 +213,10 @@ function renderActivities(records) {
                                     <span class="ms-2 badge bg-secondary">${SES.i18n.e('customerActivityType', act.activityType)}</span>
                                 </div>
                             </div>
-                            <div class="btn-group btn-group-sm">
+                            <div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
                                 ${completeBtn}
-                                <button type="button" class="btn btn-outline-info text-info ms-2" onclick="editActivity(${act.id})"><i class="bi bi-pencil"></i></button>
-                                <button type="button" class="btn btn-outline-danger text-danger ms-2" onclick="deleteActivity(${act.id}, ${act.version || 1})"><i class="bi bi-trash"></i></button>
+                                <button type="button" class="btn btn-outline-info text-info" title="${SES.i18n.t('common.edit', '編集')}" aria-label="${SES.i18n.t('common.edit', '編集')}" onclick="editActivity(${act.id})"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-outline-danger text-danger" title="${SES.i18n.t('common.delete', '削除')}" aria-label="${SES.i18n.t('common.delete', '削除')}" onclick="deleteActivity(${act.id}, ${act.version || 1})"><i class="bi bi-trash" aria-hidden="true"></i></button>
                             </div>
                         </div>
                         <div class="text-light text-wrap" style="white-space: pre-wrap;">${SES.escapeHtml(act.content || '')}</div>

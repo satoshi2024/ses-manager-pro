@@ -20,14 +20,11 @@ SES.myLifecycle = {
     // ==========================================
     loadCases: async function() {
         try {
-            const res = await SES.api.get('/api/my/lifecycle/cases');
-            if (res.code === 200) {
-                this.renderCases(res.data || []);
-            } else {
-                SES.toast.error(res.message || '案件一覧の取得に失敗しました');
-            }
+            const cases = (await SES.api.get('/api/my/lifecycle/cases')) || [];
+            this.renderCases(cases);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '案件一覧の取得に失敗しました');
         }
     },
 
@@ -66,7 +63,7 @@ SES.myLifecycle = {
             html += `
                 <tr>
                     <td class="ps-4"><span class="badge ${t.class} fs-6">${t.label}</span></td>
-                    <td class="text-muted small">${SES.escape(c.anchorDate || '-')}</td>
+                    <td class="text-muted small">${SES.escapeHtml(c.anchorDate || '-')}</td>
                     <td style="min-width: 140px;">
                         <div class="d-flex align-items-center gap-2">
                             <div class="progress flex-grow-1 bg-dark" style="height: 6px;">
@@ -89,22 +86,20 @@ SES.myLifecycle = {
 
     loadPendingTasks: async function() {
         try {
-            const res = await SES.api.get('/api/my/lifecycle/tasks/pending');
-            if (res.code === 200) {
-                const tasks = res.data || [];
-                const badge = document.getElementById('myPendingTasksBadge');
-                if (badge) {
-                    if (tasks.length > 0) {
-                        badge.textContent = tasks.length;
-                        badge.style.display = 'inline-block';
-                    } else {
-                        badge.style.display = 'none';
-                    }
+            const tasks = (await SES.api.get('/api/my/lifecycle/tasks/pending')) || [];
+            const badge = document.getElementById('myPendingTasksBadge');
+            if (badge) {
+                if (tasks.length > 0) {
+                    badge.textContent = tasks.length;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
                 }
-                this.renderPendingTasks(tasks);
             }
+            this.renderPendingTasks(tasks);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '提出タスクの取得に失敗しました');
         }
     },
 
@@ -121,11 +116,11 @@ SES.myLifecycle = {
             html += `
                 <li class="list-group-item bg-transparent border-dark d-flex justify-content-between align-items-center py-3">
                     <div>
-                        <div class="fw-bold text-light">${SES.escape(tk.taskName)}</div>
-                        <div class="text-muted small">期日: ${SES.escape(tk.dueDate || '-')}</div>
+                        <div class="fw-bold text-light">${SES.escapeHtml(tk.taskName)}</div>
+                        <div class="text-muted small">期日: ${SES.escapeHtml(tk.dueDate || '-')}</div>
                     </div>
                     <div>
-                        <button class="btn btn-sm btn-success" onclick="SES.myLifecycle.openCompleteModal(${tk.id}, '${SES.escape(tk.taskName)}', '${SES.escape(tk.description || '')}', '${tk.evidenceType || 'NONE'}')">
+                        <button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openCompleteModal(this)" data-task-id="${tk.id}" data-task-name="${SES.escapeHtml(tk.taskName || '')}" data-task-description="${SES.escapeHtml(tk.description || '')}" data-evidence-type="${SES.escapeHtml(tk.evidenceType || 'NONE')}" title="タスクを提出" aria-label="タスクを提出">
                             <i class="bi bi-check2 me-1"></i>提出・完了
                         </button>
                     </div>
@@ -135,7 +130,15 @@ SES.myLifecycle = {
         list.innerHTML = html;
     },
 
-    openCompleteModal: function(taskId, taskName, desc, evidenceType) {
+    openCompleteModal: function(buttonOrTaskId, taskName, desc, evidenceType) {
+        const taskId = buttonOrTaskId && buttonOrTaskId.dataset
+            ? buttonOrTaskId.dataset.taskId
+            : buttonOrTaskId;
+        if (buttonOrTaskId && buttonOrTaskId.dataset) {
+            taskName = buttonOrTaskId.dataset.taskName;
+            desc = buttonOrTaskId.dataset.taskDescription;
+            evidenceType = buttonOrTaskId.dataset.evidenceType;
+        }
         document.getElementById('myTaskId').value = taskId;
         document.getElementById('myTaskTitleLabel').textContent = taskName;
         document.getElementById('myTaskDescLabel').textContent = desc || '';
@@ -160,17 +163,14 @@ SES.myLifecycle = {
         };
 
         try {
-            const res = await SES.api.post(`/api/my/lifecycle/tasks/${taskId}/complete`, payload);
-            if (res.code === 200) {
-                SES.toast.success('タスクを完了報告しました');
-                bootstrap.Modal.getInstance(document.getElementById('myCompleteModal')).hide();
-                this.loadCases();
-                this.loadPendingTasks();
-            } else {
-                SES.toast.error(res.message || '報告に失敗しました');
-            }
+            await SES.api.post(`/api/my/lifecycle/tasks/${encodeURIComponent(taskId)}/complete`, payload);
+            SES.toast.success('タスクを完了報告しました');
+            bootstrap.Modal.getInstance(document.getElementById('myCompleteModal')).hide();
+            await this.loadCases();
+            await this.loadPendingTasks();
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '報告に失敗しました');
         }
     },
 
@@ -179,14 +179,11 @@ SES.myLifecycle = {
     // ==========================================
     loadDetail: async function(caseId) {
         try {
-            const res = await SES.api.get(`/api/my/lifecycle/cases/${caseId}`);
-            if (res.code === 200) {
-                this.renderDetail(res.data);
-            } else {
-                SES.toast.error(res.message || '詳細取得に失敗しました');
-            }
+            const caseDto = await SES.api.get(`/api/my/lifecycle/cases/${encodeURIComponent(caseId)}`);
+            this.renderDetail(caseDto);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '詳細取得に失敗しました');
         }
     },
 
@@ -252,19 +249,19 @@ SES.myLifecycle = {
 
             let actionBtn = '-';
             if (caseStatus === 'ACTIVE' && (t.status === 'IN_PROGRESS' || t.status === 'PENDING')) {
-                actionBtn = `<button class="btn btn-sm btn-success" onclick="SES.myLifecycle.openDetailCompleteModal(${t.id}, '${t.evidenceType || 'NONE'}')"><i class="bi bi-check-lg me-1"></i>完了・提出</button>`;
+                actionBtn = `<button type="button" class="btn btn-sm btn-success" onclick="SES.myLifecycle.openDetailCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了・提出</button>`;
             }
 
             html += `
                 <tr>
                     <td class="ps-4 text-muted">${t.stepOrder || '-'}</td>
                     <td>
-                        <div class="fw-bold text-light">${SES.escape(t.taskName)}</div>
-                        <div class="text-muted small">${SES.escape(t.description || '')}</div>
+                        <div class="fw-bold text-light">${SES.escapeHtml(t.taskName)}</div>
+                        <div class="text-muted small">${SES.escapeHtml(t.description || '')}</div>
                     </td>
-                    <td class="text-muted small">${SES.escape(t.dueDate || '-')}</td>
+                    <td class="text-muted small">${SES.escapeHtml(t.dueDate || '-')}</td>
                     <td><span class="badge ${sClass}">${sLabel}</span></td>
-                    <td class="text-light small">${SES.escape(t.completionComment || '-')}</td>
+                    <td class="text-light small">${SES.escapeHtml(t.completionComment || '-')}</td>
                     <td class="text-end pe-4">${actionBtn}</td>
                 </tr>
             `;
@@ -272,7 +269,13 @@ SES.myLifecycle = {
         tbody.innerHTML = html;
     },
 
-    openDetailCompleteModal: function(taskId, evidenceType) {
+    openDetailCompleteModal: function(buttonOrTaskId, evidenceType) {
+        const taskId = buttonOrTaskId && buttonOrTaskId.dataset
+            ? buttonOrTaskId.dataset.taskId
+            : buttonOrTaskId;
+        if (buttonOrTaskId && buttonOrTaskId.dataset) {
+            evidenceType = buttonOrTaskId.dataset.evidenceType;
+        }
         document.getElementById('myDetailTaskId').value = taskId;
         document.getElementById('myDetailCompletionComment').value = '';
         const docSection = document.getElementById('myDetailDocIdSection');
@@ -295,16 +298,13 @@ SES.myLifecycle = {
         };
 
         try {
-            const res = await SES.api.post(`/api/my/lifecycle/tasks/${taskId}/complete`, payload);
-            if (res.code === 200) {
-                SES.toast.success('タスクを完了報告しました');
-                bootstrap.Modal.getInstance(document.getElementById('myDetailCompleteModal')).hide();
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message || '報告に失敗しました');
-            }
+            await SES.api.post(`/api/my/lifecycle/tasks/${encodeURIComponent(taskId)}/complete`, payload);
+            SES.toast.success('タスクを完了報告しました');
+            bootstrap.Modal.getInstance(document.getElementById('myDetailCompleteModal')).hide();
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '報告に失敗しました');
         }
     }
 };

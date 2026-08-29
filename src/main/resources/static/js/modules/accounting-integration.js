@@ -150,14 +150,13 @@ window.AccountingIntegration = (function () {
                     <td class="font-monospace">${escapeHtml(m.externalId)}</td>
                     <td>${escapeHtml(m.externalCode || '-')}</td>
                     <td>${verifiedBadge}</td>
-                    <td>
-                        <button class="btn btn-xs btn-outline-primary btn-verify-mapping me-1" data-id="${m.id}" title="${escapeHtml(t('btnVerify'))}">
-                            <i class="bi bi-check-circle"></i>
+                    <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-xs btn-outline-primary btn-verify-mapping" data-id="${m.id}" title="${escapeHtml(t('btnVerify'))}" aria-label="${escapeHtml(t('btnVerify'))}">
+                            <i class="bi bi-check-circle" aria-hidden="true"></i>
                         </button>
-                        <button class="btn btn-xs btn-outline-secondary btn-edit-mapping" data-id="${m.id}" title="${escapeHtml(t('btnEdit'))}">
-                            <i class="bi bi-pencil"></i>
+                        <button class="btn btn-xs btn-outline-secondary btn-edit-mapping" data-id="${m.id}" title="${escapeHtml(t('btnEdit'))}" aria-label="${escapeHtml(t('btnEdit'))}">
+                            <i class="bi bi-pencil" aria-hidden="true"></i>
                         </button>
-                    </td>
+                    </div></td>
                 </tr>`;
                 tbody.append(tr);
             });
@@ -223,12 +222,12 @@ window.AccountingIntegration = (function () {
                                 j.status === 'CANCELLED' ? '<span class="badge bg-secondary">CANCELLED</span>' :
                                     '<span class="badge bg-primary">PENDING</span>';
 
-                let actionBtns = `<button class="btn btn-xs btn-outline-info btn-job-detail me-1" data-id="${j.id}" title="${escapeHtml(t('btnDetail'))}"><i class="bi bi-info-circle"></i></button>`;
+                let actionBtns = `<button class="btn btn-xs btn-outline-info btn-job-detail" data-id="${j.id}" title="${escapeHtml(t('btnDetail'))}" aria-label="${escapeHtml(t('btnDetail'))}"><i class="bi bi-info-circle" aria-hidden="true"></i></button>`;
                 if (j.status === 'RETRYABLE' || j.status === 'FAILED') {
-                    actionBtns += `<button class="btn btn-xs btn-outline-warning btn-job-retry me-1" data-id="${j.id}" title="${escapeHtml(t('btnRetry'))}"><i class="bi bi-arrow-repeat"></i></button>`;
+                    actionBtns += `<button class="btn btn-xs btn-outline-warning btn-job-retry" data-id="${j.id}" title="${escapeHtml(t('btnRetry'))}" aria-label="${escapeHtml(t('btnRetry'))}"><i class="bi bi-arrow-repeat" aria-hidden="true"></i></button>`;
                 }
                 if (j.status === 'PENDING' || j.status === 'RETRYABLE' || j.status === 'RUNNING') {
-                    actionBtns += `<button class="btn btn-xs btn-outline-danger btn-job-cancel" data-id="${j.id}" title="${escapeHtml(t('btnCancel'))}"><i class="bi bi-x-circle"></i></button>`;
+                    actionBtns += `<button class="btn btn-xs btn-outline-danger btn-job-cancel" data-id="${j.id}" title="${escapeHtml(t('btnCancel'))}" aria-label="${escapeHtml(t('btnCancel'))}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>`;
                 }
 
                 let tr = `
@@ -240,7 +239,7 @@ window.AccountingIntegration = (function () {
                     <td>${j.attemptCount || 0}</td>
                     <td class="font-monospace small">${escapeHtml(j.externalId || '-')}</td>
                     <td class="small text-muted">${escapeHtml(j.createdAt ? j.createdAt.replace('T', ' ') : '-')}</td>
-                    <td>${actionBtns}</td>
+                    <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${actionBtns}</div></td>
                 </tr>`;
                 tbody.append(tr);
             });

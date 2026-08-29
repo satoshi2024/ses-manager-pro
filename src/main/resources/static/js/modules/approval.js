@@ -8,6 +8,11 @@ $(function () {
     if ($('#approvalDetailPage').length) loadApprovalDetail($('#approvalDetailPage').data('request-id'));
 });
 
+function showApprovalApiError(error, fallback) {
+    console.error(error);
+    SES.toast.error(error && error.message ? error.message : fallback);
+}
+
 function loadApprovalCreateOptions() {
     const targetSel = $('#approvalCreateForm [name=targetId]');
     const orgSel = $('#approvalCreateForm [name=organizationId]');
@@ -41,7 +46,7 @@ async function loadApprovalList(page) {
             view: approvalView(), status: $('#approvalStatus').val() || '', page: page, pageSize: 20
         });
         renderApprovalList(data);
-    } catch (e) { /* SES.apiが共通トーストを表示 */ }
+    } catch (e) { showApprovalApiError(e, SES.i18n.t('common.msg.fetchFail', '申請一覧の取得に失敗しました')); }
 }
 
 function renderApprovalList(data) {
@@ -107,7 +112,7 @@ async function submitApprovalAction(action, data) {
     const comment = $('#approvalComment').val() || '';
     const body = { comment: comment };
     if (action === 'resubmit') Object.assign(body, { payload: data.payload || {}, diff: (data.diff || []).reduce(function (m, d) { m[d.field] = { label: d.label, before: d.before, after: d.after, changed: d.changed }; return m; }, {}), amountSnapshot: data.amountSnapshot });
-    try { await SES.api.post('/api/approval/requests/' + encodeURIComponent(data.id) + '/' + action, body); SES.toast.success(SES.i18n.t('approval.action.done', '処理しました')); window.location.reload(); } catch (e) { }
+    try { await SES.api.post('/api/approval/requests/' + encodeURIComponent(data.id) + '/' + action, body); SES.toast.success(SES.i18n.t('approval.action.done', '処理しました')); window.location.reload(); } catch (e) { showApprovalApiError(e, SES.i18n.t('approval.action.failed', '申請処理に失敗しました')); }
 }
 
 async function createApprovalRequest() {
@@ -115,5 +120,5 @@ async function createApprovalRequest() {
     form.serializeArray().forEach(function (item) { if (item.name === 'payload' || item.name === 'diff') { try { body[item.name] = item.value ? JSON.parse(item.value) : {}; } catch (e) { SES.toast.error(SES.i18n.t('approval.create.invalidJson', 'JSON形式を確認してください')); body = null; } } else if (item.value !== '') body[item.name] = item.value; });
     if (!body) return;
     ['targetId', 'targetVersion', 'organizationId'].forEach(function (k) { if (body[k]) body[k] = Number(body[k]); }); if (body.amountSnapshot) body.amountSnapshot = Number(body.amountSnapshot);
-    try { const result = await SES.api.post('/api/approval/requests', body); bootstrap.Modal.getInstance(document.getElementById('approvalCreateModal')).hide(); window.location.href = '/approval/requests/' + result.id; } catch (e) { }
+    try { const result = await SES.api.post('/api/approval/requests', body); bootstrap.Modal.getInstance(document.getElementById('approvalCreateModal')).hide(); window.location.href = '/approval/requests/' + result.id; } catch (e) { showApprovalApiError(e, SES.i18n.t('approval.create.failed', '申請の作成に失敗しました')); }
 }

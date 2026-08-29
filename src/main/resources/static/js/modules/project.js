@@ -184,12 +184,13 @@ function renderProjects(records) {
                 <td id="list-skills-${proj.id}"><div class="spinner-border spinner-border-sm text-secondary" role="status"></div></td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
-                    <div class="btn-group btn-group-sm" role="group">
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><div class="btn-group btn-group-sm" role="group">
                         <button type="button" class="btn btn-outline-success text-success border-success" title="${SES.i18n.t('js.project.search_candidate')}" onclick="findMatchingEngineers(${proj.id})"><i class="bi bi-robot"></i></button>
                         <button type="button" class="btn btn-outline-info text-info border-info" title="${SES.i18n.t('common.edit')}" onclick="editProject(${proj.id})"><i class="bi bi-pencil"></i></button>
                         <button type="button" class="btn btn-outline-danger text-danger border-danger" title="${SES.i18n.t('common.delete')}" onclick="deleteProject(${proj.id})"><i class="bi bi-trash"></i></button>
                     </div>
-                </td>
+                </div>
+</td>
             </tr>
         `;
         tbody.append(tr);

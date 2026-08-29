@@ -18,7 +18,10 @@ function loadTemplates() {
             : '<tr><td colspan="4" class="text-center text-muted">—</td></tr>';
         const sel = document.getElementById('campaign-template');
         sel.innerHTML = rows.map(t => `<option value="${t.id}">${SES.escapeHtml(t.title)}</option>`).join('');
-    }).catch(() => {});
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || 'サーベイテンプレートの取得に失敗しました');
+    });
 }
 
 function loadCampaigns() {
@@ -29,20 +32,22 @@ function loadCampaigns() {
             <td>${SES.escapeHtml(c.title)}</td>
             <td>${SES.escapeHtml(c.periodFrom || '')} 〜 ${SES.escapeHtml(c.periodTo || '')}</td>
             <td>${SES.escapeHtml(c.status)}</td>
-            <td>
-                ${c.status === 'DRAFT' ? `<button class="btn btn-sm btn-outline-primary" data-act="activate" data-id="${c.id}">${SES.escapeHtml(SES.i18n.t('survey.activate','配信開始'))}</button>` : ''}
+            <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${c.status === 'DRAFT' ? `<button class="btn btn-sm btn-outline-primary" data-act="activate" data-id="${c.id}">${SES.escapeHtml(SES.i18n.t('survey.activate','配信開始'))}</button>` : ''}
                 ${c.status === 'ACTIVE' ? `<button class="btn btn-sm btn-outline-secondary" data-act="close" data-id="${c.id}">${SES.escapeHtml(SES.i18n.t('survey.close','締め切り'))}</button>` : ''}
                 <button class="btn btn-sm btn-outline-info" data-act="aggregate" data-id="${c.id}">${SES.escapeHtml(SES.i18n.t('survey.aggregate','集計'))}</button>
-            </td></tr>`).join('')
+            </div></td></tr>`).join('')
             : '<tr><td colspan="4" class="text-center text-muted">—</td></tr>';
         body.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => {
             const id = Number(b.dataset.id);
             const act = b.dataset.act;
-            if (act === 'activate') SES.api.post('/api/surveys/' + id + '/activate', {}).then(loadCampaigns);
-            else if (act === 'close') SES.api.post('/api/surveys/' + id + '/close', {}).then(loadCampaigns);
+            if (act === 'activate') runSurveyAction(id, 'activate');
+            else if (act === 'close') runSurveyAction(id, 'close');
             else if (act === 'aggregate') loadAggregate(id);
         }));
-    }).catch(() => {});
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || 'サーベイ一覧の取得に失敗しました');
+    });
 }
 
 function loadAggregate(campaignId) {
@@ -57,7 +62,10 @@ function loadAggregate(campaignId) {
         html += (a.segments || []).map(s => `<div class="mt-1"><b>${SES.escapeHtml(s.organizationName)}</b>（回答要員${s.answeredEngineers}名）
             ${s.hidden ? '<span class="badge bg-warning text-dark">' + SES.escapeHtml(SES.i18n.t('survey.hiddenSegment','非表示')) + '</span>' : (s.questions || []).map(fmt).join('')}</div>`).join('');
         el.innerHTML = html;
-    }).catch(() => {});
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || 'サーベイ集計の取得に失敗しました');
+    });
 }
 
 function questionRow(q) {
@@ -85,7 +93,10 @@ async function createCampaign() {
         loadCampaigns();
         const modal = bootstrap.Modal.getInstance(document.getElementById('campaignModal'));
         if (modal) modal.hide();
-    } catch (e) { /* toasts */ }
+    } catch (e) {
+        console.error(e);
+        SES.toast.error(e.message || 'サーベイの作成に失敗しました');
+    }
 }
 
 async function createTemplate() {
@@ -106,7 +117,19 @@ async function createTemplate() {
         loadTemplates();
         const modal = bootstrap.Modal.getInstance(document.getElementById('templateModal'));
         if (modal) modal.hide();
-    } catch (e) { /* toasts */ }
+    } catch (e) {
+        console.error(e);
+        SES.toast.error(e.message || 'サーベイテンプレートの作成に失敗しました');
+    }
+}
+
+function runSurveyAction(id, action) {
+    SES.api.post('/api/surveys/' + encodeURIComponent(id) + '/' + action, {})
+        .then(() => loadCampaigns())
+        .catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || 'サーベイの状態更新に失敗しました');
+        });
 }
 
 document.addEventListener('click', (e) => {

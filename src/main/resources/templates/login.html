@@ -148,8 +148,8 @@
                 <input type="password" class="form-control form-control-dark" id="password" name="password" th:placeholder="#{login.password}" required autocomplete="current-password">
             </div>
 
-            <button type="submit" class="btn btn-primary btn-login w-100 rounded-sm text-white">
-                <i class="bi bi-box-arrow-in-right me-2"></i><span th:text="#{login.button}">ログイン</span>
+            <button type="submit" id="login-submit-button" class="btn btn-primary btn-login w-100 rounded-sm text-white">
+                <i class="bi bi-box-arrow-in-right me-2"></i><span id="login-submit-label" th:text="#{login.button}">ログイン</span>
             </button>
         </form>
 
@@ -177,5 +177,39 @@
 
     <!-- i18n -->
     <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()})}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var form = document.querySelector('form');
+            if (form) {
+                var isComposing = false;
+                var submitButton = document.getElementById('login-submit-button');
+                var submitLabel = document.getElementById('login-submit-label');
+                form.addEventListener('compositionstart', function() { isComposing = true; });
+                form.addEventListener('compositionend', function() { isComposing = false; });
+                form.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        if (e.isComposing || isComposing) {
+                            e.preventDefault();
+                            return;
+                        }
+                        e.preventDefault();
+                        form.requestSubmit();
+                    }
+                });
+                form.addEventListener('submit', function(e) {
+                    if (form.dataset.submitting === 'true') {
+                        e.preventDefault();
+                        return;
+                    }
+                    form.dataset.submitting = 'true';
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.setAttribute('aria-busy', 'true');
+                    }
+                    if (submitLabel) submitLabel.textContent = '処理中...';
+                });
+            }
+        });
+    </script>
 </body>
 </html>

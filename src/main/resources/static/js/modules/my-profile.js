@@ -22,7 +22,11 @@ function loadMasterSkills() {
             window._masterSkills = Array.isArray(res) ? res : ((res && res.records) ? res.records : []);
             if (window.myProfileData) buildChangeForm();
         })
-        .catch(() => { window._masterSkills = []; });
+        .catch(error => {
+            console.error(error);
+            window._masterSkills = [];
+            SES.toast.error(error.message || 'スキル候補の取得に失敗しました');
+        });
 }
 
 function loadProfile() {
@@ -35,13 +39,19 @@ function loadProfile() {
             renderCareers(data.careers || []);
             buildChangeForm();
         })
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || 'プロフィールの取得に失敗しました');
+        });
 }
 
 function loadRequests() {
     SES.api.get('/api/my/change-requests', { current: 1, size: 100 })
         .then(data => renderRequests(data.records || []))
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '変更申請一覧の取得に失敗しました');
+        });
 }
 
 function renderProfile(data) {
@@ -110,7 +120,10 @@ async function changeRequestAction(action, id) {
     try {
         await SES.api.post('/api/my/change-requests/' + id + '/' + action, {});
         loadProfile();
-    } catch (e) { /* SES.api toasts */ }
+    } catch (e) {
+        console.error(e);
+        SES.toast.error(e.message || '変更申請の処理に失敗しました');
+    }
 }
 
 function buildChangeForm() {
@@ -342,12 +355,18 @@ async function doCreate(type, payload, reason, attachmentDocumentId) {
         const modal = bootstrap.Modal.getInstance(document.getElementById('changeModal'));
         if (modal) modal.hide();
         Toast.success(SES.i18n.t('my.changeRequest.created', '変更申請の下書きを作成しました'));
-    } catch (e) { /* SES.api toasts */ }
+    } catch (e) {
+        console.error(e);
+        SES.toast.error(e.message || '変更申請の保存に失敗しました');
+    }
 }
 
 // ---- スキルシート確認 ----
 function loadSkillSheet() {
-    SES.api.get('/api/my/profile/skill-sheet').then(renderSkillSheet).catch(() => {});
+    SES.api.get('/api/my/profile/skill-sheet').then(renderSkillSheet).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || 'スキルシートの取得に失敗しました');
+    });
 }
 
 function renderSkillSheet(preview) {
@@ -370,5 +389,8 @@ async function confirmSkillSheet(fingerprint) {
         await SES.api.post('/api/my/profile/skill-sheet/confirm', { fingerprint });
         loadSkillSheet();
         Toast.success(SES.i18n.t('my.skillSheet.confirmed', '確認を記録しました'));
-    } catch (e) { /* SES.api toasts */ }
+    } catch (e) {
+        console.error(e);
+        SES.toast.error(e.message || 'スキルシート確認の保存に失敗しました');
+    }
 }

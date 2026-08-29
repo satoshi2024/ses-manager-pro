@@ -54,7 +54,9 @@ function renderExpenses(rows) {
             <td class="text-end">${SES.escapeHtml(SES.util.formatCurrency(row.amount))}</td>
             <td>${canDownload ? `<a href="#" class="btn btn-sm btn-outline-info" data-document="${SES.escapeHtml(String(row.receiptDocumentId))}" data-version="${SES.escapeHtml(String(row.receiptVersionNo))}"><i class="bi bi-download"></i> ${SES.escapeHtml(SES.i18n.t('expense.receipt.download', 'ダウンロード'))}</a>` : '-'}</td>
             <td><span class="badge ${STATUS_BADGE[row.status] || 'bg-secondary'}">${SES.escapeHtml(statusText)}</span></td>
-            <td class="text-end pe-4">${canMarkPaid ? `<button type="button" class="btn btn-sm btn-success" data-action="mark-paid" data-id="${SES.escapeHtml(String(row.id))}">${SES.escapeHtml(SES.i18n.t('expense.markPaid', '支払済にする'))}</button>` : '-'}</td>`;
+            <td class="text-end pe-4">
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${canMarkPaid ? `<button type="button" class="btn btn-sm btn-success" data-action="mark-paid" data-id="${SES.escapeHtml(String(row.id))}">${SES.escapeHtml(SES.i18n.t('expense.markPaid', '支払済にする'))}</button>` : '-'}</div>
+</td>`;
         body.appendChild(tr);
     });
     body.querySelectorAll('[data-action="mark-paid"]').forEach(btn => {

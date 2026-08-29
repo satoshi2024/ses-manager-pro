@@ -403,6 +403,9 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         }
 
         List<LifecycleCase> list = caseMapper.selectList(wrapper);
+        if (list.isEmpty()) {
+            return Collections.emptyList();
+        }
 
         // 認可スコープフィルタリング
         Map<Long, Engineer> engineerMap = engineerMapper.selectBatchIds(

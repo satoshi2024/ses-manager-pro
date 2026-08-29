@@ -112,15 +112,15 @@ function renderRow(d) {
     // 操作ボタン（API認可が正。UIは表示制御のみ。送信は下書き+NONEのみ。HFP-02-BUG-07）
     let actions = '';
     if (CAN_SEND && d.dispatchState === 'NONE' && d.status === '下書き') {
-        actions += `<button class="btn btn-sm btn-outline-success me-1" onclick="openSendConfirm(${d.id})"><i class="bi bi-send"></i> 送信</button>`;
+        actions += `<button class="btn btn-sm btn-outline-success" onclick="openSendConfirm(${d.id})"><i class="bi bi-send" aria-hidden="true"></i> 送信</button>`;
     }
     if (CAN_SYNC && (d.dispatchState === 'SENT' || d.dispatchState === 'RECONCILIATION_REQUIRED')) {
-        actions += `<button class="btn btn-sm btn-outline-info me-1" onclick="syncDoc(${d.id})"><i class="bi bi-arrow-repeat"></i> 同期</button>`;
+        actions += `<button class="btn btn-sm btn-outline-info" onclick="syncDoc(${d.id})"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> 同期</button>`;
     }
     // 三artifact（availabilityごと）
-    actions += `<button class="btn btn-sm btn-outline-primary me-1" onclick="downloadArtifact(${d.id},'source')"><i class="bi bi-file-earmark-pdf"></i> 原本</button>`;
+    actions += `<button class="btn btn-sm btn-outline-primary" onclick="downloadArtifact(${d.id},'source')"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> 原本</button>`;
     if (d.signedPdfAvailable) {
-        actions += `<button class="btn btn-sm btn-outline-primary me-1" onclick="downloadArtifact(${d.id},'signed')"><i class="bi bi-file-earmark-check"></i> 署名済</button>`;
+        actions += `<button class="btn btn-sm btn-outline-primary" onclick="downloadArtifact(${d.id},'signed')"><i class="bi bi-file-earmark-check" aria-hidden="true"></i> 署名済</button>`;
     }
     if (d.certificateAvailable) {
         actions += `<button class="btn btn-sm btn-outline-primary" onclick="downloadArtifact(${d.id},'certificate')"><i class="bi bi-award"></i> 証明書</button>`;
@@ -132,7 +132,7 @@ function renderRow(d) {
         <td>${statusBadge}</td>
         <td>${dispatchHtml}</td>
         <td>${lastSync}</td>
-        <td class="px-4 text-end">${actions}</td>
+        <td class="px-4 text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${actions}</div></td>
     </tr>`;
 }
 

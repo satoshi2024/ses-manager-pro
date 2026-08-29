@@ -247,7 +247,7 @@ async function functionalChecks(browser) {
     const page = await context.newPage();
     await page.goto(`${BASE}/customer/list`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1500);
-    await page.click('[data-bs-target="#customerModal"]');
+    await page.click('#btn-new-customer');
     await page.waitForTimeout(500);
     await page.fill('#cust-companyName', `シードE2E株式会社${Date.now() % 10000}`);
     await page.selectOption('#cust-commercialFlow', '元請け');
@@ -372,8 +372,7 @@ async function main() {
   // 前回実行分の蓄積を残さない（JSONは毎回上書き、JSONLは追記のため明示的にリセットする）
   fs.writeFileSync(path.join(SPEC_DIR, 'e2e-issues.jsonl'), '', 'utf8');
   const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.CHROMIUM_PATH || 'C:\\Users\\satos\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe'
+    headless: true
   });
   try {
     await runMatrix(browser, 'desktop', false);

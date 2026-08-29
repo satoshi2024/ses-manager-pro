@@ -9,11 +9,16 @@ const SALES_ORDER_TRANSITIONS = {
     '取消': []
 };
 
+function showSalesOrderError(error, fallback) {
+    console.error(error);
+    SES.toast.error(error && error.message ? error.message : fallback);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadSalesOrders(1);
     document.getElementById('btnSearchSalesOrder').addEventListener('click', () => loadSalesOrders(1));
     document.getElementById('btnNewSalesOrder').addEventListener('click', () => openSalesOrderModal());
-    document.getElementById('btnSaveSalesOrder').addEventListener('click', saveSalesOrder);
+    document.getElementById('btnSaveSalesOrder').addEventListener('click', () => saveSalesOrder().catch(error => showSalesOrderError(error, '注文の保存に失敗しました')));
     document.getElementById('btnAddLine').addEventListener('click', addLineRow);
     document.getElementById('salesOrderForm').customerId.addEventListener('change', onCustomerChanged);
     document.getElementById('salesOrderForm').customerPoNo.addEventListener('blur', async () => {
@@ -23,13 +28,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const orderId = form.id.value;
         if (customerId && poNo) {
             const url = `/api/sales-orders/po-duplicate?customerId=${customerId}&customerPoNo=${encodeURIComponent(poNo)}` + (orderId ? `&excludeOrderId=${orderId}` : '');
-            const res = await SES.api.get(url);
-            const warn = document.getElementById('poWarningText');
-            if (res && res.duplicate) {
+            try {
+                const res = await SES.api.get(url);
+                const warn = document.getElementById('poWarningText');
+                if (res && res.duplicate) {
                 warn.textContent = SES.i18n.t('salesOrder.po.duplicateWarning', '同じPO番号の注文が既にあります');
                 warn.style.display = 'block';
-            } else {
+                } else {
                 warn.style.display = 'none';
+                }
+            } catch (error) {
+                showSalesOrderError(error, 'PO重複の確認に失敗しました');
             }
         }
     });
@@ -53,6 +62,9 @@ function loadSelect(url, sel, valueField, labelFn, selected) {
             if (selected && String(selected) === String(r[valueField])) opt.selected = true;
             sel.appendChild(opt);
         });
+    }).catch(error => {
+        showSalesOrderError(error, '選択肢の取得に失敗しました');
+        sel.innerHTML = '<option value="">読み込み失敗</option>';
     });
 }
 
@@ -123,7 +135,7 @@ async function presetFromQuotation(quotationId) {
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal'));
         modal.show();
     } catch (e) {
-        // エラーはSES.api側でトースト済み
+        showSalesOrderError(e, '見積情報の取得に失敗しました');
     }
 }
 
@@ -149,8 +161,8 @@ function openSalesOrderModal(id) {
             loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
             loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
             onCustomerChanged();
-            detail.lines.forEach(l => addLineRow(l));
-        });
+            (detail.lines || []).forEach(l => addLineRow(l));
+        }).catch(error => showSalesOrderError(error, '注文詳細の取得に失敗しました'));
     } else {
         title.textContent = SES.i18n.t('salesOrder.btn.new', '注文作成');
         loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
@@ -238,7 +250,7 @@ function loadSalesOrders(page) {
             tbody.appendChild(tr);
         });
         renderSalesOrderPagination(data, 'loadSalesOrders');
-    });
+    }).catch(error => showSalesOrderError(error, '注文一覧の取得に失敗しました'));
 }
 
 function renderSalesOrderPagination(pageData, loadFuncName) {
@@ -338,7 +350,15 @@ function openSalesOrderDetail(id) {
         }
         html += `</div>`;
         body.innerHTML = html;
-        body.querySelector('.btn-edit-order').addEventListener('click', () => openSalesOrderModal(d.id));
+        body.querySelector('.btn-edit-order').addEventListener('click', () => {
+            const detailModalEl = document.getElementById('salesOrderDetailModal');
+            const handler = function() {
+                detailModalEl.removeEventListener('hidden.bs.modal', handler);
+                openSalesOrderModal(d.id);
+            };
+            detailModalEl.addEventListener('hidden.bs.modal', handler);
+            bootstrap.Modal.getOrCreateInstance(detailModalEl).hide();
+        });
         const statusButtons = body.querySelectorAll('.btn-status-change');
         statusButtons.forEach(btn => btn.addEventListener('click', () => changeOrderStatus(d.id, btn.dataset.status)));
         const uploadBtn = body.querySelector('.btn-upload-source');
@@ -351,7 +371,7 @@ function openSalesOrderDetail(id) {
         if (cancelApprovalBtn) cancelApprovalBtn.addEventListener('click', () => requestCancelApproval(d.id));
         const diffApprovalBtn = body.querySelector('#btnConditionDiffApproval');
         if (diffApprovalBtn) diffApprovalBtn.addEventListener('click', () => requestConditionDiffApproval(d.id));
-    });
+    }).catch(error => showSalesOrderError(error, '注文詳細の取得に失敗しました'));
 }
 
 function changeOrderStatus(id, status) {
@@ -359,7 +379,7 @@ function changeOrderStatus(id, status) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    });
+    }).catch(error => showSalesOrderError(error, '注文状態の更新に失敗しました'));
 }
 
 function uploadSourceDocument(id) {
@@ -412,17 +432,17 @@ function createOrderContracts(id) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    });
+    }).catch(error => showSalesOrderError(error, '契約ドラフトの作成に失敗しました'));
 }
 
 function requestCancelApproval(id) {
     SES.api.post(`/api/sales-orders/${id}/cancel-approval`, { reason: '' }).then(() => {
         SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
-    });
+    }).catch(error => showSalesOrderError(error, '取消承認申請に失敗しました'));
 }
 
 function requestConditionDiffApproval(id) {
     SES.api.post(`/api/sales-orders/${id}/condition-diff-approval`, { reason: '' }).then(() => {
         SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
-    });
+    }).catch(error => showSalesOrderError(error, '条件差分の承認申請に失敗しました'));
 }

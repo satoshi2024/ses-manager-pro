@@ -33,14 +33,11 @@ SES.lifecycle = {
         if (toDate) params.toDate = toDate;
 
         try {
-            const res = await SES.api.get('/api/lifecycle/cases', params);
-            if (res.code === 200) {
-                this.renderCases(res.data || []);
-            } else {
-                SES.toast.error(res.message || '案件一覧の取得に失敗しました');
-            }
+            const cases = await SES.api.get('/api/lifecycle/cases', params);
+            this.renderCases(cases || []);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '案件一覧の取得に失敗しました');
         }
     },
 
@@ -78,21 +75,21 @@ SES.lifecycle = {
 
             html += `
                 <tr>
-                    <td class="ps-4 fw-bold font-monospace text-light">${SES.escape(c.caseNo)}</td>
+                    <td class="ps-4 fw-bold font-monospace text-theme">${SES.escapeHtml(c.caseNo)}</td>
                     <td><span class="badge ${t.class}">${t.label}</span></td>
-                    <td class="text-light">${SES.escape(c.engineerName || '-')}</td>
-                    <td class="text-muted small">${SES.escape(c.anchorDate || '-')}</td>
+                    <td class="text-theme">${SES.escapeHtml(c.engineerName || '-')}</td>
+                    <td class="text-muted small">${SES.escapeHtml(c.anchorDate || '-')}</td>
                     <td><span class="badge ${s.class}">${s.label}</span></td>
                     <td style="min-width: 160px;">
                         <div class="d-flex align-items-center gap-2">
-                            <div class="progress flex-grow-1 bg-dark" style="height: 6px;">
+                            <div class="progress flex-grow-1 bg-tertiary" style="height: 6px;">
                                 <div class="progress-bar bg-success" style="width: ${pct}%"></div>
                             </div>
                             <span class="small text-muted">${completed}/${total}</span>
                         </div>
                     </td>
                     <td class="text-end pe-4">
-                        <a href="/lifecycle/${c.id}" class="btn btn-sm btn-outline-light">
+                        <a href="/lifecycle/${encodeURIComponent(c.id)}" class="btn btn-sm btn-outline-secondary">
                             <i class="bi bi-eye me-1"></i>詳細
                         </a>
                     </td>
@@ -107,22 +104,20 @@ SES.lifecycle = {
     // ==========================================
     loadMyTasks: async function() {
         try {
-            const res = await SES.api.get('/api/lifecycle/tasks/my-pending');
-            if (res.code === 200) {
-                const tasks = res.data || [];
-                const countBadge = document.getElementById('myTasksCount');
-                if (countBadge) {
-                    if (tasks.length > 0) {
-                        countBadge.textContent = tasks.length;
-                        countBadge.style.display = 'inline-block';
-                    } else {
-                        countBadge.style.display = 'none';
-                    }
+            const tasks = (await SES.api.get('/api/lifecycle/tasks/my-pending')) || [];
+            const countBadge = document.getElementById('myTasksCount');
+            if (countBadge) {
+                if (tasks.length > 0) {
+                    countBadge.textContent = tasks.length;
+                    countBadge.style.display = 'inline-block';
+                } else {
+                    countBadge.style.display = 'none';
                 }
-                this.renderMyTasks(tasks);
             }
+            this.renderMyTasks(tasks);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '自担当タスクの取得に失敗しました');
         }
     },
 
@@ -141,13 +136,13 @@ SES.lifecycle = {
 
             html += `
                 <tr>
-                    <td class="ps-4 font-monospace text-light">${SES.escape(tk.taskCode)}</td>
-                    <td class="text-light fw-bold">${SES.escape(tk.taskName)}</td>
-                    <td class="text-muted small">${SES.escape(tk.dueDate || '-')}</td>
+                    <td class="ps-4 font-monospace text-theme">${SES.escapeHtml(tk.taskCode)}</td>
+                    <td class="text-theme fw-bold">${SES.escapeHtml(tk.taskName)}</td>
+                    <td class="text-muted small">${SES.escapeHtml(tk.dueDate || '-')}</td>
                     <td>${isBlocking}</td>
                     <td>${statusBadge}</td>
                     <td class="text-end pe-4">
-                        <a href="/lifecycle/${tk.caseId}" class="btn btn-sm btn-primary">
+                        <a href="/lifecycle/${encodeURIComponent(tk.caseId)}" class="btn btn-sm btn-primary">
                             <i class="bi bi-box-arrow-up-right me-1"></i>案件へ
                         </a>
                     </td>
@@ -164,16 +159,17 @@ SES.lifecycle = {
         const engSelect = document.getElementById('createEngineerId');
         if (engSelect && engSelect.children.length <= 1) {
             try {
-                const res = await SES.api.get('/api/engineers', { size: 500 });
-                if (res.code === 200 && res.data && res.data.records) {
+                const page = await SES.api.get('/api/engineers', { size: 500 });
+                if (page && page.records) {
                     let opts = '<option value="">要員を選択してください</option>';
-                    res.data.records.forEach(e => {
-                        opts += `<option value="${e.id}">${SES.escape(e.fullName)} (${SES.escape(e.employmentType || '-')})</option>`;
+                    page.records.forEach(e => {
+                        opts += `<option value="${e.id}">${SES.escapeHtml(e.fullName)} (${SES.escapeHtml(e.employmentType || '-')})</option>`;
                     });
                     engSelect.innerHTML = opts;
                 }
             } catch (e) {
                 console.error(e);
+                SES.toast.error(e.message || '要員一覧の取得に失敗しました');
             }
         }
         const today = new Date().toISOString().split('T')[0];
@@ -205,16 +201,13 @@ SES.lifecycle = {
         };
 
         try {
-            const res = await SES.api.post('/api/lifecycle/cases', payload);
-            if (res.code === 200) {
-                SES.toast.success(res.message || '案件を起票しました');
-                bootstrap.Modal.getInstance(document.getElementById('createCaseModal')).hide();
-                window.location.href = '/lifecycle/' + res.data.id;
-            } else {
-                SES.toast.error(res.message || '案件起票に失敗しました');
-            }
+            const created = await SES.api.post('/api/lifecycle/cases', payload);
+            SES.toast.success('案件を起票しました');
+            bootstrap.Modal.getInstance(document.getElementById('createCaseModal')).hide();
+            window.location.href = '/lifecycle/' + encodeURIComponent(created.id);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '案件起票に失敗しました');
         }
     },
 
@@ -223,14 +216,11 @@ SES.lifecycle = {
     // ==========================================
     loadDetail: async function(caseId) {
         try {
-            const res = await SES.api.get(`/api/lifecycle/cases/${caseId}`);
-            if (res.code === 200) {
-                this.renderDetail(res.data);
-            } else {
-                SES.toast.error(res.message || '詳細の読み込みに失敗しました');
-            }
+            const caseDto = await SES.api.get(`/api/lifecycle/cases/${encodeURIComponent(caseId)}`);
+            this.renderDetail(caseDto);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '詳細の読み込みに失敗しました');
         }
     },
 
@@ -339,41 +329,41 @@ SES.lifecycle = {
             let actionBtns = '';
             if (caseStatus === 'ACTIVE') {
                 if (t.status === 'PENDING') {
-                    actionBtns += `<button class="btn btn-sm btn-outline-primary me-1" onclick="SES.lifecycle.startTask(${t.id})">着手</button>`;
+                    actionBtns += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="SES.lifecycle.startTask(${t.id})">着手</button>`;
                 }
                 if (t.status === 'IN_PROGRESS') {
-                    actionBtns += `<button class="btn btn-sm btn-success me-1" onclick="SES.lifecycle.openCompleteModal(${t.id}, '${t.evidenceType || 'NONE'}')"><i class="bi bi-check-lg me-1"></i>完了</button>`;
+                    actionBtns += `<button type="button" class="btn btn-sm btn-success" onclick="SES.lifecycle.openCompleteModal(this)" data-task-id="${t.id}" data-evidence-type="${SES.escapeHtml(t.evidenceType || 'NONE')}" title="タスクを完了" aria-label="タスクを完了"><i class="bi bi-check-lg me-1"></i>完了</button>`;
                 }
                 if (t.status === 'PENDING' || t.status === 'IN_PROGRESS') {
-                    actionBtns += `<button class="btn btn-sm btn-outline-warning me-1" onclick="SES.lifecycle.openWaiveModal(${t.id})">免除</button>`;
-                    actionBtns += `<button class="btn btn-sm btn-outline-info" onclick="SES.lifecycle.openReassignModal(${t.id})">担当変更</button>`;
+                    actionBtns += `<button type="button" class="btn btn-sm btn-outline-warning" onclick="SES.lifecycle.openWaiveModal(${t.id})">免除</button>`;
+                    actionBtns += `<button type="button" class="btn btn-sm btn-outline-info" onclick="SES.lifecycle.openReassignModal(${t.id})">担当変更</button>`;
                 }
             }
 
             const assignee = t.assigneeNameSnapshot
-                ? `${SES.escape(t.assigneeNameSnapshot)} <span class="text-muted small">(${SES.escape(t.assigneeRole || '-')})</span>`
-                : (t.assigneeRole ? `<span class="text-info">${SES.escape(t.assigneeRole)}担当</span>` : '-');
+                ? `${SES.escapeHtml(t.assigneeNameSnapshot)} <span class="text-muted small">(${SES.escapeHtml(t.assigneeRole || '-')})</span>`
+                : (t.assigneeRole ? `<span class="text-info">${SES.escapeHtml(t.assigneeRole)}担当</span>` : '-');
 
             const deps = t.predecessorTaskCodes && t.predecessorTaskCodes.length > 0
-                ? t.predecessorTaskCodes.map(c => `<span class="badge bg-dark border border-secondary">${SES.escape(c)}</span>`).join(' ')
+                ? t.predecessorTaskCodes.map(c => `<span class="badge bg-tertiary border border-theme text-theme">${SES.escapeHtml(c)}</span>`).join(' ')
                 : '<span class="text-muted">-</span>';
 
             html += `
                 <tr>
                     <td class="ps-4 text-muted">${t.stepOrder || '-'}</td>
                     <td>
-                        <div class="fw-bold text-light">${SES.escape(t.taskName)}</div>
-                        <div class="font-monospace text-muted small">${SES.escape(t.taskCode)}</div>
+                        <div class="fw-bold text-theme">${SES.escapeHtml(t.taskName)}</div>
+                        <div class="font-monospace text-muted small">${SES.escapeHtml(t.taskCode)}</div>
                     </td>
                     <td>${assignee}</td>
-                    <td class="text-muted small">${SES.escape(t.dueDate || '-')}</td>
+                    <td class="text-muted small">${SES.escapeHtml(t.dueDate || '-')}</td>
                     <td>${deps}</td>
-                    <td><span class="badge bg-dark border border-secondary text-light">${SES.escape(t.evidenceType || 'NONE')}</span></td>
+                    <td><span class="badge bg-tertiary border border-theme text-theme">${SES.escapeHtml(t.evidenceType || 'NONE')}</span></td>
                     <td>
                         <span class="badge ${sClass}">${sLabel}</span>
                         ${isBlocking}
                     </td>
-                    <td class="text-end pe-4">${actionBtns}</td>
+                    <td class="text-end pe-4"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${actionBtns}</div></td>
                 </tr>
             `;
         });
@@ -391,16 +381,16 @@ SES.lifecycle = {
         let html = '';
         events.forEach(e => {
             const time = e.occurredAt ? e.occurredAt.replace('T', ' ').substring(0, 19) : '-';
-            const actor = `${e.actorUserId ? 'User#' + e.actorUserId : 'SYSTEM'} (${SES.escape(e.actorRoleSnapshot || '-')})`;
-            const transition = (e.beforeState || e.afterState) ? `${e.beforeState || '-'} → <strong class="text-light">${e.afterState || '-'}</strong>` : '-';
+            const actor = `${e.actorUserId ? 'User#' + e.actorUserId : 'SYSTEM'} (${SES.escapeHtml(e.actorRoleSnapshot || '-')})`;
+            const transition = (e.beforeState || e.afterState) ? `${e.beforeState || '-'} → <strong class="text-theme">${e.afterState || '-'}</strong>` : '-';
 
             html += `
                 <tr>
                     <td class="ps-4 text-muted font-monospace small">${time}</td>
-                    <td><span class="badge bg-dark border border-secondary">${SES.escape(e.eventType)}</span></td>
-                    <td class="text-light small">${actor}</td>
+                    <td><span class="badge bg-tertiary border border-theme text-theme">${SES.escapeHtml(e.eventType)}</span></td>
+                    <td class="text-theme small">${actor}</td>
                     <td class="small">${transition}</td>
-                    <td class="pe-4 text-muted font-monospace small">${SES.escape(e.detailsJson || '-')}</td>
+                    <td class="pe-4 text-muted font-monospace small">${SES.escapeHtml(e.detailsJson || '-')}</td>
                 </tr>
             `;
         });
@@ -413,40 +403,38 @@ SES.lifecycle = {
     checkGate: async function() {
         if (!this.currentCaseId) return;
         try {
-            const res = await SES.api.get(`/api/lifecycle/cases/${this.currentCaseId}/gate`);
-            if (res.code === 200) {
-                const data = res.data;
-                const badge = document.getElementById('gateStatusBadge');
-                if (data.passed) {
-                    badge.innerHTML = '<span class="badge bg-success px-3 py-2 fs-6"><i class="bi bi-shield-check me-1"></i>ゲート通過 (PASS)</span>';
-                } else {
-                    badge.innerHTML = '<span class="badge bg-danger px-3 py-2 fs-6"><i class="bi bi-shield-x me-1"></i>ゲート未通過 (BLOCKED)</span>';
-                }
-                document.getElementById('gateSummaryText').textContent = data.summary || '';
+            const data = await SES.api.get(`/api/lifecycle/cases/${encodeURIComponent(this.currentCaseId)}/gate`);
+            const badge = document.getElementById('gateStatusBadge');
+            if (data.passed) {
+                badge.innerHTML = '<span class="badge bg-success px-3 py-2 fs-6"><i class="bi bi-shield-check me-1"></i>ゲート通過 (PASS)</span>';
+            } else {
+                badge.innerHTML = '<span class="badge bg-danger px-3 py-2 fs-6"><i class="bi bi-shield-x me-1"></i>ゲート未通過 (BLOCKED)</span>';
+            }
+            document.getElementById('gateSummaryText').textContent = data.summary || '';
 
-                const list = document.getElementById('gateCriteriaList');
-                if (list && data.criteria) {
-                    let html = '';
-                    data.criteria.forEach(c => {
-                        const icon = c.passed ? '<i class="bi bi-check-circle-fill text-success fs-5"></i>' : '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
-                        const border = c.passed ? 'border-success' : 'border-danger';
-                        html += `
-                            <div class="col-md-6">
-                                <div class="p-2 border ${border} rounded bg-dark d-flex align-items-center gap-3">
-                                    <div>${icon}</div>
-                                    <div>
-                                        <div class="text-light small fw-bold">${SES.escape(c.criterionName)}</div>
-                                        <div class="text-muted small">${SES.escape(c.detail || '')}</div>
-                                    </div>
+            const list = document.getElementById('gateCriteriaList');
+            if (list && data.criteria) {
+                let html = '';
+                data.criteria.forEach(c => {
+                    const icon = c.passed ? '<i class="bi bi-check-circle-fill text-success fs-5"></i>' : '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
+                    const border = c.passed ? 'border-success' : 'border-danger';
+                    html += `
+                        <div class="col-md-6">
+                            <div class="p-2 border ${border} rounded bg-card d-flex align-items-center gap-3">
+                                <div>${icon}</div>
+                                <div>
+                                    <div class="text-theme small fw-bold">${SES.escapeHtml(c.criterionName)}</div>
+                                    <div class="text-muted small">${SES.escapeHtml(c.detail || '')}</div>
                                 </div>
                             </div>
-                        `;
-                    });
-                    list.innerHTML = html;
-                }
+                        </div>
+                    `;
+                });
+                list.innerHTML = html;
             }
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'ゲート情報の取得に失敗しました');
         }
     },
 
@@ -455,19 +443,22 @@ SES.lifecycle = {
     // ==========================================
     startTask: async function(taskId) {
         try {
-            const res = await SES.api.post(`/api/lifecycle/tasks/${taskId}/start`, {});
-            if (res.code === 200) {
-                SES.toast.success('タスクを開始しました');
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message || 'タスク開始に失敗しました');
-            }
+            await SES.api.post(`/api/lifecycle/tasks/${encodeURIComponent(taskId)}/start`, {});
+            SES.toast.success('タスクを開始しました');
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'タスク開始に失敗しました');
         }
     },
 
-    openCompleteModal: function(taskId, evidenceType) {
+    openCompleteModal: function(buttonOrTaskId, evidenceType) {
+        const taskId = buttonOrTaskId && buttonOrTaskId.dataset
+            ? buttonOrTaskId.dataset.taskId
+            : buttonOrTaskId;
+        if (buttonOrTaskId && buttonOrTaskId.dataset) {
+            evidenceType = buttonOrTaskId.dataset.evidenceType;
+        }
         document.getElementById('completeTaskId').value = taskId;
         document.getElementById('completeComment').value = '';
         const evSection = document.getElementById('evidenceSection');
@@ -490,16 +481,13 @@ SES.lifecycle = {
         };
 
         try {
-            const res = await SES.api.post(`/api/lifecycle/tasks/${taskId}/complete`, payload);
-            if (res.code === 200) {
-                SES.toast.success('タスクを完了しました');
-                bootstrap.Modal.getInstance(document.getElementById('completeTaskModal')).hide();
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message || 'タスク完了に失敗しました');
-            }
+            await SES.api.post(`/api/lifecycle/tasks/${encodeURIComponent(taskId)}/complete`, payload);
+            SES.toast.success('タスクを完了しました');
+            bootstrap.Modal.getInstance(document.getElementById('completeTaskModal')).hide();
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'タスク完了に失敗しました');
         }
     },
 
@@ -526,16 +514,13 @@ SES.lifecycle = {
         };
 
         try {
-            const res = await SES.api.post(`/api/lifecycle/tasks/${taskId}/waive`, payload);
-            if (res.code === 200) {
-                SES.toast.success('タスクを免除しました');
-                bootstrap.Modal.getInstance(document.getElementById('waiveTaskModal')).hide();
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message || 'タスク免除に失敗しました');
-            }
+            await SES.api.post(`/api/lifecycle/tasks/${encodeURIComponent(taskId)}/waive`, payload);
+            SES.toast.success('タスクを免除しました');
+            bootstrap.Modal.getInstance(document.getElementById('waiveTaskModal')).hide();
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'タスク免除に失敗しました');
         }
     },
 
@@ -562,16 +547,13 @@ SES.lifecycle = {
         };
 
         try {
-            const res = await SES.api.post(`/api/lifecycle/tasks/${taskId}/reassign`, payload);
-            if (res.code === 200) {
-                SES.toast.success('タスク担当者を変更しました');
-                bootstrap.Modal.getInstance(document.getElementById('reassignTaskModal')).hide();
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message || '担当者変更に失敗しました');
-            }
+            await SES.api.post(`/api/lifecycle/tasks/${encodeURIComponent(taskId)}/reassign`, payload);
+            SES.toast.success('タスク担当者を変更しました');
+            bootstrap.Modal.getInstance(document.getElementById('reassignTaskModal')).hide();
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '担当者変更に失敗しました');
         }
     },
 
@@ -586,19 +568,16 @@ SES.lifecycle = {
             showCancelButton: true,
             confirmButtonText: '保留にする',
             cancelButtonText: 'キャンセル',
-            customClass: { popup: 'bg-dark text-light' }
+            customClass: { popup: 'bg-card text-theme' }
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
-                    const res = await SES.api.post(`/api/lifecycle/cases/${this.currentCaseId}/hold`, { reason: result.value || '' });
-                    if (res.code === 200) {
-                        SES.toast.success('案件を保留にしました');
-                        this.loadDetail(this.currentCaseId);
-                    } else {
-                        SES.toast.error(res.message);
-                    }
+                    await SES.api.post(`/api/lifecycle/cases/${encodeURIComponent(this.currentCaseId)}/hold`, { reason: result.value || '' });
+                    SES.toast.success('案件を保留にしました');
+                    await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
+                    SES.toast.error(e.message || '案件の保留に失敗しました');
                 }
             }
         });
@@ -606,15 +585,12 @@ SES.lifecycle = {
 
     resumeCase: async function() {
         try {
-            const res = await SES.api.post(`/api/lifecycle/cases/${this.currentCaseId}/resume`, {});
-            if (res.code === 200) {
-                SES.toast.success('案件を再開しました');
-                this.loadDetail(this.currentCaseId);
-            } else {
-                SES.toast.error(res.message);
-            }
+            await SES.api.post(`/api/lifecycle/cases/${encodeURIComponent(this.currentCaseId)}/resume`, {});
+            SES.toast.success('案件を再開しました');
+            await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || '案件の再開に失敗しました');
         }
     },
 
@@ -626,19 +602,16 @@ SES.lifecycle = {
             showCancelButton: true,
             confirmButtonText: '完了確定',
             cancelButtonText: 'キャンセル',
-            customClass: { popup: 'bg-dark text-light' }
+            customClass: { popup: 'bg-card text-theme' }
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
-                    const res = await SES.api.post(`/api/lifecycle/cases/${this.currentCaseId}/complete`, {});
-                    if (res.code === 200) {
-                        SES.toast.success('案件を正常に完了しました');
-                        this.loadDetail(this.currentCaseId);
-                    } else {
-                        SES.toast.error(res.message);
-                    }
+                    await SES.api.post(`/api/lifecycle/cases/${encodeURIComponent(this.currentCaseId)}/complete`, {});
+                    SES.toast.success('案件を正常に完了しました');
+                    await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
+                    SES.toast.error(e.message || '案件の完了に失敗しました');
                 }
             }
         });
@@ -655,19 +628,16 @@ SES.lifecycle = {
             confirmButtonText: '中止する',
             cancelButtonText: 'キャンセル',
             confirmButtonColor: '#dc3545',
-            customClass: { popup: 'bg-dark text-light' }
+            customClass: { popup: 'bg-card text-theme' }
         }).then(async (result) => {
             if (result.isConfirmed) {
                 try {
-                    const res = await SES.api.post(`/api/lifecycle/cases/${this.currentCaseId}/cancel`, { reason: result.value || '' });
-                    if (res.code === 200) {
-                        SES.toast.success('案件を中止しました');
-                        this.loadDetail(this.currentCaseId);
-                    } else {
-                        SES.toast.error(res.message);
-                    }
+                    await SES.api.post(`/api/lifecycle/cases/${encodeURIComponent(this.currentCaseId)}/cancel`, { reason: result.value || '' });
+                    SES.toast.success('案件を中止しました');
+                    await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
+                    SES.toast.error(e.message || '案件の中止に失敗しました');
                 }
             }
         });
@@ -678,12 +648,11 @@ SES.lifecycle = {
     // ==========================================
     loadTemplates: async function() {
         try {
-            const res = await SES.api.get('/api/lifecycle/templates');
-            if (res.code === 200) {
-                this.renderTemplates(res.data || []);
-            }
+            const templates = (await SES.api.get('/api/lifecycle/templates')) || [];
+            this.renderTemplates(templates);
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'テンプレート一覧の取得に失敗しました');
         }
     },
 
@@ -703,16 +672,21 @@ SES.lifecycle = {
 
             html += `
                 <tr>
-                    <td class="ps-4 fw-bold text-light">${SES.escape(tpl.name)}</td>
-                    <td><span class="badge bg-info text-dark">${SES.escape(tpl.templateType)}</span></td>
-                    <td class="font-monospace text-light">v${tpl.versionNo}</td>
-                    <td class="text-muted small">${SES.escape(tpl.validFrom || '-')}</td>
-                    <td class="text-light">${tpl.tasks ? tpl.tasks.length : 0}件</td>
+                    <td class="ps-4 fw-bold text-theme">${SES.escapeHtml(tpl.name || '')}</td>
+                    <td><span class="badge bg-info text-dark">${SES.escapeHtml(tpl.templateType || '')}</span></td>
+                    <td class="font-monospace text-theme">v${tpl.versionNo}</td>
+                    <td class="text-muted small">${SES.escapeHtml(tpl.validFrom || '-')}</td>
+                    <td class="text-theme">${tpl.tasks ? tpl.tasks.length : 0}件</td>
                     <td>${statusBadge}</td>
                     <td class="text-end pe-4">
-                        <button class="btn btn-sm btn-outline-light" onclick="SES.lifecycle.toggleTemplateStatus(${tpl.id}, '${tpl.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}')">
-                            ${tpl.status === 'ACTIVE' ? '無効化' : '有効化'}
-                        </button>
+                        <div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="SES.lifecycle.openTemplateModal(${tpl.id})" title="テンプレートを改定" aria-label="テンプレートを改定">
+                                <i class="bi bi-pencil me-1"></i>改定
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="SES.lifecycle.toggleTemplateStatus(${tpl.id}, '${tpl.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}')">
+                                ${tpl.status === 'ACTIVE' ? '無効化' : '有効化'}
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -722,15 +696,135 @@ SES.lifecycle = {
 
     toggleTemplateStatus: async function(templateId, newStatus) {
         try {
-            const res = await SES.api.post(`/api/lifecycle/templates/${templateId}/toggle-status`, { status: newStatus });
-            if (res.code === 200) {
-                SES.toast.success('ステータスを更新しました');
-                this.loadTemplates();
-            } else {
-                SES.toast.error(res.message);
-            }
+            await SES.api.post(`/api/lifecycle/templates/${encodeURIComponent(templateId)}/toggle-status`, { status: newStatus });
+            SES.toast.success('ステータスを更新しました');
+            await this.loadTemplates();
         } catch (e) {
             console.error(e);
+            SES.toast.error(e.message || 'ステータスの更新に失敗しました');
+        }
+    },
+
+    openTemplateModal: async function(id) {
+        const form = document.getElementById('templateForm');
+        if (!form) return;
+
+        form.reset();
+        document.getElementById('templateId').value = id || '';
+        document.getElementById('templateModalTitle').textContent = id ? 'テンプレート改定' : 'テンプレート新規作成';
+        document.getElementById('templateSaveButton').textContent = id ? '改定して保存' : '作成';
+        document.getElementById('templateType').disabled = Boolean(id);
+        document.getElementById('templateTasks').replaceChildren();
+
+        if (id) {
+            try {
+                const template = await SES.api.get(`/api/lifecycle/templates/${encodeURIComponent(id)}`);
+                this.fillTemplateForm(template);
+            } catch (e) {
+                console.error(e);
+                SES.toast.error(e.message || 'テンプレート詳細の取得に失敗しました');
+                return;
+            }
+        } else {
+            document.getElementById('templateValidFrom').value = new Date().toISOString().slice(0, 10);
+            this.addTemplateTask();
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('templateModal')).show();
+    },
+
+    fillTemplateForm: function(template) {
+        document.getElementById('templateType').value = template.templateType || '';
+        document.getElementById('templateName').value = template.name || '';
+        document.getElementById('templateDescription').value = template.description || '';
+        document.getElementById('templateValidFrom').value = template.validFrom || '';
+        document.getElementById('templateValidTo').value = template.validTo || '';
+        (template.tasks || []).forEach(task => this.addTemplateTask(task));
+        if (!template.tasks || template.tasks.length === 0) this.addTemplateTask();
+    },
+
+    addTemplateTask: function(task = {}) {
+        const row = document.createElement('div');
+        row.className = 'template-task-row border-theme rounded p-3 mb-2';
+        row.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="fw-bold">タスク</span>
+                <button type="button" class="btn btn-sm btn-outline-danger remove-template-task" title="タスクを削除" aria-label="タスクを削除"><i class="bi bi-trash"></i></button>
+            </div>
+            <div class="row g-2">
+                <div class="col-md-3"><label class="form-label small">コード</label><input class="form-control form-control-sm border-theme task-code" required></div>
+                <div class="col-md-5"><label class="form-label small">タスク名</label><input class="form-control form-control-sm border-theme task-name" required></div>
+                <div class="col-md-2"><label class="form-label small">期限（日）</label><input type="number" class="form-control form-control-sm border-theme task-due-days" min="0"></div>
+                <div class="col-md-2"><label class="form-label small">並び順</label><input type="number" class="form-control form-control-sm border-theme task-sort-order" min="0"></div>
+                <div class="col-md-6"><label class="form-label small">説明</label><input class="form-control form-control-sm border-theme task-description"></div>
+                <div class="col-md-3"><label class="form-label small">担当ルール</label><input class="form-control form-control-sm border-theme task-assignee-rule" value="APPLICANT"></div>
+                <div class="col-md-3"><label class="form-label small">担当値</label><input class="form-control form-control-sm border-theme task-assignee-value"></div>
+                <div class="col-md-4"><label class="form-label small">証跡種別</label><select class="form-select form-select-sm border-theme task-evidence-type"><option value="NONE">なし</option><option value="COMMENT">コメント</option><option value="DOCUMENT_LINK">書類リンク</option></select></div>
+                <div class="col-md-8"><label class="form-label small">前提タスクコード（カンマ区切り）</label><input class="form-control form-control-sm border-theme task-predecessors"></div>
+                <div class="col-12 d-flex flex-wrap gap-3">
+                    <label class="form-check"><input type="checkbox" class="form-check-input task-mandatory" checked> 必須</label>
+                    <label class="form-check"><input type="checkbox" class="form-check-input task-blocking" checked> 阻害</label>
+                    <label class="form-check"><input type="checkbox" class="form-check-input task-engineer-visible" checked> 要員に公開</label>
+                </div>
+            </div>`;
+        const set = (selector, value) => { const element = row.querySelector(selector); if (element && value != null) element.value = value; };
+        set('.task-code', task.taskCode || '');
+        set('.task-name', task.taskName || '');
+        set('.task-due-days', task.relativeDueDays == null ? 0 : task.relativeDueDays);
+        set('.task-sort-order', task.sortOrder == null ? '' : task.sortOrder);
+        set('.task-description', task.description || '');
+        set('.task-assignee-rule', task.assigneeRule || 'APPLICANT');
+        set('.task-assignee-value', task.assigneeRuleValue || '');
+        set('.task-evidence-type', task.evidenceType || 'NONE');
+        set('.task-predecessors', (task.predecessorTaskCodes || []).join(', '));
+        row.querySelector('.task-mandatory').checked = task.isMandatory == null || task.isMandatory === 1;
+        row.querySelector('.task-blocking').checked = task.isBlocking == null || task.isBlocking === 1;
+        row.querySelector('.task-engineer-visible').checked = task.isEngineerVisible == null || task.isEngineerVisible === 1;
+        row.querySelector('.remove-template-task').addEventListener('click', () => row.remove());
+        document.getElementById('templateTasks').appendChild(row);
+    },
+
+    saveTemplate: async function() {
+        const form = document.getElementById('templateForm');
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+        const id = document.getElementById('templateId').value;
+        const tasks = Array.from(document.querySelectorAll('.template-task-row')).map((row, index) => ({
+            taskCode: row.querySelector('.task-code').value.trim(),
+            taskName: row.querySelector('.task-name').value.trim(),
+            description: row.querySelector('.task-description').value.trim() || null,
+            relativeDueDays: Number(row.querySelector('.task-due-days').value || 0),
+            assigneeRule: row.querySelector('.task-assignee-rule').value.trim() || 'APPLICANT',
+            assigneeRuleValue: row.querySelector('.task-assignee-value').value.trim() || null,
+            isMandatory: row.querySelector('.task-mandatory').checked ? 1 : 0,
+            isBlocking: row.querySelector('.task-blocking').checked ? 1 : 0,
+            evidenceType: row.querySelector('.task-evidence-type').value,
+            isEngineerVisible: row.querySelector('.task-engineer-visible').checked ? 1 : 0,
+            sortOrder: Number(row.querySelector('.task-sort-order').value || ((index + 1) * 10)),
+            predecessorTaskCodes: row.querySelector('.task-predecessors').value.split(',').map(value => value.trim()).filter(Boolean)
+        }));
+        const payload = {
+            templateType: document.getElementById('templateType').value,
+            name: document.getElementById('templateName').value.trim(),
+            description: document.getElementById('templateDescription').value.trim() || null,
+            validFrom: document.getElementById('templateValidFrom').value,
+            validTo: document.getElementById('templateValidTo').value || null,
+            tasks: tasks
+        };
+        try {
+            if (id) {
+                await SES.api.put(`/api/lifecycle/templates/${encodeURIComponent(id)}`, payload);
+            } else {
+                await SES.api.post('/api/lifecycle/templates', payload);
+            }
+            SES.toast.success(id ? 'テンプレートを改定しました' : 'テンプレートを作成しました');
+            bootstrap.Modal.getInstance(document.getElementById('templateModal')).hide();
+            await this.loadTemplates();
+        } catch (e) {
+            console.error(e);
+            SES.toast.error(e.message || 'テンプレートの保存に失敗しました');
         }
     }
 };

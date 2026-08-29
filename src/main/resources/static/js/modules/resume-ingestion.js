@@ -41,10 +41,11 @@
                     <td><span class="badge ${badgeClass}">${SES.escapeHtml(row.status)}</span></td>
                     <td>${row.createdAt ? row.createdAt.substring(0, 16) : '-'}</td>
                     <td class="text-end pe-4">
-                        ${row.status === '\u8981\u78ba\u8a8d' ? `<a href="/resume-ingestion/review/${row.id}" class="btn btn-sm btn-primary">レビュー</a>` : ''}
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${row.status === '\u8981\u78ba\u8a8d' ? `<a href="/resume-ingestion/review/${row.id}" class="btn btn-sm btn-primary">レビュー</a>` : ''}
                         ${row.status === '\u5931\u6557' ? `<button class="btn btn-sm btn-outline-warning" onclick="reparseJob(${row.id})">再解析</button>` : ''}
-                        ${row.status === '\u78ba\u5b9a\u6e08' && row.convertedEngineerId ? `<a href="/engineer/detail/${row.convertedEngineerId}" class="btn btn-sm btn-outline-success">要員詳細</a>` : ''}
-                    </td>
+                        ${row.status === '\u78ba\u5b9a\u6e08' && row.convertedEngineerId ? `<a href="/engineer/detail?id=${encodeURIComponent(row.convertedEngineerId)}" class="btn btn-sm btn-outline-success">要員詳細</a>` : ''}
+                    </div>
+</td>
                 </tr>
             `);
         });
@@ -369,7 +370,7 @@
                             success: function (res) {
                                 if (res.code === 200) {
                                     Toast.success('確定しました。要員画面へ移動します。');
-                                    setTimeout(() => location.href = '/engineer/detail/' + res.data, 2000);
+                                    setTimeout(() => location.href = '/engineer/detail?id=' + encodeURIComponent(res.data), 2000);
                                 } else {
                                     Toast.error(res.message || '確定に失敗しました。');
                                 }

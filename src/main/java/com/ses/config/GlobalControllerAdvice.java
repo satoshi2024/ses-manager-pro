@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ModelAttribute;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -22,12 +23,96 @@ import java.util.List;
 @RequiredArgsConstructor
 public class GlobalControllerAdvice {
 
+    private static final List<NavRoute> NAV_ROUTES = List.of(
+            new NavRoute("/dashboard", "/dashboard"),
+            new NavRoute("/my/attendance", "/my/attendance"),
+            new NavRoute("/my/timesheet", "/my/timesheet"),
+            new NavRoute("/my/leave", "/my/leave"),
+            new NavRoute("/my/dashboard", "/my/dashboard"),
+            new NavRoute("/my/profile", "/my/profile"),
+            new NavRoute("/my/payroll", "/my/payroll"),
+            new NavRoute("/my/expenses", "/my/expenses"),
+            new NavRoute("/my/certification-learning-skill-gap", "/my/certification-learning-skill-gap"),
+            new NavRoute("/my/one-on-ones", "/my/one-on-ones"),
+            new NavRoute("/my/surveys", "/my/surveys"),
+            new NavRoute("/my/lifecycle", "/my/lifecycle"),
+            new NavRoute("/engineer-change-requests", "/engineer-change-requests"),
+            new NavRoute("/bp-availability-ingestion", "/bp-availability-ingestion"),
+            new NavRoute("/project-ingestion", "/project-ingestion"),
+            new NavRoute("/contract-document", "/contract-document"),
+            new NavRoute("/compliance-gate", "/compliance-gate"),
+            new NavRoute("/work-record/attendance", "/work-record/attendance"),
+            new NavRoute("/approval/routes", "/approval/routes"),
+            new NavRoute("/crm/leads", "/crm/leads"),
+            new NavRoute("/crm/opportunities", "/crm/opportunities"),
+            new NavRoute("/email/template", "/email/template"),
+            new NavRoute("/accounting/integration", "/accounting/integration"),
+            new NavRoute("/ai/evaluation", "/ai/evaluation"),
+            new NavRoute("/ai/matching", "/ai/matching"),
+            new NavRoute("/engineer", "/engineer"),
+            new NavRoute("/lifecycle", "/lifecycle"),
+            new NavRoute("/certification-learning-skill-gap", "/certification-learning-skill-gap"),
+            new NavRoute("/customer", "/customer"),
+            new NavRoute("/project", "/project"),
+            new NavRoute("/candidate", "/candidate"),
+            new NavRoute("/resume-ingestion", "/resume-ingestion"),
+            new NavRoute("/bp-availability", "/bp-availability"),
+            new NavRoute("/bp-company", "/bp-company"),
+            new NavRoute("/proposal", "/proposal"),
+            new NavRoute("/quotation", "/quotation"),
+            new NavRoute("/sales-order", "/sales-order"),
+            new NavRoute("/acceptance", "/acceptance"),
+            new NavRoute("/contract", "/contract"),
+            new NavRoute("/document", "/document"),
+            new NavRoute("/work-record", "/work-record"),
+            new NavRoute("/leave", "/leave"),
+            new NavRoute("/approval", "/approval"),
+            new NavRoute("/expenses", "/expenses"),
+            new NavRoute("/one-on-ones", "/one-on-ones"),
+            new NavRoute("/surveys", "/surveys"),
+            new NavRoute("/invoice", "/invoice"),
+            new NavRoute("/reconciliation", "/reconciliation"),
+            new NavRoute("/payroll", "/payroll"),
+            new NavRoute("/analytics", "/analytics"),
+            new NavRoute("/sales-performance", "/sales-performance"),
+            new NavRoute("/management-reports", "/management-reports"),
+            new NavRoute("/monthly-closing", "/monthly-closing"),
+            new NavRoute("/compliance", "/compliance"),
+            new NavRoute("/todo", "/todo"),
+            new NavRoute("/ai", "/ai/matching"),
+            new NavRoute("/organization", "/organization"),
+            new NavRoute("/management-accounting", "/management-accounting"),
+            new NavRoute("/user", "/user"),
+            new NavRoute("/system-config", "/system-config"),
+            new NavRoute("/audit-log", "/audit-log")
+    );
+
     private final ObjectProvider<com.ses.service.MenuCacheService> menuCacheServiceProvider;
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
 
     @ModelAttribute("currentUri")
     public String currentUri(HttpServletRequest request) {
         return request.getRequestURI();
+    }
+
+    @ModelAttribute("currentNavKey")
+    public String currentNavKey(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        if (uri == null || uri.isBlank() || "/".equals(uri)) {
+            return "/";
+        }
+        return NAV_ROUTES.stream()
+                .filter(route -> isPathPrefix(uri, route.pathPrefix()))
+                .max(Comparator.comparingInt(route -> route.pathPrefix().length()))
+                .map(NavRoute::navKey)
+                .orElse("/");
+    }
+
+    private static boolean isPathPrefix(String uri, String pathPrefix) {
+        return uri.equals(pathPrefix) || uri.startsWith(pathPrefix + "/");
+    }
+
+    private record NavRoute(String pathPrefix, String navKey) {
     }
 
     /**
