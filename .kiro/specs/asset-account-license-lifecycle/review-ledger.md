@@ -29,7 +29,7 @@
 | **CR-03** | データ・マイグレーション (V129/V130, V1/H2同期, DocumentLink契約準拠) | `V129`, `V130`, `schema-asset-account-license-lifecycle-h2.sql`, `V1__create_tables.sql` | `AssetEntityMapperTest`, 全テストコンテキスト起動 (0 failures) | **PASS** |
 | **CR-04** | 監査・セキュリティ・包括的秘密非保存 (Comprehensive No-Secrets Policy) | `AssetComprehensiveSecretScanTest`, `ApiAuditFilter`, `t_asset_event`, `ExternalAccountServiceImpl.maskIdentifier` | `AssetComprehensiveSecretScanTest` (全Javaソースファイル走査・0 secret/PII fields 検証: 4/4 PASS) | **PASS** |
 | **CR-05** | UI・390pxレスポンシブ・4言語メッセージ同期 (ja, en, zh-CN, ko) | `templates/asset/*.html`, `templates/my/assets.html`, `static/js/modules/asset*.js`, `messages*.properties` | 4言語プロパティ同期 & MockMvc レンダリング検証 | **PASS** |
-| **CR-06** | NF-09対象テストの完全性（専用Fast 66件 + MySQL実コンテナ 3件） | NF-09対象14テストクラス (66メソッド) + MySQL 1クラス (3メソッド) | NF-09専用Fast: **66/66 tests PASS (0 failure, 0 error, 0 skipped)**<br>MySQL Gate: `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest` (**3/3 PASS, 0 failure, 0 error, 0 skipped**)<br>`MySqlTestShardInventoryTest` PASS & `AssetMySqlIntegrationTest` 登録。リポジトリ全体 `mvn test` は既存/環境側失敗があり、全体Fast gateは **未PASS** | **NF-09対象PASS / 全体gate未PASS** |
+| **CR-06** | NF-09対象テストの完全性（専用Fast 66件 + MySQL実コンテナ 3件） | NF-09対象14テストクラス (66メソッド) + MySQL 1クラス (3メソッド) | NF-09専用Fast: **66/66 tests PASS (0 failure, 0 error, 0 skipped)**<br>MySQL Gate: `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest` (**3/3 PASS, 0 failure, 0 error, 0 skipped**)<br>`MySqlTestShardInventoryTest` PASS & `AssetMySqlIntegrationTest` 登録。固定seed `27838638095700` の全体比較は Base `3060 tests / 2 failures / 16 errors / 0 skipped`、Head `3118 tests / 2 failures / 11 errors / 0 skipped`。Head初回のfeature起因2件は修正済みで、残存はBaseにも存在する既存/環境側テスト。全体Fast gateは **未PASS** | **NF-09対象PASS / 全体gate未PASS（Base比較済み）** |
 
 ---
 
@@ -55,7 +55,14 @@
 
 ## 4. 独立Reviewへの提出状態
 
-- **検証対象実装remote Head**: `f9dd290ec6dedc8efd46ea77c1bfdd883c5c3255`（実装・テスト修正時点で `git rev-parse HEAD` と `git ls-remote` が一致）。文書commit後の最終Review HeadはReview開始時に同コマンドで再固定する。
+### 4.1 CR-06 Base/Head比較
+
+- Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` の全体 `mvn test`: `tests=3060, failures=2, errors=16, skipped=0`。
+- 最終実装Head `e6659c90` の全体 `mvn test -Dsurefire.runOrder.random.seed=27838638095700`: `tests=3118, failures=2, errors=11, skipped=0`。
+- 最終Headの残存クラスはBaseにも存在する。初回Headで追加された `TransactionalRollbackForAuditTest`（資産系更新@TransactionalのrollbackFor不足）と `MyAssetApiControllerTest`（新規scope fixtureによるH2共有DB汚染）はfeature起因として修正し、修正後関連12/12、NF-09 66/66、MySQL 3/3をPASSした。
+- したがってNF-09対象はPASS、リポジトリ全体Fast gateは未PASSであり、独立Reviewでこの扱いを確認する。
+
+- **検証対象実装remote Head**: `e6659c90` は実装修正push済み。文書commit後の最終Review HeadはReview開始時に同コマンドで再固定する。
 - **PLAN Review**: PENDING（実装エージェントによる自己判定はしない）。
 - **IMPLEMENTATION Review**: PENDING（実装エージェントによる自己判定はしない）。
 - **PR**: 未作成。両ReviewがPASSになるまで作成しない。

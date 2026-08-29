@@ -9,8 +9,8 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base branch**: `origin/main`
 - **Base**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
-- **検証対象実装Head**: `f9dd290ec6dedc8efd46ea77c1bfdd883c5c3255`（実装・テスト修正push後。対象suite 66/66とMySQL 3/3はこの内容で検証）。
-- **Remote確認**: 実装修正push直後に `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で同じ `f9dd290ec6dedc8efd46ea77c1bfdd883c5c3255` を確認。文書のみの最終push後は、Review開始時に同コマンドで提出Headを再固定する。
+- **検証対象実装Head**: `e6659c90`（P1契約修正および全体gate差分修正後の実装・テスト検証点）。文書のみの最終push後は、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で提出Headを再固定する。
+- **Remote確認**: `e6659c90` は実装修正push済み。最終文書commit後のremote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
 - **PR**: 実装対話では未作成。独立ReviewのPLAN/IMPLEMENTATION双方PASS後にのみ作成する。
 
 ## 2. DG-09 / NF-01 決定事項
@@ -57,17 +57,22 @@
 
 ### 3.3 リポジトリ全体Fast gateの扱い
 
-`mvn test` は実行したが、全体PASSではない。NF-09対象テストは通過している一方、次の既存/環境側テストに失敗・エラーが残ったため、CR-06のリポジトリ全体Fast gateは **未PASS** と記録する。
+`mvn test` はBaseと最終Headで固定seed `27838638095700` を使って比較したが、全体PASSではない。NF-09対象テストは通過している一方、Baseにも存在する既存/環境側テストに失敗・エラーが残ったため、CR-06のリポジトリ全体Fast gateは **未PASS** と記録する。
+
+- Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`: `tests=3060, failures=2, errors=16, skipped=0`。
+- 最終Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
+- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、`e6659c90` で修正済み。修正後の関連12/12、NF-09対象66/66、MySQL 3/3はPASS。
 
 - `ControllerTransactionalBanTest`
-- `TransactionalRollbackForAuditTest`
 - `ProductionSecurityConfigurationTest`
+- `PinningHttpsTransportTest`
 - `PrometheusScraperLabE2ETest`（loopback接続環境エラー）
 - `CapacityBaselineScriptTest`
 - `ProjectSkillServiceImplTest`（random order下の固定H2 ID競合）
 - `WebhookNotifierLoopbackIntegrationTest`
+- `I18nJsControllerTest`
 
-この結果をNF-09対象suiteのPASSに混入させず、独立Reviewでベースライン差分として確認する。
+最終Headの残存8クラスはBaseにも存在し、今回のfeature対象外またはloopback・固定ID・production設定環境に起因する。この結果をNF-09対象suiteのPASSに混入させず、独立Reviewでベースライン差分と環境復旧後の再実行要否を確認する。
 
 ## 4. Reconciliation / 未返却一覧
 

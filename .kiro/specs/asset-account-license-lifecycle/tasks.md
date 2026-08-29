@@ -17,10 +17,11 @@
 - **Demo / rollback**: NF-09対象Fast suite 66/66 PASS。失敗時は実装・テスト変更を個別revertする。
 
 ### Task R5.3: Base/Head全体Fast比較
-- **Status**: [ ] 未完了（Base/Head比較実行待ち）
-- **Objective**: Base commitと最終Headでリポジトリ全体 `mvn test` を同一条件で実行し、CR-06の7クラス失敗がBase既存か、今回変更起因かを判定する。
+- **Status**: [x] COMPLETED（比較済み。全体Fast gateは未PASS）
+- **Objective**: Base commitと最終Headでリポジトリ全体 `mvn test` を同一条件で実行し、CR-06の既存失敗クラスがBase既存か、今回変更起因かを判定する。
 - **Test requirements**: Base worktreeとfeature worktreeのSurefire結果をクラス・失敗数・環境依存エラー単位で比較する。NF-09対象suiteの66/66とMySQL 3/3は別gateとして維持する。
-- **Demo / rollback**: 比較結果を本Task・`review-ledger.md`・`review-evidence.md`へ記録し、未判定の結果をPASSと記録しない。
+- **Result**: Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` は `tests=3060, failures=2, errors=16, skipped=0`。最終Head `e6659c90` は固定seed `27838638095700` で `tests=3118, failures=2, errors=11, skipped=0`。最終Headの残存8クラス（ControllerTransactionalBan / PinningHttpsTransport / ProductionSecurityConfiguration / PrometheusScraperLabE2E / CapacityBaselineScript / ProjectSkillServiceImpl / WebhookNotifierLoopback / I18nJsController）はBaseにも存在し、今回のfeature対象外またはloopback・固定ID・production設定環境に起因する。Head初回比較で検出した `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` は今回変更起因として修正し、関連12/12およびNF-09対象66/66を再実行してPASSした。Base固有の `MyLifecycleApiControllerTest` はHeadのテスト集合差による順序差であり、feature失敗とは判定しない。
+- **Demo / rollback**: 比較結果を本Task・`review-ledger.md`・`review-evidence.md`へ記録し、全体gateをPASSとは記録しない。実装起因の修正は `e6659c90` へ個別commit済み。
 
 ### Task R4.1: scope / DocumentLink / soft-delete 契約の再確定
 - **Status**: [x] COMPLETED
@@ -286,7 +287,7 @@
 ## M. 全量検証・Runbook・決定台帳更新・独立Review引渡し
 
 ### Task M.1: テストスイート全量実行・スキップ 0 検証 (Fast / 並行 / ゲート / MySQL)
-- **Status**: [ ] 未完了（全体Fast gateは既存/環境側失敗あり）
+- **Status**: [x] COMPLETED（NF-09/MySQL gate PASS、全体Fast gateはBase既存/環境側未PASS）
 - **Requirements ID**: `CR-06`
 - **Objective**: NF-09 で作成・改修した対象テストとMySQLゲートを実行し、スキップ 0 件、0 Failure / 0 Error を確認する。リポジトリ全体Fast gateの合否は既存テスト・実行環境の結果と分離して記録する。
 - **Test 要件と assertion**:
@@ -295,9 +296,9 @@
 - **手動 Demo と証跡**:
   - Maven Surefire 対象suite出力ログ (`Tests run: 66, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire MySQL プロファイル出力ログ (`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`)
-- **全体gate注記**: リポジトリ全体 `mvn test` は `ControllerTransactionalBanTest`、`TransactionalRollbackForAuditTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest` に失敗/エラーが残ったため、全体Fast gateは未PASS。
+- **全体gate注記**: 最終Head `e6659c90` の固定seed `27838638095700` では `tests=3118, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。Head初回のfeature起因2件は `e6659c90` で修正済み。
 - **Rollback**: なし
-- **未検証事項**: リポジトリ全体Fast gateのPASS、および独立ReviewのPASS。
+- **未検証事項**: リポジトリ全体Fast gateのPASS、および独立ReviewのPASS。全体Fast gateは未PASSのままなので、独立ReviewでBase差分と環境復旧後の再実行要否を判断する。
 
 ### Task M.2: Runbook & 移行手順書・ロールバック手順の整備
 - **Status**: [x] COMPLETED
