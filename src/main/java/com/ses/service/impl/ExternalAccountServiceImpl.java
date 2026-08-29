@@ -152,6 +152,10 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
             ExternalAccountProviderClient.RevokeConfirmationStatus conf = providerClient.checkRevokeConfirmation(current);
             if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
                 confirmRevoke(id, actorUserId);
+            } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN) {
+                current.setStatus("UNKNOWN");
+                current.setLastErrorMessage("Provider revoke response could not be classified");
+                updateById(current);
             }
         }
         return getById(id);
@@ -163,7 +167,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
         LocalDateTime now = LocalDateTime.now();
         List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectList(
                 new LambdaQueryWrapper<ExternalAccountReference>()
-                        .in(ExternalAccountReference::getStatus, List.of("PENDING_CONFIRMATION", "SUSPENDED"))
+                        .in(ExternalAccountReference::getStatus, List.of("PENDING_CONFIRMATION", "SUSPENDED", "UNKNOWN"))
                         .and(w -> w.isNull(ExternalAccountReference::getNextRetryAt)
                                 .or(ow -> ow.le(ExternalAccountReference::getNextRetryAt, now)))
         );
@@ -263,11 +267,15 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     @Override
     @Transactional
     public void softDeleteAccount(Long id) {
-        // AS-R1.5(b): ACTIVE/SUSPENDED/PENDING_CONFIRMATION 状態の場合は論理削除を禁止する
+        // AS-R1.5(b): 未失効状態（UNKNOWNを含む）の論理削除を禁止する
         ExternalAccountReference ref = externalAccountReferenceMapper.selectByIdForUpdate(id);
         if (ref == null) return;
         String st = ref.getStatus();
         boolean confirmed = ref.getRevokeConfirmedAt() != null;
+        if ("REVOKED".equals(st) || confirmed) {
+            throw new BusinessException(
+                    "失効済み外部アカウントの終端履歴は論理削除できません。台帳上の履歴を保持してください。" );
+        }
         if (("ACTIVE".equals(st) || "SUSPENDED".equals(st) || "PENDING_CONFIRMATION".equals(st)
                 || "UNKNOWN".equals(st)) && !confirmed) {
             throw new BusinessException(

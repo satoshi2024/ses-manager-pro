@@ -64,11 +64,11 @@ MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `remove
 | actor | 許可資産の導出 | fail-closed 条件 |
 |---|---|---|
 | 管理者 / HR | 全資産 | なし（メニュー権限は別ゲート） |
-| 営業 | 現任 `t_engineer_sales.sales_user_id = actor` の要員に対する未返却貸与、かつ owner法人がNULLまたはactorの主所属法人 | actorがDBで解決できない、担当要員0名、非NULL法人が不一致 |
-| マネージャー | 管轄組織の要員に対する未返却貸与、かつ owner法人がNULLまたは管轄組織の法人 | 所属/管理組織が解決できない、許可要員0名、非NULL法人が不一致 |
+| 営業 | 現任 `t_engineer_sales.sales_user_id = actor` の要員に対する現在貸与。既存DataScopeの担当要員母集団を使い、owner法人で追加制限しない（担当要員が別法人所属でも可） | actorがDBで解決できない、担当要員0名、現在貸与0件 |
+| マネージャー | 管轄組織の要員に対する現在貸与を既存OrganizationScope/DataScopeの母集団から導出し、owner法人は `NULL`（共有）または管轄組織の `legal_entity_id` と積集合 | 所属/管理組織が解決できない、許可要員0名、非NULL法人が不一致 |
 | 要員 | 自身の貸与記録にリンクされた証跡文書、ポータルは自身の現在貸与のみ | ログイン要員リンクなし、他要員の資産、管理台帳API |
 
-一覧・count・detail・event・assignment history・CSV・通知・外部アカウント/ライセンスの担当者参照はこの同一母集団を使う。`DocumentLink(ASSET_ASSIGNMENT)` は実在する `t_document` → assignment → asset を検証し、リンクされたassignmentの記録上のassignee（要員自身）または現在の資産スコープが許可される場合だけ詳細/downloadを許可する。返却・移管で新しいassignmentが作られた場合、旧assignmentの文書権限は旧assigneeにのみ再評価され、新assigneeへ暗黙継承しない。
+一覧・count・detail・event・assignment history・CSV・通知・外部アカウント/ライセンスの担当者参照はこの同一母集団を使う。営業・マネージャーへ未貸与資産は公開しない。`owner_company_id IS NULL` の共有資産も、営業・マネージャーに許可された要員への現在貸与がある場合だけ公開する。`DocumentLink(ASSET_ASSIGNMENT)` は実在する `t_document` → assignment → asset を検証し、リンクされたassignmentの記録上のassignee（要員自身）または現在の資産スコープが許可される場合だけ詳細/downloadを許可する。返却・移管で新しいassignmentが作られた場合、旧assignmentの文書権限は旧assigneeにのみ再評価され、新assigneeへ暗黙継承しない。
 
 ---
 
@@ -213,8 +213,12 @@ CREATE TABLE t_external_account_reference (
     assignee_type VARCHAR(32) NOT NULL COMMENT 'ENGINEER, USER',
     assignee_id BIGINT NOT NULL COMMENT '要員IDまたはユーザーID',
     permission_level VARCHAR(64) COMMENT '権限区分: ADMIN, DEVELOPER, MEMBER, READONLY',
-    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, SUSPENDED, REVOKED, EXCEPTION_HOLD',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, SUSPENDED, REVOKED, PENDING_CONFIRMATION, UNKNOWN, EXCEPTION_HOLD',
     provisioned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '発行/割当日時',
+    idempotency_key VARCHAR(128) COMMENT '失効要求冪等性キー',
+    retry_count INT NOT NULL DEFAULT 0 COMMENT 'ポーリング/リトライ回数',
+    next_retry_at DATETIME COMMENT '次回ポーリング予定日時',
+    last_error_message VARCHAR(500) COMMENT '直近エラー要約 (秘密値非含有)',
     revoke_requested_at DATETIME COMMENT '失効要求送信日時',
     revoke_confirmed_at DATETIME COMMENT '失効完了確認日時 (NULL=失効未確認)',
     revoke_confirmed_by BIGINT COMMENT '失効確認者ユーザーID',
@@ -278,7 +282,7 @@ CREATE TABLE t_license_assignment (
 |---|---|---|---|---|---|
 | **資産 (`m_asset`)** | `status`, `location`, `owner_company_id` | `t_asset_event` に全状態変更を追記 | 棚卸し実行時 (`t_asset_inventory_item.expected_*`) | `t_asset_event` を timestamp で遡及 | `owner_company_id`=NULL は自社全社共通資産 |
 | **貸与 (`t_asset_assignment`)** | `actual_return_date IS NULL` のアクティブ行 | 過去の返却済み行 (`actual_return_date` 入力済) | 貸与時・返却時受渡し証跡 (`handover/return_evidence_doc_id`) | `start_date <= :d AND (actual_return_date IS NULL OR actual_return_date >= :d)` | `actual_return_date`=NULL は未返却（現在貸与中） |
-| **外部アカウント (`t_external_account_reference`)** | `status = 'ACTIVE'` 行 | 状態変更イベント (`t_asset_event`) | 失効確認スナップショット (`revoke_confirmed_at`, `revoke_confirmed_by`) | `provisioned_at <= :t AND (revoke_confirmed_at IS NULL OR revoke_confirmed_at >= :t)` | `revoke_confirmed_at`=NULL は失効未確認（有効または失効手続中） |
+| **外部アカウント (`t_external_account_reference`)** | `ACTIVE` / `SUSPENDED` / `PENDING_CONFIRMATION` / `UNKNOWN` の未確認行 | 状態変更イベント (`t_asset_event`) | 失効確認スナップショット (`revoke_confirmed_at`, `revoke_confirmed_by`) | `provisioned_at <= :t AND (revoke_confirmed_at IS NULL OR revoke_confirmed_at >= :t)` | `revoke_confirmed_at`=NULL は失効未確認（有効・停止・確認待ち・状態不明） |
 | **ライセンス割当 (`t_license_assignment`)** | `status = 'ACTIVE'` 行 | 解除済み行 (`released_date` 入力済) | 月次管理会計締め時点の `allocated_count` | `assigned_date <= :d AND (released_date IS NULL OR released_date >= :d)` | `released_date`=NULL は現在割当継続中 |
 
 ---
@@ -302,7 +306,7 @@ CREATE TABLE t_license_assignment (
 |---|---|---|---|---|
 | **資産 (`m_asset`)** | `IN_STOCK` ↔ `ASSIGNED`<br>`IN_STOCK` ↔ `UNDER_MAINTENANCE`<br>`IN_STOCK/LOST` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`) | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
 | **貸与 (`t_asset_assignment`)** | `ACTIVE` → `RETURNED`<br>`ACTIVE` → `OVERDUE`<br>`ACTIVE/OVERDUE` → `WAIVED` | **同一資産期間排他判定**: トランザクション内で `SELECT ... FOR UPDATE` により対象資産を行ロックし、重複貸与区間が存在しないことを確認後に INSERT/UPDATE | 後発の貸与申請が `BusinessException("該当年月日に既に有効な貸与が存在します")` で拒否 | 貸与作成・更新全体がロールバック |
-| **外部アカウント (`t_external_account_reference`)** | `ACTIVE` → `SUSPENDED`<br>`ACTIVE/SUSPENDED` → `REVOKED`<br>Any → `EXCEPTION_HOLD` | 状態CAS + 失効確認分離 (`UPDATE ... SET status='REVOKED', revoke_confirmed_at=:now WHERE id=:id AND status IN ('ACTIVE','SUSPENDED')`) | 同時更新時は1件のみ成功、他方は409 | 外部API要求失敗時は `status` を変更せず `SYNC_FAILED` 記録 |
+| **外部アカウント (`t_external_account_reference`)** | `ACTIVE` → `SUSPENDED`<br>`ACTIVE` → `PENDING_CONFIRMATION`（失効要求送信）<br>`PENDING_CONFIRMATION` → `UNKNOWN`（応答形式を分類不能）<br>`SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` → `REVOKED`（外部確認済み）<br>Any → `EXCEPTION_HOLD`（承認済み例外） | 状態CAS + 失効確認分離 (`UPDATE ... SET status='REVOKED', revoke_confirmed_at=:now WHERE id=:id AND status IN ('ACTIVE','SUSPENDED','PENDING_CONFIRMATION','UNKNOWN') AND revoke_confirmed_at IS NULL`)。要求の冪等性キー、retry/backoff、`external_sync_status` を同一参照行へ保存 | 同時更新時は1件のみ成功、他方は409。timeout/5xx/429 は `PENDING_CONFIRMATION` を維持し、応答形式を分類できない場合だけ `UNKNOWN` として blocker を維持 | 外部API要求失敗時は `REVOKED`/confirmed に倒さず、`TIMEOUT`/`SYNC_FAILED` と retry/backoff を記録。管理者の確認または外部確認成功時だけ `REVOKED` へ補償遷移 |
 | **ライセンス席数 (`m_license_plan`)** | 割当増加 / 割当解除 | 席数CAS (`UPDATE m_license_plan SET allocated_count=allocated_count+1, version=version+1 WHERE id=:id AND allocated_count < seat_limit AND version=:v`) | 席数上限到達時は CAS 失敗し `BusinessException("ライセンス席数が上限に達しています")` | 割当処理全体がロールバック |
 
 ---
@@ -351,12 +355,15 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
         │
    ┌────┴───────────────────────────┐
    ▼ (成功: 200 OK)                 ▼ (タイムアウト / 5xx / 429)
-[status: REVOKED]              [status: ACTIVE のまま]
+[status: REVOKED]              [status: PENDING_CONFIRMATION]
 [revoke_confirmed_at: now]     [external_sync_status: TIMEOUT / SYNC_FAILED]
-[revoke_confirmed_by: actor]   [sync_error_message: "Gateway Timeout"]
+[revoke_confirmed_by: actor]   [retry_count / next_retry_at を保存]
                                     │
-                                    ▼ (手動確認または定期リトライ)
-                               [管理者による失効完了手動確認]
+                                    ▼ (応答形式を判別不能な場合)
+                               [status: UNKNOWN]
+                                    │
+                                    ▼
+                               [管理者による失効完了確認]
                                     │
                                     ▼
                                [status: REVOKED]

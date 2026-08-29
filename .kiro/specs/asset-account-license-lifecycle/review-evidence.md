@@ -20,6 +20,9 @@
 - MDMを端末状態、IdP/SaaSを外部アカウント失効状態の正本とし、DBは参照・要求・確認・再試行の証跡正本とする。
 - `RESIGN_ASSET_RETURN` で未返却端末・未失効アカウント・未解放ライセンスをblockし、`LIFECYCLE_EXCEPTION` の承認済み例外だけをWAIVED扱いとする。
 - password/token/recovery codeはDB列・Entity/DTO・HTML input・JS payload・ログ・監査payloadへ保存しない。
+- Provider timeout/5xx/429は `PENDING_CONFIRMATION`、応答形式を分類できない場合だけ `UNKNOWN` とし、`revoke_confirmed_at` が設定されるまで退社blockerを維持する。
+- 営業は現任担当要員への現在貸与のみ（owner法人追加制限なし）、マネージャーは管轄要員への現在貸与かつ `owner_company_id IS NULL` または管轄法人、未貸与資産は両者へ公開しない。
+- `RETURNED`/`REVOKED`/`RELEASED` の終端履歴は論理削除せず、貸与履歴の削除APIも拒否する。
 
 ## 3. 検証結果
 
@@ -36,10 +39,10 @@
 内訳の重要assertion:
 
 - 同一assetの4並行貸与は成功1・拒否3、返却直後の再貸与は成功。
-- 法人A/B、営業担当範囲、マネージャー組織範囲、要員本人、空集合fail-closedを確認。
+- 法人A/B、営業担当範囲（別法人所有でも担当要員への現在貸与は許可、未貸与は拒否）、マネージャー組織・法人範囲（共有または管轄法人のみ）、要員本人、空集合fail-closedを確認。
 - 実在 `t_document` の `ASSET_ASSIGNMENT` linkについて、無関係要員のdetail/downloadを貸与中・返却後とも403。旧assignmentの本人だけは履歴文書へアクセス可能。
 - `AssetComprehensiveSecretScanTest`: **4/4 PASS**。全 `src/main/java` を対象に、multilineのログ・例外・監査payloadを含む未マスク値を検査。
-- 退社3大blocker、承認済み例外、棚卸し確定後更新拒否・二重確定拒否、資産・アカウント・ライセンスのsoft-delete安全条件を確認。
+- 退社3大blocker、承認済み例外、棚卸し確定後更新拒否・二重確定拒否、資産・アカウント・ライセンスのsoft-delete安全条件を確認し、`RETURNED`/`REVOKED`/`RELEASED` 終端履歴の削除拒否をassert。
 - `ScheduledMethodsHaveSchedulerLockTest`: **1/1 PASS**。
 
 ### 3.2 MySQL 8 gate
@@ -98,8 +101,8 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 ## 5. 外部失効と履歴保全
 
 - `revoke_requested_at` と `revoke_confirmed_at` を別々に保持し、要求送信のみで `REVOKED` にしない。
-- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。
-- 資産の移管・返却・紛失・廃棄は `t_asset_event` へINSERT-onlyで追記する。貸与・アカウント・ライセンスの履歴も状態を上書きせず、論理削除は未完了状態を回避してから行う。
+- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま、分類不能応答は `UNKNOWN` として `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。
+- 資産の移管・返却・紛失・廃棄は `t_asset_event` へINSERT-onlyで追記する。貸与・アカウント・ライセンスの履歴も状態を上書きせず、`RETURNED`/`REVOKED`/`RELEASED` の終端行は論理削除を拒否する。
 - 外部プロバイダ呼出しはDBトランザクション外。要求記録と確認結果の間で障害が発生しても、未確認を成功として扱わない。
 
 ## 6. Secret scan

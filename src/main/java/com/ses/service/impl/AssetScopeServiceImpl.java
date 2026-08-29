@@ -39,7 +39,8 @@ import java.util.stream.Collectors;
  * 資産・アカウント・ライセンスの認可母集団を一箇所で解決する。
  *
  * <p>管理者/HR以外は、許可IDをMapperのSQL条件へ渡す。空集合は全件を意味せず、呼び出し側が
- * {@code id = -1} を付けて0件にする。DocumentLinkも実在文書とassignmentを辿って同じ規則を使う。
+ * {@code id = -1} を付けて0件にする。営業・要員は現任担当/本人への現在貸与のみ、マネージャーだけが
+ * その母集団へ所有法人条件を積集合する。DocumentLinkも実在文書とassignmentを辿って同じ規則を使う。
  */
 @Service
 @RequiredArgsConstructor
@@ -116,8 +117,10 @@ public class AssetScopeServiceImpl implements AssetScopeService {
         if (engineerIds == null || engineerIds.isEmpty()) {
             return List.of();
         }
-        return safeList(assetMapper.selectAccessibleAssetIds(
-                engineerIds, new ArrayList<>(accessibleLegalEntityIds(role, actorUserId))));
+        List<Long> ownerCompanyIds = ROLE_MANAGER.equals(role)
+                ? new ArrayList<>(accessibleLegalEntityIds(role, actorUserId))
+                : null;
+        return safeList(assetMapper.selectAccessibleAssetIds(engineerIds, ownerCompanyIds));
     }
 
     @Override

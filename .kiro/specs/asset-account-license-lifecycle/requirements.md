@@ -50,7 +50,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 4. **退社ゲート連携 (NF-01 Link Contract)**: 
    - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の **3大残存アイテム** を blocker として検出・報告する:
      - (a) 未返却貸与資産（`status = ACTIVE` または `actual_return_date IS NULL`）
-     - (b) 未失効外部アカウント（`status IN ('ACTIVE', 'SUSPENDED')` または `revoke_confirmed_at IS NULL`）
+     - (b) 未失効外部アカウント（`status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN')` かつ `revoke_confirmed_at IS NULL`）
      - (c) 未解放有償ライセンス（`status = 'ACTIVE'` または `released_date IS NULL`）
    - WHEN 上記の blocker が1件でも存在する場合、THE システム SHALL 退社ケースの通常完了を確実に阻止（Block）する。
    - WHEN 業務上の正当な理由で未返却/未失効/未解放のまま退社ケースを完了させる場合、THE システム SHALL 申請者単独の操作を禁止し、既存の承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）による例外申請（理由、是正期限、リスク所有者）の承認を必須とする。退社確定時は一括無効化トリガーを実行する。退社手続き中の担当変更・移管時も不変台帳へ排他記録する。
@@ -61,8 +61,9 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 
 1. **認可母集団 (Data Scope)**:
    - 管理者 (`ROLE_管理者`): 全法人・全部署の全資産・外部アカウント・ライセンス・棚卸しを管理・閲覧・更新・エクスポート可能。
-   - マネージャー (`ROLE_マネージャー`): 管轄組織配下の要員に貸与されている資産および外部アカウントを閲覧可能。`owner_company_id` がNULLなら共有資産、非NULLなら管轄組織の `legal_entity_id` と一致する資産だけを許可する。
-   - HR / 営業 (`ROLE_HR`, `ROLE_営業`): 既存 DataScope に準拠し、担当要員の貸与資産・アカウントを閲覧可能。営業は現任 `t_engineer_sales` の担当要員を母集団とし、担当要員が解決できない場合は0件（fail-closed）とする。
+   - マネージャー (`ROLE_マネージャー`): 管轄組織配下の要員に**現在貸与されている**資産および外部アカウントを閲覧可能。`owner_company_id` がNULLなら共有資産、非NULLなら管轄組織の `legal_entity_id` と一致する資産だけを許可する。未貸与資産は許可しない。
+   - HR (`ROLE_HR`): 既存のHR role/DataScope（全要員の入退社関連データ）に準拠し、組織で追加制限をかけない。
+   - 営業 (`ROLE_営業`): 既存 DataScope に準拠し、現任 `t_engineer_sales` の担当要員の**現在貸与資産**・アカウントを閲覧可能。担当要員が別法人所属でもowner法人による追加制限をかけない。担当要員が解決できない場合は0件（fail-closed）とする。未貸与資産は、owner_company_idがNULLの共有資産を含めて許可しない。
    - 要員本人 (`ROLE_要員`): `/my/assets` および `/api/my/assets/**` において、自分自身に現在貸与されている資産情報、返却期日、およびアカウント参照のみを閲覧可能。内部原価、他者の貸与情報、全社資産台帳を閲覧・推測できない。
 2. **通知機能**: THE システム SHALL 資産返却期日の接近（7日前/3日前/当日）、返却期日超過（超過当日/毎週リマインド）、棚卸し期限接近、および外部アカウント失効未確認を、重複排除キー（Deduplication Key）を用いて対象者および管理担当者へ通知する。
 3. **監査ログ**: THE システム SHALL 資産の新規登録、属性更新、貸与、返却、紛失、廃棄、アカウント発行/失効確認の全操作を `t_asset_event` および `t_audit_log` に記録する。

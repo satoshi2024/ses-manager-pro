@@ -8,7 +8,7 @@
 
 1. **秘密情報非保持（No Secrets Policy）**:
    - `t_external_account_reference` 等のテーブルやDTOに、パスワード・APIトークン・秘密鍵は絶対に保存・記録しません。
-   - 保有するのは外部システム識別子（アカウント名/メールアドレス）と状態（ACTIVE / SUSPENDED / REVOKED）、失効確認タイムスタンプのみです。
+   - 保有するのは外部システム識別子（アカウント名/メールアドレス）と状態（ACTIVE / SUSPENDED / REVOKED / PENDING_CONFIRMATION / UNKNOWN）、失効要求・確認タイムスタンプのみです。
 2. **排他制御と期間重複代数**:
    - 貸与作成時は `m_asset` 行を `FOR UPDATE` でロックし、`[start_date, expected_return_date]` の期間重複を代数的に排除します。
 3. **不変イベント台帳（Immutable Event Ledger）**:
@@ -21,11 +21,11 @@
    - 資産一覧・詳細・イベント・貸与履歴・CSV・通知・要員ポータル・外部アカウント・ライセンス・証跡文書で同じスコープを適用します。
 6. **論理削除の安全条件**:
    - 未返却貸与（`status IN ('ACTIVE','OVERDUE')` かつ `actual_return_date IS NULL`）がある資産は削除できません。廃棄は `DISPOSED` のイベントを追記してから論理削除します。
-   - 外部アカウントは `ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` かつ `revoke_confirmed_at IS NULL` の間は削除できません。`EXCEPTION_HOLD` は承認済み例外としてのみ許可します。
+   - 外部アカウントは `ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` かつ `revoke_confirmed_at IS NULL` の間は削除できません。`REVOKED` または失効確認済みの終端行も論理削除せず、`EXCEPTION_HOLD` の論理削除は承認済み例外としてのみ許可します。
    - ライセンスは `ACTIVE` または `released_date IS NULL` の間は削除できません。解放後は `RELEASED` と日付を履歴として保持します。
 7. **外部連携の正本とトランザクション境界**:
    - MDMは端末状態、IdP/SaaSはアカウント失効状態の外部正本です。DBは参照・要求・確認結果・再試行の証跡正本です。
-   - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、タイムアウトや失敗は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。
+   - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、timeout/5xx/429は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。応答形式を分類できない場合は `UNKNOWN` として blocker を維持します。
 
 ---
 

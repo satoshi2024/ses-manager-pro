@@ -108,6 +108,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         AssetAssignment returnedAs = assetAssignmentService.returnAssignment(as1.getId(), LocalDate.of(2026, 8, 15), null, "Returned OK", 1L);
         assertThat(returnedAs.getStatus()).isEqualTo("RETURNED");
+        assertThatThrownBy(() -> assetAssignmentService.removeById(returnedAs.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("貸与履歴は論理削除できません");
 
         Asset updatedAsset = assetService.getById(asset.getId());
         assertThat(updatedAsset.getStatus()).isEqualTo("IN_STOCK");
@@ -262,12 +265,28 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             assertThat(requested.getNextRetryAt()).isNotNull();
             assertThat(requested.getRevokeConfirmedAt()).isNull();
 
+            // 応答形式を分類できない場合だけ UNKNOWN とし、退社 blocker を維持する
+            ExternalAccountReference unknownRef = ExternalAccountReference.builder()
+                    .systemId(system.getId())
+                    .accountIdentifier("unknown.user@ses-test.jp")
+                    .assigneeType("ENGINEER")
+                    .assigneeId(302L)
+                    .status("ACTIVE")
+                    .build();
+            externalAccountReferenceMapper.insert(unknownRef);
+            mockClient.setMockStatus(unknownRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN);
+            ExternalAccountReference unknown = externalAccountService.requestRevokeWithIdempotency(
+                    unknownRef.getId(), "REVOKE-UNKNOWN-" + unknownRef.getId(), 1L);
+            assertThat(unknown.getStatus()).isEqualTo("UNKNOWN");
+            assertThat(unknown.getRevokeConfirmedAt()).isNull();
+
             // プロバイダ復旧
             mockClient.setMockStatus(ref.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+            mockClient.setMockStatus(unknownRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
 
             // ポーリングジョブ実行 -> 自動で REVOKED へ
             int processed = externalAccountService.processPendingRevokePollJob();
-            assertThat(processed).isGreaterThanOrEqualTo(1);
+            assertThat(processed).isGreaterThanOrEqualTo(2);
 
             ExternalAccountReference confirmedRef = externalAccountReferenceMapper.selectById(ref.getId());
             assertThat(confirmedRef.getStatus()).isEqualTo("REVOKED");
@@ -276,6 +295,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             // 二重失効確認は安全に冪等処理されること
             ExternalAccountReference duplicateRevoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
             assertThat(duplicateRevoked.getStatus()).isEqualTo("REVOKED");
+            assertThat(externalAccountReferenceMapper.selectById(unknownRef.getId()).getStatus()).isEqualTo("REVOKED");
         }
     }
 
@@ -425,8 +445,8 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("Boundary 6-B: 営業/マネージャーの法人・組織scopeは所有法人と担当要員の両方でfail-closed")
-    void testSalesAndManagerScopeUsesOwnerCompanyAndManagedOrganization() {
+    @DisplayName("Boundary 6-B: 営業/マネージャーの貸与・法人scopeをfail-closedで分離")
+    void testSalesAndManagerScopeUsesAssignmentAndManagedOrganization() {
         String suffix = Long.toString(System.nanoTime());
         long legalA = 91001L;
         long legalB = 91002L;
@@ -466,23 +486,37 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .category("MONITOR").ownerCompanyId(legalA).status("IN_STOCK").build();
         Asset unassignedB = Asset.builder().assetTag("AST-SCOPE-SALES-U-B-" + suffix).assetName("法人B未貸与")
                 .category("MONITOR").ownerCompanyId(legalB).status("IN_STOCK").build();
+        Asset crossCorporation = Asset.builder().assetTag("AST-SCOPE-SALES-CROSS-" + suffix).assetName("担当要員の別法人資産")
+                .category("TABLET").ownerCompanyId(legalB).status("IN_STOCK").build();
+        Asset sharedAssigned = Asset.builder().assetTag("AST-SCOPE-SALES-SHARED-" + suffix).assetName("共有資産の貸与")
+                .category("SECURITY_KEY").ownerCompanyId(null).status("IN_STOCK").build();
         assetService.createAsset(assignedA, 1L);
         assetService.createAsset(assignedB, 1L);
         assetService.createAsset(unassignedA, 1L);
         assetService.createAsset(unassignedB, 1L);
+        assetService.createAsset(crossCorporation, 1L);
+        assetService.createAsset(sharedAssigned, 1L);
         assetAssignmentService.createAssignment(assignedA.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "A", 1L);
         assetAssignmentService.createAssignment(assignedB.getId(), "ENGINEER", engineerB.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "B", 1L);
+        assetAssignmentService.createAssignment(crossCorporation.getId(), "ENGINEER", engineerA.getId(),
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "A担当・法人B保有", 1L);
+        assetAssignmentService.createAssignment(sharedAssigned.getId(), "ENGINEER", engineerA.getId(),
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "共有", 1L);
 
         assertThat(assetScopeService.isAccessible(assignedA.getId(), "営業", sales.getId())).isTrue();
         assertThat(assetScopeService.isAccessible(assignedB.getId(), "営業", sales.getId())).isFalse();
-        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "営業", sales.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "営業", sales.getId())).isFalse();
         assertThat(assetScopeService.isAccessible(unassignedB.getId(), "営業", sales.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(crossCorporation.getId(), "営業", sales.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(sharedAssigned.getId(), "営業", sales.getId())).isTrue();
         assertThat(assetScopeService.isAccessible(assignedA.getId(), "マネージャー", manager.getId())).isTrue();
         assertThat(assetScopeService.isAccessible(assignedB.getId(), "マネージャー", manager.getId())).isFalse();
-        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "マネージャー", manager.getId())).isTrue();
+        assertThat(assetScopeService.isAccessible(unassignedA.getId(), "マネージャー", manager.getId())).isFalse();
         assertThat(assetScopeService.isAccessible(unassignedB.getId(), "マネージャー", manager.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(crossCorporation.getId(), "マネージャー", manager.getId())).isFalse();
+        assertThat(assetScopeService.isAccessible(sharedAssigned.getId(), "マネージャー", manager.getId())).isTrue();
     }
 
     @Test
@@ -637,6 +671,28 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThatThrownBy(() -> externalAccountService.softDeleteAccount(ref.getId()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("ACTIVE");
+
+        // REVOKED終端行も論理削除せず、履歴を保持する
+        externalAccountService.confirmRevoke(ref.getId(), 1L);
+        assertThatThrownBy(() -> externalAccountService.softDeleteAccount(ref.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("終端履歴");
+
+        // RELEASED終端行も論理削除せず、席数・履歴の根拠を保持する
+        LicensePlan terminalPlan = LicensePlan.builder()
+                .planCode("LIC-SOFTDEL-TERMINAL-" + System.nanoTime())
+                .planName("Soft Delete Terminal License")
+                .seatLimit(1)
+                .allocatedCount(0)
+                .status("ACTIVE")
+                .build();
+        licenseService.savePlan(terminalPlan, 1L);
+        LicenseAssignment releasedLicense = licenseService.assignLicense(
+                terminalPlan.getId(), "ENGINEER", 8801L, ref.getId(), LocalDate.now(), 1L);
+        licenseService.releaseLicense(releasedLicense.getId(), LocalDate.now(), 1L);
+        assertThatThrownBy(() -> licenseService.softDeleteAssignment(releasedLicense.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("終端履歴");
 
         // 3. 資産廃棄は deleted_flag ではなく DISPOSED 状態遷移で表現する
         Asset asset2 = Asset.builder()

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -255,5 +256,15 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
         }
         wrapper.orderByDesc(AssetAssignment::getId);
         return page(pageable, wrapper);
+    }
+
+    /** 貸与履歴は返却・移管の監査証跡であり、終端状態を含め論理削除しない。 */
+    @Override
+    @Transactional
+    public boolean removeById(Serializable id) {
+        if (id == null || getById(id) == null) {
+            return false;
+        }
+        throw new BusinessException("資産貸与履歴は論理削除できません。返却・移管履歴を台帳上に保持してください。");
     }
 }

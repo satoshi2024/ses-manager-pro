@@ -4,22 +4,40 @@
 
 ## Review follow-up（第4回Review P1是正）
 
+### Task R5.1: 第5回Review P1契約差分の再確定
+- **Status**: [x] COMPLETED
+- **Objective**: Provider timeout/分類不能応答、営業/マネージャーの資産scope、終端履歴保持の要求・設計・実装・テスト契約を一つに確定する。
+- **Decision**: timeout/5xx/429は `PENDING_CONFIRMATION`、応答形式を分類できない場合だけ `UNKNOWN` とし、いずれも `revoke_confirmed_at` が設定されるまで退社blockerを維持する。営業は現任担当要員への現在貸与のみ（owner法人追加制限なし）、マネージャーは管轄要員への現在貸与かつ共有/管轄法人、未貸与は不可とする。`RETURNED`/`REVOKED`/`RELEASED` の終端履歴は論理削除を拒否する。
+- **Demo / rollback**: `requirements.md` / `design.md` / `tasks.md` / `review-ledger.md` / `review-evidence.md` とprovider実装・境界テストを同一commit系列で確認する。失敗時はR5変更を個別revertする。
+
+### Task R5.2: P1実装・境界assertion
+- **Status**: [x] COMPLETED
+- **Objective**: 営業/マネージャーscopeの未貸与・法人境界をSQLでfail-closedにし、provider `UNKNOWN` を永続化・ポーリング対象に加え、貸与/アカウント/ライセンス終端履歴のsoft-deleteを拒否する。
+- **Test requirements**: `AssetBoundaryAndLifecycleIntegrationTest` で timeout=`PENDING_CONFIRMATION`、分類不能=`UNKNOWN`、復旧後のみ`REVOKED`、営業の別法人担当資産許可、未貸与/担当外拒否、マネージャー法人交差拒否、`RETURNED`/`REVOKED`/`RELEASED` の削除拒否をassertする。
+- **Demo / rollback**: NF-09対象Fast suite 66/66 PASS。失敗時は実装・テスト変更を個別revertする。
+
+### Task R5.3: Base/Head全体Fast比較
+- **Status**: [ ] 未完了（Base/Head比較実行待ち）
+- **Objective**: Base commitと最終Headでリポジトリ全体 `mvn test` を同一条件で実行し、CR-06の7クラス失敗がBase既存か、今回変更起因かを判定する。
+- **Test requirements**: Base worktreeとfeature worktreeのSurefire結果をクラス・失敗数・環境依存エラー単位で比較する。NF-09対象suiteの66/66とMySQL 3/3は別gateとして維持する。
+- **Demo / rollback**: 比較結果を本Task・`review-ledger.md`・`review-evidence.md`へ記録し、未判定の結果をPASSと記録しない。
+
 ### Task R4.1: scope / DocumentLink / soft-delete 契約の再確定
 - **Status**: [x] COMPLETED
-- **Objective**: `owner_company_id` の実体（`m_organization_unit.legal_entity_id`）を確定し、法人A/B・営業・マネージャー・要員の許可/拒否を同一スコープで定義する。存在しないDocument IDやリンク有無だけでDocumentアクセスを許可しない。論理削除は未返却貸与・未失効アカウント・未解放ライセンスを回避できない。
-- **Test requirements**: 実在 `t_document` と `ASSET_ASSIGNMENT` link を作り、detail/download/list の無関係要員403、返却/移管後の旧assignment文書再評価、法人A/B・管理組織・営業担当外・空集合のfail-closedを検証する。各削除条件とDISPOSED/REVOKED/RELEASED履歴保持を検証する。
-- **Demo / rollback**: `mvn '-Dtest=AssetBoundaryAndLifecycleIntegrationTest,AssetApiRoleScopeIntegrationTest,DocumentApiControllerTest,AssetAlertServiceTest,AssetComprehensiveSecretScanTest,ActionPermissionResolverTest' test` で 47/47 PASS。失敗時は本Taskの実装・テスト・spec変更のみrevertする。
+- **Objective**: `owner_company_id` の実体（`m_organization_unit.legal_entity_id`）を確定し、法人A/B・営業・マネージャー・要員の許可/拒否を同一スコープで定義する。存在しないDocument IDやリンク有無だけでDocumentアクセスを許可しない。論理削除は未返却貸与・未失効アカウント・未解放ライセンスを回避できず、返却・失効済み・解放済みの終端履歴を削除できない。
+- **Test requirements**: 実在 `t_document` と `ASSET_ASSIGNMENT` link を作り、detail/download/list の無関係要員403、返却/移管後の旧assignment文書再評価、法人A/B・管理組織・営業担当外・空集合のfail-closedを検証する。営業は担当要員への現在貸与のみ（法人追加制限なし）、マネージャーは現在貸与と法人条件の積集合、未貸与資産は拒否する。`RETURNED`/`REVOKED`/`RELEASED` 終端行の論理削除拒否も検証する。
+- **Demo / rollback**: NF-09対象suiteの実行で 66/66 PASS。失敗時は本Taskの実装・テスト・spec変更のみrevertする。
 
 ### Task R4.2: 全Java secret scan とCR-01 consumer coverage
 - **Status**: [x] COMPLETED
 - **Objective**: `src/main/java` 全Javaを対象に、ログ文言のキーワードではなく未マスクのsecret/PII値の式・multiline呼出し・監査payloadを検出する。資産/アカウント/ライセンスの一覧・詳細・event/history・CSV・通知・portalで同一scopeを適用する。
 - **Test requirements**: 既存の正当な状態ラベルを誤検知せず、`accountIdentifier` 等の未マスク値・例外連結・audit payloadを検出する静的テストを実行する。sales/manager/engineer/adminの肯定・否定系を各consumerで確認する。
-- **Demo / rollback**: `AssetComprehensiveSecretScanTest` 4/4、role/document scope を含む対象suite 47/47 PASS を台帳へ記録した。失敗時は対象変更をrevertする。
+- **Demo / rollback**: `AssetComprehensiveSecretScanTest` 4/4、role/document scope を含む対象suite 66/66 PASS を台帳へ記録した。失敗時は対象変更をrevertする。
 
 ### Task R4.3: independent evidence / M handoff
 - **Status**: [x] COMPLETED（証跡パッケージ準備済み。独立Reviewは未実施）
 - **Objective**: fast/MySQL実測を同一remote Headで再実行し、reconciliation・未返却一覧・secret scan結果・rollback/runbookをReviewへ引き渡す。証跡の未実測をPASSと記録しない。
-- **Test requirements**: 対象Fast suite 47/47、MySQL 3/3、scheduler lock 1/1 は skip=0 で記録した。migration適用、並行貸与、license CAS、provider timeout、offboarding blocker/exception、inventory discrepancyも証跡化した。リポジトリ全体の `mvn test` は既存/環境側失敗が残るため、全体PASSとは記録しない。
+- **Test requirements**: 対象Fast suite 66/66、MySQL 3/3、scheduler lock 1/1 は skip=0 で記録した。migration適用、並行貸与、license CAS、provider timeout/UNKNOWN、offboarding blocker/exception、inventory discrepancy、営業/マネージャーの現在貸与scope、終端履歴の論理削除拒否も証跡化した。リポジトリ全体の `mvn test` はBaseとの比較結果を添えて記録し、全体PASSとは記録しない。
 - **Demo / rollback**: `git ls-remote` と検証ログのHead一致を示す。runbookに手順・バックアップ復旧・ロールバック境界を残す。
 - **Rollback**: Review handoffのみ取り消す場合は台帳修正、実装を戻す場合はTask R4.1/R4.2のコミットを個別revertする。
 
@@ -235,13 +253,13 @@
 ### Task B2.2: 外部プロバイダ連携クライアント & 非同期失効要求・確認分離 & Recovery/Idempotency
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R2.4`, `CR-02`
-- **Objective**: 外部SaaS/IdPプロバイダに対する失効要求と確証確認を分離し、タイムアウト・失敗時の `PENDING_CONFIRMATION` 永続化（`idempotency_key`, `retry_count`, `next_retry_at`）、指数バックオフポーリングジョブによる再照会、および二重確認時の冪等性を実装する。
+- **Objective**: 外部SaaS/IdPプロバイダに対する失効要求と確証確認を分離し、タイムアウト・5xx・429は `PENDING_CONFIRMATION`、応答形式を分類できない場合だけ `UNKNOWN` として永続化する。`idempotency_key`, `retry_count`, `next_retry_at` による指数バックオフポーリングと、二重確認時の冪等性を実装する。
 - **実装内容**:
   - `ExternalAccountProviderClient`, `MockExternalAccountProviderClientImpl`
   - `ExternalAccountServiceImpl.requestRevokeWithIdempotency`
   - `ExternalAccountServiceImpl.processPendingRevokePollJob`
 - **Test 要件と assertion**:
-  - `AssetBoundaryAndLifecycleIntegrationTest.testProviderRecoveryAndIdempotency`: タイムアウト時の `PENDING_CONFIRMATION` 永続化、ポーリングジョブによる復旧後確認完了、二重確認時の冪等性アサート
+  - `AssetBoundaryAndLifecycleIntegrationTest.testProviderRecoveryAndIdempotency`: timeout/失敗時の `PENDING_CONFIRMATION` 永続化、分類不能応答時の `UNKNOWN` blocker、ポーリングジョブによる復旧後確認完了、二重確認時の冪等性アサート
 - **手動 Demo と証跡**: `AssetBoundaryAndLifecycleIntegrationTest` 実行ログ
 - **Rollback**: アダプタークラスの revert
 - **未検証事項**: 実SaaSとのOAuth通信（NF-05開工時に委譲）
