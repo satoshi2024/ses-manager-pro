@@ -20,10 +20,12 @@ class AssetLifecycleAppendOnlyApiContractTest {
         assertFalse(IService.class.isAssignableFrom(AssetEventService.class));
         assertFalse(IService.class.isAssignableFrom(AssetAssignmentService.class));
         assertFalse(IService.class.isAssignableFrom(ExternalAccountService.class));
+        assertFalse(IService.class.isAssignableFrom(AssetService.class));
 
         assertNoGenericMutation(AssetEventService.class);
         assertNoGenericMutation(AssetAssignmentService.class);
         assertNoGenericMutation(ExternalAccountService.class);
+        assertNoGenericMutation(AssetService.class);
     }
 
     private void assertNoGenericMutation(Class<?> serviceType) {

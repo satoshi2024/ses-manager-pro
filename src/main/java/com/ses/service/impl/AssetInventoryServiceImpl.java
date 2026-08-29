@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ses.common.constant.AssetStatusPolicy;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetInventoryItem;
@@ -115,11 +116,17 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
             throw new BusinessException("完了済みの棚卸し明細は変更できません。");
         }
 
+        String normalizedObservedStatus = AssetStatusPolicy.normalize(observedStatus);
+        if (!AssetStatusPolicy.ALLOWED_VALUES.contains(normalizedObservedStatus)) {
+            throw new BusinessException(400,
+                    "実地確認ステータスが不正です。許可値: " + AssetStatusPolicy.ALLOWED_VALUES);
+        }
+
         if (!StringUtils.hasText(discrepancyType)) {
             discrepancyType = "MATCH";
         }
 
-        item.setObservedStatus(observedStatus);
+        item.setObservedStatus(normalizedObservedStatus);
         item.setObservedLocation(observedLocation);
         item.setDiscrepancyType(discrepancyType);
         item.setDiscrepancyReason(discrepancyReason);

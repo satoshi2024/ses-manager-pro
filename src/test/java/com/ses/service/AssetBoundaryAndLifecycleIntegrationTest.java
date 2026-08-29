@@ -134,6 +134,32 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("Boundary 1-C: actual return date must be within start date and today")
+    void testActualReturnDateRangeIsEnforced() {
+        LocalDate today = LocalDate.now();
+        LocalDate startDate = today.minusDays(3);
+        Asset asset = Asset.builder()
+                .assetTag("AST-RETURN-RANGE-" + System.nanoTime())
+                .assetName("Return range device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+        AssetAssignment assignment = assetAssignmentService.createAssignment(
+                asset.getId(), "ENGINEER", 103L, startDate, today.plusDays(7), null, "Return range", 1L);
+
+        assertThatThrownBy(() -> assetAssignmentService.returnAssignment(
+                assignment.getId(), startDate.minusDays(1), null, "開始日前返却", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("開始日以降かつ本日以前");
+        assertThatThrownBy(() -> assetAssignmentService.returnAssignment(
+                assignment.getId(), today.plusDays(1), null, "未来日返却", 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("開始日以降かつ本日以前");
+        assertThat(assetAssignmentService.returnAssignment(
+                assignment.getId(), today, null, "本日返却", 1L).getStatus()).isEqualTo("RETURNED");
+    }
+
+    @Test
     @DisplayName("Boundary 1-B: NF-01 asset/license blockers use the status OR date contract")
     void testOffboardingBlockersUseStatusOrDateContract() {
         Long engineerId = 10101L;

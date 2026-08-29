@@ -155,6 +155,12 @@ public class AssetAssignmentServiceImpl implements AssetAssignmentService {
         if (assignment.getActualReturnDate() != null || !List.of("ACTIVE", "OVERDUE").contains(assignment.getStatus())) {
             throw new BusinessException("この貸与は既に返却または免除済みです。");
         }
+        LocalDate today = LocalDate.now();
+        if (assignment.getStartDate() == null
+                || actualReturnDate.isBefore(assignment.getStartDate())
+                || actualReturnDate.isAfter(today)) {
+            throw new BusinessException(400, "実返却日は貸与開始日以降かつ本日以前の日付を指定してください。");
+        }
         if (StringUtils.hasText(note)) {
             note = StringUtils.hasText(assignment.getNote()) ? assignment.getNote() + " / " + note : note;
         } else {

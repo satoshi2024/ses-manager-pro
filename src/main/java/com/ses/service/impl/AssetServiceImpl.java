@@ -3,7 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ses.common.constant.AssetStatusPolicy;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
@@ -18,16 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements AssetService {
-
-    private static final Set<String> ALLOWED_ASSET_STATUSES = Set.of(
-            "IN_STOCK", "ASSIGNED", "UNDER_MAINTENANCE", "LOST", "DISPOSED", "RESERVED");
+public class AssetServiceImpl implements AssetService {
 
     private final AssetMapper assetMapper;
     private final AssetAssignmentMapper assetAssignmentMapper;
@@ -53,13 +48,10 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         }
 
         asset.setAssetTag(asset.getAssetTag().trim());
-        if (!StringUtils.hasText(asset.getStatus())) {
-            asset.setStatus("IN_STOCK");
-        } else {
-            asset.setStatus(asset.getStatus().trim().toUpperCase(Locale.ROOT));
-        }
+        asset.setStatus(StringUtils.hasText(asset.getStatus())
+                ? AssetStatusPolicy.normalize(asset.getStatus()) : AssetStatusPolicy.IN_STOCK);
         assertAllowedStatus(asset.getStatus());
-        save(asset);
+        assetMapper.insert(asset);
 
         assetEventService.recordEvent(
                 asset.getId(),
@@ -112,7 +104,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         current.setLeaseExpiry(asset.getLeaseExpiry());
         current.setNote(asset.getNote());
 
-        updateById(current);
+        assetMapper.updateById(current);
 
         assetEventService.recordEvent(
                 current.getId(),
@@ -133,8 +125,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Asset changeStatus(Long assetId, String toStatus, String reason, Long actorUserId, Long evidenceDocId) {
-        String normalizedToStatus = StringUtils.hasText(toStatus)
-                ? toStatus.trim().toUpperCase(Locale.ROOT) : toStatus;
+        String normalizedToStatus = AssetStatusPolicy.normalize(toStatus);
         assertAllowedStatus(normalizedToStatus);
 
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
@@ -147,10 +138,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
             return asset;
         }
 
-        // 貸与中の直接ステータス変更は禁止（返却または貸与解除を必須とする）
-        if ("ASSIGNED".equals(fromStatus) && !"LOST".equals(normalizedToStatus)) {
-            throw new BusinessException("貸与中の資産のステータスを変更するには、先に返却処理を行ってください。");
-        }
+        assertAllowedTransition(fromStatus, normalizedToStatus);
 
         int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, normalizedToStatus, asset.getVersion());
         if (updated == 0) {
@@ -174,8 +162,16 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     private void assertAllowedStatus(String status) {
-        if (!ALLOWED_ASSET_STATUSES.contains(status)) {
-            throw new BusinessException(400, "資産ステータスが不正です。許可値: " + ALLOWED_ASSET_STATUSES);
+        if (!AssetStatusPolicy.ALLOWED_VALUES.contains(status)) {
+            throw new BusinessException(400, "資産ステータスが不正です。許可値: " + AssetStatusPolicy.ALLOWED_VALUES);
+        }
+    }
+
+    private void assertAllowedTransition(String fromStatus, String toStatus) {
+        if (!AssetStatusPolicy.isAllowedGenericTransition(fromStatus, toStatus)) {
+            throw new BusinessException(400,
+                    "資産ステータス遷移が許可されていません: " + fromStatus + " -> " + toStatus
+                            + "。貸与・返却は専用の貸与サービスを使用してください。");
         }
     }
 
@@ -191,6 +187,10 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         }
 
         String fromStatus = asset.getStatus();
+        if (AssetStatusPolicy.DISPOSED.equals(fromStatus)) {
+            return asset;
+        }
+        assertAllowedTransition(fromStatus, AssetStatusPolicy.DISPOSED);
         int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, "DISPOSED", asset.getVersion());
         if (updated == 0) {
             throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
@@ -221,7 +221,11 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         }
 
         String fromStatus = asset.getStatus();
-        int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, "LOST", asset.getVersion());
+        if (AssetStatusPolicy.LOST.equals(fromStatus)) {
+            return asset;
+        }
+        assertAllowedTransition(fromStatus, AssetStatusPolicy.LOST);
+        int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, AssetStatusPolicy.LOST, asset.getVersion());
         if (updated == 0) {
             throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
         }
@@ -278,7 +282,12 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         }
 
         wrapper.orderByDesc(Asset::getId);
-        return page(pageable, wrapper);
+        return assetMapper.selectPage(pageable, wrapper);
+    }
+
+    @Override
+    public Asset getById(Long assetId) {
+        return assetMapper.selectById(assetId);
     }
 
     @Override
@@ -286,8 +295,8 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         if (!StringUtils.hasText(assetTag)) {
             return null;
         }
-        return getOne(new LambdaQueryWrapper<Asset>()
-                .eq(Asset::getAssetTag, assetTag.trim()), false);
+        return assetMapper.selectOne(new LambdaQueryWrapper<Asset>()
+                .eq(Asset::getAssetTag, assetTag.trim()));
     }
 
     @Override
@@ -308,7 +317,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         if (!"DISPOSED".equals(current.getStatus())) {
             throw new BusinessException("資産の論理削除はDISPOSED状態でのみ実行できます。廃棄は削除ではなく状態遷移として記録してください。");
         }
-        removeById(assetId);
+        assetMapper.deleteById(assetId);
         log.info("Asset soft-deleted: assetId={}", assetId);
     }
 }

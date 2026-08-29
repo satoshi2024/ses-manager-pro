@@ -1,7 +1,6 @@
 package com.ses.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.Asset;
 
 import java.util.List;
@@ -9,7 +8,10 @@ import java.util.List;
 /**
  * 資産台帳管理サービス
  */
-public interface AssetService extends IService<Asset> {
+public interface AssetService {
+
+    /** 資産IDで取得する（論理削除済みは除外）。 */
+    Asset getById(Long assetId);
 
     /**
      * 資産を新規登録する（イベント記録付き）

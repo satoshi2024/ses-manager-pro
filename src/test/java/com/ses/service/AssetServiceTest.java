@@ -86,7 +86,7 @@ class AssetServiceTest extends BaseIntegrationTest {
         // 3. 返却
         AssetAssignment returned = assetAssignmentService.returnAssignment(
                 assignment.getId(),
-                LocalDate.of(2026, 9, 30),
+                LocalDate.now(),
                 null,
                 "退職に伴う返却",
                 1L
@@ -130,6 +130,59 @@ class AssetServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("Asset status transitions reject forbidden resurrection and assignment shortcuts")
+    void testAssetStatusTransitionGuard() {
+        Asset inStock = Asset.builder()
+                .assetTag("AST-TRANSITION-IN-STOCK-" + System.nanoTime())
+                .assetName("Transition in stock")
+                .category("PC")
+                .build();
+        assetService.createAsset(inStock, 1L);
+        assertThatThrownBy(() -> assetService.changeStatus(
+                inStock.getId(), "ASSIGNED", "貸与行なしの直接変更", 1L, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("貸与・返却は専用の貸与サービス");
+        assertThat(assetService.getById(inStock.getId()).getStatus()).isEqualTo("IN_STOCK");
+
+        Asset disposed = Asset.builder()
+                .assetTag("AST-TRANSITION-DISPOSED-" + System.nanoTime())
+                .assetName("Transition disposed")
+                .category("PC")
+                .build();
+        assetService.createAsset(disposed, 1L);
+        assetService.disposeAsset(disposed.getId(), "廃棄", 1L, null);
+        assertThatThrownBy(() -> assetService.changeStatus(
+                disposed.getId(), "RESERVED", "廃棄済み資産の復活", 1L, null))
+                .isInstanceOf(BusinessException.class);
+        assertThat(assetService.getById(disposed.getId()).getStatus()).isEqualTo("DISPOSED");
+
+        Asset lost = Asset.builder()
+                .assetTag("AST-TRANSITION-LOST-" + System.nanoTime())
+                .assetName("Transition lost")
+                .category("PC")
+                .build();
+        assetService.createAsset(lost, 1L);
+        assetService.reportLost(lost.getId(), "紛失", 1L, null);
+        assertThatThrownBy(() -> assetService.changeStatus(
+                lost.getId(), "UNDER_MAINTENANCE", "紛失資産の修理戻し", 1L, null))
+                .isInstanceOf(BusinessException.class);
+
+        Asset maintenance = Asset.builder()
+                .assetTag("AST-TRANSITION-MAINT-" + System.nanoTime())
+                .assetName("Transition maintenance")
+                .category("PC")
+                .status("UNDER_MAINTENANCE")
+                .build();
+        assetService.createAsset(maintenance, 1L);
+        assertThatThrownBy(() -> assetService.changeStatus(
+                maintenance.getId(), "ASSIGNED", "保守中の直接貸与", 1L, null))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> assetService.disposeAsset(
+                maintenance.getId(), "保守中の廃棄", 1L, null))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
     @DisplayName("Asset Inventory Run: start -> item check -> complete with reconciliation counts")
     void testInventoryRunFlow() {
         // テスト用資産を作成
@@ -160,6 +213,36 @@ class AssetServiceTest extends BaseIntegrationTest {
         assertThat(completed.getStatus()).isEqualTo("COMPLETED");
         assertThat(completed.getCompletedAt()).isNotNull();
         assertThat(completed.getMatchedCount()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Inventory observed status accepts and normalizes all six asset states")
+    void testInventoryObservedStatusVocabulary() {
+        Asset asset = Asset.builder()
+                .assetTag("AST-INV-STATUS-" + System.nanoTime())
+                .assetName("Inventory status device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+
+        AssetInventoryRun run = assetInventoryService.startInventoryRun(
+                "INV-STATUS-" + System.nanoTime(), "状態語彙確認", LocalDate.now(), 1L);
+        AssetInventoryItem item = assetInventoryService.getItemsByRunId(run.getId()).stream()
+                .filter(candidate -> asset.getId().equals(candidate.getAssetId()))
+                .findFirst()
+                .orElseThrow();
+
+        for (String status : List.of(
+                "IN_STOCK", "ASSIGNED", "UNDER_MAINTENANCE", "LOST", "DISPOSED", "RESERVED")) {
+            String input = "RESERVED".equals(status) ? " reserved " : status;
+            AssetInventoryItem checked = assetInventoryService.recordItemCheck(
+                    item.getId(), input, "棚卸し場所", "MATCH", null, null, 1L);
+            assertThat(checked.getObservedStatus()).isEqualTo(status);
+        }
+        assertThatThrownBy(() -> assetInventoryService.recordItemCheck(
+                item.getId(), "NOT_A_REAL_STATUS", "棚卸し場所", "MATCH", null, null, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("実地確認ステータスが不正です");
     }
 
     @Test

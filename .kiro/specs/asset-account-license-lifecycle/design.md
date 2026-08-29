@@ -37,6 +37,8 @@
 
 資産ステータスの許可値は `IN_STOCK`、`ASSIGNED`、`UNDER_MAINTENANCE`、`LOST`、`DISPOSED`、`RESERVED` の6値に固定する。登録時と `AssetService.changeStatus` の両方で値をtrim・大文字化し、許可集合にない値は `BusinessException(400)` として保存前に拒否する。画面の検索・一覧バッジ・棚卸し入力、およびV1/V129のDDLコメントはこの6値を同じ語彙で表示する。
 
+状態遷移は表3の許可集合をサービスで強制する。`IN_STOCK ↔ ASSIGNED` の貸与・返却遷移は貸与レコードと資産CASを同一トランザクションで扱う `AssetAssignmentService` 専用とし、`AssetService.changeStatus` から資産だけを `ASSIGNED` または `IN_STOCK` に変更する経路は提供しない。`DISPOSED` から `IN_STOCK`/`RESERVED`、`LOST` から `UNDER_MAINTENANCE`/`RESERVED`、`UNDER_MAINTENANCE` から `ASSIGNED`/`DISPOSED` は拒否する。返却処理はロック取得後に `start_date <= actual_return_date <= 今日` を検証し、未来日または開始日前の返却で資産を `IN_STOCK` に戻さない。
+
 ## 1.5 論理削除の安全条件設計（AS-R1.5 対応）
 
 MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `removeById()` 呼び出しは論理削除（`deleted_flag = 1`）となり、以降の SELECT から自動的に除外される。これにより**退社ゲート・期間排他・ライセンス席数集計が実行時に誤った判断を行う可能性**がある。これを防ぐため以下の設計制約を適用する。
@@ -340,8 +342,8 @@ V131からの既存行は移行互換のためscope列がNULLのlegacy行とし�
 
 | エンティティ / 状態 | 許可遷移 | 遷移の防重・競合保護手段 | Competing Writer 発生時の挙動 | Rollback / 補償 |
 |---|---|---|---|---|
-| **資産 (`m_asset`)** | `IN_STOCK` ↔ `ASSIGNED`<br>`IN_STOCK` ↔ `UNDER_MAINTENANCE`<br>`IN_STOCK` ↔ `RESERVED`<br>`IN_STOCK/LOST/RESERVED` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`) | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
-| **貸与 (`t_asset_assignment`)** | `ACTIVE` → `RETURNED`<br>`ACTIVE` → `OVERDUE`<br>`ACTIVE/OVERDUE` → `WAIVED` | **同一資産期間排他判定**: トランザクション内で `SELECT ... FOR UPDATE` により対象資産を行ロックし、重複貸与区間が存在しないことを確認後に INSERT/UPDATE | 後発の貸与申請が `BusinessException("該当年月日に既に有効な貸与が存在します")` で拒否 | 貸与作成・更新全体がロールバック |
+| **資産 (`m_asset`)** | `IN_STOCK ↔ ASSIGNED`（貸与サービス専用）<br>`IN_STOCK ↔ UNDER_MAINTENANCE`<br>`IN_STOCK ↔ RESERVED`<br>`IN_STOCK/LOST/RESERVED` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`)。`ASSIGNED↔IN_STOCK` は `AssetAssignmentService` が貸与行CASと同時更新 | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
+| **貸与 (`t_asset_assignment`)** | `ACTIVE` → `RETURNED`<br>`ACTIVE` → `OVERDUE`<br>`ACTIVE/OVERDUE` → `WAIVED` | **同一資産期間排他判定**: トランザクション内で `SELECT ... FOR UPDATE` により対象資産を行ロックし、重複貸与区間が存在しないことを確認後に INSERT/UPDATE。返却時は `start_date <= actual_return_date <= 今日` をロック内で検証 | 後発の貸与申請が `BusinessException("該当年月日に既に有効な貸与が存在します")` で拒否 | 貸与作成・更新全体がロールバック |
 | **外部アカウント (`t_external_account_reference`)** | `ACTIVE` → `SUSPENDED`<br>`ACTIVE` → `PENDING_CONFIRMATION`（失効要求送信）<br>`PENDING_CONFIRMATION` → `UNKNOWN`（応答形式を分類不能）<br>`SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` → `REVOKED`（外部確認済み）<br>Any → `EXCEPTION_HOLD`（承認済み例外） | 状態CAS + 失効確認分離 (`UPDATE ... SET status='REVOKED', revoke_confirmed_at=:now WHERE id=:id AND status IN ('ACTIVE','SUSPENDED','PENDING_CONFIRMATION','UNKNOWN') AND revoke_confirmed_at IS NULL`)。要求の冪等性キー、retry/backoff、`external_sync_status` を同一参照行へ保存 | 同時更新時は1件のみ成功、他方は409。timeout/5xx/429 は `PENDING_CONFIRMATION` を維持し、応答形式を分類できない場合だけ `UNKNOWN` として blocker を維持 | 外部API要求失敗時は `REVOKED`/confirmed に倒さず、`TIMEOUT`/`SYNC_FAILED` と retry/backoff を記録。管理者の確認または外部確認成功時だけ `REVOKED` へ補償遷移 |
 | **ライセンス席数 (`m_license_plan`)** | 割当増加 / 割当解除 | 席数CAS (`UPDATE m_license_plan SET allocated_count=allocated_count+1, version=version+1 WHERE id=:id AND allocated_count < seat_limit AND version=:v`) | 席数上限到達時は CAS 失敗し `BusinessException("ライセンス席数が上限に達しています")` | 割当処理全体がロールバック |
 
