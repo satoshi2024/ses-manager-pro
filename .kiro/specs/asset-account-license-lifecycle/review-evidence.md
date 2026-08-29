@@ -9,8 +9,8 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base branch**: `origin/main`
 - **Base**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
-- **実装検証Head**: R7の実装・テスト・文書commitをpush済みの最終提出Headとして扱い、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
-- **Remote確認**: R7の各commitはpush済み。最終remote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
+- **実装検証Head**: R9の実装・テスト・文書commitをpush済みの最終提出Headとして扱い、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
+- **Remote確認**: R9の各commitはpush済み。最終remote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
 - **PR**: 実装対話では未作成。独立ReviewのPLAN/IMPLEMENTATION双方PASS後にのみ作成する。
 
 ## 2. DG-09 / NF-01 決定事項
@@ -36,14 +36,15 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetEntityMapperTest,AssetApiControllerTest,AssetApiRoleScopeIntegrationTest,AssetAssignmentConcurrencyTest,AssetAlertServiceTest,DocumentApiControllerTest,MyAssetApiControllerTest,AssetServiceTest,AssetSecretFieldScanTest,AssetOffboardingServiceTest,AssetComprehensiveSecretScanTest,AssetBoundaryAndLifecycleIntegrationTest,ScheduledMethodsHaveSchedulerLockTest,ActionPermissionResolverTest,AssetLifecycleAppendOnlyApiContractTest' test
 ```
 
-結果: **72/72 PASS, Failures=0, Errors=0, Skipped=0**。R7で追加した `AssetLifecycleAppendOnlyApiContractTest` を同一コマンドへ含め、R8で追加した状態/退社blocker境界テストも含む。
+結果: **75/75 PASS, Failures=0, Errors=0, Skipped=0**。R7/R8で追加した回帰に加え、R9で追加した状態遷移・返却日範囲・棚卸し6状態・`AssetService` API境界テストも同一コマンドへ含む。
 
 専用suite外の実退社gate drill `ResignationGateFailureDrillTest` も **9/9 PASS, Failures=0, Errors=0, Skipped=0**。3 blocker照合と永続waiverのテストを含む。
 
 内訳の重要assertion:
 
 - 同一assetの4並行貸与は成功1・拒否3、返却日当日の再貸与を含む返却直後の再貸与は成功。
-- 資産ステータスは6値に限定し、`RESERVED` の検索・表示・棚卸し入力を確認。不正な状態変更は保存前に拒否する。
+- 資産ステータスは6値に限定し、`RESERVED` の検索・表示・棚卸し入力を確認。不正な状態変更と設計表にない遷移（廃棄済み資産の保管中/予約復活、貸与サービスを経由しない `ASSIGNED` 化）を保存前に拒否する。
+- 返却処理はロック取得後に `start_date <= actual_return_date <= 今日` を検証し、開始日前・未来日の返却を拒否する。同日返却・同日再貸与は許可する。
 - NF-01の資産/license blockerはstatusまたは未返却/未解放日付のOR条件で不整合行も検出する。
 - 法人A/B、営業担当範囲（別法人所有でも担当要員への現在貸与は許可、未貸与は拒否）、マネージャー組織・法人範囲（共有または管轄法人のみ）、要員本人、空集合fail-closedを確認。
 - 実在 `t_document` の `ASSET_ASSIGNMENT` linkについて、無関係要員のdetail/downloadを貸与中・返却後とも403。旧assignmentの本人だけは履歴文書へアクセス可能。
@@ -75,7 +76,7 @@ V132追加による既存migration smokeの追随確認として、`FlywaySelfSe
 - Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`: `tests=3060, failures=2, errors=16, skipped=0`。
 - R5時点Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
 - R6実装時点: `tests=3123, failures=2, errors=11, skipped=0`。R7追加修正による対象Fast suiteの失敗はなく、残存はBase/R5から継続する8クラス（loopback接続、固定H2 ID、既存Controller/I18n/production設定）だった。
-- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6までにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、R7ではclaim競合・poll継続・service API境界・V132 DB保護を追加で修正した。R8では6状態契約・返却日当日再貸与・NF-01 blocker OR条件・異なるaccount間の同一key競合409を追加で修正した。対象Fast 72/72、MySQL 9/9、migration smoke 4/4を再実行してPASSした。
+- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6までにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、R7ではclaim競合・poll継続・service API境界・V132 DB保護を追加で修正した。R8では6状態契約・返却日当日再貸与・NF-01 blocker OR条件・異なるaccount間の同一key競合409を追加で修正した。R9ではサービス状態遷移表、実返却日範囲、棚卸し6状態、`AssetService` 汎用mutation入口を追加で修正した。現行対象Fast 75/75、MySQL 9/9、migration smoke 4/4を再実行してPASSした。
 
 - `ControllerTransactionalBanTest`
 - `ProductionSecurityConfigurationTest`
@@ -130,7 +131,7 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 - `AssetMySqlIntegrationTest.testConcurrentLicenseReleaseDecrementsOnceOnMySQL`: 同一割当の二重解放でも席数は1回だけ減算。
 - `AssetMySqlIntegrationTest.testConcurrentInventoryCompletionOnMySQL`: 棚卸し二重確定は勝者1件で、確定後の明細と集計を固定。
 - `AssetMySqlIntegrationTest.testV132WaiverShapeAndAppendOnlyGuardsOnMySQL`: Flyway latest=132、waiver scope列・unique・case/task FK、event UPDATE/DELETE triggerを確認。
-- `AssetLifecycleAppendOnlyApiContractTest`: `AssetEventService`、`AssetAssignmentService`、`ExternalAccountService` が汎用 `IService` mutation APIを公開しないことを確認。
+- `AssetLifecycleAppendOnlyApiContractTest`: `AssetEventService`、`AssetAssignmentService`、`ExternalAccountService`、`AssetService` が汎用 `IService` mutation APIを公開しないことを確認。
 
 ### 5.2 第8回Review P1/P2対応の実測
 
@@ -139,6 +140,14 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 - `AssetBoundaryAndLifecycleIntegrationTest.testOffboardingBlockersUseStatusOrDateContract`: `ACTIVE + actual_return_date`、`RETURNED + actual_return_date=NULL`、`ACTIVE + released_date`、`RELEASED + released_date=NULL` の不整合行を退社blockerとして検出することを確認。
 - `AssetMySqlIntegrationTest.testConcurrentRevokeClaimSameKeyAcrossAccountsReturns409OnMySQL`: 異なるaccountが同一keyを並行claimした場合、provider call count=1、成功1件、409が1件であることをMySQL 8 Testcontainersで確認。
 - NF-09専用Fastコマンドへ `AssetLifecycleAppendOnlyApiContractTest` を追加し、**72/72 PASS**（0 failure / 0 error / 0 skipped）を記録した。
+
+### 5.3 第9回Review P1/P2対応の実測
+
+- `AssetServiceTest.testAssetStatusTransitionGuard`: `AssetService.changeStatus` が状態遷移表を強制し、直接 `IN_STOCK → ASSIGNED`、`DISPOSED → RESERVED`、`LOST → UNDER_MAINTENANCE`、`UNDER_MAINTENANCE → ASSIGNED/DISPOSED` を拒否し、元状態を保持することを確認。
+- `AssetLifecycleAppendOnlyApiContractTest`: `AssetService` も汎用 `IService` mutation入口を公開せず、貸与/返却を専用 `AssetAssignmentService` 経由に限定するAPI境界を確認。
+- `AssetBoundaryAndLifecycleIntegrationTest.testActualReturnDateRangeIsEnforced`: 開始日前・未来日の実返却を拒否し、当日返却だけを成功させることを確認。
+- `AssetServiceTest.testInventoryObservedStatusVocabulary`: 棚卸し実地確認で `IN_STOCK`、`ASSIGNED`、`UNDER_MAINTENANCE`、`LOST`、`DISPOSED`、`RESERVED` の6値を保存し、空白/小文字入力の正規化と不正値拒否を確認。
+- NF-09専用Fast **75/75 PASS**、MySQL asset **9/9 PASS**、V132追随migration smoke **4/4 PASS**、実退社gate drill **9/9 PASS**、`MySqlTestShardInventoryTest` **1/1 PASS**（すべてfailure=0、error=0、skip=0）。
 
 ## 6. Secret scan
 

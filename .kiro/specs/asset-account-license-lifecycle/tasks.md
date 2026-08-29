@@ -2,6 +2,42 @@
 
 ---
 
+## Review follow-up（第9回Review P1/P2是正）
+
+### Task R9.1: 資産状態遷移と専用貸与入口の強制
+- **Status**: [x] COMPLETED
+- **Objective**: design.md 表3の資産状態遷移をサービスで強制し、汎用状態変更による `IN_STOCK ↔ ASSIGNED` の迂回と廃棄済み資産の復活を拒否する。
+- **Implementation**: `AssetStatusPolicy` に6状態と許可遷移を集約し、`AssetService` を汎用 `IService` から専用APIへ分離。`AssetServiceImpl` は状態遷移表とCASを検証し、貸与/返却は `AssetAssignmentService` 専用入口に限定する。
+- **Test requirements**: `IN_STOCK → ASSIGNED` の直接変更、`DISPOSED → RESERVED`、`LOST → UNDER_MAINTENANCE`、`UNDER_MAINTENANCE → ASSIGNED/DISPOSED` を拒否し、元状態を保持する。
+- **Result**: `AssetServiceTest.testAssetStatusTransitionGuard`、`AssetLifecycleAppendOnlyApiContractTest` **PASS**。
+- **Demo / rollback**: 状態遷移表、専用service API、CAS失敗時の状態保持を照合する。失敗時はR9.1の実装・テスト変更を個別revertする。
+
+### Task R9.2: 実返却日の期間不変条件
+- **Status**: [x] COMPLETED
+- **Objective**: 返却処理をロック取得後に `start_date <= actual_return_date <= 今日` で検証し、開始日前・未来日の返却で資産を `IN_STOCK` に戻さない。
+- **Implementation**: `AssetAssignmentServiceImpl.returnAssignment` に貸与行ロック後の過去/未来日検証を追加。同日返却と同日再貸与は引き続き許可する。
+- **Test requirements**: 開始日前、未来日を拒否し、当日返却だけが成功することを確認する。
+- **Result**: `AssetBoundaryAndLifecycleIntegrationTest.testActualReturnDateRangeIsEnforced` **PASS**。
+- **Demo / rollback**: 返却拒否時にasset status・assignment status・eventが変更されないことを照合する。失敗時はR9.2のservice・テスト変更を個別revertする。
+
+### Task R9.3: 棚卸し実地状態の6値同期
+- **Status**: [x] COMPLETED
+- **Objective**: 棚卸し画面と保存処理の `observedStatus` を資産6状態へ同期し、不正値を保存前に拒否する。
+- **Implementation**: `inventory.html` に `DISPOSED` を追加し、`AssetInventoryServiceImpl` でtrim・大文字化と6値検証を実施する。
+- **Test requirements**: 6状態を保存でき、空白/小文字入力が正規化され、不正値が業務例外になることを確認する。
+- **Result**: `AssetServiceTest.testInventoryObservedStatusVocabulary` **PASS**。
+- **Demo / rollback**: UI選択肢、service保存値、invalid input拒否を照合する。失敗時はR9.3のUI・service・テスト変更を個別revertする。
+
+### Task R9.4: 第9回Review証跡・完了台帳の同期
+- **Status**: [x] COMPLETED
+- **Objective**: 第9回ReviewのP1-01/P1-02/P2-01/P2-02対応、実測件数、remote引渡し条件をtasks/evidence/ledgerへ同期する。
+- **Implementation**: `review-evidence.md`、`review-ledger.md`、本tasks.mdの現行Fast件数を75/75へ更新し、第9回Review対応表を追加する。
+- **Test requirements**: NF-09 Fast 75/75、MySQL asset 9/9、V132 migration smoke 4/4、退社gate drill 9/9、MySQL shard inventory 1/1をskip=0で確認する。
+- **Result**: 上記5ゲートをすべて **PASS**。リポジトリ全体Fast gateはBase比較由来の未PASS記録を維持する。
+- **Demo / rollback**: Surefire結果、Head/Remote一致、専用worktree clean、通常checkout未変更を照合し、独立ReviewのPLAN/IMPLEMENTATION双方PASSまではPRを作成しない。
+
+---
+
 ## Review follow-up（第8回Review P1/P2是正）
 
 ### Task R8.1: 資産6状態・同日再貸与・NF-01 blocker条件の同期
@@ -23,9 +59,9 @@
 ### Task R8.3: Reviewコマンド・件数・完了台帳の同期
 - **Status**: [x] COMPLETED
 - **Objective**: R7追加テストをFast提出コマンドへ含め、R8追加回帰を含む実測件数をevidence/ledger/tasksで一致させる。
-- **Implementation**: `review-evidence.md`、`review-ledger.md`、本tasks.mdを72/72 Fast、9/9 MySQL、4/4 migration smokeへ同期。
+- **Implementation**: `review-evidence.md`、`review-ledger.md`、本tasks.mdをR8時点の72/72 Fast、9/9 MySQL、4/4 migration smokeへ同期。
 - **Test requirements**: 同一Fastコマンドを実行し、0 failure / 0 error / 0 skippedを確認する。
-- **Result**: NF-09専用Fast **72/72 PASS**、MySQL **9/9 PASS**、migration smoke **4/4 PASS**。
+- **Result**: NF-09専用Fast **72/72 PASS**、MySQL **9/9 PASS**、migration smoke **4/4 PASS**（第9回Reviewで追加修正後の現行値はR9.4に記録）。
 - **Demo / rollback**: Surefire出力、remote Head、レビュー指摘対応表を照合し、PRは独立ReviewのPLAN/IMPLEMENTATION双方PASSまで作成しない。
 
 ---
@@ -363,18 +399,19 @@
 ### Task B2.3: MySQL 8 実コンテナ統合テスト & Shard Inventory 登録 (CR-06)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `CR-06`
-- **Objective**: Testcontainers による MySQL 8 実コンテナ上で Flyway V129/V130/V131/V132 DDL、行ロック `FOR UPDATE`、CAS更新、4競合シナリオを検証する `@Tag("mysql")` テストを実装し、`mysql-shard-1.txt` に登録して `MySqlTestShardInventoryTest` と完全一致させる。
+- **Objective**: Testcontainers による MySQL 8 実コンテナ上で Flyway V129/V130/V131/V132 DDL、行ロック `FOR UPDATE`、CAS更新、5競合シナリオを検証する `@Tag("mysql")` テストを実装し、`mysql-shard-1.txt` に登録して `MySqlTestShardInventoryTest` と完全一致させる。
 - **実装内容**:
   - `src/test/java/com/ses/migration/AssetMySqlIntegrationTest.java`
   - `scripts/test-suites/mysql-shard-1.txt` 登録
 - **Test 要件と assertion**:
   - `MySqlTestShardInventoryTest.testInventoryMatchesTaggedClasses`: PASS
-  - `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest`: **8/8 PASS (0 failure, 0 error, 0 skipped)**
+  - `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest`: **9/9 PASS (0 failure, 0 error, 0 skipped)**
 - **手動 Demo と証跡**:
   - `AssetMySqlIntegrationTest.testAssetCreationAndRowLockOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testAssetAssignmentLifecycleOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testExternalAccountAndLicenseCasOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentRevokeClaimCallsProviderOnceOnMySQL`: PASS
+  - `AssetMySqlIntegrationTest.testConcurrentRevokeClaimSameKeyAcrossAccountsReturns409OnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentReturnAndWaiveOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentLicenseReleaseDecrementsOnceOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentInventoryCompletionOnMySQL`: PASS
@@ -391,16 +428,16 @@
 - **Requirements ID**: `CR-06`
 - **Objective**: NF-09 で作成・改修した対象テストとMySQLゲートを実行し、スキップ 0 件、0 Failure / 0 Error を確認する。リポジトリ全体Fast gateの合否は既存テスト・実行環境の結果と分離して記録する。
 - **Test 要件と assertion**:
-  - NF-09対象Fast Suite: 72/72 tests PASS (0 skipped, 0 failed, 0 errors)
+  - NF-09対象Fast Suite: 75/75 tests PASS (0 skipped, 0 failed, 0 errors)
   - 実退社gate drill: `ResignationGateFailureDrillTest` 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
   - MySQL asset Gate: 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
   - V132追随 migration smoke: 4/4 tests PASS (0 skipped, 0 failed, 0 errors)
 - **手動 Demo と証跡**:
-  - Maven Surefire 対象suite出力ログ (`Tests run: 72, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire 対象suite出力ログ (`Tests run: 75, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire resignation gate出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire MySQL asset出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire V132追随migration smoke出力ログ (`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`)
-- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し、NF-09専用72/72、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。
+- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し72/72を確認し、第9回Review後はR9.1〜R9.3の修正を含むNF-09専用75/75、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。
 - **Rollback**: なし
 - **未検証事項**: リポジトリ全体Fast gateのPASS、および独立ReviewのPASS。全体Fast gateは未PASSのままなので、独立ReviewでBase差分と環境復旧後の再実行要否を判断する。
 
