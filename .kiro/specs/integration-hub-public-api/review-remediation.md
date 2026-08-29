@@ -35,3 +35,9 @@ DG-05、approved scope、Owner、Baseの承認はOWNER_GATEとして残す。
 
 承認されるまで、候補OpenAPIを公開せず、認証方式・provider・rate/quota・IP boundary・SLA・version retirement・
 usage/billing・field/resource/command・webhook signature/retry/DLQ retentionを実装上の既定値にしない。
+
+## Handoff checkpoint
+
+- Review baseline Head: 6e0f5067d9a6509775225278cc0dcfdc4d47643f
+- Task 0R remediation commit: 48037c923224f684968dbaf3410cdb37307ed100
+- Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
