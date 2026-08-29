@@ -11,6 +11,7 @@
    - 保有するのは外部システム識別子（アカウント名/メールアドレス）と状態（ACTIVE / SUSPENDED / REVOKED / PENDING_CONFIRMATION / UNKNOWN）、失効要求・確認タイムスタンプのみです。
 2. **排他制御と期間重複代数**:
    - 貸与作成時は `m_asset` 行を `FOR UPDATE` でロックし、`[start_date, expected_return_date]` の期間重複を代数的に排除します。
+   - 返却・免除は `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` の順で固定し、asset CASとassignment終端CASが両方成功した場合だけeventを追記します。license解放はassignment→plan、棚卸しはrun→itemの順でロックします。
 3. **不変イベント台帳（Immutable Event Ledger）**:
    - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。
 4. **ライセンス席数 CAS（Compare-And-Swap）**:
@@ -21,8 +22,8 @@
    - 資産一覧・詳細・イベント・貸与履歴・CSV・通知・要員ポータル・外部アカウント・ライセンス・証跡文書で同じスコープを適用します。
 6. **論理削除の安全条件**:
    - 未返却貸与（`status IN ('ACTIVE','OVERDUE')` かつ `actual_return_date IS NULL`）がある資産は削除できません。廃棄は `DISPOSED` のイベントを追記してから論理削除します。
-   - 外部アカウントは `ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` かつ `revoke_confirmed_at IS NULL` の間は削除できません。`REVOKED` または失効確認済みの終端行も論理削除せず、`EXCEPTION_HOLD` の論理削除は承認済み例外としてのみ許可します。
-   - ライセンスは `ACTIVE` または `released_date IS NULL` の間は削除できません。解放後は `RELEASED` と日付を履歴として保持します。
+   - 外部アカウント参照は状態にかかわらず削除できません。`ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` は未失効blockerから除外されず、`REVOKED`・失効確認済み・`EXCEPTION_HOLD` の行も履歴として保持します。`EXCEPTION_HOLD` は承認済み例外によるgate判定であり、削除認可ではありません。
+   - ライセンス割当は状態にかかわらず削除できません。`ACTIVE` または `released_date IS NULL` は未解放として扱い、解放後も `RELEASED` と日付を履歴として保持します。
 7. **外部連携の正本とトランザクション境界**:
    - MDMは端末状態、IdP/SaaSはアカウント失効状態の外部正本です。DBは参照・要求・確認結果・再試行の証跡正本です。
    - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、timeout/5xx/429は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。応答形式を分類できない場合は `UNKNOWN` として blocker を維持します。
@@ -35,6 +36,7 @@
 Flyway マイグレーションにより自動適用されます。
 - `V129__asset_account_license_lifecycle.sql`: 9テーブル DDL 作成
 - `V130__asset_account_license_menu_permissions.sql`: メニューおよびアクション権限シード
+- `V131__asset_offboarding_waiver_ledger.sql`: 承認済み `LIFECYCLE_EXCEPTION` と対象要員を結ぶ退社例外免除台帳。`approval_request_id` は一意で、既存承認の再適用を重複記録しません。
 
 ### 2.2 既存資産・アカウントの初期登録
 1. 管理者アカウントで `/asset/list` にログイン。
@@ -98,7 +100,7 @@ WHERE deleted_flag = 0
 ### 3.3 NF-01 退社ワークフロー連携
 1. 要員の退社手続き開始時、`AssetOffboardingService.checkOffboardingClearance(engineerId)` が自動実行される。
 2. 未返却端末、未失効アカウント、未解放ライセンスが存在する場合、退社ゲートがブロックされる。
-3. 返却完了後、または例外承認（`approveOffboardingWaiver`）登録後にクリアランスがパスする。
+3. 返却完了後、または承認済み `LIFECYCLE_EXCEPTION` のrequest type・status・targetを検証して `t_asset_offboarding_waiver` に永続化した後にクリアランスがパスする。`RESIGN_ASSET_RETURN` が `COMPLETED` でも3 blockerの実照合は省略しない。
 4. 退社確定時に `triggerOffboardingRevocations` が実行され、アカウントの失効要求およびライセンスの自動解放が行われる。
 
 ### 3.4 紛失インシデント緊急初動フロー
@@ -109,6 +111,7 @@ WHERE deleted_flag = 0
 
 ### 3.5 失効要求・確認・タイムアウト対応
 - `revoke_requested_at` は外部へ要求を送信した時刻、`revoke_confirmed_at` は外部状態を確認できた時刻です。要求送信だけで `REVOKED` と判定しません。
+- `idempotency_key` はDBで一意です。同一account・同一keyの再送は既存状態を返しproviderへ再送せず、別keyまたは別accountとの衝突は409で拒否します。
 - `FAILED_OR_TIMEOUT`、ネットワークエラー、プロバイダ停止時は `status=PENDING_CONFIRMATION`、`external_sync_status=TIMEOUT` または `SYNC_FAILED` とし、`next_retry_at` に従ってポーリングします。
 - 確認成功時だけ `REVOKED` と `revoke_confirmed_at` を記録します。失効確認が取れない退社caseはブロックを維持します。
 
@@ -116,6 +119,7 @@ WHERE deleted_flag = 0
 - `MATCH` は台帳と現物が一致した場合だけ登録します。
 - `DISCREPANCY` / `MISSING` / `UNREGISTERED` は差異理由と是正措置を必須とし、棚卸し完了後の明細は変更できません。
 - 差異が解消するまで資産の廃棄・再貸与・退社完了処理を実行せず、棚卸しrunと不変イベント台帳を照合します。
+- 明細更新と確定は同一run行を先にlockします。`COMPLETED`後の更新、二重確定、確定処理と明細更新の交差は拒否し、保存明細と集計値を同一transactionで確定します。
 
 ---
 
@@ -134,6 +138,7 @@ WHERE deleted_flag = 0
   4. 検証済みの場合だけ本番DBへ切替え、Flyway checksum と smoke test を確認。
 - 下記のDDL削除は、データ消失を伴うため、本番の通常ロールバックには使用せず、バックアップ取得済みの隔離検証DBでのみ使用します。
   ```sql
+  DROP TABLE IF EXISTS t_asset_offboarding_waiver;
   DROP TABLE IF EXISTS t_license_assignment;
   DROP TABLE IF EXISTS m_license_plan;
   DROP TABLE IF EXISTS t_external_account_reference;

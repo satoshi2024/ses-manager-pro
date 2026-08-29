@@ -41,19 +41,19 @@ MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `remove
 | 操作対象 | 禁止条件 | 拒否メソッド | 例外 |
 |---|---|---|---|
 | `m_asset` | `t_asset_assignment.status IN ('ACTIVE','OVERDUE') AND actual_return_date IS NULL` のレコードが存在する | `AssetService.softDeleteAsset(id)` | `BusinessException("未返却貸与が存在する...")` |
-| `t_external_account_reference` | `status IN ('ACTIVE','SUSPENDED','PENDING_CONFIRMATION','UNKNOWN') AND revoke_confirmed_at IS NULL` | `ExternalAccountService.softDeleteAccount(id)` | `BusinessException("未失効...")` |
-| `t_license_assignment` | `status = 'ACTIVE' OR released_date IS NULL` | `LicenseService.softDeleteAssignment(id)` | `BusinessException("未解放ライセンス...")` |
+| `t_external_account_reference` | **既存参照行は状態にかかわらず論理削除禁止**。未失効状態では特に退社gateから除外されるため削除不可 | `ExternalAccountService.softDeleteAccount(id)` | 常に `BusinessException`（終端履歴も保持。`EXCEPTION_HOLD` は削除認可を意味しない） |
+| `t_license_assignment` | **既存割当行は状態にかかわらず論理削除禁止**。`ACTIVE` または `released_date IS NULL` は未解放として削除不可 | `LicenseService.softDeleteAssignment(id)` | 常に `BusinessException`（`RELEASED` 履歴も保持） |
 
-論理削除操作は上記バリデーションを通過した場合のみ実行する。バリデーションは `@Transactional` スコープ内で行い、同時削除による TOCTOU を防ぐ。
+論理削除操作は上記バリデーションを通過した場合のみ実行する。実装上、貸与・外部account・license割当の既存行は終端状態を含め常に拒否し、これらを物理/論理削除するAPIを提供しない。`m_asset` だけは`DISPOSED`かつ未返却貸与ゼロの場合に限り管理者の台帳整理を許可する。判定は`@Transactional`かつ行lock内で行い、同時削除によるTOCTOUを防ぐ。
 
 ### 1.5.2 廃棄 vs 論理削除
 
 - **資産廃棄**: `AssetService.changeStatus(id, "DISPOSED", ...)` を使用。`t_asset_event` に `DISPOSED` イベントを追記し、`deleted_flag` は `0` のままとする（台帳上の証跡を維持する）。
-- **台帳整理（論理削除）**: 管理者が廃棄後の不要な資産マスタを台帳から物理的に見えなくする目的でのみ使用可能。`DISPOSED` 状態かつ ACTIVE 貸与ゼロの場合のみ許可。
+- **台帳整理（論理削除）**: 管理者が廃棄後の不要な資産マスタを台帳から通常一覧上見えなくする目的でのみ使用可能。`DISPOSED` 状態かつ ACTIVE 貸与ゼロの場合のみ許可する。これは `m_asset` に限る。
 
 ### 1.5.3 終端状態の保持
 
-`RETURNED` / `REVOKED` / `released_date IS NOT NULL` に達したレコードは論理削除せず台帳上に残留させる。`t_asset_event` および `t_document_link` からのリンクは `deleted_flag` に関係なく参照可能性を維持するため、履歴参照 API では `selectByIdIgnoreDelete` 相当のクエリを使用すること。
+`t_asset_assignment` の `RETURNED`、`t_external_account_reference` の `REVOKED`、`t_license_assignment` の `released_date IS NOT NULL` に達した終端行は論理削除せず台帳上に残留させる。これら3台帳には終端履歴を削除するAPIを設けず、`t_asset_event` および `t_document_link` からの参照可能性を維持する。`m_asset` の `DISPOSED` 行だけは、上記の終端履歴を残したまま管理者の台帳整理として論理削除できる。
 
 ---
 
@@ -272,6 +272,26 @@ CREATE TABLE t_license_assignment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ライセンス割当台帳';
 ```
 
+### 2.7 退社例外免除台帳 (`t_asset_offboarding_waiver`)
+
+`LIFECYCLE_EXCEPTION` の承認適用結果はプロセスメモリに保持せず、V131の追記台帳へ保存する。`approval_request_id` は一意であり、同じ承認の再適用は同じ台帳行を再利用する。台帳の有効判定は、参照先 `t_approval_request` が `request_type = 'LIFECYCLE_EXCEPTION'` かつ `status = 'approved'`（大文字小文字を区別しない）で、対象要員または `RESIGN_ASSET_RETURN` タスクの退社案件と一致することを必須とする。
+
+```sql
+CREATE TABLE t_asset_offboarding_waiver (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    engineer_id BIGINT NOT NULL COMMENT '対象要員ID',
+    approval_request_id BIGINT NOT NULL COMMENT '承認済みLIFECYCLE_EXCEPTION申請ID',
+    reason VARCHAR(1000) NOT NULL COMMENT '免除理由',
+    approved_by BIGINT COMMENT '承認適用操作者ID',
+    approved_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '免除適用日時',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    UNIQUE KEY uk_asset_offboarding_waiver_request (approval_request_id),
+    INDEX idx_asset_offboarding_waiver_engineer (engineer_id, approved_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='退社blocker例外免除追記台帳';
+```
+
 ---
 
 ## 3. Platform Invariants 準拠の3つの決定表
@@ -311,6 +331,17 @@ CREATE TABLE t_license_assignment (
 
 ---
 
+### 3.1 更新系の固定lock orderとCAS契約
+
+| 操作 | 固定順序 | 成功条件 | 競合時 |
+|---|---|---|---|
+| 返却 / 免除 | `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` → asset `ASSIGNED→IN_STOCK` CAS → assignment `ACTIVE/OVERDUE→RETURNED/WAIVED` CAS → event INSERT | 両CASが各1行更新。どちらかが失敗した場合はevent・証跡を記録しない | 409、トランザクション全体rollback。返却/免除で終端eventを二重記録しない |
+| ライセンス解放 | `t_license_assignment FOR UPDATE` → `m_license_plan FOR UPDATE` → assignment `ACTIVE→RELEASED` CAS → plan `allocated_count - 1` CAS | assignment CASとplan CASが各1行更新。割当行を終端化してから席数を減算する | 409、トランザクション全体rollback。二重解放で席数を二重減算しない |
+| 棚卸し明細更新 / 確定 | `t_asset_inventory_run FOR UPDATE` → `t_asset_inventory_item FOR UPDATE` | runが`COMPLETED`でない状態で明細を更新し、同じrun lock内で集計・`COMPLETED`遷移する | 完了後更新と二重確定を拒否し、集計と保存明細を同一transactionで一致させる |
+| 外部失効要求 | `idempotency_key` unique制約 → atomic claim (`idempotency_key IS NULL OR 同一key`) → provider呼出し | 同一keyは既存要求を返してproviderへ再送しない。別key、別accountへのkey衝突は409 | 先着claim以外はproviderを呼ばず、DB状態を再読する |
+
+返却と免除の入口で行う非lock読取は対象資産IDを得るためのヒント取得に限る。状態判定、CAS、履歴追記は上表のlock内で実施する。外部providerの呼出し結果は要求記録と確認結果を分離し、timeout/通信障害/5xx/429では`PENDING_CONFIRMATION`を維持する。
+
 ## 4. 期間重複貸与排除 (Overlap Prevention Architecture)
 
 ### 4.1 重複判定代数
@@ -325,9 +356,9 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 1. BEGIN TRANSACTION
 2. SELECT * FROM m_asset WHERE id = :assetId FOR UPDATE;
 3. IF asset.status != 'IN_STOCK' THEN THROW BusinessException("資産が保管中ではありません");
-4. SELECT COUNT(*) FROM t_asset_assignment 
-   WHERE asset_id = :assetId 
-     AND deleted_flag = 0
+4. SELECT COUNT(*) FROM t_asset_assignment
+   WHERE asset_id = :assetId
+      AND deleted_flag = 0
      AND (actual_return_date IS NULL OR actual_return_date >= :startDate)
      AND (:endDate IS NULL OR start_date <= :endDate);
 5. IF count > 0 THEN THROW BusinessException("指定期間に重複する貸与が存在します");
@@ -354,23 +385,26 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 [Outbox / Adapter 呼出し]
         │
    ┌────┴───────────────────────────┐
-   ▼ (成功: 200 OK)                 ▼ (タイムアウト / 5xx / 429)
+   ▼ (成功: 200 OK)                 ▼ (timeout / 通信障害 / 5xx / 429)
 [status: REVOKED]              [status: PENDING_CONFIRMATION]
 [revoke_confirmed_at: now]     [external_sync_status: TIMEOUT / SYNC_FAILED]
 [revoke_confirmed_by: actor]   [retry_count / next_retry_at を保存]
                                     │
-                                    ▼ (応答形式を判別不能な場合)
-                               [status: UNKNOWN]
-                                    │
-                                    ▼
-                               [管理者による失効完了確認]
-                                    │
-                                    ▼
-                               [status: REVOKED]
-                               [revoke_confirmed_at: now]
-                               [revoke_confirmed_by: adminUserId]
+                                    └───────────────┐
+                                                    ▼ (応答形式を判別不能な場合だけ)
+                                               [status: UNKNOWN]
+                                                    │
+                                                    ▼
+                                               [管理者/ポーリングによる確認]
+                                                    │
+                                                    ▼
+                                               [status: REVOKED]
+                                               [revoke_confirmed_at: now]
+                                               [revoke_confirmed_by: adminUserId]
 ```
 > **重要**: 外部API呼出しがタイムアウトした場合、システムは決して `REVOKED` や `confirmed` に倒さず、`TIMEOUT` / `SYNC_FAILED` としてアラート一覧に掲出し、退社ゲート blocker を維持する（Fail-Closed 原則）。
+
+応答形式を分類できない場合だけ`UNKNOWN`へ遷移する。`UNKNOWN`はtimeoutの別名ではなく、どちらも`revoke_confirmed_at IS NULL`の間は退社gate blockerである。
 
 ---
 
@@ -378,6 +412,8 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 
 ### 6.1 `AssetOffboardingService`
 `engineer-lifecycle-workflow` の退社ケース完了時、以下のメソッドを通じて 3大 blocker（未返却端末、未失効アカウント、未解放ライセンス）判定を行う:
+
+`ResignationGateChecker` は `RESIGN_ASSET_RETURN` タスクの状態だけを信頼せず、毎回このサービスの3件のcountを照合する。タスクが`COMPLETED`でも3件のcountがすべて0でなければBlockとし、タスクが`WAIVED`の場合も、承認済み`LIFECYCLE_EXCEPTION`の対象一致を検証して`t_asset_offboarding_waiver`へ永続化された台帳行がなければBlockとする。承認申請IDだけのプロセスメモリ登録、任意ID、再起動後に消える免除状態は認めない。
 
 ```java
 public interface AssetOffboardingService {

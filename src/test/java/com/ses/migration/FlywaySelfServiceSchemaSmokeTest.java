@@ -55,10 +55,10 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=125（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version=131（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("128", latestVersion, "最新のマイグレーションバージョンは128であること");
+            assertEquals("131", latestVersion, "最新のマイグレーションバージョンは131であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",
@@ -304,7 +304,7 @@ class FlywaySelfServiceSchemaSmokeTest {
         try (Connection connection = LEGACY_MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("128", latestVersion, "legacy DBの最新マイグレーションバージョンは128であること");
+            assertEquals("131", latestVersion, "legacy DBの最新マイグレーションバージョンは131であること");
 
             for (String table : new String[]{
                     "t_engineer_change_request", "t_expense_request", "t_expense_accounting_job",

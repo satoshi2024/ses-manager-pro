@@ -9,8 +9,8 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base branch**: `origin/main`
 - **Base**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
-- **検証対象実装Head**: `e6659c90`（P1契約修正および全体gate差分修正後の実装・テスト検証点）。文書のみの最終push後は、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で提出Headを再固定する。
-- **Remote確認**: `e6659c90` は実装修正push済み。最終文書commit後のremote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
+- **実装検証Head**: `f37501fc79ebfed006887a8c920f3c7c2c5bc709`（第6回Review P1是正の実装・テスト・V131 migration・終端履歴保全commit）。文書commit後の最終提出Headは、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
+- **Remote確認**: 実装commit `f37501fc79ebfed006887a8c920f3c7c2c5bc709` はpush済み。文書commit後のremote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
 - **PR**: 実装対話では未作成。独立ReviewのPLAN/IMPLEMENTATION双方PASS後にのみ作成する。
 
 ## 2. DG-09 / NF-01 決定事項
@@ -34,7 +34,9 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetEntityMapperTest,AssetApiControllerTest,AssetApiRoleScopeIntegrationTest,AssetAssignmentConcurrencyTest,AssetAlertServiceTest,DocumentApiControllerTest,MyAssetApiControllerTest,AssetServiceTest,AssetSecretFieldScanTest,AssetOffboardingServiceTest,AssetComprehensiveSecretScanTest,AssetBoundaryAndLifecycleIntegrationTest,ScheduledMethodsHaveSchedulerLockTest,ActionPermissionResolverTest' test
 ```
 
-結果: **66/66 PASS, Failures=0, Errors=0, Skipped=0**。
+結果: **69/69 PASS, Failures=0, Errors=0, Skipped=0**。
+
+専用suite外の実退社gate drill `ResignationGateFailureDrillTest` も **9/9 PASS, Failures=0, Errors=0, Skipped=0**。3 blocker照合と永続waiverのテストを含む。
 
 内訳の重要assertion:
 
@@ -42,7 +44,10 @@
 - 法人A/B、営業担当範囲（別法人所有でも担当要員への現在貸与は許可、未貸与は拒否）、マネージャー組織・法人範囲（共有または管轄法人のみ）、要員本人、空集合fail-closedを確認。
 - 実在 `t_document` の `ASSET_ASSIGNMENT` linkについて、無関係要員のdetail/downloadを貸与中・返却後とも403。旧assignmentの本人だけは履歴文書へアクセス可能。
 - `AssetComprehensiveSecretScanTest`: **4/4 PASS**。全 `src/main/java` を対象に、multilineのログ・例外・監査payloadを含む未マスク値を検査。
+- provider実装のidentifierログはマスク済みで、scan getter patternも`getAccountIdentifier`を含む。`AssetBoundaryAndLifecycleIntegrationTest` では同一key再送なし・別key上書き拒否を確認。
 - 退社3大blocker、承認済み例外、棚卸し確定後更新拒否・二重確定拒否、資産・アカウント・ライセンスのsoft-delete安全条件を確認し、`RETURNED`/`REVOKED`/`RELEASED` 終端履歴の削除拒否をassert。
+- `ResignationGateFailureDrillTest.testResignationGateUsesAssetOffboardingBlockersAndPersistedWaiver` で、実gateが3 blockerを照合し、対象一致・承認済みの永続waiverだけをWAIVEDとして採用することを確認。
+- `AssetBoundaryAndLifecycleIntegrationTest.testConcurrentReturnAndWaiveSingleTerminalEvent`、`testLicenseConcurrentReleaseDecrementsOnce`、`testInventoryConcurrentCompletionSingleWinner` で各競合の勝者1件、終端event 1件、席数/集計整合を確認。
 - `ScheduledMethodsHaveSchedulerLockTest`: **1/1 PASS**。
 
 ### 3.2 MySQL 8 gate
@@ -53,15 +58,18 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetMySqlIntegrationTest' test -Pmysql-tests
 ```
 
-結果: **3/3 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130、`FOR UPDATE`、CAS、貸与履歴を実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
+結果: **3/3 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130/V131、`FOR UPDATE`、CAS、貸与履歴を実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
+
+V131追加による既存migration smokeの追随確認として、`FlywaySelfServiceSchemaSmokeTest`（3メソッド）と`FlywayCertificationLearningSkillGapSchemaSmokeTest`（1メソッド）も同時実行し、**4/4 PASS**。旧来の「最新version=128」assertionはV131へ同期した。
 
 ### 3.3 リポジトリ全体Fast gateの扱い
 
 `mvn test` はBaseと最終Headで固定seed `27838638095700` を使って比較したが、全体PASSではない。NF-09対象テストは通過している一方、Baseにも存在する既存/環境側テストに失敗・エラーが残ったため、CR-06のリポジトリ全体Fast gateは **未PASS** と記録する。
 
 - Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`: `tests=3060, failures=2, errors=16, skipped=0`。
-- 最終Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
-- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、`e6659c90` で修正済み。修正後の関連12/12、NF-09対象66/66、MySQL 3/3はPASS。
+- R5時点Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
+- R6実装Head `f37501fc79ebfed006887a8c920f3c7c2c5bc709`: `tests=3123, failures=2, errors=11, skipped=0`。今回の追加修正によるFast suiteの失敗はなく、残存はBase/R5から継続する8クラス（loopback接続、固定H2 ID、既存Controller/I18n/production設定）だった。
+- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6実装commitまでにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、NF-09対象69/69、MySQL 3/3、migration smoke 4/4を再実行してPASSした。
 
 - `ControllerTransactionalBanTest`
 - `ProductionSecurityConfigurationTest`
@@ -106,13 +114,13 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 ## 5. 外部失効と履歴保全
 
 - `revoke_requested_at` と `revoke_confirmed_at` を別々に保持し、要求送信のみで `REVOKED` にしない。
-- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま、分類不能応答は `UNKNOWN` として `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。
+- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま、分類不能応答だけを `UNKNOWN` として `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。同一`idempotency_key`はproviderへ再送せず、別keyによる上書きは409で拒否する。
 - 資産の移管・返却・紛失・廃棄は `t_asset_event` へINSERT-onlyで追記する。貸与・アカウント・ライセンスの履歴も状態を上書きせず、`RETURNED`/`REVOKED`/`RELEASED` の終端行は論理削除を拒否する。
 - 外部プロバイダ呼出しはDBトランザクション外。要求記録と確認結果の間で障害が発生しても、未確認を成功として扱わない。
 
 ## 6. Secret scan
 
-`AssetComprehensiveSecretScanTest` **4/4 PASS**。検査対象はEntity/DTO、V129/V130/V1のDDL、HTML、JS、`src/main/java` 全Javaのログ・例外・監査payload。アカウント識別子は必要箇所でマスクし、password/token/recovery code用のcolumn/DTO/log値は検出なし。
+`AssetComprehensiveSecretScanTest` **4/4 PASS**。検査対象はEntity/DTO、V129/V130/V131/V1のDDL、HTML、JS、`src/main/java` 全Javaのログ・例外・監査payload。アカウント識別子は必要箇所でマスクし、getter検出に`getAccountIdentifier`を含め、password/token/recovery code用のcolumn/DTO/log値と未マスクidentifierは検出なし。
 
 ## 7. Rollback / 運用手順
 

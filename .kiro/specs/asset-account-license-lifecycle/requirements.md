@@ -24,8 +24,8 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 4. **履歴の不変性 (Immutable Event History)**: THE システム SHALL 資産の登録、貸与、返却、移管、修理出入、紛失報告、リモートワイプ確認、廃棄等の全イベントを、改ざん不能な追記専用台帳（`t_asset_event`）へ記録する。過去のイベント履歴の上書き・物理削除は禁止する。
 5. **論理削除の安全条件 (Soft Delete Invariants)**: THE システム SHALL 以下の安全条件を遵守する。
    - (a) **未返却貸与中の資産を論理削除してはならない**: `status IN ('ACTIVE', 'OVERDUE') AND actual_return_date IS NULL` の `t_asset_assignment` が存在する資産を `deleted_flag = 1` にすること（管理者操作を含む）は禁止する。論理削除前に必ず返却完了（`RETURNED`）または承認済みWAIVEDへの状態遷移が必要である。
-   - (b) **未失効アカウントを論理削除してはならない**: `status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN') AND revoke_confirmed_at IS NULL` の `t_external_account_reference` を `deleted_flag = 1` にすることは禁止する。失効確認（`revoke_confirmed_at IS NOT NULL`）または既存ApprovalEngineで承認された `EXCEPTION_HOLD` 状態への遷移が必要である。
-   - (c) **未解放ライセンス割当を論理削除してはならない**: `status = 'ACTIVE' OR released_date IS NULL` の `t_license_assignment` を `deleted_flag = 1` にすることは禁止する。ライセンス解放（`status = 'RELEASED'` かつ `released_date` 設定）が必要である。
+   - (b) **外部アカウント参照履歴を論理削除してはならない**: `status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN') AND revoke_confirmed_at IS NULL` の行を `deleted_flag = 1` にすることは禁止する。さらに失効確認済み `REVOKED` 行を含む既存参照行も履歴台帳として保持し、`EXCEPTION_HOLD` は承認済み例外による退社gate判定であって削除認可には使用しない。
+   - (c) **ライセンス割当履歴を論理削除してはならない**: `status = 'ACTIVE' OR released_date IS NULL` の行を `deleted_flag = 1` にすることは禁止する。ライセンス解放（`status = 'RELEASED'` かつ `released_date` 設定）後も既存割当行を履歴として保持する。
    - (d) **論理削除後も退社ブロッカー・期間排他・席数集計に影響しない**: MyBatis-Plus のグローバル論理削除フィルタ（`deleted_flag = 0`）により、上記 (a)〜(c) の条件違反によって論理削除された行が退社ゲート検査・期間重複チェック・`allocated_count` 計算から除外されることがないよう、論理削除前バリデーションで違反を事前に阻止する。
    - (e) **資産廃棄は削除ではなく DISPOSED 状態遷移である**: `m_asset` の `deleted_flag` は管理者の明示的な台帳整理のみに使用し、資産廃棄は必ず `status = DISPOSED` への状態遷移 + イベント記録で表現する。
    - (f) **貸与・account・licenseの歴史は終端状態で保持する**: `RETURNED`, `REVOKED`, `released_date IS NOT NULL` 等の終端状態に達した行は論理削除せず台帳上に残留させ、`t_asset_event` および `t_document_link` からの参照可能性を維持する。
@@ -37,7 +37,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 1. THE 管理者 SHALL 外部システム（`m_external_account_system`: Google Workspace, GitHub, Slack, AWS, Microsoft 365, MDM等）の識別子、名称、システム種別、認可方式を管理できる。
 2. THE 外部アカウント参照（`t_external_account_reference`） SHALL 外部システムID、外部アカウント識別子（メールアドレス、ユーザー名、または外部ID）、紐付け対象（要員IDまたはユーザーID）、権限レベル（`ADMIN`, `MEMBER`, `READONLY` 等）、ステータス（`ACTIVE: 有効`, `SUSPENDED: 停止中`, `REVOKED: 失効済`, `PENDING_CONFIRMATION: 失効確認待ち`, `UNKNOWN: 状態不明`, `EXCEPTION_HOLD: 例外保留`）、発行日、失効要求日時（`revoke_requested_at`）、失効確認日時（`revoke_confirmed_at`）、および確認者（`revoke_confirmed_by`）を保持する。
 3. **秘密情報の絶対非保存 (Comprehensive No-Secrets Policy)**: THE システム SHALL 外部アカウントのパスワード、APIトークン、クライアントシークレット、リカバリーコード、暗号化キーを格納するテーブル列、DTOフィールド、ログ出力、例外メッセージ、監査payload、HTML/JS入力フォームを一切作成・受容・出力しない。外部認証はIdP/SSOおよびOAuth2 PKCE等の標準プロトコルに委ね、本システムはアカウントの「参照（Reference）」と「ライフサイクル状態（State）」のみを管理する。
-4. **外部失効要求と確認の分離 & Recovery/Idempotency**: 外部プロバイダー（IdP/MDM/SaaS）に対する失効連携において、THE システム SHALL 失効要求（`REQUESTED`）と失効完了確認（`CONFIRMED`）を別個のタイムスタンプとステータスで管理する。失効要求時は冪等性キー（`idempotency_key`）を付与し、二重revokeを防止する。外部APIのタイムアウト、通信障害、または未確認応答（5xx/429）が発生した場合、THE システム SHALL 失効を「完了」とみなさず `PENDING_CONFIRMATION` / `UNKNOWN` として永続化し、指数バックオフによる定期リトライ・ポーリングジョブで再照会する。
+4. **外部失効要求と確認の分離 & Recovery/Idempotency**: 外部プロバイダー（IdP/MDM/SaaS）に対する失効連携において、THE システム SHALL 失効要求（`REQUESTED`）と失効完了確認（`CONFIRMED`）を別個のタイムスタンプとステータスで管理する。失効要求時は冪等性キー（`idempotency_key`）を付与し、同一アカウントへの二重revokeおよび異なるkeyによる上書きを防止する。外部APIのタイムアウト、通信障害、5xx、または429は必ず `PENDING_CONFIRMATION` として永続化し、失効完了とみなさない。応答形式を分類できない場合だけ `UNKNOWN` として永続化する。いずれも指数バックオフによる定期ポーリング対象とし、`revoke_confirmed_at` が設定されるまで退社blockerを維持する。
 5. **有償ライセンス席数管理 & CAS保護**: THE ライセンス管理（`m_license_plan`, `t_license_assignment`） SHALL プラン名、プロバイダー、総ライセンス数（`seat_limit`）、割当済数（`allocated_count`）、1席あたり費用、費用負担組織（`cost_center_id`）、および有効期限を管理する。割当時は `allocated_count < seat_limit` のCAS更新で原子保護し、上限 `-1 / = / +1` の境界を厳格に制御する。上限到達時の新規割当拒否、解放後の再割当成功、並行割当での席数完全性を保証する。
 
 ---
@@ -47,7 +47,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 1. THE 管理者 SHALL 定期（半期/年次）または臨時の棚卸し（`t_asset_inventory_run`）を開始できる。
 2. THE 棚卸し明細（`t_asset_inventory_item`） SHALL 理論上の保管場所/貸与先（`expected`）と実地確認結果（`observed`）、確認者、確認日時、差異区分（`MATCH: 一致`, `DISCREPANCY: 差異あり`, `MISSING: 所在不明`, `UNREGISTERED: 未登録資産`）、差異理由、および是正措置を記録する。棚卸し確定（`COMPLETED`）後の明細更新および二重確定は厳格に拒否する。
 3. **紛失インシデント追跡 (Lost Asset Incident)**: 資産の紛失が報告された場合、THE システム SHALL ステータスを `LOST` に変更し、インシデント起票日時、リモートワイプ実施/確認状態、警察届出番号、保険申請状況、および関連文書リンクを追跡可能にし、関係者へ緊急アラートを即時一斉配信する。
-4. **退社ゲート連携 (NF-01 Link Contract)**: 
+4. **退社ゲート連携 (NF-01 Link Contract)**:
    - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の **3大残存アイテム** を blocker として検出・報告する:
      - (a) 未返却貸与資産（`status = ACTIVE` または `actual_return_date IS NULL`）
      - (b) 未失効外部アカウント（`status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN')` かつ `revoke_confirmed_at IS NULL`）

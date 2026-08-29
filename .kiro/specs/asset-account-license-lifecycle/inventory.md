@@ -8,8 +8,8 @@
 | **内部ユーザー** | `sys_user`, `SysUserService` | 貸与先 (`assignee_type = 'USER'`, `assignee_id = sys_user.id`) | ユーザー無効化 (`status = 0`) 時の資産・アカウント確認 |
 | **法人・組織** | `m_organization_unit` | 資産所有法人 (`owner_company_id` = `legal_entity_id`), 費用負担組織 (`cost_center_id`) | 法人別資産集計、組織別ライセンス費用配賦 |
 | **法定文書・証跡** | `t_document`, `DocumentService` | 受渡し・返却時の受領書・誓約書 (`handover_evidence_doc_id`, `return_evidence_doc_id`) | `DocumentLink` 構造に準拠、独自ファイル保存カラムを作らない |
-| **退社ワークフロー** | `engineer-lifecycle-workflow` (NF-01) | 退社ゲートでの未返却資産・未失効アカウント blocker 検査 | `RESIGN_ASSET_RETURN` 阻害タスクの判定元データとして提供 |
-| **内部統制・承認** | `ApprovalEngineService` | 資産未返却・アカウント未失効のまま退社させる場合の例外承認 | `RequestType = LIFECYCLE_EXCEPTION`, 二者承認 |
+| **退社ワークフロー** | `engineer-lifecycle-workflow` (NF-01) | 退社ゲートでの未返却資産・未失効アカウント・未解放ライセンス blocker 検査 | `RESIGN_ASSET_RETURN` の状態に加え、`AssetOffboardingService` の3 blocker実照合を正本とする |
+| **内部統制・承認** | `ApprovalEngineService` | 資産未返却・アカウント未失効・ライセンス未解放のまま退社させる場合の例外承認 | `RequestType = LIFECYCLE_EXCEPTION`、対象一致、承認済みstatus、`t_asset_offboarding_waiver` 永続台帳 |
 | **通知基盤** | `NotificationService`, `t_notification_outbox` | 返却期日接近・超過、棚卸し、失効未確認のアラート通知 | Deduplication Key による重複抑止 |
 
 ---
