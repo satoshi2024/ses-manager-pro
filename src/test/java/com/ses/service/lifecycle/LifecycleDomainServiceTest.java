@@ -218,6 +218,16 @@ class LifecycleDomainServiceTest {
         LifecycleTemplateDto created = templateService.createTemplate(tpl, adminUser.getId());
         assertNotNull(created.getId());
         assertEquals(1, created.getVersionNo());
+        
+        // Assert that taskCount is set in listTemplates
+        List<LifecycleTemplateDto> allTpls = templateService.listTemplates("JOIN", "ACTIVE");
+        assertTrue(allTpls.stream().anyMatch(t -> t.getId().equals(created.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list");
+        
+        // Assert invalidDateOrder for createTemplate
+        LifecycleTemplateDto invalidTpl = LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("Bad").validFrom(LocalDate.now().plusDays(10)).validTo(LocalDate.now())
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("B").taskName("B").assigneeRule("HR").sortOrder(10).build())).build();
+        assertThrows(BusinessException.class, () -> templateService.createTemplate(invalidTpl, adminUser.getId()));
 
         // 案件を起票 (v1で起票される)
         CreateLifecycleCaseCommand cmd = CreateLifecycleCaseCommand.builder()
@@ -234,6 +244,14 @@ class LifecycleDomainServiceTest {
         tpl.getTasks().get(0).setTaskName("書類提出(電子的)");
         LifecycleTemplateDto v2 = templateService.updateTemplate(created.getId(), tpl, adminUser.getId());
         assertEquals(2, v2.getVersionNo());
+        
+        // Check validFrom overlap adjustment logic
+        LifecycleTemplate oldTpl = templateService.getById(created.getId());
+        assertTrue(oldTpl.getValidTo().isBefore(v2.getValidFrom()), "Old version must end before new version begins");
+        
+        // Assert taskCount for v2
+        List<LifecycleTemplateDto> allTplsV2 = templateService.listTemplates("JOIN", "ACTIVE");
+        assertTrue(allTplsV2.stream().anyMatch(t -> t.getId().equals(v2.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list for v2");
 
         // 既存案件のバージョンが保護されていることを確認
         LifecycleCase lcCase = caseMapper.selectById(caseDto.getId());

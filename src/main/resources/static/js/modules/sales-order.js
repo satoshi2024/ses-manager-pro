@@ -68,22 +68,24 @@ function loadSelect(url, sel, valueField, labelFn, selected) {
     });
 }
 
-function onCustomerChanged() {
+async function onCustomerChanged(selectedContactId) {
     const customerId = document.getElementById('salesOrderForm').customerId.value;
     const projectSelects = document.querySelectorAll('#lineTable select[name="projectId"]');
+    const promises = [];
     projectSelects.forEach(sel => {
         if (customerId) {
-            loadSelect(`/api/projects/options?customerId=${customerId}`, sel, 'id', r => r.name);
+            promises.push(loadSelect(`/api/projects/options?customerId=${customerId}`, sel, 'id', r => r.name, sel.dataset.selectedProject));
         } else {
             sel.innerHTML = '<option value=""></option>';
         }
     });
     const contactSelect = document.getElementById('salesOrderForm').contactId;
     if (customerId) {
-        loadSelect(`/api/customers/${customerId}/contacts`, contactSelect, 'id', r => r.name);
+        promises.push(loadSelect(`/api/customers/${customerId}/contacts`, contactSelect, 'id', r => r.name, selectedContactId || contactSelect.value));
     } else {
         contactSelect.innerHTML = '<option value=""></option>';
     }
+    await Promise.all(promises);
 }
 
 function addLineRow(line) {
@@ -97,7 +99,7 @@ function addLineRow(line) {
             <input type="hidden" name="lineId" value="${line.id || ''}">
             <select class="form-select form-select-sm" name="engineerId" aria-label="${label('salesOrder.modal.line.engineer')}" required></select>
         </td>
-        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}" data-selected-project="${line.projectId || ''}" data-selected-project="${line.projectId || ''}" data-selected-project="${line.projectId || ''}"></select></td>
+        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}" data-selected-project="${line.projectId || ''}"></select></td>
         <td><input type="number" class="form-control form-control-sm" name="unitPrice" aria-label="${label('salesOrder.modal.line.unitPrice')}" value="${line.unitPrice || ''}" required></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" aria-label="${label('salesOrder.modal.line.settlementMin')}" value="${line.settlementMin || ''}"></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" aria-label="${label('salesOrder.modal.line.settlementMax')}" value="${line.settlementMax || ''}"></td>
@@ -124,8 +126,8 @@ async function presetFromQuotation(quotationId) {
         // 顧客選択の連動を再実行してから明細を埋める
         await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, quotation.customerId);
         await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
-        onCustomerChanged();
-        addLineRow({
+          await onCustomerChanged();
+          addLineRow({
             engineerId: quotation.engineerId,
             projectId: quotation.projectId,
             unitPrice: quotation.unitPrice,
