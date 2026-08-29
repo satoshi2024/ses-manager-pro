@@ -9,8 +9,8 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base branch**: `origin/main`
 - **Base**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
-- **実装検証Head**: `f37501fc79ebfed006887a8c920f3c7c2c5bc709`（第6回Review P1是正の実装・テスト・V131 migration・終端履歴保全commit）。文書commit後の最終提出Headは、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
-- **Remote確認**: 実装commit `f37501fc79ebfed006887a8c920f3c7c2c5bc709` はpush済み。文書commit後のremote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
+- **実装検証Head**: R7の実装・テスト・文書commitをpush済みの最終提出Headとして扱い、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
+- **Remote確認**: R7の各commitはpush済み。最終remote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
 - **PR**: 実装対話では未作成。独立ReviewのPLAN/IMPLEMENTATION双方PASS後にのみ作成する。
 
 ## 2. DG-09 / NF-01 決定事項
@@ -21,8 +21,10 @@
 - `RESIGN_ASSET_RETURN` で未返却端末・未失効アカウント・未解放ライセンスをblockし、`LIFECYCLE_EXCEPTION` の承認済み例外だけをWAIVED扱いとする。
 - password/token/recovery codeはDB列・Entity/DTO・HTML input・JS payload・ログ・監査payloadへ保存しない。
 - Provider timeout/5xx/429は `PENDING_CONFIRMATION`、応答形式を分類できない場合だけ `UNKNOWN` とし、`revoke_confirmed_at` が設定されるまで退社blockerを維持する。
+- Provider confirmation APIの例外はaccount単位で `PENDING_CONFIRMATION`、retry count、next retryを永続化し、poll jobは後続accountを継続処理する。
 - 営業は現任担当要員への現在貸与のみ（owner法人追加制限なし）、マネージャーは管轄要員への現在貸与かつ `owner_company_id IS NULL` または管轄法人、未貸与資産は両者へ公開しない。
 - `RETURNED`/`REVOKED`/`RELEASED` の終端履歴は論理削除せず、貸与履歴の削除APIも拒否する。
+- waiverは対象要員・退社case・`RESIGN_ASSET_RETURN` taskの完全一致でのみ有効とし、`approved_by`にはApproval Actionの実操作ユーザーを保存する。
 
 ## 3. 検証結果
 
@@ -58,9 +60,11 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetMySqlIntegrationTest' test -Pmysql-tests
 ```
 
-結果: **3/3 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130/V131、`FOR UPDATE`、CAS、貸与履歴を実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
+結果: **8/8 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130/V131/V132、`FOR UPDATE`、CAS、貸与履歴、およびclaim・返却/免除・license解放・棚卸し確定の4並行シナリオを実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
 
-V131追加による既存migration smokeの追随確認として、`FlywaySelfServiceSchemaSmokeTest`（3メソッド）と`FlywayCertificationLearningSkillGapSchemaSmokeTest`（1メソッド）も同時実行し、**4/4 PASS**。旧来の「最新version=128」assertionはV131へ同期した。
+追加した並行assertionは、同一keyのprovider call count=1、返却/免除の勝者1件と終端event 1件、license席数の1回減算、棚卸し二重確定の勝者1件です。V132 smokeではwaiverのscope列・unique/FKと`t_asset_event` UPDATE/DELETE triggerを確認しました。
+
+V132追加による既存migration smokeの追随確認として、`FlywaySelfServiceSchemaSmokeTest`（3メソッド）と`FlywayCertificationLearningSkillGapSchemaSmokeTest`（1メソッド）も同時実行し、**4/4 PASS**。Flyway latest versionは132で、旧来のlatest version assertionもV132へ同期した。
 
 ### 3.3 リポジトリ全体Fast gateの扱い
 
@@ -68,8 +72,8 @@ V131追加による既存migration smokeの追随確認として、`FlywaySelfSe
 
 - Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`: `tests=3060, failures=2, errors=16, skipped=0`。
 - R5時点Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
-- R6実装Head `f37501fc79ebfed006887a8c920f3c7c2c5bc709`: `tests=3123, failures=2, errors=11, skipped=0`。今回の追加修正によるFast suiteの失敗はなく、残存はBase/R5から継続する8クラス（loopback接続、固定H2 ID、既存Controller/I18n/production設定）だった。
-- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6実装commitまでにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、NF-09対象69/69、MySQL 3/3、migration smoke 4/4を再実行してPASSした。
+- R6実装時点: `tests=3123, failures=2, errors=11, skipped=0`。R7追加修正による対象Fast suiteの失敗はなく、残存はBase/R5から継続する8クラス（loopback接続、固定H2 ID、既存Controller/I18n/production設定）だった。
+- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6までにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、R7ではclaim競合・poll継続・service API境界・V132 DB保護を追加で修正した。対象Fast 69/69、MySQL 8/8、migration smoke 4/4を再実行してPASSした。
 
 - `ControllerTransactionalBanTest`
 - `ProductionSecurityConfigurationTest`
@@ -114,13 +118,22 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 ## 5. 外部失効と履歴保全
 
 - `revoke_requested_at` と `revoke_confirmed_at` を別々に保持し、要求送信のみで `REVOKED` にしない。
-- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま、分類不能応答だけを `UNKNOWN` として `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。同一`idempotency_key`はproviderへ再送せず、別keyによる上書きは409で拒否する。
+- `FAILED_OR_TIMEOUT` は `PENDING_CONFIRMATION` のまま、分類不能応答だけを `UNKNOWN` として `next_retry_at` によるポーリングへ送り、確認成功時だけ `REVOKED` とする。同一`idempotency_key`はatomic claimでproviderへ一度だけ送信し、別keyによる上書きは409で拒否する。確認例外はaccount単位でretry状態を永続化してpollを継続する。
 - 資産の移管・返却・紛失・廃棄は `t_asset_event` へINSERT-onlyで追記する。貸与・アカウント・ライセンスの履歴も状態を上書きせず、`RETURNED`/`REVOKED`/`RELEASED` の終端行は論理削除を拒否する。
 - 外部プロバイダ呼出しはDBトランザクション外。要求記録と確認結果の間で障害が発生しても、未確認を成功として扱わない。
 
+### 5.1 第7回Review P1/P2対応の実測
+
+- `AssetMySqlIntegrationTest.testConcurrentRevokeClaimCallsProviderOnceOnMySQL`: 同一keyを2 threadから送信し、atomic claimの勝者だけがproviderを呼び、call count=1。
+- `AssetMySqlIntegrationTest.testConcurrentReturnAndWaiveOnMySQL`: 返却と免除の競合は勝者1件、失敗1件、終端event 1件。
+- `AssetMySqlIntegrationTest.testConcurrentLicenseReleaseDecrementsOnceOnMySQL`: 同一割当の二重解放でも席数は1回だけ減算。
+- `AssetMySqlIntegrationTest.testConcurrentInventoryCompletionOnMySQL`: 棚卸し二重確定は勝者1件で、確定後の明細と集計を固定。
+- `AssetMySqlIntegrationTest.testV132WaiverShapeAndAppendOnlyGuardsOnMySQL`: Flyway latest=132、waiver scope列・unique・case/task FK、event UPDATE/DELETE triggerを確認。
+- `AssetLifecycleAppendOnlyApiContractTest`: `AssetEventService`、`AssetAssignmentService`、`ExternalAccountService` が汎用 `IService` mutation APIを公開しないことを確認。
+
 ## 6. Secret scan
 
-`AssetComprehensiveSecretScanTest` **4/4 PASS**。検査対象はEntity/DTO、V129/V130/V131/V1のDDL、HTML、JS、`src/main/java` 全Javaのログ・例外・監査payload。アカウント識別子は必要箇所でマスクし、getter検出に`getAccountIdentifier`を含め、password/token/recovery code用のcolumn/DTO/log値と未マスクidentifierは検出なし。
+`AssetComprehensiveSecretScanTest` **4/4 PASS**。検査対象はEntity/DTO、V129/V130/V131/V132/V1のDDL、HTML、JS、`src/main/java` 全Javaのログ・例外・監査payload。アカウント識別子は必要箇所でマスクし、getter検出に`getAccountIdentifier`を含め、password/token/recovery code用のcolumn/DTO/log値と未マスクidentifierは検出なし。
 
 ## 7. Rollback / 運用手順
 

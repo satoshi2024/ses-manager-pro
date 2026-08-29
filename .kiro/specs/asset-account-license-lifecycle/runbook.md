@@ -13,7 +13,7 @@
    - 貸与作成時は `m_asset` 行を `FOR UPDATE` でロックし、`[start_date, expected_return_date]` の期間重複を代数的に排除します。
    - 返却・免除は `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` の順で固定し、asset CASとassignment終端CASが両方成功した場合だけeventを追記します。license解放はassignment→plan、棚卸しはrun→itemの順でロックします。
 3. **不変イベント台帳（Immutable Event Ledger）**:
-   - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。
+   - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。専用service APIに加え、V132のMySQL UPDATE/DELETE triggerでDB側からも拒否します。
 4. **ライセンス席数 CAS（Compare-And-Swap）**:
    - `m_license_plan.allocated_count` は席数上限 `seat_limit` を超えない条件付きCAS更新でアトミックに管理されます。
 5. **所有法人と認可スコープ**:
@@ -37,6 +37,7 @@ Flyway マイグレーションにより自動適用されます。
 - `V129__asset_account_license_lifecycle.sql`: 9テーブル DDL 作成
 - `V130__asset_account_license_menu_permissions.sql`: メニューおよびアクション権限シード
 - `V131__asset_offboarding_waiver_ledger.sql`: 承認済み `LIFECYCLE_EXCEPTION` と対象要員を結ぶ退社例外免除台帳。`approval_request_id` は一意で、既存承認の再適用を重複記録しません。
+- `V132__asset_offboarding_waiver_scope_and_append_only_guards.sql`: waiverの退社case/task scope列・FK・索引、および `t_asset_event` UPDATE/DELETE拒否trigger。V131由来のNULL scope legacy行は現行gateで免除に使用しません。
 
 ### 2.2 既存資産・アカウントの初期登録
 1. 管理者アカウントで `/asset/list` にログイン。
@@ -98,9 +99,9 @@ WHERE deleted_flag = 0
 4. 全明細の確認完了後、「棚卸し完了・確定」をクリックして集計を固定。
 
 ### 3.3 NF-01 退社ワークフロー連携
-1. 要員の退社手続き開始時、`AssetOffboardingService.checkOffboardingClearance(engineerId)` が自動実行される。
+1. 要員の退社手続き開始時、`AssetOffboardingService.checkOffboardingClearance(engineerId, lifecycleCaseId, lifecycleTaskId)` が自動実行される。case/task scopeが欠落した場合はblockerを返し、waiverを適用しない。
 2. 未返却端末、未失効アカウント、未解放ライセンスが存在する場合、退社ゲートがブロックされる。
-3. 返却完了後、または承認済み `LIFECYCLE_EXCEPTION` のrequest type・status・targetを検証して `t_asset_offboarding_waiver` に永続化した後にクリアランスがパスする。`RESIGN_ASSET_RETURN` が `COMPLETED` でも3 blockerの実照合は省略しない。
+3. 返却完了後、または承認済み `LIFECYCLE_EXCEPTION` のrequest type・status・targetを検証して、対象要員・退社case・`RESIGN_ASSET_RETURN` taskをscopeとして `t_asset_offboarding_waiver` に永続化した後にクリアランスがパスする。`approved_by` はApproval Actionの実操作ユーザーを記録し、申請者IDで代用しない。`RESIGN_ASSET_RETURN` が `COMPLETED` でも3 blockerの実照合は省略しない。
 4. 退社確定時に `triggerOffboardingRevocations` が実行され、アカウントの失効要求およびライセンスの自動解放が行われる。
 
 ### 3.4 紛失インシデント緊急初動フロー
@@ -111,8 +112,9 @@ WHERE deleted_flag = 0
 
 ### 3.5 失効要求・確認・タイムアウト対応
 - `revoke_requested_at` は外部へ要求を送信した時刻、`revoke_confirmed_at` は外部状態を確認できた時刻です。要求送信だけで `REVOKED` と判定しません。
-- `idempotency_key` はDBで一意です。同一account・同一keyの再送は既存状態を返しproviderへ再送せず、別keyまたは別accountとの衝突は409で拒否します。
+- `idempotency_key` はDBで一意です。同一account・同一keyの再送は既存状態を返しproviderへ再送せず、claimは `idempotency_key IS NULL` のatomic updateで先着1件に限定します。別keyまたは別accountとの衝突は409で拒否します。
 - `FAILED_OR_TIMEOUT`、ネットワークエラー、プロバイダ停止時は `status=PENDING_CONFIRMATION`、`external_sync_status=TIMEOUT` または `SYNC_FAILED` とし、`next_retry_at` に従ってポーリングします。
+- confirmation APIのtimeout/5xx等の例外はアカウント単位でretry count/backoffを永続化し、同じpoll job内の後続アカウントを継続処理します。
 - 確認成功時だけ `REVOKED` と `revoke_confirmed_at` を記録します。失効確認が取れない退社caseはブロックを維持します。
 
 ### 3.6 棚卸し差異の扱い

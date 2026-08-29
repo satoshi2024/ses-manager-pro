@@ -26,7 +26,8 @@
 
 [Domain & Persistence Layer]
   ├─ Entity: Asset, AssetAssignment, AssetEvent, AssetInventoryRun, AssetInventoryItem,
-  │          ExternalAccountSystem, ExternalAccountReference, LicensePlan, LicenseAssignment
+  │          ExternalAccountSystem, ExternalAccountReference, LicensePlan, LicenseAssignment,
+  │          AssetOffboardingWaiver
   └─ Mapper: MyBatis-Plus BaseMapper (LambdaQueryWrapper / 行ロック @Select)
 ```
 
@@ -44,7 +45,7 @@ MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `remove
 | `t_external_account_reference` | **既存参照行は状態にかかわらず論理削除禁止**。未失効状態では特に退社gateから除外されるため削除不可 | `ExternalAccountService.softDeleteAccount(id)` | 常に `BusinessException`（終端履歴も保持。`EXCEPTION_HOLD` は削除認可を意味しない） |
 | `t_license_assignment` | **既存割当行は状態にかかわらず論理削除禁止**。`ACTIVE` または `released_date IS NULL` は未解放として削除不可 | `LicenseService.softDeleteAssignment(id)` | 常に `BusinessException`（`RELEASED` 履歴も保持） |
 
-論理削除操作は上記バリデーションを通過した場合のみ実行する。実装上、貸与・外部account・license割当の既存行は終端状態を含め常に拒否し、これらを物理/論理削除するAPIを提供しない。`m_asset` だけは`DISPOSED`かつ未返却貸与ゼロの場合に限り管理者の台帳整理を許可する。判定は`@Transactional`かつ行lock内で行い、同時削除によるTOCTOUを防ぐ。
+論理削除操作は上記バリデーションを通過した場合のみ実行する。実装上、貸与・外部account・license割当の既存行は終端状態を含め常に拒否し、これらを物理/論理削除するAPIを提供しない。`AssetEventService`、`AssetAssignmentService`、`ExternalAccountService` は汎用 `IService`/`ServiceImpl` を継承せず、専用の追記・状態遷移APIだけを公開する。さらに `t_asset_event` はV132のMySQL UPDATE/DELETE triggerでDB側からも保護する。`m_asset` だけは`DISPOSED`かつ未返却貸与ゼロの場合に限り管理者の台帳整理を許可する。判定は`@Transactional`かつ行lock内で行い、同時削除によるTOCTOUを防ぐ。
 
 ### 1.5.2 廃棄 vs 論理削除
 
@@ -274,12 +275,14 @@ CREATE TABLE t_license_assignment (
 
 ### 2.7 退社例外免除台帳 (`t_asset_offboarding_waiver`)
 
-`LIFECYCLE_EXCEPTION` の承認適用結果はプロセスメモリに保持せず、V131の追記台帳へ保存する。`approval_request_id` は一意であり、同じ承認の再適用は同じ台帳行を再利用する。台帳の有効判定は、参照先 `t_approval_request` が `request_type = 'LIFECYCLE_EXCEPTION'` かつ `status = 'approved'`（大文字小文字を区別しない）で、対象要員または `RESIGN_ASSET_RETURN` タスクの退社案件と一致することを必須とする。
+`LIFECYCLE_EXCEPTION` の承認適用結果はプロセスメモリに保持せず、V131〜V132の追記台帳へ保存する。`approval_request_id` は一意であり、同じ承認の再適用は同じ台帳行を再利用する。新規台帳行は対象要員、`lifecycle_case_id`、`lifecycle_task_id`（`RESIGN_ASSET_RETURN`）の組を必須とし、case/taskの外部キーで削除を制限する。台帳の有効判定は、参照先 `t_approval_request` が `request_type = 'LIFECYCLE_EXCEPTION'` かつ `status = 'approved'`（大文字小文字を区別しない）で、対象要員および指定された退社案件・タスクと一致することを必須とする。`approved_by` は承認アクションの実操作ユーザーであり、申請者IDを代用しない。
 
 ```sql
 CREATE TABLE t_asset_offboarding_waiver (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     engineer_id BIGINT NOT NULL COMMENT '対象要員ID',
+    lifecycle_case_id BIGINT NOT NULL COMMENT '対象退社案件ID',
+    lifecycle_task_id BIGINT NOT NULL COMMENT 'RESIGN_ASSET_RETURNタスクID',
     approval_request_id BIGINT NOT NULL COMMENT '承認済みLIFECYCLE_EXCEPTION申請ID',
     reason VARCHAR(1000) NOT NULL COMMENT '免除理由',
     approved_by BIGINT COMMENT '承認適用操作者ID',
@@ -288,9 +291,18 @@ CREATE TABLE t_asset_offboarding_waiver (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag INT NOT NULL DEFAULT 0,
     UNIQUE KEY uk_asset_offboarding_waiver_request (approval_request_id),
-    INDEX idx_asset_offboarding_waiver_engineer (engineer_id, approved_at)
+    INDEX idx_asset_offboarding_waiver_engineer (engineer_id, approved_at),
+    INDEX idx_asset_offboarding_waiver_case_task (lifecycle_case_id, lifecycle_task_id),
+    CONSTRAINT fk_asset_offboarding_waiver_case FOREIGN KEY (lifecycle_case_id) REFERENCES t_lifecycle_case(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_asset_offboarding_waiver_task FOREIGN KEY (lifecycle_task_id) REFERENCES t_lifecycle_task(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='退社blocker例外免除追記台帳';
 ```
+
+V131からの既存行は移行互換のためscope列がNULLのlegacy行として残り得るが、現行の退社gateはcase/taskの完全一致がないlegacy行を免除として採用しない。新規適用はV132でscope列、FK、索引を追加する。
+
+### 2.7.1 追記専用のDB保護
+
+`t_asset_event` はアプリケーションの専用service境界に加え、V132で `BEFORE UPDATE` と `BEFORE DELETE` triggerを作成する。訂正は既存行の更新・削除ではなく後続イベントの追記で表現する。
 
 ---
 
@@ -338,9 +350,9 @@ CREATE TABLE t_asset_offboarding_waiver (
 | 返却 / 免除 | `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` → asset `ASSIGNED→IN_STOCK` CAS → assignment `ACTIVE/OVERDUE→RETURNED/WAIVED` CAS → event INSERT | 両CASが各1行更新。どちらかが失敗した場合はevent・証跡を記録しない | 409、トランザクション全体rollback。返却/免除で終端eventを二重記録しない |
 | ライセンス解放 | `t_license_assignment FOR UPDATE` → `m_license_plan FOR UPDATE` → assignment `ACTIVE→RELEASED` CAS → plan `allocated_count - 1` CAS | assignment CASとplan CASが各1行更新。割当行を終端化してから席数を減算する | 409、トランザクション全体rollback。二重解放で席数を二重減算しない |
 | 棚卸し明細更新 / 確定 | `t_asset_inventory_run FOR UPDATE` → `t_asset_inventory_item FOR UPDATE` | runが`COMPLETED`でない状態で明細を更新し、同じrun lock内で集計・`COMPLETED`遷移する | 完了後更新と二重確定を拒否し、集計と保存明細を同一transactionで一致させる |
-| 外部失効要求 | `idempotency_key` unique制約 → atomic claim (`idempotency_key IS NULL OR 同一key`) → provider呼出し | 同一keyは既存要求を返してproviderへ再送しない。別key、別accountへのkey衝突は409 | 先着claim以外はproviderを呼ばず、DB状態を再読する |
+| 外部失効要求 | `idempotency_key` unique制約 → atomic claim (`idempotency_key IS NULL` のみ) → provider呼出し | 同一keyは既存要求を返してproviderへ再送しない。別key、別accountへのkey衝突は409 | 先着claim以外はproviderを呼ばず、更新0件ならDB状態を再読して同一keyを返す |
 
-返却と免除の入口で行う非lock読取は対象資産IDを得るためのヒント取得に限る。状態判定、CAS、履歴追記は上表のlock内で実施する。外部providerの呼出し結果は要求記録と確認結果を分離し、timeout/通信障害/5xx/429では`PENDING_CONFIRMATION`を維持する。
+返却と免除の入口で行う非lock読取は対象資産IDを得るためのヒント取得に限る。状態判定、CAS、履歴追記は上表のlock内で実施する。外部providerの呼出し結果は要求記録と確認結果を分離し、timeout/通信障害/5xx/429では`PENDING_CONFIRMATION`を維持する。poll jobはアカウントごとに確認例外を捕捉し、retry/backoffを永続化して後続アカウントへ継続する。
 
 ## 4. 期間重複貸与排除 (Overlap Prevention Architecture)
 
@@ -422,7 +434,7 @@ public interface AssetOffboardingService {
      * @param engineerId 対象要員ID
      * @return クリアランス判定結果 (未返却数、未失効数、未解放数、詳細リスト、免除フラグ)
      */
-    OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId);
+    OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId, Long lifecycleCaseId, Long lifecycleTaskId);
 
     /**
      * 退社確定時の一括無効化トリガー（アカウント失効要求・ライセンス解放）
@@ -432,7 +444,8 @@ public interface AssetOffboardingService {
     /**
      * 例外承認適用によるBlocker解除記録 (ApprovalEngine / RequestType = LIFECYCLE_EXCEPTION)
      */
-    void approveOffboardingWaiver(Long engineerId, String reason, Long approvalRequestId, Long actorUserId);
+    void approveOffboardingWaiver(Long engineerId, Long lifecycleCaseId, Long lifecycleTaskId,
+                                  String reason, Long approvalRequestId, Long actorUserId);
 }
 ```
 

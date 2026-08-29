@@ -21,7 +21,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 1. THE 管理者 SHALL 資産タグ（`asset_tag` / 全社一意）、シリアル番号（`serial_no`）、資産名称、資産区分（`category`: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER）、所有法人（`owner_company_id`）、ステータス（`status`: `IN_STOCK: 保管中`, `ASSIGNED: 貸与中`, `UNDER_MAINTENANCE: 修理/保守中`, `LOST: 紛失`, `DISPOSED: 廃棄済`, `RESERVED: 予約済`）、保管場所（`location`）、取得日、保証期限、リース満了日、および備考を管理できる。
 2. THE 貸与（Assignment） SHALL 対象資産、貸与先区分（`assignee_type`: `ENGINEER: 要員`, `USER: 内部ユーザー`）、貸与先ID（`assignee_id`）、貸与開始日（`start_date`）、返却予定日（`expected_return_date`）、実際の返却日（`actual_return_date`）、受渡し証跡文書ID（`handover_evidence_doc_id` / 既存 `DocumentLink` 連携）、返却証跡文書ID（`return_evidence_doc_id` / 既存 `DocumentLink` 連携）、および状態（`ACTIVE`, `RETURNED`, `OVERDUE`, `WAIVED`）を保持する。
 3. **期間重複貸与の絶対拒否と返却直後再貸与**: THE システム SHALL 同一資産に対して期間が重複する貸与（`actual_return_date` が NULL のアクティブ貸与が存在する状態での新規貸与、または指定期間が既存貸与区間と重複する貸与）を、DB制約およびトランザクション境界（行ロック `FOR UPDATE` + 期間重複判定）で確実に拒否（Fail-Closed）する。返却完了（`actual_return_date` 設定、ステータス `IN_STOCK` 復帰）直後の別要員への再貸与は正常に許可する。並行リクエストに対してもCAS/行ロックにより1件のみを成功させ、重複貸与を成立させない。
-4. **履歴の不変性 (Immutable Event History)**: THE システム SHALL 資産の登録、貸与、返却、移管、修理出入、紛失報告、リモートワイプ確認、廃棄等の全イベントを、改ざん不能な追記専用台帳（`t_asset_event`）へ記録する。過去のイベント履歴の上書き・物理削除は禁止する。
+4. **履歴の不変性 (Immutable Event History)**: THE システム SHALL 資産の登録、貸与、返却、移管、修理出入、紛失報告、リモートワイプ確認、廃棄等の全イベントを、改ざん不能な追記専用台帳（`t_asset_event`）へ記録する。過去のイベント履歴の上書き・物理削除は禁止する。履歴サービスは汎用 `IService` の更新・削除入口を公開せず、実MySQLではUPDATE/DELETE triggerでも保護する。
 5. **論理削除の安全条件 (Soft Delete Invariants)**: THE システム SHALL 以下の安全条件を遵守する。
    - (a) **未返却貸与中の資産を論理削除してはならない**: `status IN ('ACTIVE', 'OVERDUE') AND actual_return_date IS NULL` の `t_asset_assignment` が存在する資産を `deleted_flag = 1` にすること（管理者操作を含む）は禁止する。論理削除前に必ず返却完了（`RETURNED`）または承認済みWAIVEDへの状態遷移が必要である。
    - (b) **外部アカウント参照履歴を論理削除してはならない**: `status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN') AND revoke_confirmed_at IS NULL` の行を `deleted_flag = 1` にすることは禁止する。さらに失効確認済み `REVOKED` 行を含む既存参照行も履歴台帳として保持し、`EXCEPTION_HOLD` は承認済み例外による退社gate判定であって削除認可には使用しない。
@@ -53,7 +53,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
      - (b) 未失効外部アカウント（`status IN ('ACTIVE', 'SUSPENDED', 'PENDING_CONFIRMATION', 'UNKNOWN')` かつ `revoke_confirmed_at IS NULL`）
      - (c) 未解放有償ライセンス（`status = 'ACTIVE'` または `released_date IS NULL`）
    - WHEN 上記の blocker が1件でも存在する場合、THE システム SHALL 退社ケースの通常完了を確実に阻止（Block）する。
-   - WHEN 業務上の正当な理由で未返却/未失効/未解放のまま退社ケースを完了させる場合、THE システム SHALL 申請者単独の操作を禁止し、既存の承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）による例外申請（理由、是正期限、リスク所有者）の承認を必須とする。退社確定時は一括無効化トリガーを実行する。退社手続き中の担当変更・移管時も不変台帳へ排他記録する。
+   - WHEN 業務上の正当な理由で未返却/未失効/未解放のまま退社ケースを完了させる場合、THE システム SHALL 申請者単独の操作を禁止し、既存の承認エンジン（`ApprovalEngineService` / `RequestType = LIFECYCLE_EXCEPTION`）による例外申請（理由、是正期限、リスク所有者）の承認を必須とする。免除は対象の退社案件IDと `RESIGN_ASSET_RETURN` タスクIDに束縛して永続化し、承認アクションの実操作ユーザーを `approved_by` に記録する。要員単位の過去免除や申請者IDの代用は認めない。退社確定時は一括無効化トリガーを実行する。退社手続き中の担当変更・移管時も不変台帳へ排他記録する。
 
 ---
 
@@ -76,8 +76,9 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 2. **CR-02 状態・競合・冪等性**:
    - 資産ステータス変更および貸与更新はバージョン楽観ロック（CAS）により保護する。
    - 同一資産への並行貸与リクエストに対して、マルチスレッド並行テストで確実に1件のみが成功し他方が409/業務例外で拒否されることを実証する。
+   - 外部失効要求のclaimは `idempotency_key IS NULL` の一行更新で先着1件に限定し、同一keyの並行要求でprovider呼出しが1回だけになることをMySQLで実証する。確認poll中のprovider例外はアカウント単位で `PENDING_CONFIRMATION` とretry情報を永続化し、後続アカウントの処理を中断しない。
 3. **CR-03 データ・マイグレーション**:
-   - DDLは V1 baseline、Flyway増分マイグレーション（着手時点 latest+1）、H2テストスキーマ（`sql/schema-asset-lifecycle-h2.sql`）、および Entity と完全に同期する。
+   - DDLは V1 baseline、Flyway増分マイグレーション（着手時点 latest+1、現行V129〜V132）、H2テストスキーマ（`sql/schema-asset-lifecycle-h2.sql`）、および Entity と完全に同期する。V132は退社案件・タスクFKと `t_asset_event` append-only triggerを含み、MySQL smokeで列・unique/FK・trigger shapeを検証する。
    - 金額（取得価格、ライセンス単価等）は `BigDecimal`（円単位）で保持する。
 4. **CR-04 監査・セキュリティ・PII**:
    - パスワード、トークン、秘密鍵等の秘密情報を一切永続化・ログ出力しない。
