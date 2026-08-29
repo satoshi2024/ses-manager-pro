@@ -1,13 +1,12 @@
-# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan remediation中）
+# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1実装中）
 
 ## 現在のゲート
 
 NF-05はAPPROVEDであり、DG-05-F1-APPROVAL-20260830-01（2026-08-30）、OwnerRef=PROJECT_OWNER、
 Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope=GET-only 11 pathsとF1 persistence基盤を
-approval-decision.mdへ固定した。R-NF05の独立Plan Reviewは固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対して
-PLAN FAIL（P0=0、P1=4）となり、その後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62もPLAN FAIL
-（P0=0、P1=2）となった。Owner Gateは再オープンしていない。以下のspec remediationを再Reviewで確認するまで、
-F1 production code/migration/testを開始しない。
+approval-decision.mdへ固定した。R-NF05の独立Plan Reviewは固定Head 1db3b2fc2657831b7c6c1e59217301302b7caa80で
+PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンしていない。F1は承認済みpersistence基盤に
+限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablement、command/exportを開始しない。
 
 ## 推奨順序
 

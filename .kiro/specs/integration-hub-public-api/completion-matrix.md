@@ -1,4 +1,4 @@
-# NF-05 完了対応表（Owner承認済み・R-NF05 Plan remediation中）
+# NF-05 完了対応表（Owner承認済み・R-NF05 Plan PASS・F1実装中）
 
 ## Task対応
 
@@ -10,8 +10,9 @@
 | 0/0R/0R-D Owner Gate normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review trace、中央traceability | DG-05 DecisionId、OwnerRef、approved Base、F1 scope、auth/SLA/field/threat valuesを正本化。production変更なし | COMPLETE（docs-only gate） | 2f91e5a584c5224989780cb323e40f33fda185b6（remoteへpush済み） |
 | 0R-P R-NF05 Plan finding remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-001 rate key、P1-002 nonce ledger、P1-003 delivery分離、P1-004 retention/hold/restoreを具体化。production変更なし | SPEC_ADDRESSED（再Reviewでnonce/delivery closed、rate/retention残存） | b0151e7d8acc54da124c4464db1df263e4b3f716（remoteへpush済み） |
 | 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | SPEC_ADDRESSED（state alias残存を追加補正） | a3b63d70f53bc799d1abcb6e26e34ad163aa9843（remoteへpush済み） |
-| 0R-P3 R-NF05 state mapping cleanup | design, tasks | design内の旧RETRY/SENT/EXPIRED aliasをcanonical enum・retention mappingから除去。production変更なし | COMPLETE（docs-only、再Review待ち） | fdea4bb18db3d3ae6542dc0c534425783dd28a24（remoteへpush済み） |
-| F1 DDL | approval-decision, tasks, design | 未着手。PLAN PASS待ち | READY_AFTER_PLAN_PASS | — |
+| 0R-P3 R-NF05 state mapping cleanup | design, tasks | design内の旧RETRY/SENT/EXPIRED aliasをcanonical enum・retention mappingから除去。production変更なし | COMPLETE（docs-only） | fdea4bb18db3d3ae6542dc0c534425783dd28a24（remoteへpush済み） |
+| 0R-P4 R-NF05 final Plan Review | review-ledger, review-remediation, completion-matrix | 独立ReviewがP0=0、P1=0、P2=2でPLAN PASS。P2は非blocking | COMPLETE（Review gate） | 1db3b2fc2657831b7c6c1e59217301302b7caa80（fixed review Head） |
+| F1 DDL | approval-decision, tasks, design | persistence基盤を実装中 | IN_PROGRESS（PLAN PASS後） | — |
 | F2 security chain | tasks/design/inventory | 未着手 | DEFERRED_BY_SCOPE | — |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | candidateのみ。public endpoint未実装 | DEFERRED_BY_SCOPE | — |
 | A2 commands | tasks/design/requirements | command/export未承認・default deny | DISABLED | — |
@@ -22,9 +23,8 @@
 ## Review handoff
 
 R-NF05の固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecはPLAN FAIL（P0=0、P1=4）、そのremediation後の
-678eac3f09b7ed54419655fcf326e0b15c6d7d62もPLAN FAIL（P0=0、P1=2）だった。現時点ではP1-005/006のdocs-only
-差分を再Reviewへ渡す段階であり、production implementation、migration、test reportは存在しない。
-再ReviewのPLAN PASS後にF1を開始する。
+678eac3f09b7ed54419655fcf326e0b15c6d7d62もPLAN FAIL（P0=0、P1=2）だった。最終的に固定Head
+1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）を受領し、F1を開始した。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止する。
 
 Review Head 6e0f5067はremediationの比較基点として固定する。Task 0Rのremediation commit、Owner Gate normalization

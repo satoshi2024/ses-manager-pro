@@ -3,7 +3,7 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、R-NF05 delta PLAN FAIL（P1=2）をdocs-only remediation中、F1実装開始前
+- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1実装中
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -30,13 +30,13 @@ F1のdocs-only計画証跡は許可されたremote branchへpushできるが、f
 | 契約SLA | APPROVED | 月間99.9%、p95 500ms、保守7日前、重大障害60分以内、v1廃止予告180日 |
 | 公開field inventory | APPROVED | inventory allow-listのみ、internal entity serialize禁止 |
 
-## 確認済みの停止理由
+## Review結果とF1開始
 
 中央の受入後traceabilityとapproval-decision.mdにNF-05のAPPROVED、OwnerRef、DecisionId、Base SHA、
-scope、auth、SLA、field inventoryを固定した。R-NF05の初回固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecは
-PLAN FAIL（P0=0、P1=4）、最初のremediation後の678eac3f09b7ed54419655fcf326e0b15c6d7d62はPLAN FAIL
-（P0=0、P1=2）となったため、burst algorithmとcanonical state/terminal mappingを補正して再Reviewする。
-approved scopeはF1 persistence基盤までであり、再ReviewのPLAN PASS前はproduction実装を開始しない。
+scope、auth、SLA、field inventoryを固定した。R-NF05は固定Head 1db3b2fc2657831b7c6c1e59217301302b7caa80で
+PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約とtrace記載の補正であり、F1開始を
+妨げない。F1の実装は承認済みpersistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、
+production enablement、command/exportは引き続き禁止する。
 
 ## Task 0R remediation
 

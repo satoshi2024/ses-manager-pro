@@ -7,7 +7,8 @@ SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装
 Owner承認済みのscopeはF1 persistence基盤までであり、Plan ReviewのPLAN PASSと実装Reviewは別ゲートである。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
 最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
-Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正してから同じR-NF05へ再Reviewする。
+Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正した結果、
+固定Head 1db3b2fc2657831b7c6c1e59217301302b7caa80でR-NF05 PLAN PASS（P0=0、P1=0、P2=2）を受領した。
 
 ## Finding対応表
 
@@ -59,6 +60,7 @@ exportは引き続きこのimplementation scope外である。
 - R-NF05 delta Plan Review result: 678eac3f09b7ed54419655fcf326e0b15c6d7d62、PLAN FAIL（P0=0、P1=2）
 - R-NF05 residual remediation commit: a3b63d70f53bc799d1abcb6e26e34ad163aa9843
 - R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
+- R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応

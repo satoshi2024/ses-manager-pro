@@ -167,7 +167,8 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 
 状態名は以下を唯一の正本とする。deliveryのretry状態はRETRYABLEとし、別名のRETRY、SENT、
 idempotencyのEXPIREDを実装状態として追加しない。
-非terminal状態はpurgeせず、terminal状態はretention tableのclassと起算点へ必ず対応させる。
+非terminal状態（idempotency=IN_PROGRESS、delivery=PENDING/CLAIMED/RETRYABLE、inbound=RECEIVED/PROCESSING）は
+purgeせず、terminal状態はretention tableのclassと起算点へ必ず対応させる。
 
 | 対象 | canonical enum | terminal分類・保持 | 許可遷移と競合規則 |
 |---|---|---|---|
