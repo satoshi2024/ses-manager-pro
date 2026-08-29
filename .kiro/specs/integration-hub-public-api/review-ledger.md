@@ -38,6 +38,7 @@
 - Task 0R: atomic outbox、candidate OpenAPI、metrics cardinality、payload retention、review traceをdocs-onlyでSPEC_ADDRESSED。
   remediation commitは48037c923224f684968dbaf3410cdb37307ed100。
 - Task 0R-D: count/asOf/status-code/correlation headerのdelta指摘をdocs-onlyでSPEC_ADDRESSED。実装とOwner Gateは未完了。
+  delta remediation commitは11ee82c15a5cdf8f961b2a2d0518a52d81f4de71。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。
