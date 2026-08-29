@@ -1,8 +1,0 @@
-{"id":"E2E-004","role":"管理者","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-005","role":"営業","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-001","role":"管理者","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-002","role":"営業","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-003","role":"HR","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-004","role":"マネージャー","viewport":"mobile","page":"contract","url":"/contract/gantt","type":"H_OVERFLOW","message":"horizontal overflow 14px"}
-{"id":"E2E-005","role":"functional","viewport":"desktop","page":"customer_create","url":"-","type":"FUNCTIONAL_ERROR","message":"TimeoutError: page.click: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-bs-target=\"#customerModal\"]')\u001b[22m\n"}
-{"id":"E2E-006","role":"multi","viewport":"desktop","page":"login","url":"/login","type":"CONCURRENT_LOGIN","message":"5/10 login failed: s300.sales01,s300.sales02,s300.sales03,s300.hr01,s300.mgr01"}

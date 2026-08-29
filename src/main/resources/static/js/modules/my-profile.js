@@ -25,7 +25,7 @@ function loadMasterSkills() {
         .catch(error => {
             console.error(error);
             window._masterSkills = [];
-            SES.toast.error(error.message || 'スキル候補の取得に失敗しました');
+            console.error(error.message || 'スキル候補の取得に失敗しました');
         });
 }
 
@@ -41,7 +41,7 @@ function loadProfile() {
         })
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || 'プロフィールの取得に失敗しました');
+            console.error(error.message || 'プロフィールの取得に失敗しました');
         });
 }
 
@@ -50,7 +50,7 @@ function loadRequests() {
         .then(data => renderRequests(data.records || []))
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '変更申請一覧の取得に失敗しました');
+            console.error(error.message || '変更申請一覧の取得に失敗しました');
         });
 }
 
@@ -122,7 +122,7 @@ async function changeRequestAction(action, id) {
         loadProfile();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || '変更申請の処理に失敗しました');
+        console.error(e.message || '変更申請の処理に失敗しました');
     }
 }
 
@@ -261,7 +261,7 @@ async function submitChangeRequest() {
                 return;
             }
         } catch (e) {
-            SES.toast.error(SES.i18n.t('error.file.uploadFailed', 'ファイルのアップロードに失敗しました'));
+            console.error(SES.i18n.t('error.file.uploadFailed', 'ファイルのアップロードに失敗しました'));
             return;
         }
     } else {
@@ -357,7 +357,7 @@ async function doCreate(type, payload, reason, attachmentDocumentId) {
         Toast.success(SES.i18n.t('my.changeRequest.created', '変更申請の下書きを作成しました'));
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || '変更申請の保存に失敗しました');
+        console.error(e.message || '変更申請の保存に失敗しました');
     }
 }
 
@@ -365,7 +365,7 @@ async function doCreate(type, payload, reason, attachmentDocumentId) {
 function loadSkillSheet() {
     SES.api.get('/api/my/profile/skill-sheet').then(renderSkillSheet).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || 'スキルシートの取得に失敗しました');
+        console.error(error.message || 'スキルシートの取得に失敗しました');
     });
 }
 
@@ -391,6 +391,6 @@ async function confirmSkillSheet(fingerprint) {
         Toast.success(SES.i18n.t('my.skillSheet.confirmed', '確認を記録しました'));
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || 'スキルシート確認の保存に失敗しました');
+        console.error(e.message || 'スキルシート確認の保存に失敗しました');
     }
 }

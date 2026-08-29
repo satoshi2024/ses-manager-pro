@@ -170,7 +170,7 @@ function openQuotationModalById(id) {
     fetch('/api/quotations/' + encodeURIComponent(id)).then(res => res.json()).then(data => {
         if(data.code === 200) openQuotationModal(data.data);
         else SES.toast.error(data.message);
-    }).catch(err => SES.toast.error(err.message));
+    }).catch(err => console.error(err.message));
 }
 
 function openQuotationModal(q) {
@@ -273,7 +273,7 @@ function saveQuotation() {
         } else {
             SES.toast.error(data.message);
         }
-    }).catch(err => SES.toast.error(err.message));
+    }).catch(err => console.error(err.message));
 }
 
 function changeQuotationStatus(id, newStatus) {
@@ -286,7 +286,7 @@ function changeQuotationStatus(id, newStatus) {
             if (data.code !== 200) { SES.toast.error(data.message); return; }
             SES.toast.success(SES.i18n.t('approval.requestSubmitted', '申請を受け付けました。承認完了後に反映されます。'));
             loadQuotations(1);
-        }).catch(err => SES.toast.error(err.message));
+        }).catch(err => console.error(err.message));
     };
 
     if (newStatus === '受注') {
@@ -320,7 +320,7 @@ function createQuotationDraft(id) {
         loadQuotations(1);
     }).catch(err => {
         // draft生成が通信失敗しても一覧を再読込し、受注状態と再試行ボタンを表示する（R3R-27）。
-        SES.toast.error(err.message);
+        console.error(err.message);
         loadQuotations(1);
     });
 }

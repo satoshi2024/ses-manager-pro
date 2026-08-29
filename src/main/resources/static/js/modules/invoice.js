@@ -154,7 +154,7 @@ function loadInvoices(page = window.invoiceCurrentPage) {
         }
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '請求書一覧の取得に失敗しました。');
+        console.error(error.message || '請求書一覧の取得に失敗しました。');
     });
 }
 
@@ -512,7 +512,7 @@ function showAgingDetail(customerId, bucket) {
         html += '</tbody></table>';
         if (rows.length === 0) html = '<div class="text-muted">対象の請求書がありません</div>';
         Swal.fire({ title: '請求明細', html: html, width: 640, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
-    }).catch(err => SES.toast.error(err.message));
+    }).catch(err => console.error(err.message));
 }
 
 function exportAging() {
@@ -725,7 +725,7 @@ function loadGenerateCustomerOptions() {
         })
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '顧客一覧の取得に失敗しました。');
+            console.error(error.message || '顧客一覧の取得に失敗しました。');
         });
 }
 
@@ -766,7 +766,7 @@ function openDigitalInvoiceModal(invoiceId) {
         });
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '請求書送付情報の取得に失敗しました。');
+        console.error(error.message || '請求書送付情報の取得に失敗しました。');
     });
 }
 
@@ -776,7 +776,7 @@ function dispatchDigitalInvoice(invoiceId) {
         return updateInvoiceSentStatus(invoiceId).then(() => loadInvoices());
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '請求書の送付処理に失敗しました。');
+        console.error(error.message || '請求書の送付処理に失敗しました。');
     });
 }
 
@@ -813,7 +813,7 @@ function viewDigitalInvoiceStatus(invoiceId) {
         });
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '送信状況の取得に失敗しました。');
+        console.error(error.message || '送信状況の取得に失敗しました。');
     });
 }
 

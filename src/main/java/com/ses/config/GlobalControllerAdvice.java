@@ -41,6 +41,7 @@ public class GlobalControllerAdvice {
             new NavRoute("/project-ingestion", "/project-ingestion"),
             new NavRoute("/contract-document", "/contract-document"),
             new NavRoute("/compliance-gate", "/compliance-gate"),
+            new NavRoute("/portal-admin", "/portal-admin"),
             new NavRoute("/work-record/attendance", "/work-record/attendance"),
             new NavRoute("/approval/routes", "/approval/routes"),
             new NavRoute("/crm/leads", "/crm/leads"),

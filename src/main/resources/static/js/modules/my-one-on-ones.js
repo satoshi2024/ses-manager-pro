@@ -24,7 +24,7 @@ function loadSalesUsers() {
         }
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '担当営業の取得に失敗しました');
+        console.error(error.message || '担当営業の取得に失敗しました');
     });
 }
 
@@ -33,7 +33,7 @@ function load() {
         .then(data => render(data.records || []))
         .catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '1on1一覧の取得に失敗しました');
+            console.error(error.message || '1on1一覧の取得に失敗しました');
         });
 }
 
@@ -61,7 +61,7 @@ async function cancel(id) {
         load();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || '1on1の取消に失敗しました');
+        console.error(e.message || '1on1の取消に失敗しました');
     }
 }
 
@@ -79,6 +79,6 @@ async function create() {
         if (modal) modal.hide();
     } catch (e) {
         console.error(e);
-        SES.toast.error(e.message || '1on1の申請に失敗しました');
+        console.error(e.message || '1on1の申請に失敗しました');
     }
 }

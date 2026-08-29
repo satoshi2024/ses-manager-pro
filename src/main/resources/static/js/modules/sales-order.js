@@ -97,7 +97,7 @@ function addLineRow(line) {
             <input type="hidden" name="lineId" value="${line.id || ''}">
             <select class="form-select form-select-sm" name="engineerId" aria-label="${label('salesOrder.modal.line.engineer')}" required></select>
         </td>
-        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}"></select></td>
+        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}" data-selected-project="${line.projectId || ''}" data-selected-project="${line.projectId || ''}"></select></td>
         <td><input type="number" class="form-control form-control-sm" name="unitPrice" aria-label="${label('salesOrder.modal.line.unitPrice')}" value="${line.unitPrice || ''}" required></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" aria-label="${label('salesOrder.modal.line.settlementMin')}" value="${line.settlementMin || ''}"></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" aria-label="${label('salesOrder.modal.line.settlementMax')}" value="${line.settlementMax || ''}"></td>
@@ -402,7 +402,7 @@ function uploadSourceDocument(id) {
             }
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             openSalesOrderDetail(id);
-        }).catch(() => SES.toast.error(SES.i18n.t('error.networkError', '通信エラー')));
+        }).catch(() => console.error(SES.i18n.t('error.networkError', '通信エラー')));
     };
     input.click();
 }
@@ -424,7 +424,7 @@ function generateAckPdf(id) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    }).catch(e => SES.toast.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
+    }).catch(e => console.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
 }
 
 function createOrderContracts(id) {

@@ -54,7 +54,30 @@ const PAGE_URLS = {
   approval: ['/approval/inbox', '/approval/requests'],
   'sales-order': ['/sales-order'],
   acceptance: ['/acceptance'],
-  todo: ['/todo']
+  todo: ['/todo'],
+  myLeave: ['/my/leave'],
+  leaveManagement: ['/leave'],
+  'compliance-gate': ['/compliance-gate'],
+  'portal-admin': ['/portal-admin'],
+  myDashboard: ['/my/dashboard'],
+  myProfile: ['/my/profile'],
+  myPayroll: ['/my/payroll'],
+  myExpenses: ['/my/expenses'],
+  myOneOnOnes: ['/my/one-on-ones'],
+  mySurveys: ['/my/surveys'],
+  engineerChangeRequests: ['/engineer-change-requests'],
+  expenseManagement: ['/expenses'],
+  oneOnOneManagement: ['/one-on-ones'],
+  surveyManagement: ['/surveys'],
+  'accounting-integration': ['/accounting/integration'],
+  'digital-invoice': ['/digital-invoice'],
+  'inbound-invoice': ['/inbound-invoice'],
+  'ai-evaluation': ['/ai/evaluation'],
+  lifecycle: ['/lifecycle/list', '/lifecycle/templates'],
+  myLifecycle: ['/my/lifecycle'],
+  'management-report': ['/management-reports'],
+  'certification-learning-skill-gap': ['/certification-learning-skill-gap'],
+  myCertificationLearningGap: ['/my/certification-learning-skill-gap']
 };
 
 const EXTRA_PAGES = {
@@ -201,7 +224,9 @@ async function runMatrix(browser, viewportName, mobile) {
     const pageSet = new Set();
     for (const menu of menus) {
       if (mobile && !MOBILE_KEY_MENUS.includes(menu) && user.role !== '管理者' && user.role !== '要員') continue;
-      for (const url of PAGE_URLS[menu] || []) pageSet.add({ menu, url });
+      const urls = PAGE_URLS[menu];
+      if (!urls) throw new Error(`Missing PAGE_URLS for menu: ${menu}`);
+      for (const url of urls) pageSet.add({ menu, url });
     }
     for (const url of EXTRA_PAGES[user.role] || []) {
       pageSet.add({ menu: 'detail', url });
@@ -348,7 +373,7 @@ async function concurrentLoginCheck(browser) {
       await page.fill('#username', username);
       await page.fill('#password', password);
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => null),
         page.click('button[type="submit"]')
       ]);
       const ok = !page.url().includes('/login');

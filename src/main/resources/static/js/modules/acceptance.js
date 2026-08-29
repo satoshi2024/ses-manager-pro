@@ -34,7 +34,7 @@ function loadSelectOptions(url, sel, valueField, labelFn) {
         });
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '選択肢の取得に失敗しました');
+        console.error(error.message || '選択肢の取得に失敗しました');
     });
 }
 
@@ -86,7 +86,7 @@ function loadAcceptances(page, targetAcceptanceId) {
         }
     }).catch(error => {
         console.error(error);
-        SES.toast.error(error.message || '検収一覧の取得に失敗しました');
+        console.error(error.message || '検収一覧の取得に失敗しました');
     });
 }
 
@@ -143,7 +143,7 @@ document.addEventListener('click', (e) => {
             loadAcceptances(1);
         }).catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '提出に失敗しました');
+            console.error(error.message || '提出に失敗しました');
         });
     } else if (e.target.closest('.btn-accept')) {
         const btn = e.target.closest('.btn-accept');
@@ -152,7 +152,7 @@ document.addEventListener('click', (e) => {
             loadAcceptances(1);
         }).catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '検収に失敗しました');
+            console.error(error.message || '検収に失敗しました');
         });
     } else if (e.target.closest('.btn-reject')) {
         const btn = e.target.closest('.btn-reject');
@@ -163,7 +163,7 @@ document.addEventListener('click', (e) => {
             loadAcceptances(1);
         }).catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '差戻しに失敗しました');
+            console.error(error.message || '差戻しに失敗しました');
         });
     } else if (e.target.closest('.btn-resubmit')) {
         const btn = e.target.closest('.btn-resubmit');
@@ -172,7 +172,7 @@ document.addEventListener('click', (e) => {
             loadAcceptances(1);
         }).catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '再提出に失敗しました');
+            console.error(error.message || '再提出に失敗しました');
         });
     } else if (e.target.closest('.btn-cancel-approval')) {
         const btn = e.target.closest('.btn-cancel-approval');
@@ -180,7 +180,7 @@ document.addEventListener('click', (e) => {
             SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
         }).catch(error => {
             console.error(error);
-            SES.toast.error(error.message || '承認申請に失敗しました');
+            console.error(error.message || '承認申請に失敗しました');
         });
     } else if (e.target.closest('.btn-doc-upload')) {
         const btn = e.target.closest('.btn-doc-upload');
@@ -194,7 +194,7 @@ document.addEventListener('click', (e) => {
                 loadAcceptances(1);
             }).catch(error => {
                 console.error(error);
-                SES.toast.error(error.message || SES.i18n.t('error.networkError', '通信エラー'));
+                console.error(error.message || SES.i18n.t('error.networkError', '通信エラー'));
             });
         };
         input.click();
