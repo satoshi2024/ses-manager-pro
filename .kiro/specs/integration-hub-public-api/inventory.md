@@ -6,6 +6,7 @@
 
 - EXISTING: 現行コードで確認できる正本または既存経路。
 - REUSE-CANDIDATE: 契約を満たすよう拡張できる候補。ただしそのまま流用しない。
+- DECIDED_SEPARATE: 既存経路を変更・二重書込みせず、NF-05専用保存モデルへ分離する決定済み事項。
 - GAP: 公開APIに必要だが現行実装で確認できない。
 - BLOCKER: 承認、設計、または既存境界との不整合により実装開始を止める事項。
 - UNAPPROVED: 承認scopeに含まれず、実装・公開できない項目。
@@ -59,18 +60,22 @@ F1実装で固定する承認値:
 
 | 対象 | 現行方式 | 行/契約 | NF-05判断 |
 |---|---|---|---|
-| NotificationOutbox | t_notification_outbox、dedupe unique、PENDING/PROCESSING/RETRY/SENT/FAILED | V79__notification_webhook_outbox.sql | REUSE-CANDIDATE。notification専用列が多く、汎用deliveryへ拡張するか証明が必要 |
+| NotificationOutbox | t_notification_outbox、dedupe unique、PENDING/PROCESSING/RETRY/SENT/FAILED | V79__notification_webhook_outbox.sql | DECIDED_SEPARATE。アプリ内notification専用として変更・二重書込みしない |
 | NotificationOutbox claim | status条件付きUPDATE、attempt count、locked_at | NotificationOutboxMapper.java | claimの参考。lease token、tenant/client binding、generationが不足 |
 | Notification dispatcher | REQUIRES_NEW dispatchOne内でclaim→外部notifyNow→結果update | NotificationOutboxDispatcher.java:44-70 | 既存gap。NF-05 F1/B1ではclaim TX、HTTP、result CASを分離する |
-| Accounting IntegrationJob | payloadSnapshot、payloadHash、idempotencyKey、leaseToken、leaseExpiresAt、providerRequestId、安全なerror | IntegrationJob.java | REUSE-CANDIDATE。外部jobのsnapshot/CAS/leaseの正本 |
+| Accounting IntegrationJob | payloadSnapshot、payloadHash、idempotencyKey、leaseToken、leaseExpiresAt、providerRequestId、安全なerror | IntegrationJob.java | DECIDED_SEPARATE。会計provider専用としてNF-05 deliveryへ流用・二重書込みしない |
 | Accounting worker | due job claim、provider dispatch、stale lease recovery、provider request ID | AccountingIntegrationWorker.java | REUSE-CANDIDATE。公開API deliveryと業務会計jobの責務分離を決める |
 | Accounting provider | providerName、canonical DTO、外部I/Oはtransaction外の契約 | AccountingProvider.java | provider adapter境界の参考。公開API DTOをcanonical会計DTOへ流用しない |
 | Accounting idempotency | snapshot bytesのSHA-256、業務job unique、状態CAS | IntegrationJobMapper.java、各integration service | REUSE-CANDIDATE。同key異payload conflictの外部契約を追加検証 |
-| Inbound event | provider event ID/raw hash/processing resultのNF-05候補 | 現行公開API向けentityなし | GAP。t_inbound_eventと一意性、conflict、DLQ、manual replayが必要 |
-| Usage bucket | 公開client quotaの現行entityなし | GAP | GAP。multi-nodeでのatomic counter/window、tenant/client/IP次元が必要 |
+| NF-05 delivery ledger | event_id、subscription_id、delivery_generation、external DTO snapshot、payload hash、lease/CAS、retry、DLQ | 現行公開API向けentityなし | DECIDED_SEPARATE。t_api_deliveryをNF-05専用に新設し、第二の汎用outboxは作らない |
+| Inbound event | provider event ID、raw hash、allow-listed parsed fields、processing result、retention expiry | 現行公開API向けentityなし | GAP。t_inbound_eventと一意性、conflict、DLQ、manual replayが必要 |
+| Nonce replay ledger | client、credential version、nonce hash、accepted/expiry時刻 | 現行公開API向けentityなし | GAP。t_api_nonce_replay、client+nonce hash unique、TTL purgeが必要 |
+| Retention hold/checkpoint | record kind/id、ACTIVE/RELEASED、generation/version、restore epoch、expires-at cursor | 現行公開API向けentityなし | GAP。t_api_retention_holdとt_api_purge_checkpoint、lock/CAS/purge再評価が必要 |
+| Usage bucket | client×scope×tenant×route template、window kind/start、minute/day/burst state | 公開client quotaの現行entityなし | GAP。IPを保存キーにせず、DB uniqueと条件付きincrementでmulti-node atomicityを実装する |
 
-原則: 新しい第二outboxは既存outboxの不備を修正せずに追加しない。notification、accounting、
-公開webhook deliveryの共通化/分離をDG-05後のF1で決定する。
+原則: 新しい第二の汎用outboxは作らない。既存notification outboxとAccounting IntegrationJobは責務を維持し、
+NF-05は互換性のないretention、scope、lease、replay世代を持つためt_api_deliveryへ分離する。同じeventを
+既存outboxへ複製せず、業務stateとt_api_delivery rowだけを同一transactionでatomic commitする。
 
 ## 6. Correlation ID inventory
 
@@ -90,8 +95,8 @@ F1実装で固定する承認値:
 | PortalRateLimitFilter | login/inviteはresolved client IP、download/upload/acceptanceはportal user | 公開APIのclient、scope、method/resource、burst、Retry-After、quotaとは別 |
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
-| ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをDG-05で受入 |
-| 公開client rate | 専用実装なし | F1承認scope。client×scope×tenant×route template、60 req/min、burst 20、日次50,000を実装する |
+| ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
+| 公開client rate | 専用実装なし | F1承認scope。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで実装する |
 
 ## 8. External DTO inventory
 
@@ -141,10 +146,12 @@ F1実装で固定する承認値:
 | security | client A/B、scope/data scope/command permission、revoked/expired、rotation overlap/revoke、IP spoof、rate boundary |
 | contract | OpenAPI lint、JSON allow-list、禁止field不在、entity serialization negative test、cursor/count/error non-enumeration |
 | idempotency | same key/same payload same result、same key/different payload reject、concurrent claim、DB restart |
+| nonce | atomic unique、credential rotation跨ぎの再利用拒否、TTL境界、bounded purge、raw nonce非永続化 |
 | outbound | signed payload、timestamp、provider request ID、claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ/replay |
 | inbound | signature、raw hash、timestamp、duplicate、event conflict、unique provider event ID、transaction rollback |
 | operations | key rotation、secret/PII scan、負荷、DB/worker/provider障害、restore、runbook、alert |
 | metrics | route template、method、status class、bounded outcome、client tierのみ。client/correlation/request/resource/user/IP/provider IDはlabel禁止 |
-| retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。succeeded 30日、failed/DLQ 90日、audit metadata 1年 |
-| purge | 期限境界、legal hold、再実行、部分失敗、backup/restore後purgeの証拠が必要 |
+| delivery architecture | t_notification_outbox・Accounting IntegrationJobへの二重書込みなし。t_api_delivery分離、event/subscription/generation unique、atomic insert、claim/HTTP/CAS |
+| retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。retention class/expiry、succeeded 30日、failed/DLQ 90日、audit metadata 1年 |
+| purge | t_api_retention_holdのlock/CAS、active lease競合、期限境界、再実行、部分失敗、restore epoch後の全件再評価の証拠が必要 |
 | boundary | external callがDB transaction外、通常checkout無変更、base/head固定、push後remote/local一致 |

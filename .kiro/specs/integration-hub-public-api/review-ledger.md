@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（Owner approval + Plan Review待ち）
+# NF-05 Review Ledger（Owner approval + R-NF05 Plan remediation中）
 
 ## Approval gate
 
@@ -31,6 +31,10 @@
 | NF05-DISC-010 | P2 | metrics cardinalityと禁止labelの具体設計がない | design.md / requirements.md | SPEC_ADDRESSED。F2/M未着手 |
 | NF05-DISC-011 | P2 | payload retention、legal hold、purgeの契約がない | design.md / requirements.md | SPEC_ADDRESSED。F1/B1/B2/M未着手 |
 | NF05-DISC-012 | P2 | Review Headをcompletion traceへ固定する方式が曖昧 | completion-matrix.md | SPEC_ADDRESSED。最終Headは外部handoffで固定 |
+| NF05-PLAN-001 | P1 | rate/quota保存キーが承認値と一致しない | design.md 2.1、requirements IH-R1-8、inventory 7 | SPEC_ADDRESSED。R-NF05再Review待ち |
+| NF05-PLAN-002 | P1 | nonce replay ledgerのatomic unique、TTL、purge契約が不足 | design.md 2.1、requirements IH-R1-9/IH-R3-3 | SPEC_ADDRESSED。R-NF05再Review待ち |
+| NF05-PLAN-003 | P1 | 第二outbox禁止とt_api_deliveryのreuse/分離方針が未確定 | design.md 2/2.1、requirements IH-R3-5/6、inventory 5 | SPEC_ADDRESSED。R-NF05再Review待ち |
+| NF05-PLAN-004 | P1 | retention/legal holdの保存モデル、競合、restore後purgeが不足 | design.md 2.1/8、requirements IH-R6-3、tasks F1 | SPEC_ADDRESSED。R-NF05再Review待ち |
 
 ## Evidence status
 
@@ -41,12 +45,14 @@
   delta remediation commitは11ee82c15a5cdf8f961b2a2d0518a52d81f4de71。
 - Owner approval: approval-decision.mdと中央traceabilityへDecisionId、OwnerRef、Base、scope、auth、SLA、
   field inventory、threat modelを正本化した。
+- R-NF05 Plan Review: fixed Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecでPLAN FAIL（P0=0、P1=4）。
+  Owner Gateは再オープンせず、NF05-PLAN-001〜004のspec remediation後に同Reviewへ再提出する。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。
 
 ## Required gates before F1
 
-1. 独立Plan ReviewのPLAN PASS。
+1. R-NF05へspec remediationを再提出し、独立Plan ReviewのPLAN PASSを受領する。
 2. F1開始時にorigin/mainをfetchし、migration最大値、H2 schema/init経路、backup/rollback前提を再確認する。
 3. 実装はapproved implementation scopeへ限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablementを行わない。

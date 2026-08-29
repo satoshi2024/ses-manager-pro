@@ -3,7 +3,7 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、Plan Review待ち、F1実装開始前
+- 本specの状態: Owner承認済み、R-NF05 PLAN FAIL（P1=4）をdocs-only remediation中、F1実装開始前
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -33,8 +33,9 @@ F1のdocs-only計画証跡は許可されたremote branchへpushできるが、f
 ## 確認済みの停止理由
 
 中央の受入後traceabilityとapproval-decision.mdにNF-05のAPPROVED、OwnerRef、DecisionId、Base SHA、
-scope、auth、SLA、field inventoryを固定した。ただしapproved scopeはF1 persistence基盤までであり、
-独立Plan ReviewのPLAN PASS前はproduction実装を開始しない。
+scope、auth、SLA、field inventoryを固定した。R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecで
+PLAN FAIL（P0=0、P1=4）となったため、rate key、nonce ledger、delivery分離、retention/hold/restoreのspecを
+補正して再Reviewする。approved scopeはF1 persistence基盤までであり、再ReviewのPLAN PASS前はproduction実装を開始しない。
 
 ## Task 0R remediation
 
@@ -44,20 +45,22 @@ PLAN PASS、IMPLEMENTATION PASSを混同しない。
 
 ## 既知の重要差分
 
-1. 既存の通知outboxは再利用候補だが、NotificationOutboxDispatcher.dispatchOne は
+1. 既存の通知outboxはNF-05では再利用せず、NotificationOutboxDispatcher.dispatchOne は
    claimから外部Webhook送信・結果更新までを一つのREQUIRES_NEW transactionに包み、
    transaction中にwebhookNotifier.notifyNowを呼ぶ。NF-05の「外部callをDB transaction内に置かない」
-   条件を満たすためにはclaim、外部call、結果CASを分離する必要がある。
+   条件を満たすためにはNF-05専用t_api_deliveryを使い、claim、外部call、結果CASを分離する必要がある。
 2. 内部SecurityFilterChainとPortalSecurityFilterChainは存在するが、公開API用chain、client principal、
    credential version、scope、quotaの実装は存在しない。
 3. 相関IDは会計provider等で呼出側が生成・伝播する方式が中心で、全公開requestを横断する
    correlation ID filterは確認できない。
 4. PortalRateLimiterImplはプロセス内の1分sliding windowであり、公開clientのmulti-node rate boundary
    としては不十分である。ClientIpResolverもtrusted proxy設定時のX-Forwarded-For先頭値を使うだけなので、
-   proxy chain、IPv6、spoof試験をDG-05で確定する必要がある。
+   proxy chain、IPv6、spoof試験をF1/F2で実施する。IPは承認済みrate保存キーへ含めない。
 5. Freee tokenの暗号文にはtoken_versionとrefresh leaseがあるが、crypto key version付きの
    API credential envelopeを一つの共通基盤として提供していない。token versionをkey versionと
    混同しない。
+6. 署名nonceはt_api_nonce_replayのclient+nonce hash uniqueで一度だけ受付け、TTL purgeする。retention対象は
+   class/expiryを持ち、t_api_retention_holdとt_api_purge_checkpointのlock/CASおよびrestore後全件再評価を使う。
 
 ## Review引渡し方針
 

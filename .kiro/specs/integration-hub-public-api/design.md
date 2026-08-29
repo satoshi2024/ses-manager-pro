@@ -21,13 +21,88 @@ F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具�
 | t_credential_version | credential世代、hashまたはsecret reference、暗号文、key version、発行/expiry/revoke、overlap | 原文再表示なし、fail-closed |
 | t_api_idempotency_record | client、endpoint、idempotency key、request digest、状態、response reference、expiry | 同一payloadは同結果、別payloadはconflict |
 | m_webhook_subscription | client、direction、event allow-list、endpoint、signing key世代、状態 | subscription scopeとdata scopeを分離 |
-| t_api_delivery | event snapshot、payload hash、claim lease、attempt、backoff、DLQ、replay generation | deliveryのCAS正本 |
-| t_inbound_event | client/provider、provider event ID、timestamp、raw hash、canonical payload、processing state | duplicate/conflict/replayの正本 |
-| t_api_usage_bucket | client、scope、tenant、IP、window/burst counters | multi-node atomicityが必要 |
+| t_api_delivery | NF-05専用event snapshot、payload hash、claim lease、attempt、backoff、DLQ、replay generation | notification outboxとは分離したdelivery ledger。deliveryのCAS正本 |
+| t_inbound_event | client/provider、provider event ID、timestamp、raw hash、canonical payload、processing state、retention expiry | duplicate/conflict/replayの正本 |
+| t_api_usage_bucket | client×scope×tenant×route template、window kind/start、minute/day/burst counters | 承認済み保存キーをDB uniqueで固定し、multi-node atomicityを保証 |
+| t_api_nonce_replay | client、credential version、nonce hash、accepted/expiry時刻 | client×nonce hashのatomic uniqueとTTL purgeで署名replayを拒否 |
+| t_api_retention_hold | record kind/id、hold state、generation、reason code、version、created/released時刻 | purgeと同じ対象row lockで競合を直列化 |
+| t_api_purge_checkpoint | table kind、restore epoch、expires-at cursor、last id、run status | checkpointは最適化情報。restore後の全件再評価を妨げない |
 
-既存notification outboxとaccounting IntegrationJobは、各々の既存契約を壊さず比較対象にする。新しい公開
-persistence contractを追加する場合も、業務stateとoutbox/event rowを同一transactionでcommitし、claim、
-外部HTTP、result CASを分離する。既存notificationのtransaction境界違反はF1/B1実装の回帰対象とする。
+既存notification outboxとaccounting IntegrationJobは、各々の既存契約を壊さず比較対象にする。NF-05では
+第二の汎用outboxや同一eventの二重outbox投入を禁止する。既存notification outboxはアプリ内通知専用、
+accounting IntegrationJobは会計provider専用とし、NF-05 webhook eventは専用のt_api_deliveryへ一度だけ記録する。
+この分離は既存tableの列契約とretention、scope、lease、replay世代が互換でないためであり、既存tableを拡張・
+コピー・二重書込みしない。業務stateとt_api_delivery rowは同一transactionでcommitし、claim、外部HTTP、
+result CASを分離する。既存notificationのtransaction境界違反はNF-05へ流用しない。
+
+### 2.1 F1 persistence decision
+
+#### Usage bucketの保存キーと原子更新
+
+rate/quotaの全保存rowは、承認済みの client × scope × tenant × route template をquota subject keyとする。
+DB上の一意性は client_id、scope_code、tenant_id、route_template に、時間窓を表す window_kind、window_start
+を加えたものとする。window_kind/window_startはminute/dayの時間partitionであり、追加の認可・課金・client識別
+dimensionではない。
+minute windowとday windowを別window_kindで同じt_api_usage_bucketへ保存する。burst stateも同じminute rowへ
+保持し、IPをキー、補助dimension、fallbackキーにしない。source IPはCIDR/trusted-proxy検証の入力に限り、
+usage rowやmetrics labelへ保存しない。route_templateはendpoint templateへ正規化した後に作成し、raw pathを
+キーにしない。
+
+minute 60 req/min、burst 20、day 50,000は短いDB transaction内で条件付きincrementする。rowが無い場合の
+insert競合はDB unique violationを一度だけ安全に再読込して同じ条件付きincrementへ収束させる。minute/dayの
+両方が上限内であることを同一判定で確定できない場合はdenyする。multi-nodeでJVM内counterへfallbackせず、
+429ではRetry-Afterだけを返し、client IDやIPをmetrics labelへ出さない。
+
+#### Nonce replay ledger
+
+t_api_nonce_replayはclient_id、credential_version、nonce_hash、accepted_at、expires_at、created_atだけを
+保持し、raw nonce、署名、body、secret、PIIを保存しない。nonce_hashはcanonical nonce bytesのSHA-256とする。
+一意制約は client_id + nonce_hash とし、credential versionを跨いだ再利用も拒否する。認証署名、timestamp、
+client状態、IPを検証してから短いtransactionでinsertし、unique conflictは安全なauthentication failureへ
+収束させる。insertのcommit後だけhandlerへ進むため、後続処理失敗でも同nonceは再利用できない。
+
+expires_atは max(accepted_at, signed_timestamp) + 5分 とし、server clockを正本にする。これは許容時刻差±5分の
+future timestampを含めて少なくとも署名受付窓を覆う。purgeはexpires_at <= server_nowのrowだけをbounded batchで
+物理削除し、unique ledgerの意味を壊すupdateや再利用は行わない。purge失敗は次回同じpredicateで再実行する。
+
+#### t_api_deliveryのreuse / 分離方針
+
+既存のt_notification_outboxとAccounting IntegrationJobはreuseしない。NF-05ではt_api_deliveryを専用の
+public webhook delivery ledgerとして分離して採用するが、t_api_outboxのような第二outboxは作らない。t_api_delivery
+自身がNF-05のoutbox/event rowであり、event_id + subscription_id + delivery_generationをuniqueにする。
+同じdomain eventをnotification outboxへ複製せず、subscriptionごとに承認済みexternal DTO snapshotを一件だけ
+作る。業務stateとこのrowのinsertは同一transaction、claim/leaseは短いtransaction、外部HTTPはtransaction外、
+結果更新はlease token・payload hash・generation付きCAS transactionとする。manual replayは新generationの
+delivery rowとして作成し、元rowを再pending化しない。
+
+#### Retention / legal holdの保存モデル
+
+t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention_classとretention_expires_atを持つ。
+terminal stateごとの期限は、SUCCEEDED/SENT/PROCESSED/DUPLICATEを30日、FAILED/DLQ/CONFLICTを90日とする。
+IN_PROGRESS/CLAIMED/RETRY/RECEIVED/PROCESSINGはterminalになるまでpurge対象にせず、
+audit metadataは既存監査契約のmetadata-only rowとしてcreated_at + 1年を期限にする。payloadは承認済みexternal
+DTO snapshotまたはallow-listed parsed fieldsに限り、raw request/body/provider responseは保存しない。
+
+| record_kind | purge対象terminal state | retention_class | 起算点 |
+|---|---|---|---|
+| IDEMPOTENCY / DELIVERY | SUCCEEDED / SENT | SUCCEEDED_PAYLOAD_30D | terminal_at |
+| INBOUND | PROCESSED / DUPLICATE | SUCCEEDED_PAYLOAD_30D | terminal_at |
+| IDEMPOTENCY / DELIVERY / INBOUND | FAILED / DLQ / CONFLICT | FAILED_DLQ_PAYLOAD_90D | terminal_at |
+| AUDIT | metadata-only audit row | AUDIT_METADATA_1Y | created_at |
+
+t_api_retention_holdはrecord_kind（IDEMPOTENCY/DELIVERY/INBOUND/AUDIT）とrecord_idを一意に持ち、
+ACTIVE/RELEASED、hold_generation、reason_code、version、created_at、released_atを保存する。record_idは対象rowの
+内部参照に限定し、外部payload、raw body、PIIをhold tableへ複製しない。hold開始、解除、purgeは対象record rowを同じ順序でFOR UPDATEし、
+hold stateまたはrecord versionをCASする。purgeはterminalかつretention_expires_at <= now、active leaseなし、
+ACTIVE holdなしのrowだけを削除する。複数rowのholdはrecord kind/id順にlockしてdeadlockを避ける。holdが先に
+commitすればpurgeは削除せず、purgeが先にcommitすればhold操作は消失を隠さずgoneとして監査し、active holdを
+削除済みrowへ誤って表示しない。
+
+t_api_purge_checkpointはbounded batchの再開位置にのみ使い、削除可否の正本にしない。backup/restore後の運用は
+restore cutover時に新しいrestore_epochをcheckpointへ記録してからpurgeを起動し、旧checkpointを無効化する。
+各retention classについてexpires_atの最小値から全対象を再評価し、外部の未確定なwatermarkを正本にしない。
+restore後に復活した期限切れrow、復元されたhold、lease競合を同じlock/CAS規則で処理し、purgeは何度実行しても
+同じ結果になる。部分失敗は成功batchを再削除せず、未処理batchを次回へ残す。
 
 ## 3. 認証・secret
 

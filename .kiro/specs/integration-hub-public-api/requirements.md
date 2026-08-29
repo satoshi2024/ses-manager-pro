@@ -36,6 +36,13 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    correlation ID、結果code、target分類を監査可能にする。secret、raw body、PIIは監査しない。
 7. action permissionはrole名ではなく、client scopeとcommand permissionで表す。roleは内部管理
    principalに限る。公開APIの認可をsidebar、既存role、URL prefixだけへ依存しない。
+8. rate/quotaの永続化キーは client × scope × tenant × route template に固定する。minute/day windowと
+   burst stateをこの論理キーへ結び付け、source IPを保存キーへ含めない。routeはraw pathではなく正規化した
+   route templateを使い、条件付きincrementとDB uniqueでmulti-nodeの60 req/min、burst 20、日次50,000を
+   原子的に判定する。
+9. 署名検証済みnonceはt_api_nonce_replayへatomic insertし、client_id + nonce_hash uniqueで重複を拒否する。
+   raw nonce、署名、body、secret、PIIは保存せず、expires_at <= server_nowをbounded purgeする。TTLは
+   max(accepted_at, signed_timestamp) + 5分とし、認証失敗へ安全に収束させる。
 
 ## IH-R2 External contract
 
@@ -65,18 +72,23 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    correlation ID、subscription識別子、timestamp、signatureを送信する。
 2. signatureはHMAC-SHA256とし、clientId、credentialVersion/keyId、timestamp、nonce、method、canonical
    path/query、body SHA-256をcanonical bytesとして固定する。許容時刻差は±5分、nonce replayを拒否する。
-3. receiverはtimestamp tolerance、provider event ID、raw body hash、tenant/client bindingで
+3. nonce replay ledgerは署名とtimestamp、client状態、IP検証の後にinsertし、insert commit後にhandlerへ進む。
+   同一clientの同一nonceはcredential rotation後も再利用できず、後続業務処理の失敗ではledgerをrollbackしない。
+4. receiverはtimestamp tolerance、provider event ID、raw body hash、tenant/client bindingで
    replayとduplicateを拒否する。同一provider event IDの再送は一度だけ処理し、別payload hashは
    conflict/DLQへ収束させる。
-4. 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitし、commit後のworkerは
+5. 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitし、commit後のworkerは
    短いclaim/lease transactionで取得する。外部HTTPはDB transaction外で実行し、結果は別の短いCAS
    transactionでSUCCEEDED、RETRYABLE、FAILED、DLQへ遷移させる。timeout/429/5xxのみ最大8回の
    exponential backoff+jitter、その他4xxはretryなし、失敗後DLQ、manual replayを持つ。
-5. retryはnetwork/timeout/429/5xxだけを対象とし、validation/auth/permission等の4xxは無限retryしない。
+6. NF-05では第二の汎用outboxを作らず、既存notification outboxとAccounting IntegrationJobをreuse・二重書込み
+   しない。t_api_deliveryをNF-05専用delivery ledgerとして分離し、event_id + subscription_id + generationを
+   uniqueにする。業務stateとt_api_delivery rowだけを同一transactionでcommitする。
+7. retryはnetwork/timeout/429/5xxだけを対象とし、validation/auth/permission等の4xxは無限retryしない。
    retry状態、last safe error code、next attempt、attempt count、provider request IDを保存する。
-6. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
+8. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
    auditを必須にし、同一eventを無制限に再送しない。
-7. inbound handlerの業務適用はclaim処理とtransaction境界を分離し、外部応答を待つ間に内部DB
+9. inbound handlerの業務適用はclaim処理とtransaction境界を分離し、外部応答を待つ間に内部DB
    transactionを保持しない。
 
 ## IH-R4 Data scope / command permission
@@ -109,19 +121,31 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    event ID、timestamp、allow-listed parsed fields、safe error codeに限定する。outbound webhookは
    承認済みexternal DTO snapshotだけを保存し、internal entity/provider raw bodyを保存しない。
 3. retentionはsucceeded 30日、failed/DLQ 90日、audit metadata 1年とする。legal hold中はpurgeを
-   停止する。purge jobは期限境界、再実行、部分失敗、backup/restore後のpurgeを安全に扱う。
+   停止する。t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention classと期限を保存し、
+   terminalのsucceeded/processed/sentは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、CLAIMED、RETRY、
+   RECEIVED、PROCESSINGはterminal化するまでpurgeしない。
+   t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
+   purgeは対象rowを同じ順序でlockし、active hold、active lease、row versionをCASで再確認する。purge jobは
+   期限境界、再実行、部分失敗、backup/restore後のpurgeを安全に扱い、restore後はcheckpointを信用せず全対象を
+   再評価する。
 
 ## 受入テスト最低条件
 
 - client A/Bのresource、field、operation、data scope matrix。
 - revoked、expired、rotation overlap、旧世代失効、IP境界、rate exact boundary、burst、retry-after。
 - Idempotency-Key同一payload再送の同結果、別payload拒否、永続化失敗、worker再起動。
+- rate/quota保存キーがclient×scope×tenant×route templateだけで、IP/raw pathを含まず、minute/day/burstの
+  条件付きincrementとunique競合がmulti-nodeで同じ結果になること。
+- nonce ledgerのatomic unique、rotationを跨ぐ再利用拒否、future timestampを含むTTL、bounded purge再実行。
 - cursor stability、limit上限、count/export/errorからの存在推測防止。
 - JSON contract allow-list、entity serialization禁止、secret/PII log scan。
 - webhook署名改ざん、timestamp古い/未来、replay、duplicate、provider event conflict、
   claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ、manual replay。
+- t_notification_outbox・Accounting IntegrationJobへの二重書込みがなく、t_api_deliveryの分離、unique generation、
+  atomic event insert、claim/HTTP/CAS境界が固定されていること。
 - 業務stateとoutbox rowの原子commit、provider成功直後crash、stale lease、同時claim、replayで
   副作用が一件へ収束すること。
 - 外部callがDB transaction内で実行されないことの境界テスト。
 - metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
+- legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。

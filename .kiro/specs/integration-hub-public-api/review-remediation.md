@@ -5,6 +5,8 @@
 この文書はReview指摘のうち、実装AIがdocs/architectureで解消可能な範囲を追跡する。
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
 Owner承認済みのscopeはF1 persistence基盤までであり、Plan ReviewのPLAN PASSと実装Reviewは別ゲートである。
+R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
+Owner Gateは再オープンせず、以下4件をSPEC_ADDRESSEDへ補正してから同じR-NF05へ再Reviewする。
 
 ## Finding対応表
 
@@ -18,6 +20,10 @@ Owner承認済みのscopeはF1 persistence基盤までであり、Plan Reviewの
 | metrics cardinality不足 | P2 | finite label set、禁止label、scrape/cardinality test、safe trace/audit方針を追加 | SPEC_ADDRESSED | F2/Mの実装・scrape証拠 |
 | payload retention不足 | P2 | digest/hash/allow-list snapshot、承認retention、legal hold、purge/restore testを追加 | SPEC_ADDRESSED | F1/B1/B2/M実装 |
 | handoff commit系列不足 | P2 | Review Head 6e0f5067を基点として記録し、remediation commitと最終Headをcommit series＋外部handoffで追跡 | SPEC_ADDRESSED | remediation push後の最終Head通知 |
+| R-NF05 rate/quota保存キー不一致 | P1 | t_api_usage_bucketをclient×scope×tenant×route templateの論理キーへ固定。IP/raw pathを除外し、minute/day/burstのDB unique・条件付きincrementを定義 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+| R-NF05 nonce replay ledger不足 | P1 | t_api_nonce_replay、client+nonce hash atomic unique、rotation跨ぎ再利用拒否、TTL/purge、raw nonce非永続化を定義 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+| R-NF05 第二outbox/t_api_delivery方針不明 | P1 | 第二の汎用outboxを禁止し、既存notification outbox/Accounting IntegrationJobをreuse・二重書込みせず、t_api_deliveryをNF-05専用ledgerとして分離 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+| R-NF05 retention/legal hold契約不足 | P1 | retention class/expiry、t_api_retention_hold、lock/CAS競合、active lease、部分失敗、restore epoch後全件再評価を保存モデルへ固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 
 ## Task 0R scope
 
@@ -29,6 +35,8 @@ Owner承認済みのscopeはF1 persistence基盤までであり、Plan Reviewの
 - metrics labelを有限集合へ限定し、client/correlation/request/resource/user/IP/provider IDを禁止。
 - idempotency/inbound/outboundのraw secret/PII/provider body非永続化、succeeded 30日、failed/DLQ 90日、
   audit metadata 1年の承認済みretention、legal hold、purge/restore要件。
+- rate/quota保存キー、nonce replay ledger、NF-05専用t_api_deliveryの分離、retention hold/checkpointの
+  lock/CAS・restore再評価をR-NF05のP1 remediationとして追加。
 - requirements、design、tasks、completion matrix、review ledgerのtrace更新。
 
 ## 実装範囲の残存ゲート
@@ -43,6 +51,7 @@ exportは引き続きこのimplementation scope外である。
 - Task 0R remediation commit: 48037c923224f684968dbaf3410cdb37307ed100
 - Task 0R-D delta remediation commit: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
 - Owner Gate normalization commit: 2f91e5a584c5224989780cb323e40f33fda185b6
+- R-NF05 Plan Review result: 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ec、PLAN FAIL（P0=0、P1=4）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応

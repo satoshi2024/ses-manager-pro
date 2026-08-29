@@ -39,11 +39,18 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 
 ## Task F1: client / credential / scope / idempotency DDL
 
-- [ ] Objective: client、credential version、scope、idempotency、usage bucket、webhook/inboundの保存契約を実装する。
+- [ ] Objective: client、credential version、scope、idempotency、usage bucket、nonce replay ledger、
+  webhook/inbound、retention hold/checkpointの保存契約を実装する。
 - Preconditions: Task 0/0R/0R-D完了、approval-decision.md、指定Base再確認、独立Plan Review PLAN PASS。
+- Implementation: usage bucketのDB natural keyはclient×scope×tenant×route templateに限定し、minute/day/burstを
+  条件付きincrementする。t_api_nonce_replayはclient+nonce hash unique、TTL、bounded purgeを持つ。既存
+  t_notification_outboxとAccounting IntegrationJobは変更・二重書込みせず、t_api_deliveryをNF-05専用ledgerとして
+  分離する。各retention対象へclass/expiryを付け、t_api_retention_holdとt_api_purge_checkpointをlock/CAS規則で扱う。
 - Test requirements: fresh/legacy/partial/backfill/repair、暗号key version、revoke/expiry/overlap、unique/CAS、
-  H2とMySQL、rollback/backup/restore、purge期限境界、legal hold。
-- Demo: secret原文非表示、同key別payload拒否、migration証跡、DB transaction内外の境界を示す。
+  H2とMySQL、rollback/backup/restore、rate key exact boundary、multi-node increment、nonce atomic unique/TTL/purge、
+  delivery no-double-write、purge期限境界、legal hold競合、active lease、部分失敗、restore epoch後全件再評価。
+- Demo: secret原文非表示、同key別payload拒否、rate key/IP分離、nonce replay拒否、t_api_delivery分離、
+  migration証跡、DB transaction内外の境界、hold/purge/restoreの状態遷移を示す。
 
 ## Task F2: dedicated security chain
 
