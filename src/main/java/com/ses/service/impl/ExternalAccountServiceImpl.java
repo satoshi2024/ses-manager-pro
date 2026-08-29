@@ -12,6 +12,7 @@ import com.ses.service.ExternalAccountService;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
@@ -154,7 +155,13 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         }
 
         LocalDateTime requestedAt = LocalDateTime.now();
-        int claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt);
+        int claimed;
+        try {
+            claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt);
+        } catch (DuplicateKeyException ex) {
+            // 同一keyを別accountが先にclaimした場合はunique制約違反を500へ漏らさず、契約上409で返す。
+            throw new BusinessException(409, "失効要求の冪等性キーが別のアカウントに割り当て済みです。");
+        }
         if (claimed != 1) {
             // 同一keyの並行claimは先着だけがproviderを呼ぶ。後着はcommit済み状態を再読する。
             ExternalAccountReference latest = externalAccountReferenceMapper.selectById(id);

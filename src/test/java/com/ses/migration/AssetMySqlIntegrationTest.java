@@ -10,6 +10,7 @@ import com.ses.entity.AssetInventoryItem;
 import com.ses.entity.AssetInventoryRun;
 import com.ses.entity.LicensePlan;
 import com.ses.entity.LicenseAssignment;
+import com.ses.common.exception.BusinessException;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetEventMapper;
 import com.ses.mapper.AssetInventoryItemMapper;
@@ -46,6 +47,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -239,6 +241,65 @@ class AssetMySqlIntegrationTest {
         ExternalAccountReference current = externalAccountReferenceMapper.selectById(ref.getId());
         assertEquals("MYSQL-IDEM-" + ref.getId(), current.getIdempotencyKey());
         assertEquals(1, mockClient.getRequestCount(), "同一keyのclaim先着1件だけがproviderを呼ぶこと");
+    }
+
+    @Test
+    @DisplayName("MySQL concurrency: same idempotency key across accounts returns one 409")
+    void testConcurrentRevokeClaimSameKeyAcrossAccountsReturns409OnMySQL() throws Exception {
+        assertTrue(providerClient instanceof MockExternalAccountProviderClientImpl);
+        MockExternalAccountProviderClientImpl mockClient = (MockExternalAccountProviderClientImpl) providerClient;
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("MYSQL_CONCUR_CROSS_ACCOUNT_" + System.nanoTime())
+                .systemName("MySQL cross-account Idempotency")
+                .systemType("IDP")
+                .build();
+        externalAccountSystemMapper.insert(system);
+        ExternalAccountReference firstRef = externalAccountService.registerAccountReference(
+                system.getId(), "mysql-cross-a@ses-test.jp", "ENGINEER", 7104L, "MEMBER", 1L);
+        ExternalAccountReference secondRef = externalAccountService.registerAccountReference(
+                system.getId(), "mysql-cross-b@ses-test.jp", "ENGINEER", 7105L, "MEMBER", 1L);
+        mockClient.setMockStatus(firstRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING);
+        mockClient.setMockStatus(secondRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.PENDING);
+        mockClient.resetRequestCount();
+
+        String key = "MYSQL-CROSS-ACCOUNT-IDEM-" + System.nanoTime();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        Future<ExternalAccountReference> first = pool.submit(() -> {
+            ready.countDown();
+            start.await();
+            return externalAccountService.requestRevokeWithIdempotency(firstRef.getId(), key, 1L);
+        });
+        Future<ExternalAccountReference> second = pool.submit(() -> {
+            ready.countDown();
+            start.await();
+            return externalAccountService.requestRevokeWithIdempotency(secondRef.getId(), key, 1L);
+        });
+        try {
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            int successes = 0;
+            int conflicts = 0;
+            for (Future<ExternalAccountReference> future : List.of(first, second)) {
+                try {
+                    assertNotNull(future.get(20, TimeUnit.SECONDS));
+                    successes++;
+                } catch (ExecutionException ex) {
+                    assertInstanceOf(BusinessException.class, ex.getCause());
+                    assertEquals(409, ((BusinessException) ex.getCause()).getCode());
+                    conflicts++;
+                }
+            }
+            assertEquals(1, successes);
+            assertEquals(1, conflicts);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertEquals(1, mockClient.getRequestCount(), "同一keyは異なるaccount間でもproviderを1回だけ呼ぶこと");
+        assertEquals(1, externalAccountReferenceMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ExternalAccountReference>()
+                        .eq(ExternalAccountReference::getIdempotencyKey, key)).size());
     }
 
     private void runConcurrentRevoke(Long refId, String idempotencyKey,
