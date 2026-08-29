@@ -364,6 +364,8 @@ $(function () {
                 return '<span class="badge bg-danger">紛失</span>';
             case 'DISPOSED':
                 return '<span class="badge bg-secondary">廃棄済</span>';
+            case 'RESERVED':
+                return '<span class="badge bg-info text-dark">予約済</span>';
             default:
                 return `<span class="badge bg-dark">${escapeHtml(status)}</span>`;
         }

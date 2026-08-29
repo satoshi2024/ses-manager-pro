@@ -36,7 +36,7 @@ public interface LicenseAssignmentMapper extends BaseMapper<LicenseAssignment> {
 
     @Select("SELECT * FROM t_license_assignment " +
             "WHERE assignee_type = #{assigneeType} AND assignee_id = #{assigneeId} " +
-            "  AND status = 'ACTIVE' AND deleted_flag = 0")
+            "  AND (status = 'ACTIVE' OR released_date IS NULL) AND deleted_flag = 0")
     List<LicenseAssignment> selectActiveByAssignee(@Param("assigneeType") String assigneeType,
                                                    @Param("assigneeId") Long assigneeId);
 }

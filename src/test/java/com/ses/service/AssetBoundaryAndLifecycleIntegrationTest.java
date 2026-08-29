@@ -127,10 +127,77 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(updatedAsset.getStatus()).isEqualTo("IN_STOCK");
 
         AssetAssignment as2 = assetAssignmentService.createAssignment(
-                asset.getId(), "ENGINEER", 102L, LocalDate.of(2026, 8, 16), LocalDate.of(2026, 8, 31), null, "Second", 1L);
+                asset.getId(), "ENGINEER", 102L, LocalDate.of(2026, 8, 15), LocalDate.of(2026, 8, 31), null, "Second", 1L);
         assertThat(as2.getStatus()).isEqualTo("ACTIVE");
         assertThat(as2.getAssigneeId()).isEqualTo(102L);
         assertThat(assetService.getById(asset.getId()).getStatus()).isEqualTo("ASSIGNED");
+    }
+
+    @Test
+    @DisplayName("Boundary 1-B: NF-01 asset/license blockers use the status OR date contract")
+    void testOffboardingBlockersUseStatusOrDateContract() {
+        Long engineerId = 10101L;
+
+        Asset activeWithReturnDate = Asset.builder()
+                .assetTag("AST-BLOCKER-OR-A-" + System.nanoTime())
+                .assetName("Inconsistent active asset")
+                .category("PC")
+                .status("IN_STOCK")
+                .build();
+        Asset returnedWithoutDate = Asset.builder()
+                .assetTag("AST-BLOCKER-OR-B-" + System.nanoTime())
+                .assetName("Inconsistent returned asset")
+                .category("MONITOR")
+                .status("IN_STOCK")
+                .build();
+        assetService.createAsset(activeWithReturnDate, 1L);
+        assetService.createAsset(returnedWithoutDate, 1L);
+        assetAssignmentMapper.insert(AssetAssignment.builder()
+                .assetId(activeWithReturnDate.getId())
+                .assigneeType("ENGINEER")
+                .assigneeId(engineerId)
+                .startDate(LocalDate.of(2026, 8, 1))
+                .actualReturnDate(LocalDate.of(2026, 8, 15))
+                .status("ACTIVE")
+                .build());
+        assetAssignmentMapper.insert(AssetAssignment.builder()
+                .assetId(returnedWithoutDate.getId())
+                .assigneeType("ENGINEER")
+                .assigneeId(engineerId)
+                .startDate(LocalDate.of(2026, 8, 1))
+                .status("RETURNED")
+                .build());
+
+        LicensePlan plan = LicensePlan.builder()
+                .planCode("LIC-BLOCKER-OR-" + System.nanoTime())
+                .planName("Inconsistent blocker license")
+                .seatLimit(10)
+                .allocatedCount(0)
+                .status("ACTIVE")
+                .build();
+        licenseService.savePlan(plan, 1L);
+        licenseAssignmentMapper.insert(LicenseAssignment.builder()
+                .planId(plan.getId())
+                .assigneeType("ENGINEER")
+                .assigneeId(engineerId)
+                .assignedDate(LocalDate.of(2026, 8, 1))
+                .releasedDate(LocalDate.of(2026, 8, 15))
+                .status("ACTIVE")
+                .build());
+        licenseAssignmentMapper.insert(LicenseAssignment.builder()
+                .planId(plan.getId())
+                .assigneeType("ENGINEER")
+                .assigneeId(engineerId)
+                .assignedDate(LocalDate.of(2026, 8, 1))
+                .status("RELEASED")
+                .build());
+
+        OffboardingClearanceResultDto result = assetOffboardingService
+                .checkOffboardingClearance(engineerId, null, null);
+
+        assertThat(result.getUnreturnedAssetCount()).isEqualTo(2);
+        assertThat(result.getUnreleasedLicenseCount()).isEqualTo(2);
+        assertThat(result.isClearancePassed()).isFalse();
     }
 
     @Test

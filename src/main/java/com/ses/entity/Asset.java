@@ -45,7 +45,7 @@ public class Asset extends BaseEntity {
     private Long ownerCompanyId;
 
     /**
-     * ステータス: IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, DISPOSED, LOST
+     * ステータス: IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, LOST, DISPOSED, RESERVED
      */
     @Builder.Default
     private String status = "IN_STOCK";

@@ -9,22 +9,24 @@
 1. **秘密情報非保持（No Secrets Policy）**:
    - `t_external_account_reference` 等のテーブルやDTOに、パスワード・APIトークン・秘密鍵は絶対に保存・記録しません。
    - 保有するのは外部システム識別子（アカウント名/メールアドレス）と状態（ACTIVE / SUSPENDED / REVOKED / PENDING_CONFIRMATION / UNKNOWN）、失効要求・確認タイムスタンプのみです。
-2. **排他制御と期間重複代数**:
+2. **資産ステータス語彙**:
+   - 資産状態は `IN_STOCK` / `ASSIGNED` / `UNDER_MAINTENANCE` / `LOST` / `DISPOSED` / `RESERVED` の6値に限定します。登録・状態変更・検索・棚卸し入力で不正値を受け付けません。
+3. **排他制御と期間重複代数**:
    - 貸与作成時は `m_asset` 行を `FOR UPDATE` でロックし、`[start_date, expected_return_date]` の期間重複を代数的に排除します。
    - 返却・免除は `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` の順で固定し、asset CASとassignment終端CASが両方成功した場合だけeventを追記します。license解放はassignment→plan、棚卸しはrun→itemの順でロックします。
-3. **不変イベント台帳（Immutable Event Ledger）**:
+4. **不変イベント台帳（Immutable Event Ledger）**:
    - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。専用service APIに加え、V132のMySQL UPDATE/DELETE triggerでDB側からも拒否します。
-4. **ライセンス席数 CAS（Compare-And-Swap）**:
+5. **ライセンス席数 CAS（Compare-And-Swap）**:
    - `m_license_plan.allocated_count` は席数上限 `seat_limit` を超えない条件付きCAS更新でアトミックに管理されます。
-5. **所有法人と認可スコープ**:
+6. **所有法人と認可スコープ**:
    - `m_asset.owner_company_id` は会社マスタの新設IDではなく、既存 `m_organization_unit.legal_entity_id` の法人IDを保持します。
    - 管理者・HRは全件、マネージャーは管理組織の子孫組織とDataScopeの共通集合、営業は現行担当要員、要員は本人に限定します。許可対象が空の場合は全件許可へフォールバックしません。
    - 資産一覧・詳細・イベント・貸与履歴・CSV・通知・要員ポータル・外部アカウント・ライセンス・証跡文書で同じスコープを適用します。
-6. **論理削除の安全条件**:
-   - 未返却貸与（`status IN ('ACTIVE','OVERDUE')` かつ `actual_return_date IS NULL`）がある資産は削除できません。廃棄は `DISPOSED` のイベントを追記してから論理削除します。
+7. **論理削除の安全条件**:
+   - 未返却貸与（`status = 'ACTIVE' OR actual_return_date IS NULL`）がある資産は削除できません。廃棄は `DISPOSED` のイベントを追記してから論理削除します。
    - 外部アカウント参照は状態にかかわらず削除できません。`ACTIVE/SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` は未失効blockerから除外されず、`REVOKED`・失効確認済み・`EXCEPTION_HOLD` の行も履歴として保持します。`EXCEPTION_HOLD` は承認済み例外によるgate判定であり、削除認可ではありません。
    - ライセンス割当は状態にかかわらず削除できません。`ACTIVE` または `released_date IS NULL` は未解放として扱い、解放後も `RELEASED` と日付を履歴として保持します。
-7. **外部連携の正本とトランザクション境界**:
+8. **外部連携の正本とトランザクション境界**:
    - MDMは端末状態、IdP/SaaSはアカウント失効状態の外部正本です。DBは参照・要求・確認結果・再試行の証跡正本です。
    - 失効要求送信と失効確認は別状態・別時刻で保持します。プロバイダ呼出しはDBトランザクション外で実行し、timeout/5xx/429は成功扱いにせず `PENDING_CONFIRMATION` のまま再試行します。応答形式を分類できない場合は `UNKNOWN` として blocker を維持します。
 
@@ -64,8 +66,7 @@ FROM m_asset a
 JOIN t_asset_assignment aa ON aa.asset_id = a.id
 WHERE a.deleted_flag = 0
   AND aa.deleted_flag = 0
-  AND aa.status IN ('ACTIVE', 'OVERDUE')
-  AND aa.actual_return_date IS NULL
+  AND (aa.status = 'ACTIVE' OR aa.actual_return_date IS NULL)
 ORDER BY aa.expected_return_date, a.asset_tag;
 
 -- 失効未確認アカウント

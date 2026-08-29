@@ -100,6 +100,18 @@ class AssetServiceTest extends BaseIntegrationTest {
         Asset disposed = assetService.disposeAsset(asset.getId(), "リース満了廃棄", 1L, null);
         assertThat(disposed.getStatus()).isEqualTo("DISPOSED");
 
+        Asset reserved = Asset.builder()
+                .assetTag("AST-RESERVED-001")
+                .assetName("Reserved device")
+                .category("PC")
+                .build();
+        assetService.createAsset(reserved, 1L);
+        assertThat(assetService.changeStatus(reserved.getId(), "reserved", "予約", 1L, null).getStatus())
+                .isEqualTo("RESERVED");
+        assertThatThrownBy(() -> assetService.changeStatus(reserved.getId(), "NOT_A_REAL_STATUS", "不正", 1L, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("資産ステータスが不正です");
+
         // 廃棄後の再貸与は拒否されること
         assertThatThrownBy(() -> assetAssignmentService.createAssignment(
                 asset.getId(),

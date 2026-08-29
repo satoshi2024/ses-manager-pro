@@ -18,11 +18,16 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements AssetService {
+
+    private static final Set<String> ALLOWED_ASSET_STATUSES = Set.of(
+            "IN_STOCK", "ASSIGNED", "UNDER_MAINTENANCE", "LOST", "DISPOSED", "RESERVED");
 
     private final AssetMapper assetMapper;
     private final AssetAssignmentMapper assetAssignmentMapper;
@@ -50,7 +55,10 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
         asset.setAssetTag(asset.getAssetTag().trim());
         if (!StringUtils.hasText(asset.getStatus())) {
             asset.setStatus("IN_STOCK");
+        } else {
+            asset.setStatus(asset.getStatus().trim().toUpperCase(Locale.ROOT));
         }
+        assertAllowedStatus(asset.getStatus());
         save(asset);
 
         assetEventService.recordEvent(
@@ -125,22 +133,26 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Asset changeStatus(Long assetId, String toStatus, String reason, Long actorUserId, Long evidenceDocId) {
+        String normalizedToStatus = StringUtils.hasText(toStatus)
+                ? toStatus.trim().toUpperCase(Locale.ROOT) : toStatus;
+        assertAllowedStatus(normalizedToStatus);
+
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
         if (asset == null) {
             throw new BusinessException("指定された資産が見つかりません。");
         }
 
         String fromStatus = asset.getStatus();
-        if (fromStatus.equals(toStatus)) {
+        if (fromStatus.equals(normalizedToStatus)) {
             return asset;
         }
 
         // 貸与中の直接ステータス変更は禁止（返却または貸与解除を必須とする）
-        if ("ASSIGNED".equals(fromStatus) && !"LOST".equals(toStatus)) {
+        if ("ASSIGNED".equals(fromStatus) && !"LOST".equals(normalizedToStatus)) {
             throw new BusinessException("貸与中の資産のステータスを変更するには、先に返却処理を行ってください。");
         }
 
-        int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, toStatus, asset.getVersion());
+        int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, normalizedToStatus, asset.getVersion());
         if (updated == 0) {
             throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
         }
@@ -152,13 +164,19 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
                 null,
                 null,
                 fromStatus,
-                toStatus,
+                normalizedToStatus,
                 evidenceDocId,
-                "ステータスを変更しました: " + fromStatus + " -> " + toStatus + (StringUtils.hasText(reason) ? " (" + reason + ")" : ""),
+                "ステータスを変更しました: " + fromStatus + " -> " + normalizedToStatus + (StringUtils.hasText(reason) ? " (" + reason + ")" : ""),
                 null
         );
 
         return assetMapper.selectById(assetId);
+    }
+
+    private void assertAllowedStatus(String status) {
+        if (!ALLOWED_ASSET_STATUSES.contains(status)) {
+            throw new BusinessException(400, "資産ステータスが不正です。許可値: " + ALLOWED_ASSET_STATUSES);
+        }
     }
 
     @Override

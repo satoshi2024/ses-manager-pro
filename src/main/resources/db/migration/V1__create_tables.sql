@@ -3016,7 +3016,7 @@ CREATE TABLE IF NOT EXISTS m_asset (
     asset_name VARCHAR(128) NOT NULL COMMENT '資産名称 (例: ThinkPad T14 Gen4)',
     category VARCHAR(32) NOT NULL COMMENT '資産区分: PC, MONITOR, SMARTPHONE, SECURITY_KEY, TABLET, OTHER',
     owner_company_id BIGINT COMMENT '所有法人ID (m_organization_unit.legal_entity_id)',
-    status VARCHAR(32) NOT NULL DEFAULT 'IN_STOCK' COMMENT 'IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, DISPOSED, LOST',
+    status VARCHAR(32) NOT NULL DEFAULT 'IN_STOCK' COMMENT 'IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, LOST, DISPOSED, RESERVED',
     location VARCHAR(128) COMMENT '保管場所/拠点',
     purchase_date DATE COMMENT '取得日',
     purchase_price DECIMAL(12, 2) COMMENT '取得価格 (円)',

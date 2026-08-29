@@ -33,6 +33,10 @@
 
 ---
 
+## 1.4 資産ステータス語彙と遷移入口
+
+資産ステータスの許可値は `IN_STOCK`、`ASSIGNED`、`UNDER_MAINTENANCE`、`LOST`、`DISPOSED`、`RESERVED` の6値に固定する。登録時と `AssetService.changeStatus` の両方で値をtrim・大文字化し、許可集合にない値は `BusinessException(400)` として保存前に拒否する。画面の検索・一覧バッジ・棚卸し入力、およびV1/V129のDDLコメントはこの6値を同じ語彙で表示する。
+
 ## 1.5 論理削除の安全条件設計（AS-R1.5 対応）
 
 MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `removeById()` 呼び出しは論理削除（`deleted_flag = 1`）となり、以降の SELECT から自動的に除外される。これにより**退社ゲート・期間排他・ライセンス席数集計が実行時に誤った判断を行う可能性**がある。これを防ぐため以下の設計制約を適用する。
@@ -313,7 +317,7 @@ V131からの既存行は移行互換のためscope列がNULLのlegacy行とし�
 | 対象 | current (現在値) | history (履歴) | snapshot (時点確定) | asOfで読む源 | 明示NULLの意味 |
 |---|---|---|---|---|---|
 | **資産 (`m_asset`)** | `status`, `location`, `owner_company_id` | `t_asset_event` に全状態変更を追記 | 棚卸し実行時 (`t_asset_inventory_item.expected_*`) | `t_asset_event` を timestamp で遡及 | `owner_company_id`=NULL は自社全社共通資産 |
-| **貸与 (`t_asset_assignment`)** | `actual_return_date IS NULL` のアクティブ行 | 過去の返却済み行 (`actual_return_date` 入力済) | 貸与時・返却時受渡し証跡 (`handover/return_evidence_doc_id`) | `start_date <= :d AND (actual_return_date IS NULL OR actual_return_date >= :d)` | `actual_return_date`=NULL は未返却（現在貸与中） |
+| **貸与 (`t_asset_assignment`)** | `actual_return_date IS NULL` のアクティブ行 | 過去の返却済み行 (`actual_return_date` 入力済) | 貸与時・返却時受渡し証跡 (`handover/return_evidence_doc_id`) | 貸与重複判定は `start_date <= :d AND (actual_return_date IS NULL OR actual_return_date > :d)`。asOf履歴参照では返却日を含む | `actual_return_date`=NULL は未返却（現在貸与中）。次の貸与に対して返却日は排他的境界 |
 | **外部アカウント (`t_external_account_reference`)** | `ACTIVE` / `SUSPENDED` / `PENDING_CONFIRMATION` / `UNKNOWN` の未確認行 | 状態変更イベント (`t_asset_event`) | 失効確認スナップショット (`revoke_confirmed_at`, `revoke_confirmed_by`) | `provisioned_at <= :t AND (revoke_confirmed_at IS NULL OR revoke_confirmed_at >= :t)` | `revoke_confirmed_at`=NULL は失効未確認（有効・停止・確認待ち・状態不明） |
 | **ライセンス割当 (`t_license_assignment`)** | `status = 'ACTIVE'` 行 | 解除済み行 (`released_date` 入力済) | 月次管理会計締め時点の `allocated_count` | `assigned_date <= :d AND (released_date IS NULL OR released_date >= :d)` | `released_date`=NULL は現在割当継続中 |
 
@@ -336,7 +340,7 @@ V131からの既存行は移行互換のためscope列がNULLのlegacy行とし�
 
 | エンティティ / 状態 | 許可遷移 | 遷移の防重・競合保護手段 | Competing Writer 発生時の挙動 | Rollback / 補償 |
 |---|---|---|---|---|
-| **資産 (`m_asset`)** | `IN_STOCK` ↔ `ASSIGNED`<br>`IN_STOCK` ↔ `UNDER_MAINTENANCE`<br>`IN_STOCK/LOST` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`) | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
+| **資産 (`m_asset`)** | `IN_STOCK` ↔ `ASSIGNED`<br>`IN_STOCK` ↔ `UNDER_MAINTENANCE`<br>`IN_STOCK` ↔ `RESERVED`<br>`IN_STOCK/LOST/RESERVED` → `DISPOSED`<br>Any → `LOST` | `version` CAS 楽観ロック + 状態条件付き UPDATE (`UPDATE m_asset SET status=:to, version=version+1 WHERE id=:id AND version=:v AND status=:from`) | 一方が 409 Conflict（楽観ロック例外）で失敗 | トランザクション全体ロールバック |
 | **貸与 (`t_asset_assignment`)** | `ACTIVE` → `RETURNED`<br>`ACTIVE` → `OVERDUE`<br>`ACTIVE/OVERDUE` → `WAIVED` | **同一資産期間排他判定**: トランザクション内で `SELECT ... FOR UPDATE` により対象資産を行ロックし、重複貸与区間が存在しないことを確認後に INSERT/UPDATE | 後発の貸与申請が `BusinessException("該当年月日に既に有効な貸与が存在します")` で拒否 | 貸与作成・更新全体がロールバック |
 | **外部アカウント (`t_external_account_reference`)** | `ACTIVE` → `SUSPENDED`<br>`ACTIVE` → `PENDING_CONFIRMATION`（失効要求送信）<br>`PENDING_CONFIRMATION` → `UNKNOWN`（応答形式を分類不能）<br>`SUSPENDED/PENDING_CONFIRMATION/UNKNOWN` → `REVOKED`（外部確認済み）<br>Any → `EXCEPTION_HOLD`（承認済み例外） | 状態CAS + 失効確認分離 (`UPDATE ... SET status='REVOKED', revoke_confirmed_at=:now WHERE id=:id AND status IN ('ACTIVE','SUSPENDED','PENDING_CONFIRMATION','UNKNOWN') AND revoke_confirmed_at IS NULL`)。要求の冪等性キー、retry/backoff、`external_sync_status` を同一参照行へ保存 | 同時更新時は1件のみ成功、他方は409。timeout/5xx/429 は `PENDING_CONFIRMATION` を維持し、応答形式を分類できない場合だけ `UNKNOWN` として blocker を維持 | 外部API要求失敗時は `REVOKED`/confirmed に倒さず、`TIMEOUT`/`SYNC_FAILED` と retry/backoff を記録。管理者の確認または外部確認成功時だけ `REVOKED` へ補償遷移 |
 | **ライセンス席数 (`m_license_plan`)** | 割当増加 / 割当解除 | 席数CAS (`UPDATE m_license_plan SET allocated_count=allocated_count+1, version=version+1 WHERE id=:id AND allocated_count < seat_limit AND version=:v`) | 席数上限到達時は CAS 失敗し `BusinessException("ライセンス席数が上限に達しています")` | 割当処理全体がロールバック |
@@ -357,10 +361,10 @@ V131からの既存行は移行互換のためscope列がNULLのlegacy行とし�
 ## 4. 期間重複貸与排除 (Overlap Prevention Architecture)
 
 ### 4.1 重複判定代数
-同一の `asset_id` に対して、新規貸与期間 `[req_start, req_end]`（`req_end` は未定の場合 NULL）と既存貸与期間 `[exist_start, exist_end]`（`actual_return_date` または `expected_return_date`）の重なり判定式:
+同一の `asset_id` に対して、新規貸与期間 `[req_start, req_end]`（`req_end` は未定の場合 NULL）と既存貸与期間 `[exist_start, exist_end]`（`actual_return_date` または `expected_return_date`）の重なり判定式。実返却済み行では `actual_return_date` を次の貸与に対する排他的境界とし、返却日当日の再貸与を許可する:
 ```
 overlap := (exist_start <= req_end OR req_end IS NULL)
-       AND (exist_actual_return IS NULL OR exist_actual_return >= req_start)
+       AND (exist_actual_return IS NULL OR exist_actual_return > req_start)
 ```
 
 ### 4.2 トランザクション内排他シーケンス
@@ -371,7 +375,7 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 4. SELECT COUNT(*) FROM t_asset_assignment
    WHERE asset_id = :assetId
       AND deleted_flag = 0
-     AND (actual_return_date IS NULL OR actual_return_date >= :startDate)
+     AND (actual_return_date IS NULL OR actual_return_date > :startDate)
      AND (:endDate IS NULL OR start_date <= :endDate);
 5. IF count > 0 THEN THROW BusinessException("指定期間に重複する貸与が存在します");
 6. INSERT INTO t_asset_assignment (...) VALUES (...);
@@ -426,6 +430,20 @@ overlap := (exist_start <= req_end OR req_end IS NULL)
 `engineer-lifecycle-workflow` の退社ケース完了時、以下のメソッドを通じて 3大 blocker（未返却端末、未失効アカウント、未解放ライセンス）判定を行う:
 
 `ResignationGateChecker` は `RESIGN_ASSET_RETURN` タスクの状態だけを信頼せず、毎回このサービスの3件のcountを照合する。タスクが`COMPLETED`でも3件のcountがすべて0でなければBlockとし、タスクが`WAIVED`の場合も、承認済み`LIFECYCLE_EXCEPTION`の対象一致を検証して`t_asset_offboarding_waiver`へ永続化された台帳行がなければBlockとする。承認申請IDだけのプロセスメモリ登録、任意ID、再起動後に消える免除状態は認めない。
+
+blockerの検索条件はrequirementsと同じOR契約を使い、状態と日付の不整合行もfail-closedで検出する。
+
+```sql
+-- 未返却貸与資産
+WHERE assignee_type = 'ENGINEER' AND assignee_id = :engineerId
+  AND deleted_flag = 0
+  AND (status = 'ACTIVE' OR actual_return_date IS NULL)
+
+-- 未解放ライセンス
+WHERE assignee_type = 'ENGINEER' AND assignee_id = :engineerId
+  AND deleted_flag = 0
+  AND (status = 'ACTIVE' OR released_date IS NULL)
+```
 
 ```java
 public interface AssetOffboardingService {
