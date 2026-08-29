@@ -29,7 +29,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V116からV131のNF03_shapeがMySQLで成立する() throws Exception {
+    void V116からV132のNF03_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("131", latestVersion, "最新マイグレーションバージョンは131であること");
+            assertEquals("132", latestVersion, "最新マイグレーションバージョンは132であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",

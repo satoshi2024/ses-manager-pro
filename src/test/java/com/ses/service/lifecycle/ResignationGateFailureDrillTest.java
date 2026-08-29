@@ -303,7 +303,8 @@ class ResignationGateFailureDrillTest {
                 .routeSnapshotJson("[]").status("APPROVED").version(1).build();
         approvalRequestMapper.insert(approval);
         assetOffboardingService.approveOffboardingWaiver(
-                engineer.getId(), "経営承認済み", approval.getId(), adminUser.getId());
+                engineer.getId(), caseDto.getId(), assetTask.getId(),
+                "経営承認済み", approval.getId(), adminUser.getId());
         taskService.waiveTask(assetTask.getId(), adminUser.getId(), approval.getId(), "経営承認済み");
 
         ResignationGateResultDto waived = resignationGateChecker.evaluate(

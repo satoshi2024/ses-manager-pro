@@ -3,7 +3,6 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
@@ -21,14 +20,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.io.Serializable;
 import java.time.LocalDate;
 import java.util.List;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMapper, AssetAssignment> implements AssetAssignmentService {
+public class AssetAssignmentServiceImpl implements AssetAssignmentService {
 
     private final AssetAssignmentMapper assetAssignmentMapper;
     private final AssetMapper assetMapper;
@@ -90,7 +88,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
                 .note(note)
                 .createdBy(actorUserId)
                 .build();
-        save(assignment);
+        assetAssignmentMapper.insert(assignment);
 
         // DocumentLink 連携（受渡証跡）
         if (handoverEvidenceDocId != null) {
@@ -299,7 +297,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
 
     @Override
     public List<AssetAssignment> getAssignmentHistoryByAssetId(Long assetId) {
-        return list(new LambdaQueryWrapper<AssetAssignment>()
+        return assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
                 .eq(AssetAssignment::getAssetId, assetId)
                 .orderByDesc(AssetAssignment::getStartDate)
                 .orderByDesc(AssetAssignment::getId));
@@ -319,15 +317,15 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
             wrapper.eq(AssetAssignment::getStatus, status);
         }
         wrapper.orderByDesc(AssetAssignment::getId);
-        return page(pageable, wrapper);
+        return assetAssignmentMapper.selectPage(pageable, wrapper);
     }
 
     /** 貸与履歴は返却・移管の監査証跡であり、終端状態を含め論理削除しない。 */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean removeById(Serializable id) {
-        if (id == null || getById(id) == null) {
-            return false;
+    public void softDeleteAssignment(Long id) {
+        if (id == null || assetAssignmentMapper.selectById(id) == null) {
+            return;
         }
         throw new BusinessException("資産貸与履歴は論理削除できません。返却・移管履歴を台帳上に保持してください。");
     }

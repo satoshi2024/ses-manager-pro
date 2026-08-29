@@ -85,6 +85,15 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     private ApprovalRequestMapper approvalRequestMapper;
 
     @Autowired
+    private LifecycleCaseMapper lifecycleCaseMapper;
+
+    @Autowired
+    private LifecycleTaskMapper lifecycleTaskMapper;
+
+    @Autowired
+    private LifecycleTemplateMapper lifecycleTemplateMapper;
+
+    @Autowired
     private AssetScopeService assetScopeService;
 
     @Autowired
@@ -110,7 +119,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         AssetAssignment returnedAs = assetAssignmentService.returnAssignment(as1.getId(), LocalDate.of(2026, 8, 15), null, "Returned OK", 1L);
         assertThat(returnedAs.getStatus()).isEqualTo("RETURNED");
-        assertThatThrownBy(() -> assetAssignmentService.removeById(returnedAs.getId()))
+        assertThatThrownBy(() -> assetAssignmentService.softDeleteAssignment(returnedAs.getId()))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("貸与履歴は論理削除できません");
 
@@ -494,7 +503,37 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         licenseService.savePlan(plan, 1L);
         licenseService.assignLicense(plan.getId(), "ENGINEER", engineerId, ref.getId(), LocalDate.now(), 1L);
 
-        OffboardingClearanceResultDto result = assetOffboardingService.checkOffboardingClearance(engineerId);
+        LifecycleTemplate lifecycleTemplate = LifecycleTemplate.builder()
+                .templateType("RESIGNATION")
+                .name("退社資産scope test")
+                .versionNo(1)
+                .status("ACTIVE")
+                .validFrom(LocalDate.now().minusDays(1))
+                .build();
+        lifecycleTemplateMapper.insert(lifecycleTemplate);
+        LifecycleCase lifecycleCase = LifecycleCase.builder()
+                .caseNo("LC-BLOCKER-" + System.nanoTime())
+                .lifecycleType("RESIGNATION")
+                .engineerId(engineerId)
+                .templateId(lifecycleTemplate.getId())
+                .templateVersion(1)
+                .anchorDate(LocalDate.now())
+                .status("ACTIVE")
+                .title("退社blocker scope test")
+                .applicantUserId(1L)
+                .engineerSnapshotJson("{}")
+                .build();
+        lifecycleCaseMapper.insert(lifecycleCase);
+        LifecycleTask lifecycleTask = LifecycleTask.builder()
+                .caseId(lifecycleCase.getId())
+                .taskCode("RESIGN_ASSET_RETURN")
+                .taskName("貸与資産返却")
+                .dueDate(LocalDate.now())
+                .status("PENDING")
+                .build();
+        lifecycleTaskMapper.insert(lifecycleTask);
+        OffboardingClearanceResultDto result = assetOffboardingService.checkOffboardingClearance(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId());
         assertThat(result.isClearancePassed()).isFalse();
         assertThat(result.getUnreturnedAssetCount()).isGreaterThanOrEqualTo(1);
         assertThat(result.getUnrevokedAccountCount()).isGreaterThanOrEqualTo(1);
@@ -513,8 +552,11 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .version(1)
                 .build();
         approvalRequestMapper.insert(approval);
-        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", approval.getId(), 1L);
-        OffboardingClearanceResultDto waivedResult = assetOffboardingService.checkOffboardingClearance(engineerId);
+        assetOffboardingService.approveOffboardingWaiver(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId(),
+                "役員特例承認済み", approval.getId(), 1L);
+        OffboardingClearanceResultDto waivedResult = assetOffboardingService.checkOffboardingClearance(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId());
         assertThat(waivedResult.isClearancePassed()).isTrue();
         assertThat(waivedResult.isWaived()).isTrue();
     }

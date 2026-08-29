@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.AssetEvent;
 import com.ses.mapper.AssetEventMapper;
 import com.ses.service.AssetEventService;
@@ -16,7 +15,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AssetEventServiceImpl extends ServiceImpl<AssetEventMapper, AssetEvent> implements AssetEventService {
+public class AssetEventServiceImpl implements AssetEventService {
 
     private final AssetEventMapper assetEventMapper;
 
@@ -45,7 +44,7 @@ public class AssetEventServiceImpl extends ServiceImpl<AssetEventMapper, AssetEv
                 .eventSummary(eventSummary)
                 .detailsJson(detailsJson)
                 .build();
-        save(event);
+        assetEventMapper.insert(event);
         log.info("Asset event recorded: assetId={}, type={}, from={}, to={}, actor={}",
                 assetId, eventType, fromStatus, toStatus, actorUserId);
         return event;

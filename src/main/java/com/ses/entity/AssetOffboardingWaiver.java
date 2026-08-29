@@ -22,6 +22,10 @@ import java.time.LocalDateTime;
 public class AssetOffboardingWaiver extends BaseEntity {
 
     private Long engineerId;
+    /** 退社案件ID。要員単位の過去免除を別案件へ流用しないため必須の業務scope。 */
+    private Long lifecycleCaseId;
+    /** RESIGN_ASSET_RETURNタスクID。案件内の別タスクへの流用を防止する。 */
+    private Long lifecycleTaskId;
     private Long approvalRequestId;
     private String reason;
     private Long approvedBy;

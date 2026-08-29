@@ -58,28 +58,34 @@ class AssetComprehensiveSecretScanTest {
     @Test
     @DisplayName("2. Scan DDL migration files for forbidden secret column definitions")
     void scanDdlMigrationFiles() throws IOException {
-        Path migrationPath = Paths.get("src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql");
-        if (!Files.exists(migrationPath)) {
-            return;
-        }
-
-        List<String> lines = Files.readAllLines(migrationPath, StandardCharsets.UTF_8);
         List<String> violations = new ArrayList<>();
 
-        for (int i = 0; i < lines.size(); i++) {
-            String line = lines.get(i).trim().toLowerCase();
-            if (line.startsWith("create table") || line.startsWith("--") || line.isEmpty()) {
+        List<Path> migrationPaths = List.of(
+                Paths.get("src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql"),
+                Paths.get("src/main/resources/db/migration/V130__asset_account_license_menu_permissions.sql"),
+                Paths.get("src/main/resources/db/migration/V131__asset_offboarding_waiver_ledger.sql"),
+                Paths.get("src/main/resources/db/migration/V132__asset_offboarding_waiver_scope_and_append_only_guards.sql")
+        );
+        for (Path migrationPath : migrationPaths) {
+            if (!Files.exists(migrationPath)) {
                 continue;
             }
-            for (String forbidden : FORBIDDEN_KEYWORDS) {
-                if (line.contains(forbidden) && !line.contains("pii/secret非含有") && !line.contains("秘密非保存") && !line.contains("秘密値非含有") && !line.contains("秘密非含有")) {
-                    violations.add("V129: Line " + (i + 1) + ": " + lines.get(i));
+            List<String> lines = Files.readAllLines(migrationPath, StandardCharsets.UTF_8);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim().toLowerCase();
+                if (line.startsWith("create table") || line.startsWith("--") || line.isEmpty()) {
+                    continue;
+                }
+                for (String forbidden : FORBIDDEN_KEYWORDS) {
+                    if (line.contains(forbidden) && !line.contains("pii/secret非含有") && !line.contains("秘密非保存") && !line.contains("秘密値非含有") && !line.contains("秘密非含有")) {
+                        violations.add(migrationPath.getFileName() + ": Line " + (i + 1) + ": " + lines.get(i));
+                    }
                 }
             }
         }
 
         assertThat(violations)
-                .withFailMessage("Found forbidden column definitions in V129 DDL: %s", violations)
+                .withFailMessage("Found forbidden column definitions in asset lifecycle DDL: %s", violations)
                 .isEmpty();
     }
 

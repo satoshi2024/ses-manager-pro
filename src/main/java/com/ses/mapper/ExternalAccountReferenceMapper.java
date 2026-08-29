@@ -44,7 +44,7 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
             + "last_error_message = NULL, sync_error_message = NULL, version = version + 1, "
             + "updated_at = CURRENT_TIMESTAMP "
             + "WHERE id = #{id} AND deleted_flag = 0 AND revoke_confirmed_at IS NULL "
-            + "AND (idempotency_key IS NULL OR idempotency_key = #{idempotencyKey}) "
+            + "AND idempotency_key IS NULL "
             + "AND status <> 'REVOKED'")
     int claimRevokeRequest(@Param("id") Long id,
                            @Param("idempotencyKey") String idempotencyKey,

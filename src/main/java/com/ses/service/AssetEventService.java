@@ -1,6 +1,5 @@
 package com.ses.service;
 
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.AssetEvent;
 
 import java.util.List;
@@ -8,7 +7,7 @@ import java.util.List;
 /**
  * 資産不変イベント台帳サービス
  */
-public interface AssetEventService extends IService<AssetEvent> {
+public interface AssetEventService {
 
     /**
      * イベントを追記記録する

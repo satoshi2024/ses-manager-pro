@@ -8,6 +8,9 @@ import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.mapper.LicenseAssignmentMapper;
+import com.ses.mapper.LifecycleCaseMapper;
+import com.ses.mapper.LifecycleTaskMapper;
+import com.ses.mapper.LifecycleTemplateMapper;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.DisplayName;
@@ -47,10 +50,22 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
     private ApprovalRequestMapper approvalRequestMapper;
 
     @Autowired
+    private LifecycleCaseMapper lifecycleCaseMapper;
+
+    @Autowired
+    private LifecycleTaskMapper lifecycleTaskMapper;
+
+    @Autowired
+    private LifecycleTemplateMapper lifecycleTemplateMapper;
+
+    @Autowired
     private LicenseService licenseService;
 
     @Autowired
     private ExternalAccountProviderClient externalAccountProviderClient;
+
+    @Autowired
+    private ExternalAccountService externalAccountService;
 
     @Test
     @DisplayName("Offboarding clearance: blocked when active unreturned asset or account exists")
@@ -76,7 +91,38 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
         assetAssignmentMapper.insert(assignment);
 
         // 2. クリアランスチェック（未返却のためブロックされること）
-        OffboardingClearanceResultDto result1 = assetOffboardingService.checkOffboardingClearance(engineerId);
+        LifecycleTemplate lifecycleTemplate = LifecycleTemplate.builder()
+                .templateType("RESIGNATION")
+                .name("退社資産scope test")
+                .versionNo(1)
+                .status("ACTIVE")
+                .validFrom(LocalDate.now().minusDays(1))
+                .build();
+        lifecycleTemplateMapper.insert(lifecycleTemplate);
+        LifecycleCase lifecycleCase = LifecycleCase.builder()
+                .caseNo("LC-OFF-9901")
+                .lifecycleType("RESIGNATION")
+                .engineerId(engineerId)
+                .templateId(lifecycleTemplate.getId())
+                .templateVersion(1)
+                .anchorDate(LocalDate.now())
+                .status("ACTIVE")
+                .title("退社scope test")
+                .applicantUserId(1L)
+                .engineerSnapshotJson("{}")
+                .build();
+        lifecycleCaseMapper.insert(lifecycleCase);
+        LifecycleTask lifecycleTask = LifecycleTask.builder()
+                .caseId(lifecycleCase.getId())
+                .taskCode("RESIGN_ASSET_RETURN")
+                .taskName("貸与資産返却")
+                .dueDate(LocalDate.now())
+                .status("PENDING")
+                .build();
+        lifecycleTaskMapper.insert(lifecycleTask);
+
+        OffboardingClearanceResultDto result1 = assetOffboardingService.checkOffboardingClearance(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId());
         assertThat(result1.isClearancePassed()).isFalse();
         assertThat(result1.getUnreturnedAssetCount()).isEqualTo(1);
         assertThat(result1.getBlockingItems()).isNotEmpty();
@@ -94,12 +140,21 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
                 .version(1)
                 .build();
         approvalRequestMapper.insert(approval);
-        assetOffboardingService.approveOffboardingWaiver(engineerId, "役員特例承認済み", approval.getId(), 1L);
+        assetOffboardingService.approveOffboardingWaiver(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId(),
+                "役員特例承認済み", approval.getId(), 1L);
 
         // 4. クリアランス再チェック（例外承認によりパスすること）
-        OffboardingClearanceResultDto result2 = assetOffboardingService.checkOffboardingClearance(engineerId);
+        OffboardingClearanceResultDto result2 = assetOffboardingService.checkOffboardingClearance(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId());
         assertThat(result2.isClearancePassed()).isTrue();
         assertThat(result2.isWaived()).isTrue();
+
+        OffboardingClearanceResultDto mismatchedScope = assetOffboardingService.checkOffboardingClearance(
+                engineerId, lifecycleCase.getId(), lifecycleTask.getId() + 99999L);
+        assertThat(mismatchedScope.isClearancePassed()).isFalse();
+        assertThat(mismatchedScope.isWaived()).isFalse();
+        assertThat(mismatchedScope.getUnreturnedAssetCount()).isEqualTo(1);
     }
 
     @Test
@@ -170,6 +225,48 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
             assertThat(status).isEqualTo(ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
             // 確証が得られない限り CONFIRMED にはならない
             assertThat(status).isNotEqualTo(ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("Provider poll: one confirmation exception is persisted and later accounts continue")
+    void testProviderPollContinuesAfterConfirmationException() {
+        if (!(externalAccountProviderClient instanceof MockExternalAccountProviderClientImpl mockClient)) {
+            return;
+        }
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("POLL_EXCEPTION_" + System.nanoTime())
+                .systemName("Poll exception test")
+                .systemType("IDP")
+                .build();
+        externalAccountSystemMapper.insert(system);
+        ExternalAccountReference failed = ExternalAccountReference.builder()
+                .systemId(system.getId()).accountIdentifier("poll-failed@ses-test.jp")
+                .assigneeType("ENGINEER").assigneeId(9910L)
+                .status("PENDING_CONFIRMATION").retryCount(0)
+                .nextRetryAt(LocalDate.now().atStartOfDay()).build();
+        ExternalAccountReference confirmed = ExternalAccountReference.builder()
+                .systemId(system.getId()).accountIdentifier("poll-confirmed@ses-test.jp")
+                .assigneeType("ENGINEER").assigneeId(9911L)
+                .status("PENDING_CONFIRMATION").retryCount(0)
+                .nextRetryAt(LocalDate.now().atStartOfDay()).build();
+        externalAccountReferenceMapper.insert(failed);
+        externalAccountReferenceMapper.insert(confirmed);
+        mockClient.setConfirmationFailure(failed.getId(), new RuntimeException("simulated provider timeout"));
+        mockClient.setMockStatus(confirmed.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+        try {
+            int processed = externalAccountProviderClient instanceof MockExternalAccountProviderClientImpl
+                    ? externalAccountService.processPendingRevokePollJob() : 0;
+            assertThat(processed).isGreaterThanOrEqualTo(1);
+            ExternalAccountReference failedAfter = externalAccountReferenceMapper.selectById(failed.getId());
+            ExternalAccountReference confirmedAfter = externalAccountReferenceMapper.selectById(confirmed.getId());
+            assertThat(failedAfter.getStatus()).isEqualTo("PENDING_CONFIRMATION");
+            assertThat(failedAfter.getRetryCount()).isEqualTo(1);
+            assertThat(failedAfter.getNextRetryAt()).isNotNull();
+            assertThat(confirmedAfter.getStatus()).isEqualTo("REVOKED");
+        } finally {
+            mockClient.clearConfirmationFailure(failed.getId());
         }
     }
 }

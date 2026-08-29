@@ -1,7 +1,6 @@
 package com.ses.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.ExternalAccountReference;
 import com.ses.entity.ExternalAccountSystem;
 
@@ -11,7 +10,7 @@ import java.util.List;
  * 外部アカウント参照管理サービス
  * ※秘密非保存: password, token, key は一切扱わない。
  */
-public interface ExternalAccountService extends IService<ExternalAccountReference> {
+public interface ExternalAccountService {
 
     /**
      * 外部アカウント参照を新規登録する
@@ -78,7 +77,7 @@ public interface ExternalAccountService extends IService<ExternalAccountReferenc
 
     /**
      * 外部アカウントを台帳から論理削除する。
-     * AS-R1.5(b): ACTIVE/SUSPENDED/PENDING_CONFIRMATION 状態の場合は BusinessException を送出する（Fail-Closed）。
+     * AS-R1.5(b): 状態にかかわらず既存参照行の論理削除を拒否する（Fail-Closed）。
      *
      * @throws com.ses.common.exception.BusinessException 未失効状態の場合
      */

@@ -5,6 +5,8 @@
 CREATE TABLE IF NOT EXISTS t_asset_offboarding_waiver (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     engineer_id BIGINT NOT NULL,
+    lifecycle_case_id BIGINT,
+    lifecycle_task_id BIGINT,
     approval_request_id BIGINT NOT NULL UNIQUE,
     reason VARCHAR(1000) NOT NULL,
     approved_by BIGINT,

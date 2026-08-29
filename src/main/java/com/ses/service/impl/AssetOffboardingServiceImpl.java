@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.asset.OffboardingClearanceResultDto;
 import com.ses.entity.Asset;
@@ -9,6 +8,8 @@ import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ExternalAccountReference;
 import com.ses.entity.LicenseAssignment;
 import com.ses.entity.AssetOffboardingWaiver;
+import com.ses.entity.LifecycleCase;
+import com.ses.entity.LifecycleTask;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.AssetOffboardingWaiverMapper;
@@ -51,7 +52,9 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
     private final LicenseService licenseService;
 
     @Override
-    public OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId) {
+    public OffboardingClearanceResultDto checkOffboardingClearance(Long engineerId,
+                                                                    Long lifecycleCaseId,
+                                                                    Long lifecycleTaskId) {
         if (engineerId == null) {
             return OffboardingClearanceResultDto.builder().clearancePassed(false).build();
         }
@@ -78,7 +81,11 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
             blockingItems.add("未解放有償ライセンス: Plan#" + lic.getPlanId() + " [割当ID: " + lic.getId() + "]");
         }
 
-        boolean hasWaiver = assetOffboardingWaiverMapper.selectValidByEngineerId(engineerId) != null;
+        // scopeが欠けた照合は免除を認めない。ただし実blocker件数は常に返し、
+        // 呼出側がscope欠落を理由に未返却・未失効・未解放を見落とさないようにする。
+        boolean hasWaiver = lifecycleCaseId != null && lifecycleTaskId != null
+                && assetOffboardingWaiverMapper.selectValidByCaseAndTask(
+                engineerId, lifecycleCaseId, lifecycleTaskId) != null;
         boolean passed = blockingItems.isEmpty() || hasWaiver;
 
         return OffboardingClearanceResultDto.builder()
@@ -115,9 +122,24 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void approveOffboardingWaiver(Long engineerId, String reason, Long approvalRequestId, Long actorUserId) {
-        if (engineerId == null || approvalRequestId == null || !StringUtils.hasText(reason)) {
+    public void approveOffboardingWaiver(Long engineerId,
+                                         Long lifecycleCaseId,
+                                         Long lifecycleTaskId,
+                                         String reason,
+                                         Long approvalRequestId,
+                                         Long actorUserId) {
+        if (engineerId == null || lifecycleCaseId == null || lifecycleTaskId == null
+                || approvalRequestId == null || actorUserId == null || !StringUtils.hasText(reason)) {
             throw new BusinessException(400, "退社例外免除には対象要員、理由、承認申請IDが必要です。");
+        }
+
+        LifecycleTask scopedTask = lifecycleTaskMapper.selectByIdForUpdate(lifecycleTaskId);
+        LifecycleCase scopedCase = scopedTask == null ? null : lifecycleCaseMapper.selectByIdForUpdate(lifecycleCaseId);
+        if (scopedTask == null || scopedCase == null || !lifecycleCaseId.equals(scopedTask.getCaseId())
+                || !lifecycleCaseId.equals(scopedCase.getId())
+                || !"RESIGN_ASSET_RETURN".equals(scopedTask.getTaskCode())
+                || !engineerId.equals(scopedCase.getEngineerId())) {
+            throw new BusinessException(400, "退社例外免除の案件・タスクscopeが対象要員と一致しません。");
         }
 
         ApprovalRequest approval = approvalRequestMapper.selectByIdForUpdate(approvalRequestId);
@@ -130,6 +152,8 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
         if (assetOffboardingWaiverMapper.selectByApprovalRequestId(approvalRequestId) == null) {
             assetOffboardingWaiverMapper.insert(AssetOffboardingWaiver.builder()
                     .engineerId(engineerId)
+                    .lifecycleCaseId(lifecycleCaseId)
+                    .lifecycleTaskId(lifecycleTaskId)
                     .approvalRequestId(approvalRequestId)
                     .reason(reason.trim())
                     .approvedBy(actorUserId)

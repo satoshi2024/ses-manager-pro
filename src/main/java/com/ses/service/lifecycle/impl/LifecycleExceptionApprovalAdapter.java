@@ -7,6 +7,7 @@ import com.ses.entity.LifecycleCase;
 import com.ses.entity.LifecycleTask;
 import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleTaskMapper;
+import com.ses.mapper.ApprovalActionMapper;
 import com.ses.service.approval.ApprovalOrganizationResolver;
 import com.ses.service.approval.ApprovalPayloads;
 import com.ses.service.approval.ApprovalSnapshot;
@@ -34,6 +35,7 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
     private final AssetOffboardingService assetOffboardingService;
     private final ObjectMapper objectMapper;
     private final com.ses.mapper.UserOrganizationMapper userOrganizationMapper;
+    private final ApprovalActionMapper approvalActionMapper;
 
     @Override
     public String requestType() {
@@ -135,14 +137,20 @@ public class LifecycleExceptionApprovalAdapter implements ApprovalTargetAdapter 
         Map<String, Object> payload = ApprovalPayloads.read(objectMapper, request.getPayloadJson());
         Long taskId = request.getTargetId();
         String reason = (String) payload.get("reason");
-        taskService.waiveTask(taskId, request.getApplicantId(), request.getId(), reason);
+        var approvalAction = approvalActionMapper.selectLatestApprovalByRequestId(request.getId());
+        if (approvalAction == null || approvalAction.getApproverUserId() == null) {
+            throw BusinessException.of(409, "承認実行者を特定できないため例外免除を適用できません");
+        }
+        Long actualApproverId = approvalAction.getApproverUserId();
+        taskService.waiveTask(taskId, actualApproverId, request.getId(), reason);
 
         LifecycleTask task = require(taskId);
         if ("RESIGN_ASSET_RETURN".equals(task.getTaskCode())) {
             LifecycleCase lcCase = caseMapper.selectById(task.getCaseId());
             if (lcCase != null) {
                 assetOffboardingService.approveOffboardingWaiver(
-                        lcCase.getEngineerId(), reason, request.getId(), request.getApplicantId());
+                        lcCase.getEngineerId(), lcCase.getId(), task.getId(), reason,
+                        request.getId(), actualApproverId);
             }
         }
     }

@@ -136,7 +136,8 @@ public class ResignationGateChecker {
         // 6. 貸与資産の返却 (ASSET_RETURN)
         LifecycleTask assetTask = findTaskByCode(lcCase.getId(), "RESIGN_ASSET_RETURN");
         com.ses.dto.asset.OffboardingClearanceResultDto offboarding =
-                assetOffboardingService.checkOffboardingClearance(engineerId);
+                assetOffboardingService.checkOffboardingClearance(
+                        engineerId, lcCase.getId(), assetTask != null ? assetTask.getId() : null);
         boolean blockersClear = offboarding.getUnreturnedAssetCount() == 0
                 && offboarding.getUnrevokedAccountCount() == 0
                 && offboarding.getUnreleasedLicenseCount() == 0;

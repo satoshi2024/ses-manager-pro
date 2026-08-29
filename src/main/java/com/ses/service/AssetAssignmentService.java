@@ -1,7 +1,6 @@
 package com.ses.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.AssetAssignment;
 
 import java.time.LocalDate;
@@ -10,7 +9,7 @@ import java.util.List;
 /**
  * 資産貸与・返却管理サービス
  */
-public interface AssetAssignmentService extends IService<AssetAssignment> {
+public interface AssetAssignmentService {
 
     /**
      * 資産を貸与する（トランザクション内行ロック ＋ 期間重複チェック ＋ 資産ステータス変更 ＋ イベント記録）
@@ -55,4 +54,7 @@ public interface AssetAssignmentService extends IService<AssetAssignment> {
      * 貸与一覧検索（ページネーション）
      */
     IPage<AssetAssignment> searchAssignments(int page, int size, String assigneeType, Long assigneeId, String status);
+
+    /** 貸与履歴の論理削除を常に拒否する明示的な境界API。 */
+    void softDeleteAssignment(Long id);
 }

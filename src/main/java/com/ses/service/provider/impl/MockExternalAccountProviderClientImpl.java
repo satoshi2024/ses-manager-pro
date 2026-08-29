@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MockExternalAccountProviderClientImpl implements ExternalAccountProviderClient {
 
     private final Map<Long, RevokeConfirmationStatus> mockStatusMap = new ConcurrentHashMap<>();
+    private final Map<Long, RuntimeException> confirmationFailures = new ConcurrentHashMap<>();
     private final AtomicInteger requestCount = new AtomicInteger();
 
     private static String maskIdentifier(String identifier) {
@@ -45,6 +46,10 @@ public class MockExternalAccountProviderClientImpl implements ExternalAccountPro
         if (accountRef == null) {
             return RevokeConfirmationStatus.FAILED_OR_TIMEOUT;
         }
+        RuntimeException failure = confirmationFailures.get(accountRef.getId());
+        if (failure != null) {
+            throw failure;
+        }
         RevokeConfirmationStatus status = mockStatusMap.getOrDefault(accountRef.getId(), RevokeConfirmationStatus.CONFIRMED);
         log.info("Mock external revoke status checked: id={}, status={}", accountRef.getId(), status);
         return status;
@@ -63,5 +68,14 @@ public class MockExternalAccountProviderClientImpl implements ExternalAccountPro
 
     public void resetRequestCount() {
         requestCount.set(0);
+    }
+
+    /** テスト用: 確認APIを例外化し、poll jobのアカウント単位fail-closed継続を検証する。 */
+    public void setConfirmationFailure(Long accountRefId, RuntimeException failure) {
+        confirmationFailures.put(accountRefId, failure);
+    }
+
+    public void clearConfirmationFailure(Long accountRefId) {
+        confirmationFailures.remove(accountRefId);
     }
 }
