@@ -42,6 +42,7 @@ exportは引き続きこのimplementation scope外である。
 - Review baseline Head: 6e0f5067d9a6509775225278cc0dcfdc4d47643f
 - Task 0R remediation commit: 48037c923224f684968dbaf3410cdb37307ed100
 - Task 0R-D delta remediation commit: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
+- Owner Gate normalization commit: 2f91e5a584c5224989780cb323e40f33fda185b6
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応
