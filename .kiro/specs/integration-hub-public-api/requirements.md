@@ -100,4 +100,3 @@
 - webhook署名改ざん、timestamp古い/未来、replay、duplicate、provider event conflict、
   claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ、manual replay。
 - 外部callがDB transaction内で実行されないことの境界テスト。
-

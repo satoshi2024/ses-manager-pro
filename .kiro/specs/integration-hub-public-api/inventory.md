@@ -148,4 +148,3 @@
 | inbound | signature、raw hash、timestamp、duplicate、event conflict、unique provider event ID、transaction rollback |
 | operations | key rotation、secret/PII scan、負荷、DB/worker/provider障害、restore、runbook、alert |
 | boundary | external callがDB transaction外、通常checkout無変更、base/head固定、push後remote/local一致 |
- 
