@@ -34,7 +34,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
-@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
     @Autowired
@@ -159,6 +158,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     @DisplayName("Boundary 2-B: License concurrent allocation with CAS protection (4 threads for 2 seats)")
     void testLicenseConcurrentAllocationWithCas() throws Exception {
         LicensePlan plan = LicensePlan.builder()
@@ -234,6 +234,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     @DisplayName("Boundary 4: Provider recovery, idempotency key, next_retry_at & polling job")
     void testProviderRecoveryAndIdempotency() {
         ExternalAccountSystem system = ExternalAccountSystem.builder()

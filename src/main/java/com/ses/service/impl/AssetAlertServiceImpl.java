@@ -36,7 +36,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     private final NotificationService notificationService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int checkOverdueAssignments() {
         LocalDate today = LocalDate.now();
         List<AssetAssignment> activeList = assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
@@ -92,7 +92,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public int checkExpiringLeases() {
         LocalDate today = LocalDate.now();
         LocalDate threshold = today.plusDays(30);
@@ -125,7 +125,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void notifyLostAssetIncident(Asset asset, String incidentDetails, Long reporterUserId) {
         if (asset == null) return;
         String dedupeKey = "asset:lost:" + asset.getId() + ":" + System.currentTimeMillis();

@@ -21,7 +21,7 @@ public class AssetEventServiceImpl extends ServiceImpl<AssetEventMapper, AssetEv
     private final AssetEventMapper assetEventMapper;
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRED)
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public AssetEvent recordEvent(Long assetId,
                                   String eventType,
                                   Long actorUserId,

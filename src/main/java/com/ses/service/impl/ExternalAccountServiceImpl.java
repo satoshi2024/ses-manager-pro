@@ -42,7 +42,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountReference registerAccountReference(Long systemId,
                                                               String accountIdentifier,
                                                               String assigneeType,
@@ -82,7 +82,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountReference updateAccountReference(Long id,
                                                             String accountIdentifier,
                                                             String permissionLevel,
@@ -103,7 +103,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountReference confirmRevoke(Long id, Long actorUserId) {
         ExternalAccountReference current = getById(id);
         if (current == null) {
@@ -127,7 +127,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public ExternalAccountReference requestRevokeWithIdempotency(Long id, String idempotencyKey, Long actorUserId) {
         ExternalAccountReference current = getById(id);
         if (current == null) {
@@ -162,7 +162,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public int processPendingRevokePollJob() {
         LocalDateTime now = LocalDateTime.now();
         List<ExternalAccountReference> pendingList = externalAccountReferenceMapper.selectList(
@@ -193,7 +193,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountReference changeStatus(Long id, String status, Long actorUserId) {
         ExternalAccountReference current = getById(id);
         if (current == null) {
@@ -216,7 +216,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalAccountSystem saveSystem(ExternalAccountSystem system) {
         if (system == null) {
             throw new BusinessException("外部システム情報は必須です。");
@@ -265,7 +265,7 @@ public class ExternalAccountServiceImpl extends ServiceImpl<ExternalAccountRefer
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void softDeleteAccount(Long id) {
         // AS-R1.5(b): 未失効状態（UNKNOWNを含む）の論理削除を禁止する
         ExternalAccountReference ref = externalAccountReferenceMapper.selectByIdForUpdate(id);

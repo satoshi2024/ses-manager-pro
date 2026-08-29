@@ -88,7 +88,7 @@ public class AssetOffboardingServiceImpl implements AssetOffboardingService {
 
     @Override
     /** DB状態を先に確定し、provider I/OはDBトランザクション外で実行する。 */
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     public void triggerOffboardingRevocations(Long engineerId, Long actorUserId) {
         log.info("Triggering offboarding revocations for engineerId={}, actorUserId={}", engineerId, actorUserId);
 

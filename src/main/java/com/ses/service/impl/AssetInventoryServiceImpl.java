@@ -34,7 +34,7 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
     private final AssetEventService assetEventService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetInventoryRun startInventoryRun(String inventoryCode,
                                                String title,
                                                LocalDate targetDate,
@@ -90,7 +90,7 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetInventoryItem recordItemCheck(Long itemId,
                                               String observedStatus,
                                               String observedLocation,
@@ -125,7 +125,7 @@ public class AssetInventoryServiceImpl extends ServiceImpl<AssetInventoryRunMapp
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetInventoryRun completeInventoryRun(Long runId, Long actorUserId) {
         AssetInventoryRun run = getById(runId);
         if (run == null) {

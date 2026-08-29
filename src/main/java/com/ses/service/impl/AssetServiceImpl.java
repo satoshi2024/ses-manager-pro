@@ -29,7 +29,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     private final AssetEventService assetEventService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Asset createAsset(Asset asset, Long actorUserId) {
         if (!StringUtils.hasText(asset.getAssetTag())) {
             throw new BusinessException("資産管理タグは必須です。");
@@ -70,7 +70,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Asset updateAsset(Asset asset, Long actorUserId) {
         if (asset.getId() == null) {
             throw new BusinessException("資産IDが指定されていません。");
@@ -123,7 +123,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Asset changeStatus(Long assetId, String toStatus, String reason, Long actorUserId, Long evidenceDocId) {
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
         if (asset == null) {
@@ -162,7 +162,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Asset disposeAsset(Long assetId, String reason, Long actorUserId, Long evidenceDocId) {
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
         if (asset == null) {
@@ -195,7 +195,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Asset reportLost(Long assetId, String incidentDetails, Long actorUserId, Long evidenceDocId) {
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
         if (asset == null) {
@@ -273,7 +273,7 @@ public class AssetServiceImpl extends ServiceImpl<AssetMapper, Asset> implements
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void softDeleteAsset(Long assetId) {
         Asset current = assetMapper.selectByIdForUpdate(assetId);
         if (current == null) {

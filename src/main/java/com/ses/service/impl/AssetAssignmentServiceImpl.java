@@ -32,7 +32,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
     private final com.ses.mapper.DocumentLinkMapper documentLinkMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetAssignment createAssignment(Long assetId,
                                             String assigneeType,
                                             Long assigneeId,
@@ -120,7 +120,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetAssignment returnAssignment(Long assignmentId,
                                             LocalDate actualReturnDate,
                                             Long returnEvidenceDocId,
@@ -187,7 +187,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public AssetAssignment waiveAssignment(Long assignmentId,
                                             String reason,
                                             Long approvalRequestId,
@@ -260,7 +260,7 @@ public class AssetAssignmentServiceImpl extends ServiceImpl<AssetAssignmentMappe
 
     /** 貸与履歴は返却・移管の監査証跡であり、終端状態を含め論理削除しない。 */
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         if (id == null || getById(id) == null) {
             return false;

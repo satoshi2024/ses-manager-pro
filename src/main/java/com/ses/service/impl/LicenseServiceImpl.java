@@ -28,7 +28,7 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
     private final LicenseAssignmentMapper licenseAssignmentMapper;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LicensePlan savePlan(LicensePlan plan, Long actorUserId) {
         if (!StringUtils.hasText(plan.getPlanCode())) {
             throw new BusinessException("プランコードは必須です。");
@@ -70,7 +70,7 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LicenseAssignment assignLicense(Long planId,
                                            String assigneeType,
                                            Long assigneeId,
@@ -119,7 +119,7 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public LicenseAssignment releaseLicense(Long assignmentId,
                                             LocalDate releasedDate,
                                             Long actorUserId) {
@@ -189,7 +189,7 @@ public class LicenseServiceImpl extends ServiceImpl<LicensePlanMapper, LicensePl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void softDeleteAssignment(Long assignmentId) {
         LicenseAssignment assignment = licenseAssignmentMapper.selectByIdForUpdate(assignmentId);
         if (assignment == null) {
