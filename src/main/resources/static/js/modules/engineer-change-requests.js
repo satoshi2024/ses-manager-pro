@@ -20,7 +20,7 @@ function load(page) {
         .then(data => { crPage = { current: data.current, size: data.size, total: data.total }; render(data.records || []); })
         .catch(error => {
             console.error(error);
-            console.error(error.message || '変更申請一覧の取得に失敗しました');
+            SES.toast.error(error.message || '変更申請一覧の取得に失敗しました');
         });
 }
 
@@ -72,7 +72,7 @@ function loadDetail(id) {
         })
         .catch(error => {
             console.error(error);
-            console.error(error.message || '変更申請詳細の取得に失敗しました');
+            SES.toast.error(error.message || '変更申請詳細の取得に失敗しました');
         });
 }
 

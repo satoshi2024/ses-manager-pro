@@ -37,7 +37,7 @@ SES.lifecycle = {
             this.renderCases(cases || []);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '案件一覧の取得に失敗しました');
+            SES.toast.error(e.message || '案件一覧の取得に失敗しました');
         }
     },
 
@@ -117,7 +117,7 @@ SES.lifecycle = {
             this.renderMyTasks(tasks);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '自担当タスクの取得に失敗しました');
+            SES.toast.error(e.message || '自担当タスクの取得に失敗しました');
         }
     },
 
@@ -169,10 +169,10 @@ SES.lifecycle = {
                 }
             } catch (e) {
                 console.error(e);
-                console.error(e.message || '要員一覧の取得に失敗しました');
+                SES.toast.error(e.message || '要員一覧の取得に失敗しました');
             }
         }
-        const today = SES.util.getLocalDateString();
+        const today = new Date().toISOString().split('T')[0];
         if (document.getElementById('createAnchorDate')) {
             document.getElementById('createAnchorDate').value = today;
         }
@@ -207,7 +207,7 @@ SES.lifecycle = {
             window.location.href = '/lifecycle/' + encodeURIComponent(created.id);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '案件起票に失敗しました');
+            SES.toast.error(e.message || '案件起票に失敗しました');
         }
     },
 
@@ -220,7 +220,7 @@ SES.lifecycle = {
             this.renderDetail(caseDto);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '詳細の読み込みに失敗しました');
+            SES.toast.error(e.message || '詳細の読み込みに失敗しました');
         }
     },
 
@@ -434,7 +434,7 @@ SES.lifecycle = {
             }
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'ゲート情報の取得に失敗しました');
+            SES.toast.error(e.message || 'ゲート情報の取得に失敗しました');
         }
     },
 
@@ -448,7 +448,7 @@ SES.lifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'タスク開始に失敗しました');
+            SES.toast.error(e.message || 'タスク開始に失敗しました');
         }
     },
 
@@ -487,7 +487,7 @@ SES.lifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'タスク完了に失敗しました');
+            SES.toast.error(e.message || 'タスク完了に失敗しました');
         }
     },
 
@@ -520,7 +520,7 @@ SES.lifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'タスク免除に失敗しました');
+            SES.toast.error(e.message || 'タスク免除に失敗しました');
         }
     },
 
@@ -553,7 +553,7 @@ SES.lifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '担当者変更に失敗しました');
+            SES.toast.error(e.message || '担当者変更に失敗しました');
         }
     },
 
@@ -577,7 +577,7 @@ SES.lifecycle = {
                     await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
-                    console.error(e.message || '案件の保留に失敗しました');
+                    SES.toast.error(e.message || '案件の保留に失敗しました');
                 }
             }
         });
@@ -590,7 +590,7 @@ SES.lifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '案件の再開に失敗しました');
+            SES.toast.error(e.message || '案件の再開に失敗しました');
         }
     },
 
@@ -611,7 +611,7 @@ SES.lifecycle = {
                     await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
-                    console.error(e.message || '案件の完了に失敗しました');
+                    SES.toast.error(e.message || '案件の完了に失敗しました');
                 }
             }
         });
@@ -637,7 +637,7 @@ SES.lifecycle = {
                     await this.loadDetail(this.currentCaseId);
                 } catch (e) {
                     console.error(e);
-                    console.error(e.message || '案件の中止に失敗しました');
+                    SES.toast.error(e.message || '案件の中止に失敗しました');
                 }
             }
         });
@@ -652,7 +652,7 @@ SES.lifecycle = {
             this.renderTemplates(templates);
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'テンプレート一覧の取得に失敗しました');
+            SES.toast.error(e.message || 'テンプレート一覧の取得に失敗しました');
         }
     },
 
@@ -676,7 +676,7 @@ SES.lifecycle = {
                     <td><span class="badge bg-info text-dark">${SES.escapeHtml(tpl.templateType || '')}</span></td>
                     <td class="font-monospace text-theme">v${tpl.versionNo}</td>
                     <td class="text-muted small">${SES.escapeHtml(tpl.validFrom || '-')}</td>
-                    <td class="text-theme">${tpl.taskCount !== undefined ? tpl.taskCount : (tpl.tasks ? tpl.tasks.length : 0)}件</td>
+                    <td class="text-theme">${tpl.tasks ? tpl.tasks.length : 0}件</td>
                     <td>${statusBadge}</td>
                     <td class="text-end pe-4">
                         <div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
@@ -701,7 +701,7 @@ SES.lifecycle = {
             await this.loadTemplates();
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'ステータスの更新に失敗しました');
+            SES.toast.error(e.message || 'ステータスの更新に失敗しました');
         }
     },
 
@@ -722,11 +722,11 @@ SES.lifecycle = {
                 this.fillTemplateForm(template);
             } catch (e) {
                 console.error(e);
-                console.error(e.message || 'テンプレート詳細の取得に失敗しました');
+                SES.toast.error(e.message || 'テンプレート詳細の取得に失敗しました');
                 return;
             }
         } else {
-            document.getElementById('templateValidFrom').value = SES.util.getLocalDateString();
+            document.getElementById('templateValidFrom').value = new Date().toISOString().slice(0, 10);
             this.addTemplateTask();
         }
 
@@ -824,7 +824,7 @@ SES.lifecycle = {
             await this.loadTemplates();
         } catch (e) {
             console.error(e);
-            console.error(e.message || 'テンプレートの保存に失敗しました');
+            SES.toast.error(e.message || 'テンプレートの保存に失敗しました');
         }
     }
 };

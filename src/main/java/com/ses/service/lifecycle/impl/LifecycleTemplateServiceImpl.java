@@ -104,17 +104,6 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         }
 
         List<LifecycleTemplate> list = templateMapper.selectList(wrapper);
-        if (list.isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
-        
-        List<Long> templateIds = list.stream().map(LifecycleTemplate::getId).toList();
-        LambdaQueryWrapper<LifecycleTemplateTask> taskWrapper = new LambdaQueryWrapper<LifecycleTemplateTask>()
-                .in(LifecycleTemplateTask::getTemplateId, templateIds);
-        List<LifecycleTemplateTask> allTasks = templateTaskMapper.selectList(taskWrapper);
-        java.util.Map<Long, Long> taskCountMap = allTasks.stream()
-                .collect(Collectors.groupingBy(LifecycleTemplateTask::getTemplateId, Collectors.counting()));
-
         return list.stream().map(t -> LifecycleTemplateDto.builder()
                 .id(t.getId())
                 .templateType(t.getTemplateType())
@@ -124,7 +113,6 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
                 .status(t.getStatus())
                 .validFrom(t.getValidFrom())
                 .validTo(t.getValidTo())
-                .taskCount(taskCountMap.getOrDefault(t.getId(), 0L).intValue())
                 .build()).collect(Collectors.toList());
     }
 
@@ -168,16 +156,8 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         Integer maxVer = templateMapper.selectMaxVersionNo(existing.getTemplateType());
         int nextVer = (maxVer != null) ? maxVer + 1 : existing.getVersionNo() + 1;
 
-        LocalDate newValidFrom = dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now();
-        if (dto.getValidTo() != null && newValidFrom.isAfter(dto.getValidTo())) {
-            throw BusinessException.of(400, "error.lifecycle.invalidDateOrder", "開始日は終了日以前である必要があります");
-        }
-        if (existing.getValidFrom() != null && !newValidFrom.isAfter(existing.getValidFrom())) {
-            throw BusinessException.of(400, "error.lifecycle.invalidDateOrder", "新バージョンの開始日は旧バージョンの開始日より後である必要があります");
-        }
-
         // 旧バージョンの有効終了日をクローズ
-        existing.setValidTo(newValidFrom.minusDays(1));
+        existing.setValidTo(LocalDate.now().minusDays(1));
         existing.setUpdatedBy(userId);
         templateMapper.updateById(existing);
 
@@ -187,7 +167,7 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
                 .description(dto.getDescription() != null ? dto.getDescription() : existing.getDescription())
                 .versionNo(nextVer)
                 .status("ACTIVE")
-                .validFrom(newValidFrom)
+                .validFrom(dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now())
                 .validTo(dto.getValidTo())
                 .createdBy(userId)
                 .updatedBy(userId)

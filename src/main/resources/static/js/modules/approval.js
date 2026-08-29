@@ -117,7 +117,7 @@ async function submitApprovalAction(action, data) {
 
 async function createApprovalRequest() {
     const form = $('#approvalCreateForm'); let body = {};
-    form.serializeArray().forEach(function (item) { if (item.name === 'payload' || item.name === 'diff') { try { body[item.name] = item.value ? JSON.parse(item.value) : {}; } catch (e) { console.error(SES.i18n.t('approval.create.invalidJson', 'JSON形式を確認してください')); body = null; } } else if (item.value !== '') body[item.name] = item.value; });
+    form.serializeArray().forEach(function (item) { if (item.name === 'payload' || item.name === 'diff') { try { body[item.name] = item.value ? JSON.parse(item.value) : {}; } catch (e) { SES.toast.error(SES.i18n.t('approval.create.invalidJson', 'JSON形式を確認してください')); body = null; } } else if (item.value !== '') body[item.name] = item.value; });
     if (!body) return;
     ['targetId', 'targetVersion', 'organizationId'].forEach(function (k) { if (body[k]) body[k] = Number(body[k]); }); if (body.amountSnapshot) body.amountSnapshot = Number(body.amountSnapshot);
     try { const result = await SES.api.post('/api/approval/requests', body); bootstrap.Modal.getInstance(document.getElementById('approvalCreateModal')).hide(); window.location.href = '/approval/requests/' + result.id; } catch (e) { showApprovalApiError(e, SES.i18n.t('approval.create.failed', '申請の作成に失敗しました')); }

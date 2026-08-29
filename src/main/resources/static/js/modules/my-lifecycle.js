@@ -24,7 +24,7 @@ SES.myLifecycle = {
             this.renderCases(cases);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '案件一覧の取得に失敗しました');
+            SES.toast.error(e.message || '案件一覧の取得に失敗しました');
         }
     },
 
@@ -99,7 +99,7 @@ SES.myLifecycle = {
             this.renderPendingTasks(tasks);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '提出タスクの取得に失敗しました');
+            SES.toast.error(e.message || '提出タスクの取得に失敗しました');
         }
     },
 
@@ -170,7 +170,7 @@ SES.myLifecycle = {
             await this.loadPendingTasks();
         } catch (e) {
             console.error(e);
-            console.error(e.message || '報告に失敗しました');
+            SES.toast.error(e.message || '報告に失敗しました');
         }
     },
 
@@ -183,7 +183,7 @@ SES.myLifecycle = {
             this.renderDetail(caseDto);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '詳細取得に失敗しました');
+            SES.toast.error(e.message || '詳細取得に失敗しました');
         }
     },
 
@@ -304,7 +304,7 @@ SES.myLifecycle = {
             await this.loadDetail(this.currentCaseId);
         } catch (e) {
             console.error(e);
-            console.error(e.message || '報告に失敗しました');
+            SES.toast.error(e.message || '報告に失敗しました');
         }
     }
 };

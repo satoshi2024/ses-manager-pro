@@ -154,9 +154,6 @@ const SES = {
                 
             } catch (error) {
                 console.error('API Error:', error);
-                if (error instanceof TypeError) {
-                    SES.toast.error('通信エラーが発生しました。ネットワーク接続を確認してください。');
-                }
                 throw error;
             }
         }

@@ -16,7 +16,7 @@ function load(p) {
     };
     SES.api.get('/api/one-on-ones', params).then(d => { page = { current: d.current, size: d.size, total: d.total }; render(d.records || []); }).catch(error => {
         console.error(error);
-        console.error(error.message || '1on1一覧の取得に失敗しました');
+        SES.toast.error(error.message || '1on1一覧の取得に失敗しました');
     });
 }
 
@@ -95,7 +95,7 @@ function openDetail(id) {
         });
     }).catch(error => {
         console.error(error);
-        console.error(error.message || '1on1詳細の取得に失敗しました');
+        SES.toast.error(error.message || '1on1詳細の取得に失敗しました');
     });
 }
 
@@ -107,6 +107,6 @@ function runOneOnOneAction(id, action, payload) {
         })
         .catch(error => {
             console.error(error);
-            console.error(error.message || '1on1の更新に失敗しました');
+            SES.toast.error(error.message || '1on1の更新に失敗しました');
         });
 }

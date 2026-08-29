@@ -85,7 +85,7 @@
                     this.applyCallback({ filter: filter, sort: sort, columns: columns, pageSize: pageSize, view: view });
                     SES.toast.success(`ビュー「${view.name}」を適用しました`);
                 } catch (e) {
-                    console.error('ビューデータの適用に失敗しました');
+                    SES.toast.error('ビューデータの適用に失敗しました');
                 }
             }
         },
@@ -175,7 +175,7 @@
                         const json = JSON.parse(xhr.responseText);
                         if (json.message) msg = json.message;
                     } catch(e) {}
-                    console.error(msg);
+                    SES.toast.error(msg);
                 }
             });
         },
@@ -210,7 +210,7 @@
                                 const json = JSON.parse(xhr.responseText);
                                 if (json.message) msg = json.message;
                             } catch(e) {}
-                            console.error(msg);
+                            SES.toast.error(msg);
                         }
                     });
                 }

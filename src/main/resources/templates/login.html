@@ -177,7 +177,7 @@
 
     <!-- i18n -->
     <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()})}"></script>
-    <script th:inline="javascript">
+    <script>
         document.addEventListener('DOMContentLoaded', function() {
             var form = document.querySelector('form');
             if (form) {
@@ -189,6 +189,7 @@
                 form.addEventListener('keydown', function(e) {
                     if (e.key === 'Enter') {
                         if (e.isComposing || isComposing) {
+                            e.preventDefault();
                             return;
                         }
                         e.preventDefault();
@@ -203,9 +204,9 @@
                     form.dataset.submitting = 'true';
                     if (submitButton) {
                         submitButton.disabled = true;
-                        var processingText = /*[[#{common.processing}]]*/ '処理中...';
-                        submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>' + processingText;
+                        submitButton.setAttribute('aria-busy', 'true');
                     }
+                    if (submitLabel) submitLabel.textContent = '処理中...';
                 });
             }
         });
