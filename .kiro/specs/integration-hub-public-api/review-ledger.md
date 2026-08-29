@@ -35,6 +35,8 @@
 | NF05-PLAN-002 | P1 | nonce replay ledgerのatomic unique、TTL、purge契約が不足 | design.md 2.1、requirements IH-R1-9/IH-R3-3 | SPEC_ADDRESSED。R-NF05再Review待ち |
 | NF05-PLAN-003 | P1 | 第二outbox禁止とt_api_deliveryのreuse/分離方針が未確定 | design.md 2/2.1、requirements IH-R3-5/6、inventory 5 | SPEC_ADDRESSED。R-NF05再Review待ち |
 | NF05-PLAN-004 | P1 | retention/legal holdの保存モデル、競合、restore後purgeが不足 | design.md 2.1/8、requirements IH-R6-3、tasks F1 | SPEC_ADDRESSED。R-NF05再Review待ち |
+| NF05-PLAN-005 | P1 | burst 20のcapacity、refill、atomic predicate、clock rollbackが未固定 | design.md 2.1、requirements IH-R1-8、tasks F1 | SPEC_ADDRESSED。R-NF05再Review待ち |
+| NF05-PLAN-006 | P1 | idempotency/delivery/inboundのcanonical enumとterminal retention mappingが不一致 | design.md 2.1/5.3、requirements IH-R6-3、tasks F1 | SPEC_ADDRESSED。R-NF05再Review待ち |
 
 ## Evidence status
 
@@ -49,6 +51,8 @@
   Owner Gateは再オープンせず、NF05-PLAN-001〜004のspec remediation後に同Reviewへ再提出する。
 - R-NF05 remediation: b0151e7d8acc54da124c4464db1df263e4b3f716でNF05-PLAN-001〜004をSPEC_ADDRESSEDへ更新した。
   再ReviewのPLAN PASSまではF1を開始しない。
+- R-NF05 delta Plan Review: fixed Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でPLAN FAIL（P0=0、P1=2）。
+  NF05-PLAN-005/006をspec remediation後、同Reviewへ再提出する。Owner GateとNF05-PLAN-001〜004は再オープンしない。
 - F1、F2、A1、A2、B1、B2、M: 実装・テスト・運用証跡なし。未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。

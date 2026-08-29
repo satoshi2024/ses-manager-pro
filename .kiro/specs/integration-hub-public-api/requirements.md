@@ -38,8 +38,9 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    principalに限る。公開APIの認可をsidebar、既存role、URL prefixだけへ依存しない。
 8. rate/quotaの永続化キーは client × scope × tenant × route template に固定する。minute/day windowと
    burst stateをこの論理キーへ結び付け、source IPを保存キーへ含めない。routeはraw pathではなく正規化した
-   route templateを使い、条件付きincrementとDB uniqueでmulti-nodeの60 req/min、burst 20、日次50,000を
-   原子的に判定する。
+   route templateを使い、capacity 20 token、3秒ごとに1 token refillの固定token bucket、条件付きincrement、
+   DB uniqueでmulti-nodeの60 req/min、burst 20、日次50,000を原子的に判定する。minute/day/burstの全条件を
+   同一transactionで満たした場合だけconsumeし、Retry-Afterは不足条件の最大待機秒を返す。
 9. 署名検証済みnonceはt_api_nonce_replayへatomic insertし、client_id + nonce_hash uniqueで重複を拒否する。
    raw nonce、署名、body、secret、PIIは保存せず、expires_at <= server_nowをbounded purgeする。TTLは
    max(accepted_at, signed_timestamp) + 5分とし、認証失敗へ安全に収束させる。
@@ -122,7 +123,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    承認済みexternal DTO snapshotだけを保存し、internal entity/provider raw bodyを保存しない。
 3. retentionはsucceeded 30日、failed/DLQ 90日、audit metadata 1年とする。legal hold中はpurgeを
    停止する。t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention classと期限を保存し、
-   terminalのsucceeded/processed/sentは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、CLAIMED、RETRY、
+   terminalのsucceeded/processedは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、CLAIMED、RETRYABLE、
    RECEIVED、PROCESSINGはterminal化するまでpurgeしない。
    t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
    purgeは対象rowを同じ順序でlockし、active hold、active lease、row versionをCASで再確認する。purge jobは
@@ -135,7 +136,8 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 - revoked、expired、rotation overlap、旧世代失効、IP境界、rate exact boundary、burst、retry-after。
 - Idempotency-Key同一payload再送の同結果、別payload拒否、永続化失敗、worker再起動。
 - rate/quota保存キーがclient×scope×tenant×route templateだけで、IP/raw pathを含まず、minute/day/burstの
-  条件付きincrementとunique競合がmulti-nodeで同じ結果になること。
+  条件付きincrementとunique競合がmulti-nodeで同じ結果になること。burst capacity 20、3秒ごとの1 token refill、
+  refill直前/直後、minute/day境界、clock rollback、片方のquota更新失敗、Retry-Afterを検証する。
 - nonce ledgerのatomic unique、rotationを跨ぐ再利用拒否、future timestampを含むTTL、bounded purge再実行。
 - cursor stability、limit上限、count/export/errorからの存在推測防止。
 - JSON contract allow-list、entity serialization禁止、secret/PII log scan。
@@ -149,3 +151,5 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 - metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
 - legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。
+- idempotency/delivery/inboundのcanonical enum全値が一つの遷移表とretention class/起算点へ漏れなく分類され、
+  alias状態、terminal逆遷移、期限境界、各CAS失敗を許可しないこと。

@@ -5,8 +5,9 @@
 NF-05はAPPROVEDであり、DG-05-F1-APPROVAL-20260830-01（2026-08-30）、OwnerRef=PROJECT_OWNER、
 Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope=GET-only 11 pathsとF1 persistence基盤を
 approval-decision.mdへ固定した。R-NF05の独立Plan Reviewは固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対して
-PLAN FAIL（P0=0、P1=4）となったが、Owner Gateは再オープンしていない。以下のspec remediationを再Reviewで
-確認するまで、F1 production code/migration/testを開始しない。
+PLAN FAIL（P0=0、P1=4）となり、その後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62もPLAN FAIL
+（P0=0、P1=2）となった。Owner Gateは再オープンしていない。以下のspec remediationを再Reviewで確認するまで、
+F1 production code/migration/testを開始しない。
 
 ## 推奨順序
 
@@ -16,6 +17,7 @@ PLAN FAIL（P0=0、P1=4）となったが、Owner Gateは再オープンして�
 | 0R | Review remediation | atomic outbox、candidate OpenAPI、metrics cardinality、payload retention、review trace | docs-only範囲で完了。実装PASSではない |
 | 0R-D | delta Review remediation | count/asOf/status-code/correlation header契約 | docs-only範囲で完了。実装PASSではない |
 | 0R-P | R-NF05 Plan finding remediation | rate key、nonce ledger、delivery分離、retention/hold/restore contract | docs-only修正後、R-NF05再Review |
+| 0R-P2 | R-NF05 residual Plan remediation | burst algorithm、canonical state/terminal retention mapping | docs-only修正後、R-NF05再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | R-NF05 PLAN PASS、F1 scope、schema方針確認 |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | F1完了。公開endpointは別承認まで禁止 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | 別のimplementation scope承認 |
@@ -27,16 +29,18 @@ PLAN FAIL（P0=0、P1=4）となったが、Owner Gateは再オープンして�
 ## R-NF05 P1 remediationの完了条件
 
 1. rate/quotaの保存キーが client × scope × tenant × route template に固定され、IPやraw pathを含まず、
-   minute/day/burstをDB uniqueと条件付きincrementで原子的に扱うこと。
+   burstをcapacity 20、初期20、3秒ごとに1 token refillの固定token bucketとしてminute/day条件と同一transactionで
+   原子的に扱うこと。clock rollback、refill境界、Retry-Afterを含めて一意なpredicateを持つこと。
 2. t_api_nonce_replayのclient + nonce hash atomic unique、credential rotation跨ぎの再利用拒否、
    max(accepted_at, signed_timestamp) + 5分のTTL、bounded purgeを保存契約とすること。
 3. 第二の汎用outboxを作らず、既存notification outbox/Accounting IntegrationJobを変更・二重書込みせず、
    t_api_deliveryをNF-05専用delivery ledgerとして分離し、event/subscription/generation uniqueと
    atomic insert、claim/HTTP/CAS境界を固定すること。
-4. retention_class、retention_expires_at、t_api_retention_hold、t_api_purge_checkpointの保存モデルと、
-   hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
+4. idempotency/delivery/inboundのcanonical enumと全遷移を一つに固定し、全terminal stateをretention class/起算点へ
+   漏れなく接続すること。retention_class、retention_expires_at、t_api_retention_hold、t_api_purge_checkpointの
+   保存モデルと、hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
 
-これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P docs-only commit後、R-NF05が独立に再判定する。
+これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P2 docs-only commit後、R-NF05が独立に再判定する。
 
 ## 完了・引き渡し条件
 

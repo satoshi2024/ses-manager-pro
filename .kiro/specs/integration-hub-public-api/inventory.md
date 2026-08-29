@@ -7,6 +7,7 @@
 - EXISTING: 現行コードで確認できる正本または既存経路。
 - REUSE-CANDIDATE: 契約を満たすよう拡張できる候補。ただしそのまま流用しない。
 - DECIDED_SEPARATE: 既存経路を変更・二重書込みせず、NF-05専用保存モデルへ分離する決定済み事項。
+- CONTRACT_FIXED: 保存・状態・遷移の仕様を正本へ固定済みだが、production実装は未着手。
 - GAP: 公開APIに必要だが現行実装で確認できない。
 - BLOCKER: 承認、設計、または既存境界との不整合により実装開始を止める事項。
 - UNAPPROVED: 承認scopeに含まれず、実装・公開できない項目。
@@ -71,7 +72,8 @@ F1実装で固定する承認値:
 | Inbound event | provider event ID、raw hash、allow-listed parsed fields、processing result、retention expiry | 現行公開API向けentityなし | GAP。t_inbound_eventと一意性、conflict、DLQ、manual replayが必要 |
 | Nonce replay ledger | client、credential version、nonce hash、accepted/expiry時刻 | 現行公開API向けentityなし | GAP。t_api_nonce_replay、client+nonce hash unique、TTL purgeが必要 |
 | Retention hold/checkpoint | record kind/id、ACTIVE/RELEASED、generation/version、restore epoch、expires-at cursor | 現行公開API向けentityなし | GAP。t_api_retention_holdとt_api_purge_checkpoint、lock/CAS/purge再評価が必要 |
-| Usage bucket | client×scope×tenant×route template、window kind/start、minute/day/burst state | 公開client quotaの現行entityなし | GAP。IPを保存キーにせず、DB uniqueと条件付きincrementでmulti-node atomicityを実装する |
+| Usage bucket | client×scope×tenant×route template、minute/day counter、capacity 20 token、3秒ごとに1 token refill、burst state | 公開client quotaの現行entityなし | CONTRACT_FIXED。IP/raw pathを保存キーにせず、DB uniqueと同一transactionの条件付きincrementでmulti-node atomicityを実装する |
+| Canonical state/retention | idempotency/delivery/inboundのenum、遷移、terminal class/起算点 | 現行NF-05状態entityなし | CONTRACT_FIXED。RETRYABLE等のcanonical名、逆遷移拒否、全terminalの30/90日mappingをF1へ固定する |
 
 原則: 新しい第二の汎用outboxは作らない。既存notification outboxとAccounting IntegrationJobは責務を維持し、
 NF-05は互換性のないretention、scope、lease、replay世代を持つためt_api_deliveryへ分離する。同じeventを
@@ -145,8 +147,9 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 |---|---|
 | security | client A/B、scope/data scope/command permission、revoked/expired、rotation overlap/revoke、IP spoof、rate boundary |
 | contract | OpenAPI lint、JSON allow-list、禁止field不在、entity serialization negative test、cursor/count/error non-enumeration |
-| idempotency | same key/same payload same result、same key/different payload reject、concurrent claim、DB restart |
+| idempotency | same key/same payload same result、same key/different payload reject、concurrent claim、DB restart、canonical state/terminal mapping |
 | nonce | atomic unique、credential rotation跨ぎの再利用拒否、TTL境界、bounded purge、raw nonce非永続化 |
+| rate | subject key exact、capacity 20、3秒refill、refill直前/直後、minute/day境界、clock rollback、Retry-After、atomic partial failure |
 | outbound | signed payload、timestamp、provider request ID、claim競合、timeout、429/5xx backoff、4xx no-retry、DLQ/replay |
 | inbound | signature、raw hash、timestamp、duplicate、event conflict、unique provider event ID、transaction rollback |
 | operations | key rotation、secret/PII scan、負荷、DB/worker/provider障害、restore、runbook、alert |

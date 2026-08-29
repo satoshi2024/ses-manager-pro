@@ -23,7 +23,7 @@ F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具�
 | m_webhook_subscription | client、direction、event allow-list、endpoint、signing key世代、状態 | subscription scopeとdata scopeを分離 |
 | t_api_delivery | NF-05専用event snapshot、payload hash、claim lease、attempt、backoff、DLQ、replay generation | notification outboxとは分離したdelivery ledger。deliveryのCAS正本 |
 | t_inbound_event | client/provider、provider event ID、timestamp、raw hash、canonical payload、processing state、retention expiry | duplicate/conflict/replayの正本 |
-| t_api_usage_bucket | client×scope×tenant×route template、window kind/start、minute/day/burst counters | 承認済み保存キーをDB uniqueで固定し、multi-node atomicityを保証 |
+| t_api_usage_bucket | client×scope×tenant×route template、minute/day window state、burst token state | 承認済み4次元だけをDB uniqueで固定し、multi-node atomicityを保証 |
 | t_api_nonce_replay | client、credential version、nonce hash、accepted/expiry時刻 | client×nonce hashのatomic uniqueとTTL purgeで署名replayを拒否 |
 | t_api_retention_hold | record kind/id、hold state、generation、reason code、version、created/released時刻 | purgeと同じ対象row lockで競合を直列化 |
 | t_api_purge_checkpoint | table kind、restore epoch、expires-at cursor、last id、run status | checkpointは最適化情報。restore後の全件再評価を妨げない |
@@ -40,18 +40,23 @@ result CASを分離する。既存notificationのtransaction境界違反はNF-05
 #### Usage bucketの保存キーと原子更新
 
 rate/quotaの全保存rowは、承認済みの client × scope × tenant × route template をquota subject keyとする。
-DB上の一意性は client_id、scope_code、tenant_id、route_template に、時間窓を表す window_kind、window_start
-を加えたものとする。window_kind/window_startはminute/dayの時間partitionであり、追加の認可・課金・client識別
-dimensionではない。
-minute windowとday windowを別window_kindで同じt_api_usage_bucketへ保存する。burst stateも同じminute rowへ
-保持し、IPをキー、補助dimension、fallbackキーにしない。source IPはCIDR/trusted-proxy検証の入力に限り、
-usage rowやmetrics labelへ保存しない。route_templateはendpoint templateへ正規化した後に作成し、raw pathを
-キーにしない。
+DB unique keyは client_id、scope_code、tenant_id、route_template の4列だけとし、minute_window_start、
+minute_count、day_window_start、day_count、burst_tokens、burst_last_refill_at、versionは状態列であって、
+追加の認可・課金・client識別dimensionではない。source IPはCIDR/trusted-proxy検証の入力に限り、usage rowや
+metrics labelへ保存しない。route_templateはendpoint templateへ正規化した後に作成し、raw pathをキーにしない。
 
-minute 60 req/min、burst 20、day 50,000は短いDB transaction内で条件付きincrementする。rowが無い場合の
-insert競合はDB unique violationを一度だけ安全に再読込して同じ条件付きincrementへ収束させる。minute/dayの
-両方が上限内であることを同一判定で確定できない場合はdenyする。multi-nodeでJVM内counterへfallbackせず、
-429ではRetry-Afterだけを返し、client IDやIPをmetrics labelへ出さない。
+burstはcapacity 20 token、初期token 20、refillは3秒ごとに1 token（20 token/60秒）の固定token bucketとする。
+burst_tokensは0以上20以下の整数、burst_last_refill_atは直近refill境界を保存する。短いDB transaction内で
+server_nowを読み、floor((server_now - burst_last_refill_at) / 3秒)だけtokenをmin(20, current + elapsed)へ補充し、
+burst_last_refill_atを補充済み境界まで進める。clock rollback（server_nowが直近時刻より過去）の場合はwindow resetも
+refillも行わず、時刻を後戻りさせない。minute_window_startはUTC minute境界、day_window_startはUTC day境界で管理し、
+境界を越えたときだけ対応するcountを0へresetする。
+
+同じ短いDB transactionがrow lockを取得し、minute_count < 60、day_count < 50,000、burst_tokens >= 1の三条件を
+同時に満たす場合だけminute_count/day_countを各1増加しburst_tokensを1減らす。いずれかが不足する場合はどのcounterも
+変更せずdenyし、Retry-Afterは不足した条件がすべて満たせるまでの最大待機秒を返す（burstは次token境界、minute/dayは
+次のUTC境界）。rowが無い場合のinsert競合はDB unique violationを一度だけ安全に再読込して同じlock/predicateへ収束させる。
+multi-nodeでJVM内counterへfallbackせず、client IDやIPをmetrics labelへ出さない。
 
 #### Nonce replay ledger
 
@@ -85,7 +90,7 @@ DTO snapshotまたはallow-listed parsed fieldsに限り、raw request/body/prov
 
 | record_kind | purge対象terminal state | retention_class | 起算点 |
 |---|---|---|---|
-| IDEMPOTENCY / DELIVERY | SUCCEEDED / SENT | SUCCEEDED_PAYLOAD_30D | terminal_at |
+| IDEMPOTENCY / DELIVERY | SUCCEEDED | SUCCEEDED_PAYLOAD_30D | terminal_at |
 | INBOUND | PROCESSED / DUPLICATE | SUCCEEDED_PAYLOAD_30D | terminal_at |
 | IDEMPOTENCY / DELIVERY / INBOUND | FAILED / DLQ / CONFLICT | FAILED_DLQ_PAYLOAD_90D | terminal_at |
 | AUDIT | metadata-only audit row | AUDIT_METADATA_1Y | created_at |
@@ -158,14 +163,17 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 | webhook worker | delivery | subscription scope ∩ event allow-list | claim対象外は処理しない |
 | admin operator | replay/rotate | 内部admin action permission ∩ audit requirement | internal admin UIの規則に従う |
 
-### 5.3 状態・並行性
+### 5.3 canonical state・retention・並行性
 
-| 対象 | 状態 | 遷移と競合規則 |
-|---|---|---|
-| credential | ACTIVE / OVERLAP / REVOKED / EXPIRED | version付き検証、revoke即時、旧世代はoverlapUntilまで |
-| idempotency | IN_PROGRESS / SUCCEEDED / FAILED / CONFLICT / EXPIRED | unique(client, endpoint, key)、digest一致のみ再利用 |
-| delivery | PENDING / CLAIMED / RETRY / SENT / DLQ | lease token付きCAS、stale claim recovery |
-| inbound event | RECEIVED / PROCESSING / PROCESSED / DUPLICATE / CONFLICT / DLQ | provider event ID unique、raw hash不一致はconflict |
+状態名は以下を唯一の正本とする。別名のRETRY、RETRYABLE、SENT、EXPIREDを実装状態として追加しない。
+非terminal状態はpurgeせず、terminal状態はretention tableのclassと起算点へ必ず対応させる。
+
+| 対象 | canonical enum | terminal分類・保持 | 許可遷移と競合規則 |
+|---|---|---|---|
+| credential | ACTIVE / OVERLAP / REVOKED / EXPIRED | credential metadata。payload retention対象外 | ACTIVE→OVERLAP/REVOKED/EXPIRED、revoke即時、旧世代はoverlapUntilまで。version CAS |
+| idempotency | IN_PROGRESS / SUCCEEDED / FAILED / CONFLICT | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/CONFLICT=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | IN_PROGRESS→SUCCEEDED/FAILED/CONFLICT。unique(client, endpoint, key)、digest一致だけ再利用。terminalから逆遷移しない |
+| delivery | PENDING / CLAIMED / RETRYABLE / SUCCEEDED / FAILED / DLQ | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/DLQ=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | PENDING→CLAIMED→SUCCEEDED/RETRYABLE/FAILED/DLQ、RETRYABLE→CLAIMED。lease token・payload hash・generation付きCAS。terminalから逆遷移しない |
+| inbound event | RECEIVED / PROCESSING / PROCESSED / DUPLICATE / CONFLICT / DLQ | PROCESSED/DUPLICATE=SUCCEEDED_PAYLOAD_30D、CONFLICT/DLQ=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | RECEIVED→PROCESSING→PROCESSED/DUPLICATE/CONFLICT/DLQ。provider event ID unique、raw hash不一致はCONFLICT。terminalから逆遷移しない |
 
 ## 6. HTTP契約（F1/A1計画入力）
 

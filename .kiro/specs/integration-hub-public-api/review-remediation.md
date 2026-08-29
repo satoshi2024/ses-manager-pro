@@ -6,7 +6,8 @@
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
 Owner承認済みのscopeはF1 persistence基盤までであり、Plan ReviewのPLAN PASSと実装Reviewは別ゲートである。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
-Owner Gateは再オープンせず、以下4件をSPEC_ADDRESSEDへ補正してから同じR-NF05へ再Reviewする。
+最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
+Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正してから同じR-NF05へ再Reviewする。
 
 ## Finding対応表
 
@@ -24,6 +25,8 @@ Owner Gateは再オープンせず、以下4件をSPEC_ADDRESSEDへ補正して�
 | R-NF05 nonce replay ledger不足 | P1 | t_api_nonce_replay、client+nonce hash atomic unique、rotation跨ぎ再利用拒否、TTL/purge、raw nonce非永続化を定義 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 | R-NF05 第二outbox/t_api_delivery方針不明 | P1 | 第二の汎用outboxを禁止し、既存notification outbox/Accounting IntegrationJobをreuse・二重書込みせず、t_api_deliveryをNF-05専用ledgerとして分離 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 | R-NF05 retention/legal hold契約不足 | P1 | retention class/expiry、t_api_retention_hold、lock/CAS競合、active lease、部分失敗、restore epoch後全件再評価を保存モデルへ固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+| R-NF05 burst algorithm不足 | P1 | capacity 20、初期token 20、3秒ごとに1 token refill、minute/dayと同一transactionのatomic predicate、clock rollback、Retry-Afterを固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+| R-NF05 canonical state/terminal mapping不足 | P1 | idempotency/delivery/inboundのcanonical enum、遷移、非terminal/terminal、30/90日classと起算点、alias/逆遷移拒否を固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 
 ## Task 0R scope
 
@@ -53,6 +56,7 @@ exportは引き続きこのimplementation scope外である。
 - Owner Gate normalization commit: 2f91e5a584c5224989780cb323e40f33fda185b6
 - R-NF05 Plan Review result: 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ec、PLAN FAIL（P0=0、P1=4）
 - R-NF05 Plan remediation commit: b0151e7d8acc54da124c4464db1df263e4b3f716
+- R-NF05 delta Plan Review result: 678eac3f09b7ed54419655fcf326e0b15c6d7d62、PLAN FAIL（P0=0、P1=2）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応
