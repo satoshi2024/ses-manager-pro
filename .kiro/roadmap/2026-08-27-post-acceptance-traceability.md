@@ -26,7 +26,7 @@
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | APPROVED | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document、NF-01 lifecycle | `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@76e45340`。経費締めA、PII AES-256-GCM、as-of event、AI候補のみ。詳細: `.kiro/specs/certification-learning-skill-gap/approval-decision.md` | 実装・独立Review完了後 |
 | NF-04 | `mobile-pwa-self-service` | APPROVED | 管理者（プロジェクト責任者） | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 2026-08-28承認。Base=`origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、branch=`codex/mobile-pwa-self-service`、worktree=`C:\\work\\ses-mobile-pwa-self-service`。Chrome/Edge/Safari現行版・直前版、Android Chrome/iOS Safariを対象。install任意、pushなし。承認済みoffline/cache、idempotency、version/CAS、logout/user switch、30日保持、409差分UXをNF-04専用specへ固定する | 2026-08-28 |
-| NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
+| NF-05 | `integration-hub-public-api` | APPROVED | `PROJECT_OWNER` | API成功率、DLQ滞留、p95、rate境界 | identity、outbox、audit、data scope | DG-05-F1-APPROVAL-20260830-01（2026-08-30）。OwnerRef=PROJECT_OWNER、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd。F1 persistence contractのみ承認し、public endpoint、外部送信、A1/A2/B1/B2、production enablementは保留。詳細: .kiro/specs/integration-hub-public-api/approval-decision.md | Plan/実装・独立Review完了後 |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
@@ -122,10 +122,15 @@
 
 ### DG-05 NF-05
 
-- API利用者、契約SLA、公開resource/command。
-- OAuth provider、client secret保管/rotation、IP制限。
-- version廃止期間、rate limit、課金/利用量制限。
-- webhook署名、retry上限、dead-letter retention。
+- DecisionId=DG-05-F1-APPROVAL-20260830-01、Decision date=2026-08-30、OwnerRef=PROJECT_OWNER、OwnerType=ROLE。
+- Approved Baseはorigin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、実装branchはcodex/integration-hub-public-api。
+- F1のclient/credential/scope/idempotency/usage bucket/webhook persistence contractと最小crypto/config abstractionを承認する。
+- HMAC-SHA256 signed service account、AES-256-GCM envelope、±5分、nonce replay拒否、rotation overlap 24時間、revoke即時、90日expiryを固定する。
+- client CIDR default deny、trusted proxy限定、60 req/min、burst 20、日次50,000、SLA月間99.9%/p95 500ms、v1廃止予告180日を固定する。
+- GET-only 11 pathsとinventory allow-listを承認する。command/export、public endpoint、外部送信、A1/A2/B1/B2、production enablementは別承認まで禁止する。
+- webhookはHMAC-SHA256、timestamp±5分、最大8回の指数backoff+jitter、4xx no-retry、DLQ/manual replayを固定する。
+- retentionはsucceeded 30日、failed/DLQ 90日、audit metadata 1年、legal hold中purge停止。脅威モデル11項目を受入対象とする。
+- Plan ReviewのPLAN PASSをF1開始条件とし、force push、main変更、PR、merge、auto-mergeは禁止する。
 
 ### DG-06 NF-06
 

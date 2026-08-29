@@ -2,47 +2,45 @@
 
 ## 状態
 
-- 中央台帳の状態: CANDIDATE
-- 本specの状態: DISCOVERY 完了、実装開始不可
-- Decision Gate: DG-05 未承認
-- Approved resources/commands: 未提供（入力値は <APPROVED_SCOPE> のまま）
-- Owner: 未提供（入力値は <OWNER> のまま）
-- Base branch: 未提供（入力値は <BASE_BRANCH> のまま）
-- Base commit: 未提供（入力値は <BASE_COMMIT> のまま）
-- Discovery比較参照: origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd
+- 中央台帳の状態: APPROVED
+- 本specの状態: Owner承認済み、Plan Review待ち、F1実装開始前
+- Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
+- Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
+- Owner: PROJECT_OWNER（OwnerType=ROLE）
+- Base branch: origin/main
+- Base commit: b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd
+- Approved比較参照: origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd
 - 専用worktree: C:\work\ses-manager-pro-integration-hub-public-api
 - 専用branch: codex/integration-hub-public-api
 
-この文書は、候補段階で許可されるread-only discovery、Review remediation、spec作成の成果物である。DG-05、脅威モデル、
-認証方式、契約SLA、公開field inventory、Owner、実値のBaseが承認されるまで、production Java、
-SQL/migration、画面、既存shared file、production test、外部送信、production変更のpushを開始しない。
-明示されたReview remediationのdocs-only pushはこの停止規則の対象外である。
+この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。独立Plan ReviewがPASSするまで、
+production Java、SQL/migration、画面、既存shared file、production test、外部送信、public endpointを開始しない。
+F1のdocs-only計画証跡は許可されたremote branchへpushできるが、force push、main変更、PR、mergeは行わない。
 
 ## 承認ゲート
 
 | ゲート | 現在 | production変更開始条件 |
 |---|---|---|
-| Approved resources/commands | 未提供 | 対象resource、command、許可commandを実値で承認 |
-| Owner | 未提供 | repository外の責任主体をOwnerRefで一意に確定 |
-| Base branch/commit | 未提供 | fetch後の実branchとSHAをspec/ledgerへ固定 |
-| DG-05 | 未承認 | 利用者、SLA、OAuth provider、secret保管/rotation、IP、version、rate、課金、webhook retry/DLQを承認 |
-| Threat model | 未承認 | client impersonation、IDOR/scope、replay、secret漏洩、SSRF、DLQ復旧等を受入条件付きで承認 |
-| 認証方式 | 未承認 | OAuth2 client credentialsまたは署名service account等を選択し、fallbackを定義 |
-| 契約SLA | 未承認 | 可用性、p95、rate/quota、version廃止、障害通知、DLQ retentionを定義 |
-| 公開field inventory | 未承認 | resource/field/operation単位のallow-listを承認 |
+| Approved resources/commands | APPROVED | GET-only 11 paths、inventory allow-list、command/exportなし |
+| Owner | APPROVED | PROJECT_OWNER、OwnerType=ROLE |
+| Base branch/commit | APPROVED | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
+| DG-05 | APPROVED | DG-05-F1-APPROVAL-20260830-01 |
+| Threat model | APPROVED | 承認済み11脅威をF1〜Mの受入対象として固定 |
+| 認証方式 | APPROVED | HMAC-SHA256 signed service account、OAuth fallbackなし |
+| 契約SLA | APPROVED | 月間99.9%、p95 500ms、保守7日前、重大障害60分以内、v1廃止予告180日 |
+| 公開field inventory | APPROVED | inventory allow-listのみ、internal entity serialize禁止 |
 
 ## 確認済みの停止理由
 
-中央の受入後traceabilityはNF-05をCANDIDATE、Owner/Decision/再評価日を未定としている。
-DG-05欄も未決定項目だけを列挙しており、承認DecisionId、scope、Base SHAは存在しない。
-したがって候補段階の規則に従い、T0 discovery/spec作成と明示されたTask 0R remediationだけを行い、
-production実装で停止する。
+中央の受入後traceabilityとapproval-decision.mdにNF-05のAPPROVED、OwnerRef、DecisionId、Base SHA、
+scope、auth、SLA、field inventoryを固定した。ただしapproved scopeはF1 persistence基盤までであり、
+独立Plan ReviewのPLAN PASS前はproduction実装を開始しない。
 
 ## Task 0R remediation
 
 ReviewのP1/P2指摘に対し、atomic outbox、非公開OpenAPI candidate、metrics cardinality、payload retention、
-review traceをspecへ反映した。対応状況はreview-remediation.mdを正本とし、SPEC_ADDRESSEDとOWNER_GATEを
-混同しない。
+review traceをspecへ反映した。対応状況はreview-remediation.mdを正本とし、SPEC_ADDRESSED、OWNER_APPROVED、
+PLAN PASS、IMPLEMENTATION PASSを混同しない。
 
 ## 既知の重要差分
 

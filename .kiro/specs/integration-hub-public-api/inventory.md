@@ -8,7 +8,7 @@
 - REUSE-CANDIDATE: 契約を満たすよう拡張できる候補。ただしそのまま流用しない。
 - GAP: 公開APIに必要だが現行実装で確認できない。
 - BLOCKER: 承認、設計、または既存境界との不整合により実装開始を止める事項。
-- UNAPPROVED: 候補として記録したがDG-05で承認されていない。
+- UNAPPROVED: 承認scopeに含まれず、実装・公開できない項目。
 
 ## 2. Repository / worktree / base
 
@@ -20,8 +20,7 @@
 | remote | origin = https://github.com/satoshi2024/ses-manager-pro.git |
 | Discovery worktree | C:\work\ses-manager-pro-integration-hub-public-api |
 | Discovery branch | codex/integration-hub-public-api |
-| 比較base | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
-| approved Base | 未提供。比較baseをapproved Baseとして扱わない |
+| approved Base | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 
 ## 3. Filter chain inventory
 
@@ -48,14 +47,13 @@
 | 内部MFA | key version、current-key-version、rotation用keyring設定 | MfaServiceImpl.java、application.yml | REUSE-CANDIDATE。overlap期間、旧key失効、re-encrypt jobの契約を公開credentialで再確認 |
 | Compliance credential | provider経由のversion付きAES/GCM envelope、masked snapshot | ComplianceGateCredentialCryptoServiceImpl.java | REUSE-CANDIDATE。secret原文非表示・safe errorのパターンを採用 |
 | 銀行口座 | encryptedAccountNumber、prod key必須 | BpCompanyServiceImpl.java | 公開field候補に含めない |
-| 公開API credential | 専用entity/credential versionの現行実装なし | GAP | BLOCKER。m_api_clientとt_api_credential_versionの契約・key providerをDG-05後に確定 |
+| 公開API credential | 専用entity/credential versionの現行実装なし | GAP | F1承認scope。m_api_clientとt_credential_version、AES-256-GCM keyring、AAD bindingを実装する |
 
-必要な未承認決定:
+F1実装で固定する承認値:
 
-1. 暗号化本文を保持するか、secret manager reference + hashとするか。
-2. key version、cipher format、AAD（tenant/client/credential version）、overlap、re-encrypt、
-   revoke/expiry、decrypt failureのfail-closed契約。
-3. secret原文を発行時のresponseから一度だけ返す場合のclient側責任と再発行手順。
+1. AES-256-GCM envelope、環境注入keyring、AAD（clientId/credentialVersion/purpose）、hashまたは参照。
+2. rotation overlap 24時間、revoke即時、credential expiry 90日、decrypt failureはfail-closed。
+3. secret原文は発行時一度だけ表示し、再表示・ログ・監査・metrics・exception保存を禁止する。
 
 ## 5. Outbox / provider / job / idempotency inventory
 
@@ -63,7 +61,7 @@
 |---|---|---|---|
 | NotificationOutbox | t_notification_outbox、dedupe unique、PENDING/PROCESSING/RETRY/SENT/FAILED | V79__notification_webhook_outbox.sql | REUSE-CANDIDATE。notification専用列が多く、汎用deliveryへ拡張するか証明が必要 |
 | NotificationOutbox claim | status条件付きUPDATE、attempt count、locked_at | NotificationOutboxMapper.java | claimの参考。lease token、tenant/client binding、generationが不足 |
-| Notification dispatcher | REQUIRES_NEW dispatchOne内でclaim→外部notifyNow→結果update | NotificationOutboxDispatcher.java:44-70 | BLOCKER。外部HTTPがDB transaction中。claim TX、HTTP、result CASへ分離が必要 |
+| Notification dispatcher | REQUIRES_NEW dispatchOne内でclaim→外部notifyNow→結果update | NotificationOutboxDispatcher.java:44-70 | 既存gap。NF-05 F1/B1ではclaim TX、HTTP、result CASを分離する |
 | Accounting IntegrationJob | payloadSnapshot、payloadHash、idempotencyKey、leaseToken、leaseExpiresAt、providerRequestId、安全なerror | IntegrationJob.java | REUSE-CANDIDATE。外部jobのsnapshot/CAS/leaseの正本 |
 | Accounting worker | due job claim、provider dispatch、stale lease recovery、provider request ID | AccountingIntegrationWorker.java | REUSE-CANDIDATE。公開API deliveryと業務会計jobの責務分離を決める |
 | Accounting provider | providerName、canonical DTO、外部I/Oはtransaction外の契約 | AccountingProvider.java | provider adapter境界の参考。公開API DTOをcanonical会計DTOへ流用しない |
@@ -93,7 +91,7 @@
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
 | ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをDG-05で受入 |
-| 公開client rate | 専用実装なし | GAP/BLOCKER。client×scope×IP×tenantの境界をDB/Redis等で選択 |
+| 公開client rate | 専用実装なし | F1承認scope。client×scope×tenant×route template、60 req/min、burst 20、日次50,000を実装する |
 
 ## 8. External DTO inventory
 
@@ -106,36 +104,35 @@
 | InvoiceDetailDto | Invoiceをextendsする既存DTO | 使用禁止。internal entity serializationの危険な前例 |
 | Entity全般 | MyBatis-Plus persistence model | 使用禁止。external mapperでallow-list DTOへ変換 |
 
-## 9. 公開resource / field / operation matrix（未承認候補）
+## 9. 公開resource / field / operation matrix（Owner承認済み初期契約）
 
-この表はDG-05へ提示する候補inventoryであり、公開許可ではない。fieldはallow-listを先に定義し、
-未記載fieldをdenyする。internal numeric IDではなく、client/tenantにbindしたopaque public IDを
-使用する想定も未承認である。
+この表はDG-05-F1-APPROVAL-20260830-01で承認された初期契約である。実装時もfieldはallow-listを先に定義し、
+未記載fieldをdenyする。internal numeric IDではなく、client/tenantにbindしたopaque public IDを使用する。
 
-| Resource | Candidate operation | Candidate allow-list field | Client scope | Data scope | Command permission | 状態 |
+| Resource | Approved operation | Approved allow-list field | Client scope | Data scope | Command permission | 状態 |
 |---|---|---|---|---|---|---|
-| engineer-availability | list, detail | publicEngineerId, availabilityStatus, availableFrom, availableTo, skillTagCode（表示許可されたcanonical codeのみ） | integration.availability.read | tenant + legal entity + engineer allow-list | integration.engineer-availability.read | UNAPPROVED |
-| project | list, detail, count | publicProjectId, status, startDate, endDate, publicCustomerId（customer nameは別承認） | integration.project.read | tenant + legal entity + project/customer allow-list | integration.project.read | UNAPPROVED |
-| contract-status | list, detail, count | publicContractId, publicProjectId, status, startDate, endDate, renewalStatus | integration.contract-status.read | tenant + legal entity + contract/project allow-list | integration.contract-status.read | UNAPPROVED |
-| invoice-status | list, detail, count | publicInvoiceId, publicContractId, status, issueDate, dueDate, paidAt, settlementStatus | integration.invoice-status.read | tenant + legal entity + invoice/customer allow-list | integration.invoice-status.read | UNAPPROVED |
-| command surface | TBD | TBD。read resourceに含めない | integration.command.* | commandごとにtarget scope | integration.<resource>.<operation> | BLOCKED_BY_DG05 |
-| export | 禁止候補（初期） | 原則なし。必要性・最大件数・same-scopeをDG-05で再審査 | resource.read + export scope | 同一resource scope | integration.<resource>.export | UNAPPROVED |
+| engineer-availability | list, detail | publicEngineerId, availabilityStatus, availableFrom, availableTo, skillTagCode（表示許可されたcanonical codeのみ） | integration.availability.read | tenant + legal entity + engineer allow-list | integration.engineer-availability.read | APPROVED |
+| project | list, detail, count | publicProjectId, status, startDate, endDate, publicCustomerId（customer nameは別承認） | integration.project.read | tenant + legal entity + project/customer allow-list | integration.project.read | APPROVED |
+| contract-status | list, detail, count | publicContractId, publicProjectId, status, startDate, endDate, renewalStatus | integration.contract-status.read | tenant + legal entity + contract/project allow-list | integration.contract-status.read | APPROVED |
+| invoice-status | list, detail, count | publicInvoiceId, publicContractId, status, issueDate, dueDate, paidAt, settlementStatus | integration.invoice-status.read | tenant + legal entity + invoice/customer allow-list | integration.invoice-status.read | APPROVED |
+| command surface | disabled | なし | integration.command.* | 適用なし | 未承認 | DISABLED |
+| export | disabled | なし | 適用なし | 適用なし | 未承認 | DISABLED |
 
-明示的に公開しない候補:
+明示的に公開しないdeny-list:
 
 - password、OAuth token、API key、TOTP/recovery code、暗号文、secret ref。
 - internal DB id、role、permission group、audit actor、raw SQL、internal path、stack trace、
   provider raw body、provider credential、DLQ内部エラー。
 - 氏名、email、電話、住所、口座、個人番号、文書本文、添付、原価、粗利、単価、銀行情報。
-- 未承認のcustomer name、engineer name、skill free text、invoice amount。
+- customer name、engineer name、skill free text、invoice amount。
 
-## 10. Webhook field / operation matrix（未承認候補）
+## 10. Webhook field / operation matrix（契約承認済み・実装延期）
 
 | 種別 | direction | field allow-list | scope/permission | 状態 |
 |---|---|---|---|---|
-| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | UNAPPROVED |
-| provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | UNAPPROVED |
-| DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | BLOCKED_BY_DG05 |
+| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | APPROVED_CONTRACT_DEFERRED |
+| provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | APPROVED_CONTRACT_DEFERRED |
+| DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | APPROVED_CONTRACT_DEFERRED |
 
 ## 11. Test / evidence inventory
 
@@ -148,6 +145,6 @@
 | inbound | signature、raw hash、timestamp、duplicate、event conflict、unique provider event ID、transaction rollback |
 | operations | key rotation、secret/PII scan、負荷、DB/worker/provider障害、restore、runbook、alert |
 | metrics | route template、method、status class、bounded outcome、client tierのみ。client/correlation/request/resource/user/IP/provider IDはlabel禁止 |
-| retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。succeeded 30日、failed/DLQ 90日、audit metadata 1年はcandidate |
+| retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。succeeded 30日、failed/DLQ 90日、audit metadata 1年 |
 | purge | 期限境界、legal hold、再実行、部分失敗、backup/restore後purgeの証拠が必要 |
 | boundary | external callがDB transaction外、通常checkout無変更、base/head固定、push後remote/local一致 |

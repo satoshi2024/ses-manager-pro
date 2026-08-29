@@ -3,19 +3,19 @@ info:
   title: SES Manager Pro Integration Hub Public API
   version: 1.0.0-candidate
   description: >
-    DG-05承認前の非公開candidate契約。公開対象、認証方式、SLA、field inventoryは未承認であり、
-    この文書をproduction APIまたはapproved OpenAPIとして扱ってはならない。
+    DG-05承認済みのPlan Review用非公開candidate契約。F1 persistence基盤の入力として使用できるが、
+    この文書だけでproduction API endpointをenableしてはならない。
     /external-api/v1/** はinternal管理chain、portal chain、anonymous webhook例外から分離された
     dedicated machine-to-machine security boundaryである。匿名アクセス、internal role偽装、entity直列化、
     command API、export APIは許可しない。
-  x-approval-status: UNAPPROVED
+  x-approval-status: APPROVED_FOR_PLAN_ONLY
   x-security-boundary: dedicated-public-client-chain
   x-default-deny-surfaces:
     - command
     - export
   x-version-retirement-policy: >
-    Candidate rule only: deprecation noticeは後継versionとmigration planを添えて180日以上前に通知し、
-    retirementはDG-05 Owner承認とsecurity review PASS後にだけ行う。最終SLAは未承認。
+    retirementは後継versionとmigration planを添えて180日以上前に通知し、security review PASS後に行う。
+    月間99.9%、p95 500ms等の承認SLAを満たさないenablementは禁止する。
   x-error-status-code-map:
     '400': [REQUEST_INVALID, CURSOR_INVALID]
     '401': [AUTHENTICATION_FAILED]
@@ -24,11 +24,11 @@ info:
     '429': [RATE_LIMITED]
     '500': [INTERNAL_ERROR]
   x-non-enumeration-rule: >
-    Scope外のdetail targetは存在しないtargetと同じ404/RESOURCE_NOT_FOUNDへ収束させる候補。
+    Scope外のdetail targetは存在しないtargetと同じ404/RESOURCE_NOT_FOUNDへ収束させる。
     list/countではscope外rowを母集団へ含めず、error、cursor、件数から存在を推測できないようにする。
 servers:
   - url: https://api.example.invalid
-    description: Candidate placeholder server; production endpoint is not approved.
+    description: Non-production example; public endpoint enablement is not approved by this scope.
 security:
   - publicClientAuthentication: []
 paths:
@@ -407,12 +407,14 @@ paths:
 components:
   securitySchemes:
     publicClientAuthentication:
-      type: http
-      scheme: bearer
-      bearerFormat: candidate-client-credential
+      type: apiKey
+      in: header
+      name: X-Client-Signature
       description: >
-        Non-anonymous dedicated public-client authentication boundary. Concrete OAuth2 client credentials or
-        signed service account verification remains an OWNER_GATE and is not approved by this candidate.
+        HMAC-SHA256 signed service account authentication. The canonical bytes include clientId,
+        credentialVersion/keyId, timestamp, nonce, method, canonical path/query, and body SHA-256.
+        Timestamp tolerance is plus or minus five minutes, nonce replay is rejected, and OAuth fallback is disabled.
+      x-required-auth-headers: [X-Client-ID, X-Credential-Version, X-Key-ID, X-Timestamp, X-Nonce, X-Client-Signature]
   parameters:
     CorrelationId:
       name: X-Correlation-ID
@@ -432,7 +434,7 @@ components:
         minimum: 1
         maximum: 100
         default: 50
-      description: Candidate bounded page size. Final SLA and limit are unapproved.
+      description: Candidate bounded page size within the approved SLA and payload limit.
     Cursor:
       name: cursor
       in: query

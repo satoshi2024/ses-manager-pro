@@ -4,19 +4,19 @@
 
 この文書はReview指摘のうち、実装AIがdocs/architectureで解消可能な範囲を追跡する。
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
-DG-05、approved scope、Owner、Baseの承認はOWNER_GATEとして残す。
+Owner承認済みのscopeはF1 persistence基盤までであり、Plan ReviewのPLAN PASSと実装Reviewは別ゲートである。
 
 ## Finding対応表
 
 | Finding | 種別 | 対応 | 状態 | 残る条件 |
 |---|---|---|---|---|
-| DG-05 / scope / Owner / Base / auth / SLA / field | P1 | review-ledger、requirements、design、tasksへ未承認gateを明記 | OWNER_GATE | repository外の承認記録 |
-| remote Headなし | P1 | Discovery seriesをorigin/codex/integration-hub-public-apiへpushし、local/remote一致を確認 | SPEC_ADDRESSED | remediation後の最終Headを再固定 |
+| DG-05 / scope / Owner / Base / auth / SLA / field | P1 | approval-decision.md、review-ledger、中央traceabilityへ承認値を正本化 | OWNER_APPROVED | Plan PASS、F1実装、独立Implementation Review |
+| remote Headなし | P1 | Discovery/0R/0R-D seriesをorigin/codex/integration-hub-public-apiへpushし、local/remote一致を確認 | SPEC_ADDRESSED | Task単位pushと最終Head固定 |
 | outbox insert after-commit | P1 | 業務stateとoutbox rowを同一DB transactionでatomic commitする設計へ修正。claim/HTTP/CASを分離 | SPEC_ADDRESSED | F1/B1実装とcrash/stale/replay test |
-| 外部契約なし | P1 | 非公開・未承認のopenapi-candidate.yamlを追加。read-only allow-list、status/error/cursor/securityを固定 | SPEC_ADDRESSED | Ownerのresource/field/SLA承認、A1実装 |
+| 外部契約なし | P1 | Owner承認済みの非公開openapi-candidate.yamlを保持。read-only allow-list、status/error/cursor/securityを固定 | SPEC_ADDRESSED | A1は別scope、public endpointは未実装 |
 | 実装・検証証拠なし | P1 | F1〜Mを未着手のまま維持。Task 0Rのdocs-only検証だけを記録 | OPEN | F1〜Mの実装・独立test |
 | metrics cardinality不足 | P2 | finite label set、禁止label、scrape/cardinality test、safe trace/audit方針を追加 | SPEC_ADDRESSED | F2/Mの実装・scrape証拠 |
-| payload retention不足 | P2 | digest/hash/allow-list snapshot、candidate retention、legal hold、purge/restore testを追加 | SPEC_ADDRESSED | Owner承認、F1/B1/B2/M実装 |
+| payload retention不足 | P2 | digest/hash/allow-list snapshot、承認retention、legal hold、purge/restore testを追加 | SPEC_ADDRESSED | F1/B1/B2/M実装 |
 | handoff commit系列不足 | P2 | Review Head 6e0f5067を基点として記録し、remediation commitと最終Headをcommit series＋外部handoffで追跡 | SPEC_ADDRESSED | remediation push後の最終Head通知 |
 
 ## Task 0R scope
@@ -28,13 +28,14 @@ DG-05、approved scope、Owner、Baseの承認はOWNER_GATEとして残す。
   deny-list、stable error、correlation、cursor binding、default-deny command/export。
 - metrics labelを有限集合へ限定し、client/correlation/request/resource/user/IP/provider IDを禁止。
 - idempotency/inbound/outboundのraw secret/PII/provider body非永続化、succeeded 30日、failed/DLQ 90日、
-  audit metadata 1年のcandidate、legal hold、purge/restore要件。
+  audit metadata 1年の承認済みretention、legal hold、purge/restore要件。
 - requirements、design、tasks、completion matrix、review ledgerのtrace更新。
 
-## 未解消のOwner Gate
+## 実装範囲の残存ゲート
 
-承認されるまで、候補OpenAPIを公開せず、認証方式・provider・rate/quota・IP boundary・SLA・version retirement・
-usage/billing・field/resource/command・webhook signature/retry/DLQ retentionを実装上の既定値にしない。
+Owner承認により、F1 persistence基盤の実装条件は確定した。独立Plan ReviewのPLAN PASSまではF1 production
+code/migration/testを開始しない。public endpoint、外部送信、A1/A2/B1/B2、production enablement、command、
+exportは引き続きこのimplementation scope外である。
 
 ## Handoff checkpoint
 
@@ -48,9 +49,10 @@ usage/billing・field/resource/command・webhook signature/retry/DLQ retention�
 | Delta finding | 対応 | 状態 |
 |---|---|---|
 | engineer-availability countがinventoryを越える | candidate OpenAPIからcount pathを削除。inventoryのlist/detailと一致 | SPEC_ADDRESSED |
-| client指定asOfがdesignと矛盾 | 全query parameterからasOfを削除。server受信時刻をresponse/cursorへ固定する候補に統一 | SPEC_ADDRESSED |
-| HTTP statusとerror codeの未固定 | statusごとの専用error schemaとcode enum、status/code map、scope外detailの404収束候補を追加 | SPEC_ADDRESSED |
+| client指定asOfがdesignと矛盾 | 全query parameterからasOfを削除。server受信時刻をresponse/cursorへ固定する契約へ統一 | SPEC_ADDRESSED |
+| HTTP statusとerror codeの未固定 | statusごとの専用error schemaとcode enum、status/code map、scope外detailの404収束契約を追加 | SPEC_ADDRESSED |
 | 成功/error responseのcorrelation header不統一 | 全GET success responseと共通error responseへX-Correlation-IDを追加 | SPEC_ADDRESSED |
-| DG-05、scope、Owner、Base、auth、SLA、field inventory | 承認記録なしのまま維持 | OWNER_GATE |
+| DG-05、scope、Owner、Base、auth、SLA、field inventory | approval-decision.mdと中央traceabilityへ正本化 | OWNER_APPROVED |
 
 Task 0R-Dもdocs-onlyであり、OpenAPI implementation、contract test、security test、F1〜MをPASS扱いにしない。
+Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。

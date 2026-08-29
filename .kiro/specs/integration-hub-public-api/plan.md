@@ -1,10 +1,11 @@
-# NF-05 Public API 実装計画（未承認ドラフト）
+# NF-05 Public API 実装計画（Owner承認済み・Plan Review待ち）
 
 ## 現在のゲート
 
-NF-05はCANDIDATEであり、DG-05は未承認である。承認済みresources/commands、Owner、Base branch、Base commit、
-threat model、認証方式、契約SLA、public field inventoryの確定記録がないため、production変更は開始しない。
-この計画はDiscovery成果物としてのレビュー対象であり、approved planではない。
+NF-05はAPPROVEDであり、DG-05-F1-APPROVAL-20260830-01（2026-08-30）、OwnerRef=PROJECT_OWNER、
+Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope=GET-only 11 pathsとF1 persistence基盤を
+approval-decision.mdへ固定した。ただしこの文書は独立Plan Reviewの対象であり、PLAN PASS前はF1 production
+code/migration/testを開始しない。
 
 ## 推奨順序
 
@@ -12,13 +13,14 @@ threat model、認証方式、契約SLA、public field inventoryの確定記録�
 |---|---|---|---|
 | 0 | threat / contract / field inventory | approval ledger、filter/secret/outbox/correlation/rate/DTO inventory | 完了。production変更なし |
 | 0R | Review remediation | atomic outbox、candidate OpenAPI、metrics cardinality、payload retention、review trace | docs-only範囲で完了。実装PASSではない |
-| F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback | DG-05、Base、Owner、schema方針承認 |
-| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | F1完了とauth/IP承認 |
-| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | field/resource/SLA承認 |
-| A2 | limited command APIs | permission、idempotency、CAS、audit | command一覧と業務承認 |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | delivery SLA/signature/retry承認 |
-| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | provider contractと運用承認 |
-| M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | 全機能完了、security review PASS |
+| 0R-D | delta Review remediation | count/asOf/status-code/correlation header契約 | docs-only範囲で完了。実装PASSではない |
+| F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | PLAN PASS、F1 scope、schema方針確認 |
+| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | F1完了。公開endpointは別承認まで禁止 |
+| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | 別のimplementation scope承認 |
+| A2 | limited command APIs | permission、idempotency、CAS、audit | 未承認。default deny |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | 未承認。外部送信禁止 |
+| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | 未承認。外部受信/UI禁止 |
+| M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | 全機能完了、security review PASS、追加承認 |
 
 ## 完了・引き渡し条件
 
