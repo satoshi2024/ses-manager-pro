@@ -123,7 +123,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    承認済みexternal DTO snapshotだけを保存し、internal entity/provider raw bodyを保存しない。
 3. retentionはsucceeded 30日、failed/DLQ 90日、audit metadata 1年とする。legal hold中はpurgeを
    停止する。t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention classと期限を保存し、
-   terminalのsucceeded/processedは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、CLAIMED、RETRYABLE、
+    terminalのsucceeded/processedは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、PENDING、CLAIMED、RETRYABLE、
    RECEIVED、PROCESSINGはterminal化するまでpurgeしない。
    t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
    purgeは対象rowを同じ順序でlockし、active hold、active lease、row versionをCASで再確認する。purge jobは

@@ -84,7 +84,7 @@ delivery rowとして作成し、元rowを再pending化しない。
 
 t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention_classとretention_expires_atを持つ。
 terminal stateごとの期限は、SUCCEEDED/PROCESSED/DUPLICATEを30日、FAILED/DLQ/CONFLICTを90日とする。
-IN_PROGRESS/CLAIMED/RETRYABLE/RECEIVED/PROCESSINGはterminalになるまでpurge対象にせず、
+IN_PROGRESS/PENDING/CLAIMED/RETRYABLE/RECEIVED/PROCESSINGはterminalになるまでpurge対象にせず、
 audit metadataは既存監査契約のmetadata-only rowとしてcreated_at + 1年を期限にする。payloadは承認済みexternal
 DTO snapshotまたはallow-listed parsed fieldsに限り、raw request/body/provider responseは保存しない。
 

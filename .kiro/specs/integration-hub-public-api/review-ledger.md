@@ -60,7 +60,8 @@
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
 - F1: Approved scopeのpersistence基盤を実装中。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
-- 本ledger作成時点で外部送信、migration、production Java、UI変更は行っていない。docs-only remote pushのみ実施した。
+- Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
+  persistence基盤の実装に限定している。
 
 ## Required gates before F1
 
