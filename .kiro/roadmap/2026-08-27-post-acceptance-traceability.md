@@ -147,6 +147,8 @@
 - scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL
   （P0=0、P1=3、P2=0）。security chain監査/error boundary、canonicalTarget byte生成、
   disabled deny-only/bean/config契約をdocs-onlyで補正後、同じR-NF05へ再Reviewする。
+- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。
+  最終trace commit後のremote Headを同じR-NF05へ再提出し、PLAN PASS受領前はF2を開始しない。
 
 ### DG-06 NF-06
 

@@ -67,7 +67,8 @@ evidence path、F2開始条件を照合する。
 ExternalApiAuditBoundaryは既存ApiAuditFilterの代替ではなく、external GETを含む全decisionの
 専用監査境界である。nonce commit前のsource IP確定、canonicalTarget golden vector、disabled
 deny-only chainとbean不存在を仕様・受入テストへ固定した。SPEC_ADDRESSEDは独立Plan Reviewの
-PASSを意味せず、新しいremote Headを同じR-NF05へ再提出する。
+PASSを意味せず、remediation commit e18f0d589b63223bf864bb33c6910b56a59d940eを同じremote branchへ
+pushしたうえで、新しいremote Headを同じR-NF05へ再提出する。
 
 ## Findings
 

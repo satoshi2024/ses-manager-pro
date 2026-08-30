@@ -139,6 +139,7 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 - Scope expansion Plan delta Review: 1547871caed049ba14d1e5e4a25ad50fa19771fc、PLAN FAIL（P0=0、P1=4、P2=2）
 - Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a（docs-only、remoteへpush済み）
 - Scope expansion Plan delta re-Review: 9cca2deec9ab1bd5417aaba98f859ed14210da13、PLAN FAIL（P0=0、P1=3、P2=0）
+- Scope expansion Plan delta residual remediation commit: e18f0d589b63223bf864bb33c6910b56a59d940e（docs-only、remoteへpush済み）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS
