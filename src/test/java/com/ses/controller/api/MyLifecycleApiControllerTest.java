@@ -1,6 +1,7 @@
 package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
@@ -137,6 +138,16 @@ class MyLifecycleApiControllerTest {
                 .build();
         engineer2.setOrganizationId(org.getId());
         engineerMapper.insert(engineer2);
+
+        // 共有H2では別contextが採番を再利用するため、前回fixtureのリンクを先に除去する。
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, engineer1.getId()));
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, engineer2.getId()));
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, engineerUser1.getId()));
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, engineerUser2.getId()));
 
         EngineerAccountLink link1 = new EngineerAccountLink();
         link1.setEngineerId(engineer1.getId());
