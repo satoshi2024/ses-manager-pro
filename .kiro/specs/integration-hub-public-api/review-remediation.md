@@ -91,7 +91,7 @@ canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。初回r
 | 対象 | 状態 | Review境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | `874fface3bfe90dd27b766ddf9aeff4e00eae591`を既存R-NF05へ再handoff。独立再Review完了までB1を開始しない |
+| A1 | REMEDIATED_REVIEW_PENDING | 再Review FAIL fixed Head `cddd4850`のNF05-IMPL-A1-005〜007を`626e3e65`で追加remediate。独立再Review完了までB1を開始しない |
 
 remediation focused/integration suiteは23/23 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。Linux実connectorの401/200再実行結果を独立Reviewで確認する。
 

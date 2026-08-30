@@ -29,7 +29,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | Wave | 状態 | 開始条件・境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | 初回Review FAIL（`111f4baa`、P0=0/P1=2/P2=2）を`874fface`で修正。独立再Review待ち |
+| A1 | REMEDIATED_REVIEW_PENDING | 初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でP1=1/P2=2（purge、asOf精度、E2E fixture）が残り、追加remediation中 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |

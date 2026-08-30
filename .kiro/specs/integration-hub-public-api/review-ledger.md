@@ -21,7 +21,7 @@
 |---|---|---|
 | F1 | APPROVED | PLAN PASS / IMPLEMENTATION PASS。fixed reviewed Head 7e50bf1360ea8d7271acc0667593635451300268 |
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | 初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）を`874fface3bfe90dd27b766ddf9aeff4e00eae591`で修正。独立再Review待ち |
+| A1 | REMEDIATED_REVIEW_PENDING | 初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でP1=1/P2=2が残り、NF05-IMPL-A1-005〜007を追加remediate中 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。development/test mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。production受信enablementなし |
@@ -243,7 +243,7 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head
   7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）を正本化している。
 - F1はPLAN PASS / IMPLEMENTATION PASSを維持する。scope expansion Plan deltaはca27f455でPLAN PASS、
-  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediate済みのREMEDIATED_REVIEW_PENDING、B1/B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
+  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface`系列でremediateしたが、再Review fixed Head `cddd4850`でP1=1/P2=2が残り追加remediation中のREMEDIATED_REVIEW_PENDING、B1/B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
 - A1 remediationを既存R-NF05へ独立再Reviewとして依頼する。F1 gate、Owner Gate、0R/0R-D、F2 PASSの状態は再オープンしない。A1再Review完了までB1は開始しない。
 - P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。production endpoint enablement、実顧客credential、実provider送信、PR、mergeは引き続き禁止する。
 

@@ -33,7 +33,7 @@
 | Scope expansion approval reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値） |
 | F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
 | F2 | IMPLEMENTATION_PASS。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING。初回FAIL（`111f4baa`、P1=2/P2=2）を`874fface3bfe90dd27b766ddf9aeff4e00eae591`で修正 |
+| A1 | REMEDIATED_REVIEW_PENDING。初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でP1=1/P2=2が残り、追加remediation中 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |

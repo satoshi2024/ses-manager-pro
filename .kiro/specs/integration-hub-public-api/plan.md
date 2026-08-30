@@ -26,7 +26,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | 0R-P6 | scope expansion Plan delta residual remediation | security chain監査/error境界、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約 | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
-| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、contract tests | REMEDIATED_REVIEW_PENDING。初回FAILを`874fface`で修正 |
+| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | REMEDIATED_REVIEW_PENDING。再Review FAIL（`cddd4850`、P1=1/P2=2）の3件を追加remediate中 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
 | B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | APPROVED_SEQUENCED。A1 Review後、mock/loopbackのみ |
 | B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
@@ -151,7 +151,7 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2はIMPLEMENTATION_PASS、A1は初回Review FAIL（fixed Head `111f4baa`、P0=0/P1=2/P2=2）を`874fface`でremediate済みのREMEDIATED_REVIEW_PENDING、B1/B2/MはAPPROVED_SEQUENCEDである。A1独立再Implementation Review PASS後に順次開始する。A2は
+F2はIMPLEMENTATION_PASS、A1は初回Review FAIL（fixed Head `111f4baa`、P0=0/P1=2/P2=2）を`874fface`系列でremediateしたが、再Review fixed Head `cddd4850`でP1=1/P2=2が残ったREMEDIATED_REVIEW_PENDINGである。追加3件の独立再Review PASS後にB1→B2→Mを順次開始する。A2は
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
 credential、実providerへの外部送信は引き続き禁止する。
 
