@@ -48,6 +48,10 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   t_notification_outboxとAccounting IntegrationJobは変更・二重書込みせず、t_api_deliveryをNF-05専用ledgerとして
   分離する。各retention対象へclass/expiryを付け、t_api_retention_holdとt_api_purge_checkpointをlock/CAS規則で扱う。
   service interfaceは汎用IService/CRUDを公開せず、用途別snapshot allow-listとcanonical state transitionを通るtyped operationだけにする。
+  snapshotのpayload/canonicalPayloadは構造化object、changedFieldNamesはbounded string arrayに限定し、raw body/PIIの
+  scalar埋込みを拒否する。quota subjectとpurge checkpointの初期化はupsert-first、quota transactionはREAD COMMITTED＋
+  bounded deadlock retryとし、hold/purgeはcheckpoint→target→holdの共通lock順序を使う。delivery purgeはlease token/expiry
+  の片方NULLをfail-closedで除外する。
   idempotency/inboundのhash conflictは例外だけで終わらせずCONFLICT rowへ永続化する。purgeはretention_expires_at,idの
   keyset cursorを使い、active hold/lease除外、hold解除・restore時reset、候補末尾reset、delete直前のversion/lease再確認を行う。
   state enumはidempotency=IN_PROGRESS/SUCCEEDED/FAILED/CONFLICT、delivery=PENDING/CLAIMED/RETRYABLE/SUCCEEDED/FAILED/DLQ、
@@ -59,15 +63,16 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   直前/直後、minute/day境界、clock rollback、Retry-After、片方のquota更新失敗、nonce atomic unique/TTL/purge、
   delivery no-double-write、purge期限境界、legal hold競合、active lease、部分失敗、restore epoch後全件再評価、
   idempotency/delivery/inboundのcanonical enum全値・遷移・terminal retention mapping・alias/逆遷移拒否、service汎用CRUD迂回拒否、
-  snapshot構造allow-list、idempotency/inbound conflict永続化、active lease後のkeyset再評価。
+  snapshot構造allow-list、idempotency/inbound conflict永続化、active lease後のkeyset再評価、実service/mapperを使うMySQL複数connection競合（usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicate）を含む。
 - Demo: secret原文非表示、同key別payload拒否、rate key/IP分離、nonce replay拒否、t_api_delivery分離、
   burst/refillと三つのquota境界、migration証跡、DB transaction内外の境界、canonical state遷移、hold/purge/restoreの
   状態遷移を示す。
 - 実施証跡: `a7654b44`でV129 MySQL migration、H2 schema/init、entity/mapper/service/crypto基盤、
-  `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
+  `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、`5a2a0231`でfollow-up reviewの4 P1を実装・テストremediateし、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
   Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
   production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで終了している。独立Implementation Reviewの
-  remediation再Reviewは未実施である。MySQL multi-connection F1 concurrency test 3件はPASSした。
+  旧remediation時点の再Reviewは未実施だった。follow-up remediation後の固定Headを独立Implementation Reviewへ再提出する。
+  MySQL `IntegrationHubF1MySqlConcurrencyTest` 5件はPASSした。
 
 ## Task F2: dedicated security chain
 

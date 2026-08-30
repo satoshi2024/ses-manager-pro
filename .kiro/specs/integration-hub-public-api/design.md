@@ -55,8 +55,9 @@ refillも行わず、時刻を後戻りさせない。minute_window_startはUTC 
 同じ短いDB transactionがrow lockを取得し、minute_count < 60、day_count < 50,000、burst_tokens >= 1の三条件を
 同時に満たす場合だけminute_count/day_countを各1増加しburst_tokensを1減らす。いずれかが不足する場合はどのcounterも
 変更せずdenyし、Retry-Afterは不足した条件がすべて満たせるまでの最大待機秒を返す（burstは次token境界、minute/dayは
-次のUTC境界）。rowが無い場合のinsert競合はDB unique violationを一度だけ安全に再読込して同じlock/predicateへ収束させる。
-multi-nodeでJVM内counterへfallbackせず、client IDやIPをmetrics labelへ出さない。
+次のUTC境界）。rowが無い場合のinsert競合は、MySQL gap lockを作る先行FOR UPDATEを避けてDB unique upsertで直列化し、
+戻り値に依存せず同じlock/predicateへ収束させる。quotaの短いtransactionはREAD COMMITTEDで実行し、deadlock時は
+transaction全体を限定回数だけ再試行する。multi-nodeでJVM内counterへfallbackせず、client IDやIPをmetrics labelへ出さない。
 
 #### 保存serviceとsnapshotの型境界
 
@@ -68,7 +69,9 @@ ExternalDtoSnapshotはJSON objectを構造的にparseし、用途ごとにSAFE_R
 OUTBOUND_FIELDSのallow-listを適用する。未知field、過大な配列・文字列、重複JSON key、object以外のrootは拒否する。
 idempotencyのsafe responseはcode/statusと承認済みdata fieldだけ、inboundはprovider event metadataと
 allow-listed parsed fieldだけ、outboundは承認済みexternal DTO envelopeだけを保存する。自由記述message、internal
-entity、DB internal ID、secret、PII、provider raw body、stack/SQLは各保存境界へ渡さない。
+entity、DB internal ID、secret、PII、provider raw body、stack/SQLは各保存境界へ渡さない。payload/canonicalPayloadは
+allow-list済みのnested object、changedFieldNamesはbounded string array、その他の値はbounded string/nullに限定し、
+raw body/PIIをscalar文字列として包んだ値も拒否する。
 
 #### Conflictのcanonical persistence
 
@@ -123,8 +126,10 @@ DTO snapshotまたはallow-listed parsed fieldsに限り、raw request/body/prov
 t_api_retention_holdはrecord_kind（IDEMPOTENCY/DELIVERY/INBOUND/AUDIT）とrecord_idを一意に持ち、
 ACTIVE/RELEASED、hold_generation、reason_code、version、created_at、released_atを保存する。record_idは対象rowの
 内部参照に限定し、外部payload、raw body、PIIをhold tableへ複製しない。hold開始、解除、purgeは対象record rowを同じ順序でFOR UPDATEし、
-hold stateまたはrecord versionをCASする。purgeはterminalかつretention_expires_at <= now、active leaseなし、
-ACTIVE holdなしのrowだけを削除する。複数rowのholdはrecord kind/id順にlockしてdeadlockを避ける。holdが先に
+hold stateまたはrecord versionをCASする。purgeはterminalかつretention_expires_at <= now、delivery leaseのtoken/expiryが
+両方NULL、または両方non-NULLでexpiry <= now、
+ACTIVE holdなしのrowだけを削除する。checkpointを確保した後にtarget row、最後にhold rowをlockする共通順序を
+hold開始/解除/purgeで使い、初期checkpointはupsert-firstで作る。複数rowのholdはrecord kind/id順にlockしてdeadlockを避ける。holdが先に
 commitすればpurgeは削除せず、purgeが先にcommitすればhold操作は消失を隠さずgoneとして監査し、active holdを
 削除済みrowへ誤って表示しない。
 
@@ -133,7 +138,8 @@ restore cutover時に新しいrestore_epochをcheckpointへ記録してからpur
 各retention classについてretention_expires_at,idのkeyset cursorでbounded batchを再開する。候補SQLではACTIVE holdと
 期限前のleaseを除外し、hold取得・解除は対象classのcursorをresetする。active leaseのように時間でeligibilityが
 変化するrowをcursorの先へ取り残さないため、候補数がlimit未満ならbatch完了時にcursorをnullへ戻し、次回走査を先頭から
-行う。delete直前には対象rowを同じ順序でFOR UPDATEし、ACTIVE holdなし、leaseなし/期限切れ、terminal state、
+行う。delete直前には対象rowを同じ順序でFOR UPDATEし、ACTIVE holdなし、lease token/expiryのstrictなNULL組合せまたは
+期限切れ、terminal state、
 retention_expires_at <= now、取得時version一致をdelete predicateで再確認する。
 restore後に復活した期限切れrow、復元されたhold、lease競合を同じlock/CAS規則で処理し、purgeは何度実行しても
 同じ結果になる。部分失敗は成功batchを再削除せず、未処理batchを次回へ残し、cursor末尾では再評価のためresetする。

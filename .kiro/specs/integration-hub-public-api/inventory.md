@@ -49,7 +49,7 @@
 | 内部MFA | key version、current-key-version、rotation用keyring設定 | MfaServiceImpl.java、application.yml | REUSE-CANDIDATE。overlap期間、旧key失効、re-encrypt jobの契約を公開credentialで再確認 |
 | Compliance credential | provider経由のversion付きAES/GCM envelope、masked snapshot | ComplianceGateCredentialCryptoServiceImpl.java | REUSE-CANDIDATE。secret原文非表示・safe errorのパターンを採用 |
 | 銀行口座 | encryptedAccountNumber、prod key必須 | BpCompanyServiceImpl.java | 公開field候補に含めない |
-| 公開API credential | 専用entity/credential versionの現行実装なし | GAP | F1承認scope。m_api_clientとt_credential_version、AES-256-GCM keyring、AAD bindingを実装する |
+| 公開API credential | 専用entity、AES-256-GCM envelope、AAD binding、rotation/revoke/expiry service | `ApiClient`、`CredentialVersion`、`CredentialVersionServiceImpl`、`IntegrationHubSecretCryptoService` | CONTRACT_FIXED。原文非表示、24時間overlap、即時revoke、90日expiryを実装済み（F1独立再Review待ち） |
 
 F1実装で固定する承認値:
 
@@ -68,11 +68,11 @@ F1実装で固定する承認値:
 | Accounting worker | due job claim、provider dispatch、stale lease recovery、provider request ID | AccountingIntegrationWorker.java | REUSE-CANDIDATE。公開API deliveryと業務会計jobの責務分離を決める |
 | Accounting provider | providerName、canonical DTO、外部I/Oはtransaction外の契約 | AccountingProvider.java | provider adapter境界の参考。公開API DTOをcanonical会計DTOへ流用しない |
 | Accounting idempotency | snapshot bytesのSHA-256、業務job unique、状態CAS | IntegrationJobMapper.java、各integration service | REUSE-CANDIDATE。同key異payload conflictの外部契約を追加検証 |
-| NF-05 delivery ledger | event_id、subscription_id、delivery_generation、external DTO snapshot、payload hash、lease/CAS、retry、DLQ | 現行公開API向けentityなし | DECIDED_SEPARATE。t_api_deliveryをNF-05専用に新設し、第二の汎用outboxは作らない |
-| Inbound event | provider event ID、raw hash、allow-listed parsed fields、processing result、retention expiry | 現行公開API向けentityなし | GAP。t_inbound_eventと一意性、conflict、DLQ、manual replayが必要 |
-| Nonce replay ledger | client、credential version、nonce hash、accepted/expiry時刻 | 現行公開API向けentityなし | GAP。t_api_nonce_replay、client+nonce hash unique、TTL purgeが必要 |
-| Retention hold/checkpoint | record kind/id、ACTIVE/RELEASED、generation/version、restore epoch、expires-at cursor | 現行公開API向けentityなし | GAP。t_api_retention_holdとt_api_purge_checkpoint、lock/CAS/purge再評価が必要 |
-| Usage bucket | client×scope×tenant×route template、minute/day counter、capacity 20 token、3秒ごとに1 token refill、burst state | 公開client quotaの現行entityなし | CONTRACT_FIXED。IP/raw pathを保存キーにせず、DB uniqueと同一transactionの条件付きincrementでmulti-node atomicityを実装する |
+| NF-05 delivery ledger | event_id、subscription_id、delivery_generation、external DTO snapshot、payload hash、lease/CAS、retry、DLQ | `ApiDelivery`、`ApiDeliveryMapper`、`ApiDeliveryServiceImpl`、`t_api_delivery` | DECIDED_SEPARATE。NF-05専用ledgerを実装済み。第二の汎用outboxは作らない（独立再Review待ち） |
+| Inbound event | provider event ID、raw hash、allow-listed parsed fields、processing result、retention expiry | `InboundEvent`、`InboundEventMapper`、`InboundEventServiceImpl`、`t_inbound_event` | CONTRACT_FIXED。unique/conflict/claim/CAS基盤を実装済み（外部受信・DLQ UIは未着手、独立再Review待ち） |
+| Nonce replay ledger | client、credential version、nonce hash、accepted/expiry時刻 | `ApiNonceReplay`、`ApiNonceReplayServiceImpl`、`t_api_nonce_replay` | CONTRACT_FIXED。client+nonce hash unique、TTL bounded purge、raw nonce非保存基盤を実装済み（独立再Review待ち） |
+| Retention hold/checkpoint | record kind/id、ACTIVE/RELEASED、generation/version、restore epoch、expires-at cursor | `ApiRetentionPurgeServiceImpl`、`t_api_retention_hold`、`t_api_purge_checkpoint` | CONTRACT_FIXED。checkpoint→target→holdの共通lock順序、hold/purge CAS、active lease strict predicate、restore再評価をF1へ実装済み（独立再Review待ち） |
+| Usage bucket | client×scope×tenant×route template、minute/day counter、capacity 20 token、3秒ごとに1 token refill、burst state | `ApiUsageBucket`、`ApiUsageBucketMapper`、`ApiUsageBucketServiceImpl`、`t_api_usage_bucket` | CONTRACT_FIXED。IP/raw pathを保存キーにせず、DB unique upsert＋READ COMMITTEDの短いtransaction、FOR UPDATE/条件付きincrement、限定deadlock retryでmulti-node atomicityを実装済み（F1独立再Review待ち） |
 | Canonical state/retention | idempotency/delivery/inboundのenum、遷移、terminal class/起算点 | 現行NF-05状態entityなし | CONTRACT_FIXED。RETRYABLE等のcanonical名、逆遷移拒否、全terminalの30/90日mappingをF1へ固定する |
 
 原則: 新しい第二の汎用outboxは作らない。既存notification outboxとAccounting IntegrationJobは責務を維持し、
@@ -158,3 +158,10 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | retention | idempotency digest/safe snapshot、inbound hash/allow-list fields、outbound external DTO snapshot。retention class/expiry、succeeded 30日、failed/DLQ 90日、audit metadata 1年 |
 | purge | t_api_retention_holdのlock/CAS、active lease競合、期限境界、再実行、部分失敗、restore epoch後の全件再評価の証拠が必要 |
 | boundary | external callがDB transaction外、通常checkout無変更、base/head固定、push後remote/local一致 |
+
+F1実装後の証跡更新:
+
+- `5a2a023178433882bc1c5dcf92e19b5ecfa19db6`で、snapshotのfield-specific構造検証、delivery leaseのfail-closed、
+  checkpoint→target→hold lock順序、quota初期化競合のupsert/短transactionを実装した。
+- H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
+- 実装はF1 persistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablement、UIは未着手。

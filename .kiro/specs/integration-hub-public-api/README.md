@@ -3,7 +3,7 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1 implementation remediation済み・独立再Review待ち
+- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1 follow-up implementation remediation済み・独立再Review待ち
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -39,8 +39,10 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約
 production enablement、command/exportは引き続き禁止する。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
-`d476614e`。V129 MySQL Flyway smoke、F1 H2 targeted
-suite（31 tests、failure/error/skipなし）、MySQL multi-connection concurrency（3 tests、failure/error/skipなし）を確認した。
+`d476614e`、follow-up remediationは `5a2a0231`。V129 MySQL Flyway smoke、F1 H2 targeted
+suite（31 tests、failure/error/skipなし）、MySQL `IntegrationHubF1MySqlConcurrencyTest`（5 tests、failure/error/skipなし）を確認した。
+follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378a352b1fa000dd1`でFAIL（P0=0、P1=4、P2=0）だったため、
+`5a2a0231`の再Reviewを残している。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わず、独立Implementation Reviewを残している。
 

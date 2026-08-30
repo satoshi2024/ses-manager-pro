@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1 remediation中）
+# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1 follow-up remediation中）
 
 ## 現在のゲート
 
@@ -46,7 +46,17 @@ FAIL（P0=0、P1=7、P2=2）だった。F1 approved scope内で、typed snapshot
 canonical persistence、delivery CAS、purge keyset/hold/lease競合、credential overlap、route templateを
 修正し、implementation commit `a184c1f4`へpushした。その後、delivery CASへgeneration predicateを追加する
 残存指摘を`d476614e`で修正した。H2 F1対象31 testsとMySQL multi-connection concurrency
-3 testsはPASSしたが、独立Implementation Reviewの再判定を受けるまでF1をPASS扱いしない。
+3 testsはPASSした。follow-up reviewは固定Head `dff90b3961b647035436abd378a352b1fa000dd1`に対して
+FAIL（P0=0、P1=4、P2=0）となったため、`5a2a0231`でsnapshotのfield-specific構造検証、NULL leaseの
+fail-closed、checkpoint→target→holdの共通lock順序、実service/mapperを使うMySQL 5競合証跡を追加した。
+H2 F1対象31 testsとMySQL 5 testsはPASSしたが、独立Implementation Reviewの再判定を受けるまでF1をPASS扱いしない。
+
+follow-up remediationの実装境界:
+
+- ExternalDtoSnapshotのpayload/canonicalPayloadはallow-list済み構造化object、changedFieldNamesはbounded string array、その他fieldはbounded string/nullだけとし、raw body/PIIを文字列へ埋め込めないようにする。
+- delivery purgeはlease tokenとlease expiryが両方NULL、または両方non-NULLかつexpiry<=nowの場合だけ候補/削除可能とする。
+- retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
+- MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
 F2、A1、A2、B1、B2、M、public endpoint、外部送信、production enablement、command/exportは引き続き未着手・禁止である。
 

@@ -40,13 +40,15 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    burst stateをこの論理キーへ結び付け、source IPを保存キーへ含めない。routeはraw pathではなく正規化した
    route templateを使い、capacity 20 token、3秒ごとに1 token refillの固定token bucket、条件付きincrement、
    DB uniqueでmulti-nodeの60 req/min、burst 20、日次50,000を原子的に判定する。minute/day/burstの全条件を
-   同一transactionで満たした場合だけconsumeし、Retry-Afterは不足条件の最大待機秒を返す。
+    同一transactionで満たした場合だけconsumeし、Retry-Afterは不足条件の最大待機秒を返す。欠落subjectの初期化は
+    gap lockを作る先行FOR UPDATEを避けるinsert/upsert-firstとし、insert/既存rowを同じrow lockへ収束させる。
 9. 署名検証済みnonceはt_api_nonce_replayへatomic insertし、client_id + nonce_hash uniqueで重複を拒否する。
    raw nonce、署名、body、secret、PIIは保存せず、expires_at <= server_nowをbounded purgeする。TTLは
    max(accepted_at, signed_timestamp) + 5分とし、認証失敗へ安全に収束させる。
 10. F1のpersistence serviceは汎用IService/CRUDを公開せず、許可された遷移・状態・snapshot型を受ける
     明示的なcommandだけを公開する。mapperは内部実装に限定し、external DTO snapshotは保存用途別の
-    allow-list（safe response / inbound / outbound）を構造的に検証する。
+     allow-list（safe response / inbound / outbound）を構造的に検証する。payload/canonicalPayloadは用途別allow-listの
+     構造化objectだけ、changedFieldNamesはbounded string arrayだけを許可し、raw body/PIIの文字列埋込みを拒否する。
 11. Idempotency-Keyのdigest不一致は例外を返す前にIN_PROGRESS rowをCONFLICT、409、安全な固定code、
     90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
     RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。
@@ -132,8 +134,9 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    停止する。t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention classと期限を保存し、
     terminalのsucceeded/processedは30日、failed/conflict/DLQは90日とする。IN_PROGRESS、PENDING、CLAIMED、RETRYABLE、
    RECEIVED、PROCESSINGはterminal化するまでpurgeしない。
-   t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
-   purgeは対象rowを同じ順序でlockし、active hold、active lease、row versionをCASで再確認する。purge jobは
+    t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
+    purgeはcheckpoint→target row→holdの共通順序でlockし、active hold、active lease、row versionをCASで再確認する。
+    deliveryのleaseはtokenとexpiryが両方NULL、または両方non-NULLでexpiry<=nowの場合だけpurge可能とする。purge jobは
    期限境界、再実行、部分失敗、backup/restore後のpurgeを安全に扱い、restore後はcheckpointを信用せず全対象を
    再評価する。bounded purgeのcursorはretention_expires_at,idのkeysetとし、active holdは解除時、active leaseは
    eligibility集合の末尾到達時にcursorをresetして再評価する。候補取得時に除外された時間依存rowをcursorの先へ
@@ -167,5 +170,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
 - legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。
 - active leaseでkeyset先を通過した後のlease expiry再評価、hold解除時cursor reset、checkpointの同時claim/CAS。
+- 実MySQLの複数connectionから実service/mapperを通したusage unique初期化、delivery CAS、hold/purge競合、NULL lease
+  fail-closed、inbound duplicate raceが、deadlockなくcanonical stateへ収束すること。
 - idempotency/delivery/inboundのcanonical enum全値が一つの遷移表とretention class/起算点へ漏れなく分類され、
   alias状態、terminal逆遷移、期限境界、各CAS失敗を許可しないこと。
