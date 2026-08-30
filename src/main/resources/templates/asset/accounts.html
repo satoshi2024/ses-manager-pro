@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>外部アカウント・ライセンス管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid p-4">
+
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="fw-bold mb-0 text-white"><i class="bi bi-shield-lock me-2"></i>外部アカウント・ライセンス管理</h4>
+            <p class="text-muted small mb-0">SaaS/IdPアカウント参照・秘密非保存統制・有償ライセンス席数管理</p>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-info btn-sm" id="btnOpenPlanModal">
+                <i class="bi bi-plus-circle me-1"></i>ライセンスプラン登録
+            </button>
+            <button class="btn btn-primary btn-sm" id="btnOpenAccountModal">
+                <i class="bi bi-person-plus me-1"></i>アカウント参照登録
+            </button>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4 border-secondary">
+        <li class="nav-item">
+            <a class="nav-link text-secondary" href="/asset/list">
+                <i class="bi bi-pc-display me-1"></i>資産台帳
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link text-secondary" href="/asset/inventory">
+                <i class="bi bi-clipboard-check me-1"></i>棚卸し管理
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link active fw-bold text-white bg-tertiary" href="/asset/accounts">
+                <i class="bi bi-shield-lock me-1"></i>外部アカウント・ライセンス
+            </a>
+        </li>
+    </ul>
+
+    <!-- ライセンスプラン席数消費ダッシュボード -->
+    <div class="card bg-secondary border-secondary mb-4">
+        <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+            <span class="fw-bold"><i class="bi bi-pie-chart me-1"></i>有償ライセンス席数サマリー</span>
+        </div>
+        <div class="card-body py-3">
+            <div class="row g-3" id="licensePlanCards">
+                <div class="col-12 text-center text-muted py-2">読み込み中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部アカウント参照一覧 -->
+    <div class="card bg-secondary border-secondary">
+        <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+            <span class="fw-bold"><i class="bi bi-people me-1"></i>外部アカウント参照一覧</span>
+            <div class="d-flex gap-2">
+                <select class="form-select form-select-sm bg-dark text-white border-secondary" id="filterSystemSelect" style="width: 200px;">
+                    <option value="">全外部システム</option>
+                </select>
+                <select class="form-select form-select-sm bg-dark text-white border-secondary" id="filterStatusSelect" style="width: 150px;">
+                    <option value="">全ステータス</option>
+                    <option value="ACTIVE">ACTIVE (有効)</option>
+                    <option value="SUSPENDED">SUSPENDED (停止中)</option>
+                    <option value="REVOKED">REVOKED (失効済)</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover mb-0 align-middle">
+                    <thead class="table-dark text-secondary small">
+                        <tr>
+                            <th>システム</th>
+                            <th>アカウント識別子</th>
+                            <th>紐付け先</th>
+                            <th>権限レベル</th>
+                            <th>ステータス</th>
+                            <th>発行日</th>
+                            <th>失効確認日時</th>
+                            <th class="text-end">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountTableBody">
+                        <tr><td colspan="8" class="text-center py-4 text-muted">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- アカウント参照登録モーダル -->
+    <div class="modal fade" id="accountModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-secondary text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">外部アカウント参照登録</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="accountForm">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">外部システム <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm bg-dark text-white border-secondary" id="inputSystemId" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">アカウント識別子 (メール / ID) <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputAccountIdentifier" required placeholder="例: yamada.taro@company.com">
+                            <small class="text-warning small"><i class="bi bi-shield-exclamation me-1"></i>パスワードやトークンは絶対にここに入力しないでください。</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">紐付け区分 <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm bg-dark text-white border-secondary" id="inputAssigneeType" required>
+                                <option value="ENGINEER">要員 (Engineer)</option>
+                                <option value="USER">社内ユーザー (SysUser)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">対象ID (要員ID / ユーザーID) <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputAssigneeId" required placeholder="対象IDを入力">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">権限レベル</label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputPermissionLevel" placeholder="例: ADMIN, DEVELOPER, MEMBER">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-primary btn-sm">登録</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ライセンスプラン登録モーダル -->
+    <div class="modal fade" id="planModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-secondary text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">ライセンスプラン登録 / 編集</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="planForm">
+                    <input type="hidden" id="planId">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">プランコード <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputPlanCode" required placeholder="例: LIC-GITHUB-ENT">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">プラン名 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputPlanName" required placeholder="例: GitHub Enterprise">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">購入席数上限 <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputSeatLimit" required placeholder="例: 50" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">1席あたり月額単価 (円)</label>
+                            <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary"
+                                   id="inputCostPerSeat" placeholder="例: 2500">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-primary btn-sm">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/asset-accounts.js}"></script>
+</th:block>
+</body>
+</html>
