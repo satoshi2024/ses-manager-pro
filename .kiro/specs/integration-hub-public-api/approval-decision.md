@@ -28,6 +28,36 @@ service基盤、H2/MySQL migration、test、purge、rollback証跡、およびF1
 public endpointの公開、外部送信、A1、A2、B1、B2、production enablementはこの承認では開始しない。
 command/exportはdefault denyとし、A2 commandは未承認である。
 
+## Scope expansion decision
+
+| 項目 | 正本値 |
+|---|---|
+| DecisionId | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 |
+| Decision date | 2026-08-30 |
+| OwnerRef | PROJECT_OWNER |
+| OwnerType | ROLE |
+| Base | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
+| Current reviewed remote Head | 7e50bf1360ea8d7271acc0667593635451300268 |
+| F1 gate | PLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持。再オープンしない |
+| Implementation branch | codex/integration-hub-public-api |
+| Allowed remote push | origin/codex/integration-hub-public-api only |
+
+このDecisionは、F1 PASS後の開発scopeを拡張する。F2 dedicated security chain、A1 v1 GET-only read
+API/OpenAPI、B1 outbound webhook、B2 inbound webhook/DLQ/admin UI、Mのpenetration/recovery/
+performance/scan/runbook、および各waveのspec、migration、H2/MySQL、contract/security test、docs trace、
+commit/push、独立Review remediationを承認する。開発・test環境のmock/stub providerとloopback test serverも
+承認する。production enablement、実顧客credential、実providerへの外部送信、main変更、force push、mergeは
+引き続き禁止する。
+
+| Wave | Decision status | 境界 |
+|---|---|---|
+| F2 | APPROVED_NOT_STARTED | Plan delta PASS後に着手。専用security chain、client principal、scope/data scope、audit、rate/IP |
+| A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 paths、inventory allow-list、external DTOのみ |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
+| B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
+| B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
+| M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
+
 ## Approved contract and security values
 
 1. API利用者は管理者が事前登録したB2B system clientのみとする。clientはtenant、legal entity、data
@@ -63,7 +93,11 @@ command/exportはdefault denyとし、A2 commandは未承認である。
 
 ## Required next gate
 
-Owner承認済みのため、Plan Reviewへ固定remote Headを渡せる。独立Plan ReviewのPLAN PASSを受領するまで
-F1 production code、migration、test source、外部送信、public endpoint、UI変更は開始しない。PLAN FAIL時は
-specを修正して同じremote branchへcommit/pushし、再Reviewする。PLAN PASS後のF1ではTask単位にcommit/pushし、
-最終的に独立Implementation Reviewへ渡す。
+F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、
+再オープンしない。scope expansion docs-only gateのcommit/push後、同じ固定remote branchを既存R-NF05へ
+Plan delta Reviewとして渡す。Plan delta PASS前はF2 implementationを開始しない。FAILの場合はspec/architecture
+remediationだけを同じbranchへcommit/pushして再Reviewする。
+
+Plan delta PASS後はF2→独立Implementation Review→A1→Review→B1→Review→B2→Review→M→最終Reviewの順に
+継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

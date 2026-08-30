@@ -1,8 +1,10 @@
-# NF-05 Public API 設計（Owner承認済み・F1/Plan Review対象）
+# NF-05 Public API 設計（scope expansion承認済み・Plan delta Review対象）
 
 ## 1. 適用範囲と境界
 
-この設計はDG-05-F1-APPROVAL-20260830-01で承認されたF1実装入力である。公開機械クライアントは内部管理chain、
+この設計はDG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02で承認された
+NF-05実装入力である。F1は独立PLAN/IMPLEMENTATION PASS済みで、F2以降はscope expansionのPlan delta PASS後に
+順次開始する。公開機械クライアントは内部管理chain、
 portal chain、既存のanonymous webhook例外へ混ぜず、/external-api/v1/** を専用chainで処理する。
 公開clientを内部roleへ変換せず、client principalにtenant、legal entity、client scope、data scope、
 command permission、credential version、correlation IDを束ねる。
@@ -285,10 +287,14 @@ Mではsecurity review、負荷とrate boundary、DB/worker/provider停止、res
 secret/PII scan、payload purge、alert、runbook、固定remote Headを証拠化する。全テストとReviewの
 PLAN/IMPLEMENTATION PASS後のみPR作成を許可する。
 
-## 9. F1開始条件と禁止範囲
+## 9. Wave開始条件と禁止範囲
 
-- 独立Plan ReviewのPLAN PASS、approved Baseの再fetch確認、migration最大値の再確認。
+- scope expansionのPlan delta ReviewのPASS、approved Baseの再fetch確認、各waveのmigration最大値の再確認。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
-  abstractionだけを実装する。secret、raw body、PIIは保存しない。
-- public endpoint、外部送信、A1、A2、B1、B2、production enablement、command、exportはこのscopeで禁止する。
-- F1完了後は独立Implementation Reviewへ渡し、MとPLAN/IMPLEMENTATION双方PASS後までPRを作成しない。
+  abstractionを実装済みとする。secret、raw body、PIIは保存しない。
+- F2はPlan delta PASS後に開始し、A1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
+  A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
+- B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
+  実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。
+- Mではsecurity review、負荷、障害訓練、key rotation/revoke、secret/PII scan、runbook、remote/local Head固定を完了し、
+  最終PLAN/IMPLEMENTATION PASS後までPRを作成しない。

@@ -3,8 +3,8 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1独立Implementation Review PASS（P0=0、P1=0、P2=0）、M未完了
-- Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
+- 本specの状態: F1独立Implementation Review PASSを維持。scope expansionは承認済み、Plan delta Review待ち、F2未着手、A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
+- Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
 - Base branch: origin/main
@@ -13,18 +13,20 @@
 - 専用worktree: C:\work\ses-manager-pro-integration-hub-public-api
 - 専用branch: codex/integration-hub-public-api
 
-この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。独立Plan ReviewがPASSするまで、
-production Java、SQL/migration、画面、既存shared file、production test、外部送信、public endpointを開始しない。
-F1の実装と証跡は許可されたremote branchへpushできるが、force push、main変更、PR、mergeは行わない。
+この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。scope expansionの
+Plan delta ReviewがPASSするまでF2のproduction Java、SQL/migration、画面、既存shared file、production test、
+外部送信、public endpointを開始しない。Plan delta PASS後は承認済みwaveを順に実装できるが、development/testの
+mock/stub providerとloopback test serverに限定し、production enablement、実顧客credential、実provider送信は
+行わない。force push、main変更、PR、merge、auto-mergeは禁止する。
 
 ## 承認ゲート
 
 | ゲート | 現在 | production変更開始条件 |
 |---|---|---|
-| Approved resources/commands | APPROVED | GET-only 11 paths、inventory allow-list、command/exportなし |
+| Approved resources/commands | APPROVED | GET-only 11 paths、inventory allow-list、command/exportなし。A2はN/A |
 | Owner | APPROVED | PROJECT_OWNER、OwnerType=ROLE |
 | Base branch/commit | APPROVED | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
-| DG-05 | APPROVED | DG-05-F1-APPROVAL-20260830-01 |
+| DG-05 | APPROVED | F1: DG-05-F1-APPROVAL-20260830-01／scope expansion: DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 |
 | Threat model | APPROVED | 承認済み11脅威をF1〜Mの受入対象として固定 |
 | 認証方式 | APPROVED | HMAC-SHA256 signed service account、OAuth fallbackなし |
 | 契約SLA | APPROVED | 月間99.9%、p95 500ms、保守7日前、重大障害60分以内、v1廃止予告180日 |
@@ -33,10 +35,10 @@ F1の実装と証跡は許可されたremote branchへpushできるが、force p
 ## Review結果とF1開始
 
 中央の受入後traceabilityとapproval-decision.mdにNF-05のAPPROVED、OwnerRef、DecisionId、Base SHA、
-scope、auth、SLA、field inventoryを固定した。R-NF05は固定Head 1db3b2fc2657831b7c6c1e59217301302b7caa80で
-PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約とtrace記載の補正であり、F1開始を
-妨げない。F1の実装は承認済みpersistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、
-production enablement、command/exportは引き続き禁止する。
+scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implementation ReviewはPASS済みであり、
+固定Head 7e50bf1360ea8d7271acc0667593635451300268で再オープンしない。scope expansionのdocs-only gateを
+同Headから作成し、既存R-NF05へPlan delta Reviewを渡す。Plan delta PASS後はF2→A1→B1→B2→Mを順次実装し、
+A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
 `d476614e`、follow-up remediationは `5a2a0231`、typed snapshot correctionは `96d6801c`。V129 MySQL Flyway smoke、F1 H2 targeted
@@ -45,7 +47,8 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `5a2a0231`の再Reviewを行った。固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1=1（nested scalar bypass）が残ったため、
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
-public endpoint、外部送信、production enablementは未完了である。
+public endpoint、外部送信、production enablementは未完了である。F2/A1/B1/B2/Mはscope expansion承認済みだが、
+Plan delta PASSまでは未着手とする。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 

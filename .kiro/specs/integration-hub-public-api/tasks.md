@@ -1,11 +1,12 @@
-# NF-05 Public API Tasks（Owner承認済み・Plan PASS・F1実装完了）
+# NF-05 Public API Tasks（scope expansion承認済み・F1 Implementation PASS・Plan delta待ち）
 
 ## 実行停止規則
 
-Owner承認済みscopeはF1 persistence基盤に限定する。独立Plan ReviewのPLAN PASS前はproduction code、migration、
-test source、API、UI、外部送信を開始しない。PLAN PASS後もpublic endpoint、A1/A2/B1/B2、production enablement、
-command、exportはこの承認の対象外である。approval-decision、Review remediation、Plan Reviewのdocs-only
-commit/pushは指定remote branchへ実施できる。force push、main変更、PR、merge、auto-mergeは行わない。
+F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansionのPlan delta PASS前はF2、API、UI、
+外部送受信の実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
+development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
+実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
 
 ## Task 0: threat / contract / field inventory
 
@@ -80,7 +81,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 
 - [ ] Objective: /external-api/v1/**専用principal、client scope、data scope、command permission、audit、
   correlation、rate/IP境界を実装する。
-- Preconditions: F1完了と別途F2/public endpoint scope承認。現在は未着手・scope外。
+- Preconditions: F1 Implementation PASS、scope expansion Decision、既存R-NF05 Plan delta PASS。現在はAPPROVED_NOT_STARTED。
 - Test requirements: client A/B、scope差、data差、command差、rotation overlap/revoke/expiry、spoof、429、
   Retry-After、filter二重登録、CSRF/anonymous webhook非混入、metrics scrape cardinality。
 - Demo: internal/portal chainと公開chainが相互にprincipalを偽装しない。
@@ -88,7 +89,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 ## Task A1: v1 read APIs / OpenAPI
 
 - [ ] Objective: 承認済みread resourceのlist/detail/count、opaque cursor、stable error、OpenAPIを実装する。
-- Preconditions: 初期contractは承認済みだが、public endpoint enablementとA1 implementation scopeの別承認。
+- Preconditions: F2 Implementation PASS、scope expansion Decision、A1 Review開始条件。現在はAPPROVED_SEQUENCED。
 - Test requirements: external DTO allow-list、entity serialization negative、scope一致、cursor tamper/expiry、
   count/detail/list非列挙、error body secret/PII/内部情報なし。
 - Demo: internal entityを一つもserializeせず、OpenAPIと実レスポンスが一致する。
@@ -96,7 +97,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 ## Task A2: limited command APIs
 
 - [ ] Objective: 承認済みの最小commandだけをCAS、audit、idempotency付きで実装する。
-- Preconditions: 未承認。command/exportはdefault denyのまま。
+- Preconditions: approved command=0件。NOT_APPLICABLE_UNDER_CURRENT_DECISION、command/exportはdefault denyのまま。
 - Test requirements: same key/same payload、same key/different payload、並行claim、CAS失敗、scope/command拒否、
   external call outside transaction。
 - Demo: commandごとにclient scope、data scope、command permissionが独立して評価される。
@@ -104,7 +105,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 ## Task B1: outbound webhook
 
 - [ ] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
-- Preconditions: persistence contractは承認済みだが、外部送信/B1 implementation scopeは未承認。
+- Preconditions: A1 Implementation Review PASS、scope expansion Decision。APPROVED_SEQUENCED、mock/stub/loopbackのみ。
 - Test requirements: signature/timestamp/key overlap、duplicate、claim競合、timeout、429/5xx、4xx no-retry、
   backoff、DLQ、manual replay、provider/correlation ID、snapshot purge。
 - Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。
@@ -112,7 +113,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 ## Task B2: inbound webhook / DLQ / admin UI
 
 - [ ] Objective: provider event unique/hash、processing state、duplicate/conflict、DLQ、内部admin replay UIを実装する。
-- Preconditions: persistence contractは承認済みだが、外部受信/UI/B2 implementation scopeは未承認。
+- Preconditions: B1 Implementation Review PASS、scope expansion Decision。APPROVED_SEQUENCED、production受信enablementなし。
 - Test requirements: signature/timestamp/replay/duplicate、raw hash conflict、transaction rollback、replay safety、
   audit、PII/secret masking、raw bytes非永続化、期限purge、backup/restore後purge。
 - Demo: 同一provider eventは副作用一度、hash違いはconflict/DLQとなる。
@@ -120,7 +121,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 ## Task M: penetration / recovery / performance
 
 - [ ] Objective: security review、負荷、障害訓練、key rotation、scan、runbookを完了し、Headを固定する。
-- Preconditions: F1-B2完了、production-like config、observability、rollback plan。
+- Preconditions: F1-B2完了、各wave Review PASS、development/test mock/loopback config、observability、rollback plan。
 - Test requirements: penetration、rate/IP boundary、DB/worker/provider停止、restore、stale lease、rotation/revoke、
   secret/PII scan、metrics cardinality、payload retention/purge、負荷SLA、alert。
 - Demo: evidence index、runbook、review PLAN/IMPLEMENTATION PASS、remote/local fixed Headを独立Reviewへ渡す。

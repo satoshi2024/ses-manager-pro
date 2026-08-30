@@ -1,12 +1,14 @@
-# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1 follow-up remediation中）
+# NF-05 Public API 実装計画（scope expansion承認済み・F1 Implementation PASS・Plan delta待ち）
 
 ## 現在のゲート
 
-NF-05はAPPROVEDであり、DG-05-F1-APPROVAL-20260830-01（2026-08-30）、OwnerRef=PROJECT_OWNER、
-Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope=GET-only 11 pathsとF1 persistence基盤を
-approval-decision.mdへ固定した。R-NF05の独立Plan Reviewは固定Head 1db3b2fc2657831b7c6c1e59217301302b7caa80で
-PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンしていない。F1は承認済みpersistence基盤に
-限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablement、command/exportを開始しない。
+NF-05はAPPROVEDであり、F1 Decision DG-05-F1-APPROVAL-20260830-01とscope expansion Decision
+DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（いずれも2026-08-30）、OwnerRef=PROJECT_OWNER、
+Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.mdへ固定した。F1は
+7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、再オープンしない。
+現在はscope expansion docs-only gateを既存R-NF05へPlan delta Reviewとして引き渡す段階である。Plan delta PASS後は
+F2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、production enablementと実顧客/実providerは
+引き続き禁止する。
 
 ## 推奨順序
 
@@ -17,13 +19,13 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンし�
 | 0R-D | delta Review remediation | count/asOf/status-code/correlation header契約 | docs-only範囲で完了。実装PASSではない |
 | 0R-P | R-NF05 Plan finding remediation | rate key、nonce ledger、delivery分離、retention/hold/restore contract | docs-only修正後、R-NF05再Review |
 | 0R-P2 | R-NF05 residual Plan remediation | burst algorithm、canonical state/terminal retention mapping | docs-only修正後、R-NF05再Review |
-| F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | R-NF05 PLAN PASS、F1 scope、schema方針確認 |
-| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | F1完了。公開endpointは別承認まで禁止 |
-| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | 別のimplementation scope承認 |
-| A2 | limited command APIs | permission、idempotency、CAS、audit | 未承認。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | 未承認。外部送信禁止 |
-| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | 未承認。外部受信/UI禁止 |
-| M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | 全機能完了、security review PASS、追加承認 |
+| F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
+| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | APPROVED_NOT_STARTED。Plan delta PASS後 |
+| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | APPROVED_SEQUENCED。F2 Review PASS後 |
+| A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | APPROVED_SEQUENCED。A1 Review後、mock/loopbackのみ |
+| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
+| M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
 ## R-NF05 P1 remediationの完了条件
 
@@ -66,7 +68,9 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2、A1、A2、B1、B2、M、public endpoint、外部送信、production enablement、command/exportは引き続き未着手・禁止である。
+F2はAPPROVED_NOT_STARTED、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、Plan delta PASS後に順次開始する。A2は
+NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
+credential、実providerへの外部送信は引き続き禁止する。
 
 これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P2 docs-only commit後、R-NF05が独立に再判定する。
 

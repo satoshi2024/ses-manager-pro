@@ -1,4 +1,4 @@
-# NF-05 完了対応表（Owner承認済み・R-NF05 Plan PASS・F1 Implementation PASS・M未完了）
+# NF-05 完了対応表（scope expansion承認済み・F1 Implementation PASS・Plan delta待ち）
 
 ## Task対応
 
@@ -14,12 +14,13 @@
 | 0R-P4 R-NF05 final Plan Review | review-ledger, review-remediation, completion-matrix | 独立ReviewがP0=0、P1=0、P2=2でPLAN PASS。P2は非blocking | COMPLETE（Review gate） | 1db3b2fc2657831b7c6c1e59217301302b7caa80（fixed review Head） |
 | F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 5 tests、Flyway smoke PASS | IMPLEMENTATION_PASS | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、follow-up `5a2a0231`、typed snapshot `96d6801c`、独立Review PASS |
 | F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）とfollow-up FAIL（P1=4、再Review P1=1）への実装・テスト対応。typed snapshot field boundary、lease fail-closed、lock順序、delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTATION_PASS | `a184c1f4` + `d476614e` + `5a2a0231` + `96d6801c`、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3` → 独立Review PASS |
-| F2 security chain | tasks/design/inventory | 未着手 | DEFERRED_BY_SCOPE | — |
-| A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | candidateのみ。public endpoint未実装 | DEFERRED_BY_SCOPE | — |
-| A2 commands | tasks/design/requirements | command/export未承認・default deny | DISABLED | — |
-| B1 outbound webhook | tasks/design/inventory | persistence contractのみ承認。外部送信未着手 | DEFERRED_BY_SCOPE | — |
-| B2 inbound/DLQ/admin UI | tasks/design/requirements | persistence contractのみ承認。外部受信/UI未着手 | DEFERRED_BY_SCOPE | — |
-| M verification | tasks/design | 未着手 | AFTER_IMPLEMENTATION | — |
+| Scope expansion normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review-ledger、中央traceability | DecisionId、OwnerRef、Base、reviewed Head、wave status、A2 N/A、production禁止境界を正本化。production変更なし | APPROVED / PLAN_DELTA_REVIEW_PENDING | docs-only commit待ち |
+| F2 security chain | tasks/design/inventory | scope expansion承認済み。Plan delta PASS後に着手 | APPROVED_NOT_STARTED | — |
+| A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | GET-only 11 paths、external DTO allow-list。F2 Review後に着手 | APPROVED_SEQUENCED | — |
+| A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
+| B1 outbound webhook | tasks/design/inventory | A1 Review後。development/test mock/stub/loopbackのみ | APPROVED_SEQUENCED | — |
+| B2 inbound/DLQ/admin UI | tasks/design/requirements | B1 Review後。production受信enablementなし | APPROVED_SEQUENCED | — |
+| M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
 
 ## Review handoff
 
@@ -30,12 +31,17 @@ Implementation Review follow-upは`dff90b3961b647035436abd378a352b1fa000dd1`でF
 `5a2a023178433882bc1c5dcf92e19b5ecfa19db6`のremediationを同一Reviewへ再提出した。再ReviewのP1-FU-001を
 `96d6801c37d4b952e2601a06cf7edc1bc1a1bef8`で追加remediateし、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`で
 独立Implementation Review PASS（P0=0、P1=0、P2=0）を受領した。
-PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止する。
+scope expansionのPlan delta Reviewは既存R-NF05へ固定remote Headを渡す。Plan delta PASS前はF2を開始せず、
+FAIL時はspec/architecture remediationだけを同じbranchへcommit/pushする。A2はN/Aで全体完了をblockしない。
+PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止し、production enablement、実顧客credential、実provider送信、
+merge、auto-mergeも禁止する。
 
 Review Head 6e0f5067はremediationの比較基点として固定する。Task 0Rのremediation commit、Owner Gate normalization
 commit、最終remote Headはcommit series＋外部handoff通知で固定し、自己参照hashはcompletion matrixへ埋め込まない。
 
 Review baseline: 6e0f5067d9a6509775225278cc0dcfdc4d47643f
+Scope expansion reviewed Head: 7e50bf1360ea8d7271acc0667593635451300268
+Scope expansion DecisionId: DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02
 Task 0R remediation: 48037c923224f684968dbaf3410cdb37307ed100
 Task 0R-D delta remediation: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
 Owner Gate normalization: 2f91e5a584c5224989780cb323e40f33fda185b6

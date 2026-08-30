@@ -24,6 +24,22 @@
 | Discovery branch | codex/integration-hub-public-api |
 | approved Base | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 
+## 2.1 Scope expansion decisionとwave状態
+
+| 項目 | 正本値 |
+|---|---|
+| DecisionId | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 |
+| Decision date / Owner | 2026-08-30 / PROJECT_OWNER（ROLE） |
+| Reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268 |
+| F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
+| F2 | APPROVED_NOT_STARTED。Plan delta PASS後に専用security chainを実装 |
+| A1 | APPROVED_SEQUENCED。F2 Review PASS後にGET-only 11 pathsを実装 |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
+| B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
+| B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |
+| M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
+| 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
+
 ## 3. Filter chain inventory
 
 | 境界 | 現行実装 | 行/契約 | NF-05への含意 |
@@ -87,7 +103,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | Accounting job | providerRequestId、payload hash、job idを保持 | 参考。公開client request、delivery、inbound eventを同一traceへ結ぶ必要 |
 | Expense/Attendance | provider callへcorrelationIdを渡す経路あり | 参考。global MDC/filterの代替ではない |
 | AI/Compliance | traceId/correlationIdを業務recordへ保存する個別経路あり | 参考。横断公開API correlation contractは未実装 |
-| HTTP filter/MDC | correlation ID専用filter、MDC設定・finally解除を確認できない | BLOCKER。edge filter、validation、log/audit/worker propagationをF1/F2で設計 |
+| HTTP filter/MDC | correlation ID専用filter、MDC設定・finally解除を確認できない | F2 APPROVED_NOT_STARTED。edge filter、validation、log/audit/worker propagationを実装する |
 
 ## 7. Rate limiter / IP inventory
 
@@ -98,7 +114,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
 | ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
-| 公開client rate | 専用実装なし | F1承認scope。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで実装する |
+| 公開client rate | 専用実装なし | F2 APPROVED_NOT_STARTED。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで実装する |
 
 ## 8. External DTO inventory
 
@@ -133,13 +149,13 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 - 氏名、email、電話、住所、口座、個人番号、文書本文、添付、原価、粗利、単価、銀行情報。
 - customer name、engineer name、skill free text、invoice amount。
 
-## 10. Webhook field / operation matrix（契約承認済み・実装延期）
+## 10. Webhook field / operation matrix（契約承認済み・順次実装）
 
 | 種別 | direction | field allow-list | scope/permission | 状態 |
 |---|---|---|---|---|
-| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | APPROVED_CONTRACT_DEFERRED |
-| provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | APPROVED_CONTRACT_DEFERRED |
-| DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | APPROVED_CONTRACT_DEFERRED |
+| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | APPROVED_SEQUENCED（B1） |
+| provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | APPROVED_SEQUENCED（B2） |
+| DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | APPROVED_SEQUENCED（B2 admin UI） |
 
 ## 11. Test / evidence inventory
 
@@ -169,4 +185,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- 実装はF1 persistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablement、UIは未着手。
+- F1 persistence基盤はImplementation PASS済み。F2/A1/B1/B2/Mは承認済みで順次実装するが、Plan delta PASS前は未着手。
+  A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

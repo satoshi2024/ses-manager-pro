@@ -2,8 +2,10 @@
 
 ## 0. 状態と適用範囲
 
-本書はDG-05-F1-APPROVAL-20260830-01でOwner承認されたNF-05基線である。承認scopeはF1 persistence基盤までで、
-独立Plan ReviewのPLAN PASS前にproduction implementation、public endpoint、外部送信を開始しない。
+本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
+NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansionはPlan delta Review待ちである。Plan delta
+PASS前にF2以降のproduction implementation、public endpoint、外部送信を開始しない。PASS後もproduction enablement、
+実顧客credential、実provider送信は禁止し、development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
 参照:
@@ -12,11 +14,23 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
   client scope、data scope、rate、IP、rotation、OpenAPI、cursor、Idempotency-Key、
   Correlation-ID、outbox、署名、replay防止、retry/backoff、DLQ。
 - 受入後requirements/design: IH-R1〜IH-R3。
-- 受入後traceability: NF-05はAPPROVED、OwnerRef=PROJECT_OWNER、DecisionId=DG-05-F1-APPROVAL-20260830-01。
+- 受入後traceability: NF-05はAPPROVED、OwnerRef=PROJECT_OWNER、DecisionId=DG-05-F1-APPROVAL-20260830-01および
+  scope expansion DecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。
 - customer-product-expansion-2026/platform-invariants.md: transaction、scope、secret、
   external I/O、pagination、audit、migration、性能。
 - enterprise-identity-security: client secret/tokenをログへ出さず、action permissionとfield maskingを
   service境界で実施する。
+
+### Scope expansionのwave状態
+
+| Wave | 状態 | 開始条件・境界 |
+|---|---|---|
+| F2 | APPROVED_NOT_STARTED | scope expansion Plan delta PASS。専用security chain、認証境界、audit/rate/IP |
+| A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 pathsとexternal DTO allow-list |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
+| B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
+| B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
+| M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
 ## IH-R1 Client / credential / security
 

@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（Owner approval + R-NF05 Plan PASS）
+# NF-05 Review Ledger（scope expansion承認・F1 Implementation PASS・Plan delta待ち）
 
 ## Approval gate
 
@@ -15,6 +15,23 @@
 | contract SLA | 月間99.9%、p95 500ms、保守7日前、重大障害60分以内、v1廃止予告180日 | APPROVED |
 | public field inventory | inventory allow-listのみ、internal entity serialize禁止 | APPROVED |
 
+## Scope expansion gate
+
+| Wave | Decision status | Review/実装状態 |
+|---|---|---|
+| F1 | APPROVED | PLAN PASS / IMPLEMENTATION PASS。fixed reviewed Head 7e50bf1360ea8d7271acc0667593635451300268 |
+| F2 | APPROVED_NOT_STARTED | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。Plan delta PASS後に開始 |
+| A1 | APPROVED_SEQUENCED | F2 Implementation Review PASS後に開始。GET-only 11 paths、allow-list DTOのみ |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
+| B1 | APPROVED_SEQUENCED | A1 Review後。development/test mock/stub/loopbackのみ |
+| B2 | APPROVED_SEQUENCED | B1 Review後。production受信enablementなし |
+| M | APPROVED_SEQUENCED | B2 Review後。最終security/recovery/performance/scan/runbook Review |
+
+scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
+OwnerRef=PROJECT_OWNER、OwnerType=ROLE、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、
+Implementation branch=codex/integration-hub-public-apiである。production enablement、実顧客credential、
+実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
+
 ## Findings
 
 | ID | Severity | Finding | Evidence | Disposition |
@@ -22,14 +39,14 @@
 | NF05-DISC-BLOCK-001 | BLOCKER | approval ledgerがCANDIDATEで、DG-05と開始条件が未承認 | approval-decision.md、中央traceability | OWNER_GATE_RESOLVED |
 | NF05-DISC-002 | P1 | NotificationOutboxDispatcherがclaim→外部notify→resultをREQUIRES_NEW transaction内で実行 | NotificationOutboxDispatcher.java:44-70 | SPEC_ADDRESSED。実装は未着手 |
 | NF05-DISC-003 | P1 | provider token versionと暗号key versionが分離された公開credential envelopeなし | IntegrationConnection、FreeeIntegrationServiceImpl、MFA crypto services | F1 scope APPROVED。実装未着手 |
-| NF05-DISC-004 | P1 | ApiAuditFilterは公開API境界を監査しない | ApiAuditFilter.java:103-117 | F2へ延期。公開endpointは未実装 |
-| NF05-DISC-005 | P1 | 公開client quotaのmulti-node rate limiterなし。既存portal limiterはJVMローカル | PortalRateLimiterImpl.java:15-45 | F1 usage bucket scope APPROVED。実装未着手 |
+| NF05-DISC-004 | P1 | ApiAuditFilterは公開API境界を監査しない | ApiAuditFilter.java:103-117 | F2 APPROVED_NOT_STARTED。Plan delta PASS後に公開境界を監査する |
+| NF05-DISC-005 | P1 | 公開client quotaのmulti-node rate limiterなし。既存portal limiterはJVMローカル | PortalRateLimiterImpl.java:15-45 | F2 APPROVED_NOT_STARTED。F1 persistence PASS済み、chain側は未実装 |
 | NF05-DISC-006 | P1 | InvoiceDetailDtoがInvoice entityを継承する既存前例 | dto/.../InvoiceDetailDto | public DTOでは禁止 |
 | NF05-DISC-007 | P1 | 既存/api/webhooks/**はpermitAllかつCSRF ignore | SecurityConfig.java:130-145, 312-315 | 公開inboundと分離 |
-| NF05-DISC-008 | P2 | correlation IDのglobal edge filter/MDC propagationを確認できない | ad hoc provider/service経路のみ | F2で横断実装 |
-| NF05-DISC-009 | P1 | OpenAPI、HTTP status/error、version互換規則がなく外部契約をreviewできない | openapi-candidate.yaml | SPEC_APPROVED_FOR_PLAN。A1未着手 |
-| NF05-DISC-010 | P2 | metrics cardinalityと禁止labelの具体設計がない | design.md / requirements.md | SPEC_ADDRESSED。F2/M未着手 |
-| NF05-DISC-011 | P2 | payload retention、legal hold、purgeの契約がない | design.md / requirements.md | SPEC_ADDRESSED。F1/B1/B2/M未着手 |
+| NF05-DISC-008 | P2 | correlation IDのglobal edge filter/MDC propagationを確認できない | ad hoc provider/service経路のみ | F2 APPROVED_NOT_STARTED。Plan delta PASS後に横断実装 |
+| NF05-DISC-009 | P1 | OpenAPI、HTTP status/error、version互換規則がなく外部契約をreviewできない | openapi-candidate.yaml | SPEC_APPROVED。A1 APPROVED_SEQUENCED、実装未着手 |
+| NF05-DISC-010 | P2 | metrics cardinalityと禁止labelの具体設計がない | design.md / requirements.md | SPEC_ADDRESSED。F2/M APPROVED_SEQUENCED、実装未着手 |
+| NF05-DISC-011 | P2 | payload retention、legal hold、purgeの契約がない | design.md / requirements.md | SPEC_ADDRESSED。F1 PASS、B1/B2/M APPROVED_SEQUENCED |
 | NF05-DISC-012 | P2 | Review Headをcompletion traceへ固定する方式が曖昧 | completion-matrix.md | SPEC_ADDRESSED。最終Headは外部handoffで固定 |
 | NF05-PLAN-001 | P1 | rate/quota保存キーが承認値と一致しない | design.md 2.1、requirements IH-R1-8、inventory 7 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
 | NF05-PLAN-002 | P1 | nonce replay ledgerのatomic unique、TTL、purge契約が不足 | design.md 2.1、requirements IH-R1-9/IH-R3-3 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
@@ -102,8 +119,19 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`はFAIL（P0=0、P1=1、P2=0）で、FU-002〜004はクローズ、FU-001のnested scalar bypassのみ残った。
   `96d6801c`でこれをremediateし、H2 F1対象31 testsを再PASSした。固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewはPASS（P0=0、P1=0、P2=0）となった。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
-- Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
-  persistence基盤の実装に限定している。
+- Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。F1実装は
+  Implementation PASS済みで、scope expansion Plan delta PASS後にF2以降を順次開始する。development/testの
+  mock/stub/loopback以外の外部送信、production enablement、実顧客credentialは引き続き禁止する。
+
+## Current scope expansion evidence
+
+- DecisionId DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 はOwnerRef PROJECT_OWNER、OwnerType ROLE、
+  Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、reviewed Head
+  7e50bf1360ea8d7271acc0667593635451300268を正本化している。
+- F1はPLAN PASS / IMPLEMENTATION PASSを維持する。F2はAPPROVED_NOT_STARTED、A1/B1/B2/Mは
+  APPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
+- 本docs-only gateをpush後、既存R-NF05へPlan delta Reviewを依頼する。PASS前はF2を開始せず、FAIL時は
+  spec/architecture remediationだけを行う。F1 gate、Owner Gate、0R/0R-DのPASS/対応状態は再オープンしない。
 
 ## F1 gate evidence
 
