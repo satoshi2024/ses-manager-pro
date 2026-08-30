@@ -48,10 +48,21 @@ public interface ApiIdempotencyRecordMapper extends BaseMapper<ApiIdempotencyRec
                          @Param("requestDigest") String requestDigest, @Param("responseStatus") Integer responseStatus,
                          @Param("safeResponseSnapshot") String safeResponseSnapshot,
                          @Param("terminalAt") LocalDateTime terminalAt,
-                         @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
+                            @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
 
-    @Delete("DELETE FROM t_api_idempotency_record WHERE id = #{id} "
+    @Update("UPDATE t_api_idempotency_record SET status = 'CONFLICT', response_status = 409, "
+            + "safe_response_snapshot = '{\"code\":\"IDEMPOTENCY_PAYLOAD_CONFLICT\"}', "
+            + "terminal_at = #{terminalAt}, retention_class = 'FAILED_DLQ_PAYLOAD_90D', "
+            + "retention_expires_at = #{retentionExpiresAt}, version = version + 1, updated_at = #{terminalAt} "
+            + "WHERE id = #{id} AND version = #{version} AND request_digest = #{requestDigest} "
+            + "AND status = 'IN_PROGRESS'")
+    int transitionConflict(@Param("id") Long id, @Param("version") Integer version,
+                           @Param("requestDigest") String requestDigest,
+                           @Param("terminalAt") LocalDateTime terminalAt,
+                           @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
+
+    @Delete("DELETE FROM t_api_idempotency_record WHERE id = #{id} AND version = #{version} "
             + "AND retention_expires_at IS NOT NULL AND retention_expires_at <= #{now} "
             + "AND status IN ('SUCCEEDED', 'FAILED', 'CONFLICT')")
-    int deleteExpired(@Param("id") Long id, @Param("now") LocalDateTime now);
+    int deleteExpired(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);
 }

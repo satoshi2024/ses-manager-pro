@@ -19,6 +19,12 @@ public interface InboundEventMapper extends BaseMapper<InboundEvent> {
                                        @Param("providerName") String providerName,
                                        @Param("providerEventId") String providerEventId);
 
+    @Select("SELECT * FROM t_inbound_event WHERE client_id = #{clientId} "
+            + "AND provider_name = #{providerName} AND provider_event_id = #{providerEventId} FOR UPDATE")
+    InboundEvent selectByProviderEventForUpdate(@Param("clientId") String clientId,
+                                                @Param("providerName") String providerName,
+                                                @Param("providerEventId") String providerEventId);
+
     @Select("SELECT * FROM t_inbound_event WHERE id = #{id} FOR UPDATE")
     InboundEvent selectForUpdate(@Param("id") Long id);
 
@@ -46,7 +52,8 @@ public interface InboundEventMapper extends BaseMapper<InboundEvent> {
                            @Param("terminalAt") LocalDateTime terminalAt,
                            @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
 
-    @Delete("DELETE FROM t_inbound_event WHERE id = #{id} AND retention_expires_at IS NOT NULL "
+    @Delete("DELETE FROM t_inbound_event WHERE id = #{id} AND version = #{version} "
+            + "AND retention_expires_at IS NOT NULL "
             + "AND retention_expires_at <= #{now} AND status IN ('PROCESSED', 'DUPLICATE', 'CONFLICT', 'DLQ')")
-    int deleteExpired(@Param("id") Long id, @Param("now") LocalDateTime now);
+    int deleteExpired(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);
 }

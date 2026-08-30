@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** NF-05 F1: retention expiry/legal hold/restore epoch/nonce purgeのH2境界。 */
@@ -33,15 +34,17 @@ class IntegrationHubF1RetentionH2Test {
     void expiredDeliveryはpurgeされactiveHold中は残り解除後に再実行できる() {
         long subscriptionId = insertSubscription("retention-client", "https://example.invalid/hook");
         long deliveryId = insertDelivery(subscriptionId, "delivery-held", "FAILED_DLQ_PAYLOAD_90D");
+        long freeDeliveryId = insertDelivery(subscriptionId, "delivery-free", "FAILED_DLQ_PAYLOAD_90D");
         LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
 
         assertTrue(retentionPurgeService.acquireHold("DELIVERY", deliveryId, "LEGAL_HOLD", now));
         ApiRetentionPurgeService.PurgeReport held = retentionPurgeService.purgeExpired(
-                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10);
-        assertEquals(1, held.inspected());
-        assertEquals(0, held.purged());
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 1);
+        assertEquals(1, held.purged());
         assertEquals(1, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+                 "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, freeDeliveryId));
 
         assertTrue(retentionPurgeService.releaseHold("DELIVERY", deliveryId, now));
         ApiRetentionPurgeService.PurgeReport purged = retentionPurgeService.purgeExpired(
@@ -52,7 +55,7 @@ class IntegrationHubF1RetentionH2Test {
         assertEquals("COMPLETE", jdbcTemplate.queryForObject(
                 "SELECT run_status FROM t_api_purge_checkpoint WHERE record_kind = 'DELIVERY' "
                         + "AND retention_class = 'FAILED_DLQ_PAYLOAD_90D'", String.class));
-        assertEquals(deliveryId, jdbcTemplate.queryForObject(
+        assertNull(jdbcTemplate.queryForObject(
                 "SELECT last_record_id FROM t_api_purge_checkpoint WHERE record_kind = 'DELIVERY' "
                         + "AND retention_class = 'FAILED_DLQ_PAYLOAD_90D'", Long.class));
     }
@@ -75,6 +78,55 @@ class IntegrationHubF1RetentionH2Test {
         assertEquals(1, nonceReplayService.purgeExpired(accepted.plusMinutes(5), 100));
         assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_api_nonce_replay WHERE client_id = 'nonce-client'", Integer.class));
+    }
+
+    @Test
+    void activeLease中は削除せずlease期限後にversion条件付きで削除する() {
+        long subscriptionId = insertSubscription("lease-client", "https://example.invalid/lease");
+        long deliveryId = insertDelivery(subscriptionId, "delivery-lease", "FAILED_DLQ_PAYLOAD_90D");
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+        jdbcTemplate.update("UPDATE t_api_delivery SET status = 'SUCCEEDED', lease_token = 'active-lease', "
+                + "lease_expires_at = ? WHERE id = ?", now.plusMinutes(1), deliveryId);
+
+        ApiRetentionPurgeService.PurgeReport active = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10);
+        assertEquals(0, active.purged());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+
+        ApiRetentionPurgeService.PurgeReport expired = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now.plusMinutes(1), 10);
+        assertEquals(1, expired.purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+    }
+
+    @Test
+    void activeLeaseでkeysetの先を通過しても次回走査で期限後rowを再評価する() {
+        long subscriptionId = insertSubscription("lease-cursor-client", "https://example.invalid/lease-cursor");
+        long activeLeaseId = insertDelivery(subscriptionId, "delivery-cursor-active", "FAILED_DLQ_PAYLOAD_90D");
+        long freeDeliveryId = insertDelivery(subscriptionId, "delivery-cursor-free", "FAILED_DLQ_PAYLOAD_90D");
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+        jdbcTemplate.update("UPDATE t_api_delivery SET status = 'SUCCEEDED', lease_token = 'active-lease', "
+                + "lease_expires_at = ? WHERE id = ?", now.plusMinutes(1), activeLeaseId);
+
+        ApiRetentionPurgeService.PurgeReport first = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 1);
+        assertEquals(1, first.purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, freeDeliveryId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, activeLeaseId));
+
+        // eligible集合の末尾まで到達した時点でcursorをresetし、lease満了後の再評価を可能にする。
+        ApiRetentionPurgeService.PurgeReport beforeExpiry = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 1);
+        assertEquals(0, beforeExpiry.purged());
+        ApiRetentionPurgeService.PurgeReport afterExpiry = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now.plusMinutes(1), 1);
+        assertEquals(1, afterExpiry.purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, activeLeaseId));
     }
 
     private long insertSubscription(String clientId, String endpoint) {

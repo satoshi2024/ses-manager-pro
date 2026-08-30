@@ -3,10 +3,10 @@ package com.ses.service.integrationhub.impl;
 import com.ses.entity.integrationhub.ApiIdempotencyRecord;
 import com.ses.mapper.ApiIdempotencyRecordMapper;
 import com.ses.service.integrationhub.ApiIdempotencyService;
+import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IdempotencyPayloadConflictException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 
@@ -25,17 +25,17 @@ class ApiIdempotencyServiceTest {
     private ApiIdempotencyServiceImpl service;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 0, 0);
     private final String digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    private static final String ROUTE = "/external-api/v1/projects";
 
     @BeforeEach
     void setUp() {
         mapper = mock(ApiIdempotencyRecordMapper.class);
-        service = new ApiIdempotencyServiceImpl();
-        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        service = new ApiIdempotencyServiceImpl(mapper);
     }
 
     @Test
     void 同一payloadは既存recordを再利用し異なるpayloadは安全な409相当へ収束する() {
-        when(mapper.selectByNaturalKeyForUpdate("client-a", "/route", "key-1"))
+        when(mapper.selectByNaturalKeyForUpdate("client-a", ROUTE, "key-1"))
                 .thenReturn(null)
                 .thenReturn(ApiIdempotencyRecord.builder().id(1L).version(0).requestDigest(digest)
                         .status("IN_PROGRESS").build());
@@ -45,19 +45,32 @@ class ApiIdempotencyServiceTest {
             return 1;
         });
 
-        ApiIdempotencyService.Reservation first = service.reserve("client-a", "/route", "key-1", digest, now);
+        ApiIdempotencyService.Reservation first = service.reserve("client-a", ROUTE, "key-1", digest, now);
         assertFalse(first.reused());
-        ApiIdempotencyService.Reservation second = service.reserve("client-a", "/route", "key-1", digest, now);
+        ApiIdempotencyService.Reservation second = service.reserve("client-a", ROUTE, "key-1", digest, now);
         assertTrue(second.reused());
         assertThrows(IdempotencyPayloadConflictException.class,
-                () -> service.reserve("client-a", "/route", "key-1", digest.substring(0, 63) + "0", now));
+                () -> service.reserve("client-a", ROUTE, "key-1", digest.substring(0, 63) + "0", now));
     }
 
     @Test
     void successはsafeSnapshotだけを30日retentionへ接続する() {
-        when(mapper.transitionSucceeded(1L, 0, digest, 200, "{\"status\":\"ok\"}", now, now.plusDays(30)))
+        ExternalDtoSnapshot snapshot = ExternalDtoSnapshot.of("{\"status\":\"ok\"}");
+        when(mapper.transitionSucceeded(1L, 0, digest, 200, snapshot.json(), now, now.plusDays(30)))
                 .thenReturn(1);
-        assertTrue(service.completeSucceeded(1L, 0, digest, 200, "{\"status\":\"ok\"}", now));
-        verify(mapper).transitionSucceeded(1L, 0, digest, 200, "{\"status\":\"ok\"}", now, now.plusDays(30));
+        assertTrue(service.completeSucceeded(1L, 0, digest, 200, snapshot, now));
+        verify(mapper).transitionSucceeded(1L, 0, digest, 200, snapshot.json(), now, now.plusDays(30));
+    }
+
+    @Test
+    void 異なるpayloadはIN_PROGRESSからCONFLICTへ永続化してから拒否する() {
+        ApiIdempotencyRecord existing = ApiIdempotencyRecord.builder().id(1L).version(0)
+                .requestDigest(digest).status("IN_PROGRESS").build();
+        when(mapper.selectByNaturalKeyForUpdate("client-a", ROUTE, "key-1")).thenReturn(existing);
+        when(mapper.transitionConflict(1L, 0, digest, now, now.plusDays(90))).thenReturn(1);
+
+        assertThrows(IdempotencyPayloadConflictException.class,
+                () -> service.reserve("client-a", ROUTE, "key-1", digest.substring(0, 63) + "0", now));
+        verify(mapper).transitionConflict(1L, 0, digest, now, now.plusDays(90));
     }
 }

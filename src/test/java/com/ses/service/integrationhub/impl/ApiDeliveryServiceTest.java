@@ -6,7 +6,6 @@ import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 
@@ -23,12 +22,13 @@ class ApiDeliveryServiceTest {
     private ApiDeliveryMapper mapper;
     private ApiDeliveryServiceImpl service;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+    private final String payloadHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    private final String providerKey = IntegrationHubDigest.sha256Hex("event-1|7|1");
 
     @BeforeEach
     void setUp() {
         mapper = mock(ApiDeliveryMapper.class);
-        service = new ApiDeliveryServiceImpl();
-        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        service = new ApiDeliveryServiceImpl(mapper);
     }
 
     @Test
@@ -75,5 +75,28 @@ class ApiDeliveryServiceTest {
 
         assertTrue(result != null && "CLAIMED".equals(result.getStatus()));
         verify(mapper).claim(7L, 2, "lease-1", now.plusMinutes(1), now);
+    }
+
+    @Test
+    void resultCASはlease世代とprovider冪等keyとpayloadHashを全て照合する() {
+        when(mapper.transitionSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+                "provider-request-1", now, now.plusDays(30))).thenReturn(1);
+
+        assertTrue(service.markSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+                "provider-request-1", now));
+        verify(mapper).transitionSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+                "provider-request-1", now, now.plusDays(30));
+    }
+
+    @Test
+    void 外部DTOは構造化allowList外のfieldとnestedfieldを拒否する() {
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"password\":\"do-not-store\"}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"payload\":{\"internalDbId\":1}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
+                        "event.type", "v1", "corr-1",
+                        ExternalDtoSnapshot.of("{\"code\":\"not-an-outbound-field\"}"), now));
     }
 }

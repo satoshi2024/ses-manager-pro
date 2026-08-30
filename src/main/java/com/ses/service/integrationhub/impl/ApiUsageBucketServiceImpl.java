@@ -1,6 +1,5 @@
 package com.ses.service.integrationhub.impl;
 
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.integrationhub.ApiUsageBucket;
 import com.ses.mapper.ApiUsageBucketMapper;
 import com.ses.service.integrationhub.ApiUsageBucketService;
@@ -23,14 +22,26 @@ import java.util.Set;
  */
 @Service
 @RequiredArgsConstructor
-public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper, ApiUsageBucket>
-        implements ApiUsageBucketService {
+public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
     private static final int MINUTE_LIMIT = 60;
     private static final int DAY_LIMIT = 50_000;
     private static final int BURST_CAPACITY = 20;
     private static final int REFILL_SECONDS = 3;
+    public static final Set<String> APPROVED_ROUTE_TEMPLATES = Set.of(
+            "/external-api/v1/engineer-availability",
+            "/external-api/v1/engineer-availability/{publicEngineerId}",
+            "/external-api/v1/projects",
+            "/external-api/v1/projects/{publicProjectId}",
+            "/external-api/v1/projects/count",
+            "/external-api/v1/contract-statuses",
+            "/external-api/v1/contract-statuses/{publicContractId}",
+            "/external-api/v1/contract-statuses/count",
+            "/external-api/v1/invoice-statuses",
+            "/external-api/v1/invoice-statuses/{publicInvoiceId}",
+            "/external-api/v1/invoice-statuses/count");
 
     private final Clock clock;
+    private final ApiUsageBucketMapper mapper;
 
     @Override
     public RateDecision consume(String clientId, String scopeCode, String tenantId, String routeTemplate) {
@@ -43,7 +54,7 @@ public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper,
     public RateDecision consumeAt(String clientId, String scopeCode, String tenantId, String routeTemplate,
                                   LocalDateTime serverNowUtc) {
         validateSubject(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
-        ApiUsageBucket bucket = baseMapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
+        ApiUsageBucket bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
         if (bucket == null) {
             bucket = insertInitialBucket(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
             if (bucket != null) {
@@ -51,7 +62,7 @@ public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper,
                 return RateDecision.allow();
             }
             // unique競合時は一度だけFOR UPDATEで再読込し、同じ判定へ収束する。
-            bucket = baseMapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
+            bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
             if (bucket == null) {
                 throw new IllegalStateException("quota bucket could not be loaded after unique conflict");
             }
@@ -78,7 +89,7 @@ public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper,
                 .updatedAt(now)
                 .build();
         try {
-            baseMapper.insert(initial);
+            mapper.insert(initial);
             return initial;
         } catch (DuplicateKeyException e) {
             return null;
@@ -132,7 +143,7 @@ public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper,
         bucket.setBurstTokens(burstTokens - 1);
         bucket.setBurstLastRefillAt(lastRefill);
         bucket.setUpdatedAt(now);
-        if (baseMapper.updateCounters(bucket) != 1) {
+        if (mapper.updateCounters(bucket) != 1) {
             throw new IllegalStateException("quota bucket CAS failed");
         }
         return RateDecision.allow();
@@ -179,7 +190,7 @@ public class ApiUsageBucketServiceImpl extends ServiceImpl<ApiUsageBucketMapper,
         requireText(scopeCode, 100, "scopeCode");
         requireText(tenantId, 64, "tenantId");
         requireText(routeTemplate, 255, "routeTemplate");
-        if (!routeTemplate.startsWith("/") || routeTemplate.contains("?")) {
+        if (!APPROVED_ROUTE_TEMPLATES.contains(routeTemplate)) {
             throw new IllegalArgumentException("routeTemplate must be a canonical path template");
         }
         if (serverNowUtc == null) {

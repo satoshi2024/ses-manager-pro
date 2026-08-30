@@ -1,6 +1,5 @@
 package com.ses.service.integrationhub.impl;
 
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.integrationhub.CredentialVersion;
 import com.ses.mapper.CredentialVersionMapper;
 import com.ses.service.integrationhub.CredentialVersionService;
@@ -15,8 +14,8 @@ import java.util.List;
 /** NF-05 credential version persistence implementation。 */
 @Service
 @RequiredArgsConstructor
-public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionMapper, CredentialVersion>
-        implements CredentialVersionService {
+public class CredentialVersionServiceImpl implements CredentialVersionService {
+    private final CredentialVersionMapper mapper;
     private final IntegrationHubSecretCryptoService cryptoService;
 
     @Override
@@ -29,13 +28,15 @@ public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionM
             throw new IllegalArgumentException("invalid credential issue request");
         }
         // 旧世代は24時間だけOVERLAP。旧secretの値はこのメソッド外へ返さず、新世代のenvelopeのみ保存する。
-        List<CredentialVersion> current = baseMapper.selectRotatable(apiClientId);
+        List<CredentialVersion> current = mapper.selectRotatable(apiClientId);
         for (CredentialVersion old : current) {
             if ("ACTIVE".equals(old.getStatus())) {
                 old.setStatus("OVERLAP");
                 old.setOverlapUntil(now.plusHours(24));
                 old.setUpdatedAt(now);
-                updateById(old);
+                if (mapper.updateById(old) != 1) {
+                    throw new IllegalStateException("credential overlap CAS failed");
+                }
             }
         }
         String envelope = cryptoService.encrypt(clientId, credentialVersion, "credential", plaintextSecret);
@@ -54,7 +55,7 @@ public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionM
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
-        baseMapper.insert(created);
+        mapper.insert(created);
         return created;
     }
     @Override
@@ -62,7 +63,7 @@ public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionM
         if (apiClientId == null || keyId == null || keyId.isBlank() || now == null) {
             return null;
         }
-        return baseMapper.selectUsable(apiClientId, keyId, now);
+        return mapper.selectUsable(apiClientId, keyId, now);
     }
 
     @Override
@@ -70,7 +71,7 @@ public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionM
         if (apiClientId == null || credentialVersion == null) {
             return null;
         }
-        return baseMapper.selectByClientAndVersion(apiClientId, credentialVersion);
+        return mapper.selectByClientAndVersion(apiClientId, credentialVersion);
     }
 
     @Override
@@ -79,8 +80,8 @@ public class CredentialVersionServiceImpl extends ServiceImpl<CredentialVersionM
         if (apiClientId == null || credentialVersion == null || now == null) {
             throw new IllegalArgumentException("invalid credential revoke request");
         }
-        CredentialVersion row = baseMapper.selectForUpdate(apiClientId, credentialVersion);
-        return row != null && baseMapper.revoke(apiClientId, credentialVersion, row.getVersion(), now) == 1;
+        CredentialVersion row = mapper.selectForUpdate(apiClientId, credentialVersion);
+        return row != null && mapper.revoke(apiClientId, credentialVersion, row.getVersion(), now) == 1;
     }
 
     private String extractKeyVersion(String envelope) {

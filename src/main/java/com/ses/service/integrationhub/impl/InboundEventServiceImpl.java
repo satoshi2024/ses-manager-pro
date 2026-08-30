@@ -1,8 +1,8 @@
 package com.ses.service.integrationhub.impl;
 
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.mapper.InboundEventMapper;
+import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.InboundEventService;
 import com.ses.service.integrationhub.IntegrationHubStates;
 import lombok.RequiredArgsConstructor;
@@ -15,28 +15,30 @@ import java.time.LocalDateTime;
 /** NF-05 inbound replay ledger implementation。 */
 @Service
 @RequiredArgsConstructor
-public class InboundEventServiceImpl extends ServiceImpl<InboundEventMapper, InboundEvent>
-        implements InboundEventService {
+public class InboundEventServiceImpl implements InboundEventService {
+    private final InboundEventMapper mapper;
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Receipt recordReceived(String clientId, String providerName, String providerEventId, String rawBodyHash,
-                                  LocalDateTime signedTimestamp, String parsedFieldsSnapshot,
+                                  LocalDateTime signedTimestamp, ExternalDtoSnapshot parsedFieldsSnapshot,
                                   boolean signatureValid, LocalDateTime receivedAt) {
         requireText(clientId, 100, "clientId");
         requireText(providerName, 100, "providerName");
         requireText(providerEventId, 160, "providerEventId");
         requireHash(rawBodyHash);
-        if (signedTimestamp == null || receivedAt == null || parsedFieldsSnapshot != null && parsedFieldsSnapshot.length() > 65535) {
+        if (signedTimestamp == null || receivedAt == null || parsedFieldsSnapshot == null) {
             throw new IllegalArgumentException("invalid inbound event");
         }
-        InboundEvent existing = baseMapper.selectByProviderEvent(clientId, providerName, providerEventId);
+        ExternalDtoSnapshot.requireAllowList(parsedFieldsSnapshot, ExternalDtoSnapshot.INBOUND_FIELDS);
+        InboundEvent existing = mapper.selectByProviderEvent(clientId, providerName, providerEventId);
         if (existing != null) {
             if (rawBodyHash.equalsIgnoreCase(existing.getRawBodyHash())) {
                 return new Receipt(existing, true, false);
             }
             if (existing.getVersion() != null) {
-                baseMapper.transitionConflict(existing.getId(), existing.getVersion(), rawBodyHash,
+                mapper.transitionConflict(existing.getId(), existing.getVersion(), rawBodyHash,
                         receivedAt, receivedAt.plusDays(90));
+                existing = mapper.selectForUpdate(existing.getId());
             }
             return new Receipt(existing, true, true);
         }
@@ -46,7 +48,7 @@ public class InboundEventServiceImpl extends ServiceImpl<InboundEventMapper, Inb
                 .providerEventId(providerEventId)
                 .rawBodyHash(rawBodyHash.toLowerCase())
                 .signedTimestamp(signedTimestamp)
-                .parsedFieldsSnapshot(parsedFieldsSnapshot)
+                .parsedFieldsSnapshot(parsedFieldsSnapshot.json())
                 .signatureValid(signatureValid)
                 .status(IntegrationHubStates.INBOUND_RECEIVED)
                 .receivedAt(receivedAt)
@@ -55,14 +57,20 @@ public class InboundEventServiceImpl extends ServiceImpl<InboundEventMapper, Inb
                 .updatedAt(receivedAt)
                 .build();
         try {
-            baseMapper.insert(row);
+            mapper.insert(row);
             return new Receipt(row, false, false);
         } catch (DuplicateKeyException e) {
-            InboundEvent concurrent = baseMapper.selectByProviderEvent(clientId, providerName, providerEventId);
+            InboundEvent concurrent = mapper.selectByProviderEventForUpdate(clientId, providerName, providerEventId);
             if (concurrent == null) {
                 throw e;
             }
             boolean conflict = !rawBodyHash.equalsIgnoreCase(concurrent.getRawBodyHash());
+            if (conflict && (IntegrationHubStates.INBOUND_RECEIVED.equals(concurrent.getStatus())
+                    || IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus()))) {
+                mapper.transitionConflict(concurrent.getId(), concurrent.getVersion(), rawBodyHash,
+                        receivedAt, receivedAt.plusDays(90));
+                concurrent = mapper.selectForUpdate(concurrent.getId());
+            }
             return new Receipt(concurrent, true, conflict);
         }
     }
@@ -73,14 +81,14 @@ public class InboundEventServiceImpl extends ServiceImpl<InboundEventMapper, Inb
         if (id == null || now == null) {
             throw new IllegalArgumentException("invalid inbound claim");
         }
-        InboundEvent row = baseMapper.selectForUpdate(id);
+        InboundEvent row = mapper.selectForUpdate(id);
         if (row == null || !IntegrationHubStates.INBOUND_RECEIVED.equals(row.getStatus())) {
             return null;
         }
-        if (baseMapper.claim(id, row.getVersion(), now) != 1) {
+        if (mapper.claim(id, row.getVersion(), now) != 1) {
             return null;
         }
-        return baseMapper.selectById(id);
+        return mapper.selectById(id);
     }
 
     @Override
@@ -99,7 +107,7 @@ public class InboundEventServiceImpl extends ServiceImpl<InboundEventMapper, Inb
                 && !IntegrationHubStates.INBOUND_DLQ.equals(status)) {
             throw new IllegalArgumentException("invalid inbound terminal status");
         }
-        return baseMapper.transitionTerminal(id, version, status, resultCode, retention,
+        return mapper.transitionTerminal(id, version, status, resultCode, retention,
                 terminalAt, terminalAt.plusDays(retention.equals(IntegrationHubStates.RETENTION_SUCCEEDED_30D) ? 30 : 90)) == 1;
     }
 

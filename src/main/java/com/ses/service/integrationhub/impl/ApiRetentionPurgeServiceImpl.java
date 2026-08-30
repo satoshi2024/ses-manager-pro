@@ -1,7 +1,6 @@
 package com.ses.service.integrationhub.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.integrationhub.ApiDelivery;
 import com.ses.entity.integrationhub.ApiIdempotencyRecord;
 import com.ses.entity.integrationhub.ApiPurgeCheckpoint;
@@ -25,8 +24,8 @@ import java.util.List;
 /** NF-05 legal hold and retention purge implementation。 */
 @Service
 @RequiredArgsConstructor
-public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMapper, ApiRetentionHold>
-        implements ApiRetentionPurgeService {
+public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
+    private final ApiRetentionHoldMapper holdMapper;
     private final ApiIdempotencyRecordMapper idempotencyMapper;
     private final ApiDeliveryMapper deliveryMapper;
     private final InboundEventMapper inboundMapper;
@@ -42,10 +41,11 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         if (!lockTarget(recordKind, recordId)) {
             return false;
         }
-        ApiRetentionHold hold = baseMapper.selectForUpdate(recordKind, recordId);
+        String retentionClass = targetRetentionClass(recordKind, recordId);
+        ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
         if (hold == null) {
             try {
-                baseMapper.insert(ApiRetentionHold.builder()
+                holdMapper.insert(ApiRetentionHold.builder()
                         .recordKind(recordKind)
                         .recordId(recordId)
                         .status("ACTIVE")
@@ -55,16 +55,22 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
                         .createdAt(now)
                         .updatedAt(now)
                         .build());
+                resetCursor(recordKind, retentionClass, now);
                 return true;
             } catch (DuplicateKeyException e) {
                 // 同時holdは再読込して既存ACTIVEへ収束する。
-                hold = baseMapper.selectForUpdate(recordKind, recordId);
+                hold = holdMapper.selectForUpdate(recordKind, recordId);
             }
         }
         if (hold == null || "ACTIVE".equals(hold.getStatus())) {
+            resetCursor(recordKind, retentionClass, now);
             return hold != null;
         }
-        return baseMapper.reacquire(hold.getId(), hold.getVersion(), reasonCode, now) == 1;
+        boolean reacquired = holdMapper.reacquire(hold.getId(), hold.getVersion(), reasonCode, now) == 1;
+        if (reacquired) {
+            resetCursor(recordKind, retentionClass, now);
+        }
+        return reacquired;
     }
 
     @Override
@@ -74,9 +80,14 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         if (recordId == null || now == null || !lockTarget(recordKind, recordId)) {
             return false;
         }
-        ApiRetentionHold hold = baseMapper.selectForUpdate(recordKind, recordId);
-        return hold != null && "ACTIVE".equals(hold.getStatus())
-                && baseMapper.release(hold.getId(), hold.getVersion(), now) == 1;
+        String retentionClass = targetRetentionClass(recordKind, recordId);
+        ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
+        boolean released = hold != null && "ACTIVE".equals(hold.getStatus())
+                && holdMapper.release(hold.getId(), hold.getVersion(), now) == 1;
+        if (released) {
+            resetCursor(recordKind, retentionClass, now);
+        }
+        return released;
     }
 
     @Override
@@ -91,7 +102,10 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         int inspected = 0;
         int purged = 0;
         int held = 0;
+        boolean fullBatch = false;
         ApiPurgeCheckpoint checkpoint = ensureCheckpoint(recordKind, retentionClass, now);
+        LocalDateTime checkpointExpiresAt = checkpoint.getLastExpiresAt();
+        Long checkpointRecordId = checkpoint.getLastRecordId();
         int checkpointVersion = checkpoint.getVersion();
         if (checkpointMapper.startBatch(checkpoint.getId(), checkpointVersion, now) != 1) {
             throw new IllegalStateException("purge checkpoint start CAS failed");
@@ -100,10 +114,15 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         LocalDateTime lastExpiresAt = null;
         Long lastRecordId = null;
         if ("IDEMPOTENCY".equals(recordKind)) {
-            List<ApiIdempotencyRecord> candidates = idempotencyMapper.selectList(new QueryWrapper<ApiIdempotencyRecord>()
+            QueryWrapper<ApiIdempotencyRecord> query = new QueryWrapper<ApiIdempotencyRecord>()
                     .select("id", "retention_expires_at").in("status", "SUCCEEDED", "FAILED", "CONFLICT")
                     .eq("retention_class", retentionClass).le("retention_expires_at", now)
-                    .orderByAsc("retention_expires_at", "id").last("LIMIT " + limit));
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'IDEMPOTENCY' "
+                            + "AND h.record_id = t_api_idempotency_record.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            List<ApiIdempotencyRecord> candidates = idempotencyMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
             for (ApiIdempotencyRecord candidate : candidates) {
                 inspected++;
                 lastExpiresAt = candidate.getRetentionExpiresAt();
@@ -115,10 +134,17 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
                 }
             }
         } else if ("DELIVERY".equals(recordKind)) {
-            List<ApiDelivery> candidates = deliveryMapper.selectList(new QueryWrapper<ApiDelivery>()
+            QueryWrapper<ApiDelivery> query = new QueryWrapper<ApiDelivery>()
                     .select("id", "retention_expires_at").in("status", "SUCCEEDED", "FAILED", "DLQ")
                     .eq("retention_class", retentionClass).le("retention_expires_at", now)
-                    .orderByAsc("retention_expires_at", "id").last("LIMIT " + limit));
+                    .and(wrapper -> wrapper.isNull("lease_token").or(inner -> inner.isNull("lease_expires_at"))
+                            .or(inner -> inner.le("lease_expires_at", now)))
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'DELIVERY' "
+                            + "AND h.record_id = t_api_delivery.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            List<ApiDelivery> candidates = deliveryMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
             for (ApiDelivery candidate : candidates) {
                 inspected++;
                 lastExpiresAt = candidate.getRetentionExpiresAt();
@@ -130,10 +156,15 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
                 }
             }
         } else if ("INBOUND".equals(recordKind)) {
-            List<InboundEvent> candidates = inboundMapper.selectList(new QueryWrapper<InboundEvent>()
+            QueryWrapper<InboundEvent> query = new QueryWrapper<InboundEvent>()
                     .select("id", "retention_expires_at").in("status", "PROCESSED", "DUPLICATE", "CONFLICT", "DLQ")
                     .eq("retention_class", retentionClass).le("retention_expires_at", now)
-                    .orderByAsc("retention_expires_at", "id").last("LIMIT " + limit));
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'INBOUND' "
+                            + "AND h.record_id = t_inbound_event.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            List<InboundEvent> candidates = inboundMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
             for (InboundEvent candidate : candidates) {
                 inspected++;
                 lastExpiresAt = candidate.getRetentionExpiresAt();
@@ -149,7 +180,10 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
             completeCheckpoint(checkpoint, checkpointVersion, null, null, now);
             return new PurgeReport(0, 0, 0, checkpoint.getRestoreEpoch());
         }
-        completeCheckpoint(checkpoint, checkpointVersion, lastExpiresAt, lastRecordId, now);
+        // lease/holdのようにeligibilityが時間経過で変化するrowをkeysetの先へ取り残さない。
+        // 現在のeligible集合を走査し切ったbatchではcursorを先頭へ戻し、次回に再評価する。
+        completeCheckpoint(checkpoint, checkpointVersion,
+                fullBatch ? lastExpiresAt : null, fullBatch ? lastRecordId : null, now);
         return new PurgeReport(inspected, purged, held, checkpoint.getRestoreEpoch());
     }
 
@@ -186,7 +220,7 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("IDEMPOTENCY", id)) {
             return false;
         }
-        return idempotencyMapper.deleteExpired(id, now) == 1;
+        return idempotencyMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 
     private boolean lockAndDeleteDelivery(Long id, String retentionClass, LocalDateTime now) {
@@ -194,7 +228,7 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("DELIVERY", id)) {
             return false;
         }
-        return deliveryMapper.deleteExpired(id, now) == 1;
+        return deliveryMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 
     private boolean lockAndDeleteInbound(Long id, String retentionClass, LocalDateTime now) {
@@ -202,11 +236,11 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
         if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("INBOUND", id)) {
             return false;
         }
-        return inboundMapper.deleteExpired(id, now) == 1;
+        return inboundMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 
     private boolean hasActiveHold(String recordKind, Long recordId) {
-        ApiRetentionHold hold = baseMapper.selectForUpdate(recordKind, recordId);
+        ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
         return hold != null && "ACTIVE".equals(hold.getStatus());
     }
 
@@ -250,6 +284,41 @@ public class ApiRetentionPurgeServiceImpl extends ServiceImpl<ApiRetentionHoldMa
             case "AUDIT" -> true;
             default -> false;
         };
+    }
+
+    private String targetRetentionClass(String recordKind, Long recordId) {
+        return switch (recordKind) {
+            case "IDEMPOTENCY" -> {
+                ApiIdempotencyRecord row = idempotencyMapper.selectByIdForUpdate(recordId);
+                yield row == null ? null : row.getRetentionClass();
+            }
+            case "DELIVERY" -> {
+                ApiDelivery row = deliveryMapper.selectForUpdate(recordId);
+                yield row == null ? null : row.getRetentionClass();
+            }
+            case "INBOUND" -> {
+                InboundEvent row = inboundMapper.selectForUpdate(recordId);
+                yield row == null ? null : row.getRetentionClass();
+            }
+            default -> null;
+        };
+    }
+
+    private void resetCursor(String recordKind, String retentionClass, LocalDateTime now) {
+        if (retentionClass == null) {
+            return;
+        }
+        ApiPurgeCheckpoint checkpoint = checkpointMapper.selectForUpdate(recordKind, retentionClass);
+        if (checkpoint != null && checkpointMapper.resetCursor(checkpoint.getId(), checkpoint.getVersion(), now) != 1) {
+            throw new IllegalStateException("purge checkpoint reset CAS failed");
+        }
+    }
+
+    private <T> void applyCheckpoint(QueryWrapper<T> query, LocalDateTime lastExpiresAt, Long lastRecordId) {
+        if (lastExpiresAt != null && lastRecordId != null) {
+            query.and(wrapper -> wrapper.gt("retention_expires_at", lastExpiresAt)
+                    .or(nested -> nested.eq("retention_expires_at", lastExpiresAt).gt("id", lastRecordId)));
+        }
     }
 
     private void validateKind(String kind) {

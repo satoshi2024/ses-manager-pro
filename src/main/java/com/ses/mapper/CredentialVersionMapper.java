@@ -23,7 +23,7 @@ public interface CredentialVersionMapper extends BaseMapper<CredentialVersion> {
     @Select("SELECT * FROM t_credential_version WHERE api_client_id = #{clientId} AND key_id = #{keyId} "
             + "AND status IN ('ACTIVE', 'OVERLAP') AND issued_at <= #{now} "
             + "AND expires_at > #{now} AND (revoked_at IS NULL OR revoked_at > #{now}) "
-            + "AND (status <> 'OVERLAP' OR overlap_until IS NULL OR overlap_until > #{now}) LIMIT 1")
+            + "AND (status <> 'OVERLAP' OR overlap_until IS NOT NULL AND overlap_until > #{now}) LIMIT 1")
     CredentialVersion selectUsable(@Param("clientId") Long clientId,
                                    @Param("keyId") String keyId,
                                    @Param("now") LocalDateTime now);

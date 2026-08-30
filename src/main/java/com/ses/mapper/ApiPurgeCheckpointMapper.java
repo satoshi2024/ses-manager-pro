@@ -29,6 +29,12 @@ public interface ApiPurgeCheckpointMapper extends BaseMapper<ApiPurgeCheckpoint>
                       @Param("lastRecordId") Long lastRecordId,
                       @Param("completedAt") java.time.LocalDateTime completedAt);
 
+    @Update("UPDATE t_api_purge_checkpoint SET last_expires_at = NULL, last_record_id = NULL, "
+            + "run_status = 'READY', started_at = NULL, completed_at = NULL, version = version + 1, "
+            + "updated_at = #{updatedAt} WHERE id = #{id} AND version = #{version}")
+    int resetCursor(@Param("id") Long id, @Param("version") Integer version,
+                    @Param("updatedAt") java.time.LocalDateTime updatedAt);
+
     @Update("UPDATE t_api_purge_checkpoint SET restore_epoch = #{restoreEpoch}, last_expires_at = NULL, "
             + "last_record_id = NULL, run_status = 'READY', started_at = NULL, completed_at = NULL, "
             + "version = version + 1, updated_at = #{updatedAt} WHERE id = #{id} AND version = #{version}")

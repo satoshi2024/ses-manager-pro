@@ -1,14 +1,13 @@
 package com.ses.service.integrationhub;
 
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.entity.integrationhub.InboundEvent;
 
 import java.time.LocalDateTime;
 
 /** NF-05 inbound replay/claim persistence service。raw bytesは受け取らずhashのみ保存する。 */
-public interface InboundEventService extends IService<InboundEvent> {
+public interface InboundEventService {
     Receipt recordReceived(String clientId, String providerName, String providerEventId, String rawBodyHash,
-                           LocalDateTime signedTimestamp, String parsedFieldsSnapshot,
+                           LocalDateTime signedTimestamp, ExternalDtoSnapshot parsedFieldsSnapshot,
                            boolean signatureValid, LocalDateTime receivedAt);
 
     InboundEvent claim(Long id, LocalDateTime now);

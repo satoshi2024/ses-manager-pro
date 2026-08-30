@@ -5,7 +5,6 @@ import com.ses.mapper.ApiUsageBucketMapper;
 import com.ses.service.integrationhub.ApiUsageBucketService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 
@@ -24,24 +23,24 @@ class ApiUsageBucketServiceTest {
     private ApiUsageBucketMapper mapper;
     private ApiUsageBucketServiceImpl service;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 0, 0, 30);
+    private static final String ROUTE = "/external-api/v1/projects";
 
     @BeforeEach
     void setUp() {
         mapper = mock(ApiUsageBucketMapper.class);
-        service = new ApiUsageBucketServiceImpl(java.time.Clock.systemUTC());
-        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        service = new ApiUsageBucketServiceImpl(java.time.Clock.systemUTC(), mapper);
     }
 
     @Test
     void 初回consumeはapproved四列keyで20から一つだけ消費する() {
-        when(mapper.selectSubjectForUpdate("client-a", "engineer.read", "tenant-a", "/external-api/v1/engineers"))
+        when(mapper.selectSubjectForUpdate("client-a", "engineer.read", "tenant-a", ROUTE))
                 .thenReturn(null);
         when(mapper.insert(any(ApiUsageBucket.class))).thenAnswer(invocation -> {
             ApiUsageBucket row = invocation.getArgument(0);
             assertEquals("client-a", row.getClientId());
             assertEquals("engineer.read", row.getScopeCode());
             assertEquals("tenant-a", row.getTenantId());
-            assertEquals("/external-api/v1/engineers", row.getRouteTemplate());
+            assertEquals(ROUTE, row.getRouteTemplate());
             assertEquals(1, row.getMinuteCount());
             assertEquals(1, row.getDayCount());
             assertEquals(19, row.getBurstTokens());
@@ -49,7 +48,7 @@ class ApiUsageBucketServiceTest {
         });
 
         ApiUsageBucketService.RateDecision result = service.consumeAt(
-                "client-a", "engineer.read", "tenant-a", "/external-api/v1/engineers", now);
+                "client-a", "engineer.read", "tenant-a", ROUTE, now);
 
         assertTrue(result.allowed());
         verify(mapper).insert(any(ApiUsageBucket.class));
@@ -58,9 +57,9 @@ class ApiUsageBucketServiceTest {
     @Test
     void burst不足はminuteとdayを変更せず次tokenまで拒否する() {
         ApiUsageBucket bucket = bucket(60, 100, 0, now.minusSeconds(1));
-        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", "/route")).thenReturn(bucket);
+        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", ROUTE)).thenReturn(bucket);
 
-        ApiUsageBucketService.RateDecision result = service.consumeAt("client-a", "scope", "tenant-a", "/route", now);
+        ApiUsageBucketService.RateDecision result = service.consumeAt("client-a", "scope", "tenant-a", ROUTE, now);
 
         assertFalse(result.allowed());
         assertTrue(result.exhaustedLimits().contains("MINUTE"));
@@ -72,7 +71,7 @@ class ApiUsageBucketServiceTest {
     @Test
     void 三秒境界では一tokenだけrefillしてconsumeする() {
         ApiUsageBucket bucket = bucket(0, 0, 0, now.minusSeconds(3));
-        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", "/route")).thenReturn(bucket);
+        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", ROUTE)).thenReturn(bucket);
         when(mapper.updateCounters(any(ApiUsageBucket.class))).thenAnswer(invocation -> {
             ApiUsageBucket updated = invocation.getArgument(0);
             assertEquals(0, updated.getBurstTokens());
@@ -81,7 +80,7 @@ class ApiUsageBucketServiceTest {
             return 1;
         });
 
-        assertTrue(service.consumeAt("client-a", "scope", "tenant-a", "/route", now).allowed());
+        assertTrue(service.consumeAt("client-a", "scope", "tenant-a", ROUTE, now).allowed());
         verify(mapper).updateCounters(any(ApiUsageBucket.class));
     }
 
@@ -90,18 +89,25 @@ class ApiUsageBucketServiceTest {
         LocalDateTime stored = now.plusMinutes(1);
         ApiUsageBucket bucket = bucket(59, 99, 10, stored);
         bucket.setBurstLastRefillAt(stored);
-        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", "/route")).thenReturn(bucket);
+        when(mapper.selectSubjectForUpdate("client-a", "scope", "tenant-a", ROUTE)).thenReturn(bucket);
         when(mapper.updateCounters(any(ApiUsageBucket.class))).thenReturn(1);
 
-        assertTrue(service.consumeAt("client-a", "scope", "tenant-a", "/route", now).allowed());
+        assertTrue(service.consumeAt("client-a", "scope", "tenant-a", ROUTE, now).allowed());
         assertEquals(now.withSecond(0).withNano(0), bucket.getMinuteWindowStart());
         assertEquals(60, bucket.getMinuteCount());
         assertEquals(stored, bucket.getBurstLastRefillAt());
     }
 
+    @Test
+    void rawResourcePathはquotaSubjectKeyとして受け付けない() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> service.consumeAt("client-a", "scope", "tenant-a",
+                        "/external-api/v1/projects/123", now));
+    }
+
     private ApiUsageBucket bucket(int minute, int day, int burst, LocalDateTime refillAt) {
         return ApiUsageBucket.builder()
-                .id(1L).clientId("client-a").scopeCode("scope").tenantId("tenant-a").routeTemplate("/route")
+                .id(1L).clientId("client-a").scopeCode("scope").tenantId("tenant-a").routeTemplate(ROUTE)
                 .minuteWindowStart(now.withSecond(0).withNano(0)).minuteCount(minute)
                 .dayWindowStart(now.toLocalDate().atStartOfDay()).dayCount(day)
                 .burstTokens(burst).burstLastRefillAt(refillAt).version(0).updatedAt(now).build();

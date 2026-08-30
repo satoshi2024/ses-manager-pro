@@ -5,7 +5,6 @@ import com.ses.mapper.ApiNonceReplayMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -27,8 +26,7 @@ class ApiNonceReplayServiceTest {
     @BeforeEach
     void setUp() {
         mapper = mock(ApiNonceReplayMapper.class);
-        service = new ApiNonceReplayServiceImpl();
-        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        service = new ApiNonceReplayServiceImpl(mapper);
     }
 
     @Test

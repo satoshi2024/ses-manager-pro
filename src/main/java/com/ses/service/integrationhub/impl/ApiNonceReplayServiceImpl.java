@@ -1,6 +1,5 @@
 package com.ses.service.integrationhub.impl;
 
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.entity.integrationhub.ApiNonceReplay;
 import com.ses.mapper.ApiNonceReplayMapper;
 import com.ses.service.integrationhub.ApiNonceReplayService;
@@ -15,8 +14,8 @@ import java.time.LocalDateTime;
 /** NF-05 nonce replay ledger implementation。rotationを跨いだ再利用もuniqueで拒否する。 */
 @Service
 @RequiredArgsConstructor
-public class ApiNonceReplayServiceImpl extends ServiceImpl<ApiNonceReplayMapper, ApiNonceReplay>
-        implements ApiNonceReplayService {
+public class ApiNonceReplayServiceImpl implements ApiNonceReplayService {
+    private final ApiNonceReplayMapper mapper;
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean accept(String clientId, int credentialVersion, byte[] rawNonce,
@@ -37,7 +36,7 @@ public class ApiNonceReplayServiceImpl extends ServiceImpl<ApiNonceReplayMapper,
                 .createdAt(acceptedAt)
                 .build();
         try {
-            baseMapper.insert(row);
+            mapper.insert(row);
             return true;
         } catch (DuplicateKeyException e) {
             // duplicateは認証失敗へ収束し、raw nonceやkeyをmessage/logへ出さない。
@@ -51,6 +50,6 @@ public class ApiNonceReplayServiceImpl extends ServiceImpl<ApiNonceReplayMapper,
         if (serverNow == null || maxRows <= 0) {
             throw new IllegalArgumentException("invalid nonce purge request");
         }
-        return baseMapper.deleteExpiredBatch(serverNow, Math.min(maxRows, 1000));
+        return mapper.deleteExpiredBatch(serverNow, Math.min(maxRows, 1000));
     }
 }

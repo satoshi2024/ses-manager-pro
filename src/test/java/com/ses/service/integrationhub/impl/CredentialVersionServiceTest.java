@@ -5,7 +5,6 @@ import com.ses.mapper.CredentialVersionMapper;
 import com.ses.service.integrationhub.crypto.IntegrationHubSecretCryptoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,8 +28,7 @@ class CredentialVersionServiceTest {
     void setUp() {
         mapper = mock(CredentialVersionMapper.class);
         crypto = mock(IntegrationHubSecretCryptoService.class);
-        service = new CredentialVersionServiceImpl(crypto);
-        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        service = new CredentialVersionServiceImpl(mapper, crypto);
         when(crypto.encrypt("client-a", 2, "credential", "new-secret")).thenReturn("IHG1:v1:iv:cipher");
         when(crypto.sha256Hex("new-secret")).thenReturn("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     }
@@ -40,6 +38,7 @@ class CredentialVersionServiceTest {
         CredentialVersion old = CredentialVersion.builder().id(10L).credentialVersion(1).status("ACTIVE")
                 .version(3).build();
         when(mapper.selectRotatable(20L)).thenReturn(List.of(old));
+        when(mapper.updateById(old)).thenReturn(1);
         when(mapper.insert(any(CredentialVersion.class))).thenAnswer(invocation -> {
             CredentialVersion created = invocation.getArgument(0);
             created.setId(11L);

@@ -45,9 +45,12 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
             + "last_error_code = NULL, terminal_at = #{terminalAt}, retention_class = 'SUCCEEDED_PAYLOAD_30D', "
             + "retention_expires_at = #{retentionExpiresAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{terminalAt} WHERE id = #{id} AND version = #{version} "
-            + "AND lease_token = #{leaseToken} AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
+            + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
+            + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
     int transitionSucceeded(@Param("id") Long id, @Param("version") Integer version,
-                            @Param("leaseToken") String leaseToken, @Param("payloadHash") String payloadHash,
+                            @Param("leaseToken") String leaseToken,
+                            @Param("providerIdempotencyKey") String providerIdempotencyKey,
+                            @Param("payloadHash") String payloadHash,
                             @Param("providerRequestId") String providerRequestId,
                             @Param("terminalAt") LocalDateTime terminalAt,
                             @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
@@ -55,9 +58,12 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     @Update("UPDATE t_api_delivery SET status = 'RETRYABLE', last_error_code = #{errorCode}, "
             + "next_attempt_at = #{nextAttemptAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{now} WHERE id = #{id} AND version = #{version} "
-            + "AND lease_token = #{leaseToken} AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
+            + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
+            + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
     int transitionRetryable(@Param("id") Long id, @Param("version") Integer version,
-                            @Param("leaseToken") String leaseToken, @Param("payloadHash") String payloadHash,
+                            @Param("leaseToken") String leaseToken,
+                            @Param("providerIdempotencyKey") String providerIdempotencyKey,
+                            @Param("payloadHash") String payloadHash,
                             @Param("errorCode") String errorCode, @Param("nextAttemptAt") LocalDateTime nextAttemptAt,
                             @Param("now") LocalDateTime now);
 
@@ -65,15 +71,20 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
             + "terminal_at = #{terminalAt}, retention_class = 'FAILED_DLQ_PAYLOAD_90D', "
             + "retention_expires_at = #{retentionExpiresAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{terminalAt} WHERE id = #{id} AND version = #{version} "
-            + "AND lease_token = #{leaseToken} AND payload_hash = #{payloadHash} AND status = 'CLAIMED' "
+            + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
+            + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED' "
             + "AND #{status} IN ('FAILED', 'DLQ')")
     int transitionTerminal(@Param("id") Long id, @Param("version") Integer version,
-                           @Param("leaseToken") String leaseToken, @Param("payloadHash") String payloadHash,
+                           @Param("leaseToken") String leaseToken,
+                           @Param("providerIdempotencyKey") String providerIdempotencyKey,
+                           @Param("payloadHash") String payloadHash,
                            @Param("status") String status, @Param("errorCode") String errorCode,
                            @Param("terminalAt") LocalDateTime terminalAt,
                            @Param("retentionExpiresAt") LocalDateTime retentionExpiresAt);
 
-    @Delete("DELETE FROM t_api_delivery WHERE id = #{id} AND retention_expires_at IS NOT NULL "
-            + "AND retention_expires_at <= #{now} AND status IN ('SUCCEEDED', 'FAILED', 'DLQ')")
-    int deleteExpired(@Param("id") Long id, @Param("now") LocalDateTime now);
+    @Delete("DELETE FROM t_api_delivery WHERE id = #{id} AND version = #{version} "
+            + "AND retention_expires_at IS NOT NULL AND retention_expires_at <= #{now} "
+            + "AND status IN ('SUCCEEDED', 'FAILED', 'DLQ') "
+            + "AND (lease_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= #{now})")
+    int deleteExpired(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);
 }

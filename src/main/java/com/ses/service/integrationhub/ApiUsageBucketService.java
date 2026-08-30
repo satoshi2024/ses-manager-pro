@@ -1,13 +1,10 @@
 package com.ses.service.integrationhub;
 
-import com.baomidou.mybatisplus.extension.service.IService;
-import com.ses.entity.integrationhub.ApiUsageBucket;
-
 import java.time.LocalDateTime;
 import java.util.Set;
 
 /** NF-05 DB-backed quota service。JVMローカルcounterへfallbackしない。 */
-public interface ApiUsageBucketService extends IService<ApiUsageBucket> {
+public interface ApiUsageBucketService {
     RateDecision consume(String clientId, String scopeCode, String tenantId, String routeTemplate);
 
     RateDecision consumeAt(String clientId, String scopeCode, String tenantId, String routeTemplate,
