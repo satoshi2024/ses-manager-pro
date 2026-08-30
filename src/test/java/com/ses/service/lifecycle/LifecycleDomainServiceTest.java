@@ -75,6 +75,15 @@ class LifecycleDomainServiceTest {
     private com.ses.mapper.AssetOffboardingWaiverMapper assetOffboardingWaiverMapper;
 
     @Autowired
+    private com.ses.mapper.AssetAssignmentMapper assetAssignmentMapper;
+
+    @Autowired
+    private com.ses.mapper.ExternalAccountReferenceMapper externalAccountReferenceMapper;
+
+    @Autowired
+    private com.ses.mapper.LicenseAssignmentMapper licenseAssignmentMapper;
+
+    @Autowired
     private com.ses.mapper.DocumentMapper documentMapper;
 
     @Autowired
@@ -155,6 +164,18 @@ class LifecycleDomainServiceTest {
                 .build();
         testEngineer.setOrganizationId(testOrg.getId());
         engineerMapper.insert(testEngineer);
+
+        // 共有H2では@Sqlが要員台帳だけを再構築し、資産台帳を残す場合があるため、
+        // AUTO_INCREMENT再利用で前テストのblockerが同じ要員IDに紐づくのを防ぐ。
+        assetAssignmentMapper.delete(new LambdaQueryWrapper<AssetAssignment>()
+                .eq(AssetAssignment::getAssigneeType, "ENGINEER")
+                .eq(AssetAssignment::getAssigneeId, testEngineer.getId()));
+        externalAccountReferenceMapper.delete(new LambdaQueryWrapper<ExternalAccountReference>()
+                .eq(ExternalAccountReference::getAssigneeType, "ENGINEER")
+                .eq(ExternalAccountReference::getAssigneeId, testEngineer.getId()));
+        licenseAssignmentMapper.delete(new LambdaQueryWrapper<LicenseAssignment>()
+                .eq(LicenseAssignment::getAssigneeType, "ENGINEER")
+                .eq(LicenseAssignment::getAssigneeId, testEngineer.getId()));
 
         // 要員アカウントリンク（既存のリンクがあれば事前削除して一意性を確保）
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
