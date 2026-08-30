@@ -143,6 +143,7 @@
 - scope expansion Plan deltaの固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL
   （P0=0、P1=4、P2=2）。dedicated chain、HMAC canonical bytes、production fail-closed、
   mock/loopback destination、A2 N/A、旧traceをdocs-onlyで補正後、同じR-NF05へ再Reviewする。
+- scope expansion Plan delta remediationは8d25215b9b651e99433becf50d13498da3699d2aへpush済み。
 
 ### DG-06 NF-06
 

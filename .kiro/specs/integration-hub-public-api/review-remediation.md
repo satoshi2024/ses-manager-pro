@@ -122,6 +122,7 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 - R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
 - Scope expansion Plan delta Review: 1547871caed049ba14d1e5e4a25ad50fa19771fc、PLAN FAIL（P0=0、P1=4、P2=2）
+- Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a（docs-only、remoteへpush済み）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS
