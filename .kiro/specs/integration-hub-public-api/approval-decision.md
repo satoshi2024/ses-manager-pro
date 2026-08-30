@@ -79,7 +79,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
    labelへ入れない。
 7. SLAは月間99.9%、p95 500msとする。対象は同時接続・payload上限内で、計画保守を除外する。計画保守は
    7日前、重大障害は60分以内に通知する。v1廃止予告は180日とする。
-8. scope外detailと不存在detailは同一404/ResourceNotFoundへ収束する。list/countはscope適用後だけを
+8. scope外detailと不存在detailは同一404/RESOURCE_NOT_FOUNDへ収束する。list/countはscope適用後だけを
    返し、empty scopeを全件として扱わない。as-ofはserver clockで固定し、client指定asOfは持たない。
 9. webhookはHMAC-SHA256、timestamp±5分、event/provider ID replay拒否とする。timeout/429/5xxだけを
    最大8回、指数backoff+jitterでretryし、その他4xxはretryしない。失敗後はDLQとする。manual replayは
@@ -96,8 +96,9 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 
 F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、
 再オープンしない。scope expansionの固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL
-（P0=0、P1=4、P2=2）だったため、dedicated chain、HMAC byte canonical、production fail-closed、
-mock/loopback destination、A2 N/A、traceのspec/architecture remediationだけを同じbranchへcommit/pushし、
+（P0=0、P1=4、P2=2）となり補正したが、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13も
+PLAN FAIL（P0=0、P1=3、P2=0）だった。security chain監査/error boundary、canonicalTarget byte
+生成、disabled deny-only/bean/config契約のspec/architecture remediationだけを同じbranchへcommit/pushし、
 既存R-NF05へPlan delta再Reviewとして渡す。Plan delta PASS前はF2 implementationを開始しない。
 
 Plan delta PASS後はF2→独立Implementation Review→A1→Review→B1→Review→B2→Review→M→最終Reviewの順に

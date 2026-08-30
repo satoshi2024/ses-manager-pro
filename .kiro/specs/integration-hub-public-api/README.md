@@ -4,7 +4,7 @@
 
 - 中央台帳の状態: APPROVED
 - 本specの状態: F1独立Implementation Review PASSを維持。scope expansionは承認済みだが、固定Head
-  1547871caed049ba14d1e5e4a25ad50fa19771fcのPlan deltaはPLAN FAIL（P0=0、P1=4、P2=2）で、
+  9cca2deec9ab1bd5417aaba98f859ed14210da13のPlan deltaはPLAN FAIL（P0=0、P1=3、P2=0）で、
   現在はdocs-only remediation中。F2未着手、A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -40,8 +40,10 @@ mock/stub providerとloopback test serverに限定し、production enablement、
 scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implementation ReviewはPASS済みであり、
 固定Head 7e50bf1360ea8d7271acc0667593635451300268で再オープンしない。scope expansionのdocs-only gateを
 同Headから作成し、既存R-NF05へPlan delta Reviewを渡した。固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcは
-PLAN FAIL（P0=0、P1=4、P2=2）だったため、dedicated chain、HMAC byte canonical、production
-fail-closed、mock/loopback destination、A2 N/A、traceをdocs-onlyで補正し、同じR-NF05へ再提出する。
+PLAN FAIL（P0=0、P1=4、P2=2）だったためdocs-only補正を行ったが、固定Head
+9cca2deec9ab1bd5417aaba98f859ed14210da13でもPLAN FAIL（P0=0、P1=3、P2=0）となった。
+残るsecurity chain監査/error境界、canonicalTarget byte生成、disabled deny-only/bean/config契約を
+docs-onlyで補正し、同じR-NF05へ再提出する。
 Plan delta PASS後はF2→A1→B1→B2→Mを順次実装し、A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは

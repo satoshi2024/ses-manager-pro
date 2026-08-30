@@ -43,18 +43,16 @@
 ### 2.2 現在のscope expansion Plan delta
 
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcの独立Plan deltaはPLAN FAIL
-（P0=0、P1=4、P2=2）である。F1のPLAN/IMPLEMENTATION PASS、Owner Gate、0R/0R-Dの
-対応状態は再オープンしない。F2は次の4契約の再補正とR-NF05の再Reviewが完了するまで
-APPROVED_NOT_STARTEDのままとする。
+（P0=0、P1=4、P2=2）となり補正した。固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の
+再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）である。F1のPLAN/IMPLEMENTATION PASS、Owner Gate、
+0R/0R-DおよびP1-EXP-004/P2-EXP-005/006の対応状態は再オープンしない。F2は次の3契約の
+再補正とR-NF05の再Reviewが完了するまでAPPROVED_NOT_STARTEDのままとする。
 
 | finding | inventoryで固定する契約 | status |
 |---|---|---|
-| P1 dedicated chain | order、matcher排他、stateless、既存chain非共有、default deny | SPEC_REMEDIATION |
-| P1 HMAC bytes | UTF-8 byte length、raw body hash、path/query encoding、固定framing | SPEC_REMEDIATION |
-| P1 production gate | default-off、起動時fail-closed、production real transport禁止 | SPEC_REMEDIATION |
-| P1 test destination | MOCK/loopback、peer/DNS、redirect/proxy、rebind拒否 | SPEC_REMEDIATION |
-| P2 A2 | approved command=0件、N/A、command実装taskを生成しない | SPEC_REMEDIATION |
-| P2 old trace | requirements/plan/current ledgerを現HeadとFAIL状態へ同期 | SPEC_REMEDIATION |
+| P1 security boundary | trusted proxy/IP/CIDR→HMAC（nonce未永続化）→nonce commit、専用audit、401/403/CORS/CSRF/error boundary | SPEC_REMEDIATION |
+| P1 canonicalTarget | OpenAPI wire header、raw target取得元、path/query完全再構築、空値、header/target/body上限、Content-Encoding、signature 32-byte、golden vector | SPEC_REMEDIATION |
+| P1 disabled startup | false/MOCKの明示profile、missing拒否、deny-only chain、controller/worker/scheduler/transport bean条件 | SPEC_REMEDIATION |
 
 ## 3. Filter chain inventory
 
@@ -76,20 +74,26 @@ APPROVED_NOT_STARTEDのままとする。
 |---|---|
 | chain | externalApiSecurityFilterChain、@Order(0)、/external-api/v1/** |
 | 排他 | portal/internal chain、/api/webhooks/**、/loginとmatcherを重複させない |
-| 順序 | correlation/size/canonical precheck→HMAC→trusted proxy/CIDR→scope/data scope/command permission→rate/quota→ApiAuditFilter→controller |
+| 順序 | correlation+audit開始→size/raw target→trusted proxy/source IP→HMAC→client principal後のclient CIDR→nonce atomic commit→scope/data scope/command→rate/quota→全decision監査→controller |
+| audit | ExternalApiAuditBoundaryが認証前/後principal、allow-list route template、GETを含む全成功/error/rejectを一件化。認証前はUNAUTHENTICATED、未一致はEXTERNAL_UNKNOWN_ROUTE。既存ApiAuditFilterは内部更新系でありexternal監査の正本にしない |
+| error boundary | CSRF/CORS/anonymousをexternal境界で明示拒否。専用401/403 stable JSON entrypoint（AUTHENTICATION_FAILED/FORBIDDEN_SCOPE）、correlation header、internal form/error fall-through禁止 |
 | state | STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/OIDC/anonymous継承なし |
 | deny | 承認済みGET allow-list以外とunknown path/methodはanyRequest().denyAll() |
-| registration | HMAC/API audit filterをServlet自動登録せず、各request一回だけ実行 |
-| destination | MOCKまたはliteral loopback allow-list portのみ。redirect/proxy/DNS/non-loopbackを拒否 |
+| disabled | public-api.enabled=falseでもdeny-only chainを生成し、controller/worker/scheduler/transportを生成せずinternal/portalへfall-throughさせない |
+| registration | HMAC/ExternalApiAuditBoundaryをServlet自動登録せず、各request一回だけ実行 |
+| destination | MOCK/STUB（無接続）またはliteral loopback allow-list portのみ。redirect/proxy/DNS/non-loopbackを拒否 |
 
 ### 3.2 HMACと起動fail-closedの実装入力
 
-canonical bytesは固定field順、UTF-8 byte length prefix、LF、raw body SHA-256、RFC3986
-encoded query sort、duplicate保持、base64url paddingなしであり、JSON再シリアライズや
-Forwarded/XFFの影響を受けない。productionではpublic-api.enabledとexternal-transport.enabledを
-false、provider.modeをMOCKのdefaultとし、missing/unknown/conflicting config、real URL/credential、
-redirect/proxyを拒否する。LOOPBACKは127.0.0.1または[::1]のliteralとallow-list portだけで、
-connection直前のsocket peerも検証する。
+canonical bytesはOpenAPI candidateのwire header（X-Client-ID、X-Credential-Version、X-Key-ID、
+X-Timestamp、X-Nonce、X-Client-Signature）、raw request-target取得元、path/query split/rebuild、
+値なし/空値、encoded byte順sort、固定field/LF framing、raw body SHA-256、Content-Encoding、
+header/target/body上限、base64url decode後32-byte制約までdesign 3.1のgolden vectorへ固定する。
+productionは明示設定の
+public-api=false、external-transport=false、provider.mode=MOCKのみとし、missing/unknown/conflicting
+configは起動拒否する。disabled時もdeny-only chainを残し、controller/worker/scheduler/transportを
+生成しない。LOOPBACKは127.0.0.1または[::1]のliteralとallow-list portだけで、connection直前の
+socket peerも検証する。
 | 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 新filterもSecurityFilterChainへの明示登録と二重登録試験が必要 |
 
 ## 4. Secret encryption / rotation inventory

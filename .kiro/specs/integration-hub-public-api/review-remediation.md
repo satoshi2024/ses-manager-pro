@@ -41,12 +41,27 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 | P1 chain order/stateless/exclusivity/default deny | dedicated chainのorder、排他matcher、stateless、filter順序、anyRequest deny、非共有principalをdesign/inventory/requirements/tasksへ追加 | SPEC_ADDRESSED | 独立Plan delta Review |
 | P1 HMAC canonical bytes | raw body bytes、UTF-8 byte length、RFC3986 path/query、duplicate sort、固定LF framing、厳密base64urlを追加 | SPEC_ADDRESSED | 署名vectorとbyte契約の照合 |
 | P1 production enablement guard | default-off、MOCK default、missing/unknown/conflict/real URL/credentialのstartup fail-closedを追加 | SPEC_ADDRESSED | 起動fail-closed契約の照合 |
-| P1 mock/loopback destination | literal loopback/port、peer/DNS、redirect/proxy、rebind/multi-address拒否を追加 | SPEC_ADDRESSED | SSRF境界とtest要求の照合 |
-| P2 A2 inconsistency | A2をNOT_APPLICABLE_UNDER_CURRENT_DECISIONへ統一し、command implementation objectiveを除去 | SPEC_ADDRESSED | inventory/requirements/tasks/matrix一致 |
-| P2 old trace | README/plan/requirements/ledger/matrix/中央traceabilityを現HeadのFAILへ同期 | SPEC_ADDRESSED | current Headと履歴の照合 |
+| P1 mock/loopback destination | literal loopback/port、peer/DNS、redirect/proxy、rebind/multi-address拒否を追加 | CLOSED_BY_REVIEW | R-NF05 delta re-Reviewでクローズ |
+| P2 A2 inconsistency | A2をNOT_APPLICABLE_UNDER_CURRENT_DECISIONへ統一し、command implementation objectiveを除去 | CLOSED_BY_REVIEW | R-NF05 delta re-Reviewでクローズ |
+| P2 old trace | README/plan/requirements/ledger/matrix/中央traceabilityを現HeadのFAILへ同期 | CLOSED_BY_REVIEW | R-NF05 delta re-Reviewでクローズ |
 
 この表のSPEC_ADDRESSEDはPLAN PASSではない。production source、migration、test、endpoint、外部送信の
 変更はなく、remediation後の新しいremote Headを同じR-NF05へhandoffする。
+
+## Scope expansion Plan delta re-review remediation
+
+固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の独立Plan delta再ReviewはPLAN FAIL
+（P0=0、P1=3、P2=0）だった。P1-EXP-004、P2-EXP-005/006はSPEC_ADDRESSEDを維持し、
+次の3件を0R-P6として補正する。F1 PASS、Owner Gate、production禁止境界は再オープンしない。
+
+| Finding | 対応 | 状態 | 再Review条件 |
+|---|---|---|---|
+| P1 security chain order/audit/error boundary | trusted proxy/source IP/CIDRをnonce commit前に確定、HMACとnonce insertを分離。ExternalApiAuditBoundaryでGETを含む全decisionを記録し、CSRF/CORS/anonymous/401/403/correlationを専用chainへ固定 | SPEC_ADDRESSED | 独立Plan delta再Review |
+| P1 canonicalTarget byte uniqueness | OpenAPI wire header、credentialVersion/keyId、raw request-target取得元、origin-form split、path/queryの?・&・=、値なし/空値、percent normalization、sort/rebuild、Content-Encoding、target/header/body上限、signature 32-byte、golden vectorを固定 | SPEC_ADDRESSED | canonical byte照合 |
+| P1 disabled fail-closed bean/config | profileへfalse/MOCKを明示しmissingは拒否。disabledでもdeny-only chainを生成し、controller/worker/scheduler/transportを生成せずfall-throughを禁止。mode enumをMOCK/STUB/LOOPBACKへ統一 | SPEC_ADDRESSED | startup/bean/route境界照合 |
+
+この0R-P6はdocs/architectureのみであり、production source、migration、test、public endpoint、
+external transportを変更しない。新しいremote Headを同じR-NF05へ渡し、PLAN PASS受領までF2を開始しない。
 
 ## F1 Implementation Review remediation
 
@@ -123,6 +138,7 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
 - Scope expansion Plan delta Review: 1547871caed049ba14d1e5e4a25ad50fa19771fc、PLAN FAIL（P0=0、P1=4、P2=2）
 - Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a（docs-only、remoteへpush済み）
+- Scope expansion Plan delta re-Review: 9cca2deec9ab1bd5417aaba98f859ed14210da13、PLAN FAIL（P0=0、P1=3、P2=0）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS

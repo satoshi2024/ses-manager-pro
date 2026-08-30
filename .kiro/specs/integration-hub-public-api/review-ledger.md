@@ -44,13 +44,30 @@ PLAN PASSまで開始しない。今回のdocs-only remediationで次をSPEC_ADD
 | NF05-PLAN-EXP-001 | P1 | F2 chainの順序、stateless、既存chain排他、default denyが未固定 | design 1.1、inventory 3.1、requirements IH-R1-12、tasks F2 | SPEC_ADDRESSED |
 | NF05-PLAN-EXP-002 | P1 | HMAC canonical requestのbyte単位仕様が不足 | design 3.1、inventory 3.2、requirements IH-R1-13、tasks F2 | SPEC_ADDRESSED |
 | NF05-PLAN-EXP-003 | P1 | production enablement禁止のdefault-off/fail-closed起動契約が不足 | design 8.1、requirements IH-R1-14/IH-R5-4、tasks F2 | SPEC_ADDRESSED |
-| NF05-PLAN-EXP-004 | P1 | mock/stub/loopback限定のdestination、redirect、proxy、DNS検証が不足 | design 8.2、inventory 3.1/3.2、requirements IH-R1-15/IH-R5-4、tasks F2 | SPEC_ADDRESSED |
-| NF05-PLAN-EXP-005 | P2 | A2=N/Aとcommand implementation taskが不整合 | requirements IH-R2-6、tasks A2、inventory 9 | SPEC_ADDRESSED |
-| NF05-PLAN-EXP-006 | P2 | requirements/planの旧Plan delta trace | README、plan、requirements、completion-matrix、中央traceability | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-004 | P1 | mock/stub/loopback限定のdestination、redirect、proxy、DNS検証が不足 | design 8.2、inventory 3.1/3.2、requirements IH-R1-15/IH-R5-4、tasks F2 | CLOSED_BY_REVIEW |
+| NF05-PLAN-EXP-005 | P2 | A2=N/Aとcommand implementation taskが不整合 | requirements IH-R2-6、tasks A2、inventory 9 | CLOSED_BY_REVIEW |
+| NF05-PLAN-EXP-006 | P2 | requirements/planの旧Plan delta trace | README、plan、requirements、completion-matrix、中央traceability | CLOSED_BY_REVIEW |
 
 SPEC_ADDRESSEDは独立ReviewのPLAN PASSを意味しない。production source、migration、test、
 public endpoint、external transportはこのremediationで変更していない。再Reviewで各契約、
 evidence path、F2開始条件を照合する。
+
+## Scope expansion Plan delta re-review remediation
+
+固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の再ReviewはPLAN FAIL
+（P0=0、P1=3、P2=0）だった。F1 PASS、P1-EXP-004、P2-EXP-005/006は維持し、
+下記の残存P1だけを0R-P6として補正する。
+
+| Finding ID | Severity | Finding | 対応証跡 | Status |
+|---|---|---|---|---|
+| NF05-PLAN-EXP-007 | P1 | security chainの順序、専用監査、CSRF/CORS、anonymous、401/403 error boundaryが未閉鎖 | design 1.1、inventory 3.1、requirements IH-R1-12、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-008 | P1 | canonicalTargetのraw取得、path/query結合、空値、上限、Content-Encoding、signature長が未確定 | design 3.1、requirements IH-R1-13、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-009 | P1 | disabled時deny-only chain、bean生成条件、missing/default、MOCK/STUB/LOOPBACK enumが未閉鎖 | design 8.1、inventory 3.1/3.2、requirements IH-R1-14/IH-R1-15/IH-R5-4、tasks F2 | SPEC_ADDRESSED |
+
+ExternalApiAuditBoundaryは既存ApiAuditFilterの代替ではなく、external GETを含む全decisionの
+専用監査境界である。nonce commit前のsource IP確定、canonicalTarget golden vector、disabled
+deny-only chainとbean不存在を仕様・受入テストへ固定した。SPEC_ADDRESSEDは独立Plan Reviewの
+PASSを意味せず、新しいremote Headを同じR-NF05へ再提出する。
 
 ## Findings
 
@@ -133,6 +150,8 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
 - Scope expansion Plan delta Review: fixed Head 1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL
   （P0=0、P1=4、P2=2）。NF05-PLAN-EXP-001〜006をSPEC_ADDRESSEDへ補正し、同じR-NF05へ再提出する。
+- Scope expansion Plan delta re-Review: fixed Head 9cca2deec9ab1bd5417aaba98f859ed14210da13でPLAN FAIL
+  （P0=0、P1=3、P2=0）。NF05-PLAN-EXP-007〜009を0R-P6でSPEC_ADDRESSEDへ補正し、同じR-NF05へ再提出する。
 - F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
 - F1 Implementation Review: `b420911b63177763544edd1e02d663bf528d9dc1`でFAIL（P0=0、P1=7、P2=2）。
   `a184c1f4`および`d476614e`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
@@ -154,8 +173,9 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   APPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
 - 本docs-only gateをpush後、既存R-NF05へPlan delta Reviewを依頼する。PASS前はF2を開始せず、FAIL時は
   spec/architecture remediationだけを行う。F1 gate、Owner Gate、0R/0R-DのPASS/対応状態は再オープンしない。
-- 現在のPlan delta FAIL remediationでは、専用chain、canonical bytes、起動fail-closed、loopback destination、
-  A2 N/A、旧traceを補正する。固定remote Headはdocs-only commit後に更新し、PLAN PASS受領前はF2を開始しない。
+- 現在のPlan delta FAIL remediationでは、専用chainの監査/error境界、canonicalTarget byte生成、
+  disabled deny-only/bean/config契約を補正する。固定remote Headはdocs-only commit後に更新し、
+  PLAN PASS受領前はF2を開始しない。P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。
 
 ## F1 gate evidence
 

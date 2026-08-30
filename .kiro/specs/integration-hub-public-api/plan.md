@@ -7,9 +7,11 @@ DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（いずれも2026-08-30）、O
 Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.mdへ固定した。F1は
 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、再オープンしない。
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
-（P0=0、P1=4、P2=2）である。現在はP1/P2のdocs-only remediationを既存R-NF05へ再提出する段階であり、
-F2は開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のため
-N/A、production enablementと実顧客/実providerは引き続き禁止する。
+（P0=0、P1=4、P2=2）となりdocs-only補正を行った。固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の
+再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）である。現在はsecurity chain監査/error境界、
+canonicalTarget byte生成、disabled deny-only/bean/config契約を補正して再提出する段階であり、F2は開始しない。
+Plan delta PASS後はF2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
+production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
 
@@ -20,7 +22,8 @@ N/A、production enablementと実顧客/実providerは引き続き禁止する�
 | 0R-D | delta Review remediation | count/asOf/status-code/correlation header契約 | docs-only範囲で完了。実装PASSではない |
 | 0R-P | R-NF05 Plan finding remediation | rate key、nonce ledger、delivery分離、retention/hold/restore contract | docs-only修正後、R-NF05再Review |
 | 0R-P2 | R-NF05 residual Plan remediation | burst algorithm、canonical state/terminal retention mapping | docs-only修正後、R-NF05再Review |
-| 0R-P5 | scope expansion Plan delta remediation | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、trace | docs-only修正後、R-NF05 Plan delta再Review |
+| 0R-P5 | scope expansion Plan delta remediation | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、trace | 前回P1-EXP-004/P2はSPEC_ADDRESSED。残存P1を0R-P6で補正 |
+| 0R-P6 | scope expansion Plan delta residual remediation | security chain監査/error境界、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約 | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | APPROVED_NOT_STARTED。Plan delta PASS後 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | APPROVED_SEQUENCED。F2 Review PASS後 |
@@ -51,9 +54,19 @@ N/A、production enablementと実顧客/実providerは引き続き禁止する�
    encoded byte順sort、固定field/LF framing、厳密base64urlを固定する。
 3. production public-api/external-transport default-off、MOCK default、unknown/malformed/conflicting
    configとreal URL/credentialの起動fail-closedを固定する。
-4. MOCK/LOOPBACKのみ、literal loopback/port、peer/DNS、redirect/proxy、multi-address/rebinding拒否を
+4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
+   peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
 5. A2をN/Aへ統一し、current Plan delta FAIL、F1 PASS維持、F2未着手、Owner/Base正本値を全traceへ同期する。
+
+6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
+   前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
+7. OpenAPI wire header、raw request-target取得元、path/queryのsplit・empty/valueなし・sort・rebuild、
+   Content-Encoding、header/target/body全上限、credentialVersion/keyId、signature decode後32-byteを
+   golden vectorへ固定する。
+8. public-api=falseでもdeny-only chainを残し、controller/worker/scheduler/transport beanを生成しない。
+   profileへfalse/MOCKを明示し、missingはimplicit defaultで補わず起動拒否する。mode enumはMOCK/STUB/
+   LOOPBACKへ統一する。
 
 ## F1 Implementation Review remediation（独立Review PASS）
 

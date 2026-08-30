@@ -12,7 +12,8 @@
 | 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | SPEC_ADDRESSED（state alias残存を追加補正） | a3b63d70f53bc799d1abcb6e26e34ad163aa9843（remoteへpush済み） |
 | 0R-P3 R-NF05 state mapping cleanup | design, tasks | design内の旧RETRY/SENT/EXPIRED aliasをcanonical enum・retention mappingから除去。production変更なし | COMPLETE（docs-only） | fdea4bb18db3d3ae6542dc0c534425783dd28a24（remoteへpush済み） |
 | 0R-P4 R-NF05 final Plan Review | review-ledger, review-remediation, completion-matrix | 独立ReviewがP0=0、P1=0、P2=2でPLAN PASS。P2は非blocking | COMPLETE（Review gate） | 1db3b2fc2657831b7c6c1e59217301302b7caa80（fixed review Head） |
-| 0R-P5 Scope expansion Plan delta remediation | README、plan、requirements、design、tasks、inventory、review-ledger、review-remediation、中央traceability | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、current traceを補正。production変更なし | SPEC_ADDRESSED（再Review待ち） | 8d25215b9b651e99433becf50d13498da3699d2a（remoteへpush済み） |
+| 0R-P5 Scope expansion Plan delta remediation | README、plan、requirements、design、tasks、inventory、review-ledger、review-remediation、中央traceability | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、current traceを補正。production変更なし | SPEC_ADDRESSED（P1-EXP-004/P2-EXP-005/006はReviewでCLOSED。残存P1あり） | 8d25215b9b651e99433becf50d13498da3699d2a（remoteへpush済み） |
+| 0R-P6 Scope expansion Plan delta residual remediation | README、plan、requirements、design、tasks、inventory、review-ledger、review-remediation、中央traceability | security chain監査/error boundary、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約を補正。production変更なし | SPEC_ADDRESSED（再Review待ち） | remediation commit後に固定 |
 | F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 5 tests、Flyway smoke PASS | IMPLEMENTATION_PASS | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、follow-up `5a2a0231`、typed snapshot `96d6801c`、独立Review PASS |
 | F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）とfollow-up FAIL（P1=4、再Review P1=1）への実装・テスト対応。typed snapshot field boundary、lease fail-closed、lock順序、delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTATION_PASS | `a184c1f4` + `d476614e` + `5a2a0231` + `96d6801c`、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3` → 独立Review PASS |
 | Scope expansion normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review-ledger、中央traceability | DecisionId、OwnerRef、Base、reviewed Head、wave status、A2 N/A、production禁止境界を正本化。production変更なし | COMPLETE（docs-only gate、Plan delta FAIL remediation中） | f7d7d144（remoteへpush済み。最終handoff Headは外部通知で固定） |
@@ -33,8 +34,9 @@ Implementation Review follow-upは`dff90b3961b647035436abd378a352b1fa000dd1`でF
 `96d6801c37d4b952e2601a06cf7edc1bc1a1bef8`で追加remediateし、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`で
 独立Implementation Review PASS（P0=0、P1=0、P2=0）を受領した。
 scope expansionのPlan delta Reviewは既存R-NF05へ固定remote Headを渡す。固定Head
-1547871caed049ba14d1e5e4a25ad50fa19771fcの判定はPLAN FAIL（P0=0、P1=4、P2=2）であり、
-NF05-PLAN-EXP-001〜006のspec/architecture remediationだけを同じbranchへcommit/pushする。
+1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL（P0=0、P1=4、P2=2）、
+固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）であり、
+NF05-PLAN-EXP-007〜009のspec/architecture remediationだけを同じbranchへcommit/pushする。
 Plan delta PASS前はF2を開始せず、A2はN/Aで全体完了をblockしない。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止し、production enablement、実顧客credential、実provider送信、
 merge、auto-mergeも禁止する。
@@ -46,7 +48,9 @@ Review baseline: 6e0f5067d9a6509775225278cc0dcfdc4d47643f
 Scope expansion reviewed Head: 7e50bf1360ea8d7271acc0667593635451300268
 Scope expansion DecisionId: DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02
 Scope expansion Plan delta FAIL Head: 1547871caed049ba14d1e5e4a25ad50fa19771fc（P0=0、P1=4、P2=2）
-Scope expansion Plan delta remediation commit: このdocs-only remediation後に固定
+Scope expansion Plan delta re-Review FAIL Head: 9cca2deec9ab1bd5417aaba98f859ed14210da13（P0=0、P1=3、P2=0）
+Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a
+Scope expansion Plan delta residual remediation commit: このdocs-only remediation後に固定
 Task 0R remediation: 48037c923224f684968dbaf3410cdb37307ed100
 Task 0R-D delta remediation: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
 Owner Gate normalization: 2f91e5a584c5224989780cb323e40f33fda185b6

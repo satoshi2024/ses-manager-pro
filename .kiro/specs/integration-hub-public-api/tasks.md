@@ -2,9 +2,10 @@
 
 ## 実行停止規則
 
-F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。現在のscope expansion Plan deltaはP0=0、
-P1=4、P2=2のFAILであるため、下記0R-P5のspec/architecture remediationと同じR-NF05の再Review
-以外のF2実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。前回のscope expansion Plan deltaは
+P0=0、P1=4、P2=2であり、補正後の固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13も
+P0=0、P1=3、P2=0のFAILであるため、下記0R-P6のspec/architecture remediationと同じR-NF05の
+再Review以外のF2実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -38,6 +39,15 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   status別code enum、全response correlation header、production source/migration/test差分0。
 - Demo: inventoryのoperation表とcandidate OpenAPIのpath/parameter/error/header集合が一致し、未承認のまま
   公開許可・実装PASSへ昇格していないことを確認する。
+
+## Task 0R-P6: scope expansion Plan delta residual remediation（spec / architecture only）
+
+- [ ] Objective: security chainのnonce前IP確定・専用監査・error boundary、canonicalTarget完全byte手順、
+  disabled deny-only chainとbean/config生成条件をrequirements/design/inventory/plan/ledgerへ同期する。
+- Test requirements: docs-only差分、golden vector、filter/error/CORS/CSRF/anonymous境界、default/prod profile、
+  disabled route、controller/worker/scheduler/transport bean不存在の受入条件を独立Plan Reviewが照合する。
+- Demo: 固定remote Headを既存R-NF05へ渡し、PLAN PASS受領前にF2を開始しない。production source、migration、
+  test、endpoint、外部送信、PRは変更しない。
 
 ## Task F1: client / credential / scope / idempotency DDL
 
@@ -84,21 +94,36 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   correlation、rate/IP境界を実装する。@Order(0)のsecurityMatcher、既存portal/internal chainとの
   排他、STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/OIDC/
   anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定する。filter順序はcorrelation/
-  size/canonical precheck→HMAC→trusted proxy/CIDR→scope/data scope/command permission→rate/quota→
-  ApiAuditFilter→controllerとし、同一filterの自動二重登録を防ぐ。
+  ExternalApiAuditBoundary開始→size/raw target precheck→trusted proxy/source IP解決→HMAC検証→
+  client principal確定後のclient CIDR判定（nonce未永続化）→nonce atomic insert commit→scope/data
+  scope/command permission→rate/quota→全decisionの監査確定→controllerとし、既存ApiAuditFilterを
+  GET監査の正本にせず同一filterの自動
+  二重登録を防ぐ。CSRFはexternal chainだけdisable、CORSは許可originなし、anonymousはdisable、
+  401/403は専用stable JSON entrypointとcorrelation headerでinternal errorへfall-throughさせない。
 - Preconditions: F1 Implementation PASS、scope expansion Decision、既存R-NF05 Plan delta PASS。現在はAPPROVED_NOT_STARTED。
-- Implementation guidance: HMAC canonical bytesはraw body SHA-256、uppercase method、RFC3986 path/query、
-  duplicate query保持、encoded byte順sort、UTF-8 byte length prefix、固定field順/LF framing、
-  base64url paddingなし/constant-time compareを使い、JSON再シリアライズやForwarded/XFFの影響を
-  受けない。startupではpublic-api.enabled=false、external-transport.enabled=false、provider.mode=MOCK
-  をdefaultにし、unknown/malformed/conflicting config、production enablement、real URL/credentialを
-  fail-closedで拒否する。MOCK/STUBまたはliteral loopbackのallow-list portだけを許可し、redirect、proxy、
-  hostname/DNS、multi-address/rebinding、non-loopbackをconfig時とconnection直前に拒否する。
+- Implementation guidance: HMAC wire headerはOpenAPI candidateのX-Client-ID、X-Credential-Version、
+  X-Key-ID、X-Timestamp、X-Nonce、X-Client-Signatureへ固定し、credentialVersion/keyIdの形式、
+  raw header block 16,384 byte/32 field、Content-Length、body 1,048,576 byte、Content-Encodingの
+  上限をdesign 3.1どおりに検証する。canonical bytesはraw request-targetをtrusted connectorのimmutable
+  attributeから取得し、最初の?で一度だけsplitする。path/queryの?・&・=、値なしと空値、percent
+  encoding、canonical pair sort/rebuild、raw body SHA-256、Content-Encoding、各byte上限、UTF-8
+  byte length prefix、keyIdを含む固定field順/LF framing、signature decode後32-byte、base64url paddingなし/
+  constant-time compareをdesign 3.1のgolden vectorどおりに実装し、JSON再シリアライズや
+  Forwarded/XFFの影響を受けない。各profileへpublic-api.enabled=false、external-transport.enabled=false、
+  provider.mode=MOCK、STUB、LOOPBACKの明示enumを設定し、missing/unknown/malformed/conflicting config、
+  production enablement、real URL/credentialをfail-closedで拒否する。disabled時もdeny-only chainを
+  残し、controller、worker、scheduler、transport beanを生成しない。MOCK/STUBまたはliteral loopbackの
+  allow-list portだけを許可し、redirect、proxy、hostname/DNS、multi-address/rebinding、non-loopbackを
+  config時とconnection直前に拒否する。
 - Test requirements: client A/B、scope差、data差、command差、rotation overlap/revoke/expiry、spoof、429、
   Retry-After、filter二重登録、chain順序/排他、stateless/session拒否、unknown method/path default deny、
-  CSRF/anonymous webhook非混入、metrics scrape cardinality。Unicode byte length、duplicate query、
-  percent encoding、empty body、malformed header/pathのsignature vector、default-off/起動fail-closed、
-  MOCK無接続、loopback IPv4/IPv6、DNS/redirect/proxy/peer検証も含む。
+  CSRF/CORS/anonymous拒否、401/403 stable JSONとcorrelation header、認証前/後principalとallow-list
+  route templateを含むGET全decisionの専用監査、
+  metrics scrape cardinality。raw request-target取得失敗、?・&・=、値なし/空値、duplicate query、
+  percent encoding、Content-Encoding、body/target/header上限、empty body、malformed header/pathの
+  golden signature vector、signature 32-byte制約、default-off/未設定/unknown起動fail-closed、
+  disabled deny-only chainとcontroller/worker/scheduler/transport bean不存在、MOCK/STUB無接続、
+  loopback IPv4/IPv6、DNS/redirect/proxy/peer検証も含む。
 - Demo: internal/portal chainと公開chainが相互にprincipalを偽装しない。
 
 ## Task A1: v1 read APIs / OpenAPI

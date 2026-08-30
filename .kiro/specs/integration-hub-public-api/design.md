@@ -19,16 +19,38 @@ command permission、credential version、correlation IDを束ねる。
 /portal/** と /api/portal/**だけを担当し、内部管理chainはその残りを担当する。各chainの
 matcherは相互排他的であり、/api/webhooks/**、/login、portal path、内部/api pathを
 external chainへ含めない。external chainへServlet FilterRegistrationBeanで同じfilterを
-自動登録せず、HMAC filterとApiAuditFilterの実行回数が各request一回であることを検証する。
+自動登録せず、HMAC filterとExternalApiAuditBoundaryの実行回数が各request一回であることを検証する。
 
 external chainはSessionCreationPolicy.STATELESS、NullSecurityContextRepository、request
 cache無効を固定し、form login、basic、OIDC、anonymous session継承、JSESSIONIDによる認証を
 受け付けない。client principalは内部roleまたはportal userへ変換せず、既存chainの
-Authenticationをexternal chainで再利用しない。明示的なfilter順序は、(1) correlation ID・
-request size・canonical target事前検証、(2) HMAC authentication、(3) trusted proxy/CIDR、
-(4) client scope・data scope・command permission、(5) distributed rate/quota、
-(6) ApiAuditFilter、(7) controllerとする。認証前の監査にはsecretを含めず、認証後は
-principalとdecisionをsafe metadataだけで記録する。
+Authenticationをexternal chainで再利用しない。明示的なfilter順序は、(1) correlation IDと
+ExternalApiAuditBoundaryの開始、request size・raw request-target事前検証、(2) trusted proxyと
+source IPを解決（この段階ではclient CIDR判定をしない）、(3) HMAC header・signature・timestamp・
+credentialの検証、(4) client principalを確定して解決済みsource IPへclient CIDR allow-listを
+適用（この段階でもnonceを永続化しない）、(5) IP判定済みprincipalのnonce atomic insert
+commit、(6) client scope・data scope・command permission、(7) distributed rate/quota、
+(8) ExternalApiAuditBoundaryの最終decision記録、(9) controllerとする。nonce commitは
+trusted proxy/source IP/CIDRと署名、timestamp、client状態をすべて検証した後だけ実行する。
+認証前の監査にはsecret、raw path、raw body、PIIを含めず、認証後はexternal principal、
+route template、scope/data scope/command/rateの全decision、stable result codeをsafe metadata
+だけで記録する。
+
+既存ApiAuditFilterは内部APIの更新系中心でGET external requestを完全には監査しないため、
+external chainの監査正本にしない。ExternalApiAuditBoundaryは成功・controller error・
+canonical/auth/IP/nonce/scope/rate拒否を含む全decisionをfinallyで一件に確定し、既存auditへ
+二重登録しない。external専用AuthenticationEntryPointとAccessDeniedHandlerは、401/403を
+stable JSON code（AUTHENTICATION_FAILED / FORBIDDEN_SCOPE）、correlation ID response header、
+必要最小限のmessageだけで返す。ExternalApiExceptionHandlerも同じwriterを使い、stack/SQL/
+internal IDを出さない。CSRFはcookie/sessionを使わないexternal chainだけでdisableし、
+CORSは許可originなし・wildcardなしでOrigin付きbrowser requestとOPTIONSをdefault denyする。
+anonymousはdisableし、401/403をinternal form login/error dispatchへfall-throughさせない。
+
+監査recordのroute templateは承認済みallow-listから選ぶ有限値とし、未一致targetは
+EXTERNAL_UNKNOWN_ROUTEへ収束させる。認証前principalはUNAUTHENTICATED、認証後principalは
+clientIdだけをsafe external principalとして記録し、raw target/query、body、credential header、
+secret、PII、source IPは監査recordへ保存しない。decision type、status class、stable result code、
+correlation ID、route templateを含む一request一recordを成功・例外・rejectのfinallyで確定する。
 
 external chainの認可は承認済みGET routeの完全一致allow-listだけを通し、anyRequest().denyAll()
 を最後に置く。unknown path、unknown method、command、export、matcher外のrequestには
@@ -193,33 +215,66 @@ unknown versionはfail-closedとする。
 
 ### 3.1 HMAC canonical requestのbyte契約
 
-署名対象headerは X-Api-Client-Id、X-Api-Credential-Version、X-Api-Timestamp、
-X-Api-Nonce、X-Api-Signature とし、header名の重複、obs-fold、CR/LF、前後空白、許可外ASCIIを
-拒否する。clientIdとcredential versionは長さ上限付きのASCII識別子、timestampはUTC Unix
-秒の符号なし10進表記（先頭ゼロ禁止、空白禁止、符号禁止）、nonceは上限付きbase64url
-（paddingなし）とする。署名値もbase64url paddingなしで、trimせず厳密にdecodeする。
+署名対象headerは X-Client-ID、X-Credential-Version、X-Key-ID、X-Timestamp、X-Nonce、
+X-Client-Signature とし、OpenAPI candidateのwire名と一致させる。header名の重複、obs-fold、
+CR/LF、前後空白、許可外ASCIIを拒否し、first/last選択やUnicodeの代替解釈を行わない。
+clientIdは1〜64 byteのASCII [A-Za-z0-9._~-]、credential versionは1〜10 byteの正の
+ASCII十進数（1〜2147483647、先頭ゼロ、空白、符号を禁止）、keyIdは1〜100 byteのASCII
+[A-Za-z0-9._~-]、timestampは10桁のUTC Unix秒（先頭ゼロ、空白、符号を禁止）とする。
+nonceはbase64url paddingなしで22〜43 ASCII文字かつdecode後16〜32 byteとする。署名値は
+base64url paddingなしで43 ASCII文字、decode後ちょうど32 byteでなければ拒否する。
+raw external header blockは16,384 byte以下かつ32 field以下、未定義の単一header valueは
+256 byte以下とする。Content-LengthはASCII十進数1〜7桁で0以外の先頭ゼロを禁止し、
+1,048,576以下のdecoded body長と一致させる。X-Correlation-IDを受け付ける場合は16〜128 byteの
+ASCII [A-Za-z0-9._~-]に限定し、署名・principal・認可判定には使わず、未指定時はserver生成する。
 
 bodySha256はrequestで受信した未加工byte列に対するSHA-256の小文字64桁hexとする。
 bodyが空の場合も空byte列のhashを使い、JSON parse、charset変換、再シリアライズ後のbodyを
-使わない。request size上限を超えるbodyは署名前に拒否し、raw bodyを永続化・logしない。
-methodはuppercase ASCIIとし、pathは / で始まり、NUL、backslash、dot segment、invalid
-UTF-8、曖昧なpercent encodingを拒否する。RFC3986 unreserved文字のpercent encodingだけを
-一度decodeし、percent hexはuppercaseで出力し、reserved文字のencodingは保持する。
-queryはformのplus規則を使わずRFC3986としてparseし、名前・値をencoded byte列の順に
-sortし、duplicate pairを保持する。queryなしは空byte列とし、Forwarded/X-Forwarded-For
-やproxy headerはcanonical targetに影響させない。
+使わない。raw bodyはtransfer decoding後・content decoding前の受信byte列とし、body上限は
+1,048,576 byteとする。Content-Encodingは未指定またはidentityだけを許可し（header valueは
+8 byte以下）、gzip/br等は
+署名前に拒否して展開しない。重複Content-Length、Content-Length不一致、body上限超過も
+拒否し、raw bodyを永続化・logしない。
+
+raw request-targetの入力元は、信頼するHTTP/1.1 connectorがrequest-lineから、HTTP/2 connectorが
+path pseudo-headerから、servlet containerのpath/query正規化前に設定するimmutableな
+external.raw-request-target byte属性とする。属性がない、connectorが未承認、または
+getRequestURI/getQueryString等の正規化値とorigin-form targetを検証できない場合は400へ
+拒否する。absolute-form、fragment、CR/LF、NUL、backslash、raw non-ASCII、invalid percent
+tripletを拒否し、Forwarded/X-Forwarded-For、Host、proxy rewrite値をsourceにしない。raw
+request-targetは4,096 byte以下とし、pathとqueryの各raw byte長も2,048以下とする。
+
+canonicalTargetは次の順序で生成する。全byteはASCII origin-form targetとして扱い、raw targetを
+最初の ? でpathとqueryへ一度だけ分割する。pathは / で始め、dot segmentを入力時点で拒否する。
+pathのliteral / はseparatorとして保持し、unreserved byte（A-Z、a-z、0-9、-、.、_、~）は
+そのまま出力する。percent tripletはHHを一byteとして検査し、そのbyteがunreservedならliteral
+へ一度だけdecodeし、それ以外は%HH（hex uppercase）として出力する。その他のraw byteは
+%HHへ変換する。これにより%2fと%2Fは同じ%2Fになり、%2Fはliteral /へdecodeしない。
+pathのcanonical byte長は2,048以下とする。
+
+queryがない、または ? の後が空ならquery suffixを付けない。queryはliteral & で分割し、
+空pairを拒否する（query全体が空の場合を除く）。各pairは最初のliteral = だけでname/valueに
+分け、=がない場合はvalueを空とし、canonical outputでは必ずname=とする。nameは空を拒否し、
+空valueは許可する。name/valueのnormalizationはpathのpercent規則を使うが、/を特別扱いせず、
+unreserved以外を%HHへ変換する。したがって+は空白でなく%2B、value内の=は%3Dとなる。
+pairをcanonical name byte、canonical value byte、入力順序の順にstable sortし、duplicate pairを
+削除せず、name=valueを&で連結する。query raw byte長は2,048以下、pair数は50以下、各
+name/valueのcanonical byte長は256以下、完成したcanonicalTargetは4,096 byte以下とする。
+queryが一つ以上ある場合だけpath + ? + joined pairsをcanonicalTargetとする。
 
 canonicalBytesは、先頭のASCII文字列 IH-HMAC-SHA256-V1 とLF byteに続けて、次の固定順序で
 構成する。field(name,value)はASCIIの name + ":" + UTF-8 byte lengthの10進表記 + ":" に
 続けて、そのvalueのUTF-8 bytesとLF byteを置く。したがって実装上は
 ASCII("IH-HMAC-SHA256-V1" + LF) || field("clientId", clientId) || field("credentialVersion",
-credentialVersion) || field("timestamp", timestamp) || field("nonce", nonce) || field("method",
-method) || field("canonicalTarget", canonicalTarget) || field("bodySha256", bodySha256) とし、
+credentialVersion) || field("keyId", keyId) || field("timestamp", timestamp) || field("nonce",
+nonce) || field("method", method) || field("canonicalTarget", canonicalTarget) ||
+field("bodySha256", bodySha256) とし、
 値をtrimまたは再正規化しない。値のbyte lengthは文字数ではなくUTF-8 byte数である。
 
     IH-HMAC-SHA256-V1
     clientId
     credentialVersion
+    keyId
     timestamp
     nonce
     method
@@ -228,10 +283,30 @@ method) || field("canonicalTarget", canonicalTarget) || field("bodySha256", body
 
 上記は説明上のfield順であり、実装では各fieldのlength prefixを含むbyte列を連結する。
 署名はそのcanonicalBytesへHMAC-SHA256を適用し、base64url paddingなしでconstant-time
-compareする。byte lengthは文字数ではなくUTF-8 byte数であり、Unicode client value、
+compareする。byte lengthは文字数ではなくUTF-8 byte数であり、UTF-8 byte length prefixの境界、
 duplicate query、percent encoding、空body、malformed header、path ambiguity、署名vectorを
 固定したcontract testを持つ。webhook eventもJSON serializer任せにせず、同じくallow-list
 された明示的byte encodingを使う。
+
+contract testのgolden vectorは次を正本とする。最初のvectorはtest fixture専用secretであり、
+実credentialやlogへ流さない。
+
+| raw request-target | canonicalTarget |
+|---|---|
+| /external-api/v1/project?b=2&a=one&a=&flag | /external-api/v1/project?a=&a=one&b=2&flag= |
+| /external-api/v1/project?x=hello%20world&x=hello+world&x=a%3Db | /external-api/v1/project?x=a%3Db&x=hello%20world&x=hello%2Bworld |
+| /external-api/v1/project?b&b= | /external-api/v1/project?b=&b= |
+| /external-api/v1/project? | /external-api/v1/project |
+| /external-api/v1/%2f | /external-api/v1/%2F |
+| /external-api/v1/a/../b、/external-api/v1/%G0 | reject（REQUEST_INVALID） |
+
+signature vectorは固定test clock 2026-08-30T00:00:00Z、clientId=client-a、
+credentialVersion=1、keyId=key-1、timestamp=1788048000、nonce=AQIDBAUGBwgJCgsMDQ4PEA、
+method=GET、canonicalTarget=/external-api/v1/project?a=&a=one&b=2&flag=、空body、
+test-secretを使う。
+canonicalTarget byte lengthは43、empty body SHA-256は
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855、期待するunpadded
+base64url signatureは UGMa5HEXan7nOe2RtY8RO_x4TgNXuaBZ0QMA7RaVz2A である。
 
 IPはclientごとのCIDR allow-listをdefault denyで適用する。Forwarded/X-Forwarded-Forは明示設定された
 trusted proxyからのみ採用し、unknown、malformed、multi-hop不正を拒否する。IPv4/IPv6を正規化し、
@@ -296,9 +371,9 @@ countとexportはlistと同一predicateを使い、
 権限外件数、存在判定、ページ境界から他client dataを推測できないようにする。
 
 error bodyはstable code、message、correlationId、必要最小限のfield errorのみとし、stack、SQL、内部ID、
-provider本文、DLQ内部理由を出さない。approved status/code mappingは400=RequestInvalidまたはCursorInvalid、
-401=AuthenticationFailed、403=ForbiddenScope、404=ResourceNotFound、429=RateLimited、
-500=InternalErrorに限定する。scope外detailと不存在detailは404/ResourceNotFoundへ収束させ、
+provider本文、DLQ内部理由を出さない。approved status/code mappingは400=REQUEST_INVALIDまたはCURSOR_INVALID、
+401=AUTHENTICATION_FAILED、403=FORBIDDEN_SCOPE、404=RESOURCE_NOT_FOUND、429=RATE_LIMITED、
+500=INTERNAL_ERRORに限定する。scope外detailと不存在detailは404/RESOURCE_NOT_FOUNDへ収束させ、
 list/countはscope適用後の母集団だけを返す。
 
 将来承認されたcommandはIdempotency-Keyを必須とし、正規化したrequest bodyとendpoint/clientを含むdigestを保存する。
@@ -355,19 +430,29 @@ PLAN/IMPLEMENTATION PASS後のみPR作成を許可する。
 
 ### 8.1 production enablementのdefault-off / fail-closed起動契約
 
-設定の正本名は integration.hub.public-api.enabled=false、
-integration.hub.external-transport.enabled=false、
-integration.hub.provider.mode=MOCK とする。public-api、external-transport、provider.modeは
-未設定・unknown・型不正・矛盾するprofile/env値が一つでもあれば起動を拒否し、defaultを
-trueへ補うfallbackを持たない。production profileではpublic-apiまたはexternal-transportが
-true、provider modeがMOCK/LOOPBACK以外、実credential、実provider URL、未承認の接続先が
-存在する場合にstartup validatorがfail-closedで停止する。実provider beanまたはreal HTTP
-clientをproductionへ生成しない。
+設定の正本名は integration.hub.public-api.enabled、integration.hub.external-transport.enabled、
+integration.hub.provider.mode とする。安全なdefault-offは実行時codeのimplicit defaultではなく、
+各profile設定へ明示する値であり、productionの正本は enabled=false、external-transport=false、
+provider.mode=MOCK とする。したがって三つのpropertyのいずれかが未設定、unknown、型不正、または
+profile/envの複数値が衝突する場合は、falseやMOCKを補うのではなくstartup validatorがfail-closedで
+起動を拒否する。default-offとmissing rejectionはこの区別で両立し、未設定でrouteが有効になる
+fallbackは持たない。
 
-development/testでは明示的にMOCKまたはLOOPBACKを選択できるが、これは実装・test専用であり、
-実顧客credentialとreal provider送信を許可しない。default-off、missing property、unknown
-mode、production violation、real URL混入、startup後のoutbound callなしをtestする。config
-guardは単なるfeature flagではなく、起動時とconnection直前の二重境界として実装する。
+public-api.enabled=falseでも externalApiSecurityFilterChain は常に生成する。これは
+/external-api/v1/**を捕捉するdeny-only chainで、anyRequest().denyAll()と専用stable error writer
+（404 RESOURCE_NOT_FOUND、correlation ID header）だけを持ち、internal/portal chainへfall-through
+させない。enabled=trueのcontrollerはdevelopment/testでのみ生成し、productionではstartup guard
+が拒否する。external-transport.enabled=falseの場合はdelivery worker、scheduler、transport
+clientを生成せず、workerのfallback schedulerも持たない。
+
+provider.modeの許可enumは MOCK、STUB、LOOPBACK の三値だけとする。MOCKとSTUBはネットワークを
+発生させず、LOOPBACKはdevelopment/testでのみliteral loopback allow-listへ接続する。
+development/testでは明示設定されたenabled値とこの三値の組合せだけを受け入れ、productionでは
+MOCK以外を拒否し、real credential、real provider URL、proxy、redirect、未承認接続先が一つでも
+あれば起動を停止する。ExternalApiController、delivery worker、scheduler、transport clientの
+生成条件、missing/unknown/malformed/conflict、default profile、prod profile、disabled routeの
+fall-throughなし、worker/outbound beanなし、起動後callなしをtestで固定する。config guardは
+feature flagだけでなく、起動時とconnection直前の二重境界として実装する。
 
 ### 8.2 mock/stub/loopback接続先検証契約
 

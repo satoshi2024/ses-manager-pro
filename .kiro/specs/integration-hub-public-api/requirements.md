@@ -4,8 +4,9 @@
 
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
 NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansionのPlan deltaは固定Head
-1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL（P0=0、P1=4、P2=2）であり、現在は
-docs-only remediation中である。Plan delta PASS前にF2以降のproduction implementation、public endpoint、
+1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL（P0=0、P1=4、P2=2）となり補正した。
+固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）であり、
+現在はdocs-only remediation中である。Plan delta PASS前にF2以降のproduction implementation、public endpoint、
 外部送信を開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -71,26 +72,39 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
      90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
      RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。
 IH-R1-12. F2は /external-api/v1/** にだけ一致する@Order(0)の専用security chainとし、既存portal/internal
-    chainとのmatcherを排他的にする。STATELESS、NullSecurityContextRepository、request cache無効、
-    session/form/basic/OIDC/anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定し、
-    HMAC、trusted proxy/CIDR、scope/data scope/command permission、rate、auditの順序とfilter一回実行を
-    contract testで検証する。
-IH-R1-13. HMAC canonical requestは値の意味だけでなくbyte列を固定する。raw body bytesのSHA-256、uppercase
-    method、RFC3986 path/query、duplicate query保持、encoded byte順sort、UTF-8 byte length prefix、
-    field順、LF framing、base64url paddingなし、constant-time compareを正本とし、JSON再シリアライズ、
+    chainとのmatcherを排他的にする。処理順序はcorrelationとExternalApiAuditBoundary開始、size/raw
+    request-target検証、trusted proxy/source IP解決、HMAC検証、client principal確定後のclient
+    CIDR判定（nonce未永続化）、nonce atomic insert commit、client scope/data scope/command permission、
+    rate/quota、全decisionの監査確定、
+    controllerとする。STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/
+    OIDC/anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定する。既存ApiAuditFilterが
+    GETを監査しない場合でも専用監査境界が全requestと全reject outcomeを記録し、CSRFは外部chainだけ
+    disable、CORSは許可originなし・wildcardなし、anonymous無効、401/403はstable JSON entrypointと
+    correlation headerで返し、internal form/errorへfall-throughさせないことをtestする。認証前principal、
+    allow-list route template、全decisionの監査record境界も固定する。
+IH-R1-13. HMAC canonical requestは値の意味だけでなくbyte列を固定する。OpenAPI candidateの
+    X-Client-ID / X-Credential-Version / X-Key-ID / X-Timestamp / X-Nonce / X-Client-Signature
+    をwire名とし、credentialVersionは1〜2147483647のASCII十進数、keyIdは1〜100 byteとする。
+    raw external header blockは16,384 byte/32 field以下、raw request-targetの取得元、
+    path/queryの分割、?・&・=、値なしと空値、pair sortと再構築、raw body bytesのSHA-256、
+    Content-Encoding、上限、UTF-8 byte length prefix、field順、LF framing、base64url decode後32-byte
+    制約、constant-time compareをdesign 3.1の手順とgolden vectorへ固定する。JSON再シリアライズ、
     trim、Forwarded/X-Forwarded-Forの影響を許可しない。
-IH-R1-14. productionのpublic-apiとexternal-transportはdefault false、provider modeはMOCKをdefaultとし、
-    未設定・unknown・型不正・矛盾設定、productionでのenablement、実credential/real provider URLを
-    startup validatorがfail-closedで拒否する。MOCK/LOOPBACK以外のprovider beanを生成せず、起動後の
-    外部callなしを検証する。
-IH-R1-15. development/testの接続先はMOCKまたはliteral loopback（127.0.0.1/[::1]とallow-list port）だけとし、
-    hostname/DNS、redirect、proxy、userinfo、non-loopback、DNS rebinding/multi-addressを拒否する。
-    redirectはNEVER、HTTP_PROXY等とJVM proxyは適用せず、config時とconnection直前のpeer検証を行う。
+IH-R1-14. 安全なdefault-offは各profile設定へ明示されたpublic-api.enabled=false、
+    external-transport.enabled=false、provider.mode=MOCKを意味し、codeのimplicit defaultではない。
+    未設定・unknown・型不正・矛盾設定は全profileでstartup validatorがfail-closed拒否する。
+    disabled時もdeny-only external chainを生成し、controller、worker、scheduler、transport beanを
+    生成せずinternal/portalへfall-throughさせない。productionはoff＋MOCKのみとし、enablement、
+    STUB/LOOPBACK、実credential/real provider URLを拒否する。
+IH-R1-15. development/testのprovider.mode enumはMOCK、STUB、LOOPBACKの三値だけとする。MOCK/STUBは
+    networkなし、LOOPBACKはliteral 127.0.0.1/[::1]とallow-list portだけとし、hostname/DNS、
+    redirect、proxy、userinfo、non-loopback、DNS rebinding/multi-addressを拒否する。redirectはNEVER、
+    HTTP_PROXY等とJVM proxyは適用せず、config時とconnection直前のpeer検証を行う。
 
 ## IH-R2 External contract
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
-   scope expansionは開発実装を承認するが、現在はPlan delta FAIL（P1=4、P2=2）のためF2を開始せず、
+   scope expansionは開発実装を承認するが、現在はPlan delta FAIL（P1=3、P2=0）のためF2を開始せず、
    production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
@@ -156,9 +170,11 @@ IH-R1-15. development/testの接続先はMOCKまたはliteral loopback（127.0.0
    manual replay失敗のrunbookとalertを持つ。
 3. Mではsecurity review、負荷、障害訓練、key rotation、secret/PII scan、backup/restore、
    recovery、runbook、remote Head固定を完了する。
-IH-R5-4. public-api.enabledとexternal-transport.enabledはdefault-offで、productionでは有効化不能な
-   fail-closed起動契約を持つ。MOCK/LOOPBACK以外の接続先、real provider URL、proxy、redirectを
-   起動時またはconnection直前に検出した場合は送信せず停止する。
+IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを明示し、provider.modeは
+   productionへMOCKを明示する。missing/unknown/malformed/conflicting configはimplicit defaultで補わず
+   fail-closed起動拒否とする。productionではoff＋MOCK以外、development/testではMOCK、STUB、LOOPBACK
+   以外のmode、real provider URL、proxy、redirectを起動時またはconnection直前に検出した場合は
+   controller、worker、scheduler、transportを生成せず送信しない。
 
 ## IH-R6 Metrics / payload retention
 
@@ -194,12 +210,18 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledはdefault-offで、prod
   refill直前/直後、minute/day境界、clock rollback、片方のquota更新失敗、Retry-Afterを検証する。
 - nonce ledgerのatomic unique、rotationを跨ぐ再利用拒否、future timestampを含むTTL、bounded purge再実行。
 - dedicated chainの@Order、matcher排他、stateless/session拒否、filter一回実行、unknown method/pathの
-  default deny、既存portal/internal chainとのprincipal非共有。
-- canonical bytesの署名vector、Unicode UTF-8 byte length、duplicate query、percent encoding、
-  empty body、invalid header/path、body上限、再シリアライズ差異の拒否。
-- default-off、missing/unknown/malformed/conflicting config、production violation、real URL/credential、
+  default deny、既存portal/internal chainとのprincipal非共有。trusted proxy/source IP/CIDRがnonce commit
+  より前に確定し、ExternalApiAuditBoundaryがGETを含む全decision/reject outcomeを監査すること。
+- CSRF/CORS/anonymous拒否、専用401/403 stable JSON entrypoint、全responseのcorrelation header、
+  internal form/errorへのfall-throughなし、既存ApiAuditFilterとの二重監査なし。
+- canonicalTargetのraw request-target取得元、origin-form、path/queryの?・&・= split、値なし/空値、
+  duplicate保持、canonical byte sort/rebuild、percent encoding、raw target/path/query/header/body上限、
+  credentialVersion/keyId、Content-Encoding、
+  empty body、signature decode後32-byte、golden vector、再シリアライズ差異の拒否。
+- profileへ明示したdefault-off、missing/unknown/malformed/conflicting config、production violation、
+  real URL/credential、disabled deny-only chain、controller/worker/scheduler/transport bean不存在、
   MOCKの無接続、起動後outboundなし。
-- MOCK/STUBの無接続、LOOPBACKのliteral IPv4/IPv6とport、hostname/DNS/multi-address/rebinding、non-loopback、userinfo、
+- provider.modeのMOCK/STUB（無接続）、LOOPBACKのliteral IPv4/IPv6とport、hostname/DNS/multi-address/rebinding、non-loopback、userinfo、
   redirect、HTTP_PROXY/HTTPS_PROXY/NO_PROXY、JVM proxyの拒否およびconnection直前peer検証。
 - service汎用CRUDの非公開、safe response/inbound/outbound snapshotの構造allow-list、idempotency/inboundの
   hash conflict永続化。
