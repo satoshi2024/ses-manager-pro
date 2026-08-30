@@ -15,6 +15,7 @@ public final class ExternalApiRouteCatalog {
 
     /** Spring matcher用のpath（detailのwildcardはcatalog側で1 segmentに再検証する）。 */
     public static final String[] SECURITY_MATCHERS = {
+            "/external-api/v1",
             "/external-api/v1/engineer-availability",
             "/external-api/v1/engineer-availability/*",
             "/external-api/v1/projects",
@@ -32,10 +33,28 @@ public final class ExternalApiRouteCatalog {
     }
 
     public static boolean isExternalApiPath(String path) {
-        return path != null && path.startsWith("/external-api/v1/");
+        return "/external-api/v1".equals(path)
+                || path != null && path.startsWith("/external-api/v1/");
     }
 
-    public record Route(String template, String scopeCode, String operationCode) {
+    public enum ResourceType {
+        ENGINEER_AVAILABILITY("engineerIds"),
+        PROJECT("projectIds"),
+        CONTRACT_STATUS("contractIds"),
+        INVOICE_STATUS("invoiceIds");
+
+        private final String dataScopeDimension;
+
+        ResourceType(String dataScopeDimension) {
+            this.dataScopeDimension = dataScopeDimension;
+        }
+
+        public String dataScopeDimension() {
+            return dataScopeDimension;
+        }
+    }
+
+    public record Route(String template, String scopeCode, String operationCode, ResourceType resourceType) {
     }
 
     public static Route resolve(String method, String path) {
@@ -43,40 +62,43 @@ public final class ExternalApiRouteCatalog {
             return null;
         }
         if ("/external-api/v1/engineer-availability".equals(path)) {
-            return new Route(path, ENGINEER_AVAILABILITY_SCOPE, ENGINEER_AVAILABILITY_PERMISSION);
+            return new Route(path, ENGINEER_AVAILABILITY_SCOPE, ENGINEER_AVAILABILITY_PERMISSION,
+                    ResourceType.ENGINEER_AVAILABILITY);
         }
         if (oneSegmentDetail(path, "/external-api/v1/engineer-availability/")) {
             return new Route("/external-api/v1/engineer-availability/{publicEngineerId}",
-                    ENGINEER_AVAILABILITY_SCOPE, ENGINEER_AVAILABILITY_PERMISSION);
+                    ENGINEER_AVAILABILITY_SCOPE, ENGINEER_AVAILABILITY_PERMISSION,
+                    ResourceType.ENGINEER_AVAILABILITY);
         }
         if ("/external-api/v1/projects".equals(path)) {
-            return new Route(path, PROJECT_SCOPE, PROJECT_PERMISSION);
+            return new Route(path, PROJECT_SCOPE, PROJECT_PERMISSION, ResourceType.PROJECT);
         }
         if ("/external-api/v1/projects/count".equals(path)) {
-            return new Route(path, PROJECT_SCOPE, PROJECT_PERMISSION);
+            return new Route(path, PROJECT_SCOPE, PROJECT_PERMISSION, ResourceType.PROJECT);
         }
         if (oneSegmentDetail(path, "/external-api/v1/projects/")) {
-            return new Route("/external-api/v1/projects/{publicProjectId}", PROJECT_SCOPE, PROJECT_PERMISSION);
+            return new Route("/external-api/v1/projects/{publicProjectId}", PROJECT_SCOPE, PROJECT_PERMISSION,
+                    ResourceType.PROJECT);
         }
         if ("/external-api/v1/contract-statuses".equals(path)) {
-            return new Route(path, CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION);
+            return new Route(path, CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION, ResourceType.CONTRACT_STATUS);
         }
         if ("/external-api/v1/contract-statuses/count".equals(path)) {
-            return new Route(path, CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION);
+            return new Route(path, CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION, ResourceType.CONTRACT_STATUS);
         }
         if (oneSegmentDetail(path, "/external-api/v1/contract-statuses/")) {
             return new Route("/external-api/v1/contract-statuses/{publicContractId}",
-                    CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION);
+                    CONTRACT_STATUS_SCOPE, CONTRACT_STATUS_PERMISSION, ResourceType.CONTRACT_STATUS);
         }
         if ("/external-api/v1/invoice-statuses".equals(path)) {
-            return new Route(path, INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION);
+            return new Route(path, INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION, ResourceType.INVOICE_STATUS);
         }
         if ("/external-api/v1/invoice-statuses/count".equals(path)) {
-            return new Route(path, INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION);
+            return new Route(path, INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION, ResourceType.INVOICE_STATUS);
         }
         if (oneSegmentDetail(path, "/external-api/v1/invoice-statuses/")) {
             return new Route("/external-api/v1/invoice-statuses/{publicInvoiceId}",
-                    INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION);
+                    INVOICE_STATUS_SCOPE, INVOICE_STATUS_PERMISSION, ResourceType.INVOICE_STATUS);
         }
         return null;
     }

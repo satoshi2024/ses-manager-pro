@@ -72,6 +72,8 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     parsed.canonicalPath());
             request.setAttribute(ExternalApiErrorWriter.ROUTE_ATTRIBUTE,
                     preAuthRoute == null ? "EXTERNAL_UNKNOWN_ROUTE" : preAuthRoute.template());
+            ExternalApiAuditTrail.route(request,
+                    preAuthRoute == null ? "EXTERNAL_UNKNOWN_ROUTE" : preAuthRoute.template());
 
             String clientId = requiredHeader(request, "X-Client-ID");
             String versionText = requiredHeader(request, "X-Credential-Version");
@@ -136,6 +138,8 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             ExternalApiPrincipal principal = new ExternalApiPrincipal(client.getClientId(), client.getId(),
                     client.getTenantId(), client.getLegalEntityId(), client.getDataScopeJson(),
                     credentialVersion, keyId, client.getClientTier());
+            ExternalApiAuditTrail.principal(request, principal);
+            ExternalApiAuditTrail.mark(request, "authentication", "AUTHENTICATED");
             request.setAttribute(ExternalApiErrorWriter.PRINCIPAL_ATTRIBUTE, principal);
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, "AUTHENTICATED");
             request.setAttribute(ExternalApiCanonicalRequest.class.getName(), parsed);
@@ -143,15 +147,18 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             filterChain.doFilter(new ExternalApiCachedBodyRequest(request, body), response);
         } catch (ExternalApiSecurityException e) {
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, e.getDecision());
+            ExternalApiAuditTrail.mark(request, "authentication", e.getDecision());
             ExternalApiErrorWriter.writeException(response, objectMapper, correlationId(request), e);
         } catch (IOException e) {
             ExternalApiSecurityException failure = ExternalApiSecurityException.invalid("REQUEST_INVALID");
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, failure.getDecision());
+            ExternalApiAuditTrail.mark(request, "authentication", failure.getDecision());
             ExternalApiErrorWriter.writeException(response, objectMapper, correlationId(request), failure);
         } catch (RuntimeException e) {
             ExternalApiSecurityException failure = new ExternalApiSecurityException(
                     HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "INTERNAL_ERROR");
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, failure.getDecision());
+            ExternalApiAuditTrail.mark(request, "authentication", failure.getDecision());
             ExternalApiErrorWriter.writeException(response, objectMapper, correlationId(request), failure);
         }
     }
@@ -232,6 +239,7 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                 && client.getClientId() != null
                 && client.getClientId().matches("[A-Za-z0-9._~-]{1,64}")
                 && client.getTenantId() != null && !client.getTenantId().isBlank()
+                && client.getLegalEntityId() != null
                 && client.getDataScopeJson() != null && !client.getDataScopeJson().isBlank()
                 && client.getRevokedAt() == null && (client.getExpiresAt() == null || client.getExpiresAt().isAfter(now));
     }

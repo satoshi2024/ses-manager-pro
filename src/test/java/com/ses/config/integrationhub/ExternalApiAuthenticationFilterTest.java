@@ -51,7 +51,7 @@ class ExternalApiAuthenticationFilterTest {
         IntegrationHubSecretCryptoService crypto = mock(IntegrationHubSecretCryptoService.class);
         ExternalApiAuthenticationFilter filter = filter(clientService, credentialService, nonceService, crypto);
 
-        ApiClient client = ApiClient.builder().id(7L).clientId("client-a").tenantId("tenant-a")
+        ApiClient client = ApiClient.builder().id(7L).clientId("client-a").tenantId("tenant-a").legalEntityId(9L)
                 .dataScopeJson("{\"engineerIds\":[\"e-1\"]}").allowedCidrs("203.0.113.0/24")
                 .clientTier("STANDARD").status("ACTIVE").build();
         CredentialVersion credential = CredentialVersion.builder().apiClientId(7L).credentialVersion(1)
@@ -163,7 +163,7 @@ class ExternalApiAuthenticationFilterTest {
     }
 
     private ApiClient activeClient() {
-        return ApiClient.builder().id(7L).clientId("client-a").tenantId("tenant-a")
+        return ApiClient.builder().id(7L).clientId("client-a").tenantId("tenant-a").legalEntityId(9L)
                 .dataScopeJson("{\"engineerIds\":[\"e-1\"]}").allowedCidrs("203.0.113.0/24")
                 .clientTier("STANDARD").status("ACTIVE").build();
     }

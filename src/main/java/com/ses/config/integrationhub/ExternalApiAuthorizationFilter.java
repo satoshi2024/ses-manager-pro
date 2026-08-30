@@ -40,18 +40,36 @@ public class ExternalApiAuthorizationFilter extends OncePerRequestFilter {
             ExternalApiRouteCatalog.Route route = ExternalApiRouteCatalog.resolve(request.getMethod(),
                     parsed.canonicalPath());
             if (route == null) {
+                ExternalApiAuditTrail.mark(request, "command", "UNKNOWN_ROUTE_OR_METHOD");
                 throw ExternalApiSecurityException.notFound("UNKNOWN_ROUTE_OR_METHOD");
             }
             request.setAttribute(ExternalApiErrorWriter.ROUTE_ATTRIBUTE, route.template());
+            ExternalApiAuditTrail.route(request, route.template());
             ApiClientScopeService scopeService = required(scopeServiceProvider);
             ApiUsageBucketService usageBucketService = required(usageBucketServiceProvider);
             ApiClientScope scope = scopeService.getActive(principal.clientDatabaseId(), route.scopeCode(),
                     route.operationCode());
             if (scope == null || !StringUtils.hasText(scope.getDataScopeJson())
                     || !StringUtils.hasText(principal.dataScopeJson())) {
+                ExternalApiAuditTrail.mark(request, "scope", "DENIED");
+                ExternalApiAuditTrail.mark(request, "dataScope", "DENIED");
                 throw ExternalApiSecurityException.forbidden("SCOPE_OR_DATA_SCOPE_DENIED");
             }
+            ExternalApiDataScope clientDataScope = ExternalApiDataScope.parse(principal.dataScopeJson(), objectMapper);
+            ExternalApiDataScope routeDataScope = ExternalApiDataScope.parse(scope.getDataScopeJson(), objectMapper);
+            ExternalApiDataScope intersection = clientDataScope.intersect(routeDataScope);
+            ExternalApiEffectiveScope effectiveScope = new ExternalApiEffectiveScope(
+                    principal.tenantId(), principal.legalEntityId(), intersection.values());
+            if (!effectiveScope.permits(route.resourceType())) {
+                ExternalApiAuditTrail.mark(request, "scope", "DENIED");
+                ExternalApiAuditTrail.mark(request, "dataScope", "INTERSECTION_DENIED");
+                throw ExternalApiSecurityException.forbidden("DATA_SCOPE_INTERSECTION_DENIED");
+            }
+            request.setAttribute(ExternalApiEffectiveScope.class.getName(), effectiveScope);
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, "SCOPE_ALLOWED");
+            ExternalApiAuditTrail.mark(request, "scope", "ALLOWED");
+            ExternalApiAuditTrail.mark(request, "dataScope", "INTERSECTION_ALLOWED");
+            ExternalApiAuditTrail.mark(request, "command", "READ_ALLOWED");
             ApiUsageBucketService.RateDecision rate = usageBucketService.consume(principal.clientId(),
                     route.scopeCode(), principal.tenantId(), route.template());
             if (!rate.allowed()) {
@@ -59,13 +77,23 @@ public class ExternalApiAuthorizationFilter extends OncePerRequestFilter {
                 ExternalApiErrorWriter.write(response, objectMapper, correlationId(request),
                         HttpStatus.TOO_MANY_REQUESTS.value(), "RATE_LIMITED", true,
                         rate.retryAfterSeconds());
+                ExternalApiAuditTrail.mark(request, "rate", "RATE_LIMITED");
                 return;
             }
+            ExternalApiAuditTrail.mark(request, "rate", "ALLOWED");
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, "AUTHORIZED");
             filterChain.doFilter(request, response);
         } catch (ExternalApiSecurityException e) {
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, e.getDecision());
+            if ("FORBIDDEN_SCOPE".equals(e.getCode())) {
+                ExternalApiAuditTrail.mark(request, "scope", e.getDecision());
+            }
             ExternalApiErrorWriter.writeException(response, objectMapper, correlationId(request), e);
+        } catch (IllegalArgumentException e) {
+            ExternalApiAuditTrail.mark(request, "dataScope", "INVALID");
+            ExternalApiSecurityException failure = ExternalApiSecurityException.forbidden("DATA_SCOPE_INVALID");
+            request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, failure.getDecision());
+            ExternalApiErrorWriter.writeException(response, objectMapper, correlationId(request), failure);
         } catch (RuntimeException e) {
             ExternalApiSecurityException failure = new ExternalApiSecurityException(
                     HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "INTERNAL_ERROR");

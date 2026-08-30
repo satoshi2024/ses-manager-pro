@@ -40,9 +40,11 @@ public class ExternalApiCorrelationFilter extends OncePerRequestFilter {
                 request.setAttribute(ExternalApiErrorWriter.CORRELATION_ATTRIBUTE, correlationId);
                 response.setHeader("X-Correlation-ID", correlationId);
             }
+            ExternalApiAuditTrail.correlation(request, correlationId);
             filterChain.doFilter(request, response);
         } catch (ExternalApiSecurityException e) {
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, e.getDecision());
+            ExternalApiAuditTrail.mark(request, "authentication", e.getDecision());
             ExternalApiErrorWriter.writeException(response, objectMapper,
                     correlationId(request), e);
         }

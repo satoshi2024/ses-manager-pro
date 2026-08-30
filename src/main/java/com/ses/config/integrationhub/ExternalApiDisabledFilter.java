@@ -33,6 +33,7 @@ public class ExternalApiDisabledFilter extends OncePerRequestFilter {
         }
         request.setAttribute(ExternalApiErrorWriter.ROUTE_ATTRIBUTE, "EXTERNAL_UNKNOWN_ROUTE");
         request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, "DISABLED_DENY");
+        ExternalApiAuditTrail.mark(request, "authentication", "DISABLED_DENY");
         ExternalApiErrorWriter.write(response, objectMapper, correlationId(request), 404,
                 "RESOURCE_NOT_FOUND", false, 0);
     }

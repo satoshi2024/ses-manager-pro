@@ -60,6 +60,7 @@ spring:
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
         - classpath:sql/schema-integration-hub-f1-h2.sql
+        - classpath:sql/schema-integration-hub-f2-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 

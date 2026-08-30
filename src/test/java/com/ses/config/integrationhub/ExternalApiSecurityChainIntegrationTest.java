@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -29,6 +30,9 @@ class ExternalApiSecurityChainIntegrationTest {
     @Autowired
     private FilterChainProxy filterChainProxy;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     void disabledApprovedPathReturnsStableNotFoundJson() throws Exception {
         mockMvc.perform(get("/external-api/v1/projects"))
@@ -36,6 +40,12 @@ class ExternalApiSecurityChainIntegrationTest {
                 .andExpect(header().exists("X-Correlation-ID"))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").value("Resource not found"));
+        assertEquals(1, auditCount());
+        mockMvc.perform(get("/external-api/v1"))
+                .andExpect(status().isNotFound())
+                .andExpect(header().exists("X-Correlation-ID"))
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        assertEquals(2, auditCount());
     }
 
     @Test
@@ -48,6 +58,7 @@ class ExternalApiSecurityChainIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(header().exists("X-Correlation-ID"))
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        assertEquals(2, auditCount());
     }
 
     @Test
@@ -60,5 +71,9 @@ class ExternalApiSecurityChainIntegrationTest {
         assertEquals(1, filters.stream().filter(filter -> filter instanceof ExternalApiAuthorizationFilter).count());
         assertTrue(filters.indexOf(filters.stream().filter(filter -> filter instanceof ExternalApiAuditBoundary).findFirst().orElseThrow())
                 < filters.indexOf(filters.stream().filter(filter -> filter instanceof ExternalApiAuthenticationFilter).findFirst().orElseThrow()));
+    }
+
+    private int auditCount() {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_external_api_audit", Integer.class);
     }
 }

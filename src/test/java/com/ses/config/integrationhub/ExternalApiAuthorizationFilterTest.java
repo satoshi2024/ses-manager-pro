@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -57,6 +58,11 @@ class ExternalApiAuthorizationFilterTest {
         filter.doFilter(request, response, (req, res) -> called.set(true));
 
         assertTrue(called.get());
+        ExternalApiEffectiveScope effective = assertInstanceOf(ExternalApiEffectiveScope.class,
+                request.getAttribute(ExternalApiEffectiveScope.class.getName()));
+        assertEquals("tenant-a", effective.tenantId());
+        assertEquals(9L, effective.legalEntityId());
+        assertEquals(java.util.Set.of("p-1"), effective.allowedValues().get("projectIds"));
         verify(usageService).consume("client-a", ExternalApiRouteCatalog.PROJECT_SCOPE, "tenant-a",
                 "/external-api/v1/projects/{publicProjectId}");
     }
@@ -99,6 +105,38 @@ class ExternalApiAuthorizationFilterTest {
         filter.doFilter(command, commandResponse, (req, res) -> { throw new AssertionError("command allowed"); });
         assertEquals(404, commandResponse.getStatus());
         assertFalse(commandResponse.getContentAsString().contains("FORBIDDEN_SCOPE"));
+    }
+
+    @Test
+    void nonIntersectingClientAndRouteScopeIsDeniedBeforeQuota() throws Exception {
+        authenticate(principal());
+        when(scopeService.getActive(any(), any(), any())).thenReturn(ApiClientScope.builder()
+                .dataScopeJson("{\"projectIds\":[\"p-2\"]}").build());
+        MockHttpServletRequest request = request("GET", "/external-api/v1/projects");
+        request.setAttribute(ExternalApiCanonicalRequest.class.getName(), parsed("/external-api/v1/projects"));
+        request.setAttribute(ExternalApiErrorWriter.CORRELATION_ATTRIBUTE, "correlation-123456");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> { throw new AssertionError("must not reach controller"); });
+
+        assertEquals(403, response.getStatus());
+        verify(usageService, never()).consume(any(), any(), any(), any());
+    }
+
+    @Test
+    void malformedOrWildcardScopeIsDeniedClosed() throws Exception {
+        authenticate(principal());
+        when(scopeService.getActive(any(), any(), any())).thenReturn(ApiClientScope.builder()
+                .dataScopeJson("{\"projectIds\":[\"*\"]}").build());
+        MockHttpServletRequest request = request("GET", "/external-api/v1/projects");
+        request.setAttribute(ExternalApiCanonicalRequest.class.getName(), parsed("/external-api/v1/projects"));
+        request.setAttribute(ExternalApiErrorWriter.CORRELATION_ATTRIBUTE, "correlation-123456");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> { throw new AssertionError("must not reach controller"); });
+
+        assertEquals(403, response.getStatus());
+        verify(usageService, never()).consume(any(), any(), any(), any());
     }
 
     private void authenticate(ExternalApiPrincipal principal) {

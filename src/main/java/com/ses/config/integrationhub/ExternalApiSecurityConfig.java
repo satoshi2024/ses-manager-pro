@@ -16,6 +16,8 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.context.NullSecurityContextRepository;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 
 /** NF-05公開API専用SecurityFilterChain。既存internal/portal chainと相互排他的にする。 */
@@ -78,7 +80,9 @@ public class ExternalApiSecurityConfig {
         AuthenticationEntryPoint entryPoint = this::writeAuthenticationFailure;
         AccessDeniedHandler deniedHandler = this::writeForbidden;
         http
-                .securityMatcher("/external-api/v1/**")
+                .securityMatcher(new OrRequestMatcher(
+                        new AntPathRequestMatcher("/external-api/v1"),
+                        new AntPathRequestMatcher("/external-api/v1/**")))
                 .addFilterBefore(auditBoundary, SecurityContextHolderFilter.class)
                 .addFilterAfter(correlationFilter, ExternalApiAuditBoundary.class)
                 .addFilterAfter(disabledFilter, ExternalApiCorrelationFilter.class)

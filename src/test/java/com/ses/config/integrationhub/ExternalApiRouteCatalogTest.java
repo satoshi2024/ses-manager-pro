@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExternalApiRouteCatalogTest {
     @Test
@@ -15,5 +16,7 @@ class ExternalApiRouteCatalogTest {
         assertNull(ExternalApiRouteCatalog.resolve("POST", "/external-api/v1/projects"));
         assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/projects/p-1/extra"));
         assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/engineer-availability/count"));
+        assertTrue(ExternalApiRouteCatalog.isExternalApiPath("/external-api/v1"));
+        assertTrue(ExternalApiRouteCatalog.isExternalApiPath("/external-api/v1/unknown"));
     }
 }

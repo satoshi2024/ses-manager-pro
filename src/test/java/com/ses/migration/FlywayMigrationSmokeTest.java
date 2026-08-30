@@ -103,12 +103,14 @@ class FlywayMigrationSmokeTest {
             for (String table : new String[]{
                     "m_api_client", "m_api_client_scope", "t_credential_version", "t_api_idempotency_record",
                     "m_webhook_subscription", "t_api_delivery", "t_inbound_event", "t_api_usage_bucket",
-                    "t_api_nonce_replay", "t_api_retention_hold", "t_api_purge_checkpoint"}) {
+                    "t_api_nonce_replay", "t_api_retention_hold", "t_api_purge_checkpoint",
+                    "t_external_api_audit"}) {
                 assertTableExists(st, table);
             }
             assertIndexExists(st, "t_api_usage_bucket", "uk_api_usage_subject");
             assertIndexExists(st, "t_api_nonce_replay", "uk_api_nonce_client_hash");
             assertIndexExists(st, "t_api_delivery", "uk_api_delivery_event_generation");
+            assertIndexExists(st, "t_external_api_audit", "idx_external_audit_created");
             assertColumnExists(st, "t_api_idempotency_record", "request_digest");
             assertColumnExists(st, "t_api_delivery", "external_dto_snapshot");
             assertColumnExists(st, "t_api_delivery", "provider_idempotency_key");

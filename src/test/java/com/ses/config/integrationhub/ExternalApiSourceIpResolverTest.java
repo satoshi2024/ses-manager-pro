@@ -6,6 +6,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ExternalApiSourceIpResolverTest {
@@ -37,6 +38,17 @@ class ExternalApiSourceIpResolverTest {
         MockHttpServletRequest malformed = request("10.0.0.1");
         malformed.addHeader("Forwarded", "for=_hidden");
         assertThrows(ExternalApiSecurityException.class, () -> resolver.resolve(malformed, List.of("10.0.0.1/32")));
+    }
+
+    @Test
+    void onlyStrictLiteralIpFormsAreAcceptedWithoutDns() {
+        assertEquals("203.0.113.10", ExternalApiCidrMatcher.normalizeIp("203.0.113.10"));
+        assertEquals("203.0.113.10", ExternalApiCidrMatcher.normalizeIp("::ffff:203.0.113.10"));
+        assertNull(ExternalApiCidrMatcher.normalizeIp("127.1"));
+        assertNull(ExternalApiCidrMatcher.normalizeIp("2130706433"));
+        assertNull(ExternalApiCidrMatcher.normalizeIp("0127.0.0.1"));
+        assertNull(ExternalApiCidrMatcher.normalizeIp("example.invalid"));
+        assertNull(ExternalApiCidrMatcher.normalizeIp("fe80::1%lo0"));
     }
 
     private MockHttpServletRequest request(String remoteAddr) {
