@@ -3,7 +3,7 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1実装完了・Implementation Review待ち
+- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1 implementation remediation済み・独立再Review待ち
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -38,8 +38,9 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約
 妨げない。F1の実装は承認済みpersistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、
 production enablement、command/exportは引き続き禁止する。
 
-F1実装commitは `a7654b44`。V129 MySQL Flyway smoke（empty/legacy V78/normal）とF1 targeted suite（23 tests、
-failure/error/skipなし）を確認した。全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresで
+F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`。V129 MySQL Flyway smoke、F1 H2 targeted
+suite（31 tests、failure/error/skipなし）、MySQL multi-connection concurrency（3 tests、failure/error/skipなし）を確認した。
+全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わず、独立Implementation Reviewを残している。
 
 ## Task 0R remediation

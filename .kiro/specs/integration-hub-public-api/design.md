@@ -58,6 +58,26 @@ refillも行わず、時刻を後戻りさせない。minute_window_startはUTC 
 次のUTC境界）。rowが無い場合のinsert競合はDB unique violationを一度だけ安全に再読込して同じlock/predicateへ収束させる。
 multi-nodeでJVM内counterへfallbackせず、client IDやIPをmetrics labelへ出さない。
 
+#### 保存serviceとsnapshotの型境界
+
+F1のintegrationhub service interfaceはMyBatis-PlusのIServiceを継承せず、保存・状態遷移ごとの明示的な
+typed operationだけを公開する。mapperは内部のSQL境界であり、controllerや外部adapterへ汎用save/update/removeを
+露出しない。これにより、entityを直接保存してscope、状態、retention、snapshot検証を迂回する経路を作らない。
+
+ExternalDtoSnapshotはJSON objectを構造的にparseし、用途ごとにSAFE_RESPONSE_FIELDS、INBOUND_FIELDS、
+OUTBOUND_FIELDSのallow-listを適用する。未知field、過大な配列・文字列、重複JSON key、object以外のrootは拒否する。
+idempotencyのsafe responseはcode/statusと承認済みdata fieldだけ、inboundはprovider event metadataと
+allow-listed parsed fieldだけ、outboundは承認済みexternal DTO envelopeだけを保存する。自由記述message、internal
+entity、DB internal ID、secret、PII、provider raw body、stack/SQLは各保存境界へ渡さない。
+
+#### Conflictのcanonical persistence
+
+同じidempotency natural keyでrequest digestが異なる場合、既存IN_PROGRESS rowをFOR UPDATEし、CONFLICT、409、
+固定safe code、terminal_at、FAILED_DLQ_PAYLOAD_90Dへ一回だけversion CASする。その後に安全なconflict exceptionを
+返し、別payloadを既存結果へ接続しない。provider eventのunique insertがDuplicateKeyになった場合はprovider event
+rowをFOR UPDATEで再読し、raw hash不一致かつRECEIVED/PROCESSINGならCONFLICTへ遷移させる。同時処理の勝者・敗者を問わず
+DB上のcanonical stateを残す。
+
 #### Nonce replay ledger
 
 t_api_nonce_replayはclient_id、credential_version、nonce_hash、accepted_at、expires_at、created_atだけを
@@ -77,7 +97,7 @@ public webhook delivery ledgerとして分離して採用するが、t_api_outbo
 自身がNF-05のoutbox/event rowであり、event_id + subscription_id + delivery_generationをuniqueにする。
 同じdomain eventをnotification outboxへ複製せず、subscriptionごとに承認済みexternal DTO snapshotを一件だけ
 作る。業務stateとこのrowのinsertは同一transaction、claim/leaseは短いtransaction、外部HTTPはtransaction外、
-結果更新はlease token・payload hash・generation付きCAS transactionとする。manual replayは新generationの
+結果更新はrow version、lease token、payload hash、provider idempotency key、delivery generation付きCAS transactionとする。manual replayは新generationの
 delivery rowとして作成し、元rowを再pending化しない。
 
 delivery rowには event_id、subscription_id、delivery_generationからSHA-256で決定的に導出した
@@ -110,9 +130,13 @@ commitすればpurgeは削除せず、purgeが先にcommitすればhold操作は
 
 t_api_purge_checkpointはbounded batchの再開位置にのみ使い、削除可否の正本にしない。backup/restore後の運用は
 restore cutover時に新しいrestore_epochをcheckpointへ記録してからpurgeを起動し、旧checkpointを無効化する。
-各retention classについてexpires_atの最小値から全対象を再評価し、外部の未確定なwatermarkを正本にしない。
+各retention classについてretention_expires_at,idのkeyset cursorでbounded batchを再開する。候補SQLではACTIVE holdと
+期限前のleaseを除外し、hold取得・解除は対象classのcursorをresetする。active leaseのように時間でeligibilityが
+変化するrowをcursorの先へ取り残さないため、候補数がlimit未満ならbatch完了時にcursorをnullへ戻し、次回走査を先頭から
+行う。delete直前には対象rowを同じ順序でFOR UPDATEし、ACTIVE holdなし、leaseなし/期限切れ、terminal state、
+retention_expires_at <= now、取得時version一致をdelete predicateで再確認する。
 restore後に復活した期限切れrow、復元されたhold、lease競合を同じlock/CAS規則で処理し、purgeは何度実行しても
-同じ結果になる。部分失敗は成功batchを再削除せず、未処理batchを次回へ残す。
+同じ結果になる。部分失敗は成功batchを再削除せず、未処理batchを次回へ残し、cursor末尾では再評価のためresetする。
 
 webhook endpoint_urlは最大512文字とし、client・direction・event type・endpointの組合せをDB uniqueで固定する。
 この上限はutf8mb4の複合unique keyがMySQLの3072-byte制限を越えないための保存契約であり、B1の登録時にも同じ上限を
@@ -181,9 +205,9 @@ purgeせず、terminal状態はretention tableのclassと起算点へ必ず対�
 
 | 対象 | canonical enum | terminal分類・保持 | 許可遷移と競合規則 |
 |---|---|---|---|
-| credential | ACTIVE / OVERLAP / REVOKED / EXPIRED | credential metadata。payload retention対象外 | ACTIVE→OVERLAP/REVOKED/EXPIRED、revoke即時、旧世代はoverlapUntilまで。version CAS |
-| idempotency | IN_PROGRESS / SUCCEEDED / FAILED / CONFLICT | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/CONFLICT=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | IN_PROGRESS→SUCCEEDED/FAILED/CONFLICT。unique(client, endpoint, key)、digest一致だけ再利用。terminalから逆遷移しない |
-| delivery | PENDING / CLAIMED / RETRYABLE / SUCCEEDED / FAILED / DLQ | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/DLQ=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | PENDING→CLAIMED→SUCCEEDED/RETRYABLE/FAILED/DLQ、RETRYABLE→CLAIMED。lease token・payload hash・generation付きCAS。terminalから逆遷移しない |
+| credential | ACTIVE / OVERLAP / REVOKED / EXPIRED | credential metadata。payload retention対象外 | ACTIVE→OVERLAP/REVOKED/EXPIRED、revoke即時、旧世代はnon-null overlapUntilまで。version CAS |
+| idempotency | IN_PROGRESS / SUCCEEDED / FAILED / CONFLICT | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/CONFLICT=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | IN_PROGRESS→SUCCEEDED/FAILED/CONFLICT。unique(client, endpoint, key)、digest一致だけ再利用。不一致はCONFLICTを永続化してから409。terminalから逆遷移しない |
+| delivery | PENDING / CLAIMED / RETRYABLE / SUCCEEDED / FAILED / DLQ | SUCCEEDED=SUCCEEDED_PAYLOAD_30D、FAILED/DLQ=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | PENDING→CLAIMED→SUCCEEDED/RETRYABLE/FAILED/DLQ、RETRYABLE→CLAIMED。row version・lease token・payload hash・provider key・generation付きCAS。terminalから逆遷移しない |
 | inbound event | RECEIVED / PROCESSING / PROCESSED / DUPLICATE / CONFLICT / DLQ | PROCESSED/DUPLICATE=SUCCEEDED_PAYLOAD_30D、CONFLICT/DLQ=FAILED_DLQ_PAYLOAD_90D。terminal_at起算 | RECEIVED→PROCESSING→PROCESSED/DUPLICATE/CONFLICT/DLQ。provider event ID unique、raw hash不一致はCONFLICT。terminalから逆遷移しない |
 
 ## 6. HTTP契約（F1/A1計画入力）
@@ -225,7 +249,7 @@ CONFLICT/DLQとする。
 
 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitする。業務commit後に
 callbackや別transactionでoutboxを作る方式は採用しない。workerは短いclaim/lease transactionをcommitして
-から外部callを行い、完了後にlease tokenとpayload hashを含む別の短いCAS transactionで
+から外部callを行い、完了後にrow version、lease token、provider idempotency key、payload hash、generationを含む別の短いCAS transactionで
 SUCCEEDED、RETRYABLE、FAILED、DLQへ遷移させる。stale leaseはsafeにrecoverする。
 
 provider成功直後にworkerが停止しても、provider request ID、idempotency key、payload hash、lease世代を
@@ -245,7 +269,8 @@ succeeded 30日、failed/DLQ 90日、audit metadata 1年とし、legal hold中�
 DG-05 Owner承認済みである。
 
 purge jobは期限境界をUTC/Asia-Tokyoの契約に従って一度だけ判定し、legal hold、backup/restore後、
-再実行、部分失敗を安全に扱う。ログ、metrics、auditにはsecret、PII、raw request/responseを出さず、
+再実行、部分失敗、dynamic lease eligibilityを安全に扱う。keyset cursorは候補集合の末尾でresetし、hold解除と
+restore epochでは対象classを先頭から再評価する。ログ、metrics、auditにはsecret、PII、raw request/responseを出さず、
 safe codeとhashの一部だけを使う。
 
 Mではsecurity review、負荷とrate boundary、DB/worker/provider停止、restore、key rotation/revoke、

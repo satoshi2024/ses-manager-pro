@@ -38,11 +38,28 @@
 | NF05-PLAN-005 | P1 | burst 20のcapacity、refill、atomic predicate、clock rollbackが未固定 | design.md 2.1、requirements IH-R1-8、tasks F1 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
 | NF05-PLAN-006 | P1 | idempotency/delivery/inboundのcanonical enumとterminal retention mappingが不一致 | design.md 2.1/5.3、requirements IH-R6-3、tasks F1 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
 
+## F1 Implementation Review findings
+
+初回の独立Implementation Reviewは固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対し、
+FAIL（P0=0、P1=7、P2=2）だった。以下はapproved F1 scope内のremediationであり、再Review前にPASSへ昇格させない。
+
+| ID | Severity | Finding | 対応 | Status |
+|---|---|---|---|---|
+| NF05-IMPL-001 | P1 | secret/PII/raw body非永続化とgeneric CRUD迂回がservice境界で保証されない | typed ExternalDtoSnapshotの用途別構造allow-list、safe response/inbound/outbound検証、F1 serviceからIService/ServiceImpl継承を除去 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-002 | P1 | inbound DuplicateKey hash conflictがCONFLICTへ永続化されずRECEIVEDに残る | provider event rowをFOR UPDATEで再読し、RECEIVED/PROCESSINGをversion CASでCONFLICTへ遷移。unit test追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-003 | P1 | active holdを含むpurge batchでcheckpointがstarveする | active holdを候補から除外し、hold acquire/release時に対象class cursorをreset。keyset末尾resetを仕様・実装へ追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-004 | P1 | purge deleteがactive leaseとrow versionを直前に再確認しない |対象row lock後にversion、retention、terminal、lease expiryをdelete predicateへ含め、H2/MySQL test追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-005 | P1 | idempotency conflictが永続化されずCONFLICT状態へ到達しない | mismatch時に固定409 code、terminal/90日retentionをCAS保存してから例外を返す | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-006 | P1 | delivery result CASがgeneration/provider idempotency keyを要求しない | row version、lease token、payload hash、provider idempotency key、generation由来のCAS契約へ修正し、H2/MySQL test追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-007 | P1 | F1のmulti-node/境界/遷移/hold-purge証跡が不足 | MySQL multi-connection usage、delivery CAS、active lease purge 3件とH2 inbound/purge境界を追加。残る網羅的境界・M証跡は未完了 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-008 | P2 | credential OVERLAPのNULL期限がfail-open | overlap_until IS NOT NULL AND overlap_until > server_nowへ修正 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-009 | P2 | raw pathをroute templateとしてusage bucketへ保存可能 | OpenAPI candidateの11 fixed route template exact setへ制限し、raw resource path test追加 | IMPLEMENTED_PENDING_REVIEW |
+
 ## F1 implementation trace
 
 | Task | Evidence | Status | Review boundary |
 |---|---|---|---|
-| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡、F1 targeted 23 tests | IMPLEMENTED_PENDING_REVIEW | 独立Implementation Review未実施。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
+| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`でIMPL findingsをremediate。F1 H2 31 tests、MySQL concurrency 3 testsはPASS。独立Implementation Review再Review待ち。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
 
 ## Evidence status
 
@@ -65,7 +82,9 @@
   retention mappingをdesign/tasksへ同期した。
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
 - F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
-  独立Implementation Reviewは未実施。F2、A1、A2、B1、B2、M: 未着手。
+- F1 Implementation Review: `b420911b63177763544edd1e02d663bf528d9dc1`でFAIL（P0=0、P1=7、P2=2）。
+  `a184c1f4`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
+  concurrency 3 testsをPASSした。独立Implementation Review再Review待ち。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
   persistence基盤の実装に限定している。
@@ -74,5 +93,5 @@
 
 1. F1開始時にorigin/mainをfetchし、migration最大値、H2 schema/init経路、backup/rollback前提を再確認する（完了）。
 2. 実装はapproved implementation scopeへ限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablementを行わない。
-3. 実装commit `a7654b44`を許可されたbranchへpush済み。対象F1 suiteはfailure/error/skipなし、全fast
+3. 実装commit `a7654b44`とremediation commit `a184c1f4`を許可されたbranchへpush済み。F1対象suiteはfailure/error/skipなし、全fast
    suiteのF1対象外failure/errorは全体PASSへ昇格させない。

@@ -29,6 +29,26 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 | R-NF05 burst algorithm不足 | P1 | capacity 20、初期token 20、3秒ごとに1 token refill、minute/dayと同一transactionのatomic predicate、clock rollback、Retry-Afterを固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 | R-NF05 canonical state/terminal mapping不足 | P1 | idempotency/delivery/inboundのcanonical enum、遷移、非terminal/terminal、30/90日classと起算点、alias/逆遷移拒否を固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 
+## F1 Implementation Review remediation
+
+初回Implementation Reviewは固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対してFAIL（P0=0、
+P1=7、P2=2）だった。以下は実装・テストへ反映したが、独立再Reviewを受けるまでIMPLEMENTATION PASSではない。
+
+| Finding | 対応 | 状態 | 証跡 / 残る条件 |
+|---|---|---|---|
+| P1-001 snapshot保存境界・generic CRUD迂回 | typed ExternalDtoSnapshotの構造allow-listと用途別service API。IService/ServiceImpl継承を除去 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`、H2 targeted。再Review、M scan |
+| P1-002 inbound DuplicateKey conflict | provider event FOR UPDATE後にCONFLICTをversion CAS保存 | IMPLEMENTED_PENDING_REVIEW | InboundEventServiceTest 2件。MySQL inbound raceはB2/Mで継続 |
+| P1-003 purge starvation | active hold除外、hold acquire/release reset、keyset末尾reset | IMPLEMENTED_PENDING_REVIEW | IntegrationHubF1RetentionH2Testのhold/lease-cursor境界。再Review |
+| P1-004 purge lease/version CAS | lock後のdelete predicateへversion、terminal、expiry、leaseを含める | IMPLEMENTED_PENDING_REVIEW | H2 + IntegrationHubF1MySqlConcurrencyTest |
+| P1-005 idempotency CONFLICT | mismatchを固定409/90日retentionへ永続化後に拒否 | IMPLEMENTED_PENDING_REVIEW | ApiIdempotencyServiceTest、mapper CAS。再Review |
+| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求 | IMPLEMENTED_PENDING_REVIEW | H2 + MySQL CAS test。B1外部provider実装は未着手 |
+| P1-007 F1 evidence不足 | H2 31 tests、MySQL multi-connection 3 tests、shard inventoryを追加 | IMPLEMENTED_PENDING_REVIEW | 全境界網羅、M/security/load/recoveryは未完了 |
+| P2-001 credential overlap NULL | non-null overlap_untilの将来期限だけ有効 | IMPLEMENTED_PENDING_REVIEW | CredentialVersionServiceTest |
+| P2-002 raw route template | candidate 11 fixed templates以外を拒否 | IMPLEMENTED_PENDING_REVIEW | ApiUsageBucketServiceTest |
+
+今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期したが、public endpoint、
+外部送信、F2/A1/A2/B1/B2/Mは未着手であり、レビュー結果を自己PASSへ変更しない。
+
 ## Task 0R scope
 
 完了範囲は以下のdocs-only変更に限定する。
@@ -45,8 +65,8 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 
 ## 実装範囲の残存ゲート
 
-Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1は`a7654b44`で実装済みだが、
-独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
+Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1初回実装は`a7654b44`、Review remediationは
+`a184c1f4`であるが、独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
 command、exportは引き続きこのimplementation scope外である。
 
 ## Handoff checkpoint
@@ -62,6 +82,8 @@ command、exportは引き続きこのimplementation scope外である。
 - R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
+- F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS
+- 初回Implementation Review: b420911b63177763544edd1e02d663bf528d9dc1、FAIL（P0=0、P1=7、P2=2）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応

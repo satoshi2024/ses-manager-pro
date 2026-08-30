@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1実装中）
+# NF-05 Public API 実装計画（Owner承認済み・R-NF05 Plan PASS・F1 remediation中）
 
 ## 現在のゲート
 
@@ -37,7 +37,17 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンし�
    atomic insert、claim/HTTP/CAS境界を固定すること。
 4. idempotency/delivery/inboundのcanonical enumと全遷移を一つに固定し、全terminal stateをretention class/起算点へ
    漏れなく接続すること。retention_class、retention_expires_at、t_api_retention_hold、t_api_purge_checkpointの
-   保存モデルと、hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
+    保存モデルと、hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
+
+## F1 Implementation Review remediation（再Review待ち）
+
+独立Implementation Reviewは初回固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対して
+FAIL（P0=0、P1=7、P2=2）だった。F1 approved scope内で、typed snapshot/service boundary、conflictの
+canonical persistence、delivery CAS、purge keyset/hold/lease競合、credential overlap、route templateを
+修正し、implementation commit `a184c1f4`へpushした。H2 F1対象31 testsとMySQL multi-connection concurrency
+3 testsはPASSしたが、独立Implementation Reviewの再判定を受けるまでF1をPASS扱いしない。
+
+F2、A1、A2、B1、B2、M、public endpoint、外部送信、production enablement、command/exportは引き続き未着手・禁止である。
 
 これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P2 docs-only commit後、R-NF05が独立に再判定する。
 

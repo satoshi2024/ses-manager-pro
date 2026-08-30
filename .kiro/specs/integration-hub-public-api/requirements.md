@@ -44,6 +44,12 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 9. 署名検証済みnonceはt_api_nonce_replayへatomic insertし、client_id + nonce_hash uniqueで重複を拒否する。
    raw nonce、署名、body、secret、PIIは保存せず、expires_at <= server_nowをbounded purgeする。TTLは
    max(accepted_at, signed_timestamp) + 5分とし、認証失敗へ安全に収束させる。
+10. F1のpersistence serviceは汎用IService/CRUDを公開せず、許可された遷移・状態・snapshot型を受ける
+    明示的なcommandだけを公開する。mapperは内部実装に限定し、external DTO snapshotは保存用途別の
+    allow-list（safe response / inbound / outbound）を構造的に検証する。
+11. Idempotency-Keyのdigest不一致は例外を返す前にIN_PROGRESS rowをCONFLICT、409、安全な固定code、
+    90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
+    RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。
 
 ## IH-R2 External contract
 
@@ -129,7 +135,12 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    t_api_retention_holdはrecord kind/id、ACTIVE/RELEASED、generation、versionを一意管理する。hold開始/解除と
    purgeは対象rowを同じ順序でlockし、active hold、active lease、row versionをCASで再確認する。purge jobは
    期限境界、再実行、部分失敗、backup/restore後のpurgeを安全に扱い、restore後はcheckpointを信用せず全対象を
-   再評価する。
+   再評価する。bounded purgeのcursorはretention_expires_at,idのkeysetとし、active holdは解除時、active leaseは
+   eligibility集合の末尾到達時にcursorをresetして再評価する。候補取得時に除外された時間依存rowをcursorの先へ
+   取り残さず、delete predicateでもlease expiry、retention expiry、terminal state、versionを再確認する。
+4. F1のroute templateはOpenAPI candidateの11個の固定template集合だけを受け付け、raw path、query string、
+   resource IDをusage bucketの保存キーにしない。credential OVERLAPはnon-nullのoverlap_untilがserver_nowより
+   後である場合だけ有効とし、NULL期限をfail-openに扱わない。
 
 ## 受入テスト最低条件
 
@@ -140,6 +151,8 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
   条件付きincrementとunique競合がmulti-nodeで同じ結果になること。burst capacity 20、3秒ごとの1 token refill、
   refill直前/直後、minute/day境界、clock rollback、片方のquota更新失敗、Retry-Afterを検証する。
 - nonce ledgerのatomic unique、rotationを跨ぐ再利用拒否、future timestampを含むTTL、bounded purge再実行。
+- service汎用CRUDの非公開、safe response/inbound/outbound snapshotの構造allow-list、idempotency/inboundの
+  hash conflict永続化。
 - cursor stability、limit上限、count/export/errorからの存在推測防止。
 - JSON contract allow-list、entity serialization禁止、secret/PII log scan。
 - webhook署名改ざん、timestamp古い/未来、replay、duplicate、provider event conflict、
@@ -153,5 +166,6 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 - metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
 - legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。
+- active leaseでkeyset先を通過した後のlease expiry再評価、hold解除時cursor reset、checkpointの同時claim/CAS。
 - idempotency/delivery/inboundのcanonical enum全値が一つの遷移表とretention class/起算点へ漏れなく分類され、
   alias状態、terminal逆遷移、期限境界、各CAS失敗を許可しないこと。
