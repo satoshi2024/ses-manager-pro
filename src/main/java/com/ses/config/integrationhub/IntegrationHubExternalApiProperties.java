@@ -39,6 +39,11 @@ public class IntegrationHubExternalApiProperties {
         if (security.allowedLoopbackPorts.stream().anyMatch(port -> port < 1 || port > 65535)) {
             throw new IllegalStateException("loopback許可portが不正です");
         }
+        if (publicApi.readSnapshotPurgeBatchSize < 1 || publicApi.readSnapshotPurgeBatchSize > 32
+                || publicApi.readSnapshotPurgeFixedDelayMs < 1000
+                || publicApi.readSnapshotPurgeFixedDelayMs > 86_400_000L) {
+            throw new IllegalStateException("read snapshot purge設定が不正です");
+        }
         for (String proxy : security.trustedProxies) {
             if (!StringUtils.hasText(proxy)) {
                 throw new IllegalStateException("trusted proxyに空要素は指定できません");
@@ -54,6 +59,10 @@ public class IntegrationHubExternalApiProperties {
         private String publicIdKey;
         /** cursorの有効秒数。短い上限で失効させる。 */
         private int cursorTtlSeconds = 300;
+        /** 公開requestとは独立したsnapshot purgeの1回上限。 */
+        private int readSnapshotPurgeBatchSize = 32;
+        /** snapshot purge schedulerの実行間隔。 */
+        private long readSnapshotPurgeFixedDelayMs = 60_000L;
     }
 
     @Data

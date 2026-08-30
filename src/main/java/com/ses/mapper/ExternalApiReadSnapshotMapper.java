@@ -55,14 +55,24 @@ public interface ExternalApiReadSnapshotMapper {
                                                    @Param("afterId") Long afterId,
                                                    @Param("limit") int limit);
 
-    @Delete("""
-            DELETE FROM t_api_read_snapshot_item
-            WHERE snapshot_id IN (
-                SELECT snapshot_id FROM t_api_read_snapshot WHERE expires_at <= #{now}
-            )
+    /** expiry index順の有限batch。header削除時のFK cascadeでitemも同じbounded snapshot集合だけを削除する。 */
+    @Select("""
+            SELECT snapshot_id
+            FROM t_api_read_snapshot
+            WHERE expires_at <= #{now}
+            ORDER BY expires_at, snapshot_id
+            LIMIT #{limit}
             """)
-    int deleteExpiredItems(@Param("now") Instant now);
+    List<String> selectExpiredSnapshotIds(@Param("now") Instant now, @Param("limit") int limit);
 
-    @Delete("DELETE FROM t_api_read_snapshot WHERE expires_at <= #{now}")
-    int deleteExpiredSnapshots(@Param("now") Instant now);
+    @Delete("""
+            <script>
+            DELETE FROM t_api_read_snapshot
+            WHERE snapshot_id IN
+            <foreach collection="snapshotIds" item="snapshotId" open="(" separator="," close=")">
+                #{snapshotId}
+            </foreach>
+            </script>
+            """)
+    int deleteSnapshotsById(@Param("snapshotIds") List<String> snapshotIds);
 }

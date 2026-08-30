@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -67,6 +68,30 @@ class ExternalApiReadServiceTest {
         ExternalApiProject first = response.items().get(0);
         assertEquals("ACTIVE", first.status());
         verify(mapper).selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513);
+        verify(snapshotMapper, never()).selectExpiredSnapshotIds(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(snapshotMapper, never()).deleteSnapshotsById(org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void fractionalClockIsNormalizedToSameSecondAcrossSnapshotPages() {
+        IntegrationHubExternalApiProperties properties = properties();
+        properties.getPublicApi().setCursorTtlSeconds(300);
+        Clock fractionalClock = Clock.fixed(Instant.parse("2026-08-30T00:00:00.123456Z"), ZoneOffset.UTC);
+        ExternalApiReadService fractionalService = new ExternalApiReadService(mapper, snapshotMapper,
+                new ExternalApiPublicIdCodec(properties), new ExternalApiCursorCodec(properties),
+                new ObjectMapper().findAndRegisterModules(), fractionalClock);
+        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513)).thenReturn(List.of(
+                projectRow(2L, 10L), projectRow(1L, 10L)));
+        String cursor = fractionalService.listProjects(principal, scope, 1, null).nextCursor();
+        when(snapshotMapper.selectItemsAfter(anyString(), eq(2L), eq(2))).thenReturn(List.of(
+                new ExternalApiSnapshotItem(1L,
+                        "{\"publicProjectId\":\"public-project-1\",\"status\":\"ACTIVE\","
+                                + "\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\","
+                                + "\"publicCustomerId\":\"public-customer-10\"}")));
+
+        var second = fractionalService.listProjects(principal, scope, 1, cursor);
+
+        assertEquals(Instant.parse("2026-08-30T00:00:00Z"), second.asOf());
     }
 
     @Test

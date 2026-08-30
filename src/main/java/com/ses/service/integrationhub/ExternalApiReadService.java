@@ -153,10 +153,9 @@ public class ExternalApiReadService {
         if (cursor != null && !cursor.isBlank()) {
             return pageFromSnapshot(principal, route, digest, limit, cursor, dtoType, now);
         }
-        snapshotMapper.deleteExpiredItems(now);
-        snapshotMapper.deleteExpiredSnapshots(now);
-        Instant asOf = now;
-        long expiresAt = cursorCodec.expiryFrom(now);
+        // 公開read transactionではpurgeを実行しない。asOf/cursorは秒精度へ最初から統一する。
+        Instant asOf = Instant.ofEpochSecond(now.getEpochSecond());
+        long expiresAt = cursorCodec.expiryFrom(asOf);
         List<ExternalApiReadRow> rows = fetcher.fetch(null, MAX_SNAPSHOT_ITEMS + 1);
         if (rows.size() > MAX_SNAPSHOT_ITEMS) {
             throw ExternalApiSecurityException.forbidden("FORBIDDEN_SCOPE");

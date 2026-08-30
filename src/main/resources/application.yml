@@ -421,6 +421,8 @@ integration:
       enabled: false
       public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
       cursor-ttl-seconds: 300
+      read-snapshot-purge-batch-size: 32
+      read-snapshot-purge-fixed-delay-ms: 60000
     external-transport:
       enabled: false
     provider:

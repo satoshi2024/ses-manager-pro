@@ -20,6 +20,8 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -90,8 +92,8 @@ class ExternalApiEnabledConnectorE2ETest {
                 VALUES (?, ?, 1, ?, ?, ?, 'test-key-v1', 'IHG1', 'ACTIVE', ?, ?, 0)
                 """, CREDENTIAL_DB_ID, CLIENT_DB_ID, KEY_ID, encryptedSecret,
                 cryptoService.sha256Hex(CLIENT_SECRET),
-                java.sql.Timestamp.from(now.minusSeconds(60)),
-                java.sql.Timestamp.from(now.plusSeconds(86400)));
+                LocalDateTime.ofInstant(now.minusSeconds(60), ZoneOffset.UTC),
+                LocalDateTime.ofInstant(now.plusSeconds(86400), ZoneOffset.UTC));
     }
 
     @Test
