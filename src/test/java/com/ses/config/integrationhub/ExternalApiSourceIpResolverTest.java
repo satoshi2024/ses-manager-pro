@@ -6,8 +6,10 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExternalApiSourceIpResolverTest {
     private final ExternalApiSourceIpResolver resolver = new ExternalApiSourceIpResolver();
@@ -49,6 +51,15 @@ class ExternalApiSourceIpResolverTest {
         assertNull(ExternalApiCidrMatcher.normalizeIp("0127.0.0.1"));
         assertNull(ExternalApiCidrMatcher.normalizeIp("example.invalid"));
         assertNull(ExternalApiCidrMatcher.normalizeIp("fe80::1%lo0"));
+    }
+
+    @Test
+    void mappedIpv6AndIpv4CidrsCollapseToTheSameFourByteFamily() {
+        assertTrue(ExternalApiCidrMatcher.matchesAny("::ffff:203.0.113.10", "203.0.113.0/24"));
+        assertTrue(ExternalApiCidrMatcher.matchesAny("203.0.113.10", "::ffff:203.0.113.0/120"));
+        assertTrue(ExternalApiCidrMatcher.matchesAny("::ffff:203.0.113.10", "::ffff:0:0/96"));
+        assertTrue(ExternalApiCidrMatcher.matchesAny("203.0.113.10", "::ffff:203.0.113.10/128"));
+        assertFalse(ExternalApiCidrMatcher.matchesAny("203.0.113.10", "::ffff:203.0.113.0/125"));
     }
 
     private MockHttpServletRequest request(String remoteAddr) {

@@ -139,6 +139,40 @@ class ExternalApiAuthorizationFilterTest {
         verify(usageService, never()).consume(any(), any(), any(), any());
     }
 
+    @Test
+    void tenantOrLegalEntityMismatchIsDeniedBeforeResourcePermission() throws Exception {
+        authenticate(principal());
+        when(scopeService.getActive(any(), any(), any())).thenReturn(ApiClientScope.builder()
+                .dataScopeJson("{\"projectIds\":[\"p-1\"],\"tenantIds\":[\"tenant-b\"],\"legalEntityIds\":[\"10\"]}")
+                .build());
+        MockHttpServletRequest request = request("GET", "/external-api/v1/projects/p-1");
+        request.setAttribute(ExternalApiCanonicalRequest.class.getName(), parsed("/external-api/v1/projects/p-1"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> { throw new AssertionError("must not reach controller"); });
+
+        assertEquals(403, response.getStatus());
+        verify(usageService, never()).consume(any(), any(), any(), any());
+    }
+
+    @Test
+    void tenantAndLegalEntityOmissionStillUsesPrincipalSingletons() throws Exception {
+        authenticate(principal());
+        when(scopeService.getActive(any(), any(), any())).thenReturn(ApiClientScope.builder()
+                .dataScopeJson("{\"projectIds\":[\"p-1\"]}").build());
+        MockHttpServletRequest request = request("GET", "/external-api/v1/projects/p-1");
+        request.setAttribute(ExternalApiCanonicalRequest.class.getName(), parsed("/external-api/v1/projects/p-1"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(usageService.consume(any(), any(), any(), any())).thenReturn(ApiUsageBucketService.RateDecision.allow());
+
+        filter.doFilter(request, response, (req, res) -> { });
+
+        ExternalApiEffectiveScope effective = assertInstanceOf(ExternalApiEffectiveScope.class,
+                request.getAttribute(ExternalApiEffectiveScope.class.getName()));
+        assertEquals(java.util.Set.of("tenant-a"), effective.allowedValues().get("tenantIds"));
+        assertEquals(java.util.Set.of("9"), effective.allowedValues().get("legalEntityIds"));
+    }
+
     private void authenticate(ExternalApiPrincipal principal) {
         org.springframework.security.core.context.SecurityContextHolder.getContext()
                 .setAuthentication(new ExternalApiAuthenticationToken(principal));

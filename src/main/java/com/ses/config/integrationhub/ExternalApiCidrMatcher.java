@@ -48,33 +48,53 @@ final class ExternalApiCidrMatcher {
     }
 
     private static boolean matches(byte[] target, String cidr) {
-        if (cidr.isBlank()) {
+        ParsedCidr parsed = parseCidr(cidr);
+        if (parsed == null || parsed.network().length != target.length) {
             return false;
         }
-        String[] parts = cidr.split("/", -1);
-        if (parts.length != 2) {
-            return false;
-        }
-        byte[] network = parseIp(parts[0]);
-        if (network == null || network.length != target.length) {
-            return false;
-        }
-        try {
-            int prefix = Integer.parseInt(parts[1]);
-            if (prefix < 0 || prefix > network.length * 8) {
+        int prefix = parsed.prefixLength();
+        int full = prefix / 8;
+        int bits = prefix % 8;
+        for (int i = 0; i < full; i++) {
+            if (target[i] != parsed.network()[i]) {
                 return false;
             }
-            int full = prefix / 8;
-            int bits = prefix % 8;
-            for (int i = 0; i < full; i++) {
-                if (target[i] != network[i]) {
-                    return false;
+        }
+        return bits == 0 || (target[full] & (0xff << (8 - bits)))
+                == (parsed.network()[full] & (0xff << (8 - bits)));
+    }
+
+    private static ParsedCidr parseCidr(String cidr) {
+        if (cidr == null || cidr.isBlank()) {
+            return null;
+        }
+        String[] parts = cidr.split("/", -1);
+        if (parts.length != 2 || parts[0].isBlank() || !parts[1].matches("[0-9]{1,3}")) {
+            return null;
+        }
+        byte[] network = parseIp(parts[0]);
+        if (network == null) {
+            return null;
+        }
+        try {
+            int suppliedPrefix = Integer.parseInt(parts[1]);
+            boolean mappedLiteral = parts[0].indexOf(':') >= 0 && network.length == 4;
+            int prefix;
+            if (mappedLiteral) {
+                // A mapped IPv6 CIDR must cover the ::ffff:0:0/96 prefix; compare as IPv4.
+                if (suppliedPrefix < 96 || suppliedPrefix > 128) {
+                    return null;
                 }
+                prefix = suppliedPrefix - 96;
+            } else {
+                prefix = suppliedPrefix;
             }
-            return bits == 0 || (target[full] & (0xff << (8 - bits)))
-                    == (network[full] & (0xff << (8 - bits)));
+            if (prefix < 0 || prefix > network.length * 8) {
+                return null;
+            }
+            return new ParsedCidr(network, prefix);
         } catch (NumberFormatException e) {
-            return false;
+            return null;
         }
     }
 
@@ -84,9 +104,27 @@ final class ExternalApiCidrMatcher {
             return null;
         }
         if (value.indexOf(':') >= 0) {
-            return parseIpv6(value);
+            return collapseMappedIpv6(parseIpv6(value));
         }
         return value.indexOf('.') >= 0 ? parseIpv4(value) : null;
+    }
+
+    private static byte[] collapseMappedIpv6(byte[] value) {
+        if (value == null || value.length != 16) {
+            return value;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (value[i] != 0) {
+                return value;
+            }
+        }
+        if ((value[10] & 0xff) != 0xff || (value[11] & 0xff) != 0xff) {
+            return value;
+        }
+        return java.util.Arrays.copyOfRange(value, 12, 16);
+    }
+
+    private record ParsedCidr(byte[] network, int prefixLength) {
     }
 
     private static byte[] parseIpv4(String value) {

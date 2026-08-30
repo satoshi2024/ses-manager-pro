@@ -57,9 +57,12 @@ public class ExternalApiAuthorizationFilter extends OncePerRequestFilter {
             }
             ExternalApiDataScope clientDataScope = ExternalApiDataScope.parse(principal.dataScopeJson(), objectMapper);
             ExternalApiDataScope routeDataScope = ExternalApiDataScope.parse(scope.getDataScopeJson(), objectMapper);
+            clientDataScope.requireAuthoritativeBinding(principal.tenantId(), principal.legalEntityId());
+            routeDataScope.requireAuthoritativeBinding(principal.tenantId(), principal.legalEntityId());
             ExternalApiDataScope intersection = clientDataScope.intersect(routeDataScope);
+            intersection.requireAuthoritativeBinding(principal.tenantId(), principal.legalEntityId());
             ExternalApiEffectiveScope effectiveScope = new ExternalApiEffectiveScope(
-                    principal.tenantId(), principal.legalEntityId(), intersection.values());
+                principal.tenantId(), principal.legalEntityId(), intersection.values());
             if (!effectiveScope.permits(route.resourceType())) {
                 ExternalApiAuditTrail.mark(request, "scope", "DENIED");
                 ExternalApiAuditTrail.mark(request, "dataScope", "INTERSECTION_DENIED");

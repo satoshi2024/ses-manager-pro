@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ExternalApiDataScopeTest {
@@ -32,5 +33,30 @@ class ExternalApiDataScopeTest {
                 () -> ExternalApiDataScope.parse("{\"projectIds\":[\"p-1\",\"p-1\"]}", objectMapper));
         assertThrows(IllegalArgumentException.class,
                 () -> ExternalApiDataScope.parse("{\"projectIds\":[\"*\"]}", objectMapper));
+    }
+
+    @Test
+    void authoritativeTenantAndLegalEntityMustBeSingletonAndMatching() {
+        ExternalApiDataScope omitted = ExternalApiDataScope.parse("{\"projectIds\":[\"p-1\"]}", objectMapper);
+        assertDoesNotThrow(() -> omitted.requireAuthoritativeBinding("tenant-a", 9L));
+        assertThrows(IllegalArgumentException.class, () -> ExternalApiDataScope.parse(
+                "{\"projectIds\":[\"p-1\"],\"tenantIds\":[\"tenant-b\"]}", objectMapper)
+                .requireAuthoritativeBinding("tenant-a", 9L));
+        assertThrows(IllegalArgumentException.class, () -> ExternalApiDataScope.parse(
+                "{\"projectIds\":[\"p-1\"],\"legalEntityIds\":[\"10\"]}", objectMapper)
+                .requireAuthoritativeBinding("tenant-a", 9L));
+    }
+
+    @Test
+    void emptyAuthoritativeIntersectionCannotBeDropped() {
+        ExternalApiDataScope client = ExternalApiDataScope.parse(
+                "{\"projectIds\":[\"p-1\"],\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"]}", objectMapper);
+        ExternalApiDataScope route = ExternalApiDataScope.parse(
+                "{\"projectIds\":[\"p-1\"],\"tenantIds\":[\"tenant-b\"],\"legalEntityIds\":[\"10\"]}", objectMapper);
+        ExternalApiDataScope intersection = client.intersect(route);
+        assertThrows(IllegalArgumentException.class,
+                () -> intersection.requireAuthoritativeBinding("tenant-a", 9L));
+        assertEquals(java.util.Set.of(), intersection.values().get("tenantIds"));
+        assertEquals(java.util.Set.of(), intersection.values().get("legalEntityIds"));
     }
 }

@@ -82,11 +82,18 @@ public final class ExternalApiDataScope {
             }
             Set<String> common = new LinkedHashSet<>(entry.getValue());
             common.retainAll(otherValues);
-            if (!common.isEmpty()) {
-                intersection.put(entry.getKey(), common);
-            }
+            // Keep an explicitly shared empty intersection visible to the binding validator.
+            intersection.put(entry.getKey(), common);
         }
         return new ExternalApiDataScope(intersection);
+    }
+
+    public void requireAuthoritativeBinding(String tenantId, Long legalEntityId) {
+        if (tenantId == null || tenantId.isBlank() || legalEntityId == null) {
+            throw new IllegalArgumentException("authoritative data scope binding is missing");
+        }
+        requireSingleton("tenantIds", tenantId);
+        requireSingleton("legalEntityIds", Long.toString(legalEntityId));
     }
 
     public boolean hasDimension(String dimension) {
@@ -99,5 +106,12 @@ public final class ExternalApiDataScope {
 
     public boolean isEmpty() {
         return values.isEmpty();
+    }
+
+    private void requireSingleton(String dimension, String expected) {
+        Set<String> dimensionValues = values.get(dimension);
+        if (dimensionValues != null && (dimensionValues.size() != 1 || !dimensionValues.contains(expected))) {
+            throw new IllegalArgumentException("authoritative data scope binding is invalid");
+        }
     }
 }
