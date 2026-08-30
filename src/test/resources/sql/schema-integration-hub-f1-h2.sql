@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS t_api_purge_checkpoint CASCADE;
 DROP TABLE IF EXISTS t_api_retention_hold CASCADE;
 DROP TABLE IF EXISTS t_api_nonce_replay CASCADE;
 DROP TABLE IF EXISTS t_inbound_event CASCADE;
+DROP TABLE IF EXISTS t_api_delivery_replay_audit CASCADE;
 DROP TABLE IF EXISTS t_api_delivery CASCADE;
 DROP TABLE IF EXISTS m_webhook_subscription CASCADE;
 DROP TABLE IF EXISTS t_api_idempotency_record CASCADE;
@@ -247,15 +248,19 @@ CREATE INDEX idx_retention_hold_status ON t_api_retention_hold (record_kind, sta
 
 CREATE TABLE t_api_delivery_replay_audit (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    delivery_id BIGINT NOT NULL,
+    delivery_id BIGINT,
     event_id VARCHAR(128) NOT NULL,
     replay_generation INT NOT NULL,
     operator_ref VARCHAR(128) NOT NULL,
     reason_code VARCHAR(64) NOT NULL,
     scope_digest CHAR(64) NOT NULL,
     payload_hash CHAR(64) NOT NULL,
+    retention_class VARCHAR(32) NOT NULL DEFAULT 'AUDIT_METADATA_1Y',
+    retention_expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_api_delivery_replay_generation UNIQUE (delivery_id, replay_generation),
-    CONSTRAINT fk_api_delivery_replay_delivery FOREIGN KEY (delivery_id) REFERENCES t_api_delivery (id)
+    CONSTRAINT fk_api_delivery_replay_delivery FOREIGN KEY (delivery_id) REFERENCES t_api_delivery (id) ON DELETE SET NULL,
+    CONSTRAINT chk_api_delivery_replay_audit_retention CHECK (retention_class = 'AUDIT_METADATA_1Y')
 );
 CREATE INDEX idx_api_delivery_replay_event ON t_api_delivery_replay_audit (event_id, created_at, id);
+CREATE INDEX idx_api_delivery_replay_expiry ON t_api_delivery_replay_audit (retention_class, retention_expires_at, id);

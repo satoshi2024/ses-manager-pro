@@ -28,4 +28,21 @@ class IntegrationHubB1MigrationContractTest {
                 && !sql.contains("encrypted_signing_secret"));
         assertTrue(sql.contains("rollback evidence"));
     }
+
+    @Test
+    void V133はdeliveryとauditのretentionおよびFK削除動作を分離する() throws IOException {
+        String sql;
+        try (var stream = getClass().getResourceAsStream(
+                "/db/migration/V133__integration_hub_public_api_b1_replay_retention.sql")) {
+            if (stream == null) throw new IOException("missing V133 migration");
+            sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
+        }
+        assertTrue(sql.contains("drop foreign key fk_api_delivery_replay_delivery"));
+        assertTrue(sql.contains("modify column delivery_id bigint null"));
+        assertTrue(sql.contains("retention_class"));
+        assertTrue(sql.contains("retention_expires_at"));
+        assertTrue(sql.contains("on delete set null"));
+        assertTrue(sql.contains("audit_metadata_1y"));
+        assertTrue(sql.contains("idx_api_delivery_replay_expiry"));
+    }
 }

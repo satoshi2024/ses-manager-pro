@@ -6,6 +6,7 @@ import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.mapper.ApiDeliveryReplayAuditMapper;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import com.ses.service.integrationhub.IntegrationHubStates;
+import com.ses.service.integrationhub.IntegrationHubWebhookReplayAuthorizationService;
 import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,12 +21,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 /** B1 DLQ replayのgeneration/scope/audit契約。 */
 class IntegrationHubWebhookDeliveryReplayServiceTest {
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 31, 12, 0);
     private ApiDeliveryMapper deliveryMapper;
     private ApiDeliveryReplayAuditMapper auditMapper;
+    private IntegrationHubWebhookReplayAuthorizationService authorizationService;
     private IntegrationHubWebhookDeliveryReplayServiceImpl service;
     private String scopeDigest;
 
@@ -33,7 +36,9 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
     void setUp() {
         deliveryMapper = mock(ApiDeliveryMapper.class);
         auditMapper = mock(ApiDeliveryReplayAuditMapper.class);
-        service = new IntegrationHubWebhookDeliveryReplayServiceImpl(deliveryMapper, auditMapper);
+        authorizationService = mock(IntegrationHubWebhookReplayAuthorizationService.class);
+        service = new IntegrationHubWebhookDeliveryReplayServiceImpl(deliveryMapper, auditMapper,
+                authorizationService);
         scopeDigest = IntegrationHubWebhookScopeDigest.of("client-a", "resource.read", "tenant-a");
     }
 
@@ -50,6 +55,7 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
         assertEquals(2, replay.getDeliveryGeneration());
         assertEquals(IntegrationHubStates.DELIVERY_PENDING, replay.getStatus());
         assertEquals(IntegrationHubDigest.sha256Hex("event-1|7|2"), replay.getProviderIdempotencyKey());
+        verify(authorizationService).authorize(original, scopeDigest, now);
         verify(deliveryMapper).insert(any(ApiDelivery.class));
         verify(auditMapper).insert(any(ApiDeliveryReplayAudit.class));
     }
@@ -57,8 +63,17 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
     @Test
     void scope再検証失敗とDLQ以外は再送しない() {
         when(deliveryMapper.selectForUpdate(9L)).thenReturn(original());
+        doThrow(new IllegalArgumentException("replay scope digest is invalid"))
+                .when(authorizationService).authorize(any(ApiDelivery.class), eq("0".repeat(64)), eq(now));
         assertThrows(IllegalArgumentException.class,
                 () -> service.replay(9L, 2, "operator-1", "PROVIDER_RECOVERY", "0".repeat(64), now));
+
+        when(deliveryMapper.selectForUpdate(9L)).thenReturn(original());
+        doThrow(new SecurityException("replay permission is not active"))
+                .when(authorizationService).authorize(any(ApiDelivery.class), eq(scopeDigest), eq(now));
+        assertThrows(SecurityException.class,
+                () -> service.replay(9L, 2, "operator-1", "PROVIDER_RECOVERY", scopeDigest, now));
+
         ApiDelivery notDlq = original();
         notDlq.setStatus(IntegrationHubStates.DELIVERY_FAILED);
         when(deliveryMapper.selectForUpdate(9L)).thenReturn(notDlq);
@@ -71,9 +86,15 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
                 .clientId("client-a").scopeCode("resource.read").tenantId("tenant-a").scopeDigest(scopeDigest)
                 .eventType("resource.changed").schemaVersion("v1").providerIdempotencyKey(
                         IntegrationHubDigest.sha256Hex("event-1|7|1"))
-                .externalDtoSnapshot("{\"payload\":{\"status\":\"ACTIVE\"}}")
-                .payloadHash(IntegrationHubDigest.sha256Hex("{\"payload\":{\"status\":\"ACTIVE\"}}"))
+                .externalDtoSnapshot(snapshotJson())
+                .payloadHash(IntegrationHubDigest.sha256Hex(snapshotJson()))
                 .status(IntegrationHubStates.DELIVERY_DLQ).version(4).attemptCount(8).maxAttempts(8)
                 .createdAt(now).updatedAt(now).build();
+    }
+
+    private String snapshotJson() {
+        return "{\"eventId\":\"event-1\",\"eventType\":\"resource.changed\",\"schemaVersion\":\"v1\","
+                + "\"createdAt\":\"2026-08-31T12:00:00Z\",\"publicResourceId\":\"resource-1\","
+                + "\"correlationId\":\"correlation-000001\",\"payload\":{\"status\":\"ACTIVE\"}}";
     }
 }

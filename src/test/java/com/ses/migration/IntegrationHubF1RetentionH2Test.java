@@ -1,12 +1,18 @@
 package com.ses.migration;
 
+import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.ApiNonceReplayService;
 import com.ses.service.integrationhub.ApiRetentionPurgeService;
+import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -14,6 +20,7 @@ import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** NF-05 F1: retention expiry/legal hold/restore epoch/nonce purgeのH2境界。 */
@@ -29,6 +36,12 @@ class IntegrationHubF1RetentionH2Test {
 
     @Autowired
     private ApiNonceReplayService nonceReplayService;
+
+    @Autowired
+    private ApiDeliveryService deliveryService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void expiredDeliveryはpurgeされactiveHold中は残り解除後に再実行できる() {
@@ -129,6 +142,56 @@ class IntegrationHubF1RetentionH2Test {
                 "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, activeLeaseId));
     }
 
+    @Test
+    void replay監査はdelivery削除を阻害せずaudit期限で独立purgeできる() {
+        long subscriptionId = insertSubscription("audit-retention-client", "https://example.invalid/audit");
+        long deliveryId = insertDelivery(subscriptionId, "delivery-audit-retention", "FAILED_DLQ_PAYLOAD_90D");
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+        String hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        jdbcTemplate.update("INSERT INTO t_api_delivery_replay_audit "
+                        + "(delivery_id, event_id, replay_generation, operator_ref, reason_code, scope_digest, payload_hash, "
+                        + "retention_class, retention_expires_at, created_at) VALUES (?, ?, 2, ?, ?, ?, ?, ?, ?, ?)",
+                deliveryId, "delivery-audit-retention", "operator-1", "RECOVERY", hash, hash,
+                "AUDIT_METADATA_1Y", now.minusDays(1), now.minusYears(2));
+
+        assertEquals(1, retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10).purged());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery_replay_audit WHERE event_id = ?", Integer.class,
+                "delivery-audit-retention"));
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT delivery_id FROM t_api_delivery_replay_audit WHERE event_id = ?", Long.class,
+                "delivery-audit-retention"));
+
+        assertEquals(1, retentionPurgeService.purgeExpired(
+                "AUDIT", "AUDIT_METADATA_1Y", now, 10).purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery_replay_audit WHERE event_id = ?", Integer.class,
+                "delivery-audit-retention"));
+    }
+
+    @Test
+    void 業務transactionのrollbackでdelivery_enqueueも原子的に取り消される() {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+
+        assertThrows(RollbackMarker.class, () -> template.executeWithoutResult(status -> {
+            long subscriptionId = insertSubscription("atomic-enqueue-client", "https://example.invalid/atomic");
+            ApiDelivery delivery = deliveryService.enqueue("delivery-atomic-rollback", subscriptionId, 1,
+                    "atomic-enqueue-client", "scope", "tenant-a", "event.type", "v1",
+                    "correlation-atomic-000001", ExternalDtoSnapshot.of(
+                            "{\"eventId\":\"delivery-atomic-rollback\",\"eventType\":\"event.type\","
+                                    + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\","
+                                    + "\"publicResourceId\":\"resource-1\",\"correlationId\":"
+                                    + "\"correlation-atomic-000001\",\"payload\":{\"status\":\"ACTIVE\"}}"), now);
+            assertTrue(delivery.getId() != null);
+            throw new RollbackMarker();
+        }));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE event_id = 'delivery-atomic-rollback'", Integer.class));
+    }
+
     private long insertSubscription(String clientId, String endpoint) {
         jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, "
                 + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json) VALUES "
@@ -145,5 +208,8 @@ class IntegrationHubF1RetentionH2Test {
                 eventId, subscriptionId, hash, LocalDateTime.of(2026, 8, 1, 12, 0), retentionClass,
                 LocalDateTime.of(2026, 8, 29, 12, 0));
         return jdbcTemplate.queryForObject("SELECT id FROM t_api_delivery WHERE event_id = ?", Long.class, eventId);
+    }
+
+    private static final class RollbackMarker extends RuntimeException {
     }
 }

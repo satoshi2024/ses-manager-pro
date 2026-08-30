@@ -51,6 +51,11 @@ public class IntegrationHubExternalApiProperties {
                 || externalTransport.readTimeoutMs < 100 || externalTransport.readTimeoutMs > 30_000) {
             throw new IllegalStateException("external transport設定が不正です");
         }
+        long providerTimeoutSeconds = (externalTransport.connectTimeoutMs
+                + (long) externalTransport.readTimeoutMs + 999L) / 1000L;
+        if (externalTransport.leaseSeconds <= providerTimeoutSeconds) {
+            throw new IllegalStateException("leaseはconnect/read timeout合計より長く設定してください");
+        }
         if (externalTransport.enabled && provider.mode == ProviderMode.LOOPBACK
                 && security.allowedLoopbackPorts.isEmpty()) {
             throw new IllegalStateException("LOOPBACK transportには明示的な許可portが必要です");

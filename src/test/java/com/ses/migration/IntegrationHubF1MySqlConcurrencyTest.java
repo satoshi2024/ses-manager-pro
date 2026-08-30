@@ -84,6 +84,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
     void cleanup() throws Exception {
         try (Connection connection = MYSQL.createConnection("")) {
             try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate("DELETE FROM t_api_delivery_replay_audit WHERE event_id LIKE 'f1-%'");
                 statement.executeUpdate("DELETE FROM t_api_delivery WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM m_webhook_subscription WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_usage_bucket WHERE client_id = '" + CLIENT_ID + "'");
@@ -134,7 +135,8 @@ class IntegrationHubF1MySqlConcurrencyTest {
         }
 
         ApiDelivery enqueued = deliveryService.enqueue("f1-delivery-cas", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "corr-f1", ExternalDtoSnapshot.of("{\"status\":\"ok\"}"), NOW);
+                TENANT_ID, "resource.changed", "v1", "correlation-f1-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-cas", "correlation-f1-000001")), NOW);
         ApiDelivery claimed = deliveryService.claim(enqueued.getId(), "lease-1", NOW, NOW.plusMinutes(5));
         assertEquals("CLAIMED", claimed.getStatus());
 
@@ -165,26 +167,188 @@ class IntegrationHubF1MySqlConcurrencyTest {
     }
 
     @Test
+    void timeout_5xx_attempt8とprovider成功直後crashは実DBのretry_DLQ_recoveryへ収束する() throws Exception {
+        long subscriptionId;
+        try (Connection connection = MYSQL.createConnection("")) {
+            subscriptionId = insertSubscription(connection);
+        }
+
+        ApiDelivery timeout = deliveryService.enqueue("f1-delivery-timeout", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "correlation-timeout-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-timeout", "correlation-timeout-000001")), NOW);
+        ApiDelivery timeoutClaimed = deliveryService.claim(timeout.getId(), "lease-timeout", NOW,
+                NOW.plusMinutes(5));
+        assertTrue(deliveryService.markRetryable(timeoutClaimed.getId(), timeoutClaimed.getVersion(),
+                timeoutClaimed.getDeliveryGeneration(), timeoutClaimed.getLeaseToken(),
+                timeoutClaimed.getProviderIdempotencyKey(), timeoutClaimed.getPayloadHash(), "TRANSPORT_ERROR",
+                NOW, NOW.plusSeconds(10)));
+        assertEquals("RETRYABLE", deliveryMapper.selectById(timeout.getId()).getStatus());
+
+        ApiDelivery fiveHundred = deliveryService.enqueue("f1-delivery-5xx", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "correlation-5xx-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-5xx", "correlation-5xx-000001")), NOW);
+        ApiDelivery fiveHundredClaimed = deliveryService.claim(fiveHundred.getId(), "lease-5xx", NOW,
+                NOW.plusMinutes(5));
+        assertTrue(deliveryService.markRetryable(fiveHundredClaimed.getId(), fiveHundredClaimed.getVersion(),
+                fiveHundredClaimed.getDeliveryGeneration(), fiveHundredClaimed.getLeaseToken(),
+                fiveHundredClaimed.getProviderIdempotencyKey(), fiveHundredClaimed.getPayloadHash(), "HTTP_5XX",
+                NOW, NOW.plusSeconds(20)));
+        assertEquals("HTTP_5XX", deliveryMapper.selectById(fiveHundred.getId()).getLastErrorCode());
+
+        ApiDelivery attemptEight = deliveryService.enqueue("f1-delivery-attempt-8", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "correlation-attempt-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-attempt-8", "correlation-attempt-000001")), NOW);
+        ApiDelivery attemptEightClaimed = deliveryService.claim(attemptEight.getId(), "lease-attempt-8", NOW,
+                NOW.plusMinutes(5));
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE t_api_delivery SET attempt_count = 8 WHERE id = ?")) {
+            statement.setLong(1, attemptEight.getId());
+            statement.executeUpdate();
+        }
+        assertTrue(deliveryService.markRetryable(attemptEightClaimed.getId(), attemptEightClaimed.getVersion(),
+                attemptEightClaimed.getDeliveryGeneration(), attemptEightClaimed.getLeaseToken(),
+                attemptEightClaimed.getProviderIdempotencyKey(), attemptEightClaimed.getPayloadHash(), "HTTP_5XX",
+                NOW, NOW.plusSeconds(20)));
+        assertEquals("DLQ", deliveryMapper.selectById(attemptEight.getId()).getStatus());
+
+        ApiDelivery providerAccepted = deliveryService.enqueue("f1-delivery-provider-crash", subscriptionId, 1,
+                CLIENT_ID, SCOPE, TENANT_ID, "resource.changed", "v1", "correlation-crash-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-provider-crash", "correlation-crash-000001")), NOW);
+        ApiDelivery providerClaimed = deliveryService.claim(providerAccepted.getId(), "lease-provider-crash", NOW,
+                NOW.plusMinutes(5));
+        // provider側では同一Idempotency-Keyを受理した直後にworkerがcrashした想定。
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE t_api_delivery SET lease_expires_at = ? WHERE id = ?")) {
+            statement.setObject(1, NOW.minusSeconds(1));
+            statement.setLong(2, providerAccepted.getId());
+            statement.executeUpdate();
+        }
+        assertEquals(1, deliveryService.recoverExpiredLeases(NOW));
+        ApiDelivery recovered = deliveryMapper.selectById(providerAccepted.getId());
+        assertEquals("RETRYABLE", recovered.getStatus());
+        assertEquals(providerClaimed.getProviderIdempotencyKey(), recovered.getProviderIdempotencyKey());
+    }
+
+    @Test
+    void concurrentClaimは同一rowを一workerだけ取得する() throws Exception {
+        long subscriptionId;
+        try (Connection connection = MYSQL.createConnection("")) {
+            subscriptionId = insertSubscription(connection);
+        }
+        ApiDelivery delivery = deliveryService.enqueue("f1-delivery-claim-race", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "correlation-claim-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-claim-race", "correlation-claim-000001")), NOW);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<java.util.concurrent.Future<ApiDelivery>> futures = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            int worker = i;
+            futures.add(executor.submit(() -> {
+                ready.countDown();
+                start.await(10, TimeUnit.SECONDS);
+                return deliveryService.claim(delivery.getId(), "lease-race-" + worker, NOW, NOW.plusMinutes(5));
+            }));
+        }
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        int claimed = 0;
+        for (var future : futures) {
+            if (future.get(30, TimeUnit.SECONDS) != null) {
+                claimed++;
+            }
+        }
+        executor.shutdownNow();
+        assertEquals(1, claimed, "同一deliveryのclaimは一workerだけ成功すること");
+    }
+
+    @Test
+    void replay監査はdeliveryの90日purge後もauditの1年期限まで残る() throws Exception {
+        long subscriptionId;
+        try (Connection connection = MYSQL.createConnection("")) {
+            subscriptionId = insertSubscription(connection);
+        }
+        long deliveryId;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO t_api_delivery (event_id, subscription_id, delivery_generation, client_id, "
+                            + "scope_code, tenant_id, scope_digest, event_type, schema_version, provider_idempotency_key, "
+                            + "external_dto_snapshot, payload_hash, status, terminal_at, retention_class, "
+                            + "retention_expires_at) VALUES ('f1-delivery-replay-retention', ?, 1, ?, ?, ?, "
+                            + "?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'DLQ', ?, "
+                            + "'FAILED_DLQ_PAYLOAD_90D', ?)")) {
+            insert.setLong(1, subscriptionId);
+            insert.setString(2, CLIENT_ID);
+            insert.setString(3, SCOPE);
+            insert.setString(4, TENANT_ID);
+            insert.setString(5, HASH);
+            insert.setString(6, HASH);
+            insert.setString(7, HASH);
+            insert.setObject(8, NOW.minusDays(100));
+            insert.setObject(9, NOW.minusDays(1));
+            insert.executeUpdate();
+        }
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT id FROM t_api_delivery WHERE event_id = 'f1-delivery-replay-retention'")) {
+            try (ResultSet rs = statement.executeQuery()) {
+                rs.next();
+                deliveryId = rs.getLong(1);
+            }
+        }
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement insert = connection.prepareStatement(
+                     "INSERT INTO t_api_delivery_replay_audit (delivery_id, event_id, replay_generation, "
+                             + "operator_ref, reason_code, scope_digest, payload_hash, retention_class, "
+                             + "retention_expires_at, created_at) VALUES (?, 'f1-delivery-replay-retention', 2, "
+                             + "'operator-1', 'RECOVERY', ?, ?, 'AUDIT_METADATA_1Y', ?, ?)")) {
+            insert.setLong(1, deliveryId);
+            insert.setString(2, HASH);
+            insert.setString(3, HASH);
+            insert.setObject(4, NOW.minusDays(1));
+            insert.setObject(5, NOW.minusYears(2));
+            insert.executeUpdate();
+        }
+
+        assertEquals(1, retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", NOW, 10).purged());
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM t_api_delivery_replay_audit WHERE event_id = 'f1-delivery-replay-retention'")) {
+            try (ResultSet rs = statement.executeQuery()) {
+                rs.next();
+                assertEquals(1, rs.getInt(1));
+            }
+        }
+        assertEquals(1, retentionPurgeService.purgeExpired(
+                "AUDIT", "AUDIT_METADATA_1Y", NOW, 10).purged());
+    }
+
+    @Test
     void holdとpurgeの同時処理は共通lock順序でdeadlockせずどちらか一つへ収束する() throws Exception {
         long subscriptionId;
         try (Connection connection = MYSQL.createConnection("")) {
             subscriptionId = insertSubscription(connection);
             try (PreparedStatement insert = connection.prepareStatement(
                     "INSERT INTO t_api_delivery (event_id, subscription_id, delivery_generation, client_id, "
-                            + "scope_code, tenant_id, event_type, schema_version, provider_idempotency_key, "
+                            + "scope_code, tenant_id, scope_digest, event_type, schema_version, provider_idempotency_key, "
                             + "external_dto_snapshot, payload_hash, status, lease_token, lease_expires_at, "
                             + "terminal_at, retention_class, retention_expires_at) VALUES "
-                            + "('f1-delivery-hold-race', ?, 1, ?, ?, ?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'SUCCEEDED', ?, ?, ?, 'SUCCEEDED_PAYLOAD_30D', ?)")) {
+                            + "('f1-delivery-hold-race', ?, 1, ?, ?, ?, ?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'SUCCEEDED', ?, ?, ?, 'SUCCEEDED_PAYLOAD_30D', ?)")) {
                 insert.setLong(1, subscriptionId);
                 insert.setString(2, CLIENT_ID);
                 insert.setString(3, SCOPE);
                 insert.setString(4, TENANT_ID);
                 insert.setString(5, HASH);
                 insert.setString(6, HASH);
-                insert.setObject(7, null);
+                insert.setString(7, HASH);
                 insert.setObject(8, null);
-                insert.setObject(9, NOW.minusDays(1));
-                insert.setObject(10, NOW.minusSeconds(1));
+                insert.setObject(9, null);
+                insert.setObject(10, NOW.minusDays(1));
+                insert.setObject(11, NOW.minusSeconds(1));
                 insert.executeUpdate();
             }
         }
@@ -240,7 +404,8 @@ class IntegrationHubF1MySqlConcurrencyTest {
             subscriptionId = insertSubscription(connection);
         }
         ApiDelivery delivery = deliveryService.enqueue("f1-delivery-lease", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "corr-lease", ExternalDtoSnapshot.of("{\"status\":\"ok\"}"), NOW);
+                TENANT_ID, "resource.changed", "v1", "correlation-lease-000001",
+                ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-lease", "correlation-lease-000001")), NOW);
         try (Connection connection = MYSQL.createConnection("");
              PreparedStatement statement = connection.prepareStatement(
                      "UPDATE t_api_delivery SET status = 'SUCCEEDED', terminal_at = ?, "
@@ -320,5 +485,12 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 return keys.getLong(1);
             }
         }
+    }
+
+    private String outboundSnapshot(String eventId, String correlationId) {
+        return "{\"eventId\":\"" + eventId + "\",\"eventType\":\"resource.changed\","
+                + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\","
+                + "\"publicResourceId\":\"resource-1\",\"correlationId\":\"" + correlationId
+                + "\",\"payload\":{\"status\":\"ACTIVE\"}}";
     }
 }

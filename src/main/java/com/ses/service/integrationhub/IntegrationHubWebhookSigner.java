@@ -23,17 +23,19 @@ public final class IntegrationHubWebhookSigner {
     private static final String PREFIX = "IH-WEBHOOK-1\n";
     private static final DateTimeFormatter CREATED_AT_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
-    public String sign(ApiDelivery delivery, String keyId, long timestampEpochSeconds, String secret,
+    public String sign(ApiDelivery delivery, int credentialVersion, String keyId, long timestampEpochSeconds, String secret,
                        byte[] body) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(
-                hmac(secret, canonicalBytes(delivery, keyId, timestampEpochSeconds, body)));
+                hmac(secret, canonicalBytes(delivery, credentialVersion, keyId, timestampEpochSeconds, body)));
     }
 
-    public byte[] canonicalBytes(ApiDelivery delivery, String keyId, long timestampEpochSeconds, byte[] body) {
-        if (delivery == null || keyId == null || keyId.isBlank() || keyId.length() > 100
+    public byte[] canonicalBytes(ApiDelivery delivery, int credentialVersion, String keyId,
+                                 long timestampEpochSeconds, byte[] body) {
+        if (delivery == null || credentialVersion <= 0 || keyId == null || keyId.isBlank() || keyId.length() > 100
                 || timestampEpochSeconds <= 0 || body == null || body.length == 0
                 || !IntegrationHubDigest.sha256Hex(body).equalsIgnoreCase(delivery.getPayloadHash())
-                || delivery.getCreatedAt() == null) {
+                || delivery.getCreatedAt() == null || delivery.getProviderIdempotencyKey() == null
+                || !delivery.getProviderIdempotencyKey().matches("[0-9a-fA-F]{64}")) {
             throw new IllegalArgumentException("invalid webhook signing input");
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -44,7 +46,9 @@ public final class IntegrationHubWebhookSigner {
         writeField(out, CREATED_AT_FORMAT.format(delivery.getCreatedAt()));
         writeField(out, delivery.getCorrelationId() == null ? "" : delivery.getCorrelationId());
         writeField(out, Long.toString(timestampEpochSeconds));
+        writeField(out, Integer.toString(credentialVersion));
         writeField(out, keyId);
+        writeField(out, delivery.getProviderIdempotencyKey());
         writeField(out, delivery.getPayloadHash());
         writeField(out, body);
         return out.toByteArray();

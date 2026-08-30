@@ -4,11 +4,10 @@ import com.ses.entity.integrationhub.ApiDelivery;
 import com.ses.entity.integrationhub.ApiDeliveryReplayAudit;
 import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.mapper.ApiDeliveryReplayAuditMapper;
-import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import com.ses.service.integrationhub.IntegrationHubStates;
 import com.ses.service.integrationhub.IntegrationHubWebhookDeliveryReplayService;
-import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
+import com.ses.service.integrationhub.IntegrationHubWebhookReplayAuthorizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -25,6 +24,7 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
 
     private final ApiDeliveryMapper deliveryMapper;
     private final ApiDeliveryReplayAuditMapper replayAuditMapper;
+    private final IntegrationHubWebhookReplayAuthorizationService authorizationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -39,13 +39,10 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
         if (original == null || !IntegrationHubStates.DELIVERY_DLQ.equals(original.getStatus())) {
             throw new IllegalStateException("only DLQ delivery can be replayed");
         }
-        if (original.getDeliveryGeneration() == null
-                || replayGeneration != original.getDeliveryGeneration() + 1
-                || !revalidatedScopeDigest.equalsIgnoreCase(original.getScopeDigest())
-                || !revalidatedScopeDigest.equalsIgnoreCase(
-                IntegrationHubWebhookScopeDigest.of(original.getClientId(), original.getScopeCode(), original.getTenantId()))) {
-            throw new IllegalArgumentException("webhook replay scope or generation is invalid");
+        if (original.getDeliveryGeneration() == null || replayGeneration != original.getDeliveryGeneration() + 1) {
+            throw new IllegalArgumentException("webhook replay generation is invalid");
         }
+        authorizationService.authorize(original, revalidatedScopeDigest, now);
         if (replayAuditMapper.selectByDeliveryGeneration(deliveryId, replayGeneration) != null) {
             throw new IllegalStateException("webhook replay generation already exists");
         }
@@ -84,6 +81,8 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
             audit.setScopeDigest(revalidatedScopeDigest.toLowerCase());
             audit.setPayloadHash(original.getPayloadHash());
             audit.setCreatedAt(now);
+            audit.setRetentionClass(IntegrationHubStates.RETENTION_AUDIT_1Y);
+            audit.setRetentionExpiresAt(now.plusYears(1));
             replayAuditMapper.insert(audit);
             return replay;
         } catch (DuplicateKeyException e) {

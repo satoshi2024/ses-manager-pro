@@ -2,11 +2,13 @@ package com.ses.service.integrationhub.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.entity.integrationhub.ApiDeliveryReplayAudit;
 import com.ses.entity.integrationhub.ApiIdempotencyRecord;
 import com.ses.entity.integrationhub.ApiPurgeCheckpoint;
 import com.ses.entity.integrationhub.ApiRetentionHold;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.mapper.ApiDeliveryMapper;
+import com.ses.mapper.ApiDeliveryReplayAuditMapper;
 import com.ses.mapper.ApiIdempotencyRecordMapper;
 import com.ses.mapper.ApiPurgeCheckpointMapper;
 import com.ses.mapper.ApiRetentionHoldMapper;
@@ -28,6 +30,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     private final ApiRetentionHoldMapper holdMapper;
     private final ApiIdempotencyRecordMapper idempotencyMapper;
     private final ApiDeliveryMapper deliveryMapper;
+    private final ApiDeliveryReplayAuditMapper replayAuditMapper;
     private final InboundEventMapper inboundMapper;
     private final ApiPurgeCheckpointMapper checkpointMapper;
 
@@ -187,10 +190,28 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
                     purged++;
                 }
             }
+        } else if ("AUDIT".equals(recordKind)) {
+            QueryWrapper<ApiDeliveryReplayAudit> query = new QueryWrapper<ApiDeliveryReplayAudit>()
+                    .select("id", "retention_expires_at")
+                    .eq("retention_class", retentionClass).le("retention_expires_at", now)
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'AUDIT' "
+                            + "AND h.record_id = t_api_delivery_replay_audit.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            List<ApiDeliveryReplayAudit> candidates = replayAuditMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
+            for (ApiDeliveryReplayAudit candidate : candidates) {
+                inspected++;
+                lastExpiresAt = candidate.getRetentionExpiresAt();
+                lastRecordId = candidate.getId();
+                if (!lockAndDeleteAudit(candidate.getId(), retentionClass, now)) {
+                    held++;
+                } else {
+                    purged++;
+                }
+            }
         } else {
-            // AUDIT metadata purgeは既存監査契約の専用jobへ接続するまで削除しない。
-            completeCheckpoint(checkpoint, checkpointVersion, null, null, now);
-            return new PurgeReport(0, 0, 0, checkpoint.getRestoreEpoch());
+            throw new IllegalStateException("unsupported purge record kind");
         }
         // lease/holdのようにeligibilityが時間経過で変化するrowをkeysetの先へ取り残さない。
         // 現在のeligible集合を走査し切ったbatchではcursorを先頭へ戻し、次回に再評価する。
@@ -251,6 +272,14 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
         return inboundMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 
+    private boolean lockAndDeleteAudit(Long id, String retentionClass, LocalDateTime now) {
+        ApiDeliveryReplayAudit row = replayAuditMapper.selectForUpdate(id);
+        if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("AUDIT", id)) {
+            return false;
+        }
+        return replayAuditMapper.deleteExpired(id, now) == 1;
+    }
+
     private boolean hasActiveHold(String recordKind, Long recordId) {
         ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
         return hold != null && "ACTIVE".equals(hold.getStatus());
@@ -291,7 +320,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             case "IDEMPOTENCY" -> idempotencyMapper.selectByIdForUpdate(recordId) != null;
             case "DELIVERY" -> deliveryMapper.selectForUpdate(recordId) != null;
             case "INBOUND" -> inboundMapper.selectForUpdate(recordId) != null;
-            case "AUDIT" -> true;
+            case "AUDIT" -> replayAuditMapper.selectForUpdate(recordId) != null;
             default -> false;
         };
     }
@@ -308,6 +337,10 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             }
             case "INBOUND" -> {
                 InboundEvent row = inboundMapper.selectById(recordId);
+                yield row == null ? null : row.getRetentionClass();
+            }
+            case "AUDIT" -> {
+                ApiDeliveryReplayAudit row = replayAuditMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
             default -> null;

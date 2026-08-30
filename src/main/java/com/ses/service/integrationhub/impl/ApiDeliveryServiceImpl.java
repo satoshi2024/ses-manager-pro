@@ -36,6 +36,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
             throw new IllegalArgumentException("invalid delivery request");
         }
         ExternalDtoSnapshot.requireAllowList(snapshot, ExternalDtoSnapshot.OUTBOUND_FIELDS);
+        ExternalDtoSnapshot.requireOutboundEnvelope(snapshot, eventId, eventType, schemaVersion, correlationId, now);
         ApiDelivery existing = mapper.selectByEventGeneration(eventId, subscriptionId, generation);
         if (existing != null) {
             if (!snapshot.payloadHash().equalsIgnoreCase(existing.getPayloadHash())) {

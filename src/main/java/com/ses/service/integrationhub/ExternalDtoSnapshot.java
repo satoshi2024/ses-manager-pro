@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -112,6 +114,48 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             throw new IllegalArgumentException("snapshot allow-list contains an unapproved field");
         }
         validateAllowList(snapshot.json(), allowedFields);
+    }
+
+    /** outbound envelopeの必須fieldとdelivery ledgerの不変値を送信直前に一致検証する。 */
+    public static void requireOutboundEnvelope(ExternalDtoSnapshot snapshot, String eventId, String eventType,
+                                               String schemaVersion, String correlationId,
+                                               LocalDateTime createdAt) {
+        requireAllowList(snapshot, OUTBOUND_FIELDS);
+        if (eventId == null || eventType == null || schemaVersion == null || correlationId == null
+                || correlationId.isBlank() || createdAt == null) {
+            throw new IllegalArgumentException("outbound envelope binding is incomplete");
+        }
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(snapshot.json());
+            requireTextEquals(root, "eventId", eventId);
+            requireTextEquals(root, "eventType", eventType);
+            requireTextEquals(root, "schemaVersion", schemaVersion);
+            requireTextEquals(root, "correlationId", correlationId);
+            JsonNode createdAtNode = root.get("createdAt");
+            if (createdAtNode == null || !createdAtNode.isTextual()
+                    || !OffsetDateTime.parse(createdAtNode.textValue()).toInstant()
+                    .equals(createdAt.toInstant(ZoneOffset.UTC))) {
+                throw new IllegalArgumentException("outbound envelope createdAt does not match ledger");
+            }
+            JsonNode publicResourceId = root.get("publicResourceId");
+            JsonNode payload = root.get("payload");
+            if (publicResourceId == null || !publicResourceId.isTextual()
+                    || publicResourceId.textValue().isBlank()
+                    || payload == null || !payload.isObject()) {
+                throw new IllegalArgumentException("outbound envelope required field is missing");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("outbound envelope is invalid", e);
+        }
+    }
+
+    private static void requireTextEquals(JsonNode root, String field, String expected) {
+        JsonNode actual = root.get(field);
+        if (actual == null || !actual.isTextual() || !expected.equals(actual.textValue())) {
+            throw new IllegalArgumentException("outbound envelope " + field + " does not match ledger");
+        }
     }
 
     private static void validateDigest(String json, String payloadHash) {

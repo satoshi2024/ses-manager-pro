@@ -21,4 +21,11 @@ public interface ApiClientScopeMapper extends BaseMapper<ApiClientScope> {
     ApiClientScope selectActive(@Param("clientId") Long clientId,
                                 @Param("scopeCode") String scopeCode,
                                 @Param("operationCode") String operationCode);
+
+    @Select("SELECT * FROM m_api_client_scope WHERE api_client_id = #{clientId} "
+            + "AND scope_code = #{scopeCode} AND operation_code = #{operationCode} "
+            + "AND status = 'ACTIVE' LIMIT 1 FOR UPDATE")
+    ApiClientScope selectActiveForUpdate(@Param("clientId") Long clientId,
+                                         @Param("scopeCode") String scopeCode,
+                                         @Param("operationCode") String operationCode);
 }

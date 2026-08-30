@@ -50,4 +50,17 @@ class IntegrationHubExternalApiPropertiesTest {
 
         assertThrows(IllegalStateException.class, properties::validateBoundaries);
     }
+
+    @Test
+    void leaseMustOutliveTheWorstCaseProviderTimeout() {
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setEnabled(false);
+        properties.getExternalTransport().setEnabled(true);
+        properties.getExternalTransport().setConnectTimeoutMs(3000);
+        properties.getExternalTransport().setReadTimeoutMs(3000);
+        properties.getExternalTransport().setLeaseSeconds(6);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.MOCK);
+
+        assertThrows(IllegalStateException.class, properties::validateBoundaries);
+    }
 }

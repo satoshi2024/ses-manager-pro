@@ -66,13 +66,14 @@ public class IntegrationHubWebhookDeliveryWorker {
 
     /** schedulerから呼ぶ入口。外部I/Oはこのメソッドのtransaction外でのみ行う。 */
     public int dispatchDue() {
-        LocalDateTime now = utcNow();
-        deliveryService.recoverExpiredLeases(now);
-        List<ApiDelivery> due = deliveryMapper.selectDue(now,
+        LocalDateTime recoveryNow = utcNow();
+        deliveryService.recoverExpiredLeases(recoveryNow);
+        LocalDateTime scanNow = utcNow();
+        List<ApiDelivery> due = deliveryMapper.selectDue(scanNow,
                 Math.min(MAX_DUE_BATCH, properties.getExternalTransport().getBatchSize()));
         int processed = 0;
         for (ApiDelivery candidate : due) {
-            if (dispatchOne(candidate.getId(), now)) {
+            if (dispatchOne(candidate.getId(), utcNow())) {
                 processed++;
             }
         }
@@ -98,17 +99,19 @@ public class IntegrationHubWebhookDeliveryWorker {
         WebhookSubscription subscription = subscriptionService.getActive(claimed.getSubscriptionId());
         if (!validSubscription(claimed, subscription)) {
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    "SUBSCRIPTION_INVALID", now);
+                    "SUBSCRIPTION_INVALID", utcNow());
         }
 
         final ExternalDtoSnapshot snapshot;
         try {
             snapshot = ExternalDtoSnapshot.of(claimed.getExternalDtoSnapshot());
             ExternalDtoSnapshot.requireAllowList(snapshot, ExternalDtoSnapshot.OUTBOUND_FIELDS);
+            ExternalDtoSnapshot.requireOutboundEnvelope(snapshot, claimed.getEventId(), claimed.getEventType(),
+                    claimed.getSchemaVersion(), claimed.getCorrelationId(), claimed.getCreatedAt());
         } catch (RuntimeException e) {
             // payload契約違反は再試行せず、本文・例外本文を記録しない。
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    "PAYLOAD_INVALID", now);
+                    "PAYLOAD_INVALID", utcNow());
         }
 
         final byte[] body = snapshot.json().getBytes(StandardCharsets.UTF_8);
@@ -117,7 +120,8 @@ public class IntegrationHubWebhookDeliveryWorker {
             String secret = cryptoService.decrypt(subscription.getClientId(),
                     subscription.getSigningCredentialVersion(), PURPOSE, subscription.getEncryptedSigningSecret());
             long timestamp = clock.instant().getEpochSecond();
-            String signature = signer.sign(claimed, subscription.getKeyId(), timestamp, secret, body);
+            String signature = signer.sign(claimed, subscription.getSigningCredentialVersion(),
+                    subscription.getKeyId(), timestamp, secret, body);
             headers.put("X-Integration-Hub-Event-ID", claimed.getEventId());
             headers.put("X-Integration-Hub-Event-Type", claimed.getEventType());
             headers.put("X-Integration-Hub-Schema-Version", claimed.getSchemaVersion());
@@ -133,28 +137,38 @@ public class IntegrationHubWebhookDeliveryWorker {
         } catch (RuntimeException e) {
             // secret、署名、headerの契約違反は再試行せず、秘密値を記録しない。
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    "SIGNING_INVALID", now);
+                    "SIGNING_INVALID", utcNow());
+        }
+
+        IntegrationHubWebhookTransportResult result;
+        try {
+            result = transport.send(new IntegrationHubWebhookRequest(
+                    URI.create(subscription.getEndpointUrl()), body, headers));
+        } catch (Exception e) {
+            // provider I/Oその他は本文・例外本文を記録せず、安全なbounded errorへ収束させる。
+            return retryable(claimed, leaseToken, "TRANSPORT_ERROR", utcNow());
         }
 
         try {
-            IntegrationHubWebhookTransportResult result = transport.send(new IntegrationHubWebhookRequest(
-                    URI.create(subscription.getEndpointUrl()), body, headers));
             if (result == null) {
-                return retryable(claimed, leaseToken, "TRANSPORT_EMPTY_RESULT", now);
+                return retryable(claimed, leaseToken, "TRANSPORT_EMPTY_RESULT", utcNow());
             }
             if (result.success()) {
+                // provider成功後のCAS障害はlease expiry/recoveryへ委ね、同じ副作用を
+                // 別idempotency keyで再送しない。CAS例外をtransport failureへ変換しない。
                 return deliveryService.markSucceeded(claimed.getId(), claimed.getVersion(),
                         claimed.getDeliveryGeneration(), leaseToken, claimed.getProviderIdempotencyKey(),
-                        claimed.getPayloadHash(), result.providerRequestId(), now);
+                        claimed.getPayloadHash(), result.providerRequestId(), utcNow());
             }
             if (result.retryable()) {
-                return retryable(claimed, leaseToken, result.errorCode(), now);
+                return retryable(claimed, leaseToken, result.errorCode(), utcNow());
             }
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
-                    result.errorCode(), now);
-        } catch (Exception e) {
-            // provider I/Oその他は本文・例外本文を記録せず、安全なbounded errorへ収束させる。
-            return retryable(claimed, leaseToken, "TRANSPORT_ERROR", now);
+                    result.errorCode(), utcNow());
+        } catch (RuntimeException e) {
+            // provider結果確定のCAS障害はlease recoveryで再取得する。ここでretry時刻を
+            // 書き込むと、provider成功直後のcrashを別経路の再送へ誤変換し得る。
+            return false;
         }
     }
 

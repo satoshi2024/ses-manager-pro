@@ -17,4 +17,7 @@ public interface WebhookSubscriptionMapper extends BaseMapper<WebhookSubscriptio
 
     @Select("SELECT * FROM m_webhook_subscription WHERE id = #{id} AND status = 'ACTIVE' LIMIT 1")
     WebhookSubscription selectActiveById(@Param("id") Long id);
+
+    @Select("SELECT * FROM m_webhook_subscription WHERE id = #{id} AND status = 'ACTIVE' LIMIT 1 FOR UPDATE")
+    WebhookSubscription selectActiveByIdForUpdate(@Param("id") Long id);
 }

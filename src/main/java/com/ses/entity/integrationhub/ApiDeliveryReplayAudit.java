@@ -20,5 +20,7 @@ public class ApiDeliveryReplayAudit {
     private String reasonCode;
     private String scopeDigest;
     private String payloadHash;
+    private String retentionClass;
+    private LocalDateTime retentionExpiresAt;
     private LocalDateTime createdAt;
 }
