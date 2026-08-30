@@ -1,0 +1,97 @@
+package com.ses.migration;
+
+import com.ses.service.integrationhub.ApiNonceReplayService;
+import com.ses.service.integrationhub.ApiRetentionPurgeService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/** NF-05 F1: retention expiry/legal hold/restore epoch/nonce purgeのH2境界。 */
+@SpringBootTest
+@ActiveProfiles("test")
+@Transactional
+class IntegrationHubF1RetentionH2Test {
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ApiRetentionPurgeService retentionPurgeService;
+
+    @Autowired
+    private ApiNonceReplayService nonceReplayService;
+
+    @Test
+    void expiredDeliveryはpurgeされactiveHold中は残り解除後に再実行できる() {
+        long subscriptionId = insertSubscription("retention-client", "https://example.invalid/hook");
+        long deliveryId = insertDelivery(subscriptionId, "delivery-held", "FAILED_DLQ_PAYLOAD_90D");
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+
+        assertTrue(retentionPurgeService.acquireHold("DELIVERY", deliveryId, "LEGAL_HOLD", now));
+        ApiRetentionPurgeService.PurgeReport held = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10);
+        assertEquals(1, held.inspected());
+        assertEquals(0, held.purged());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+
+        assertTrue(retentionPurgeService.releaseHold("DELIVERY", deliveryId, now));
+        ApiRetentionPurgeService.PurgeReport purged = retentionPurgeService.purgeExpired(
+                "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10);
+        assertEquals(1, purged.purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+        assertEquals("COMPLETE", jdbcTemplate.queryForObject(
+                "SELECT run_status FROM t_api_purge_checkpoint WHERE record_kind = 'DELIVERY' "
+                        + "AND retention_class = 'FAILED_DLQ_PAYLOAD_90D'", String.class));
+        assertEquals(deliveryId, jdbcTemplate.queryForObject(
+                "SELECT last_record_id FROM t_api_purge_checkpoint WHERE record_kind = 'DELIVERY' "
+                        + "AND retention_class = 'FAILED_DLQ_PAYLOAD_90D'", Long.class));
+    }
+
+    @Test
+    void restoreEpochはcheckpointをinvalid化し同じpurgeを再実行可能にする() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+        assertEquals(1L, retentionPurgeService.advanceRestoreEpoch("INBOUND", "SUCCEEDED_PAYLOAD_30D", now));
+        assertEquals(2L, retentionPurgeService.advanceRestoreEpoch("INBOUND", "SUCCEEDED_PAYLOAD_30D", now.plusMinutes(1)));
+        assertEquals(2L, jdbcTemplate.queryForObject(
+                "SELECT restore_epoch FROM t_api_purge_checkpoint WHERE record_kind = 'INBOUND' "
+                        + "AND retention_class = 'SUCCEEDED_PAYLOAD_30D'", Long.class));
+    }
+
+    @Test
+    void nonceの期限境界をboundedPurgeできる() {
+        LocalDateTime accepted = LocalDateTime.of(2026, 8, 30, 12, 0);
+        assertTrue(nonceReplayService.accept("nonce-client", 1,
+                "nonce-value-which-is-not-persisted".getBytes(StandardCharsets.UTF_8), accepted, accepted));
+        assertEquals(1, nonceReplayService.purgeExpired(accepted.plusMinutes(5), 100));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_nonce_replay WHERE client_id = 'nonce-client'", Integer.class));
+    }
+
+    private long insertSubscription(String clientId, String endpoint) {
+        jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, "
+                + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json) VALUES "
+                + "(?, 'OUTBOUND', 'event.type', ?, 'key-1', 'IHG1:v1:iv:cipher', 'v1', '{}')", clientId, endpoint);
+        return jdbcTemplate.queryForObject("SELECT id FROM m_webhook_subscription WHERE client_id = ?", Long.class, clientId);
+    }
+
+    private long insertDelivery(long subscriptionId, String eventId, String retentionClass) {
+        String hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        jdbcTemplate.update("INSERT INTO t_api_delivery (event_id, subscription_id, delivery_generation, client_id, "
+                + "scope_code, tenant_id, event_type, schema_version, provider_idempotency_key, external_dto_snapshot, payload_hash, status, "
+                + "terminal_at, retention_class, retention_expires_at) VALUES "
+                + "(?, ?, 1, 'retention-client', 'scope', 'tenant-a', 'event.type', 'v1', 'provider-key', '{\"status\":\"failed\"}', ?, 'FAILED', ?, ?, ?)",
+                eventId, subscriptionId, hash, LocalDateTime.of(2026, 8, 1, 12, 0), retentionClass,
+                LocalDateTime.of(2026, 8, 29, 12, 0));
+        return jdbcTemplate.queryForObject("SELECT id FROM t_api_delivery WHERE event_id = ?", Long.class, eventId);
+    }
+}

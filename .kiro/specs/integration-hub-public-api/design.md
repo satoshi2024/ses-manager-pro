@@ -80,6 +80,11 @@ public webhook delivery ledgerとして分離して採用するが、t_api_outbo
 結果更新はlease token・payload hash・generation付きCAS transactionとする。manual replayは新generationの
 delivery rowとして作成し、元rowを再pending化しない。
 
+delivery rowには event_id、subscription_id、delivery_generationからSHA-256で決定的に導出した
+provider_idempotency_keyも保存する。後続B1 workerはproviderの冪等キーとしてこの値を毎回再利用し、provider成功直後の
+worker crashやstale lease recoveryで同じ外部副作用を重ねない。provider request IDは結果確認用のsafe metadataであり、
+deliveryのCASはprovider_idempotency_key、payload hash、lease世代が一致する場合だけ許可する。
+
 #### Retention / legal holdの保存モデル
 
 t_api_idempotency_record、t_api_delivery、t_inbound_eventはretention_classとretention_expires_atを持つ。
@@ -108,6 +113,10 @@ restore cutover時に新しいrestore_epochをcheckpointへ記録してからpur
 各retention classについてexpires_atの最小値から全対象を再評価し、外部の未確定なwatermarkを正本にしない。
 restore後に復活した期限切れrow、復元されたhold、lease競合を同じlock/CAS規則で処理し、purgeは何度実行しても
 同じ結果になる。部分失敗は成功batchを再削除せず、未処理batchを次回へ残す。
+
+webhook endpoint_urlは最大512文字とし、client・direction・event type・endpointの組合せをDB uniqueで固定する。
+この上限はutf8mb4の複合unique keyがMySQLの3072-byte制限を越えないための保存契約であり、B1の登録時にも同じ上限を
+検証する。
 
 ## 3. 認証・secret
 

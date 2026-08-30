@@ -85,6 +85,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 6. NF-05では第二の汎用outboxを作らず、既存notification outboxとAccounting IntegrationJobをreuse・二重書込み
    しない。t_api_deliveryをNF-05専用delivery ledgerとして分離し、event_id + subscription_id + generationを
    uniqueにする。業務stateとt_api_delivery rowだけを同一transactionでcommitする。
+   webhook endpointは最大512文字とし、utf8mb4複合unique keyの境界を固定する。
 7. retryはnetwork/timeout/429/5xxだけを対象とし、validation/auth/permission等の4xxは無限retryしない。
    retry状態、last safe error code、next attempt、attempt count、provider request IDを保存する。
 8. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
@@ -146,7 +147,8 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 - t_notification_outbox・Accounting IntegrationJobへの二重書込みがなく、t_api_deliveryの分離、unique generation、
   atomic event insert、claim/HTTP/CAS境界が固定されていること。
 - 業務stateとoutbox rowの原子commit、provider成功直後crash、stale lease、同時claim、replayで
-  副作用が一件へ収束すること。
+  副作用が一件へ収束すること。delivery rowはevent/subscription/generationから導出した決定的な
+  provider idempotency keyを保持し、workerは再試行でも同じ値をproviderへ渡すこと。
 - 外部callがDB transaction内で実行されないことの境界テスト。
 - metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。

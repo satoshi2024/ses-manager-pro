@@ -411,3 +411,11 @@ compliance:
       #   current-key-version: ${COMPLIANCE_FINGERPRINT_CURRENT_KEY_VERSION:}
       #   keys:
       #     v1: ${COMPLIANCE_FINGERPRINT_KEY_V1:}
+
+# ===== NF-05 Integration Hub F1 secret envelope =====
+# deployment secret storeからのみ注入する。未設定時に開発用secretへfallbackしない。
+integration:
+  hub:
+    crypto:
+      current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
+      keys: {}

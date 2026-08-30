@@ -49,6 +49,8 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   分離する。各retention対象へclass/expiryを付け、t_api_retention_holdとt_api_purge_checkpointをlock/CAS規則で扱う。
   state enumはidempotency=IN_PROGRESS/SUCCEEDED/FAILED/CONFLICT、delivery=PENDING/CLAIMED/RETRYABLE/SUCCEEDED/FAILED/DLQ、
   inbound=RECEIVED/PROCESSING/PROCESSED/DUPLICATE/CONFLICT/DLQをcanonicalとし、別名・terminal逆遷移を実装しない。
+  deliveryにはevent/subscription/generation由来の決定的provider idempotency keyを保存し、worker crash/stale lease/replayでも
+  provider副作用を一件へ収束できる契約を固定する。
 - Test requirements: fresh/legacy/partial/backfill/repair、暗号key version、revoke/expiry/overlap、unique/CAS、
   H2とMySQL、rollback/backup/restore、rate key exact boundary、multi-node increment、burst 20 capacity、3秒refillの
   直前/直後、minute/day境界、clock rollback、Retry-After、片方のquota更新失敗、nonce atomic unique/TTL/purge、
