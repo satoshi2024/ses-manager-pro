@@ -15,12 +15,14 @@ import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetEventMapper;
 import com.ses.mapper.AssetInventoryItemMapper;
 import com.ses.mapper.AssetInventoryRunMapper;
+import com.ses.mapper.AssetLostIncidentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.mapper.LicenseAssignmentMapper;
 import com.ses.mapper.LicensePlanMapper;
+import com.ses.mapper.NotificationMapper;
 import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetInventoryService;
 import com.ses.service.AssetService;
@@ -120,6 +122,12 @@ class AssetMySqlIntegrationTest {
 
     @Autowired
     private AssetInventoryItemMapper assetInventoryItemMapper;
+
+    @Autowired
+    private AssetLostIncidentMapper assetLostIncidentMapper;
+
+    @Autowired
+    private NotificationMapper notificationMapper;
 
     @Autowired
     private ApprovalRequestMapper approvalRequestMapper;
@@ -414,6 +422,61 @@ class AssetMySqlIntegrationTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(ex);
         }
+    }
+
+    @Test
+    @DisplayName("MySQL concurrency: duplicate lost reports create one incident and one notification per recipient")
+    void testConcurrentLostReportPublishesOnceOnMySQL() throws Exception {
+        Asset asset = Asset.builder()
+                .assetTag("MYSQL-LOST-DEDUPE-" + System.nanoTime())
+                .assetName("MySQL lost report device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger success = new AtomicInteger();
+        AtomicInteger failure = new AtomicInteger();
+        try {
+            for (int i = 0; i < 2; i++) {
+                pool.submit(() -> awaitAndRun(start, success, failure,
+                        () -> assetService.reportLost(asset.getId(), "MySQL concurrent lost report", 1L, null)));
+            }
+            start.countDown();
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(20, TimeUnit.SECONDS));
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertEquals(2, success.get());
+        assertEquals(0, failure.get());
+        assertEquals(1, assetLostIncidentMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.AssetLostIncident>()
+                        .eq(com.ses.entity.AssetLostIncident::getAssetId, asset.getId())));
+        com.ses.entity.AssetLostIncident incident = assetLostIncidentMapper.selectLatestByAssetId(asset.getId());
+        long notificationCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'ASSET_LOST_INCIDENT' AND dedupe_key LIKE ?",
+                Long.class, "asset:lost:" + incident.getId() + "%");
+        long expectedRecipients = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_user WHERE status = 1 AND role IN ('管理者', 'HR')",
+                Long.class);
+        long reporterIsManagement = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_user WHERE id = 1 AND status = 1 AND role IN ('管理者', 'HR')",
+                Long.class);
+        if (reporterIsManagement == 0) {
+            expectedRecipients++;
+        }
+        assertEquals(expectedRecipients, notificationCount,
+                "同一incidentの通知は各recipient一件だけであること");
+
+        long beforeResend = notificationCount;
+        assetService.reportLost(asset.getId(), "MySQL sequential resend", 1L, null);
+        long afterResend = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_notification WHERE type = 'ASSET_LOST_INCIDENT' AND dedupe_key LIKE ?",
+                Long.class, "asset:lost:" + incident.getId() + "%");
+        assertEquals(beforeResend, afterResend, "再送で通知件数が増えないこと");
     }
 
     @Test

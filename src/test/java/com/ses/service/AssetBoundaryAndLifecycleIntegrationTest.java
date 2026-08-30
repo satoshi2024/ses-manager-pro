@@ -747,8 +747,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED, rollbackFor = Exception.class)
     @DisplayName("Boundary 6-B: 営業/マネージャーの貸与・法人scopeをfail-closedで分離")
-    void testSalesAndManagerScopeUsesAssignmentAndManagedOrganization() {
+    void testSalesAndManagerScopeUsesAssignmentAndManagedOrganization() throws Exception {
         String suffix = Long.toString(System.nanoTime());
         long legalA = 91001L;
         long legalB = 91002L;
@@ -800,8 +801,18 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assetService.createAsset(sharedAssigned, 1L);
         assetAssignmentService.createAssignment(assignedA.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "A", 1L);
+        Document crossScopeEvidence = new Document();
+        crossScopeEvidence.setTenantId("default");
+        crossScopeEvidence.setDocumentType("INTERNAL");
+        crossScopeEvidence.setTitle("別法人資産の証跡");
+        crossScopeEvidence.setDirection("INTERNAL");
+        crossScopeEvidence.setStatus("DRAFT");
+        crossScopeEvidence.setCurrency("JPY");
+        crossScopeEvidence.setLegalHoldFlag(0);
+        crossScopeEvidence.setVersion(1L);
+        documentMapper.insert(crossScopeEvidence);
         assetAssignmentService.createAssignment(assignedB.getId(), "ENGINEER", engineerB.getId(),
-                LocalDate.now(), LocalDate.now().plusMonths(1), null, "B", 1L);
+                LocalDate.now(), LocalDate.now().plusMonths(1), crossScopeEvidence.getId(), "B", 1L);
         assetAssignmentService.createAssignment(crossCorporation.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "A担当・法人B保有", 1L);
         assetAssignmentService.createAssignment(sharedAssigned.getId(), "ENGINEER", engineerA.getId(),
@@ -819,6 +830,36 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assertThat(assetScopeService.isAccessible(unassignedB.getId(), "マネージャー", manager.getId())).isFalse();
         assertThat(assetScopeService.isAccessible(crossCorporation.getId(), "マネージャー", manager.getId())).isFalse();
         assertThat(assetScopeService.isAccessible(sharedAssigned.getId(), "マネージャー", manager.getId())).isTrue();
+
+        // 管理者/HR以外は、別法人資産にしか紐づかない文書IDを紛失台帳へ横取りできない。
+        assertThatThrownBy(() -> assetService.reportLost(
+                assignedA.getId(), "別法人文書を不正指定", manager.getId(), crossScopeEvidence.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("スコープ外");
+        assertThat(assetService.getById(assignedA.getId()).getStatus()).isEqualTo("ASSIGNED");
+
+        // 紛失インシデントだけにリンクされた文書も、担当範囲内のマネージャーは参照できる。
+        Asset managerLostAsset = Asset.builder().assetTag("AST-SCOPE-LOST-" + suffix)
+                .assetName("マネージャー担当紛失資産").category("PC")
+                .ownerCompanyId(legalA).status("IN_STOCK").build();
+        assetService.createAsset(managerLostAsset, 1L);
+        assetAssignmentService.createAssignment(managerLostAsset.getId(), "ENGINEER", engineerA.getId(),
+                LocalDate.now(), LocalDate.now().plusMonths(1), null, "紛失", 1L);
+        Document lostEvidence = new Document();
+        lostEvidence.setTenantId("default");
+        lostEvidence.setDocumentType("INTERNAL");
+        lostEvidence.setTitle("紛失インシデント証跡");
+        lostEvidence.setDirection("INTERNAL");
+        lostEvidence.setStatus("DRAFT");
+        lostEvidence.setCurrency("JPY");
+        lostEvidence.setLegalHoldFlag(0);
+        lostEvidence.setVersion(1L);
+        documentMapper.insert(lostEvidence);
+        assetService.reportLost(managerLostAsset.getId(), "担当範囲内の紛失", 1L, lostEvidence.getId());
+        mockMvc.perform(get("/api/documents/" + lostEvidence.getId())
+                        .with(SecurityMockMvcRequestPostProcessors.user(String.valueOf(manager.getId()))
+                                .roles("マネージャー")))
+                .andExpect(status().isOk());
     }
 
     @Test

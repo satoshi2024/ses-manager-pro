@@ -381,10 +381,10 @@ class AssetServiceTest extends BaseIntegrationTest {
         assertThat(initial.getRelatedDocumentIds()).containsExactly(evidence.getId());
         assertThat(documentLinkMapper.findDocumentIdsByTarget("ASSET_LOST_INCIDENT", initial.getId()))
                 .containsExactly(evidence.getId());
-        assertThat(notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
+        List<Notification> notificationsBeforeResend = notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
                 .eq(Notification::getType, "ASSET_LOST_INCIDENT")
-                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId())))
-                .isNotEmpty();
+                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId()));
+        assertThat(notificationsBeforeResend).isNotEmpty();
         assertThat(assetEventMapper.selectByAssetId(asset.getId()).stream()
                 .filter(event -> "REPORTED_LOST".equals(event.getEventType())))
                 .hasSize(1);
@@ -410,9 +410,13 @@ class AssetServiceTest extends BaseIntegrationTest {
         assetService.reportLost(asset.getId(), "再送", 1L, evidence.getId());
         assertThat(assetLostIncidentMapper.selectCount(new LambdaQueryWrapper<AssetLostIncident>()
                 .eq(AssetLostIncident::getAssetId, asset.getId()))).isEqualTo(1);
-        assertThat(notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
+        List<Notification> notificationsAfterResend = notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
                 .eq(Notification::getType, "ASSET_LOST_INCIDENT")
-                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId())))
-                .isNotEmpty();
+                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId()));
+        assertThat(notificationsAfterResend)
+                .hasSize(notificationsBeforeResend.size())
+                .extracting(Notification::getDedupeKey)
+                .containsExactlyInAnyOrderElementsOf(
+                        notificationsBeforeResend.stream().map(Notification::getDedupeKey).toList());
     }
 }

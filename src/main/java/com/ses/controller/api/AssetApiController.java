@@ -120,6 +120,7 @@ public class AssetApiController {
     }
 
     @GetMapping("/{id}/lost-incident")
+    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
     public ApiResult<AssetLostIncident> getLostIncident(@PathVariable Long id) {
         assertAccessible(id);
         AssetLostIncident incident = assetLostIncidentService.getByAssetId(id);

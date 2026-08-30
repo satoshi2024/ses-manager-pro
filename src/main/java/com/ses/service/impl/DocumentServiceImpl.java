@@ -948,7 +948,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             try {
                 String type = link.getTargetType();
                 Long targetId = link.getTargetId();
-                if ("ASSET_ASSIGNMENT".equals(type)) {
+                if ("ASSET_ASSIGNMENT".equals(type) || "ASSET_LOST_INCIDENT".equals(type)) {
                     if (assetScopeService != null
                             && assetScopeService.isAccessibleByDocumentLink(doc.getId(), SecurityUtils.currentRole(), SecurityUtils.currentUserId())) {
                         anyAllowed = true;

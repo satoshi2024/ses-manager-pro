@@ -3,8 +3,15 @@ package com.ses.controller.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.BaseIntegrationTest;
 import com.ses.entity.Asset;
+import com.ses.entity.Engineer;
+import com.ses.entity.EngineerSales;
 import com.ses.entity.ExternalAccountSystem;
 import com.ses.entity.LicensePlan;
+import com.ses.entity.SysUser;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.EngineerSalesMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetService;
 import com.ses.service.ExternalAccountService;
 import com.ses.service.LicenseService;
@@ -37,6 +44,18 @@ class AssetApiControllerTest extends BaseIntegrationTest {
 
     @Autowired
     private AssetService assetService;
+
+    @Autowired
+    private AssetAssignmentService assetAssignmentService;
+
+    @Autowired
+    private EngineerMapper engineerMapper;
+
+    @Autowired
+    private EngineerSalesMapper engineerSalesMapper;
+
+    @Autowired
+    private SysUserMapper sysUserMapper;
 
     @Autowired
     private ExternalAccountService externalAccountService;
@@ -202,5 +221,46 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.data.remoteWipeStatus").value("CONFIRMED"))
                 .andExpect(jsonPath("$.data.policeReportNumber").value("POLICE-API-0001"))
                 .andExpect(jsonPath("$.data.insuranceClaimStatus").value("APPLIED"));
+    }
+
+    @Test
+    @DisplayName("Lost incident detail is not exposed to sales even for an assigned asset")
+    void testSalesCannotReadLostIncidentDetails() throws Exception {
+        String suffix = Long.toString(System.nanoTime());
+        Engineer engineer = Engineer.builder()
+                .fullName("紛失scope要員-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineer);
+        SysUser sales = SysUser.builder()
+                .username("asset-r10-sales-" + suffix)
+                .password("pass")
+                .role("営業")
+                .status(1)
+                .build();
+        sysUserMapper.insert(sales);
+        engineerSalesMapper.insert(EngineerSales.builder()
+                .engineerId(engineer.getId())
+                .salesUserId(sales.getId())
+                .primaryFlag(1)
+                .assignedAt(LocalDate.now())
+                .build());
+
+        Asset asset = Asset.builder()
+                .assetTag("AST-API-LOST-SCOPE-" + suffix)
+                .assetName("Lost scope device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+        assetAssignmentService.createAssignment(
+                asset.getId(), "ENGINEER", engineer.getId(), LocalDate.now(), LocalDate.now().plusDays(30),
+                null, "紛失scope確認", 1L);
+        assetService.reportLost(asset.getId(), "営業閲覧拒否確認", 1L, null);
+
+        mockMvc.perform(get("/api/assets/" + asset.getId() + "/lost-incident")
+                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                                .user(String.valueOf(sales.getId())).roles("営業")))
+                .andExpect(status().isForbidden());
     }
 }

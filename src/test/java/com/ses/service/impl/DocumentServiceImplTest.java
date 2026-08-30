@@ -525,6 +525,22 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    void assertDocumentAccessAllowed_lostIncidentLinkAllowsScopedManager() {
+        loginAsRole("マネージャー");
+        Document doc = new Document();
+        doc.setId(81L);
+        doc.setDocumentType("INTERNAL");
+        DocumentLink incidentLink = new DocumentLink();
+        incidentLink.setDocumentId(81L);
+        incidentLink.setTargetType("ASSET_LOST_INCIDENT");
+        incidentLink.setTargetId(7L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(incidentLink));
+        when(assetScopeService.isAccessibleByDocumentLink(81L, "マネージャー", 99L)).thenReturn(true);
+
+        assertDoesNotThrow(() -> sut.assertDocumentAccessAllowed(doc));
+    }
+
+    @Test
     void applyDataScopeFilter_excludesReceiptForSales() {
         loginAsRole("営業");
         when(dataScopeService.isScoped()).thenReturn(false);

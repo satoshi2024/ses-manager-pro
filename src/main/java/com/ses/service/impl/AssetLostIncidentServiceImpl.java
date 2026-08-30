@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.constant.AssetStatusPolicy;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.util.SecurityUtils;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetLostIncident;
 import com.ses.entity.DocumentLink;
@@ -10,9 +11,11 @@ import com.ses.mapper.AssetLostIncidentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetAlertService;
 import com.ses.service.AssetEventService;
 import com.ses.service.AssetLostIncidentService;
+import com.ses.service.AssetScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,8 +43,10 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
     private final AssetMapper assetMapper;
     private final DocumentLinkMapper documentLinkMapper;
     private final DocumentMapper documentMapper;
+    private final SysUserMapper sysUserMapper;
     private final AssetEventService assetEventService;
     private final AssetAlertService assetAlertService;
+    private final AssetScopeService assetScopeService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -62,7 +67,8 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
                 .insuranceClaimStatus("NOT_APPLIED")
                 .build();
         assetLostIncidentMapper.insert(incident);
-        linkDocuments(incident.getId(), evidenceDocumentId == null ? List.of() : List.of(evidenceDocumentId));
+        linkDocuments(incident.getId(), assetId,
+                evidenceDocumentId == null ? List.of() : List.of(evidenceDocumentId), reporterUserId);
 
         // AssetServiceImplのLOST遷移と同一transaction内でoutboxへ登録する。
         assetAlertService.notifyLostAssetIncident(asset, incident);
@@ -155,7 +161,7 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
 
         assertTimeline(incident);
 
-        linkDocuments(incident.getId(), documentIds);
+        linkDocuments(incident.getId(), assetId, documentIds, actorUserId);
         if (changed) {
             assetLostIncidentMapper.updateById(incident);
             assetEventService.recordEvent(
@@ -187,13 +193,17 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
         return asset;
     }
 
-    private void linkDocuments(Long incidentId, List<Long> documentIds) {
+    private void linkDocuments(Long incidentId, Long assetId, List<Long> documentIds, Long actorUserId) {
         if (documentIds == null) {
             return;
         }
         for (Long documentId : documentIds.stream().filter(java.util.Objects::nonNull).distinct().toList()) {
             if (documentMapper.selectById(documentId) == null) {
                 throw new BusinessException(404, "関連文書が見つかりません: " + documentId);
+            }
+            if (!canLinkDocument(documentId, assetId, actorUserId)) {
+                throw new BusinessException(403,
+                        "関連文書が現在の資産・組織スコープ外です。既存の認可済み文書だけを紛失インシデントへ関連付けできます。");
             }
             DocumentLink existing = documentLinkMapper.selectOne(new LambdaQueryWrapper<DocumentLink>()
                     .eq(DocumentLink::getDocumentId, documentId)
@@ -207,6 +217,23 @@ public class AssetLostIncidentServiceImpl implements AssetLostIncidentService {
                 documentLinkMapper.insert(link);
             }
         }
+    }
+
+    /**
+     * 非管理者の文書ID推測による別法人・別組織文書の横取りを防ぐ。
+     * 未リンク文書は認可母集団を導出できないため、管理者/HR以外からは拒否する。
+     */
+    private boolean canLinkDocument(Long documentId, Long assetId, Long actorUserId) {
+        String role;
+        if (actorUserId != null) {
+            var actor = sysUserMapper.selectById(actorUserId);
+            role = actor == null ? null : actor.getRole();
+        } else {
+            role = SecurityUtils.currentRole();
+        }
+        return role != null
+                && assetScopeService.isAccessible(assetId, role, actorUserId)
+                && assetScopeService.isAccessibleByDocumentLink(documentId, role, actorUserId);
     }
 
     private AssetLostIncident enrich(AssetLostIncident incident) {
