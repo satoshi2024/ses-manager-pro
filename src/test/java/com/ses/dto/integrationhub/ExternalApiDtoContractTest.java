@@ -3,6 +3,7 @@ package com.ses.dto.integrationhub;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.controller.externalapi.ExternalApiReadController;
+import com.ses.entity.Project;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
 
@@ -15,6 +16,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExternalApiDtoContractTest {
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -67,14 +69,20 @@ class ExternalApiDtoContractTest {
     void publicDtoDoesNotSerializeInternalEntityFields() throws Exception {
         JsonNode publicJson = objectMapper.valueToTree(new ExternalApiProject(
                 "public-project", "ACTIVE", LocalDate.of(2026, 1, 1), null, "public-customer"));
-        JsonNode internalProjection = objectMapper.valueToTree(new ExternalApiReadRow());
+        Project internalEntity = new Project();
+        internalEntity.setProjectName("internal-project");
+        internalEntity.setCustomerId(42L);
+        JsonNode entityJson = objectMapper.valueToTree(internalEntity);
 
         assertFalse(publicJson.has("id"));
         assertFalse(publicJson.has("customerId"));
+        assertFalse(publicJson.has("projectName"));
         assertFalse(publicJson.has("unitPrice"));
         assertFalse(publicJson.has("cost"));
         assertFalse(publicJson.has("rawBody"));
-        assertFalse(internalProjection.has("publicProjectId"));
+        assertFalse(publicJson.has("description"));
+        assertTrue(entityJson.has("projectName"));
+        assertTrue(entityJson.has("customerId"));
     }
 
     @Test
