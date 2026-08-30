@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -98,6 +99,14 @@ class ApiDeliveryServiceTest {
                 () -> ExternalDtoSnapshot.of("{\"payload\":\"{\\\"password\\\":\\\"secret\\\"}\"}"));
         assertThrows(IllegalArgumentException.class,
                 () -> ExternalDtoSnapshot.of("{\"canonicalPayload\":\"raw-provider-body-with-PII\"}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"payload\":{\"status\":\"{\\\"password\\\":\\\"secret\\\"}\"}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"canonicalPayload\":{\"resultCode\":\"raw-provider-body-with-PII\"}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"payload\":{\"publicProjectId\":\"project-1\",\"startDate\":\"not-a-date\"}}"));
+        assertDoesNotThrow(() -> ExternalDtoSnapshot.of(
+                "{\"payload\":{\"publicProjectId\":\"project-1\",\"status\":\"ACTIVE\",\"startDate\":\"2026-08-30\"}}"));
         assertThrows(IllegalArgumentException.class,
                 () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
                         "event.type", "v1", "corr-1",

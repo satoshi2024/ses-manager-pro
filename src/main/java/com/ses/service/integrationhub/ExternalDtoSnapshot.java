@@ -5,17 +5,26 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 承認済みexternal DTOの不変snapshot。
  * internal entity/provider response/raw bodyをこの型へ変換する実装はF1の責務外とし、
- * 少なくとも明白なsecret・内部障害情報を保存境界で拒否する。
+ * 用途別field allow-listとfield固有の型・code・日時・ID規則を保存境界で強制する。
  */
 public record ExternalDtoSnapshot(String json, String payloadHash) {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    private static final int MAX_OBJECT_DEPTH = 2;
+    private static final Pattern SAFE_CODE_PATTERN = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
+    private static final Pattern SAFE_TOKEN_PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
+    private static final Pattern SCHEMA_VERSION_PATTERN = Pattern.compile("v[0-9]+(?:\\.[0-9]+){0,2}");
+    private static final Pattern SIGNATURE_PATTERN = Pattern.compile("[A-Za-z0-9+/=_-]{1,512}");
 
     /** DG-05で承認された外部DTOとwebhook envelopeのfieldだけを保存境界へ通す。 */
     public static final Set<String> APPROVED_FIELDS = Set.of(
@@ -24,7 +33,7 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             "publicContractId", "renewalStatus", "publicInvoiceId", "issueDate", "dueDate", "paidAt",
             "settlementStatus", "eventId", "eventType", "schemaVersion", "createdAt", "publicResourceId",
             "changedFieldNames", "payload", "correlationId", "timestamp", "signature", "keyVersion",
-            "code", "message", "canonicalPayload", "signatureResult", "processingStatus", "provider",
+            "code", "canonicalPayload", "signatureResult", "processingStatus", "provider",
             "providerEventId", "receivedAt", "resultCode");
 
     /** inbound persistenceではprovider eventのallow-listed metadataだけを受け付ける。 */
@@ -55,6 +64,26 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             "publicCustomerId", "publicContractId", "renewalStatus", "publicInvoiceId", "issueDate",
             "dueDate", "paidAt", "settlementStatus", "changedFieldNames", "payload");
 
+    private static final Set<String> RESOURCE_PAYLOAD_FIELDS = Set.of(
+            "publicEngineerId", "availabilityStatus", "availableFrom", "availableTo", "skillTagCode",
+            "publicProjectId", "status", "startDate", "endDate", "publicCustomerId", "publicContractId",
+            "renewalStatus", "publicInvoiceId", "issueDate", "dueDate", "paidAt", "settlementStatus");
+    private static final Set<String> PUBLIC_ID_FIELDS = Set.of(
+            "publicEngineerId", "publicProjectId", "publicCustomerId", "publicContractId", "publicInvoiceId",
+            "publicResourceId", "eventId", "providerEventId");
+    private static final Set<String> DATE_FIELDS = Set.of(
+            "availableFrom", "availableTo", "startDate", "endDate", "issueDate", "dueDate");
+    private static final Set<String> DATE_TIME_FIELDS = Set.of(
+            "createdAt", "timestamp", "receivedAt", "paidAt");
+    private static final Set<String> CODE_FIELDS = Set.of(
+            "status", "renewalStatus", "settlementStatus", "resultCode");
+    private static final Set<String> SIGNATURE_RESULTS = Set.of("VALID", "INVALID", "REPLAY", "MALFORMED");
+    private static final Set<String> PROCESSING_STATUSES = Set.of(
+            "RECEIVED", "PROCESSING", "PROCESSED", "DUPLICATE", "CONFLICT", "DLQ", "FAILED");
+    private static final Set<String> ERROR_CODES = Set.of(
+            "REQUEST_INVALID", "CURSOR_INVALID", "AUTHENTICATION_FAILED", "FORBIDDEN_SCOPE",
+            "RESOURCE_NOT_FOUND", "RATE_LIMITED", "INTERNAL_ERROR");
+
     public ExternalDtoSnapshot {
         validateDigest(json, payloadHash);
         validateAllowList(json, APPROVED_FIELDS);
@@ -68,6 +97,9 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
         if (allowedFields == null || allowedFields.isEmpty()) {
             throw new IllegalArgumentException("snapshot allow-list is required");
         }
+        if (!APPROVED_FIELDS.containsAll(allowedFields)) {
+            throw new IllegalArgumentException("snapshot allow-list contains an unapproved field");
+        }
         validateAllowList(json, allowedFields);
         return new ExternalDtoSnapshot(json, IntegrationHubDigest.sha256Hex(json));
     }
@@ -75,6 +107,9 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
     public static void requireAllowList(ExternalDtoSnapshot snapshot, Set<String> allowedFields) {
         if (snapshot == null || allowedFields == null || allowedFields.isEmpty()) {
             throw new IllegalArgumentException("snapshot allow-list is required");
+        }
+        if (!APPROVED_FIELDS.containsAll(allowedFields)) {
+            throw new IllegalArgumentException("snapshot allow-list contains an unapproved field");
         }
         validateAllowList(snapshot.json(), allowedFields);
     }
@@ -98,7 +133,7 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             if (root == null || !root.isObject()) {
                 throw new IllegalArgumentException("external DTO snapshot must be an object");
             }
-            validateNode(root, allowedFields);
+            validateNode(root, allowedFields, 0);
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
@@ -106,24 +141,28 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
         }
     }
 
-    private static void validateNode(JsonNode node, Set<String> allowedFields) {
+    private static void validateNode(JsonNode node, Set<String> allowedFields, int depth) {
         if (!node.isObject()) {
             throw new IllegalArgumentException("external DTO snapshot nested value must be an object");
+        }
+        if (depth > MAX_OBJECT_DEPTH) {
+            throw new IllegalArgumentException("external DTO snapshot nesting is too deep");
         }
         node.fieldNames().forEachRemaining(field -> {
             if (!allowedFields.contains(field)) {
                 throw new IllegalArgumentException("external DTO snapshot contains non-allow-listed field");
             }
-            validateFieldValue(field, node.get(field), allowedFields);
+            validateFieldValue(field, node.get(field), depth);
         });
     }
 
-    private static void validateFieldValue(String field, JsonNode value, Set<String> allowedFields) {
+    private static void validateFieldValue(String field, JsonNode value, int depth) {
         if ("payload".equals(field) || "canonicalPayload".equals(field)) {
-            if (!value.isObject()) {
+            if (!value.isObject() || depth >= MAX_OBJECT_DEPTH) {
                 throw new IllegalArgumentException("external DTO payload must be a structured object");
             }
-            validateNode(value, "canonicalPayload".equals(field) ? CANONICAL_PAYLOAD_FIELDS : allowedFields);
+            validateNode(value, "canonicalPayload".equals(field) ? CANONICAL_PAYLOAD_FIELDS : RESOURCE_PAYLOAD_FIELDS,
+                    depth + 1);
             return;
         }
         if ("changedFieldNames".equals(field)) {
@@ -131,17 +170,84 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
                 throw new IllegalArgumentException("external DTO changedFieldNames must be a bounded array");
             }
             value.forEach(item -> {
-                if (!item.isTextual() || item.textValue().length() > 128) {
+                if (!item.isTextual() || item.textValue().length() > 128
+                        || !RESOURCE_PAYLOAD_FIELDS.contains(item.textValue())) {
                     throw new IllegalArgumentException("external DTO changedFieldNames value is invalid");
                 }
             });
             return;
         }
-        if (!value.isTextual() && !value.isNull()) {
+        if ("skillTagCode".equals(field)) {
+            if (!value.isArray() || value.size() > 50) {
+                throw new IllegalArgumentException("external DTO skillTagCode must be a bounded array");
+            }
+            value.forEach(item -> {
+                if (!item.isTextual() || item.textValue().length() > 64
+                        || !SAFE_TOKEN_PATTERN.matcher(item.textValue()).matches()) {
+                    throw new IllegalArgumentException("external DTO skillTagCode value is invalid");
+                }
+            });
+            return;
+        }
+        if (value.isNull()) {
+            return;
+        }
+        if (!value.isTextual()) {
             throw new IllegalArgumentException("external DTO scalar field has invalid type");
         }
-        if (value.isTextual() && value.textValue().length() > 512) {
+        String text = value.textValue();
+        if (text.isBlank() || text.length() > 512) {
             throw new IllegalArgumentException("external DTO snapshot value is too large");
+        }
+        if (PUBLIC_ID_FIELDS.contains(field)) {
+            requirePattern(field, text, SAFE_TOKEN_PATTERN);
+        } else if (DATE_FIELDS.contains(field)) {
+            try {
+                LocalDate.parse(text);
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("external DTO date field is invalid");
+            }
+        } else if (DATE_TIME_FIELDS.contains(field)) {
+            try {
+                OffsetDateTime.parse(text);
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("external DTO date-time field is invalid");
+            }
+        } else if ("availabilityStatus".equals(field)) {
+            requireEnum(field, text, Set.of("AVAILABLE", "UNAVAILABLE", "UNKNOWN"));
+        } else if (CODE_FIELDS.contains(field)) {
+            requirePattern(field, text, SAFE_CODE_PATTERN);
+        } else if ("signatureResult".equals(field)) {
+            requireEnum(field, text, SIGNATURE_RESULTS);
+        } else if ("processingStatus".equals(field)) {
+            requireEnum(field, text, PROCESSING_STATUSES);
+        } else if ("code".equals(field)) {
+            requireEnum(field, text, ERROR_CODES);
+        } else if ("schemaVersion".equals(field)) {
+            requirePattern(field, text, SCHEMA_VERSION_PATTERN);
+        } else if ("signature".equals(field)) {
+            requirePattern(field, text, SIGNATURE_PATTERN);
+        } else if ("correlationId".equals(field)) {
+            if (text.length() < 16) {
+                throw new IllegalArgumentException("external DTO correlationId is too short");
+            }
+            requirePattern(field, text, SAFE_TOKEN_PATTERN);
+        } else if ("eventType".equals(field) || "provider".equals(field) || "keyVersion".equals(field)) {
+            requirePattern(field, text, SAFE_TOKEN_PATTERN);
+        } else {
+            throw new IllegalArgumentException("external DTO field has no typed validation");
+        }
+    }
+
+    private static void requirePattern(String field, String value, Pattern pattern) {
+        if (!pattern.matcher(value).matches()) {
+            throw new IllegalArgumentException("external DTO " + field + " has invalid format");
+        }
+    }
+
+    private static void requireEnum(String field, String value, Set<String> values) {
+        if (!values.contains(value)) {
+            throw new IllegalArgumentException("external DTO " + field + " is not approved");
         }
     }
 }
