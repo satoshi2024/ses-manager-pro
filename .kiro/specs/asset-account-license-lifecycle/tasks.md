@@ -31,10 +31,24 @@
 ### Task R9.4: 第9回Review証跡・完了台帳の同期
 - **Status**: [x] COMPLETED
 - **Objective**: 第9回ReviewのP1-01/P1-02/P2-01/P2-02対応、実測件数、remote引渡し条件をtasks/evidence/ledgerへ同期する。
-- **Implementation**: `review-evidence.md`、`review-ledger.md`、本tasks.mdの現行Fast件数を75/75へ更新し、第9回Review対応表を追加する。
-- **Test requirements**: NF-09 Fast 75/75、MySQL asset 9/9、V132 migration smoke 4/4、退社gate drill 9/9、MySQL shard inventory 1/1をskip=0で確認する。
+- **Implementation**: `review-evidence.md`、`review-ledger.md`、本tasks.mdを第9回Review対応時点のFast件数75/75へ更新し、第9回Review対応表を追加する。
+- **Test requirements**: 第9回Review対応時点のNF-09 Fast 75/75、MySQL asset 9/9、V132 migration smoke 4/4、退社gate drill 9/9、MySQL shard inventory 1/1をskip=0で確認する。現行のV133追加後の実績はR9.5/R9.6で更新する。
 - **Result**: 上記5ゲートをすべて **PASS**。リポジトリ全体Fast gateはBase比較由来の未PASS記録を維持する。
 - **Demo / rollback**: Surefire結果、Head/Remote一致、専用worktree clean、通常checkout未変更を照合し、独立ReviewのPLAN/IMPLEMENTATION双方PASSまではPRを作成しない。
+
+### Task R9.5: AS-R3.3 紛失インシデント台帳・対応API・DocumentLink
+- **Status**: [x] COMPLETED
+- **Objective**: 紛失報告を汎用ステータス変更から分離し、起票日時、報告者、リモートワイプ要求/実施/確認状態と日時、警察届出番号、保険申請状態/日時、関連証跡DocumentLinkを永続追跡する。緊急一斉通知はインシデント初回起票と同一transactionの通知outboxへ登録する。
+- **Implementation**: `V133__asset_lost_incident_tracking.sql`、`AssetLostIncident`/`AssetLostIncidentService`、`AssetApiController` の `GET/PUT /api/assets/{assetId}/lost-incident`、`DocumentLinkMapper`/`AssetScopeServiceImpl` の `ASSET_LOST_INCIDENT` scope、`AssetAlertServiceImpl` のインシデントID単位dedupe。
+- **Test requirements**: `AssetServiceTest.testLostIncidentLedgerAndEmergencyAlert` で全項目・DocumentLink・通知一重化・再送冪等性を、`AssetApiControllerTest.testLostIncidentApiFlow` で参照/更新APIを、MySQL schema testでV133の列・unique/FKを検証する。
+- **Demo / rollback**: LOST報告後に台帳/通知/イベント/関連文書を照合し、対応更新を再取得する。失敗時はV133とincident service/APIの変更を個別revertする。本番rollbackはrunbookのbackup/restore手順に限定する。
+
+### Task R9.6: LOST/DISPOSED専用副作用経路の強制
+- **Status**: [x] COMPLETED
+- **Objective**: `AssetService.changeStatus` と通常の資産登録payloadでLOST/DISPOSED/ASSIGNED/IN_STOCKを直接操作できないようにし、紛失インシデント・緊急通知・廃棄イベント・貸与行を専用サービスから迂回できない状態にする。
+- **Implementation**: `AssetStatusPolicy.DEDICATED_TRANSITION_TARGETS`、`AssetServiceImpl.createAsset/changeStatus/reportLost/disposeAsset/restoreToStock`、`MyAssetApiController` の個別通知呼出し除去。保守完了・予約取消のIN_STOCK復帰は専用 `restoreToStock` へ分離する。
+- **Test requirements**: `AssetServiceTest.testAssetStatusTransitionGuard` で直接ASSIGNED/LOST/DISPOSED変更とLOST初期登録を拒否し、`testLostIncidentLedgerAndEmergencyAlert` と `AssetApiControllerTest.testLostIncidentApiFlow` で専用副作用を検証する。
+- **Demo / rollback**: 汎用status API・POST payloadの拒否と、admin/要員双方のreport-lostが同じincident/outbox経路を通ることを照合する。失敗時はR9.6のpolicy/service/controller/test変更を個別revertする。
 
 ---
 
@@ -79,7 +93,7 @@
 - **Status**: [x] COMPLETED
 - **Objective**: 貸与・外部account・資産eventのサービスから汎用 `IService` mutation APIを除去し、eventのUPDATE/DELETEをMySQL triggerでも拒否する。
 - **Implementation**: `AssetAssignmentService`、`ExternalAccountService`、`AssetEventService` を専用APIへ分離し、V132 `t_asset_event` append-only triggerを追加。
-- **Test requirements**: `AssetLifecycleAppendOnlyApiContractTest` と `AssetMySqlIntegrationTest.testV132WaiverShapeAndAppendOnlyGuardsOnMySQL` でAPI境界とtrigger shapeを検証する。
+- **Test requirements**: `AssetLifecycleAppendOnlyApiContractTest` と `AssetMySqlIntegrationTest.testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL` でAPI境界とtrigger/列shapeを検証する。
 - **Demo / rollback**: 終端履歴の削除拒否とevent訂正の後続追記方針を確認する。本番DBの切り戻しはrunbookのbackup/restore境界に従う。
 
 ### Task R7.3: Provider confirmation poll のアカウント単位fail-closed継続
@@ -196,10 +210,10 @@
 
 ## F1. DDL・マイグレーション・Entity・Mapper 実装
 
-### Task F1.1: DDL マイグレーション & スキーマ同期 (V129, V130, V131, V132, V1, H2)
+### Task F1.1: DDL マイグレーション & スキーマ同期 (V129, V130, V131, V132, V133, V1, H2)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `AS-R1`, `AS-R2`, `AS-R3`, `AS-R4`, `CR-03`, `CR-04`
-- **Objective**: 資産・貸与・イベント・棚卸し・アカウント参照・ライセンスの9テーブルと退社例外免除台帳を作成し、Flyway V129/V130/V131/V132、V1 baseline、H2テストスキーマ、`application-test.yml` を完全同期する。
+- **Objective**: 資産・貸与・イベント・棚卸し・紛失インシデント・アカウント参照・ライセンスの台帳と退社例外免除台帳を作成し、Flyway V129/V130/V131/V132/V133、V1 baseline、H2テストスキーマ、`application-test.yml` を完全同期する。
 - **実装内容**:
   - `src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql`
   - `src/main/resources/db/migration/V130__asset_account_license_menu_permissions.sql`
@@ -343,11 +357,12 @@
 - **Requirements ID**: `AS-R3.3`, `AS-R4.2`
 - **Objective**: 返却期限 7日前/3日前/当日接近通知、期限超過当日/週次リマインド、リース満了30日前検知、紛失インシデント起票時の緊急一斉通知、および日次午前9時定期実行スケジューラを実装する。
 - **実装内容**:
-  - `AssetAlertService`, `AssetAlertServiceImpl`
+  - `AssetAlertService`, `AssetAlertServiceImpl`, `AssetLostIncidentService`, `AssetLostIncidentServiceImpl`
   - `AssetLifecycleScheduler`
 - **Test 要件と assertion**:
   - `AssetAlertServiceTest.testCheckOverdueAssignments`: 期限超過および接近通知の生成アサート
   - `AssetAlertServiceTest.testCheckExpiringLeases`: リース満了接近資産の検知アサート
+  - `AssetServiceTest.testLostIncidentLedgerAndEmergencyAlert`: 紛失インシデント全項目、DocumentLink、緊急通知outbox、再送冪等性のアサート
 - **手動 Demo と証跡**: `AssetAlertServiceTest` 実行ログ
 - **Rollback**: AlertService / Scheduler の revert
 - **未検証事項**: なし
@@ -360,7 +375,8 @@
   - `MyAssetPageController`, `MyAssetApiController`
   - `templates/my/assets.html`, `static/js/modules/my-assets.js`
 - **Test 要件と assertion**:
-  - `MyAssetApiControllerTest.testMyAssetPortalFlow`: 要員によるサマリー取得、紛失報告実行（ステータス `LOST` 遷移 & 通知送信）アサート
+  - `MyAssetApiControllerTest.testMyAssetPortalFlow`: 要員によるサマリー取得、紛失報告実行（ステータス `LOST` 遷移 & インシデント経由通知）アサート
+  - `AssetApiControllerTest.testLostIncidentApiFlow`: 管理者による紛失報告、インシデント参照・対応更新APIのアサート
 - **手動 Demo と証跡**: `MyAssetApiControllerTest` 実行ログ
 - **Rollback**: Controller, HTML, JS の revert
 - **未検証事項**: なし
@@ -415,7 +431,7 @@
   - `AssetMySqlIntegrationTest.testConcurrentReturnAndWaiveOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentLicenseReleaseDecrementsOnceOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentInventoryCompletionOnMySQL`: PASS
-  - `AssetMySqlIntegrationTest.testV132WaiverShapeAndAppendOnlyGuardsOnMySQL`: PASS
+  - `AssetMySqlIntegrationTest.testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL`: PASS
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
 
@@ -428,16 +444,18 @@
 - **Requirements ID**: `CR-06`
 - **Objective**: NF-09 で作成・改修した対象テストとMySQLゲートを実行し、スキップ 0 件、0 Failure / 0 Error を確認する。リポジトリ全体Fast gateの合否は既存テスト・実行環境の結果と分離して記録する。
 - **Test 要件と assertion**:
-  - NF-09対象Fast Suite: 75/75 tests PASS (0 skipped, 0 failed, 0 errors)
+  - NF-09対象Fast Suite: 77/77 tests PASS (0 skipped, 0 failed, 0 errors)
   - 実退社gate drill: `ResignationGateFailureDrillTest` 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
   - MySQL asset Gate: 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
-  - V132追随 migration smoke: 4/4 tests PASS (0 skipped, 0 failed, 0 errors)
+  - V133追随 migration smoke: 4/4 tests PASS (0 skipped, 0 failed, 0 errors)
+  - MySQL shard inventory: `MySqlTestShardInventoryTest` 1/1 PASS (0 skipped, 0 failed, 0 errors)
 - **手動 Demo と証跡**:
-  - Maven Surefire 対象suite出力ログ (`Tests run: 75, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire 対象suite出力ログ (`Tests run: 77, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire resignation gate出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire MySQL asset出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
-  - Maven Surefire V132追随migration smoke出力ログ (`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`)
-- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し72/72を確認し、第9回Review後はR9.1〜R9.3の修正を含むNF-09専用75/75、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。
+  - Maven Surefire V133追随migration smoke出力ログ (`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire shard inventory出力ログ (`Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`)
+- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し72/72を確認し、第9回Review後はR9.1〜R9.3の修正を含むNF-09専用75/75、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。今回の第9回Review追加是正後はNF-09専用77/77、MySQL asset 9/9、V133追随migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1を再確認した。
 - **Rollback**: なし
 - **未検証事項**: リポジトリ全体Fast gateのPASS、および独立ReviewのPASS。全体Fast gateは未PASSのままなので、独立ReviewでBase差分と環境復旧後の再実行要否を判断する。
 

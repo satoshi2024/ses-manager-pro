@@ -8,6 +8,7 @@
 | **内部ユーザー** | `sys_user`, `SysUserService` | 貸与先 (`assignee_type = 'USER'`, `assignee_id = sys_user.id`) | ユーザー無効化 (`status = 0`) 時の資産・アカウント確認 |
 | **法人・組織** | `m_organization_unit` | 資産所有法人 (`owner_company_id` = `legal_entity_id`), 費用負担組織 (`cost_center_id`) | 法人別資産集計、組織別ライセンス費用配賦 |
 | **法定文書・証跡** | `t_document`, `DocumentService` | 受渡し・返却時の受領書・誓約書 (`handover_evidence_doc_id`, `return_evidence_doc_id`) | `DocumentLink` 構造に準拠、独自ファイル保存カラムを作らない |
+| **紛失インシデント** | `t_asset_lost_incident`, `AssetLostIncidentService` | LOST資産の起票・リモートワイプ・警察届・保険申請・関連証跡 | V133で資産ごとに1行。秘密情報は保存せず、`ASSET_LOST_INCIDENT` DocumentLinkと通知outboxを利用 |
 | **退社ワークフロー** | `engineer-lifecycle-workflow` (NF-01) | 退社ゲートでの未返却資産・未失効アカウント・未解放ライセンス blocker 検査 | `RESIGN_ASSET_RETURN` の状態に加え、`AssetOffboardingService` の3 blocker実照合を正本とする |
 | **内部統制・承認** | `ApprovalEngineService` | 資産未返却・アカウント未失効・ライセンス未解放のまま退社させる場合の例外承認 | `RequestType = LIFECYCLE_EXCEPTION`、対象一致、承認済みstatus、対象要員・退社case・`RESIGN_ASSET_RETURN` taskの完全一致、Approval Actionの実操作ユーザーを`approved_by`へ保存、`t_asset_offboarding_waiver` 永続台帳 |
 | **通知基盤** | `NotificationService`, `t_notification_outbox` | 返却期日接近・超過、棚卸し、失効未確認のアラート通知 | Deduplication Key による重複抑止 |
@@ -41,11 +42,12 @@
   - 同一失効keyのclaimはMySQLのatomic updateで1回に限定し、confirmation例外はaccount単位でretry状態を保存してpollを継続する。
 
 ### 2.3 紛失・事故インシデント運用
-- 資産紛失発生時は、直ちにステータスを `LOST` に更新し、以下の項目を記録する:
-  - 紛失発覚日時・場所・状況
-  - 外部MDMを通じたリモートワイプ要求日時・ワイプ完了確認日時
+- 資産紛失発生時は `AssetService.reportLost` の専用経路でステータスを `LOST` に更新し、V133の `t_asset_lost_incident` へ以下を記録する:
+  - インシデント起票日時・報告者・紛失状況/初動メモ
+  - 外部MDMを通じたリモートワイプ要求・実施・確認状態と各日時
   - 警察届出番号（遺失届受領番号）
-  - 保険求償証拠書類（始末書、届出受理証明書スキャン等の `t_document` リンク）
+  - 保険申請状態/日時および保険求償証拠書類（始末書、届出受理証明書スキャン等の `t_document` リンク）
+- 対応更新は `GET/PUT /api/assets/{assetId}/lost-incident` で行い、`t_document_link.target_type = ASSET_LOST_INCIDENT` として関連文書を追加する。LOST遷移・台帳起票・関係者への緊急通知outbox登録は同一transactionで行う。
 
 ---
 

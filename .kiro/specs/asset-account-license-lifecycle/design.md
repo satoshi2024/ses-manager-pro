@@ -27,7 +27,7 @@
 [Domain & Persistence Layer]
   ├─ Entity: Asset, AssetAssignment, AssetEvent, AssetInventoryRun, AssetInventoryItem,
   │          ExternalAccountSystem, ExternalAccountReference, LicensePlan, LicenseAssignment,
-  │          AssetOffboardingWaiver
+  │          AssetOffboardingWaiver, AssetLostIncident
   └─ Mapper: MyBatis-Plus BaseMapper (LambdaQueryWrapper / 行ロック @Select)
 ```
 
@@ -35,9 +35,11 @@
 
 ## 1.4 資産ステータス語彙と遷移入口
 
-資産ステータスの許可値は `IN_STOCK`、`ASSIGNED`、`UNDER_MAINTENANCE`、`LOST`、`DISPOSED`、`RESERVED` の6値に固定する。登録時と `AssetService.changeStatus` の両方で値をtrim・大文字化し、許可集合にない値は `BusinessException(400)` として保存前に拒否する。画面の検索・一覧バッジ・棚卸し入力、およびV1/V129のDDLコメントはこの6値を同じ語彙で表示する。
+資産ステータスの許可値は `IN_STOCK`、`ASSIGNED`、`UNDER_MAINTENANCE`、`LOST`、`DISPOSED`、`RESERVED` の6値に固定する。登録時と `AssetService.changeStatus` の両方で値をtrim・大文字化し、許可集合にない値は `BusinessException(400)` として保存前に拒否する。通常の新規登録は `IN_STOCK` 固定であり、`ASSIGNED`/`LOST`/`DISPOSED` をpayloadで指定して初期化する経路を持たない。画面の検索・一覧バッジ・棚卸し入力、およびV1/V129のDDLコメントはこの6値を同じ語彙で表示する。
 
-状態遷移は表3の許可集合をサービスで強制する。`IN_STOCK ↔ ASSIGNED` の貸与・返却遷移は貸与レコードと資産CASを同一トランザクションで扱う `AssetAssignmentService` 専用とし、`AssetService.changeStatus` から資産だけを `ASSIGNED` または `IN_STOCK` に変更する経路は提供しない。`DISPOSED` から `IN_STOCK`/`RESERVED`、`LOST` から `UNDER_MAINTENANCE`/`RESERVED`、`UNDER_MAINTENANCE` から `ASSIGNED`/`DISPOSED` は拒否する。返却処理はロック取得後に `start_date <= actual_return_date <= 今日` を検証し、未来日または開始日前の返却で資産を `IN_STOCK` に戻さない。
+状態遷移は表3の許可集合をサービスで強制する。`IN_STOCK ↔ ASSIGNED` の貸与・返却遷移は貸与レコードと資産CASを同一トランザクションで扱う `AssetAssignmentService` 専用、`LOST` は紛失インシデント起票付きの `AssetService.reportLost` 専用、`DISPOSED` は廃棄イベント付きの `AssetService.disposeAsset` 専用とする。`UNDER_MAINTENANCE/RESERVED → IN_STOCK` は `AssetService.restoreToStock` 専用とする。`AssetService.changeStatus` は `ASSIGNED`/`IN_STOCK`/`LOST`/`DISPOSED` を遷移先に受け付けず、専用処理の副作用を迂回する経路を提供しない。`DISPOSED` から `IN_STOCK`/`RESERVED`、`LOST` から `UNDER_MAINTENANCE`/`RESERVED`、`UNDER_MAINTENANCE` から `ASSIGNED`/`DISPOSED` は拒否する。返却処理はロック取得後に `start_date <= actual_return_date <= 今日` を検証し、未来日または開始日前の返却で資産を `IN_STOCK` に戻さない。
+
+`reportLost` は資産状態CAS、`t_asset_event.REPORTED_LOST`、`t_asset_lost_incident` 初回行、`ASSET_LOST_INCIDENT` 通知outbox登録を同一transactionで実行する。既に `LOST` の資産に対する再送は既存インシデントを返し、台帳・通知を増殖させない。インシデント対応の更新は行ロックとversionで直列化し、関連文書は `t_document_link` へINSERT-onlyで追加する。
 
 ## 1.5 論理削除の安全条件設計（AS-R1.5 対応）
 
@@ -55,7 +57,7 @@ MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `remove
 
 ### 1.5.2 廃棄 vs 論理削除
 
-- **資産廃棄**: `AssetService.changeStatus(id, "DISPOSED", ...)` を使用。`t_asset_event` に `DISPOSED` イベントを追記し、`deleted_flag` は `0` のままとする（台帳上の証跡を維持する）。
+- **資産廃棄**: `AssetService.disposeAsset(id, ...)` を使用。`t_asset_event` に `DISPOSED` イベントを追記し、`deleted_flag` は `0` のままとする（台帳上の証跡を維持する）。`changeStatus` からの直接廃棄は拒否する。
 - **台帳整理（論理削除）**: 管理者が廃棄後の不要な資産マスタを台帳から通常一覧上見えなくする目的でのみ使用可能。`DISPOSED` 状態かつ ACTIVE 貸与ゼロの場合のみ許可する。これは `m_asset` に限る。
 
 ### 1.5.3 終端状態の保持
@@ -198,7 +200,35 @@ CREATE TABLE t_asset_inventory_item (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='棚卸し明細台帳';
 ```
 
-### 2.5 外部アカウント参照 (`m_external_account_system`, `t_external_account_reference`)
+### 2.5 紛失インシデント台帳 (`t_asset_lost_incident`)
+
+V133で資産ごとに1行の紛失インシデント台帳を追加する。`reported_at`、リモートワイプ要求/実施/確認状態と各日時、警察届出番号、保険申請状態/日時を保持し、認証秘密や復旧コードは保持しない。`t_document_link` の `target_type = 'ASSET_LOST_INCIDENT'` で関連証跡を追記する。LOST遷移時は `AssetLostIncidentService.createInitial` が初回台帳と通知outboxを同一transactionで登録し、再送は既存行を再利用する。
+
+```sql
+CREATE TABLE t_asset_lost_incident (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    asset_id BIGINT NOT NULL UNIQUE,
+    reported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reported_by BIGINT,
+    incident_details VARCHAR(2000),
+    remote_wipe_status VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUESTED',
+    remote_wipe_requested_at DATETIME,
+    remote_wipe_executed_at DATETIME,
+    remote_wipe_confirmed_at DATETIME,
+    police_report_number VARCHAR(128),
+    insurance_claim_status VARCHAR(32) NOT NULL DEFAULT 'NOT_APPLIED',
+    insurance_claimed_at DATETIME,
+    version INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_asset_lost_incident_asset FOREIGN KEY (asset_id) REFERENCES m_asset(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='紛失資産インシデント対応台帳（秘密非保存）';
+```
+
+APIは `GET/PUT /api/assets/{assetId}/lost-incident` とし、管理者/HR/マネージャーが資産scope内で対応情報を更新する。要員の自己紛失報告は `AssetService.reportLost` の専用経路だけを使用し、controllerから個別通知を呼び出さない。
+
+### 2.6 外部アカウント参照 (`m_external_account_system`, `t_external_account_reference`)
 
 ```sql
 CREATE TABLE m_external_account_system (
@@ -241,7 +271,7 @@ CREATE TABLE t_external_account_reference (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部アカウント参照台帳 (秘密非保存)';
 ```
 
-### 2.6 ライセンス管理 (`m_license_plan`, `t_license_assignment`)
+### 2.7 ライセンス管理 (`m_license_plan`, `t_license_assignment`)
 
 ```sql
 CREATE TABLE m_license_plan (
@@ -279,7 +309,7 @@ CREATE TABLE t_license_assignment (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ライセンス割当台帳';
 ```
 
-### 2.7 退社例外免除台帳 (`t_asset_offboarding_waiver`)
+### 2.8 退社例外免除台帳 (`t_asset_offboarding_waiver`)
 
 `LIFECYCLE_EXCEPTION` の承認適用結果はプロセスメモリに保持せず、V131〜V132の追記台帳へ保存する。`approval_request_id` は一意であり、同じ承認の再適用は同じ台帳行を再利用する。新規台帳行は対象要員、`lifecycle_case_id`、`lifecycle_task_id`（`RESIGN_ASSET_RETURN`）の組を必須とし、case/taskの外部キーで削除を制限する。台帳の有効判定は、参照先 `t_approval_request` が `request_type = 'LIFECYCLE_EXCEPTION'` かつ `status = 'approved'`（大文字小文字を区別しない）で、対象要員および指定された退社案件・タスクと一致することを必須とする。`approved_by` は承認アクションの実操作ユーザーであり、申請者IDを代用しない。
 
@@ -306,7 +336,7 @@ CREATE TABLE t_asset_offboarding_waiver (
 
 V131からの既存行は移行互換のためscope列がNULLのlegacy行として残り得るが、現行の退社gateはcase/taskの完全一致がないlegacy行を免除として採用しない。新規適用はV132でscope列、FK、索引を追加する。
 
-### 2.7.1 追記専用のDB保護
+### 2.8.1 追記専用のDB保護
 
 `t_asset_event` はアプリケーションの専用service境界に加え、V132で `BEFORE UPDATE` と `BEFORE DELETE` triggerを作成する。訂正は既存行の更新・削除ではなく後続イベントの追記で表現する。
 

@@ -47,6 +47,9 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 1. THE 管理者 SHALL 定期（半期/年次）または臨時の棚卸し（`t_asset_inventory_run`）を開始できる。
 2. THE 棚卸し明細（`t_asset_inventory_item`） SHALL 理論上の保管場所/貸与先（`expected`）と実地確認結果（`observed`）、確認者、確認日時、差異区分（`MATCH: 一致`, `DISCREPANCY: 差異あり`, `MISSING: 所在不明`, `UNREGISTERED: 未登録資産`）、差異理由、および是正措置を記録する。棚卸し確定（`COMPLETED`）後の明細更新および二重確定は厳格に拒否する。
 3. **紛失インシデント追跡 (Lost Asset Incident)**: 資産の紛失が報告された場合、THE システム SHALL ステータスを `LOST` に変更し、インシデント起票日時、リモートワイプ実施/確認状態、警察届出番号、保険申請状況、および関連文書リンクを追跡可能にし、関係者へ緊急アラートを即時一斉配信する。
+   - (a) `t_asset_lost_incident` を紛失資産ごとの正本台帳とし、起票日時・報告者・リモートワイプ（要求/実施/確認日時を含む）・警察届出番号・保険申請状態/日時を保持する。password/token/recovery code等の秘密は保持しない。
+   - (b) `GET/PUT /api/assets/{assetId}/lost-incident` で認可済みの管理者/HR/マネージャーが対応状態を参照・更新できる。関連証跡は `DocumentLink.target_type = 'ASSET_LOST_INCIDENT'` で追記する。
+   - (c) `LOST` 遷移、専用インシデント起票、緊急一斉通知のoutbox登録は同一トランザクションで完了し、同一インシデントの再送で重複通知・重複台帳を作らない。
 4. **退社ゲート連携 (NF-01 Link Contract)**:
    - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の **3大残存アイテム** を blocker として検出・報告する:
      - (a) 未返却貸与資産（`status = ACTIVE` または `actual_return_date IS NULL`）
@@ -78,7 +81,7 @@ SES企業において、PC・スマートフォン・セキュリティキー・
    - 同一資産への並行貸与リクエストに対して、マルチスレッド並行テストで確実に1件のみが成功し他方が409/業務例外で拒否されることを実証する。
    - 外部失効要求のclaimは `idempotency_key IS NULL` の一行更新で先着1件に限定し、同一keyの並行要求でprovider呼出しが1回だけになることをMySQLで実証する。確認poll中のprovider例外はアカウント単位で `PENDING_CONFIRMATION` とretry情報を永続化し、後続アカウントの処理を中断しない。
 3. **CR-03 データ・マイグレーション**:
-   - DDLは V1 baseline、Flyway増分マイグレーション（着手時点 latest+1、現行V129〜V132）、H2テストスキーマ（`sql/schema-asset-lifecycle-h2.sql`）、および Entity と完全に同期する。V132は退社案件・タスクFKと `t_asset_event` append-only triggerを含み、MySQL smokeで列・unique/FK・trigger shapeを検証する。
+   - DDLは V1 baseline、Flyway増分マイグレーション（着手時点 latest+1、現行V129〜V133）、H2テストスキーマ（`sql/schema-asset-lifecycle-h2.sql`）、および Entity と完全に同期する。V132は退社案件・タスクFKと `t_asset_event` append-only triggerを含み、V133は紛失インシデント台帳のasset FK/uniqueを含む。MySQL smokeで列・unique/FK・trigger shapeを検証する。
    - 金額（取得価格、ライセンス単価等）は `BigDecimal`（円単位）で保持する。
 4. **CR-04 監査・セキュリティ・PII**:
    - パスワード、トークン、秘密鍵等の秘密情報を一切永続化・ログ出力しない。

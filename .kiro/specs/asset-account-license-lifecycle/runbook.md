@@ -10,12 +10,12 @@
    - `t_external_account_reference` 等のテーブルやDTOに、パスワード・APIトークン・秘密鍵は絶対に保存・記録しません。
    - 保有するのは外部システム識別子（アカウント名/メールアドレス）と状態（ACTIVE / SUSPENDED / REVOKED / PENDING_CONFIRMATION / UNKNOWN）、失効要求・確認タイムスタンプのみです。
 2. **資産ステータス語彙**:
-   - 資産状態は `IN_STOCK` / `ASSIGNED` / `UNDER_MAINTENANCE` / `LOST` / `DISPOSED` / `RESERVED` の6値に限定します。登録・状態変更・検索・棚卸し入力で不正値を受け付けません。
+   - 資産状態は `IN_STOCK` / `ASSIGNED` / `UNDER_MAINTENANCE` / `LOST` / `DISPOSED` / `RESERVED` の6値に限定します。登録・状態変更・検索・棚卸し入力で不正値を受け付けません。貸与/返却、紛失、廃棄、保守完了/予約取消はそれぞれ専用処理を使用し、汎用status APIで副作用を迂回しません。
 3. **排他制御と期間重複代数**:
    - 貸与作成時は `m_asset` 行を `FOR UPDATE` でロックし、`[start_date, expected_return_date]` の期間重複を代数的に排除します。
    - 返却・免除は `m_asset FOR UPDATE` → `t_asset_assignment FOR UPDATE` の順で固定し、asset CASとassignment終端CASが両方成功した場合だけeventを追記します。license解放はassignment→plan、棚卸しはrun→itemの順でロックします。
 4. **不変イベント台帳（Immutable Event Ledger）**:
-   - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。専用service APIに加え、V132のMySQL UPDATE/DELETE triggerでDB側からも拒否します。
+   - 資産に対する作成・更新・貸与・返却・ステータス変更・廃棄・紛失の全履歴は `t_asset_event` に追記のみ（INSERT-only）で記録され、上書き・物理削除は行いません。専用service APIに加え、V132のMySQL UPDATE/DELETE triggerでDB側からも拒否します。紛失時の対応状態はV133 `t_asset_lost_incident` と `GET/PUT /api/assets/{assetId}/lost-incident` で管理します。
 5. **ライセンス席数 CAS（Compare-And-Swap）**:
    - `m_license_plan.allocated_count` は席数上限 `seat_limit` を超えない条件付きCAS更新でアトミックに管理されます。
 6. **所有法人と認可スコープ**:
@@ -40,6 +40,7 @@ Flyway マイグレーションにより自動適用されます。
 - `V130__asset_account_license_menu_permissions.sql`: メニューおよびアクション権限シード
 - `V131__asset_offboarding_waiver_ledger.sql`: 承認済み `LIFECYCLE_EXCEPTION` と対象要員を結ぶ退社例外免除台帳。`approval_request_id` は一意で、既存承認の再適用を重複記録しません。
 - `V132__asset_offboarding_waiver_scope_and_append_only_guards.sql`: waiverの退社case/task scope列・FK・索引、および `t_asset_event` UPDATE/DELETE拒否trigger。V131由来のNULL scope legacy行は現行gateで免除に使用しません。
+- `V133__asset_lost_incident_tracking.sql`: 紛失インシデントの起票・リモートワイプ・警察届・保険申請状態とasset FK/uniqueを追加します。紛失対応中は通常のDROP/DELETEを行わず、backup/restoreによるロールバック手順を使用します。
 
 ### 2.2 既存資産・アカウントの初期登録
 1. 管理者アカウントで `/asset/list` にログイン。
@@ -107,9 +108,9 @@ WHERE deleted_flag = 0
 
 ### 3.4 紛失インシデント緊急初動フロー
 1. 要員マイポータル（`/my/assets`）または管理者画面より「紛失報告」を実行。
-2. 資産ステータスが `LOST` に遷移し、不変イベント台帳に記録。
-3. `AssetAlertService` が管理者・HR・セキュリティ担当者へ緊急通知を一斉配信。
-4. 外部アカウントの即時無効化（`/asset/accounts` から手動失効または連携失効）を実施。
+2. 資産ステータスが `LOST` に遷移し、不変イベント台帳とV133 `t_asset_lost_incident` に記録される。初回起票時の通知outbox登録も同一transactionで行われる。
+3. `GET/PUT /api/assets/{assetId}/lost-incident` でリモートワイプ状態、警察届出番号、保険申請状態、関連DocumentLinkを更新し、`CONFIRMED` などの外部確認結果を要求送信と混同しない。
+4. 外部アカウントの即時無効化（`/asset/accounts` から手動失効または連携失効）を実施する。紛失対応更新にpassword/token/recovery codeを入力・保存しない。
 
 ### 3.5 失効要求・確認・タイムアウト対応
 - `revoke_requested_at` は外部へ要求を送信した時刻、`revoke_confirmed_at` は外部状態を確認できた時刻です。要求送信だけで `REVOKED` と判定しません。
