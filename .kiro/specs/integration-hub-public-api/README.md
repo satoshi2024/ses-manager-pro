@@ -53,7 +53,7 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
 public endpoint、外部送信、production enablementは未完了である。F2は実装済みだが独立Implementation Review待ちで、
 A1/B1/B2/Mは順次未着手とする。
-全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
+全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
 ## Task 0R remediation

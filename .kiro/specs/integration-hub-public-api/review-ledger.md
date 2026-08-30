@@ -80,8 +80,9 @@ trusted proxy/source IP/CIDR、nonce atomic commit、scope/data scope/command de
 quota、correlation、専用audit、stable error boundaryとfilter自動二重登録防止を追加した。
 承認済みA1 controller、B1/B2 provider transport、production enablement、実顧客credential、
 実provider送信は変更していない。F2 testsはcanonical golden vector、proxy/CIDR、route、properties、
-認証/nonce/session/browser、scope/data/quota、disabled MockMvc chainを含む。独立Implementation Review
-PASS受領前にA1へ進まず、F2 commit後のremote Headを外部handoffで固定する。
+認証/nonce/session/browser、scope/data/quota、disabled MockMvc chainを含む。実装commitは
+`aadcfa98`であり、独立Implementation Review PASS受領前にA1へ進まず、最終remote Headは
+外部handoffで固定する。
 
 ## Findings
 
