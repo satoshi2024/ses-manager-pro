@@ -70,8 +70,10 @@ OUTBOUND_FIELDSのallow-listを適用する。未知field、過大な配列・�
 idempotencyのsafe responseはcode/statusと承認済みdata fieldだけ、inboundはprovider event metadataと
 allow-listed parsed fieldだけ、outboundは承認済みexternal DTO envelopeだけを保存する。自由記述message、internal
 entity、DB internal ID、secret、PII、provider raw body、stack/SQLは各保存境界へ渡さない。payload/canonicalPayloadは
-allow-list済みのnested object、changedFieldNamesはbounded string array、その他の値はbounded string/nullに限定し、
-raw body/PIIをscalar文字列として包んだ値も拒否する。
+allow-list済みのnested object、changedFieldNames/skillTagCodeはbounded string arrayに限定する。public IDはopaque token、
+date/date-timeはRFC形式、status/resultCodeはbounded code pattern、availability/signature/processing statusとerror codeは
+field固有enumで検証し、未型付けscalar、raw body/PIIを許可fieldの文字列として包んだ値も拒否する。nested objectの深さも
+上限を持ち、用途別typed DTOからのみsnapshotを生成する境界をF2以降へ引き渡す。
 
 #### Conflictのcanonical persistence
 

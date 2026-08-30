@@ -48,7 +48,9 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 10. F1のpersistence serviceは汎用IService/CRUDを公開せず、許可された遷移・状態・snapshot型を受ける
     明示的なcommandだけを公開する。mapperは内部実装に限定し、external DTO snapshotは保存用途別の
      allow-list（safe response / inbound / outbound）を構造的に検証する。payload/canonicalPayloadは用途別allow-listの
-     構造化objectだけ、changedFieldNamesはbounded string arrayだけを許可し、raw body/PIIの文字列埋込みを拒否する。
+     構造化objectだけ、changedFieldNames/skillTagCodeはbounded string arrayだけを許可する。public IDはsafe opaque
+     token、日付/date-timeはRFC形式、status/resultCodeはbounded code pattern、availability/signature/processing statusと
+     error codeは承認済みenumで検証し、raw body/PIIの文字列埋込みや未型付けscalarを拒否する。
 11. Idempotency-Keyのdigest不一致は例外を返す前にIN_PROGRESS rowをCONFLICT、409、安全な固定code、
     90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
     RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。

@@ -48,8 +48,9 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   t_notification_outboxとAccounting IntegrationJobは変更・二重書込みせず、t_api_deliveryをNF-05専用ledgerとして
   分離する。各retention対象へclass/expiryを付け、t_api_retention_holdとt_api_purge_checkpointをlock/CAS規則で扱う。
   service interfaceは汎用IService/CRUDを公開せず、用途別snapshot allow-listとcanonical state transitionを通るtyped operationだけにする。
-  snapshotのpayload/canonicalPayloadは構造化object、changedFieldNamesはbounded string arrayに限定し、raw body/PIIの
-  scalar埋込みを拒否する。quota subjectとpurge checkpointの初期化はupsert-first、quota transactionはREAD COMMITTED＋
+  snapshotのpayload/canonicalPayloadは構造化object、changedFieldNames/skillTagCodeはbounded string array、public ID・date・
+  date-time・status/resultCode・signature/processing statusはfield固有のpattern/enumに限定し、raw body/PIIのscalar埋込みと
+  未型付けfieldを拒否する。quota subjectとpurge checkpointの初期化はupsert-first、quota transactionはREAD COMMITTED＋
   bounded deadlock retryとし、hold/purgeはcheckpoint→target→holdの共通lock順序を使う。delivery purgeはlease token/expiry
   の片方NULLをfail-closedで除外する。
   idempotency/inboundのhash conflictは例外だけで終わらせずCONFLICT rowへ永続化する。purgeはretention_expires_at,idの
@@ -68,7 +69,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   burst/refillと三つのquota境界、migration証跡、DB transaction内外の境界、canonical state遷移、hold/purge/restoreの
   状態遷移を示す。
 - 実施証跡: `a7654b44`でV129 MySQL migration、H2 schema/init、entity/mapper/service/crypto基盤、
-  `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、`5a2a0231`でfollow-up reviewの4 P1を実装・テストremediateし、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
+  `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、`5a2a0231`でfollow-up reviewの4 P1を実装・テストremediateし、`96d6801c`でsnapshotのfield固有型検証を追加して、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
   Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
   production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで終了している。独立Implementation Reviewの
   旧remediation時点の再Reviewは未実施だった。follow-up remediation後の固定Headを独立Implementation Reviewへ再提出する。

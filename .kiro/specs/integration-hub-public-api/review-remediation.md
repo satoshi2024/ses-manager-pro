@@ -54,10 +54,14 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 
 | Finding | 対応 | 状態 | 証跡 / 残る条件 |
 |---|---|---|---|
-| P1-FU-001 raw body/PII nested snapshot | payload/canonicalPayloadを用途別allow-listのstructured objectへ限定し、scalar stringを拒否。payload内unknown field、password文字列、canonical raw bodyのnegative testを追加 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、ApiDeliveryServiceTest。再Review、M scan |
-| P1-FU-002 lease片側NULLのpurge | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、IntegrationHubF1MySqlConcurrencyTest。再Review |
-| P1-FU-003 hold/purge lock順序 | hold acquire/release/purgeをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、IntegrationHubF1RetentionH2Test/MySQL。再Review |
-| P1-FU-004 MySQL multi-connection evidence | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、5/5 PASS。M/security/load/recoveryは未完了 |
+| P1-FU-001 raw body/PII nested snapshot | `ExternalDtoSnapshot`を用途別allow-listのstructured objectへ限定し、public ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、`96d6801c`、ApiDeliveryServiceTest。再Review、M scan |
+| P1-FU-002 lease片側NULLのpurge | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | CLOSED_BY_REVIEW | `5a2a0231`、IntegrationHubF1MySqlConcurrencyTest 5/5。独立再Reviewでクローズ |
+| P1-FU-003 hold/purge lock順序 | hold acquire/release/purgeをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | CLOSED_BY_REVIEW | `5a2a0231`、IntegrationHubF1RetentionH2Test/MySQL。独立再Reviewでクローズ |
+| P1-FU-004 MySQL multi-connection evidence | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | CLOSED_BY_REVIEW | `5a2a0231`、5/5 PASS。独立再Reviewでクローズ。M/security/load/recoveryは未完了 |
+
+再Review（`f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`）はP0=0、P1=1、P2=0だった。FU-002〜004は独立検証でクローズ、
+FU-001のみ許可nested scalarの迂回が残ったため、`96d6801c`でfield固有validatorとnegative testを追加した。現状態は
+IMPLEMENTED_PENDING_REVIEWであり、自己判定でIMPLEMENTATION PASSへ変更しない。
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、

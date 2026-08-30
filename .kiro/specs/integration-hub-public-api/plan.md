@@ -51,9 +51,16 @@ FAIL（P0=0、P1=4、P2=0）となったため、`5a2a0231`でsnapshotのfield-s
 fail-closed、checkpoint→target→holdの共通lock順序、実service/mapperを使うMySQL 5競合証跡を追加した。
 H2 F1対象31 testsとMySQL 5 testsはPASSしたが、独立Implementation Reviewの再判定を受けるまでF1をPASS扱いしない。
 
+再Reviewは固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`でFAIL（P0=0、P1=1、P2=0）となり、lease fail-closed、
+lock順序、MySQL競合証跡はクローズされた。残存したnested scalar bypassに対し、`96d6801c`でpublic ID、date/date-time、
+status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証し、nested object深度と配列項目も
+boundedにした。H2 F1対象31 testsは再実行でPASSし、同Headの再独立Review待ちである。
+
 follow-up remediationの実装境界:
 
-- ExternalDtoSnapshotのpayload/canonicalPayloadはallow-list済み構造化object、changedFieldNamesはbounded string array、その他fieldはbounded string/nullだけとし、raw body/PIIを文字列へ埋め込めないようにする。
+- ExternalDtoSnapshotのpayload/canonicalPayloadはallow-list済み構造化object、changedFieldNames/skillTagCodeはbounded string array、
+  public ID・date/date-time・status/resultCode・signature/processing status・error codeはfield固有pattern/enumとし、raw body/PIIを
+  許可scalarへ埋め込めないようにする。
 - delivery purgeはlease tokenとlease expiryが両方NULL、または両方non-NULLかつexpiry<=nowの場合だけ候補/削除可能とする。
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。

@@ -39,10 +39,12 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約
 production enablement、command/exportは引き続き禁止する。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
-`d476614e`、follow-up remediationは `5a2a0231`。V129 MySQL Flyway smoke、F1 H2 targeted
+`d476614e`、follow-up remediationは `5a2a0231`、typed snapshot correctionは `96d6801c`。V129 MySQL Flyway smoke、F1 H2 targeted
 suite（31 tests、failure/error/skipなし）、MySQL `IntegrationHubF1MySqlConcurrencyTest`（5 tests、failure/error/skipなし）を確認した。
 follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378a352b1fa000dd1`でFAIL（P0=0、P1=4、P2=0）だったため、
-`5a2a0231`の再Reviewを残している。
+`5a2a0231`の再Reviewを行った。固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1=1（nested scalar bypass）が残ったため、
+`96d6801c`でfield固有pattern/enum、型、深度の検証を追加し、同Reviewへ再提出する。FU-002〜004は独立検証でクローズ済みだが、
+F1は再Review判定までIMPLEMENTATION PASS扱いにしない。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わず、独立Implementation Reviewを残している。
 

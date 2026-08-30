@@ -163,5 +163,10 @@ F1実装後の証跡更新:
 
 - `5a2a023178433882bc1c5dcf92e19b5ecfa19db6`で、snapshotのfield-specific構造検証、delivery leaseのfail-closed、
   checkpoint→target→hold lock順序、quota初期化競合のupsert/短transactionを実装した。
+- `96d6801c37d4b952e2601a06cf7edc1bc1a1bef8`で、snapshotのpublic ID、date/date-time、status/resultCode、
+  signature/processing status、error codeのfield固有pattern/enum、nested深度、配列項目検証を追加し、許可field内の
+  raw JSON/provider body scalar埋込みをnegative testで拒否した。
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
+- 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済み。`96d6801c`後も
+  IMPLEMENTATION PASSは独立再Review待ちである。
 - 実装はF1 persistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablement、UIは未着手。

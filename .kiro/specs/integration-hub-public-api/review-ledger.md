@@ -63,16 +63,16 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 
 | ID | Severity | Finding | 対応 | Status |
 |---|---|---|---|---|
-| NF05-IMPL-FU-001 | P1 | ExternalDtoSnapshotの許可fieldへraw body/PIIを文字列または未制約nested valueとして埋め込める | payload/canonicalPayloadを用途別allow-listのstructured objectへ限定し、scalar stringを拒否。payload内unknown field、password文字列、canonical raw bodyのnegative testを追加 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-FU-002 | P1 | delivery purgeのlease token/expiry片側NULLがfail-open | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-FU-003 | P1 | holdとpurgeのcheckpoint/target/hold lock順序が逆でdeadlockし得る | hold acquire/releaseをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-FU-004 | P1 | MySQL複数connectionのproduction service/mapper競合証跡が不足 | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-FU-001 | P1 | ExternalDtoSnapshotの許可fieldへraw body/PIIを文字列または未制約nested valueとして埋め込める | `96d6801c`でpublic ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-FU-002 | P1 | delivery purgeのlease token/expiry片側NULLがfail-open | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | CLOSED_BY_REVIEW |
+| NF05-IMPL-FU-003 | P1 | holdとpurgeのcheckpoint/target/hold lock順序が逆でdeadlockし得る | hold acquire/releaseをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-FU-004 | P1 | MySQL複数connectionのproduction service/mapper競合証跡が不足 | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | CLOSED_BY_REVIEW |
 
 ## F1 implementation trace
 
 | Task | Evidence | Status | Review boundary |
 |---|---|---|---|
-| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`、`d476614e`、`5a2a0231`でIMPL findingsをremediate。F1 H2 31 tests、MySQL concurrency 5 testsはPASS。独立Implementation Review再Review待ち。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
+| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`、`d476614e`、`5a2a0231`、`96d6801c`でIMPL findingsをremediate。F1 H2 31 tests、MySQL concurrency 5 testsはPASS。最新独立ReviewはP1-FU-001の再Review待ち。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
 
 ## Evidence status
 
@@ -97,8 +97,10 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 - F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
 - F1 Implementation Review: `b420911b63177763544edd1e02d663bf528d9dc1`でFAIL（P0=0、P1=7、P2=2）。
   `a184c1f4`および`d476614e`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
-  concurrency 3 testsをPASSした。follow-upの固定Head `dff90b3961b647035436abd378a352b1fa000dd1`はFAIL（P0=0、P1=4、P2=0）だったが、
-  `5a2a0231`で4件をremediateし、H2 F1対象31 testsとMySQL `IntegrationHubF1MySqlConcurrencyTest` 5 testsをPASSした。独立Implementation Review再Review待ち。F2、A1、A2、B1、B2、M: 未着手。
+ concurrency 3 testsをPASSした。follow-upの固定Head `dff90b3961b647035436abd378a352b1fa000dd1`はFAIL（P0=0、P1=4、P2=0）だったが、
+  `5a2a0231`で4件をremediateし、H2 F1対象31 testsとMySQL `IntegrationHubF1MySqlConcurrencyTest` 5 testsをPASSした。最新の再Review固定Head
+  `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`はFAIL（P0=0、P1=1、P2=0）で、FU-002〜004はクローズ、FU-001のnested scalar bypassのみ残った。
+  `96d6801c`でこれをremediateし、H2 F1対象31 testsを再PASSした。独立Implementation Review再Review待ち。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
   persistence基盤の実装に限定している。
@@ -108,5 +110,5 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 1. F1開始時にorigin/mainをfetchし、migration最大値、H2 schema/init経路、backup/rollback前提を再確認する（完了）。
 2. 実装はapproved implementation scopeへ限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablementを行わない。
 3. 実装commit `a7654b44`、remediation commit `a184c1f4`、generation correction `d476614e`、follow-up remediation
-   `5a2a0231`を許可されたbranchへpush済み。F1対象suiteはfailure/error/skipなし、全fast suiteのF1対象外failure/errorは
+   `5a2a0231`、typed snapshot correction `96d6801c`を許可されたbranchへpush済み。F1対象suiteはfailure/error/skipなし、全fast suiteのF1対象外failure/errorは
    全体PASSへ昇格させない。
