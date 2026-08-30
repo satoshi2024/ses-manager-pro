@@ -86,6 +86,18 @@ class LifecycleMySqlIntegrationTest {
     private LifecycleTaskMapper taskMapper;
 
     @Test
+    void 実MySQLで該当案件がない一覧検索は空配列を返す() {
+        SysUser admin = SysUser.builder()
+                .username("admin_mysql_lc_empty")
+                .realName("管理者MySQL空検索")
+                .role("管理者")
+                .build();
+
+        assertTrue(caseService.listCases(null, "__存在しないステータス__", null, null, null, admin).isEmpty());
+        assertTrue(caseService.listCases(null, null, Long.MAX_VALUE, null, null, admin).isEmpty());
+    }
+
+    @Test
     @DisplayName("MySQL-1: Flyway V109マイグレーション適用と実MySQL上でのライフサイクルフロー実行")
     void testLifecycleWorkflowOnRealMySql() {
         SysUser admin = SysUser.builder()

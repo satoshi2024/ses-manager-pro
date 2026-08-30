@@ -148,9 +148,9 @@ function renderCustomers(records) {
                 <td>${SES.escapeHtml(cust.contactPerson || '-')}</td>
                 <td class="font-monospace">${SES.escapeHtml(cust.contactPhone || '-')}</td>
                 <td class="text-end pe-4" onclick="event.stopPropagation();">
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-info text-info border-info" onclick="editCustomer(${cust.id})"><i class="bi bi-pencil"></i></button>
-                        <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteCustomer(${cust.id})"><i class="bi bi-trash"></i></button>
+                    <div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
+                        <button type="button" class="btn btn-sm btn-outline-info text-info border-info" title="${SES.i18n.t('common.edit', '編集')}" aria-label="${SES.i18n.t('common.edit', '編集')}" onclick="editCustomer(${cust.id})"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger text-danger border-danger" title="${SES.i18n.t('common.delete', '削除')}" aria-label="${SES.i18n.t('common.delete', '削除')}" onclick="deleteCustomer(${cust.id})"><i class="bi bi-trash" aria-hidden="true"></i></button>
                     </div>
                 </td>
             </tr>
@@ -161,20 +161,21 @@ function renderCustomers(records) {
 
 function editCustomer(id) {
     if (id) {
-        SES.api.get(`/api/customers/${id}`).then(res => {
-            if (res.code === 200) {
-                const cust = res.data;
-                $('#cust-id').val(cust.id);
-                $('#cust-version').val(cust.version != null ? cust.version : '');
-                $('#cust-companyName').val(cust.companyName);
-                $('#cust-commercialFlow').val(cust.commercialFlow);
-                $('#cust-trustLevel').val(cust.trustLevel);
-                $('#cust-deliveryPreference').val(cust.deliveryPreference || 'PDF');
-                $('#cust-contactPerson').val(cust.contactPerson);
-                $('#cust-contactPhone').val(cust.contactPhone);
-                const modal = new bootstrap.Modal(document.getElementById('customerModal'));
-                modal.show();
-            }
+        SES.api.get(`/api/customers/${encodeURIComponent(id)}`).then(cust => {
+            $('#cust-id').val(cust.id);
+            $('#cust-version').val(cust.version != null ? cust.version : '');
+            $('#cust-companyName').val(cust.companyName);
+            $('#cust-commercialFlow').val(cust.commercialFlow);
+            $('#cust-trustLevel').val(cust.trustLevel);
+            $('#cust-deliveryPreference').val(cust.deliveryPreference || 'PDF');
+            $('#cust-contactPerson').val(cust.contactPerson);
+            $('#cust-contactPhone').val(cust.contactPhone);
+            $('#customerModalTitleText').text(SES.i18n.t('customer.edit', '顧客編集'));
+            $('#customerSaveButtonText').text(SES.i18n.t('common.update', '更新'));
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).show();
+        }).catch(error => {
+            console.error(error);
+            Toast.error(error.message || SES.i18n.t('error.getDataFailed'));
         });
     } else {
         $('#cust-id').val('');
@@ -185,8 +186,9 @@ function editCustomer(id) {
         $('#cust-deliveryPreference').val('PDF');
         $('#cust-contactPerson').val('');
         $('#cust-contactPhone').val('');
-        const modal = new bootstrap.Modal(document.getElementById('customerModal'));
-        modal.show();
+        $('#customerModalTitleText').text(SES.i18n.t('customer.new', '顧客登録'));
+        $('#customerSaveButtonText').text(SES.i18n.t('common.create', '新規作成'));
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('customerModal')).show();
     }
 }
 
@@ -266,4 +268,3 @@ function deleteCustomer(id) {
         }
     });
 }
-

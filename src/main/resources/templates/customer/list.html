@@ -12,7 +12,7 @@
             <i class="bi bi-building me-2 text-info"></i><th:block th:text="#{customer.title}">顧客管理</th:block>
             <span id="total-followup-badge" class="badge bg-danger rounded-pill fs-6 ms-3 d-none">0<th:block th:text="#{customer.followUp}">件の要フォロー</th:block></span>
         </h2>
-        <button class="btn btn-info text-white shadow-sm" data-bs-toggle="modal" data-bs-target="#customerModal">
+        <button type="button" id="btn-new-customer" class="btn btn-info text-white shadow-sm" onclick="editCustomer()">
             <i class="bi bi-plus-lg me-1"></i><th:block th:text="#{customer.new}">新規登録</th:block>
         </button>
     </div>
@@ -109,7 +109,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content bg-card border-dark shadow-lg">
                 <div class="modal-header border-dark bg-dark">
-                    <h5 class="modal-title text-white fw-bold"><i class="bi bi-building-add me-2 text-info"></i><th:block th:text="#{customer.new}">顧客登録</th:block></h5>
+                    <h5 class="modal-title text-white fw-bold" id="customerModalTitle"><i class="bi bi-building-add me-2 text-info"></i><span id="customerModalTitleText" th:text="#{customer.new}">顧客登録</span></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4">
@@ -140,7 +140,7 @@
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label text-muted small" th:text="#{customer.deliveryPreference:送付方法}">送付方法</label>
+                                <label class="form-label text-muted small" th:text="#{customer.deliveryPreference}">送付方法</label>
                                 <select id="cust-deliveryPreference" class="form-select form-select-dark bg-secondary text-white border-dark">
                                     <option value="PDF">PDF</option>
                                     <option value="EMAIL">Email</option>
@@ -160,8 +160,8 @@
                 </div>
                 <div class="modal-footer border-dark bg-dark">
                     <button type="button" class="btn btn-outline-secondary text-muted hover-text-white border-dark" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
-                    <button type="button" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveCustomer()">
-                        <i class="bi bi-check-lg me-1"></i><th:block th:text="#{common.create}">登録</th:block>
+                    <button type="button" id="customerSaveButton" class="btn btn-info text-white border-0 shadow-sm px-4" onclick="saveCustomer()">
+                        <i class="bi bi-check-lg me-1"></i><span id="customerSaveButtonText" th:text="#{common.create}">登録</span>
                     </button>
                 </div>
             </div>
@@ -176,6 +176,8 @@
             document.getElementById('customer-form').reset();
             document.getElementById('cust-id').value = '';
             document.getElementById('cust-version').value = '';
+            document.getElementById('customerModalTitleText').textContent = '顧客登録';
+            document.getElementById('customerSaveButtonText').textContent = '登録';
         });
     </script>
 </th:block>

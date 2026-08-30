@@ -8,7 +8,10 @@ let currentCampaign = null;
 function loadCampaigns() {
     SES.api.get('/api/my/surveys')
         .then(list => renderCampaigns(list || []))
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            console.error(error.message || 'サーベイ一覧の取得に失敗しました');
+        });
 }
 
 function renderCampaigns(list) {
@@ -24,7 +27,10 @@ function renderCampaigns(list) {
 function openCampaign(campaignId) {
     SES.api.get('/api/my/surveys/' + campaignId)
         .then(detail => renderDetail(detail))
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            console.error(error.message || 'サーベイ詳細の取得に失敗しました');
+        });
 }
 
 function renderDetail(detail) {
@@ -80,5 +86,8 @@ async function submitAnswers() {
         await SES.api.post('/api/my/surveys/' + currentCampaign.campaignId + '/answers', { consent, answers });
         Toast.success(SES.i18n.t('my.survey.submitted', '回答を送信しました'));
         loadCampaigns();
-    } catch (e) { /* toasts */ }
+    } catch (e) {
+        console.error(e);
+        console.error(e.message || 'サーベイ回答の送信に失敗しました');
+    }
 }

@@ -278,7 +278,7 @@ function renderContracts(list) {
         // 遷移可能なステータスがあれば状態変更ボタンを表示
         const transitions = STATUS_TRANSITIONS[c.status] || [];
         const statusBtn = transitions.length > 0
-            ? `<button type="button" class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('approval.request', '申請')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right"></i></button>`
+            ? `<button type="button" class="btn btn-outline-info btn-sm" title="${SES.i18n.t('approval.request', '申請')}" aria-label="${SES.i18n.t('approval.request', '申請')}" onclick="changeContractStatus(${c.id}, '${c.status}')"><i class="bi bi-arrow-left-right" aria-hidden="true"></i></button>`
             : '';
 
         const tr = `
@@ -306,12 +306,12 @@ function renderContracts(list) {
                 <td class="py-3">
                     ${getStatusBadge(c.status)}
                 </td>
-                <td class="px-4 py-3 text-end text-nowrap">
-                    <a class="btn btn-outline-info btn-sm me-1" title="${SES.i18n.t('contract.action.detail')}" href="/contract/detail/${c.id}"><i class="bi bi-eye"></i></a>
-                    <button type="button" class="btn btn-outline-secondary btn-sm me-1" title="${SES.i18n.t('contract.action.edit')}" onclick="openEditContract(${c.id})"><i class="bi bi-pencil"></i></button>
+                <td class="px-4 py-3 text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
+                    <a class="btn btn-outline-info btn-sm" title="${SES.i18n.t('contract.action.detail')}" aria-label="${SES.i18n.t('contract.action.detail')}" href="/contract/detail/${encodeURIComponent(c.id)}"><i class="bi bi-eye" aria-hidden="true"></i></a>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" title="${SES.i18n.t('contract.action.edit')}" aria-label="${SES.i18n.t('contract.action.edit')}" onclick="openEditContract(${c.id})"><i class="bi bi-pencil" aria-hidden="true"></i></button>
                     ${statusBtn}
-                    <button type="button" class="btn btn-outline-danger btn-sm text-danger border-danger" onclick="deleteContract(${c.id})"><i class="bi bi-trash"></i></button>
-                </td>
+                    <button type="button" class="btn btn-outline-danger btn-sm text-danger border-danger" title="${SES.i18n.t('common.delete', '削除')}" aria-label="${SES.i18n.t('common.delete', '削除')}" onclick="deleteContract(${c.id})"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                </div></td>
             </tr>
         `;
         tbody.append(tr);
@@ -331,6 +331,7 @@ function getStatusBadge(status) {
 function openNewContract() {
     $('#contract-form')[0].reset();
     $('#cont-id').val('');
+    $('#cont-version').val('');
     $('#complianceWarning').addClass('d-none').text('');
     $('#contractModalTitle').text(SES.i18n.t('contract.new'));
     $('#contractSaveBtnLabel').text(SES.i18n.t('common.register'));
@@ -350,6 +351,7 @@ function openEditContract(id) {
         $('#contract-form')[0].reset();
         $('#complianceWarning').addClass('d-none').text('');
         $('#cont-id').val(c.id);
+        $('#cont-version').val(c.version != null ? c.version : '');
         $('#cont-directCommandFlag').prop('checked', !!c.directCommandFlag);
         // 検収要否（既定 true）と検収不要理由（R3.3 / R09-P1-01）
         $('#cont-acceptanceRequired').prop('checked', c.acceptanceRequired !== false);
@@ -396,6 +398,7 @@ function openEditContract(id) {
 function buildContractPayload() {
     const val = (sel) => { const v = $(sel).val(); return v !== '' && v != null ? v : null; };
     return {
+        version: val('#cont-version') != null ? parseInt(val('#cont-version'), 10) : null,
         engineerId: val('#cont-engineerId') ? parseInt(val('#cont-engineerId')) : null,
         projectId: val('#cont-projectId') ? parseInt(val('#cont-projectId')) : null,
         customerId: val('#cont-customerId') ? parseInt(val('#cont-customerId')) : null,
@@ -443,6 +446,9 @@ function saveContract() {
             if (res.code === 200) {
                 Toast.success(id ? SES.i18n.t('js.contract.success.update') : SES.i18n.t('js.contract.success.register'));
                 loadContracts(contractCurrentPage);
+                if (id && res.data && res.data.version != null) {
+                    $('#cont-version').val(res.data.version);
+                }
                 const findings = (res.data && res.data.complianceFindings) || [];
                 const hasWarning = (res.data && res.data.negativeProfit) || findings.length > 0;
                 if (hasWarning) {

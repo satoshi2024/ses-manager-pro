@@ -38,8 +38,39 @@ const PAGE_URLS = {
   'contract-document': ['/contract-document'],
   payroll: ['/payroll'],
   quotation: ['/quotation'],
-  'monthly-closing': ['/monthly-closing'],
+  document: ['/document'],
+  'bp-company': ['/bp-company/list'],
+  'crm-lead': ['/crm/leads'],
+  'crm-opportunity': ['/crm/opportunities'],
+  approval: ['/approval/inbox', '/approval/requests'],
+  'sales-order': ['/sales-order'],
+  acceptance: ['/acceptance'],
+  myLeave: ['/my/leave'],
+  leaveManagement: ['/leave'],
+  'compliance-gate': ['/compliance-gate'],
+  'portal-admin': ['/portal-admin'],
+  myDashboard: ['/my/dashboard'],
+  myProfile: ['/my/profile'],
+  myPayroll: ['/my/payroll'],
+  myExpenses: ['/my/expenses'],
+  myOneOnOnes: ['/my/one-on-ones'],
+  mySurveys: ['/my/surveys'],
+  engineerChangeRequests: ['/engineer-change-requests'],
+  expenseManagement: ['/expenses'],
+  oneOnOneManagement: ['/one-on-ones'],
+  surveyManagement: ['/surveys'],
+  'accounting-integration': ['/accounting/integration'],
+  'digital-invoice': ['/digital-invoice'],
+  'inbound-invoice': ['/inbound-invoice'],
+  'ai-evaluation': ['/ai/evaluation'],
+  lifecycle: ['/lifecycle/list', '/lifecycle/templates'],
+  'management-report': ['/management-reports'],
+  'certification-learning-skill-gap': ['/certification-learning-skill-gap'],
+  'document-archive': ['/document/list'],
   'my-timesheet': ['/my/timesheet'],
+  myLifecycle: ['/my/lifecycle'],
+  myCertificationLearningGap: ['/my/certification-learning-skill-gap'],
+  'monthly-closing': ['/monthly-closing'],
   'resume-ingestion': ['/resume-ingestion'],
   'project-ingestion': ['/project-ingestion'],
   'bp-availability': ['/bp-availability/list'],
@@ -47,13 +78,6 @@ const PAGE_URLS = {
   reconciliation: ['/reconciliation'],
   compliance: ['/compliance'],
   'management-accounting': ['/management-accounting'],
-  'document-archive': ['/document/list'],
-  'bp-company': ['/bp-company/list'],
-  'crm-lead': ['/crm/leads'],
-  'crm-opportunity': ['/crm/opportunities'],
-  approval: ['/approval/inbox', '/approval/requests'],
-  'sales-order': ['/sales-order'],
-  acceptance: ['/acceptance'],
   todo: ['/todo']
 };
 
@@ -201,7 +225,9 @@ async function runMatrix(browser, viewportName, mobile) {
     const pageSet = new Set();
     for (const menu of menus) {
       if (mobile && !MOBILE_KEY_MENUS.includes(menu) && user.role !== '管理者' && user.role !== '要員') continue;
-      for (const url of PAGE_URLS[menu] || []) pageSet.add({ menu, url });
+      const urls = PAGE_URLS[menu];
+      if (!urls) throw new Error(`Missing PAGE_URLS for menu: ${menu}`);
+      for (const url of urls) pageSet.add({ menu, url });
     }
     for (const url of EXTRA_PAGES[user.role] || []) {
       pageSet.add({ menu: 'detail', url });
@@ -247,7 +273,7 @@ async function functionalChecks(browser) {
     const page = await context.newPage();
     await page.goto(`${BASE}/customer/list`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(1500);
-    await page.click('[data-bs-target="#customerModal"]');
+    await page.click('#btn-new-customer');
     await page.waitForTimeout(500);
     await page.fill('#cust-companyName', `シードE2E株式会社${Date.now() % 10000}`);
     await page.selectOption('#cust-commercialFlow', '元請け');
@@ -348,7 +374,7 @@ async function concurrentLoginCheck(browser) {
       await page.fill('#username', username);
       await page.fill('#password', password);
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => null),
         page.click('button[type="submit"]')
       ]);
       const ok = !page.url().includes('/login');
@@ -372,8 +398,7 @@ async function main() {
   // 前回実行分の蓄積を残さない（JSONは毎回上書き、JSONLは追記のため明示的にリセットする）
   fs.writeFileSync(path.join(SPEC_DIR, 'e2e-issues.jsonl'), '', 'utf8');
   const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.CHROMIUM_PATH || 'C:\\Users\\satos\\AppData\\Local\\ms-playwright\\chromium-1228\\chrome-win64\\chrome.exe'
+    headless: true
   });
   try {
     await runMatrix(browser, 'desktop', false);
@@ -408,6 +433,7 @@ async function main() {
     lines.push(`| ${i.id} | ${i.role} | ${i.viewport} | ${i.page} | ${i.type} | ${String(i.message).replace(/\|/g, '\\|').slice(0, 160)} |`);
   }
   fs.writeFileSync(path.join(SPEC_DIR, 'e2e-report.md'), lines.join('\n') + '\n', 'utf8');
+  if (issues.length > 0) process.exitCode = 1;
   console.log(`done: ${issues.length} issues -> ${path.join(SPEC_DIR, 'e2e-issues.json')}`);
 }
 

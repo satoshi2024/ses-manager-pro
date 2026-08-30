@@ -486,6 +486,7 @@ a:hover {
 .bg-app { background-color: var(--bg-primary) !important; }
 .bg-tertiary { background-color: var(--bg-tertiary) !important; }
 .bg-card { background-color: var(--bg-card) !important; }
+.text-theme { color: var(--text-primary) !important; }
 
 .text-accent-blue { color: var(--accent-blue) !important; }
 .bg-accent-blue { background-color: var(--accent-blue) !important; color: #ffffff !important; }
@@ -675,6 +676,45 @@ a:hover {
 }
 
 /* Tables */
+.table-theme {
+    --bs-table-bg: var(--bg-card);
+    --bs-table-color: var(--text-primary);
+    --bs-table-border-color: var(--border-color);
+    --bs-table-striped-bg: var(--bg-tertiary);
+    --bs-table-hover-bg: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.table-theme > :not(caption) > * > * {
+    background-color: var(--bs-table-bg);
+    color: var(--bs-table-color);
+    border-bottom-color: var(--bs-table-border-color);
+}
+.table-theme-header {
+    --bs-table-bg: var(--bg-tertiary);
+    --bs-table-color: var(--heading-color);
+    color: var(--heading-color);
+}
+.table-theme-header > * > * {
+    background-color: var(--bs-table-bg) !important;
+    color: var(--bs-table-color) !important;
+}
+.border-theme {
+    border-color: var(--border-color) !important;
+}
+.form-control::placeholder,
+.form-select::placeholder,
+textarea.form-control::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+.form-control:disabled,
+.form-select:disabled,
+.form-control[readonly] {
+    background-color: var(--bg-tertiary);
+    color: var(--text-muted);
+    border-color: var(--border-color);
+    opacity: 1;
+}
 .table-dark {
     --bs-table-bg: transparent;
     --bs-table-striped-bg: rgba(255,255,255,0.02);

@@ -29,30 +29,30 @@
             </div>
         </div>
     </div>
-</div>
 
-<div class="modal fade" id="oneOnOneModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content bg-dark text-light border-secondary">
-            <div class="modal-header">
-                <h5 class="modal-title" th:text="#{my.oneOnOne.new}">1on1を申請</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-2">
-                    <label class="form-label text-muted small" th:text="#{my.oneOnOne.counterpart}">相手</label>
-                    <select id="oneonone-counterpart" class="form-select bg-dark border-secondary text-light"></select>
+    <div class="modal fade" id="oneOnOneModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header">
+                    <h5 class="modal-title" th:text="#{my.oneOnOne.new}">1on1を申請</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="mb-2">
-                    <label class="form-label text-muted small" th:text="#{my.oneOnOne.dates}">候補日（5日以内・未来日）</label>
-                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-1">
-                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-2">
-                    <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-3">
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label text-muted small" th:text="#{my.oneOnOne.counterpart}">相手</label>
+                        <select id="oneonone-counterpart" class="form-select bg-dark border-secondary text-light"></select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label text-muted small" th:text="#{my.oneOnOne.dates}">候補日（5日以内・未来日）</label>
+                        <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-1">
+                        <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-2">
+                        <input type="date" class="form-control bg-dark border-secondary text-light mb-1" id="candidate-3">
+                    </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
-                <button type="button" class="btn btn-primary" id="oneonone-submit" th:text="#{my.oneOnOne.apply}">申請する</button>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{common.cancel}">キャンセル</button>
+                    <button type="button" class="btn btn-primary" id="oneonone-submit" th:text="#{my.oneOnOne.apply}">申請する</button>
+                </div>
             </div>
         </div>
     </div>

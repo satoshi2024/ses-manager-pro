@@ -97,10 +97,10 @@ function renderMappings(rows) {
             <td><span class="badge ${statusBadge(r.status)}">${SES.escapeHtml(r.status || '')}</span></td>
             <td>${SES.escapeHtml(effective)}</td>
             <td><code class="small">${SES.escapeHtml((r.mappingHash || '').slice(0, 12))}…</code></td>
-            <td class="text-end">
-                <button class="btn btn-sm btn-outline-warning" onclick="transitionMapping(${r.id}, 'PROVISIONAL_REVIEWED')">freeze</button>
-                <button class="btn btn-sm btn-outline-success" onclick="promoteMapping(${r.id})">promote</button>
-            </td>
+            <td class="text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
+                <button class="btn btn-sm btn-outline-warning" onclick="transitionMapping(${r.id}, 'PROVISIONAL_REVIEWED')">凍結</button>
+                <button class="btn btn-sm btn-outline-success" onclick="promoteMapping(${r.id})">昇格</button>
+            </div></td>
         </tr>`;
     });
     $body.html(html);
@@ -212,9 +212,9 @@ function renderReviewerTypes(rows) {
             <td>${SES.escapeHtml(t.credentialLabel || '')}</td>
             <td>${t.credentialRequired ? '<span class="badge bg-danger">必須</span>' : '<span class="badge bg-secondary">任意</span>'}</td>
             <td>${t.enabled ? '<span class="badge bg-success">enabled</span>' : '<span class="badge bg-secondary">disabled</span>'}</td>
-            <td class="text-end">
+            <td class="text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
                 <button class="btn btn-sm btn-outline-secondary" onclick="toggleReviewerType(${t.id}, ${!t.enabled})">${t.enabled ? '無効化' : '有効化'}</button>
-            </td>
+            </div></td>
         </tr>`;
     });
     $body.html(html);

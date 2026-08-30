@@ -210,11 +210,11 @@ function renderWorkRecords(list) {
                 <td class="py-3 status-cell-${item.contractId}">
                     ${getStatusBadge(item.status)}
                     ${item.status === '提出済' && item.workRecordId ? `
-                        <div class="mt-1">
+                        <div class="d-flex flex-wrap justify-content-end align-items-center gap-1 mt-1">
                             <button class="btn btn-sm btn-success py-0 px-1" onclick="approveWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.approve')}</button>
                             <button class="btn btn-sm btn-warning py-0 px-1" onclick="rejectWorkRecord(${item.workRecordId})">${SES.i18n.t('workRecord.reject')}</button>
                         </div>` : ''}
-                    ${item.workRecordId ? `<div class="mt-1"><button class="btn btn-sm btn-outline-secondary py-0 px-1 me-1" onclick="showDaily(${item.workRecordId})">${SES.i18n.t('workRecord.btn.daily')}</button><a class="btn btn-sm btn-outline-info py-0 px-1" href="/api/work-records/${item.workRecordId}/report.pdf" target="_blank">PDF</a></div>` : ''}
+                    ${item.workRecordId ? `<div class="d-flex flex-wrap justify-content-end align-items-center gap-1 mt-1"><button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="showDaily(${item.workRecordId})">${SES.i18n.t('workRecord.btn.daily')}</button><a class="btn btn-sm btn-outline-info py-0 px-1" href="/api/work-records/${encodeURIComponent(item.workRecordId)}/report.pdf" target="_blank">PDF</a></div>` : ''}
                 </td>
                 <td class="px-4 py-3">
                     ${remarksInput}

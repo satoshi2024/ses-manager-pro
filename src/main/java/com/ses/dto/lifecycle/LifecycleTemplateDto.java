@@ -38,5 +38,7 @@ public class LifecycleTemplateDto {
 
     private LocalDate validTo;
 
+    private Integer taskCount;
+
     private List<LifecycleTemplateTaskDto> tasks;
 }

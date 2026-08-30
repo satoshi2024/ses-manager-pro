@@ -29,7 +29,10 @@
                 opt.textContent = e.name || '';
                 sel.appendChild(opt);
             });
-        }).catch(() => {});
+        }).catch(error => {
+            console.error(error);
+            showError(error);
+        });
     }
 
     function load() {
@@ -41,24 +44,47 @@
 
     function loadBalance() {
         const engineerId = document.getElementById('leaveBalanceEngineer').value;
-        if (!engineerId) return;
+        if (!engineerId) {
+            SES.toast.error(t('leave.selectEngineerRequired', '要員を選択してください'));
+            return;
+        }
+
+        const btn = document.getElementById('leaveBalanceLoad');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>' + t('common.msg.loading', '読み込み中');
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+
         fetch(`/api/leave/ledger/balance?engineerId=${encodeURIComponent(engineerId)}`).then(read).then(data => {
             if (data.code !== 200) return showError(data.message);
-            const rows = (data.data || []).map(b => `<span class="badge bg-secondary me-2">${esc(b.leaveType)}: ${b.mode === 'internal' ? (b.balanceMinutes ?? 0) : t('leave.balanceExternal','外部参照')}</span>`).join('');
+            const rows = (data.data || []).map(b => `<span class="badge bg-secondary me-2">${esc(b.leaveType)}: ${b.mode === 'internal' ? (b.balanceMinutes != null ? b.balanceMinutes : 0) : t('leave.balanceExternal','外部参照')}</span>`).join('');
             document.getElementById('leaveBalanceResult').innerHTML = rows || '';
             clearError();
-        }).catch(showError);
+        }).catch(err => {
+            showError(err);
+        }).finally(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+        });
     }
 
     function render(rows) {
         document.getElementById('leaveManagementBody').innerHTML = rows.map(row =>
-            `<tr><td>${esc(row.engineerName || row.engineerId)}</td><td>${esc(row.leaveType)}</td><td>${esc(row.startDate)}</td><td>${esc(row.endDate || '')}</td><td>${esc(row.requestedMinutes)}</td><td>${esc(row.status)}</td><td>${esc(row.approvalStatus || '')}</td></tr>`
+            `<tr><td>${esc(row.engineerName || row.engineerId)}</td><td>${esc(row.leaveType)}</td><td>${esc(row.startDate)}</td><td>${esc(row.endDate || '')}</td><td>${esc(row.requestedMinutes != null ? row.requestedMinutes : 0)}</td><td>${esc(row.status)}</td><td>${esc(row.approvalStatus || '')}</td></tr>`
         ).join('');
     }
 
-    function read(response) { return response.json(); }
-    function t(key, fallback) { return SES.i18n.t(key, fallback); }
-    function esc(value) { return SES.escapeHtml(String(value ?? '')); }
+    function read(response) {
+        return response.json().then(data => {
+            if (!response.ok || data.code !== 200) {
+                throw new Error(data.message || t('leave.error', '休暇の処理に失敗しました'));
+            }
+            return data;
+        });
+    }
+    function t(key, fallback) { return (typeof SES !== 'undefined' && SES.i18n) ? SES.i18n.t(key, fallback) : fallback; }
+    function esc(value) { return (typeof SES !== 'undefined' && SES.escapeHtml) ? SES.escapeHtml(String(value ?? '')) : String(value ?? ''); }
     function clearError() { document.getElementById('leaveError').classList.add('d-none'); }
     function showError(error) {
         const el = document.getElementById('leaveError');

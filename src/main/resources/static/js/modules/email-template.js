@@ -46,14 +46,14 @@ function renderTemplates(list) {
                 <td class="px-4 py-3 text-white fw-bold">${SES.escapeHtml(t.templateName)}</td>
                 <td class="py-3"><span class="status-badge ${typeBadge}">${SES.i18n.e('emailTemplateType', t.templateType)}</span></td>
                 <td class="py-3 text-muted text-truncate" style="max-width:300px;">${SES.escapeHtml(t.subjectTemplate)}</td>
-                <td class="px-4 py-3 text-end">
-                    <button class="btn btn-sm btn-outline-secondary text-muted hover-text-white border-dark me-1" onclick="editTemplate(${t.id})">
-                        <i class="bi bi-pencil"></i>
+                <td class="px-4 py-3 text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">
+                    <button class="btn btn-sm btn-outline-secondary" title="${SES.i18n.t('common.edit', '編集')}" aria-label="${SES.i18n.t('common.edit', '編集')}" onclick="editTemplate(${t.id})">
+                        <i class="bi bi-pencil" aria-hidden="true"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-danger border-dark" onclick="deleteTemplate(${t.id})">
-                        <i class="bi bi-trash"></i>
+                    <button class="btn btn-sm btn-outline-danger" title="${SES.i18n.t('common.delete', '削除')}" aria-label="${SES.i18n.t('common.delete', '削除')}" onclick="deleteTemplate(${t.id})">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
                     </button>
-                </td>
+                </div></td>
             </tr>
         `;
         tbody.append(tr);
@@ -153,4 +153,3 @@ function deleteTemplate(id) {
         }
     });
 }
-

@@ -63,13 +63,14 @@ function renderTaskTable(tasks) {
                 </td>
                 <td>${dueText}</td>
                 <td class="text-end pe-4">
-                    ${!isTerminal ? `
-                        <button class="btn btn-sm btn-outline-warning me-1" onclick="openEditTaskModal(this)" data-id="${t.id}" data-assignee="${t.assigneeUserId}" data-due-date="${t.dueDate || ''}" data-title="${SES.escapeHtml(t.title || '')}" data-description="${SES.escapeHtml(t.description || '')}" data-priority="${t.priority || 'MEDIUM'}" title="担当者・期限変更"><i class="bi bi-pencil me-1"></i>編集</button>
-                        ${t.status === 'NOT_STARTED' ? `<button class="btn btn-sm btn-outline-info me-1" onclick="updateTaskStatus(${t.id}, 'IN_PROGRESS')">進行中へ</button>` : ''}
-                        ${t.status === 'IN_PROGRESS' ? `<button class="btn btn-sm btn-success me-1" onclick="updateTaskStatus(${t.id}, 'COMPLETED')">完了</button>` : ''}
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${!isTerminal ? `
+                        <button class="btn btn-sm btn-outline-warning" onclick="openEditTaskModal(this)" data-id="${t.id}" data-assignee="${t.assigneeUserId}" data-due-date="${t.dueDate || ''}" data-title="${SES.escapeHtml(t.title || '')}" data-description="${SES.escapeHtml(t.description || '')}" data-priority="${t.priority || 'MEDIUM'}" title="担当者・期限変更" aria-label="担当者・期限変更"><i class="bi bi-pencil" aria-hidden="true"></i>編集</button>
+                        ${t.status === 'NOT_STARTED' ? `<button class="btn btn-sm btn-outline-info" onclick="updateTaskStatus(${t.id}, 'IN_PROGRESS')">進行中へ</button>` : ''}
+                        ${t.status === 'IN_PROGRESS' ? `<button class="btn btn-sm btn-success" onclick="updateTaskStatus(${t.id}, 'COMPLETED')">完了</button>` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateTaskStatus(${t.id}, 'CANCELLED')">取消</button>
                     ` : '<span class="small text-muted">処理完了</span>'}
-                </td>
+                </div>
+</td>
             </tr>
         `;
     });
@@ -333,9 +334,10 @@ function renderTable(records) {
                     </div>
                 </td>
                 <td class="text-end pe-4">
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="convertNotificationToTask(event, ${item.id})" title="タスクに変換"><i class="bi bi-plus-square me-1"></i>タスク化</button>
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-primary" onclick="convertNotificationToTask(event, ${item.id})" title="タスクに変換" aria-label="タスクに変換"><i class="bi bi-plus-square" aria-hidden="true"></i>タスク化</button>
                     ${!isRead ? `<button class="btn btn-sm btn-outline-secondary" onclick="markAsRead(event, ${item.id})">既読</button>` : ''}
-                </td>
+                </div>
+</td>
             </tr>
         `;
     });

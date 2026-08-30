@@ -245,6 +245,12 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of("error.contract.notFound");
         }
 
+        // CON-02: 画面更新は取得時のversionを必須とし、行ロック後の現行版と照合する。
+        // 行ロックだけでは同時編集を直列化できても、後勝ち上書きを防げない。
+        if (contract.getVersion() != null && !Objects.equals(contract.getVersion(), old.getVersion())) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
+
         restoreAbsentAlwaysFields(contract, old, presentAlwaysFields);
 
         java.util.List<com.ses.entity.ContractPriceHistory> histories = priceHistoryMapper.selectList(
@@ -258,7 +264,10 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         }
 
         validate(contract, old);
-        this.baseMapper.updateById(contract);
+        int updated = this.baseMapper.updateById(contract);
+        if (contract.getVersion() != null && updated != 1) {
+            throw BusinessException.of(409, "error.common.optimisticLock");
+        }
 
         Long oldEngineerId = old.getEngineerId();
         Long newEngineerId = contract.getEngineerId() != null ? contract.getEngineerId() : oldEngineerId;

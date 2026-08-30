@@ -9,11 +9,16 @@ const SALES_ORDER_TRANSITIONS = {
     '取消': []
 };
 
+function showSalesOrderError(error, fallback) {
+    console.error(fallback, error);
+    // double toast is prevented since SES.api already toasts
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadSalesOrders(1);
     document.getElementById('btnSearchSalesOrder').addEventListener('click', () => loadSalesOrders(1));
     document.getElementById('btnNewSalesOrder').addEventListener('click', () => openSalesOrderModal());
-    document.getElementById('btnSaveSalesOrder').addEventListener('click', saveSalesOrder);
+    document.getElementById('btnSaveSalesOrder').addEventListener('click', () => saveSalesOrder().catch(error => showSalesOrderError(error, '注文の保存に失敗しました')));
     document.getElementById('btnAddLine').addEventListener('click', addLineRow);
     document.getElementById('salesOrderForm').customerId.addEventListener('change', onCustomerChanged);
     document.getElementById('salesOrderForm').customerPoNo.addEventListener('blur', async () => {
@@ -23,13 +28,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const orderId = form.id.value;
         if (customerId && poNo) {
             const url = `/api/sales-orders/po-duplicate?customerId=${customerId}&customerPoNo=${encodeURIComponent(poNo)}` + (orderId ? `&excludeOrderId=${orderId}` : '');
-            const res = await SES.api.get(url);
-            const warn = document.getElementById('poWarningText');
-            if (res && res.duplicate) {
+            try {
+                const res = await SES.api.get(url);
+                const warn = document.getElementById('poWarningText');
+                if (res && res.duplicate) {
                 warn.textContent = SES.i18n.t('salesOrder.po.duplicateWarning', '同じPO番号の注文が既にあります');
                 warn.style.display = 'block';
-            } else {
+                } else {
                 warn.style.display = 'none';
+                }
+            } catch (error) {
+                showSalesOrderError(error, 'PO重複の確認に失敗しました');
             }
         }
     });
@@ -53,25 +62,30 @@ function loadSelect(url, sel, valueField, labelFn, selected) {
             if (selected && String(selected) === String(r[valueField])) opt.selected = true;
             sel.appendChild(opt);
         });
+    }).catch(error => {
+        showSalesOrderError(error, '選択肢の取得に失敗しました');
+        sel.innerHTML = '<option value="">読み込み失敗</option>';
     });
 }
 
-function onCustomerChanged() {
+async function onCustomerChanged(selectedContactId) {
     const customerId = document.getElementById('salesOrderForm').customerId.value;
     const projectSelects = document.querySelectorAll('#lineTable select[name="projectId"]');
+    const promises = [];
     projectSelects.forEach(sel => {
         if (customerId) {
-            loadSelect(`/api/projects/options?customerId=${customerId}`, sel, 'id', r => r.name);
+            promises.push(loadSelect(`/api/projects/options?customerId=${customerId}`, sel, 'id', r => r.name, sel.dataset.selectedProject));
         } else {
             sel.innerHTML = '<option value=""></option>';
         }
     });
     const contactSelect = document.getElementById('salesOrderForm').contactId;
     if (customerId) {
-        loadSelect(`/api/customers/${customerId}/contacts`, contactSelect, 'id', r => r.name);
+        promises.push(loadSelect(`/api/customers/${customerId}/contacts`, contactSelect, 'id', r => r.name, selectedContactId || contactSelect.value));
     } else {
         contactSelect.innerHTML = '<option value=""></option>';
     }
+    await Promise.all(promises);
 }
 
 function addLineRow(line) {
@@ -85,7 +99,7 @@ function addLineRow(line) {
             <input type="hidden" name="lineId" value="${line.id || ''}">
             <select class="form-select form-select-sm" name="engineerId" aria-label="${label('salesOrder.modal.line.engineer')}" required></select>
         </td>
-        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}"></select></td>
+        <td><select class="form-select form-select-sm" name="projectId" aria-label="${label('salesOrder.modal.line.project')}" data-selected-project="${line.projectId || ''}"></select></td>
         <td><input type="number" class="form-control form-control-sm" name="unitPrice" aria-label="${label('salesOrder.modal.line.unitPrice')}" value="${line.unitPrice || ''}" required></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMin" aria-label="${label('salesOrder.modal.line.settlementMin')}" value="${line.settlementMin || ''}"></td>
         <td><input type="number" step="0.1" class="form-control form-control-sm" name="settlementMax" aria-label="${label('salesOrder.modal.line.settlementMax')}" value="${line.settlementMax || ''}"></td>
@@ -112,8 +126,8 @@ async function presetFromQuotation(quotationId) {
         // 顧客選択の連動を再実行してから明細を埋める
         await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, quotation.customerId);
         await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
-        onCustomerChanged();
-        addLineRow({
+          await onCustomerChanged();
+          addLineRow({
             engineerId: quotation.engineerId,
             projectId: quotation.projectId,
             unitPrice: quotation.unitPrice,
@@ -123,11 +137,11 @@ async function presetFromQuotation(quotationId) {
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal'));
         modal.show();
     } catch (e) {
-        // エラーはSES.api側でトースト済み
+        showSalesOrderError(e, '見積情報の取得に失敗しました');
     }
 }
 
-function openSalesOrderModal(id) {
+async function openSalesOrderModal(id) {
     const form = document.getElementById('salesOrderForm');
     form.reset();
     document.getElementById('poWarningText').style.display = 'none';
@@ -135,7 +149,8 @@ function openSalesOrderModal(id) {
     const title = document.querySelector('#salesOrderModal .modal-title');
     if (id) {
         title.textContent = SES.i18n.t('salesOrder.detail.title', '注文編集');
-        SES.api.get(`/api/sales-orders/${id}`).then(detail => {
+        try {
+            const detail = await SES.api.get(`/api/sales-orders/${id}`);
             form.id.value = detail.id;
             form.customerId.value = detail.customerId;
             form.contactId.value = detail.contactId || '';
@@ -146,15 +161,17 @@ function openSalesOrderModal(id) {
             form.startDate.value = detail.startDate || '';
             form.endDate.value = detail.endDate || '';
             form.paymentTerms.value = detail.paymentTermsSnapshot || '';
-            loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
-            loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
-            onCustomerChanged();
-            detail.lines.forEach(l => addLineRow(l));
-        });
+            await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name, detail.customerId);
+            await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name, detail.legalEntityId);
+            (detail.lines || []).forEach(l => addLineRow(l));
+            await onCustomerChanged(detail.contactId);
+        } catch(error) {
+            showSalesOrderError(error, '注文詳細の取得に失敗しました');
+        }
     } else {
         title.textContent = SES.i18n.t('salesOrder.btn.new', '注文作成');
-        loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
-        loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
+        await loadSelect('/api/customers/options', form.customerId, 'id', r => r.name);
+        await loadSelect('/api/autocomplete/legal-entities', form.legalEntityId, 'id', r => r.name);
         addLineRow();
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('salesOrderModal')).show();
@@ -238,7 +255,7 @@ function loadSalesOrders(page) {
             tbody.appendChild(tr);
         });
         renderSalesOrderPagination(data, 'loadSalesOrders');
-    });
+    }).catch(error => showSalesOrderError(error, '注文一覧の取得に失敗しました'));
 }
 
 function renderSalesOrderPagination(pageData, loadFuncName) {
@@ -338,7 +355,15 @@ function openSalesOrderDetail(id) {
         }
         html += `</div>`;
         body.innerHTML = html;
-        body.querySelector('.btn-edit-order').addEventListener('click', () => openSalesOrderModal(d.id));
+        body.querySelector('.btn-edit-order').addEventListener('click', () => {
+            const detailModalEl = document.getElementById('salesOrderDetailModal');
+            const handler = function() {
+                detailModalEl.removeEventListener('hidden.bs.modal', handler);
+                openSalesOrderModal(d.id);
+            };
+            detailModalEl.addEventListener('hidden.bs.modal', handler);
+            bootstrap.Modal.getOrCreateInstance(detailModalEl).hide();
+        });
         const statusButtons = body.querySelectorAll('.btn-status-change');
         statusButtons.forEach(btn => btn.addEventListener('click', () => changeOrderStatus(d.id, btn.dataset.status)));
         const uploadBtn = body.querySelector('.btn-upload-source');
@@ -351,7 +376,7 @@ function openSalesOrderDetail(id) {
         if (cancelApprovalBtn) cancelApprovalBtn.addEventListener('click', () => requestCancelApproval(d.id));
         const diffApprovalBtn = body.querySelector('#btnConditionDiffApproval');
         if (diffApprovalBtn) diffApprovalBtn.addEventListener('click', () => requestConditionDiffApproval(d.id));
-    });
+    }).catch(error => showSalesOrderError(error, '注文詳細の取得に失敗しました'));
 }
 
 function changeOrderStatus(id, status) {
@@ -359,7 +384,7 @@ function changeOrderStatus(id, status) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    });
+    }).catch(error => showSalesOrderError(error, '注文状態の更新に失敗しました'));
 }
 
 function uploadSourceDocument(id) {
@@ -412,17 +437,17 @@ function createOrderContracts(id) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    });
+    }).catch(error => showSalesOrderError(error, '契約ドラフトの作成に失敗しました'));
 }
 
 function requestCancelApproval(id) {
     SES.api.post(`/api/sales-orders/${id}/cancel-approval`, { reason: '' }).then(() => {
         SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
-    });
+    }).catch(error => showSalesOrderError(error, '取消承認申請に失敗しました'));
 }
 
 function requestConditionDiffApproval(id) {
     SES.api.post(`/api/sales-orders/${id}/condition-diff-approval`, { reason: '' }).then(() => {
         SES.toast.success(SES.i18n.t('salesOrder.approvalRequested', '承認申請しました'));
-    });
+    }).catch(error => showSalesOrderError(error, '条件差分の承認申請に失敗しました'));
 }

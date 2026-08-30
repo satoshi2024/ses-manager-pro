@@ -62,6 +62,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('bpWorkMonth').addEventListener('change', loadBpPayments);
 });
 
+// ステータス更新はSES.apiではなくfetchのレスポンスラッパーなので、HTTPとAPIコードをここで検証する。
+async function updateInvoiceSentStatus(invoiceId) {
+    const response = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}/status`, {
+        method: 'PUT',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
+        body: JSON.stringify({ status: '送付済', paidDate: null })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error('請求書ステータスの更新に失敗しました。');
+    if (result.code !== 200) throw new Error(result.message || '請求書ステータスの更新に失敗しました。');
+}
+
 function loadInvoices(page = window.invoiceCurrentPage) {
     window.invoiceCurrentPage = page;
     const month = document.getElementById('billingMonth').value;
@@ -70,7 +82,10 @@ function loadInvoices(page = window.invoiceCurrentPage) {
     if (month) url += `&month=${month}`;
     if (overdueEl && overdueEl.checked) url += '&overdue=true';
 
-    fetch(url).then(res => res.json()).then(data => {
+    fetch(url).then(res => {
+        if (!res.ok) throw new Error('請求書一覧の取得に失敗しました。');
+        return res.json();
+    }).then(data => {
         if (data.code === 200) {
             const tbody = document.querySelector('#invoiceTable tbody');
             tbody.innerHTML = '';
@@ -105,17 +120,41 @@ function loadInvoices(page = window.invoiceCurrentPage) {
                     <td>${inv.issuedDate || ''}</td>
                     ${dueCell}
                     <td>${inv.paidDate || ''}</td>
-                    <td>
-                        <a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
+                    <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><a href="/invoice/${inv.id}/print" target="_blank" class="btn btn-sm btn-info">${SES.i18n.t('common.btn.print')}</a>
                         ${inv.status === '未送付' ? `<button class="btn btn-sm btn-primary" onclick="openDigitalInvoiceModal(${inv.id})">請求書送付</button>` : ''}
-                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-info" onclick="viewDigitalInvoiceStatus(${inv.id})">送信状況</button> <button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'}" onclick="openPaymentModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}', ${inv.total})">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory') : SES.i18n.t('invoice.btn.payment')}</button>` : ''}
-                        ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger" onclick="openReminderModal(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('invoice.btn.reminder')}</button>` : ''}
-                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger" onclick="voidInvoice(${inv.id}, '${SES.escapeHtml(inv.invoiceNo)}')">${SES.i18n.t('approval.request', '取消を申請')}</button>` : ''}
-                    </td>
+                        ${['送付済', '一部入金', '入金済'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-info" onclick="viewDigitalInvoiceStatus(${inv.id})">送信状況</button> <button class="btn btn-sm ${inv.status === '入金済' ? 'btn-outline-success' : 'btn-success'} invoice-action-payment" data-invoice-id="${inv.id}" data-invoice-no="${SES.escapeHtml(inv.invoiceNo)}" data-invoice-total="${inv.total}">${inv.status === '入金済' ? SES.i18n.t('invoice.btn.paymentHistory') : SES.i18n.t('invoice.btn.payment')}</button>` : ''}
+                        ${overdue && ['送付済', '一部入金'].includes(inv.status) ? `<button class="btn btn-sm btn-outline-danger invoice-action-reminder" data-invoice-id="${inv.id}" data-invoice-no="${SES.escapeHtml(inv.invoiceNo)}">${SES.i18n.t('invoice.btn.reminder')}</button>` : ''}
+                        ${['未送付', '送付済'].includes(inv.status) ? `<button class="btn btn-sm btn-danger invoice-action-void" data-invoice-id="${inv.id}" data-invoice-no="${SES.escapeHtml(inv.invoiceNo)}">${SES.i18n.t('approval.request', '取消を申請')}</button>` : ''}
+                    </div></td>
                 `;
                 tbody.appendChild(tr);
+                const paymentButton = tr.querySelector('.invoice-action-payment');
+                if (paymentButton) {
+                    paymentButton.addEventListener('click', () => openPaymentModal(
+                        paymentButton.dataset.invoiceId,
+                        paymentButton.dataset.invoiceNo,
+                        Number(paymentButton.dataset.invoiceTotal)
+                    ));
+                }
+                const reminderButton = tr.querySelector('.invoice-action-reminder');
+                if (reminderButton) {
+                    reminderButton.addEventListener('click', () => openReminderModal(
+                        reminderButton.dataset.invoiceId,
+                        reminderButton.dataset.invoiceNo
+                    ));
+                }
+                const voidButton = tr.querySelector('.invoice-action-void');
+                if (voidButton) {
+                    voidButton.addEventListener('click', () => voidInvoice(
+                        voidButton.dataset.invoiceId,
+                        voidButton.dataset.invoiceNo
+                    ));
+                }
             });
         }
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '請求書一覧の取得に失敗しました。');
     });
 }
 
@@ -198,11 +237,10 @@ function loadBpPayments() {
                     <td class="text-right">￥${bp.amount.toLocaleString()}</td>
                     <td>${SES.i18n.t('invoice.status.' + bp.status, bp.status)}</td>
                     <td>${bp.paidDate || ''}</td>
-                    <td>
-                        ${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('approval.request', '支払確定を申請')}</button>` : ''}
+                    <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${bp.status === '未払' ? `<button class="btn btn-sm btn-success" onclick="updateBpPaymentStatus(${bp.id}, '支払済')">${SES.i18n.t('approval.request', '支払確定を申請')}</button>` : ''}
                         ${bp.status === '支払済' ? `<button class="btn btn-sm btn-warning" onclick="updateBpPaymentStatus(${bp.id}, '未払')">${SES.i18n.t('approval.request', '支払状態変更を申請')}</button>` : ''}
                         <button class="btn btn-sm btn-info" onclick="openBpPaymentLayerModal(${bp.workRecordId}, ${bp.id}, ${bp.layerOrder ? bp.layerOrder + 1 : 2})">階層追加</button>
-                    </td>
+                    </div></td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -672,7 +710,9 @@ function loadGenerateCustomerOptions() {
     return fetch('/api/customers/options')
         .then(res => res.json())
         .then(data => {
-            if (data.code !== 200) return;
+            if (data.code !== 200) {
+                throw new Error(data.message || SES.i18n.t('error.getDataFailed', '顧客一覧の取得に失敗しました。'));
+            }
             const list = data.data || [];
             sel.innerHTML = '<option value="">' + SES.escapeHtml(SES.i18n.t('contract.customer.select')) + '</option>';
             list.forEach(c => {
@@ -683,102 +723,106 @@ function loadGenerateCustomerOptions() {
             });
             if (preselect) sel.value = String(preselect);
         })
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            SES.toast.error(error.message || '顧客一覧の取得に失敗しました。');
+        });
 }
 
 function openDigitalInvoiceModal(invoiceId) {
-    SES.api.get(`/api/digital-invoices/preview/${invoiceId}`).then(res => {
-        if (res.code === 200) {
-            const data = res.data;
-            if (data.alreadySent) {
-                Swal.fire({ icon: 'warning', title: '警告', text: data.reason, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
-                return;
-            }
-
-            let html = `<p>顧客の送付設定: <strong>${data.deliveryPreference || ''}</strong></p>`;
-
-            if (data.deliveryPreference === 'PEPPOL') {
-                if (data.peppolStatus === 'VERIFIED') {
-                    html += `<p class="text-success"><i class="bi bi-check-circle"></i> Peppol Participant IDは検証済みです。Peppolネットワーク経由でデジタルインボイスを送信します。</p>`;
-                } else {
-                    html += `<p class="text-danger"><i class="bi bi-x-circle"></i> ${data.reason || 'Peppol Participant IDが未検証です。'}</p>`;
-                }
-            } else if (data.deliveryPreference === 'EMAIL') {
-                html += `<p class="text-info"><i class="bi bi-envelope"></i> メールにPDFを添付して送信します。</p>`;
-            } else {
-                html += `<p class="text-warning"><i class="bi bi-file-pdf"></i> 手動で送付済みにマークします。（自動送信は行われません）</p>`;
-            }
-
-            Swal.fire({
-                title: '請求書送付',
-                html: html,
-                icon: 'info',
-                showCancelButton: true,
-                confirmButtonText: '送付する',
-                cancelButtonText: 'キャンセル',
-                showConfirmButton: data.canSend,
-                ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    dispatchDigitalInvoice(invoiceId);
-                }
-            });
-        } else {
-            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
+    SES.api.get(`/api/digital-invoices/preview/${encodeURIComponent(invoiceId)}`).then(data => {
+        if (data.alreadySent) {
+            Swal.fire({ icon: 'warning', title: '警告', text: data.reason || 'すでに送付済みです。', ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
+            return;
         }
+
+        let html = `<p>顧客の送付設定: <strong>${SES.escapeHtml(data.deliveryPreference || '-')}</strong></p>`;
+
+        if (data.deliveryPreference === 'PEPPOL') {
+            if (data.peppolStatus === 'VERIFIED') {
+                html += '<p class="text-success"><i class="bi bi-check-circle"></i> Peppol Participant IDは検証済みです。Peppolネットワーク経由でデジタルインボイスを送信します。</p>';
+            } else {
+                html += `<p class="text-danger"><i class="bi bi-x-circle"></i> ${SES.escapeHtml(data.reason || 'Peppol Participant IDが未検証です。')}</p>`;
+            }
+        } else if (data.deliveryPreference === 'EMAIL') {
+            html += '<p class="text-info"><i class="bi bi-envelope"></i> メールにPDFを添付して送信します。</p>';
+        } else {
+            html += '<p class="text-warning"><i class="bi bi-file-pdf"></i> 手動で送付済みにマークします。（自動送信は行われません）</p>';
+        }
+
+        Swal.fire({
+            title: '請求書送付',
+            html: html,
+            icon: 'info',
+            showCancelButton: true,
+            confirmButtonText: '送付する',
+            cancelButtonText: 'キャンセル',
+            showConfirmButton: data.canSend,
+            ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
+        }).then((result) => {
+            if (result.isConfirmed) {
+                dispatchDigitalInvoice(invoiceId);
+            }
+        });
+    }).catch(error => {
+        console.error(error);
+        SES.toast.error(error.message || '請求書送付情報の取得に失敗しました。');
     });
 }
 
 function dispatchDigitalInvoice(invoiceId) {
-    SES.api.post(`/api/digital-invoices/dispatch/${invoiceId}?specVersion=1.1.3`).then(res => {
-        if (res.code === 200) {
-            SES.toast.success('請求書の送付処理を開始しました。');
-
-            // ステータスを「送付済」に更新する
-            fetch(`/api/invoices/${invoiceId}/status`, {
-                method: 'PUT',
-                headers: Object.assign({ 'Content-Type': 'application/json' }, SES.csrf.header()),
-                body: JSON.stringify({ status: '送付済', paidDate: null })
-            }).then(() => loadInvoices());
-
-        } else {
-            Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
-        }
+    SES.api.post(`/api/digital-invoices/dispatch/${encodeURIComponent(invoiceId)}?specVersion=1.1.3`).then(() => {
+        SES.toast.success('請求書の送付処理を開始しました。');
+        return updateInvoiceSentStatus(invoiceId).then(() => loadInvoices());
+    }).catch(error => {
+        console.error(error);
+        console.error(error.message || '請求書の送付処理に失敗しました。');
     });
 }
 
 function viewDigitalInvoiceStatus(invoiceId) {
-    SES.api.get(`/api/digital-invoices/${invoiceId}/status-history`).then(res => {
-        if (res.code === 200) {
-            const data = res.data;
-            if (!data.digitalInvoiceId) {
-                Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
-                return;
-            }
-
-            let html = `<div class="text-start">`;
-            html += `<p>現在のステータス: <strong>${data.status || ''}</strong></p>`;
-
-            if (data.events && data.events.length > 0) {
-                html += `<table class="table table-sm table-dark"><thead><tr><th>日時</th><th>ステータス</th></tr></thead><tbody>`;
-                data.events.forEach(ev => {
-                    html += `<tr><td>${ev.eventAt || ''}</td><td>${ev.eventType || ''}</td></tr>`;
-                });
-                html += `</tbody></table>`;
-            }
-
-            if (data.canViewXml && data.xmlUrl) {
-                html += `<div class="mt-3"><a href="${data.xmlUrl}" target="_blank" class="btn btn-sm btn-outline-info"><i class="bi bi-file-code"></i> XMLデータをダウンロード</a></div>`;
-            }
-
-            html += `</div>`;
-
-            Swal.fire({
-                title: 'デジタルインボイス送信状況',
-                html: html,
-                width: 600,
-                ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
-            });
+    SES.api.get(`/api/digital-invoices/${encodeURIComponent(invoiceId)}/status-history`).then(data => {
+        if (!data.digitalInvoiceId) {
+            Swal.fire({ icon: 'info', title: '送信状況', text: 'デジタルインボイスとしての送信履歴はありません。（PDF/手動等）', ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
+            return;
         }
+
+        let html = '<div class="text-start">';
+        html += `<p>現在のステータス: <strong>${SES.escapeHtml(data.status || '-')}</strong></p>`;
+
+        if (data.events && data.events.length > 0) {
+            html += '<table class="table table-sm table-theme"><thead><tr><th>日時</th><th>ステータス</th></tr></thead><tbody>';
+            data.events.forEach(ev => {
+                html += `<tr><td>${SES.escapeHtml(ev.eventAt || '-')}</td><td>${SES.escapeHtml(ev.eventType || '-')}</td></tr>`;
+            });
+            html += '</tbody></table>';
+        }
+
+        const xmlUrl = data.canViewXml ? toSafeInvoiceUrl(data.xmlUrl) : null;
+        if (xmlUrl) {
+            html += `<div class="mt-3"><a href="${SES.escapeHtml(xmlUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-info"><i class="bi bi-file-code"></i> XMLデータをダウンロード</a></div>`;
+        }
+
+        html += '</div>';
+
+        Swal.fire({
+            title: 'デジタルインボイス送信状況',
+            html: html,
+            width: 600,
+            ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
+        });
+    }).catch(error => {
+        console.error(error);
+        console.error(error.message || '送信状況の取得に失敗しました。');
     });
+}
+
+function toSafeInvoiceUrl(value) {
+    if (!value) return null;
+    try {
+        const url = new URL(value, window.location.origin);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+    } catch (error) {
+        return null;
+    }
 }

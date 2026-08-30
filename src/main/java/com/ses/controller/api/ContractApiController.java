@@ -8,6 +8,7 @@ import com.ses.service.ContractRenewalService;
 import com.ses.service.ContractService;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.ses.dto.contract.ContractListDto;
@@ -162,7 +163,10 @@ public class ContractApiController {
      * @return 結果
      */
     @PutMapping("/{id}")
-    public ApiResult<com.ses.dto.contract.ContractSaveResultDto> update(@PathVariable Long id, @Valid @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
+    public ApiResult<com.ses.dto.contract.ContractSaveResultDto> update(
+            @PathVariable Long id,
+            @Validated(com.ses.dto.contract.ContractSaveDto.Update.class)
+            @RequestBody com.ses.dto.contract.ContractSaveDto dto) {
         assertContractVisible(id);
         assertReferencedAllowed(dto);
         Contract contract = new Contract();
@@ -188,6 +192,7 @@ public class ContractApiController {
 
         com.ses.dto.contract.ContractSaveResultDto result = new com.ses.dto.contract.ContractSaveResultDto();
         result.setId(contract.getId());
+        result.setVersion(contract.getVersion());
         result.setNegativeProfit(negativeProfit);
         result.setComplianceFindings(findings);
 
