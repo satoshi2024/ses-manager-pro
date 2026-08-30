@@ -5,8 +5,9 @@
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
 NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2は独立Implementation Review FAIL後のremediation再Review待ち、PASS受領前にA1へ進まない。production implementationの
-public endpoint enablement、外部送信は引き続き開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
+F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。A1は
+`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装済みだが独立Implementation Review待ちである。production implementationの
+public endpoint enablement、外部送信は引き続き開始しない。A1 Review PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
@@ -27,8 +28,8 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
 | Wave | 状態 | 開始条件・境界 |
 |---|---|---|
-| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | scope expansion Plan delta PASS済み。F2 FAIL remediation済み、再Review待ち |
-| A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 pathsとexternal DTO allow-list |
+| F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_REVIEW_PENDING | `466bd9aa`で実装済み。GET-only 11 pathsとexternal DTO allow-list |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
@@ -121,7 +122,8 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
    scope expansionは開発実装を承認し、Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASSした。
-   F2実装はFAIL後のremediation再Review待ちで、production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
+   F2実装はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済みである。A1は実装commit
+   `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`を独立Reviewへ提出中であり、production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。
@@ -140,6 +142,14 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
    canonical request digestの要件を再評価する。
 7. external DTO contract testは、許可fieldの集合と禁止fieldの不在を反射/JSON assertionで固定する。
    entity型、internal DTO、Lombokの自動getterに依存して公開形を生成しない。
+
+### A1実装証跡（独立Implementation Review待ち）
+
+`ExternalApiReadController`はcandidateのGET-only 11 pathsだけを公開し、`ExternalApiReadService`がF2のimmutable effective scopeを
+唯一のvisible populationとしてlist/detail/countへ渡す。`ExternalApiReadMapper`はallow-list列、deleted除外、scope ID predicate、
+stable ID-desc sort、limit+1 cursorだけをSQLへ固定する。external DTOは4 resourceのallow-list fieldだけを持ち、public IDはHMAC-SHA256、
+cursorはAES-GCMでclient/tenant/legal entity/route/scope/as-of/expiryへbindする。15件のfocused A1 testsはfailure/error/skipなしでPASSした。
+Windows browser profileのTomcat connector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約はPASS根拠にしない。
 
 ## IH-R3 Inbound / outbound webhook
 

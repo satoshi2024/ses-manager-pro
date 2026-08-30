@@ -56,12 +56,12 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 
 | Finding ID | Severity | Finding | 対応証跡 | Status |
 |---|---|---|---|---|
-| NF05-IMPL-F2-001 | P1 | 実運用のraw request-target供給経路がなく、enabled chainが手動attributeなしで通らない | `ExternalApiRawRequestTargetValve`、`ExternalApiTomcatConfiguration`、`ExternalApiRawRequestTargetValveTest`、manual attributeなしの`ExternalApiEnabledConnectorE2ETest` | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-002 | P1 | client data scopeとroute data scopeのintersection・tenant/legal entity bindingが認可contextへ未接続 | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter`、scope negative/integration tests | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-003 | P1 | 専用auditがcorrelation、credential識別子、pre/post principal、全decision、一request一recordを満たさない | `ExternalApiAuditTrail`、`ExternalApiAuditBoundary`、`ExternalApiAuditService`、V130、H2/audit boundary tests。永続化失敗は500 fail-closed | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-004 | P1 | CIDR判定がDNS/曖昧IP表記を許す | `ExternalApiCidrMatcher` strict literal parser、IPv4/IPv6/mapped/hostname/short/integer/leading-zero/zone tests | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-005 | P2 | finite metrics labelとscrape cardinality契約が未実装 | `ExternalApiMetricsRecorder`、finite-label scrape test | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-006 | P2 | `/external-api/v1` namespace rootが専用filter境界を迂回する | `ExternalApiRouteCatalog` exact root、`ExternalApiSecurityConfig` exact matcher、root chain/audit/correlation integration test | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-001 | P1 | 実運用のraw request-target供給経路がなく、enabled chainが手動attributeなしで通らない | `ExternalApiRawRequestTargetValve`、`ExternalApiTomcatConfiguration`、`ExternalApiRawRequestTargetValveTest`、manual attributeなしの`ExternalApiEnabledConnectorE2ETest` | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-002 | P1 | client data scopeとroute data scopeのintersection・tenant/legal entity bindingが認可contextへ未接続 | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter`、scope negative/integration tests | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-003 | P1 | 専用auditがcorrelation、credential識別子、pre/post principal、全decision、一request一recordを満たさない | `ExternalApiAuditTrail`、`ExternalApiAuditBoundary`、`ExternalApiAuditService`、V130、H2/audit boundary tests。永続化失敗は500 fail-closed | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-004 | P1 | CIDR判定がDNS/曖昧IP表記を許す | `ExternalApiCidrMatcher` strict literal parser、IPv4/IPv6/mapped/hostname/short/integer/leading-zero/zone tests | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-005 | P2 | finite metrics labelとscrape cardinality契約が未実装 | `ExternalApiMetricsRecorder`、finite-label scrape test | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-006 | P2 | `/external-api/v1` namespace rootが専用filter境界を迂回する | `ExternalApiRouteCatalog` exact root、`ExternalApiSecurityConfig` exact matcher、root chain/audit/correlation integration test | CLOSED_BY_REVIEW |
 
 F2 remediation対象13クラスの再実行結果は29 tests、failure 0、error 0、skip 0である。enabled connector E2Eは実装上のmanual
 attribute注入なしで追加したが、Windows実行環境の`Unable to establish loopback connection`によりTomcat起動前に停止し、HTTP assertionへ到達していない。
@@ -74,12 +74,25 @@ attribute注入なしで追加したが、Windows実行環境の`Unable to estab
 
 | Finding ID | Severity | Finding | 対応証跡 | Status |
 |---|---|---|---|---|
-| NF05-IMPL-F2-007 | P1 | tenant/legal entity矛盾がresource ID一致だけで許可される | `ExternalApiDataScope.requireAuthoritativeBinding`、`ExternalApiDataScope.intersect`の空dimension保持、`ExternalApiEffectiveScope`のsingleton注入/空predicate拒否、authorization/data-scope tests | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-F2-008 | P2 | IPv4-mapped IPv6 source/CIDRがfamily長不一致で誤拒否される | `ExternalApiCidrMatcher`の`::ffff:0:0/96` collapseとprefix変換、mapped/IPv4双方向CIDR tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-007 | P1 | tenant/legal entity矛盾がresource ID一致だけで許可される | `ExternalApiDataScope.requireAuthoritativeBinding`、`ExternalApiDataScope.intersect`の空dimension保持、`ExternalApiEffectiveScope`のsingleton注入/空predicate拒否、authorization/data-scope tests | CLOSED_BY_REVIEW |
+| NF05-IMPL-F2-008 | P2 | IPv4-mapped IPv6 source/CIDRがfamily長不一致で誤拒否される | `ExternalApiCidrMatcher`の`::ffff:0:0/96` collapseとprefix変換、mapped/IPv4双方向CIDR tests | CLOSED_BY_REVIEW |
 
 authoritative scopeはtenant/legal entityを常にprincipal singletonへ拘束し、JSON dimension省略時にもeffective populationへ追加する。明示dimensionの不一致、
 client/routeでの空intersection、resource dimensionの不在はfail-closedとする。CIDRはmapped IPv6をIPv4 predicateへ正規化して比較する。追加focused suiteは19 tests、
-failure/error/skipなしでPASSした。F2は独立再Review完了までPASS扱いせず、A1以降とproduction enablementは開始しない。
+failure/error/skipなしでPASSした。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領した。
+
+## A1 Implementation Review handoff
+
+F2 PASS後、A1を `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装した。対象はGET-only 11 paths、external DTO allow-list、
+opaque public ID、暗号化cursor、effective scope-bound list/detail/countである。`ExternalApiReadMapper`はselected columnsとscope IDだけを
+queryし、internal entityをserializeしない。focused suiteは15 tests、failure/error/skipなしでPASSした。
+
+| 対象 | 状態 | Review境界 |
+|---|---|---|
+| F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_REVIEW_PENDING | implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`を既存R-NF05へhandoff。独立Review完了までB1を開始しない |
+
+Windows browser profileのconnector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
 
 ## Scope expansion Plan delta re-review remediation
 
@@ -133,7 +146,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、F2/A1/A2/B1/B2/Mは未着手であり、レビュー結果を自己PASSへ変更しない。
+外部送信、B1/B2/Mは未着手であり（F2はPASS、A1は実装済みで独立Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -155,7 +168,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 `a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
-F2はFAIL後のremediation済みだが独立Implementation Review再判定待ちである。A2/command/exportは
+F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1は実装済みで独立Implementation Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -175,7 +188,7 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 - Scope expansion Plan delta re-Review: 9cca2deec9ab1bd5417aaba98f859ed14210da13、PLAN FAIL（P0=0、P1=3、P2=0）
 - Scope expansion Plan delta residual remediation commit: e18f0d589b63223bf864bb33c6910b56a59d940e（docs-only、remoteへpush済み）
 - Scope expansion Plan delta PASS: ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a（P0=0、P1=0、P2=0）
-- F2 implementation remediation: `e47025b5`でconnector raw-target、typed effective scope、専用audit、strict IP、finite metrics、namespace rootを追加（独立再Review待ち）
+- F2 implementation remediation: `e47025b5`でconnector raw-target、typed effective scope、専用audit、strict IP、finite metrics、namespace rootを追加し、`a16cdcba`でtenant/legal entityとmapped CIDRを補正（fixed Head `d022e600`で独立Review PASS）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS

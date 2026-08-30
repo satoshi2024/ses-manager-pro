@@ -32,8 +32,8 @@
 | Decision date / Owner | 2026-08-30 / PROJECT_OWNER（ROLE） |
 | Scope expansion approval reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値） |
 | F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
-| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。Implementation FAIL後の8 findingをremediate済み、独立再Review待ち |
-| A1 | APPROVED_SEQUENCED。F2 Review PASS後にGET-only 11 pathsを実装 |
+| F2 | IMPLEMENTATION_PASS。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_REVIEW_PENDING。`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`でGET-only 11 pathsを実装 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |
@@ -46,7 +46,8 @@
 （P0=0、P1=4、P2=2）となり補正した。固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の
 再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）である。F1のPLAN/IMPLEMENTATION PASS、Owner Gate、
 0R/0R-DおよびP1-EXP-004/P2-EXP-005/006の対応状態は再オープンしない。3契約の再補正後、
-固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPlan delta PASSを受領し、F2実装を開始した。
+固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPlan delta PASSを受領し、F2実装を開始した。F2はfixed Head
+`d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASSを受領し、A1実装へ進んだ。
 
 | finding | inventoryで固定する契約 | status |
 |---|---|---|
@@ -68,7 +69,7 @@
 | Portal認証 | PortalLoginUser + PortalSessionFilter | PortalSecurityConfig.java:31-40 | internal roleへ偽装しない既存パターンをclient principalにも適用 |
 | Portal rate filter | PortalRateLimitFilter | PortalRateLimitFilter.java:39-75 | endpoint種別ごとの既存判定を参考にするが、公開client/IP/rateは別設計 |
 
-### 3.1 F2 dedicated chain境界（remediation済み、独立再Review待ち）
+### 3.1 F2 dedicated chain境界（remediation済み、独立Review PASS）
 
 | 項目 | 契約 |
 |---|---|
@@ -96,20 +97,20 @@ configは起動拒否する。disabled時もdeny-only chainを残し、controlle
 socket peerも検証する。
 | 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
 
-F2実装証跡は専用packageとF2 testsに限定し、A1 controller、B1/B2 provider transport、production enablementは未着手である。
+F2実装証跡は専用packageとF2 testsに限定し、production enablementとB1/B2 provider transportは未着手である。A1 controllerは`466bd9aa`で実装済みである。
 
-### 3.3 F2 Implementation Review remediation inventory
+### 3.3 F2 Implementation Review remediation inventory（fixed Head `d022e600`でPASS）
 
 | finding | 実装正本 | 境界・検証 | status |
 |---|---|---|---|
-| raw request-target供給 | `ExternalApiRawRequestTargetValve`、`ExternalApiTomcatConfiguration` | Tomcat connectorの`T_BYTES`だけをimmutable copyし、servlet normalized URI/queryを使わない。manual attributeなしのenabled connector E2Eを追加 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| client×route data scope | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter` | strict typed allow-list、intersection、tenant/legal entity binding、immutable request context。malformed/empty/duplicate/wildcardをdeny | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| external audit | `ExternalApiAuditTrail`、`ExternalApiAuditBoundary`、`ExternalApiAuditService`、`ExternalApiAudit`、V130 | correlation、pre/post principal、credential version/key ID、全decision、route templateを一request一record。永続化失敗は500 fail-closed | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| IP/CIDR | `ExternalApiCidrMatcher` | DNSなしstrict literal parser、IPv4/IPv6/mapped IPv6、曖昧表記拒否 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| metrics | `ExternalApiMetricsRecorder` | route/method/status class/outcome/client tierのみ有限label、識別子label禁止、scrape test | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| namespace root | `ExternalApiRouteCatalog`、`ExternalApiSecurityConfig` | `/external-api/v1`をexact matcher、filter、audit、correlationの同一専用境界で処理 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| authoritative scope | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter` | tenant/legal entityのexplicit exact singleton照合、空intersection保持、未指定時もprincipal singletonをeffective populationへ注入 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
-| mapped CIDR | `ExternalApiCidrMatcher` | `::ffff:0:0/96`のsource/CIDRを4-byte IPv4へcollapseし、prefix 96〜128を0〜32へ変換 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
+| raw request-target供給 | `ExternalApiRawRequestTargetValve`、`ExternalApiTomcatConfiguration` | Tomcat connectorの`T_BYTES`だけをimmutable copyし、servlet normalized URI/queryを使わない。manual attributeなしのenabled connector E2Eを追加 | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| client×route data scope | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter` | strict typed allow-list、intersection、tenant/legal entity binding、immutable request context。malformed/empty/duplicate/wildcardをdeny | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| external audit | `ExternalApiAuditTrail`、`ExternalApiAuditBoundary`、`ExternalApiAuditService`、`ExternalApiAudit`、V130 | correlation、pre/post principal、credential version/key ID、全decision、route templateを一request一record。永続化失敗は500 fail-closed | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| IP/CIDR | `ExternalApiCidrMatcher` | DNSなしstrict literal parser、IPv4/IPv6/mapped IPv6、曖昧表記拒否 | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| metrics | `ExternalApiMetricsRecorder` | route/method/status class/outcome/client tierのみ有限label、識別子label禁止、scrape test | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| namespace root | `ExternalApiRouteCatalog`、`ExternalApiSecurityConfig` | `/external-api/v1`をexact matcher、filter、audit、correlationの同一専用境界で処理 | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| authoritative scope | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter` | tenant/legal entityのexplicit exact singleton照合、空intersection保持、未指定時もprincipal singletonをeffective populationへ注入 | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
+| mapped CIDR | `ExternalApiCidrMatcher` | `::ffff:0:0/96`のsource/CIDRを4-byte IPv4へcollapseし、prefix 96〜128を0〜32へ変換 | IMPLEMENTATION_PASS（F2 fixed Head `d022e600`） |
 
 ## 4. Secret encryption / rotation inventory
 
@@ -159,7 +160,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | Accounting job | providerRequestId、payload hash、job idを保持 | 参考。公開client request、delivery、inbound eventを同一traceへ結ぶ必要 |
 | Expense/Attendance | provider callへcorrelationIdを渡す経路あり | 参考。global MDC/filterの代替ではない |
 | AI/Compliance | traceId/correlationIdを業務recordへ保存する個別経路あり | 参考。横断公開API correlation contractは未実装 |
-| HTTP filter/MDC | F2で専用correlation filterを追加し、全responseへheaderを付与 | F2 IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。worker propagationはB1/B2で実装 |
+| HTTP filter/MDC | F2で専用correlation filterを追加し、全responseへheaderを付与 | F2 IMPLEMENTATION_PASS。worker propagationはB1/B2で実装 |
 
 ## 7. Rate limiter / IP inventory
 
@@ -170,7 +171,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
 | ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、mapped IPv6 family、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
-| 公開client rate | ExternalApiAuthorizationFilterからF1 ApiUsageBucketServiceを呼出し | F2 IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで適用 |
+| 公開client rate | ExternalApiAuthorizationFilterからF1 ApiUsageBucketServiceを呼出し | F2 IMPLEMENTATION_PASS。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで適用 |
 
 ## 8. External DTO inventory
 
@@ -182,6 +183,17 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | dto.report / dashboard / analytics | 管理画面集計 | 公開APIのscope・freshness・金額口径を別途承認 |
 | InvoiceDetailDto | Invoiceをextendsする既存DTO | 使用禁止。internal entity serializationの危険な前例 |
 | Entity全般 | MyBatis-Plus persistence model | 使用禁止。external mapperでallow-list DTOへ変換 |
+
+### 8.1 A1実装インベントリ（独立Implementation Review待ち）
+
+| 境界 | 実装正本 | 固定内容 |
+|---|---|---|
+| read controller/service | `ExternalApiReadController`、`ExternalApiReadService` | GET-only 11 paths、list/detail/count、server-clock as-of、同一immutable effective population |
+| SQL boundary | `ExternalApiReadMapper` | deleted除外、allow-list列、scope ID predicate、ID-desc stable sort、limit+1 cursor。internal entityを返さない |
+| response DTO | `ExternalApiEngineerAvailability`、`ExternalApiProject`、`ExternalApiContractStatus`、`ExternalApiInvoiceStatus` | inventory allow-listだけ。internal ID、secret、PII、金額/原価/粗利、provider raw bodyを持たない |
+| opaque identity | `ExternalApiPublicIdCodec` | client/tenant/resourceへbindしたHMAC-SHA256 public ID。enabled時key未設定は起動拒否 |
+| cursor | `ExternalApiCursorCodec` | AES-GCM暗号化、client/tenant/legal entity/route/scope/as-of/expiryへbind、tamper/expiryを拒否 |
+| tests | `ExternalApiReadMapperIntegrationTest`、A1 focused suite | 15 tests、failure/error/skipなし。browser connector E2EはWindows loopback制約でHTTP assertion未到達 |
 
 ## 9. 公開resource / field / operation matrix（Owner承認済み初期契約）
 
@@ -241,5 +253,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2は再ReviewのP1/P2追加指摘をa16cdcbaでremediate済み（独立再Review待ち）。A1/B1/B2/Mは各wave Review後に順次実装する。
+- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1は`466bd9aa`で実装済み、独立Review待ちであり、B1/B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

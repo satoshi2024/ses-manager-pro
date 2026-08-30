@@ -359,6 +359,21 @@ role名を公開認可の代替にしない。未記載fieldはdeny-by-default�
 role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部エラーを返さない。
 初期公開契約はGET-only 11 pathsのallow-listで、command/exportはdefault denyである。
 
+## 4.1 A1 read API実装境界
+
+`ExternalApiReadController`は`/external-api/v1`およびcandidateのGET-only 11 pathsだけを持つ。controllerはF2 filterが生成した
+principalと`ExternalApiEffectiveScope`を受け取り、raw client/route JSONや内部roleを参照しない。`ExternalApiReadService`はrequest受信時に
+server clockを一度取得し、list/detail/countの同一呼出しへ渡す。A1はclient指定`asOf`を受け付けない。
+
+`ExternalApiReadMapper`はresourceごとのselected columns、`deleted_flag=0`、effective scopeのID predicate、ID-desc stable sort、
+limit+1をSQL境界へ固定する。detailはopaque public IDを内部IDへ解決した後もeffective scope内だけを検索し、scope外・不存在を同じ
+`404 RESOURCE_NOT_FOUND`へ収束する。countは同一predicateで計数し、empty scopeを全件へ拡張しない。
+
+responseは`ExternalApiEngineerAvailability`、`ExternalApiProject`、`ExternalApiContractStatus`、
+`ExternalApiInvoiceStatus`およびlist/count wrapperだけを使う。engineer availabilityでは現行sourceの`available_date`だけを
+`availableFrom`へ写像し、`availableTo`と`skillTagCode`はcanonical sourceがないためnullとする。public IDはHMAC-SHA256で生成し、
+cursorはAES-GCM暗号化してclient、tenant、legal entity、route template、scope digest、as-of、expiryへbindする。
+
 ## 5. 3つの決定表
 
 ### 5.1 時刻・as-of
@@ -366,7 +381,7 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 | 対象 | 承認済み規則 | 実装時証跡 |
 |---|---|---|
 | list/detail | request受信時のserver clockをas-ofに固定。client指定asOfなし | p95/SLA内でのclock記録 |
-| availability | availabilityのeffective intervalをas-ofへ適用 | 未来予約とNULLの実データ境界 |
+| availability | availabilityのeffective intervalをas-ofへ適用。A1の現行sourceは`available_date`を`availableFrom`へ写像し、履歴・`availableTo`は公開しない | 未来予約とNULLの実データ境界 |
 | contract/invoice status | stateのeffectiveAtを使い、現在値と履歴を混ぜない | historical queryを公開しない |
 | cursor | as-of、sort key、tie-breaker、client/scopeへbind | cursor expiry、tamper、scope test |
 
@@ -506,7 +521,8 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - scope expansionのPlan delta ReviewのPASS、approved Baseの再fetch確認、各waveのmigration最大値の再確認。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
-- Plan deltaはca27f455でPASS済み。F2はFAIL後のremediation済みで独立再Review待ち、再PASS後にA1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
+- Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1は
+  `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装済みの独立Implementation Review待ちである。A1 Review PASS後にB1→B2→Mを各waveの独立Implementation Review後に順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

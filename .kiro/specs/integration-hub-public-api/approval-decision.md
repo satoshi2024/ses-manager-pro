@@ -52,8 +52,8 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 
 | Wave | Decision status | 境界 |
 |---|---|---|
-| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | 再Review（f57df6d2、P1=1/P2=1）をa16cdcbaで追加remediate、独立再Review待ち |
-| A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 paths、inventory allow-list、external DTOのみ |
+| F2 | IMPLEMENTATION_PASS | 独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_REVIEW_PENDING | 実装commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`。GET-only 11 paths、inventory allow-list、external DTOのみ |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
@@ -98,8 +98,9 @@ F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENT
 再オープンしない。scope expansionのPlan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aで
 PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで実装済みだが、固定Head `220ac86f531d6e656aeac0ef19225e9596b9385b` の独立Implementation ReviewがFAIL
 （P0=0、P1=4、P2=2）となったため、`e47025b5`でremediationし、独立再Reviewへ渡した。その再Review固定Head
-`f57df6d2cd962c4695d41b9a1980cc4b621cb408`でもP1=1、P2=1が残ったため、`a16cdcba`で追加remediationし、独立再Reviewへ渡す。
+`f57df6d2cd962c4695d41b9a1980cc4b621cb408`でもP1=1、P2=1が残ったため、`a16cdcba`で追加remediationした。独立再Review fixed Head
+`d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のF2 IMPLEMENTATION PASSを受領した。
 
-Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2は追加remediation済みで独立再Reviewへ渡し、
-PASS後はA1→Review→B1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2 PASS後、A1を
+`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、独立A1 Implementation Reviewへhandoffする。A1 Review PASS後はB1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

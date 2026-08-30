@@ -6,8 +6,9 @@
 - 本specの状態: F1独立Implementation Review PASSを維持。scope expansion Plan deltaは固定Head
   ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2は独立Implementation
   ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加した。再Review固定Head
-  f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationし、再Review待ち。
-  A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
+  f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationした。fixed Head
+  d022e600でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領し、A1を`466bd9aa`で実装済み、独立Review待ち。
+  B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -18,7 +19,7 @@
 - 専用branch: codex/integration-hub-public-api
 
 この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。scope expansionの
-Plan delta PASS後は承認済みwaveを順に実装できるが、F2独立Implementation Review PASSまではA1へ進まず、productionの
+Plan delta PASS後は承認済みwaveを順に実装できる。F2独立Implementation Review PASSを受領し、A1実装を完了したが、A1独立Implementation ReviewまではB1へ進まない。productionの
 外部送信、実顧客credential、public endpoint enablementは開始しない。development/testの
 mock/stub providerとloopback test serverに限定し、production enablement、実顧客credential、実provider送信は
 行わない。force push、main変更、PR、merge、auto-mergeは禁止する。
@@ -44,7 +45,9 @@ scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implement
 同Headから作成し、既存R-NF05へPlan delta Reviewを渡した。固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcは
 PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2のImplementation Review FAILを受けたremediationを実施済みで、独立再Reviewへ渡す。PASS後にA1→B1→B2→Mを順次実装する。
+F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
+（P0/P1/P2=0/0/0）を受領した。A1は`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、独立A1 Implementation Reviewへ渡す。
+A1 Review PASS後にB1→B2→Mを順次実装する。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -55,7 +58,7 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
 public endpoint、外部送信、production enablementは未完了である。F2はremediation済みだが独立Implementation
-Review再判定待ちで、A1/B1/B2/Mは順次未着手とする。
+Review再判定でPASS済み、A1は実装済みで独立Review待ち、B1/B2/Mは順次未着手とする。
 全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
@@ -76,7 +79,19 @@ HTTP assertion到達前に停止している。このためF2をPASSまたは公
 その後の独立再Review（fixed Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408`）で、explicit tenant/legal entityの矛盾を許可するP1と、
 IPv4-mapped IPv6 CIDR比較のP2が指摘された。`a16cdcba`でauthoritative tenant/legal entity singletonをeffective populationへ注入し、
 scope入力の明示値をprincipalと照合、空intersectionを保持してfail-closedにした。またmapped IPv6 source/CIDRを4-byte IPv4へcollapseし、
-mapped/IPv4双方のCIDR比較を追加した。独立再Reviewが完了するまでF2をPASS扱いしない。
+mapped/IPv4双方のCIDR比較を追加した。独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でF2 IMPLEMENTATION PASSを受領した。
+
+## A1 v1 read API実装
+
+`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で、承認済みGET-only 11 pathsを専用
+`ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、external DTOへ実装した。
+DB queryは許可された列とeffective scopeのID集合だけを選択し、internal entity・internal ID・secret・PII・金額/原価/粗利・provider raw bodyを
+レスポンスへ渡さない。opaque public IDはHMAC-SHA256、cursorはAES-GCMでclient/tenant/legal entity/route/scope/as-of/expiryへbindし、
+list/detail/countは同じimmutable effective populationを使う。client指定asOfは受け付けず、as-ofはrequest受信時のserver clockで固定する。
+enabled時にpublic ID keyが未設定なら起動を拒否し、production設定は引き続きpublic API disabledのままである。
+
+focused A1 suiteは15 tests、failure/error/skipなしでPASSした。Windowsのbrowser profileによるTomcat connector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、
+この環境結果をPASS根拠にはしない。A1の独立Implementation Reviewを受領するまでB1は開始しない。
 
 ## 既知の重要差分
 

@@ -1,10 +1,11 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 remediation・独立Review継続中）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 PASS・A1独立Review待ち）
 
 ## 実行停止規則
 
 F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでP0=0、P1=0、P2=0のPASSを受領したため、F2を実施する。
-F2の独立Implementation Review再PASS後はA1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSした。A1を実装済みで独立Reviewへ提出し、
+A1 Review PASS後はB1→B2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -134,16 +135,21 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   `src/main/java/com/ses/entity/integrationhub/ExternalApiAudit.java` と `V130__integration_hub_external_api_audit.sql`、
   `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象29件の再確認）および
   `ExternalApiSecurityChainIntegrationTest`。request attribute手動注入なしのenabled connector E2Eも追加したが、Windows loopback接続エラーでHTTP assertion前に停止。
-  A1 controller、B1/B2 transport、production enablementは未実装。
+  F2のproduction enablement、B1/B2 transportは未実装。A1 controllerはTask A1で実装済み。
 - 追加境界証跡: `a16cdcba`、tenant/legal entity authoritative singletonとmapped IPv6 CIDR familyのfocused suite 19 tests、failure/error/skipなし。
+- F2独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS（P0/P1/P2=0/0/0）。
 
 ## Task A1: v1 read APIs / OpenAPI
 
-- [ ] Objective: 承認済みread resourceのlist/detail/count、opaque cursor、stable error、OpenAPIを実装する。
-- Preconditions: F2 Implementation PASS、scope expansion Decision、A1 Review開始条件。現在はAPPROVED_SEQUENCED。
+- [x] Objective: 承認済みread resourceのlist/detail/count、opaque cursor、stable error、OpenAPIを実装する。
+- Preconditions: F2 Implementation PASS、scope expansion Decisionを満たした。実装commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`、現在はIMPLEMENTATION_REVIEW_PENDING。
 - Test requirements: external DTO allow-list、entity serialization negative、scope一致、cursor tamper/expiry、
   count/detail/list非列挙、error body secret/PII/内部情報なし。
-- Demo: internal entityを一つもserializeせず、OpenAPIと実レスポンスが一致する。
+- Demo: internal entityを一つもserializeせず、OpenAPI candidateのGET-only 11 pathsとexternal DTO allow-listへ一致させる。
+- 実装証跡: `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、4 resource DTO、
+  `ExternalApiPublicIdCodec`、`ExternalApiCursorCodec`、enabled key未設定時のfail-closed起動検証。
+- 検証結果: focused A1 suite 15 tests、failure/error/skipなし。Windows browser profileのconnector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、
+  独立ReviewのPASS根拠にはしない。A1 Implementation Review完了までB1を開始しない。
 
 ## Task A2: limited command APIs（N/A under current decision）
 
