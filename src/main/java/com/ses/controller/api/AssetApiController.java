@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
+import com.ses.dto.asset.AssetLostIncidentUpdateRequest;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
 import com.ses.entity.AssetEvent;
+import com.ses.entity.AssetLostIncident;
 import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetEventService;
+import com.ses.service.AssetLostIncidentService;
 import com.ses.service.AssetService;
 import com.ses.service.AssetScopeService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -33,6 +36,7 @@ public class AssetApiController {
     private final AssetService assetService;
     private final AssetEventService assetEventService;
     private final AssetAssignmentService assetAssignmentService;
+    private final AssetLostIncidentService assetLostIncidentService;
     private final AssetScopeService assetScopeService;
 
     @GetMapping
@@ -93,6 +97,17 @@ public class AssetApiController {
         return ApiResult.success(disposed);
     }
 
+    @PostMapping("/{id}/restore-stock")
+    @PreAuthorize("hasAnyRole('管理者', 'HR')")
+    public ApiResult<Asset> restoreToStock(@PathVariable Long id,
+                                           @RequestBody(required = false) StatusChangeRequest req) {
+        Long currentUserId = SecurityUtils.currentUserId();
+        String reason = req != null ? req.getReason() : null;
+        Long evidenceDocId = req != null ? req.getEvidenceDocId() : null;
+        Asset restored = assetService.restoreToStock(id, reason, currentUserId, evidenceDocId);
+        return ApiResult.success(restored);
+    }
+
     @PostMapping("/{id}/report-lost")
     @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー', '営業')")
     public ApiResult<Asset> reportLost(@PathVariable Long id, @RequestBody(required = false) StatusChangeRequest req) {
@@ -102,6 +117,37 @@ public class AssetApiController {
         assertAccessible(id);
         Asset lost = assetService.reportLost(id, details, currentUserId, evidenceDocId);
         return ApiResult.success(lost);
+    }
+
+    @GetMapping("/{id}/lost-incident")
+    public ApiResult<AssetLostIncident> getLostIncident(@PathVariable Long id) {
+        assertAccessible(id);
+        AssetLostIncident incident = assetLostIncidentService.getByAssetId(id);
+        if (incident == null) {
+            return ApiResult.error(404, "紛失インシデントが見つかりません。");
+        }
+        return ApiResult.success(incident);
+    }
+
+    @PutMapping("/{id}/lost-incident")
+    @PreAuthorize("hasAnyRole('管理者', 'HR', 'マネージャー')")
+    public ApiResult<AssetLostIncident> updateLostIncident(@PathVariable Long id,
+                                                            @RequestBody AssetLostIncidentUpdateRequest req) {
+        assertAccessible(id);
+        Long currentUserId = SecurityUtils.currentUserId();
+        AssetLostIncident updated = assetLostIncidentService.update(
+                id,
+                req.getIncidentDetails(),
+                req.getRemoteWipeStatus(),
+                req.getRemoteWipeRequestedAt(),
+                req.getRemoteWipeExecutedAt(),
+                req.getRemoteWipeConfirmedAt(),
+                req.getPoliceReportNumber(),
+                req.getInsuranceClaimStatus(),
+                req.getInsuranceClaimedAt(),
+                req.getDocumentIds(),
+                currentUserId);
+        return ApiResult.success(updated);
     }
 
     @GetMapping("/{id}/events")

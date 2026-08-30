@@ -19,14 +19,20 @@ public final class AssetStatusPolicy {
     public static final Set<String> ALLOWED_VALUES = Set.of(
             IN_STOCK, ASSIGNED, UNDER_MAINTENANCE, LOST, DISPOSED, RESERVED);
 
-    /** 一般状態変更で許可する遷移。IN_STOCK と ASSIGNED の相互遷移は専用貸与サービスが扱う。 */
+    /**
+     * 一般状態変更で許可する遷移。
+     *
+     * <p>ASSIGNED/IN_STOCK は貸与サービス、LOST/DISPOSED は専用終端処理が扱うため、
+     * {@code AssetService.changeStatus} からは選択できない。</p>
+     */
     public static final Map<String, Set<String>> ALLOWED_GENERIC_TRANSITIONS = Map.of(
-            IN_STOCK, Set.of(UNDER_MAINTENANCE, DISPOSED, RESERVED, LOST),
-            ASSIGNED, Set.of(LOST),
-            UNDER_MAINTENANCE, Set.of(IN_STOCK, LOST),
-            LOST, Set.of(DISPOSED),
-            DISPOSED, Set.of(LOST),
-            RESERVED, Set.of(IN_STOCK, DISPOSED, LOST));
+            IN_STOCK, Set.of(UNDER_MAINTENANCE, RESERVED),
+            UNDER_MAINTENANCE, Set.of(),
+            RESERVED, Set.of());
+
+    /** 汎用状態変更では到達させない状態。専用サービスが副作用と一緒に処理する。 */
+    public static final Set<String> DEDICATED_TRANSITION_TARGETS = Set.of(
+            ASSIGNED, IN_STOCK, LOST, DISPOSED);
 
     private AssetStatusPolicy() {
     }

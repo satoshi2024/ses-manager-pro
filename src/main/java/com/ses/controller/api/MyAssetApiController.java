@@ -32,7 +32,6 @@ public class MyAssetApiController {
     private final ExternalAccountService externalAccountService;
     private final LicenseService licenseService;
     private final EngineerAccountLinkService engineerAccountLinkService;
-    private final AssetAlertService assetAlertService;
 
     private final SysUserMapper sysUserMapper;
 
@@ -119,7 +118,6 @@ public class MyAssetApiController {
         }
 
         Asset lostAsset = assetService.reportLost(req.getAssetId(), req.getIncidentDetails(), userId, null);
-        assetAlertService.notifyLostAssetIncident(lostAsset, req.getIncidentDetails(), userId);
 
         return ApiResult.success(lostAsset);
     }

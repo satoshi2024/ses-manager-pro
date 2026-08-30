@@ -4,11 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AssetAssignment;
+import com.ses.entity.AssetLostIncident;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.OrganizationUnit;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.AssetAssignmentMapper;
+import com.ses.mapper.AssetLostIncidentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentMapper;
@@ -55,6 +57,7 @@ public class AssetScopeServiceImpl implements AssetScopeService {
     private final SysUserMapper sysUserMapper;
     private final AssetMapper assetMapper;
     private final AssetAssignmentMapper assetAssignmentMapper;
+    private final AssetLostIncidentMapper assetLostIncidentMapper;
     private final DocumentMapper documentMapper;
     private final DocumentLinkMapper documentLinkMapper;
     private final EngineerAccountLinkMapper engineerAccountLinkMapper;
@@ -216,20 +219,27 @@ public class AssetScopeServiceImpl implements AssetScopeService {
             return true;
         }
         for (DocumentLink link : documentLinkMapper.findByDocumentId(documentId)) {
-            if (!"ASSET_ASSIGNMENT".equals(link.getTargetType()) || link.getTargetId() == null) {
+            if (link.getTargetId() == null) {
                 continue;
             }
-            AssetAssignment assignment = assetAssignmentMapper.selectById(link.getTargetId());
-            if (assignment == null) {
-                continue;
-            }
-            // assignmentの記録上の本人は返却後も自己の受領証跡を参照できるが、別要員へ継承しない。
-            if (ROLE_ENGINEER.equals(role) && "ENGINEER".equals(assignment.getAssigneeType())
-                    && isAccessibleAssignee("ENGINEER", assignment.getAssigneeId(), role, actorUserId)) {
-                return true;
-            }
-            if (isAccessible(assignment.getAssetId(), role, actorUserId)) {
-                return true;
+            if ("ASSET_ASSIGNMENT".equals(link.getTargetType())) {
+                AssetAssignment assignment = assetAssignmentMapper.selectById(link.getTargetId());
+                if (assignment == null) {
+                    continue;
+                }
+                // assignmentの記録上の本人は返却後も自己の受領証跡を参照できるが、別要員へ継承しない。
+                if (ROLE_ENGINEER.equals(role) && "ENGINEER".equals(assignment.getAssigneeType())
+                        && isAccessibleAssignee("ENGINEER", assignment.getAssigneeId(), role, actorUserId)) {
+                    return true;
+                }
+                if (isAccessible(assignment.getAssetId(), role, actorUserId)) {
+                    return true;
+                }
+            } else if ("ASSET_LOST_INCIDENT".equals(link.getTargetType())) {
+                AssetLostIncident incident = assetLostIncidentMapper.selectById(link.getTargetId());
+                if (incident != null && isAccessible(incident.getAssetId(), role, actorUserId)) {
+                    return true;
+                }
             }
         }
         return false;

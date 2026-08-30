@@ -38,6 +38,9 @@ public interface AssetService {
      */
     Asset reportLost(Long assetId, String incidentDetails, Long actorUserId, Long evidenceDocId);
 
+    /** 保守完了・予約取消後に資産を保管中へ戻す専用処理。 */
+    Asset restoreToStock(Long assetId, String reason, Long actorUserId, Long evidenceDocId);
+
     /**
      * ページネーション検索
      */

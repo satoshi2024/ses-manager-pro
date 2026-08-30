@@ -163,4 +163,44 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.status").value("REVOKED"));
     }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("Lost incident API: report creates ledger and update tracks wipe, police, insurance and documents")
+    void testLostIncidentApiFlow() throws Exception {
+        Asset asset = Asset.builder()
+                .assetTag("AST-API-LOST-" + System.nanoTime())
+                .assetName("Lost API device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+
+        mockMvc.perform(post("/api/assets/" + asset.getId() + "/report-lost")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("reason", "API紛失報告"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.status").value("LOST"));
+
+        mockMvc.perform(get("/api/assets/" + asset.getId() + "/lost-incident"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.remoteWipeStatus").value("NOT_REQUESTED"))
+                .andExpect(jsonPath("$.data.incidentDetails").value("API紛失報告"));
+
+        String updatePayload = objectMapper.writeValueAsString(Map.of(
+                "remoteWipeStatus", "CONFIRMED",
+                "policeReportNumber", "POLICE-API-0001",
+                "insuranceClaimStatus", "APPLIED"));
+        mockMvc.perform(put("/api/assets/" + asset.getId() + "/lost-incident")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(updatePayload))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.remoteWipeStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.policeReportNumber").value("POLICE-API-0001"))
+                .andExpect(jsonPath("$.data.insuranceClaimStatus").value("APPLIED"));
+    }
 }

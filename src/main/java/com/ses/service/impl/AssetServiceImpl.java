@@ -10,6 +10,7 @@ import com.ses.entity.AssetAssignment;
 import com.ses.mapper.AssetAssignmentMapper;
 import com.ses.mapper.AssetMapper;
 import com.ses.service.AssetEventService;
+import com.ses.service.AssetLostIncidentService;
 import com.ses.service.AssetService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -27,6 +29,7 @@ public class AssetServiceImpl implements AssetService {
     private final AssetMapper assetMapper;
     private final AssetAssignmentMapper assetAssignmentMapper;
     private final AssetEventService assetEventService;
+    private final AssetLostIncidentService assetLostIncidentService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -48,9 +51,12 @@ public class AssetServiceImpl implements AssetService {
         }
 
         asset.setAssetTag(asset.getAssetTag().trim());
-        asset.setStatus(StringUtils.hasText(asset.getStatus())
-                ? AssetStatusPolicy.normalize(asset.getStatus()) : AssetStatusPolicy.IN_STOCK);
-        assertAllowedStatus(asset.getStatus());
+        String requestedStatus = StringUtils.hasText(asset.getStatus())
+                ? AssetStatusPolicy.normalize(asset.getStatus()) : AssetStatusPolicy.IN_STOCK;
+        if (!AssetStatusPolicy.IN_STOCK.equals(requestedStatus)) {
+            throw new BusinessException(400, "新規資産はIN_STOCK状態でのみ登録できます。貸与・紛失・廃棄は専用処理を使用してください。");
+        }
+        asset.setStatus(AssetStatusPolicy.IN_STOCK);
         assetMapper.insert(asset);
 
         assetEventService.recordEvent(
@@ -127,6 +133,15 @@ public class AssetServiceImpl implements AssetService {
     public Asset changeStatus(Long assetId, String toStatus, String reason, Long actorUserId, Long evidenceDocId) {
         String normalizedToStatus = AssetStatusPolicy.normalize(toStatus);
         assertAllowedStatus(normalizedToStatus);
+        if (AssetStatusPolicy.DEDICATED_TRANSITION_TARGETS.contains(normalizedToStatus)) {
+            String operation = AssetStatusPolicy.ASSIGNED.equals(normalizedToStatus)
+                    || AssetStatusPolicy.IN_STOCK.equals(normalizedToStatus)
+                    ? "貸与・返却は専用の貸与サービス"
+                    : "紛失・廃棄は専用処理";
+            throw new BusinessException(400,
+                    normalizedToStatus + "への遷移は専用処理を使用してください（" + operation + "）。" +
+                            "副作用を迂回できません。");
+        }
 
         Asset asset = assetMapper.selectByIdForUpdate(assetId);
         if (asset == null) {
@@ -190,7 +205,11 @@ public class AssetServiceImpl implements AssetService {
         if (AssetStatusPolicy.DISPOSED.equals(fromStatus)) {
             return asset;
         }
-        assertAllowedTransition(fromStatus, AssetStatusPolicy.DISPOSED);
+        if (!Set.of(AssetStatusPolicy.IN_STOCK, AssetStatusPolicy.LOST, AssetStatusPolicy.RESERVED)
+                .contains(fromStatus)) {
+            throw new BusinessException(400,
+                    "資産ステータス遷移が許可されていません: " + fromStatus + " -> DISPOSED");
+        }
         int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, "DISPOSED", asset.getVersion());
         if (updated == 0) {
             throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
@@ -222,9 +241,10 @@ public class AssetServiceImpl implements AssetService {
 
         String fromStatus = asset.getStatus();
         if (AssetStatusPolicy.LOST.equals(fromStatus)) {
-            return asset;
+            assetLostIncidentService.createInitial(assetId, incidentDetails, actorUserId, evidenceDocId);
+            return assetMapper.selectById(assetId);
         }
-        assertAllowedTransition(fromStatus, AssetStatusPolicy.LOST);
+        assertAllowedStatus(fromStatus);
         int updated = assetMapper.updateStatusWithCas(assetId, fromStatus, AssetStatusPolicy.LOST, asset.getVersion());
         if (updated == 0) {
             throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
@@ -243,6 +263,42 @@ public class AssetServiceImpl implements AssetService {
                 incidentDetails
         );
 
+        // LOST遷移、インシデント台帳、緊急通知outboxを同一transactionで確定する。
+        assetLostIncidentService.createInitial(assetId, incidentDetails, actorUserId, evidenceDocId);
+
+        return assetMapper.selectById(assetId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Asset restoreToStock(Long assetId, String reason, Long actorUserId, Long evidenceDocId) {
+        Asset asset = assetMapper.selectByIdForUpdate(assetId);
+        if (asset == null) {
+            throw new BusinessException("指定された資産が見つかりません。");
+        }
+        String fromStatus = asset.getStatus();
+        if (!Set.of(AssetStatusPolicy.UNDER_MAINTENANCE, AssetStatusPolicy.RESERVED).contains(fromStatus)) {
+            throw new BusinessException(400,
+                    "保守完了・予約取消で保管中へ戻せるのはUNDER_MAINTENANCEまたはRESERVEDだけです。");
+        }
+        int updated = assetMapper.updateStatusWithCas(
+                assetId, fromStatus, AssetStatusPolicy.IN_STOCK, asset.getVersion());
+        if (updated == 0) {
+            throw new BusinessException(409, "資産情報が他で更新されました。再読み込みしてください。");
+        }
+        String eventType = AssetStatusPolicy.UNDER_MAINTENANCE.equals(fromStatus)
+                ? "REPAIRED" : "RESERVATION_CANCELLED";
+        assetEventService.recordEvent(
+                assetId,
+                eventType,
+                actorUserId,
+                null,
+                null,
+                fromStatus,
+                AssetStatusPolicy.IN_STOCK,
+                evidenceDocId,
+                "資産を保管中へ戻しました: " + (StringUtils.hasText(reason) ? reason : "専用処理"),
+                null);
         return assetMapper.selectById(assetId);
     }
 

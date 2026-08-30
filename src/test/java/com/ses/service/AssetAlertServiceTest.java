@@ -65,7 +65,7 @@ class AssetAlertServiceTest extends BaseIntegrationTest {
                 .assetTag("AST-ALERT-001")
                 .assetName("Overdue Test Device")
                 .category("PC")
-                .status("ASSIGNED")
+                .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
 

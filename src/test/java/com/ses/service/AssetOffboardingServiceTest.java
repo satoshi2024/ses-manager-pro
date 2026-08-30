@@ -77,7 +77,7 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
                 .assetTag("AST-OFFBOARD-01")
                 .assetName("Offboarding Test PC")
                 .category("PC")
-                .status("ASSIGNED")
+                .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
 

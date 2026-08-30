@@ -447,12 +447,12 @@ class AssetMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("MySQL schema: V132 waiver scope, FK, unique key and append-only triggers")
-    void testV132WaiverShapeAndAppendOnlyGuardsOnMySQL() {
+    @DisplayName("MySQL schema: V132/V133 waiver and lost incident scope, FK, unique key and append-only triggers")
+    void testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL() {
         String latest = jdbcTemplate.queryForObject(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1",
                 String.class);
-        assertEquals("132", latest);
+        assertEquals("133", latest);
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_case_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_task_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND index_name = 'uk_asset_offboarding_waiver_request'"));
@@ -460,6 +460,14 @@ class AssetMySqlIntegrationTest {
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() AND constraint_name = 'fk_asset_offboarding_waiver_task'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = 'trg_asset_event_no_update'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE() AND trigger_name = 'trg_asset_event_no_delete'"));
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 't_asset_lost_incident'"));
+        for (String column : new String[]{
+                "reported_at", "remote_wipe_status", "remote_wipe_requested_at", "remote_wipe_executed_at",
+                "remote_wipe_confirmed_at", "police_report_number", "insurance_claim_status", "insurance_claimed_at"}) {
+            assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_lost_incident' AND column_name = '" + column + "'"));
+        }
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_lost_incident' AND index_name = 'uq_asset_lost_incident_asset' AND non_unique = 0"));
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() AND constraint_name = 'fk_asset_lost_incident_asset'"));
     }
 
     private int count(String sql) {

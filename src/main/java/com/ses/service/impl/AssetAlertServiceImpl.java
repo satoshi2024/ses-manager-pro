@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
+import com.ses.entity.AssetLostIncident;
 import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
@@ -126,12 +127,13 @@ public class AssetAlertServiceImpl implements AssetAlertService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void notifyLostAssetIncident(Asset asset, String incidentDetails, Long reporterUserId) {
+    public void notifyLostAssetIncident(Asset asset, AssetLostIncident incident) {
         if (asset == null) return;
-        String dedupeKey = "asset:lost:" + asset.getId() + ":" + System.currentTimeMillis();
+        if (incident == null || incident.getId() == null) return;
+        String dedupeKey = "asset:lost:" + incident.getId();
         Set<Long> recipients = new LinkedHashSet<>(managementUserIds());
-        if (reporterUserId != null) {
-            recipients.add(reporterUserId);
+        if (incident.getReportedBy() != null) {
+            recipients.add(incident.getReportedBy());
         }
         assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
                         .eq(AssetAssignment::getAssetId, asset.getId())
@@ -140,7 +142,8 @@ public class AssetAlertServiceImpl implements AssetAlertService {
         publishToRelevantUsers(
                 "ASSET_LOST_INCIDENT",
                 "【緊急: 資産紛失インシデント】資産「" + asset.getAssetTag() + "」の紛失が報告されました",
-                "報告者ID: " + reporterUserId + "、詳細: " + incidentDetails + "。直ちに外部アカウント停止およびリモートワイプ等の初動対応を実施してください。",
+                "インシデントID: " + incident.getId() + "、報告者ID: " + incident.getReportedBy()
+                        + "。直ちに外部アカウント停止およびリモートワイプ等の初動対応を実施してください。",
                 "/asset/list",
                 dedupeKey,
                 recipients

@@ -2,6 +2,7 @@ package com.ses.service;
 
 import com.ses.entity.Asset;
 import com.ses.entity.AssetAssignment;
+import com.ses.entity.AssetLostIncident;
 
 import java.util.List;
 
@@ -23,7 +24,7 @@ public interface AssetAlertService {
     /**
      * 紛失インシデント発生時の緊急通知を発行する
      */
-    void notifyLostAssetIncident(Asset asset, String incidentDetails, Long reporterUserId);
+    void notifyLostAssetIncident(Asset asset, AssetLostIncident incident);
 
     /**
      * 現在超過している未返却貸与一覧を取得する

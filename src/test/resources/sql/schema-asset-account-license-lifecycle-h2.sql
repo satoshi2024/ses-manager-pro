@@ -55,6 +55,26 @@ CREATE TABLE IF NOT EXISTS t_asset_assignment (
     deleted_flag INT NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS t_asset_lost_incident (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    asset_id BIGINT NOT NULL,
+    reported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reported_by BIGINT,
+    incident_details VARCHAR(2000),
+    remote_wipe_status VARCHAR(32) NOT NULL DEFAULT 'NOT_REQUESTED',
+    remote_wipe_requested_at TIMESTAMP,
+    remote_wipe_executed_at TIMESTAMP,
+    remote_wipe_confirmed_at TIMESTAMP,
+    police_report_number VARCHAR(128),
+    insurance_claim_status VARCHAR(32) NOT NULL DEFAULT 'NOT_APPLIED',
+    insurance_claimed_at TIMESTAMP,
+    version INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    UNIQUE (asset_id)
+);
+
 CREATE TABLE IF NOT EXISTS t_asset_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     asset_id BIGINT NOT NULL,

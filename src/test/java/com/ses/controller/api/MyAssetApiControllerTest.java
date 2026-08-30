@@ -79,7 +79,7 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
                 .assetTag("AST-MY-001")
                 .assetName("Surface Laptop 5")
                 .category("PC")
-                .status("ASSIGNED")
+                .status("IN_STOCK")
                 .build();
         assetService.createAsset(asset, 1L);
 

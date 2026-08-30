@@ -1,15 +1,22 @@
 package com.ses.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.ses.BaseIntegrationTest;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.*;
+import com.ses.mapper.AssetEventMapper;
+import com.ses.mapper.AssetLostIncidentMapper;
+import com.ses.mapper.DocumentLinkMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.NotificationMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,6 +36,24 @@ class AssetServiceTest extends BaseIntegrationTest {
 
     @Autowired
     private AssetInventoryService assetInventoryService;
+
+    @Autowired
+    private AssetLostIncidentService assetLostIncidentService;
+
+    @Autowired
+    private AssetLostIncidentMapper assetLostIncidentMapper;
+
+    @Autowired
+    private AssetEventMapper assetEventMapper;
+
+    @Autowired
+    private DocumentMapper documentMapper;
+
+    @Autowired
+    private DocumentLinkMapper documentLinkMapper;
+
+    @Autowired
+    private NotificationMapper notificationMapper;
 
     @Autowired
     private ExternalAccountService externalAccountService;
@@ -142,7 +167,24 @@ class AssetServiceTest extends BaseIntegrationTest {
                 inStock.getId(), "ASSIGNED", "貸与行なしの直接変更", 1L, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("貸与・返却は専用の貸与サービス");
+        assertThatThrownBy(() -> assetService.changeStatus(
+                inStock.getId(), "LOST", "紛失専用処理の迂回", 1L, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("専用処理を使用してください");
+        assertThatThrownBy(() -> assetService.changeStatus(
+                inStock.getId(), "DISPOSED", "廃棄専用処理の迂回", 1L, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("専用処理を使用してください");
         assertThat(assetService.getById(inStock.getId()).getStatus()).isEqualTo("IN_STOCK");
+
+        assertThatThrownBy(() -> assetService.createAsset(Asset.builder()
+                .assetTag("AST-TRANSITION-DIRECT-LOST-" + System.nanoTime())
+                .assetName("Direct lost registration")
+                .category("PC")
+                .status("LOST")
+                .build(), 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("IN_STOCK状態でのみ登録");
 
         Asset disposed = Asset.builder()
                 .assetTag("AST-TRANSITION-DISPOSED-" + System.nanoTime())
@@ -171,15 +213,17 @@ class AssetServiceTest extends BaseIntegrationTest {
                 .assetTag("AST-TRANSITION-MAINT-" + System.nanoTime())
                 .assetName("Transition maintenance")
                 .category("PC")
-                .status("UNDER_MAINTENANCE")
                 .build();
         assetService.createAsset(maintenance, 1L);
+        assetService.changeStatus(maintenance.getId(), "UNDER_MAINTENANCE", "保守開始", 1L, null);
         assertThatThrownBy(() -> assetService.changeStatus(
                 maintenance.getId(), "ASSIGNED", "保守中の直接貸与", 1L, null))
                 .isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> assetService.disposeAsset(
                 maintenance.getId(), "保守中の廃棄", 1L, null))
                 .isInstanceOf(BusinessException.class);
+        assertThat(assetService.restoreToStock(maintenance.getId(), "保守完了", 1L, null).getStatus())
+                .isEqualTo("IN_STOCK");
     }
 
     @Test
@@ -305,5 +349,70 @@ class AssetServiceTest extends BaseIntegrationTest {
         ExternalAccountReference revoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
         assertThat(revoked.getStatus()).isEqualTo("REVOKED");
         assertThat(revoked.getRevokeConfirmedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("紛失インシデント: 専用報告で全対応項目を保持し緊急通知を一重化する")
+    void testLostIncidentLedgerAndEmergencyAlert() {
+        Asset asset = Asset.builder()
+                .assetTag("AST-LOST-INCIDENT-" + System.nanoTime())
+                .assetName("Lost incident device")
+                .category("PC")
+                .build();
+        assetService.createAsset(asset, 1L);
+
+        Document evidence = new Document();
+        evidence.setTenantId("default");
+        evidence.setDocumentType("INTERNAL");
+        evidence.setTitle("紛失届証跡");
+        evidence.setDirection("INTERNAL");
+        evidence.setStatus("DRAFT");
+        evidence.setCurrency("JPY");
+        evidence.setLegalHoldFlag(0);
+        evidence.setVersion(1L);
+        documentMapper.insert(evidence);
+
+        assetService.reportLost(asset.getId(), "出張先で紛失", 1L, evidence.getId());
+        AssetLostIncident initial = assetLostIncidentService.getByAssetId(asset.getId());
+        assertThat(initial.getReportedAt()).isNotNull();
+        assertThat(initial.getReportedBy()).isEqualTo(1L);
+        assertThat(initial.getRemoteWipeStatus()).isEqualTo("NOT_REQUESTED");
+        assertThat(initial.getInsuranceClaimStatus()).isEqualTo("NOT_APPLIED");
+        assertThat(initial.getRelatedDocumentIds()).containsExactly(evidence.getId());
+        assertThat(documentLinkMapper.findDocumentIdsByTarget("ASSET_LOST_INCIDENT", initial.getId()))
+                .containsExactly(evidence.getId());
+        assertThat(notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
+                .eq(Notification::getType, "ASSET_LOST_INCIDENT")
+                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId())))
+                .isNotEmpty();
+        assertThat(assetEventMapper.selectByAssetId(asset.getId()).stream()
+                .filter(event -> "REPORTED_LOST".equals(event.getEventType())))
+                .hasSize(1);
+
+        LocalDateTime requestedAt = LocalDateTime.now().minusHours(3);
+        LocalDateTime executedAt = LocalDateTime.now().minusHours(2);
+        LocalDateTime confirmedAt = LocalDateTime.now().minusHours(1);
+        AssetLostIncident updated = assetLostIncidentService.update(
+                asset.getId(), "MDMで端末を隔離", "CONFIRMED", requestedAt, executedAt, confirmedAt,
+                "POLICE-2026-0001", "APPLIED", LocalDateTime.now().minusMinutes(30),
+                List.of(evidence.getId()), 1L);
+        assertThat(updated.getRemoteWipeStatus()).isEqualTo("CONFIRMED");
+        assertThat(updated.getRemoteWipeRequestedAt()).isEqualTo(requestedAt);
+        assertThat(updated.getRemoteWipeExecutedAt()).isEqualTo(executedAt);
+        assertThat(updated.getRemoteWipeConfirmedAt()).isEqualTo(confirmedAt);
+        assertThat(updated.getPoliceReportNumber()).isEqualTo("POLICE-2026-0001");
+        assertThat(updated.getInsuranceClaimStatus()).isEqualTo("APPLIED");
+        assertThat(updated.getInsuranceClaimedAt()).isNotNull();
+        assertThat(assetLostIncidentMapper.selectLatestByAssetId(asset.getId()).getId())
+                .isEqualTo(initial.getId());
+
+        // 同じLOST報告を再送してもインシデント・緊急通知を増殖させない。
+        assetService.reportLost(asset.getId(), "再送", 1L, evidence.getId());
+        assertThat(assetLostIncidentMapper.selectCount(new LambdaQueryWrapper<AssetLostIncident>()
+                .eq(AssetLostIncident::getAssetId, asset.getId()))).isEqualTo(1);
+        assertThat(notificationMapper.selectList(new LambdaQueryWrapper<Notification>()
+                .eq(Notification::getType, "ASSET_LOST_INCIDENT")
+                .like(Notification::getDedupeKey, "asset:lost:" + initial.getId())))
+                .isNotEmpty();
     }
 }

@@ -64,7 +64,8 @@ class AssetComprehensiveSecretScanTest {
                 Paths.get("src/main/resources/db/migration/V129__asset_account_license_lifecycle.sql"),
                 Paths.get("src/main/resources/db/migration/V130__asset_account_license_menu_permissions.sql"),
                 Paths.get("src/main/resources/db/migration/V131__asset_offboarding_waiver_ledger.sql"),
-                Paths.get("src/main/resources/db/migration/V132__asset_offboarding_waiver_scope_and_append_only_guards.sql")
+                Paths.get("src/main/resources/db/migration/V132__asset_offboarding_waiver_scope_and_append_only_guards.sql"),
+                Paths.get("src/main/resources/db/migration/V133__asset_lost_incident_tracking.sql")
         );
         for (Path migrationPath : migrationPaths) {
             if (!Files.exists(migrationPath)) {
