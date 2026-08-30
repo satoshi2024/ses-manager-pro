@@ -93,7 +93,7 @@ canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。remedia
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | REMEDIATED_REVIEW_PENDING | `874fface3bfe90dd27b766ddf9aeff4e00eae591`を既存R-NF05へ再handoff。独立再Review完了までB1を開始しない |
 
-Windows browser profileのconnector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
+remediation focused suiteは16/16 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
 
 ## Scope expansion Plan delta re-review remediation
 

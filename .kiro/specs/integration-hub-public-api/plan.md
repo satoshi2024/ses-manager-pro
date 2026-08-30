@@ -74,7 +74,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 invoice customer scope、cursor可視母集団、非canonical cursor、DTO/E2E証跡を指摘した。`874fface3bfe90dd27b766ddf9aeff4e00eae591`で次をremediateした。
 
 1. invoiceのlist/detail/countに`invoiceIds × customerIds`を同一SQL predicateで適用し、複数contract invoiceは一意contract時だけpublic IDを返す。
-2. 初回listのas-of時点でvisible rowのallow-list DTO snapshotを` t_api_read_snapshot`/`t_api_read_snapshot_item`へ短期保存し、snapshot ID、scope digest、route、client、tenant、legal entity、expiryをcursorへbindする。次ページはlive queryを行わない。
+2. 初回listのas-of時点でvisible rowのallow-list DTO snapshotを`t_api_read_snapshot`/`t_api_read_snapshot_item`へ短期保存し、snapshot ID、scope digest、route、client、tenant、legal entity、expiryをcursorへbindする。次ページはlive queryを行わない。
 3. cursorの全Base64URL部をpaddingなしのcanonical再encodeと完全一致させ、unused bits variantを拒否する。
 4. 4 DTOのfield allow-list、11 GET-only path、entity serialization negative、snapshotのinsert/update/delete/reparentをテストし、enabled connector E2E fixtureへtest keyを明示した。
 

@@ -60,7 +60,7 @@
 | finding | inventoryで固定する契約 | 実装/evidence | status |
 |---|---|---|---|
 | invoice customer scope | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contractは単一publicContractIdを返さない | `ExternalApiReadMapper`、`ExternalApiReadRow.contractCount`、mapper/service tests | REMEDIATED_REVIEW_PENDING |
-| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を` t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration test | REMEDIATED_REVIEW_PENDING |
+| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を`t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration test | REMEDIATED_REVIEW_PENDING |
 | cursor token encoding | paddingなしBase64URL、decode後canonical再encode完全一致、unused bits拒否 | `ExternalApiCursorCodec`、tamper test | REMEDIATED_REVIEW_PENDING |
 | external contract evidence | 4 DTO allow-list、11 GET-only paths、entity negative、enabled E2E key fixture | `ExternalApiDtoContractTest`、`ExternalApiEnabledConnectorE2ETest` | REMEDIATED_REVIEW_PENDING |
 
