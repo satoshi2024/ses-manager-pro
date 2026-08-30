@@ -60,9 +60,10 @@
 | finding | inventoryで固定する契約 | 実装/evidence | status |
 |---|---|---|---|
 | invoice customer scope | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contractは単一publicContractIdを返さない | `ExternalApiReadMapper`、`ExternalApiReadRow.contractCount`、mapper/service tests | REMEDIATED_REVIEW_PENDING |
-| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を`t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration test | REMEDIATED_REVIEW_PENDING |
+| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を`t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind。as-ofは秒精度で固定 | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration/pagination precision test | REMEDIATED_REVIEW_PENDING |
 | cursor token encoding | paddingなしBase64URL、decode後canonical再encode完全一致、unused bits拒否 | `ExternalApiCursorCodec`、tamper test | REMEDIATED_REVIEW_PENDING |
 | external contract evidence | 4 DTO allow-list、11 GET-only paths、entity negative、enabled E2E key fixture | `ExternalApiDtoContractTest`、`ExternalApiEnabledConnectorE2ETest` | REMEDIATED_REVIEW_PENDING |
+| snapshot retention purge | expiry index順の最大32 headerを公開readと別schedulerでpurge。FK cascade、partial failure rollback、再実行、無通信時期限超過 | `ExternalApiReadSnapshotPurgeService`/`Scheduler`、H2 purge integration/service tests | REMEDIATED_REVIEW_PENDING |
 
 ## 3. Filter chain inventory
 
@@ -203,7 +204,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | opaque identity | `ExternalApiPublicIdCodec` | client/tenant/resourceへbindしたHMAC-SHA256 public ID。enabled時key未設定は起動拒否 |
 | invoice scope | `ExternalApiReadMapper`、`ExternalApiReadService` | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contract時は一意の場合だけpublicContractIdを返す |
 | cursor | `ExternalApiCursorCodec`、`ExternalApiReadSnapshotMapper` | AES-GCM暗号化、client/tenant/legal entity/route/scope/snapshot/as-of/expiryへbind。初回visible membership/DTO値をV131 snapshotへmaterializeし、noncanonical Base64URLを拒否 |
-| tests | `ExternalApiReadMapperIntegrationTest`、`ExternalApiReadSnapshotIntegrationTest`、DTO/path/entity tests | remediation focused 16 tests、failure/error/skipなし。browser connector E2Eはcrypto fixture修正後もWindows loopback制約でHTTP assertion未到達 |
+| tests | `ExternalApiReadMapperIntegrationTest`、`ExternalApiReadSnapshotIntegrationTest`、DTO/path/entity tests、purge tests | remediation focused 23 tests、failure/error/skipなし。browser connector E2Eはcrypto fixture修正後もWindows loopback制約でHTTP assertion未到達 |
 
 ## 9. 公開resource / field / operation matrix（Owner承認済み初期契約）
 

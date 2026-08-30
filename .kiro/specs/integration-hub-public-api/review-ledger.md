@@ -135,6 +135,12 @@ A1 implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`の初回Revi
 | NF05-IMPL-A1-002 | P1 | cursorのasOfがページ間のvisible membership/public valueを固定しない | V131 read snapshot header/item、snapshot-only next page、insert/update/delete/reparent integration test | REMEDIATED_REVIEW_PENDING |
 | NF05-IMPL-A1-003 | P2 | noncanonical Base64URLのunused bitsを受理 | decode後paddingなしcanonical再encode完全一致、tamper test | REMEDIATED_REVIEW_PENDING |
 | NF05-IMPL-A1-004 | P2 | 4 DTO/11 path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | DTO/path/entity contract tests、明示test key付きconnector E2E | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-005 | P1 | snapshot purgeが公開request依存かつ非bounded | expiry index順最大32 header、FK cascade、独立scheduler、rollback/retry/read非DELETE tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-006 | P2 | cursor page間でfractional asOf精度が変化 | 初回からUTC epoch secondsへ正規化、fractional clock pagination test | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-007 | P2 | connector E2E fixtureのDATETIME timezone変換で認証時刻が未来化 | UTC `LocalDateTime` fixture、Linux実connector再実行対象。Windows loopback失敗は環境制約として記録 | REMEDIATED_REVIEW_PENDING |
+
+今回の再Review FAIL（fixed Head `cddd4850`、P0=0、P1=1、P2=2）の指摘を、上記3件として記録した。
+P1-005/006/007は実装・test remediation済みの独立再Review待ちであり、F2 PASS、F1 PASS、Owner Gate、Plan PASSは再オープンしない。
 
 ## Findings
 

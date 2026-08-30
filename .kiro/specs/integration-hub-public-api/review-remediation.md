@@ -86,14 +86,14 @@ failure/error/skipなしでPASSした。fixed Head `d022e60039880dc5d4743f336661
 F2 PASS後、A1を `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装した。対象はGET-only 11 paths、external DTO allow-list、
 opaque public ID、暗号化cursor、effective scope-bound list/detail/countである。初回独立Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL
 （P0=0、P1=2、P2=2）だった。`874fface3bfe90dd27b766ddf9aeff4e00eae591`でinvoice customer scope、snapshot-bound cursor、
-canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。remediation focused suiteは16 tests、failure/error/skipなしでPASSした。
+canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。初回remediation focused suiteは16 tests、failure/error/skipなしでPASSした。
 
 | 対象 | 状態 | Review境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | REMEDIATED_REVIEW_PENDING | `874fface3bfe90dd27b766ddf9aeff4e00eae591`を既存R-NF05へ再handoff。独立再Review完了までB1を開始しない |
 
-remediation focused suiteは16/16 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
+remediation focused/integration suiteは23/23 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。Linux実connectorの401/200再実行結果を独立Reviewで確認する。
 
 ## Scope expansion Plan delta re-review remediation
 
@@ -224,11 +224,14 @@ Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
 | NF05-IMPL-A1-002 | P1 | cursorのasOfがvisible membership/public valueをページ間で固定しない | `t_api_read_snapshot`/itemへ初回allow-list DTOをmaterializeし、snapshot IDを暗号化cursorへbind。insert/update/delete/reparent integration testを追加 | REMEDIATED_REVIEW_PENDING |
 | NF05-IMPL-A1-003 | P2 | noncanonical Base64URL unused bitsを受理 | paddingなしBase64URLのdecode後canonical再encode完全一致を要求し、unused bits tamper testを追加 | REMEDIATED_REVIEW_PENDING |
 | NF05-IMPL-A1-004 | P2 | DTO/path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | 4 DTO allow-list、11 GET-only path、entity negative、明示test key付きenabled E2E fixtureを追加 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-005 | P1 | snapshot purgeが公開request依存かつ非bounded | expiry index順の最大32 headerを独立schedulerが短いtransactionで削除し、FK cascadeでitemを削除。read pathからpurgeを除去し、bounded/cascade/retry/read非DELETE testを追加 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-006 | P2 | cursor page間でfractional asOf精度が変化 | 初回からUTC epoch secondsへ正規化し、snapshot/cursor/後続responseを同じ秒精度に固定。fractional clock testを追加 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-007 | P2 | connector E2E fixtureのDATETIME timezone変換で認証時刻が未来化 | fixtureをUTC `LocalDateTime`で登録。Windows loopbackは環境制約、Linux実connectorで401/200を再検証する | REMEDIATED_REVIEW_PENDING |
 
 ### A1 remediation evidence
 
-- code/test/migration commit: `874fface3bfe90dd27b766ddf9aeff4e00eae591`
+- code/test/migration commit: `874fface3bfe90dd27b766ddf9aeff4e00eae591`、追加remediationは次のfixed Headへpushする。
 - entity serialization negative strengthening follow-up: `9ed77cf3056d1bd3f913e461115f4ca732639519`
-- remediation focused suite: cursor 3、service 5、DTO 5、mapper 2、snapshot integration 1。failure/error/skipなし。
-- enabled connector browser E2Eはcrypto fixture未設定を修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewへ環境制約としてhandoffする。
+- remediation focused/integration suite: cursor 3、service 6、DTO 5、mapper 2、snapshot integration 1、purge integration 2。計23 tests、failure/error/skipなし。
+- enabled connector browser E2EはUTC `LocalDateTime` fixtureへ修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewで401/200を確認する。
 - production enablement、実顧客credential、実provider送信、A2 command/export、PR、mergeは引き続き禁止。

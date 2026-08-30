@@ -77,13 +77,16 @@ invoice customer scope、cursor可視母集団、非canonical cursor、DTO/E2E�
 2. 初回listのas-of時点でvisible rowのallow-list DTO snapshotを`t_api_read_snapshot`/`t_api_read_snapshot_item`へ短期保存し、snapshot ID、scope digest、route、client、tenant、legal entity、expiryをcursorへbindする。次ページはlive queryを行わない。
 3. cursorの全Base64URL部をpaddingなしのcanonical再encodeと完全一致させ、unused bits variantを拒否する。
 4. 4 DTOのfield allow-list、11 GET-only path、entity serialization negative、snapshotのinsert/update/delete/reparentをテストし、enabled connector E2E fixtureへtest keyを明示した。
+5. snapshot purgeを公開readから分離し、expiry index順の最大32 header batchをFK cascadeで削除するscheduler/jobを追加した。read pathはpurgeを行わず、
+   partial failure rollback、複数batch、再実行、無通信時期限超過をintegration/service testで固定した。
+6. 初回as-ofをUTC epoch secondsへ正規化し、fractional clockでもページ間のasOfを一致させた。connector E2E credential fixtureはUTC `LocalDateTime`で投入する。
 
 対象はOpenAPI candidateのGET-only 11 pathsで、
 `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、external DTO、opaque public ID codec、
 暗号化cursor codecを追加した。list/detail/countはF2のimmutable effective scopeから作る同一populationを使用し、DB queryはallow-list列と
 scope IDだけを選択する。cursorはclient/tenant/legal entity/route/scope/as-of/expiryへbindし、detailの不存在とscope外は同じ404へ収束する。
 
-remediation focused suiteは16 tests、failure/error/skipなしでPASSした。Windowsのenabled connector browser E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
+remediation focused/integration suiteは23 tests、failure/error/skipなしでPASSした。Windowsのenabled connector browser E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
 独立Reviewではこの環境制約をPASS根拠にしない。production public APIはdisabledのままであり、A1再Review PASSまでB1は開始しない。
 
 ## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）

@@ -8,7 +8,8 @@
   ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加した。再Review固定Head
   f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationした。fixed Head
   d022e600でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領し、A1の初回独立Implementation ReviewはFAIL
-  （固定Head `111f4baa`、P0=0、P1=2、P2=2）だった。`874fface`で実装remediation済み、独立再Review待ち。
+  （固定Head `111f4baa`、P0=0、P1=2、P2=2）だった。`874fface`系列で実装remediationしたが、再Review固定Head
+  `cddd4850`でもP1=1、P2=2が残ったため、追加remediation中で独立再Review待ち。
   B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -48,7 +49,8 @@ PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
 （P0/P1/P2=0/0/0）を受領した。A1は`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、独立A1 Implementation Reviewへ渡す。
-A1 Review PASS後にB1→B2→Mを順次実装する。
+A1 Review PASS後にB1→B2→Mを順次実装する。A1再Review FAILの追加3件（snapshot purgeの非bounded/request依存、asOf精度、
+connector E2E fixture timezone）は、独立schedulerの有限purge、秒精度正規化、UTC `LocalDateTime` fixtureへremediateする。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -59,7 +61,7 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
 public endpoint、外部送信、production enablementは未完了である。F2はremediation済みだが独立Implementation
-Review再判定でPASS済み、A1はremediation済みで独立再Review待ち、B1/B2/Mは順次未着手とする。
+Review再判定でPASS済み、A1は追加remediation済みで独立再Review待ち、B1/B2/Mは順次未着手とする。
 全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 

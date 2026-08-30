@@ -156,13 +156,23 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
 11. 4 resource DTOのallow-list、11 GET-only path、internal entity serialization negative、list/detail/count/errorの非列挙境界を
     自動テストで固定する。enabled connector E2Eはtest crypto keyを明示し、request attributeの手動注入を行わない。
 
+### A1 remediation contract（再Review残存finding対応）
+
+12. `t_api_read_snapshot`の期限切れpurgeは公開read requestから分離したscheduler/jobだけが実行する。expiry index順に
+    有限batchのheaderを選択し、headerのFK cascadeでitemを同じbatchとして削除する。batch上限、無通信時の期限超過、
+    複数batch、再実行、部分失敗時のtransaction rollbackをテストし、公開read pathは大量DELETEを発行しない。
+13. cursorのas-ofは初回responseからUTC epoch seconds精度へ正規化し、snapshot、cursor、後続responseで同一byte表現を返す。
+    fractional clockを使ったページ間一致をテストする。
+14. enabled connector E2E fixtureはcredentialのDATETIMEを認証filterと同じUTC `LocalDateTime`で登録する。Linux実Tomcat
+    connectorを通した401/200のHTTP assertionを実行し、Windows固有のloopback起動不能はPASS根拠にしない。
+
 ### A1実装証跡（独立再Implementation Review待ち）
 
 `ExternalApiReadController`はcandidateのGET-only 11 pathsだけを公開し、`ExternalApiReadService`がF2のimmutable effective scopeを
 唯一のvisible populationとしてlist/detail/countへ渡す。`ExternalApiReadMapper`はallow-list列、deleted除外、scope ID predicate、
 stable ID-desc sort、limit+1 cursorだけをSQLへ固定する。invoiceは`invoiceIds × customerIds`をlist/detail/countへ同じpredicateで適用し、
 複数contract時に単一public contract IDを返さない。external DTOは4 resourceのallow-list fieldだけを持ち、public IDはHMAC-SHA256、
-cursorはAES-GCMでsnapshot IDを含むclient/tenant/legal entity/route/scope/as-of/expiryへbindする。remediation focused suiteは16 tests、
+cursorはAES-GCMでsnapshot IDを含むclient/tenant/legal entity/route/scope/as-of/expiryへbindする。remediation focused suiteは23 tests、
 failure/error/skipなしでPASSした。Windows browser profileのTomcat connector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
 この環境制約はPASS根拠にしない。
 

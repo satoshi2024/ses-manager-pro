@@ -136,7 +136,7 @@
 
 - DecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、OwnerRef=PROJECT_OWNER、OwnerType=ROLE。
 - Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、Implementation branch=codex/integration-hub-public-api、scope expansion approval reviewed Head=7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）。
-- F1はPLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持し再オープンしない。scope expansion Plan deltaはca27f455でPASS、F2=fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Implementation Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediate済み・独立再Review待ち、B1/B2/M=APPROVED_SEQUENCED。
+- F1はPLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持し再オープンしない。scope expansion Plan deltaはca27f455でPASS、F2=fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Implementation Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface`系列でremediateしたが、再Review fixed Head `cddd4850`でもP1=1/P2=2が残ったため追加remediation中、B1/B2/M=APPROVED_SEQUENCED。
 - A2=NOT_APPLICABLE_UNDER_CURRENT_DECISION（approved command=0件）であり、command/exportはdefault deny、全体完了をblockしない。
 - scope expansion Plan delta PASS後はF2→A1→B1→B2→Mを各waveの独立Review後に順次実装する。development/testのmock/stub providerとloopback test serverのみを許可する。
 - production enablement、実顧客credential、実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
@@ -145,7 +145,7 @@
   mock/loopback destination、A2 N/A、旧traceをdocs-onlyで補正後、同じR-NF05へ再Reviewする。
 - scope expansion Plan delta remediationは8d25215b9b651e99433becf50d13498da3699d2aへpush済み。
 - scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13はPLAN FAILだったが、remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。Plan PASS後、F2を実装し、FAIL remediation `e47025b5`と追加remediation `a16cdcba`を経て独立再Reviewへ渡した。A1初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediateし、独立再Review待ちである。
+- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。Plan PASS後、F2を実装し、FAIL remediation `e47025b5`と追加remediation `a16cdcba`を経て独立再Reviewへ渡した。A1初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface`系列でremediateしたが、再Review fixed Head `cddd4850`でもP1=1/P2=2が残った。独立schedulerのbounded snapshot purge、秒精度asOf、UTC E2E fixtureへ追加remediationし、独立再Review待ちである。
 
 ### DG-06 NF-06
 

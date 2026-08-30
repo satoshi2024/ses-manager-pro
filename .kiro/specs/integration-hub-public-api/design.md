@@ -363,7 +363,8 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 
 `ExternalApiReadController`は`/external-api/v1`およびcandidateのGET-only 11 pathsだけを持つ。controllerはF2 filterが生成した
 principalと`ExternalApiEffectiveScope`を受け取り、raw client/route JSONや内部roleを参照しない。`ExternalApiReadService`はrequest受信時に
-server clockを一度取得し、list/detail/countの同一呼出しへ渡す。A1はclient指定`asOf`を受け付けない。
+server clockを一度取得し、UTC epoch secondsへ正規化してlist/detail/countの同一呼出しへ渡す。A1はclient指定`asOf`を受け付けない。
+初回response、snapshot、cursor、後続responseは同じ秒精度のas-ofを返す。
 
 `ExternalApiReadMapper`はresourceごとのselected columns、`deleted_flag=0`、effective scopeのID predicate、ID-desc stable sort、
 limit+1をSQL境界へ固定する。detailはopaque public IDを内部IDへ解決した後もeffective scope内だけを検索し、scope外・不存在を同じ
@@ -374,7 +375,7 @@ responseは`ExternalApiEngineerAvailability`、`ExternalApiProject`、`ExternalA
 `availableFrom`へ写像し、`availableTo`と`skillTagCode`はcanonical sourceがないためnullとする。public IDはHMAC-SHA256で生成し、
 cursorはAES-GCM暗号化してclient、tenant、legal entity、route template、scope digest、snapshot ID、as-of、expiryへbindする。
 
-初回listが次ページを持つ場合、serviceはrequest受信時のserver clockをas-ofとして、SQLでscope済みの全visible rowをallow-list DTOへ変換し、
+初回listが次ページを持つ場合、serviceは秒精度へ正規化したrequest受信時のserver clockをas-ofとして、SQLでscope済みの全visible rowをallow-list DTOへ変換し、
 `t_api_read_snapshot`（client/tenant/legal entity/route/scope digest/as-of/expiry）と
 `t_api_read_snapshot_item`（resource ID、DTO JSON）へ同一transactionで保存する。次ページはsnapshot IDと内部keysetだけでitemを読むため、
 初回後のinsert、update、delete、customer/project reparentがmembershipと公開値を変更しない。snapshotにはinternal entity JSON、raw request、
@@ -383,6 +384,15 @@ secret、PII、provider responseを保存せず、cursor TTL後にpurgeする。
 
 invoice queryは`invoiceIds × customerIds`をlist/detail/countの同一WHERE predicateへ必須適用し、contract scopeがある場合はinvoice itemからの
 EXISTS predicateでintersectionする。invoiceが複数contractへ紐づくときは、単一contractを表す`publicContractId`を返さずnullとする。
+
+snapshot purgeは公開read transactionから分離した`ExternalApiReadSnapshotPurgeScheduler`だけが起動する。
+`ExternalApiReadSnapshotMapper.selectExpiredSnapshotIds`は`expires_at, snapshot_id` expiry indexの順で最大32 headerを取得し、
+`deleteSnapshotsById`の一つの短いtransactionでheaderをprimary key削除する。itemは`ON DELETE CASCADE`で同じheader batchに限定して削除され、
+request pathからpurge mapperを呼ばない。削除件数不一致または例外はtransaction全体をrollbackし、次回schedulerが同じ期限切れ集合を再評価する。
+無通信でもschedulerが実行され、複数batchを有限回ずつ処理する。snapshot一件のitem上限はA1の最大512件であり、batch全体のcascade対象も有限である。
+
+enabled connector E2Eのcredential fixtureはDATETIME列へUTC `LocalDateTime`を渡す。認証filterのUTC判定と同じ表現に揃え、
+環境依存の`Timestamp.from(Instant)`変換でissued timeが未来になる経路を作らない。
 
 ## 5. 3つの決定表
 

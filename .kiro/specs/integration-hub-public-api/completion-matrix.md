@@ -19,7 +19,7 @@
 | Scope expansion normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review-ledger、中央traceability | DecisionId、OwnerRef、Base、reviewed Head、wave status、A2 N/A、production禁止境界を正本化。production変更なし | COMPLETE（docs-only gate、Plan delta FAIL remediation中） | f7d7d144（remoteへpush済み。最終handoff Headは外部通知で固定） |
 | F2 security chain | tasks/design/inventory、`src/main/java/com/ses/config/integrationhub/`、F2 tests、V130 | `@Order(0)`専用chain、stateless、HMAC byte canonical、connector raw-target、trusted proxy/CIDR、nonce、typed effective scope、route/quota、専用audit、有限metrics、deny-only、stable error | IMPLEMENTATION_PASS | 初回 `aadcfa98`、`e47025b5`、追加 `a16cdcba`。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS（P0/P1/P2=0/0/0） |
 | F2 Implementation Review remediation | F2専用chain、V130、H2 schema、F2 tests | raw request-target供給、client×route scope intersection、audit一request一record、strict IP、metrics cardinality、namespace root | CLOSED_BY_REVIEW | fixed FAIL Head `220ac86f` → `e47025b5`（6件）、fixed FAIL Head `f57df6d2` → `a16cdcba`（2件）。19追加tests PASS |
-| A1 read/OpenAPI | tasks/design/requirements/openapi-candidate、A1 production/test classes、V131/H2 snapshot schema | GET-only 11 paths、external DTO allow-list、invoice customer predicate、multi-contract非偽装、snapshot-bound cursor、canonical Base64URL、scope-bound list/detail/count | REMEDIATED_REVIEW_PENDING | 初回FAIL fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`（P0=0/P1=2/P2=2）→ remediation `874fface3bfe90dd27b766ddf9aeff4e00eae591`。focused remediation suite 16/16、V131 MySQL Flyway smoke 2/2 PASS、独立再Review待ち |
+| A1 read/OpenAPI | tasks/design/requirements/openapi-candidate、A1 production/test classes、V131/H2 snapshot schema、purge scheduler/tests | GET-only 11 paths、external DTO allow-list、invoice customer predicate、multi-contract非偽装、snapshot-bound cursor、canonical Base64URL、scope-bound list/detail/count、独立bounded purge、秒精度asOf、UTC E2E fixture | REMEDIATED_REVIEW_PENDING | 初回FAIL fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`（P0=0/P1=2/P2=2）→ remediation `874fface`系列。再Review FAIL fixed Head `cddd4850`（P0=0/P1=1/P2=2）→追加remediation pending。focused/integration 23/23、V131 MySQL 2/2 PASS |
 | A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
 | B1 outbound webhook | tasks/design/inventory | A1 Review後。development/test mock/stub/loopbackのみ | APPROVED_SEQUENCED | — |
 | B2 inbound/DLQ/admin UI | tasks/design/requirements | B1 Review後。production受信enablementなし | APPROVED_SEQUENCED | — |
@@ -53,7 +53,7 @@ Scope expansion Plan delta re-Review FAIL Head: 9cca2deec9ab1bd5417aaba98f859ed1
 Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a
 Scope expansion Plan delta PASS: ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a（P0=0、P1=0、P2=0）
 F2 implementation evidence: 初回 `aadcfa98`、remediation `e47025b5`、追加remediation `a16cdcba`（connector raw-target、authoritative tenant/legal scope、audit V130、strict/mapped IP、metrics、namespace root、production enablementなし）。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASSを受領した。
-A1 initial implementation: `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`。独立Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0/P1=2/P2=2）。`874fface3bfe90dd27b766ddf9aeff4e00eae591`でinvoice customer scope、snapshot-bound cursor、canonical Base64URL、DTO/path/entity/E2E証跡をremediateした。focused remediation suite 16 tests PASS。独立再Review完了まではB1を開始しない。
+A1 initial implementation: `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`。独立Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0/P1=2/P2=2）。`874fface3bfe90dd27b766ddf9aeff4e00eae591`でinvoice customer scope、snapshot-bound cursor、canonical Base64URL、DTO/path/entity/E2E証跡をremediateした。初回focused remediation suiteは16 tests PASS、その後の再Reviewで判明した3件を追加remediateし、focused/integration 23/23 PASSとした。独立再Review完了まではB1を開始しない。
 Scope expansion Plan delta residual remediation commit: e18f0d589b63223bf864bb33c6910b56a59d940e（docs-only、remoteへpush済み）
 Task 0R remediation: 48037c923224f684968dbaf3410cdb37307ed100
 Task 0R-D delta remediation: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71
@@ -65,6 +65,7 @@ F1 implementation follow-up remediation: 5a2a023178433882bc1c5dcf92e19b5ecfa19db
 F1 typed snapshot correction: 96d6801c37d4b952e2601a06cf7edc1bc1a1bef8
 A1 remediation: 874fface3bfe90dd27b766ddf9aeff4e00eae591
 A1 entity serialization contract follow-up: 9ed77cf3056d1bd3f913e461115f4ca732639519
+A1 snapshot purge/asOf/E2E remediation: 次のfixed Headへpushして独立再Reviewへhandoff
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）
 
 ## F1実装証跡

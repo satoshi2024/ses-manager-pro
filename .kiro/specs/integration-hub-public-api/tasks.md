@@ -147,10 +147,11 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 - Test requirements: external DTO allow-list、entity serialization negative、scope一致、cursor tamper/expiry、
   count/detail/list非列挙、error body secret/PII/内部情報なし。
 - Demo: internal entityを一つもserializeせず、OpenAPI candidateのGET-only 11 pathsとexternal DTO allow-listへ一致させる。invoice customer scope、
-  複数contract非偽装、初回as-of snapshotのinsert/update/delete/reparent、非canonical cursor拒否を確認する。
+  複数contract非偽装、初回as-of snapshotのinsert/update/delete/reparent、非canonical cursor拒否を確認する。snapshot purgeは公開readから分離し、
+  expiry index順の有限batch、FK cascade、複数batch、再実行、部分失敗rollback、無通信時期限超過を確認する。
 - 実装証跡: `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、4 resource DTO、
   `ExternalApiPublicIdCodec`、`ExternalApiCursorCodec`、enabled key未設定時のfail-closed起動検証。
-- 検証結果: remediation focused suite 16 tests、failure/error/skipなし。Windows browser profileはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
+- 検証結果: remediation focused suite 23 tests、failure/error/skipなし。Windows browser profileはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
   独立ReviewのPASS根拠にはしない。A1独立再Implementation Review完了までB1を開始しない。
 
 ## Task A2: limited command APIs（N/A under current decision）
