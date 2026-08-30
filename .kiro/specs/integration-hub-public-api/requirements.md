@@ -5,7 +5,7 @@
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
 NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2は実装済みで独立Implementation Review待ち、PASS受領前にA1へ進まない。production implementationの
+F2は独立Implementation Review FAIL後のremediation再Review待ち、PASS受領前にA1へ進まない。production implementationの
 public endpoint enablement、外部送信は引き続き開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -27,7 +27,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
 | Wave | 状態 | 開始条件・境界 |
 |---|---|---|
-| F2 | IMPLEMENTED_REVIEW_PENDING | scope expansion Plan delta PASS済み。専用security chain、認証境界、audit/rate/IP |
+| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | scope expansion Plan delta PASS済み。F2 FAIL remediation済み、再Review待ち |
 | A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 pathsとexternal DTO allow-list |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
@@ -100,11 +100,24 @@ IH-R1-15. development/testのprovider.mode enumはMOCK、STUB、LOOPBACKの三�
     redirect、proxy、userinfo、non-loopback、DNS rebinding/multi-addressを拒否する。redirectはNEVER、
     HTTP_PROXY等とJVM proxyは適用せず、config時とconnection直前のpeer検証を行う。
 
+IH-R1-16. raw request-targetは承認済みHTTP connector境界からのみ供給する。Tomcat HTTP/1.1 request-lineまたはHTTP/2 path
+    pseudo-headerのservlet正規化前bytesをimmutable copyし、`external.raw-request-target` request attributeへ一度だけ渡す。
+    filter、controller、test fixtureがservletのnormalized URI/queryや手動attributeを署名入力へ差し替えてはならない。
+    connector属性がない、bytesでない、origin-formを検証できない場合はfail-closed 400とし、enabled実filter-chain E2Eで手動注入なしを検証する。
+IH-R1-17. client data scopeとroute data scopeはstrict typed modelへparseし、承認済みdimensionと有限IDだけを許可する。unknown field、
+    malformed/empty array、duplicate、wildcard、過大値、route resource dimension不一致は拒否する。clientとrouteの共通dimensionのintersectionを
+    tenant/legal entityへbindしたimmutable effective scopeとして認可contextへ渡し、list/detail/countが同じeffective populationを使う。
+IH-R1-18. external専用auditは専用schema/serviceでsuccess、error、rejectを一request一recordへ収束させる。correlation ID、認証前後principal、
+    credential version/key ID、allow-list route template、authentication/scope/dataScope/command/rateの各decision、status/result codeをbounded metadataとして
+    保存し、audit service/schema欠落または永続化失敗は公開responseをfail-closed 500へする。raw target/body、IP、secret、PIIを保存・logしない。
+IH-R1-19. CIDR入力はDNSを一切使わないstrict literal parserで扱い、IPv4は4個のcanonical decimal octet、IPv6は厳密なhex group/`::`、
+    IPv4-mapped IPv6はIPv4へ正規化する。short/integer/leading-zero/zone ID/hostname/bracket/空白表記は拒否し、source IPとCIDRのfamily不一致も拒否する。
+
 ## IH-R2 External contract
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
    scope expansionは開発実装を承認し、Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASSした。
-   F2実装は独立Implementation Review待ちで、production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
+   F2実装はFAIL後のremediation再Review待ちで、production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。
@@ -235,6 +248,9 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを
   provider idempotency keyを保持し、workerは再試行でも同じ値をproviderへ渡すこと。
 - 外部callがDB transaction内で実行されないことの境界テスト。
 - metrics labelの有限集合/cardinality上限、secret/PII log・trace・metrics scan。
+- metrics scrapeはroute template/method/status class/outcome/client tierの有限集合だけを確認し、client/correlation/request/idempotency/resource/user/IP/
+  provider IDがlabelに存在しないことと、route unknownを固定bucketへ収束することを検証する。
+- enabled connector E2Eはrequest attributeの手動注入なしでraw request-targetを取得し、raw target欠落時はfail-closed、通常のrequestは認証境界まで到達することを検証する。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
 - legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。
 - active leaseでkeyset先を通過した後のlease expiry再評価、hold解除時cursor reset、checkpointの同時claim/CAS。

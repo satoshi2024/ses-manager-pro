@@ -1,10 +1,10 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2実装・独立Review継続中）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 remediation・独立Review継続中）
 
 ## 実行停止規則
 
 F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでP0=0、P1=0、P2=0のPASSを受領したため、F2を実施する。
-F2の独立Implementation Review PASS後はA1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+F2の独立Implementation Review再PASS後はA1→B1→B2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -99,7 +99,9 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   GET監査の正本にせず同一filterの自動
   二重登録を防ぐ。CSRFはexternal chainだけdisable、CORSは許可originなし、anonymousはdisable、
   401/403は専用stable JSON entrypointとcorrelation headerでinternal errorへfall-throughさせない。
-- Preconditions: F1 Implementation PASS、scope expansion Decision、R-NF05 Plan delta PASS。F2独立Implementation Review待ち。
+- Preconditions: F1 Implementation PASS、scope expansion Decision、R-NF05 Plan delta PASS。F2独立Implementation Review再判定待ち。
+- Remediation: 前回F2 FAIL（fixed Head `220ac86f`、P1=4/P2=2）に対し、connector raw-target供給、typed effective scope、専用audit、strict IP parser、finite metrics、
+  namespace root boundaryを `e47025b5` へ実装した。独立再ReviewまでF2 PASSへ昇格しない。
 - Implementation guidance: HMAC wire headerはOpenAPI candidateのX-Client-ID、X-Credential-Version、
   X-Key-ID、X-Timestamp、X-Nonce、X-Client-Signatureへ固定し、credentialVersion/keyIdの形式、
   raw header block 16,384 byte/32 field、Content-Length、body 1,048,576 byte、Content-Encodingの
@@ -125,9 +127,11 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   loopback IPv4/IPv6、DNS/redirect/proxy/peer検証も含む。
 - Demo: internal/portal chainと公開chainが相互にprincipalを偽装しない。
 
-- 実施証跡: `src/main/java/com/ses/config/integrationhub/` の専用chain/filter/principal/canonicalizer、
-  `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象41件のcombined suite）および
-  `ExternalApiSecurityChainIntegrationTest`。A1 controller、B1/B2 transport、production enablementは未実装。
+- 実施証跡: `src/main/java/com/ses/config/integrationhub/` の専用chain/filter/principal/canonicalizer、raw-target valve、typed scope、専用audit/metrics、
+  `src/main/java/com/ses/entity/integrationhub/ExternalApiAudit.java` と `V130__integration_hub_external_api_audit.sql`、
+  `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象29件の再確認）および
+  `ExternalApiSecurityChainIntegrationTest`。request attribute手動注入なしのenabled connector E2Eも追加したが、Windows loopback接続エラーでHTTP assertion前に停止。
+  A1 controller、B1/B2 transport、production enablementは未実装。
 
 ## Task A1: v1 read APIs / OpenAPI
 

@@ -52,7 +52,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 
 | Wave | Decision status | 境界 |
 |---|---|---|
-| F2 | IMPLEMENTED_REVIEW_PENDING | Plan delta PASS済み。専用security chain、client principal、scope/data scope、audit、rate/IP |
+| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | Implementation FAIL（220ac86f、P1=4/P2=2）をe47025b5でremediate、独立再Review待ち |
 | A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 paths、inventory allow-list、external DTOのみ |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
@@ -96,8 +96,9 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 
 F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、
 再オープンしない。scope expansionのPlan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aで
-PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで実装済みであり、独立Implementation Reviewへ渡す。
+PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで実装済みだが、固定Head `220ac86f531d6e656aeac0ef19225e9596b9385b` の独立Implementation ReviewがFAIL
+（P0=0、P1=4、P2=2）となったため、`e47025b5`でremediationし、独立再Reviewへ渡す。
 
-Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2は実装済みで独立Implementation Reviewへ渡し、
+Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2はremediation済みで独立再Reviewへ渡し、
 PASS後はA1→Review→B1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

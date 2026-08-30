@@ -48,6 +48,25 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 この表のSPEC_ADDRESSEDはPLAN PASSではない。production source、migration、test、endpoint、外部送信の
 変更はなく、remediation後の新しいremote Headを同じR-NF05へhandoffする。
 
+## F2 Implementation Review remediation
+
+固定Head `220ac86f531d6e656aeac0ef19225e9596b9385b` の独立Implementation ReviewはFAIL
+（P0=0、P1=4、P2=2）だった。F2 approved scope内で解消可能な6件を実装commit
+`e47025b5`へ反映した。独立再Reviewが完了するまで、いずれもPASSまたは公開許可へ昇格させない。
+
+| Finding ID | Severity | Finding | 対応証跡 | Status |
+|---|---|---|---|---|
+| NF05-IMPL-F2-001 | P1 | 実運用のraw request-target供給経路がなく、enabled chainが手動attributeなしで通らない | `ExternalApiRawRequestTargetValve`、`ExternalApiTomcatConfiguration`、`ExternalApiRawRequestTargetValveTest`、manual attributeなしの`ExternalApiEnabledConnectorE2ETest` | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-002 | P1 | client data scopeとroute data scopeのintersection・tenant/legal entity bindingが認可contextへ未接続 | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter`、scope negative/integration tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-003 | P1 | 専用auditがcorrelation、credential識別子、pre/post principal、全decision、一request一recordを満たさない | `ExternalApiAuditTrail`、`ExternalApiAuditBoundary`、`ExternalApiAuditService`、V130、H2/audit boundary tests。永続化失敗は500 fail-closed | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-004 | P1 | CIDR判定がDNS/曖昧IP表記を許す | `ExternalApiCidrMatcher` strict literal parser、IPv4/IPv6/mapped/hostname/short/integer/leading-zero/zone tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-005 | P2 | finite metrics labelとscrape cardinality契約が未実装 | `ExternalApiMetricsRecorder`、finite-label scrape test | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-006 | P2 | `/external-api/v1` namespace rootが専用filter境界を迂回する | `ExternalApiRouteCatalog` exact root、`ExternalApiSecurityConfig` exact matcher、root chain/audit/correlation integration test | REMEDIATED_REVIEW_PENDING |
+
+F2 remediation対象13クラスの再実行結果は29 tests、failure 0、error 0、skip 0である。enabled connector E2Eは実装上のmanual
+attribute注入なしで追加したが、Windows実行環境の`Unable to establish loopback connection`によりTomcat起動前に停止し、HTTP assertionへ到達していない。
+この環境制約をPASS根拠にせず、独立Reviewへ明示する。A1/B1/B2/M、production enablement、実顧客credential、実provider送信、PR/mergeは未実施である。
+
 ## Scope expansion Plan delta re-review remediation
 
 固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の独立Plan delta再ReviewはPLAN FAIL
@@ -122,7 +141,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 `a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
-F2は実装済みだが独立Implementation Review待ちである。A2/command/exportは
+F2はFAIL後のremediation済みだが独立Implementation Review再判定待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -142,7 +161,7 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 - Scope expansion Plan delta re-Review: 9cca2deec9ab1bd5417aaba98f859ed14210da13、PLAN FAIL（P0=0、P1=3、P2=0）
 - Scope expansion Plan delta residual remediation commit: e18f0d589b63223bf864bb33c6910b56a59d940e（docs-only、remoteへpush済み）
 - Scope expansion Plan delta PASS: ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a（P0=0、P1=0、P2=0）
-- F2 implementation: dedicated security chainとF2 boundary testsを同一専用worktreeで実施（独立Implementation Review待ち）
+- F2 implementation remediation: `e47025b5`でconnector raw-target、typed effective scope、専用audit、strict IP、finite metrics、namespace rootを追加（独立再Review待ち）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS

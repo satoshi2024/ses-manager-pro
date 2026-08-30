@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（scope expansion承認済み・F2実装・独立Implementation Review待ち）
+# NF-05 Public API 実装計画（scope expansion承認済み・F2 remediation・独立再Review待ち）
 
 ## 現在のゲート
 
@@ -9,7 +9,7 @@ Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.md
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
 （P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2は実装済みで独立Implementation Review待ちであり、PASS受領後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
+F2は独立Implementation Review FAIL後のremediation済みで再Review待ちであり、PASS受領後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -24,7 +24,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | 0R-P5 | scope expansion Plan delta remediation | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、trace | 前回P1-EXP-004/P2はSPEC_ADDRESSED。残存P1を0R-P6で補正 |
 | 0R-P6 | scope expansion Plan delta residual remediation | security chain監査/error境界、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約 | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
-| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTED。独立Implementation Review待ち |
+| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。F2 FAIL remediation済み |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | APPROVED_SEQUENCED。F2 Review PASS後 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
 | B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | APPROVED_SEQUENCED。A1 Review後、mock/loopbackのみ |
@@ -56,7 +56,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
    peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
-5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2実装Review待ち、Owner/Base正本値を全traceへ同期する。
+5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 remediation再Review待ち、Owner/Base正本値を全traceへ同期する。
 
 6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
    前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
@@ -66,6 +66,28 @@ production enablementと実顧客/実providerは引き続き禁止する。
 8. public-api=falseでもdeny-only chainを残し、controller/worker/scheduler/transport beanを生成しない。
    profileへfalse/MOCKを明示し、missingはimplicit defaultで補わず起動拒否する。mode enumはMOCK/STUB/
    LOOPBACKへ統一する。
+
+## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）
+
+独立Implementation Reviewは固定Head `220ac86f531d6e656aeac0ef19225e9596b9385b`でFAIL（P0=0、P1=4、P2=2）だった。
+次の実装境界を追加し、再Reviewへ提出する。
+
+1. `ExternalApiRawRequestTargetValve`をTomcat connectorのrequest-line bytes境界へ接続し、`T_BYTES`のimmutable copyだけを
+   `external.raw-request-target`へ渡す。servlet normalized URI/query、Forwarded/XFF、proxy rewriteは署名入力に使わない。
+   enabled `@SpringBootTest`はrequest attributeを手動設定せず、実filter chainを通す。
+2. `ExternalApiDataScope`をstrict JSON object/allow-list dimension/有限IDのtyped modelとし、client bindingとroute scopeの共通dimensionだけを
+   intersectionする。tenant/legal entityはprincipal bindingから再確認し、`ExternalApiEffectiveScope`をimmutable request contextへ渡す。
+   malformed、empty、duplicate、wildcard、route/resource dimension不一致はfail-closedとする。
+3. `ExternalApiAuditBoundary`はcorrelation、認証前後principal、credential version/key ID、route template、authentication/scope/dataScope/
+   command/rate decisionを一request一recordで保存する。専用`V130` audit table/serviceがない場合はresponseを500へ収束させ、raw target/body、IP、secret、
+   PIIを保存しない。
+4. CIDRはDNSを使わないstrict literal parserとし、IPv4 4 octet、IPv6、IPv4-mapped IPv6を固定正規化する。short/integer/leading-zero/
+   zone ID/hostnameを拒否する。
+5. metricsはroute/method/status class/outcome/client tierの有限集合のみをlabelとし、ID類をlabelへ入れない。namespace root `/external-api/v1`も
+   security matcher、filter、audit、correlationの同一境界で扱う。
+
+実装commitは `e47025b5`。対象F2 suiteは29 testsがfailure/error/skipなしでPASSした。enabled connector E2EはWindowsのloopback接続確立失敗でHTTP assertion前に停止したため、独立Review再判定前は
+F2 IMPLEMENTATION_PASSへ昇格しない。
 
 ## F1 Implementation Review remediation（独立Review PASS）
 
@@ -94,11 +116,11 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2はIMPLEMENTED_REVIEW_PENDING、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、F2 Implementation Review PASS後に順次開始する。A2は
+F2はIMPLEMENTATION_REMEDIATION_REVIEW_PENDING、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、F2 Implementation Review再PASS後に順次開始する。A2は
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
 credential、実providerへの外部送信は引き続き禁止する。
 
-F2実装の独立Implementation Reviewは未受領であり、これを公開可能または全体PASSとは扱わない。
+F2の独立Implementation ReviewはFAIL後のremediation再Review待ちであり、これを公開可能または全体PASSとは扱わない。
 
 ## 完了・引き渡し条件
 

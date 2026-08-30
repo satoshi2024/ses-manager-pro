@@ -4,8 +4,9 @@
 
 - 中央台帳の状態: APPROVED
 - 本specの状態: F1独立Implementation Review PASSを維持。scope expansion Plan deltaは固定Head
-  ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2実装済みで独立
-  Implementation Review待ち、A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
+  ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2は独立Implementation
+  ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加し、再Review待ち。
+  A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -42,7 +43,8 @@ scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implement
 同Headから作成し、既存R-NF05へPlan delta Reviewを渡した。固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcは
 PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2を実装済みで独立Implementation Reviewへ渡し、PASS後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/Aとする。
+F2のImplementation Review FAILを受けたremediationを実施済みで、独立再Reviewへ渡す。PASS後にA1→B1→B2→Mを順次実装する。
+A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
 `d476614e`、follow-up remediationは `5a2a0231`、typed snapshot correctionは `96d6801c`。V129 MySQL Flyway smoke、F1 H2 targeted
@@ -51,8 +53,8 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `5a2a0231`の再Reviewを行った。固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1=1（nested scalar bypass）が残ったため、
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
-public endpoint、外部送信、production enablementは未完了である。F2は実装済みだが独立Implementation Review待ちで、
-A1/B1/B2/Mは順次未着手とする。
+public endpoint、外部送信、production enablementは未完了である。F2はremediation済みだが独立Implementation
+Review再判定待ちで、A1/B1/B2/Mは順次未着手とする。
 全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
@@ -61,6 +63,14 @@ A1/B1/B2/Mは順次未着手とする。
 ReviewのP1/P2指摘に対し、atomic outbox、非公開OpenAPI candidate、metrics cardinality、payload retention、
 review traceをspecへ反映した。対応状況はreview-remediation.mdを正本とし、SPEC_ADDRESSED、OWNER_APPROVED、
 PLAN PASS、IMPLEMENTATION PASSを混同しない。
+
+## F2 Implementation Review remediation
+
+固定Head `220ac86f531d6e656aeac0ef19225e9596b9385b` の独立Implementation ReviewはFAIL（P0=0、P1=4、P2=2）だった。
+実装可能な指摘を `e47025b5` でremediateした。Tomcat connector valveからのみraw request-targetを受け、typed data-scopeの
+intersectionとimmutable effective scopeを認可へbindし、専用audit table/service、strict literal IP parser、有限metrics label、
+namespace root matcherを追加した。enabled connector E2Eは手動request属性を注入しない形で追加したが、実行環境のloopback接続確立失敗により
+HTTP assertion到達前に停止している。このためF2をPASSまたは公開可能とは扱わず、独立Implementation再Reviewを要求する。
 
 ## 既知の重要差分
 

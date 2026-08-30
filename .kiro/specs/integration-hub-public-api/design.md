@@ -58,6 +58,26 @@ permitAllを適用しない。既存portal/internal chainはexternal clientを�
 external chainはinternal user/sessionを認証根拠にしない。chain選択、順序、排他、stateless、
 default deny、filter一回実行を起動時assertionとsecurity testで固定する。
 
+### 1.2 F2 Implementation Review remediation boundary
+
+F2の実装は `e47025b5` で次の専用境界へ固定する。これは実装Reviewの再判定を待つ証跡であり、PASSやproduction enablementを意味しない。
+
+1. raw request-targetは `ExternalApiRawRequestTargetValve` がTomcat connectorのrequest-line bytes（`MessageBytes.T_BYTES`）から取得し、
+   `ExternalApiTomcatConfiguration`がengineへ一度だけ登録する。byte配列はcopyしてrequest attributeへ渡し、servlet normalized URI/query、Host、
+   Forwarded/X-Forwarded-For、proxy rewrite、testの手動attributeは入力元にしない。属性がない場合は認証前に400 fail-closedとする。
+2. `ExternalApiDataScope`はJSON objectのallowed dimensionと有限IDをstrict parseし、client bindingとroute scopeの共通dimensionだけをintersectionする。
+   `ExternalApiEffectiveScope`はtenant/legal entity、allowed valuesをdeep-copyしたimmutable recordとし、`ExternalApiAuthorizationFilter`がrequest contextへ一度だけ
+   bindする。route resource typeに対応するdimensionがない、またはmalformed/empty/duplicate/wildcardの場合は403へ収束する。
+3. `ExternalApiAuditTrail`はrequest内のbounded metadataだけを収集し、`ExternalApiAuditBoundary`が `ExternalApiAuditService` へ一request一recordを要求する。
+   `V130__integration_hub_external_api_audit.sql` の専用tableはcorrelation、pre/post principal、credential version/key ID、allow-list route template、
+   authentication/scope/dataScope/command/rate decision、status/result codeだけを保存する。永続化serviceの欠落・失敗時はresponseを500へ置換し、response bodyを
+   commitする前にfail-closedとする。raw target/body、source IP、secret、PIIはrecord/logへ渡さない。
+4. `ExternalApiCidrMatcher`はDNS APIを呼ばず、strict literal parserでIPv4 4 octetとIPv6 group/`::`だけを受け付ける。IPv4-mapped IPv6はIPv4へ
+   normalized byte representationとして比較し、short/integer/leading-zero/zone ID/hostname/bracket/空白を拒否する。
+5. `ExternalApiMetricsRecorder`はroute/method/status class/outcome/client tierの有限集合だけでCounterを登録する。client/correlation/request/
+   idempotency/resource/user/IP/provider IDをlabelへ入れず、unknown route/method/outcome/tierは固定bucketへ収束させる。
+6. `/external-api/v1` exact rootは `/external-api/v1/**`と同じsecurity matcher、route catalog、correlation、audit、disabled deny-only境界で処理する。
+
 ## 2. F1コンポーネントと保存モデル
 
 F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具体実装は開始時に現行最大値を再確認する。
@@ -474,7 +494,7 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - scope expansionのPlan delta ReviewのPASS、approved Baseの再fetch確認、各waveのmigration最大値の再確認。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
-- Plan deltaはca27f455でPASS済み。F2は実装済みで独立Implementation Review待ち、PASS後にA1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
+- Plan deltaはca27f455でPASS済み。F2はFAIL後のremediation済みで独立再Review待ち、再PASS後にA1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。
