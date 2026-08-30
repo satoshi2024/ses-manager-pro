@@ -38,10 +38,13 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
         if (recordId == null || reasonCode == null || reasonCode.isBlank() || reasonCode.length() > 64 || now == null) {
             throw new IllegalArgumentException("invalid retention hold");
         }
+        String retentionClass = targetRetentionClass(recordKind, recordId);
+        if (retentionClass != null) {
+            ensureCheckpoint(recordKind, retentionClass, now);
+        }
         if (!lockTarget(recordKind, recordId)) {
             return false;
         }
-        String retentionClass = targetRetentionClass(recordKind, recordId);
         ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
         if (hold == null) {
             try {
@@ -77,10 +80,16 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     @Transactional(rollbackFor = Exception.class)
     public boolean releaseHold(String recordKind, Long recordId, LocalDateTime now) {
         validateKind(recordKind);
-        if (recordId == null || now == null || !lockTarget(recordKind, recordId)) {
+        if (recordId == null || now == null) {
             return false;
         }
         String retentionClass = targetRetentionClass(recordKind, recordId);
+        if (retentionClass != null) {
+            ensureCheckpoint(recordKind, retentionClass, now);
+        }
+        if (!lockTarget(recordKind, recordId)) {
+            return false;
+        }
         ApiRetentionHold hold = holdMapper.selectForUpdate(recordKind, recordId);
         boolean released = hold != null && "ACTIVE".equals(hold.getStatus())
                 && holdMapper.release(hold.getId(), hold.getVersion(), now) == 1;
@@ -137,8 +146,11 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             QueryWrapper<ApiDelivery> query = new QueryWrapper<ApiDelivery>()
                     .select("id", "retention_expires_at").in("status", "SUCCEEDED", "FAILED", "DLQ")
                     .eq("retention_class", retentionClass).le("retention_expires_at", now)
-                    .and(wrapper -> wrapper.isNull("lease_token").or(inner -> inner.isNull("lease_expires_at"))
-                            .or(inner -> inner.le("lease_expires_at", now)))
+                    .and(wrapper -> wrapper.and(inner -> inner.isNull("lease_token")
+                            .isNull("lease_expires_at"))
+                            .or(inner -> inner.isNotNull("lease_token")
+                                    .isNotNull("lease_expires_at")
+                                    .le("lease_expires_at", now)))
                     .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'DELIVERY' "
                             + "AND h.record_id = t_api_delivery.id AND h.status = 'ACTIVE'")
                     .orderByAsc("retention_expires_at", "id");
@@ -245,10 +257,8 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     }
 
     private ApiPurgeCheckpoint ensureCheckpoint(String recordKind, String retentionClass, LocalDateTime now) {
-        ApiPurgeCheckpoint checkpoint = checkpointMapper.selectForUpdate(recordKind, retentionClass);
-        if (checkpoint != null) {
-            return checkpoint;
-        }
+        // 欠落rowのSELECT FOR UPDATEはMySQLのgap lockを作り、hold/purgeの同時初期化で
+        // INSERT deadlockを招く。unique INSERTを先に試み、既存rowは競合後にFOR UPDATEへ収束する。
         try {
             ApiPurgeCheckpoint newCheckpoint = ApiPurgeCheckpoint.builder()
                     .recordKind(recordKind)
@@ -261,7 +271,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             checkpointMapper.insert(newCheckpoint);
             return newCheckpoint;
         } catch (DuplicateKeyException e) {
-            checkpoint = checkpointMapper.selectForUpdate(recordKind, retentionClass);
+            ApiPurgeCheckpoint checkpoint = checkpointMapper.selectForUpdate(recordKind, retentionClass);
             if (checkpoint == null) {
                 throw e;
             }
@@ -289,15 +299,15 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     private String targetRetentionClass(String recordKind, Long recordId) {
         return switch (recordKind) {
             case "IDEMPOTENCY" -> {
-                ApiIdempotencyRecord row = idempotencyMapper.selectByIdForUpdate(recordId);
+                ApiIdempotencyRecord row = idempotencyMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
             case "DELIVERY" -> {
-                ApiDelivery row = deliveryMapper.selectForUpdate(recordId);
+                ApiDelivery row = deliveryMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
             case "INBOUND" -> {
-                InboundEvent row = inboundMapper.selectForUpdate(recordId);
+                InboundEvent row = inboundMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
             default -> null;

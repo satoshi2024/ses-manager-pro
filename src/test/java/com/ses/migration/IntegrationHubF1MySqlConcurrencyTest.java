@@ -1,11 +1,22 @@
 package com.ses.migration;
 
+import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.mapper.ApiDeliveryMapper;
+import com.ses.mapper.InboundEventMapper;
+import com.ses.service.integrationhub.ApiDeliveryService;
+import com.ses.service.integrationhub.ApiRetentionPurgeService;
+import com.ses.service.integrationhub.ApiUsageBucketService;
+import com.ses.service.integrationhub.ExternalDtoSnapshot;
+import com.ses.service.integrationhub.InboundEventService;
 import com.ses.test.MySQLContainer;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -22,9 +33,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** NF-05 F1: MySQL row lock、delivery CAS、active lease purge predicateの実証。 */
 @Tag("mysql")
+@SpringBootTest
+@ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 class IntegrationHubF1MySqlConcurrencyTest {
     private static final String CLIENT_ID = "f1-mysql-concurrency-client";
@@ -41,14 +57,28 @@ class IntegrationHubF1MySqlConcurrencyTest {
             .withUsername("root")
             .withPassword("ses");
 
-    @BeforeAll
-    static void migrate() {
-        Flyway.configure()
-                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
-                .locations("classpath:db/migration")
-                .load()
-                .migrate();
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.username", MYSQL::getUsername);
+        registry.add("spring.datasource.password", MYSQL::getPassword);
+        registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.sql.init.mode", () -> "never");
     }
+
+    @Autowired
+    private ApiUsageBucketService usageBucketService;
+    @Autowired
+    private ApiDeliveryService deliveryService;
+    @Autowired
+    private ApiDeliveryMapper deliveryMapper;
+    @Autowired
+    private ApiRetentionPurgeService retentionPurgeService;
+    @Autowired
+    private InboundEventService inboundEventService;
+    @Autowired
+    private InboundEventMapper inboundEventMapper;
 
     @AfterEach
     void cleanup() throws Exception {
@@ -57,16 +87,15 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 statement.executeUpdate("DELETE FROM t_api_delivery WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM m_webhook_subscription WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_usage_bucket WHERE client_id = '" + CLIENT_ID + "'");
+                statement.executeUpdate("DELETE FROM t_inbound_event WHERE client_id = '" + CLIENT_ID + "'");
+                statement.executeUpdate("DELETE FROM t_api_retention_hold");
+                statement.executeUpdate("DELETE FROM t_api_purge_checkpoint");
             }
         }
     }
 
     @Test
     void usageBucketは複数connectionの同時incrementを一つのrowへ直列化する() throws Exception {
-        try (Connection connection = MYSQL.createConnection("")) {
-            insertUsageBucket(connection);
-        }
-
         int workers = 8;
         ExecutorService executor = Executors.newFixedThreadPool(workers);
         CountDownLatch ready = new CountDownLatch(workers);
@@ -76,44 +105,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
             futures.add(executor.submit(() -> {
                 ready.countDown();
                 start.await(10, TimeUnit.SECONDS);
-                try (Connection connection = MYSQL.createConnection("")) {
-                    connection.setAutoCommit(false);
-                    int current;
-                    int version;
-                    try (PreparedStatement select = connection.prepareStatement(
-                            "SELECT minute_count, version FROM t_api_usage_bucket "
-                                    + "WHERE client_id = ? AND scope_code = ? AND tenant_id = ? "
-                                    + "AND route_template = ? FOR UPDATE")) {
-                        select.setString(1, CLIENT_ID);
-                        select.setString(2, SCOPE);
-                        select.setString(3, TENANT_ID);
-                        select.setString(4, ROUTE);
-                        try (ResultSet rs = select.executeQuery()) {
-                            if (!rs.next()) {
-                                throw new IllegalStateException("usage bucket missing");
-                            }
-                            current = rs.getInt(1);
-                            version = rs.getInt(2);
-                        }
-                    }
-                    try (PreparedStatement update = connection.prepareStatement(
-                            "UPDATE t_api_usage_bucket SET minute_count = ?, version = version + 1 "
-                                    + "WHERE client_id = ? AND scope_code = ? AND tenant_id = ? "
-                                    + "AND route_template = ? AND version = ? AND minute_count < 60")) {
-                        update.setInt(1, current + 1);
-                        update.setString(2, CLIENT_ID);
-                        update.setString(3, SCOPE);
-                        update.setString(4, TENANT_ID);
-                        update.setString(5, ROUTE);
-                        update.setInt(6, version);
-                        int updated = update.executeUpdate();
-                        connection.commit();
-                        return updated;
-                    } catch (Exception e) {
-                        connection.rollback();
-                        throw e;
-                    }
-                }
+                return usageBucketService.consumeAt(CLIENT_ID, SCOPE, TENANT_ID, ROUTE, NOW).allowed() ? 1 : 0;
             }));
         }
         ready.await(10, TimeUnit.SECONDS);
@@ -137,70 +129,43 @@ class IntegrationHubF1MySqlConcurrencyTest {
     @Test
     void deliveryCASはproviderKey_payloadHash_version_lease_generationを同時に要求する() throws Exception {
         long subscriptionId;
-        long deliveryId;
-        String providerKey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
         try (Connection connection = MYSQL.createConnection("")) {
             subscriptionId = insertSubscription(connection);
-            try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO t_api_delivery (event_id, subscription_id, delivery_generation, client_id, "
-                            + "scope_code, tenant_id, event_type, schema_version, provider_idempotency_key, "
-                            + "external_dto_snapshot, payload_hash, status, lease_token, lease_expires_at) "
-                            + "VALUES ('f1-delivery-cas', ?, 1, ?, ?, ?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'CLAIMED', 'lease-1', ?)")) {
-                insert.setLong(1, subscriptionId);
-                insert.setString(2, CLIENT_ID);
-                insert.setString(3, SCOPE);
-                insert.setString(4, TENANT_ID);
-                insert.setString(5, providerKey);
-                insert.setString(6, HASH);
-                insert.setObject(7, NOW.plusMinutes(5));
-                insert.executeUpdate();
-            }
-            try (Statement statement = connection.createStatement();
-                 ResultSet rs = statement.executeQuery("SELECT id FROM t_api_delivery WHERE event_id = 'f1-delivery-cas'")) {
-                rs.next();
-                deliveryId = rs.getLong(1);
-            }
         }
 
-        String update = "UPDATE t_api_delivery SET status = 'SUCCEEDED', terminal_at = ?, "
-                + "retention_class = 'SUCCEEDED_PAYLOAD_30D', retention_expires_at = ?, "
-                + "lease_token = NULL, lease_expires_at = NULL, version = version + 1 "
-                + "WHERE id = ? AND version = 0 AND delivery_generation = ? AND lease_token = ? AND provider_idempotency_key = ? "
-                + "AND payload_hash = ? AND status = 'CLAIMED'";
-        try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
-            statement.setObject(1, NOW);
-            statement.setObject(2, NOW.plusDays(30));
-            statement.setLong(3, deliveryId);
-            statement.setInt(4, 2);
-            statement.setString(5, "lease-1");
-            statement.setString(6, providerKey);
-            statement.setString(7, HASH);
-            assertEquals(0, statement.executeUpdate());
+        ApiDelivery enqueued = deliveryService.enqueue("f1-delivery-cas", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "corr-f1", ExternalDtoSnapshot.of("{\"status\":\"ok\"}"), NOW);
+        ApiDelivery claimed = deliveryService.claim(enqueued.getId(), "lease-1", NOW, NOW.plusMinutes(5));
+        assertEquals("CLAIMED", claimed.getStatus());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<java.util.concurrent.Future<Boolean>> futures = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            futures.add(executor.submit(() -> {
+                ready.countDown();
+                start.await(10, TimeUnit.SECONDS);
+                return deliveryService.markSucceeded(claimed.getId(), claimed.getVersion(),
+                        claimed.getDeliveryGeneration(), claimed.getLeaseToken(), claimed.getProviderIdempotencyKey(),
+                        claimed.getPayloadHash(), "provider-request-1", NOW);
+            }));
         }
-        try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
-            statement.setObject(1, NOW);
-            statement.setObject(2, NOW.plusDays(30));
-            statement.setLong(3, deliveryId);
-            statement.setInt(4, 1);
-            statement.setString(5, "lease-1");
-            statement.setString(6, providerKey);
-            statement.setString(7, HASH);
-            assertEquals(1, statement.executeUpdate());
+        ready.await(10, TimeUnit.SECONDS);
+        start.countDown();
+        int succeeded = 0;
+        for (java.util.concurrent.Future<Boolean> future : futures) {
+            if (future.get(30, TimeUnit.SECONDS)) {
+                succeeded++;
+            }
         }
-        try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
-            statement.setObject(1, NOW);
-            statement.setObject(2, NOW.plusDays(30));
-            statement.setLong(3, deliveryId);
-            statement.setInt(4, 1);
-            statement.setString(5, "lease-1");
-            statement.setString(6, providerKey);
-            statement.setString(7, HASH);
-            assertEquals(0, statement.executeUpdate());
-        }
+        executor.shutdownNow();
+        assertEquals(1, succeeded, "同じlease/version/generationのresult CASは一つだけ成功すること");
+        assertEquals("SUCCEEDED", deliveryMapper.selectById(enqueued.getId()).getStatus());
     }
 
     @Test
-    void activeLease中のpurgeは削除せず期限後だけCAS削除する() throws Exception {
+    void holdとpurgeの同時処理は共通lock順序でdeadlockせずどちらか一つへ収束する() throws Exception {
         long subscriptionId;
         try (Connection connection = MYSQL.createConnection("")) {
             subscriptionId = insertSubscription(connection);
@@ -209,53 +174,136 @@ class IntegrationHubF1MySqlConcurrencyTest {
                             + "scope_code, tenant_id, event_type, schema_version, provider_idempotency_key, "
                             + "external_dto_snapshot, payload_hash, status, lease_token, lease_expires_at, "
                             + "terminal_at, retention_class, retention_expires_at) VALUES "
-                            + "('f1-delivery-lease', ?, 1, ?, ?, ?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'SUCCEEDED', 'active-lease', ?, ?, 'SUCCEEDED_PAYLOAD_30D', ?)")) {
+                            + "('f1-delivery-hold-race', ?, 1, ?, ?, ?, 'resource.changed', 'v1', ?, '{\"status\":\"ok\"}', ?, 'SUCCEEDED', ?, ?, ?, 'SUCCEEDED_PAYLOAD_30D', ?)")) {
                 insert.setLong(1, subscriptionId);
                 insert.setString(2, CLIENT_ID);
                 insert.setString(3, SCOPE);
                 insert.setString(4, TENANT_ID);
                 insert.setString(5, HASH);
                 insert.setString(6, HASH);
-                insert.setObject(7, NOW.plusMinutes(1));
-                insert.setObject(8, NOW.minusDays(1));
-                insert.setObject(9, NOW.minusSeconds(1));
+                insert.setObject(7, null);
+                insert.setObject(8, null);
+                insert.setObject(9, NOW.minusDays(1));
+                insert.setObject(10, NOW.minusSeconds(1));
                 insert.executeUpdate();
             }
         }
-        try (Connection connection = MYSQL.createConnection("")) {
-            assertEquals(0, deleteExpiredDelivery(connection, NOW));
-            try (Statement statement = connection.createStatement()) {
-                statement.executeUpdate("UPDATE t_api_delivery SET lease_expires_at = '2026-08-30 12:00:00' "
-                        + "WHERE event_id = 'f1-delivery-lease'");
+
+        long deliveryId;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT id FROM t_api_delivery WHERE event_id = 'f1-delivery-hold-race'")) {
+            try (ResultSet rs = statement.executeQuery()) {
+                rs.next();
+                deliveryId = rs.getLong(1);
             }
-            assertEquals(1, deleteExpiredDelivery(connection, NOW));
         }
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        var holdFuture = executor.submit(() -> {
+            ready.countDown();
+            start.await(10, TimeUnit.SECONDS);
+            return retentionPurgeService.acquireHold("DELIVERY", deliveryId, "MYSQL_RACE", NOW);
+        });
+        var purgeFuture = executor.submit(() -> {
+            ready.countDown();
+            start.await(10, TimeUnit.SECONDS);
+            return retentionPurgeService.purgeExpired("DELIVERY", "SUCCEEDED_PAYLOAD_30D", NOW, 10);
+        });
+        ready.await(10, TimeUnit.SECONDS);
+        start.countDown();
+        boolean held = holdFuture.get(30, TimeUnit.SECONDS);
+        ApiRetentionPurgeService.PurgeReport report = purgeFuture.get(30, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        long remaining;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?")) {
+            statement.setLong(1, deliveryId);
+            try (ResultSet rs = statement.executeQuery()) {
+                rs.next();
+                remaining = rs.getLong(1);
+            }
+        }
+        assertTrue((held && remaining == 1 && report.purged() == 0)
+                || (!held && remaining == 0 && report.purged() == 1),
+                "hold/purgeの勝者とDB状態が一致すること");
     }
 
-    private int deleteExpiredDelivery(Connection connection, LocalDateTime now) throws Exception {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "DELETE FROM t_api_delivery WHERE event_id = 'f1-delivery-lease' AND version = 0 "
-                        + "AND retention_expires_at <= ? AND status IN ('SUCCEEDED', 'FAILED', 'DLQ') "
-                        + "AND (lease_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?)")) {
-            statement.setObject(1, now);
-            statement.setObject(2, now);
-            return statement.executeUpdate();
+    @Test
+    void activeLeaseまたは期限欠落rowはpurgeせず期限後にCAS削除する() throws Exception {
+        long subscriptionId;
+        try (Connection connection = MYSQL.createConnection("")) {
+            subscriptionId = insertSubscription(connection);
         }
+        ApiDelivery delivery = deliveryService.enqueue("f1-delivery-lease", subscriptionId, 1, CLIENT_ID, SCOPE,
+                TENANT_ID, "resource.changed", "v1", "corr-lease", ExternalDtoSnapshot.of("{\"status\":\"ok\"}"), NOW);
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE t_api_delivery SET status = 'SUCCEEDED', terminal_at = ?, "
+                             + "retention_class = 'SUCCEEDED_PAYLOAD_30D', retention_expires_at = ?, "
+                             + "lease_token = 'active-lease', lease_expires_at = ? WHERE id = ?")) {
+            statement.setObject(1, NOW.minusDays(1));
+            statement.setObject(2, NOW.minusSeconds(1));
+            statement.setObject(3, null);
+            statement.setLong(4, delivery.getId());
+            statement.executeUpdate();
+        }
+        assertEquals(0, retentionPurgeService.purgeExpired(
+                "DELIVERY", "SUCCEEDED_PAYLOAD_30D", NOW, 10).purged());
+        assertNotNull(deliveryMapper.selectById(delivery.getId()));
+
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE t_api_delivery SET lease_expires_at = ? WHERE id = ?")) {
+            statement.setObject(1, NOW.plusMinutes(1));
+            statement.setLong(2, delivery.getId());
+            statement.executeUpdate();
+        }
+        assertEquals(0, retentionPurgeService.purgeExpired(
+                "DELIVERY", "SUCCEEDED_PAYLOAD_30D", NOW, 10).purged());
+
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE t_api_delivery SET lease_expires_at = ? WHERE id = ?")) {
+            statement.setObject(1, NOW);
+            statement.setLong(2, delivery.getId());
+            statement.executeUpdate();
+        }
+        assertEquals(1, retentionPurgeService.purgeExpired(
+                "DELIVERY", "SUCCEEDED_PAYLOAD_30D", NOW, 10).purged());
+        assertNull(deliveryMapper.selectById(delivery.getId()));
     }
 
-    private void insertUsageBucket(Connection connection) throws Exception {
-        try (PreparedStatement insert = connection.prepareStatement(
-                "INSERT INTO t_api_usage_bucket (client_id, scope_code, tenant_id, route_template, "
-                        + "minute_window_start, day_window_start, burst_last_refill_at) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
-            insert.setString(1, CLIENT_ID);
-            insert.setString(2, SCOPE);
-            insert.setString(3, TENANT_ID);
-            insert.setString(4, ROUTE);
-            insert.setObject(5, NOW.withSecond(0));
-            insert.setObject(6, NOW.toLocalDate().atStartOfDay());
-            insert.setObject(7, NOW);
-            insert.executeUpdate();
-        }
+    @Test
+    void inboundDuplicateKeyのhash競合は実serviceでCONFLICTへ永続化する() throws Exception {
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        var first = executor.submit(() -> recordInbound(HASH, ready, start));
+        var second = executor.submit(() -> recordInbound(
+                "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", ready, start));
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        var firstReceipt = first.get(30, TimeUnit.SECONDS);
+        var secondReceipt = second.get(30, TimeUnit.SECONDS);
+        executor.shutdownNow();
+
+        assertTrue(firstReceipt.conflict() || secondReceipt.conflict());
+        assertEquals("CONFLICT", inboundEventMapper.selectByProviderEvent(
+                CLIENT_ID, "provider-f1", "provider-event-race").getStatus());
+    }
+
+    private InboundEventService.Receipt recordInbound(String hash, CountDownLatch ready, CountDownLatch start)
+            throws Exception {
+        ready.countDown();
+        assertTrue(start.await(10, TimeUnit.SECONDS));
+        return inboundEventService.recordReceived(CLIENT_ID, "provider-f1", "provider-event-race", hash,
+                NOW, ExternalDtoSnapshot.ofAllowList("{\"eventType\":\"resource.changed\"}",
+                        ExternalDtoSnapshot.INBOUND_FIELDS), true, NOW);
     }
 
     private long insertSubscription(Connection connection) throws Exception {

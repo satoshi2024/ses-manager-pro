@@ -4,9 +4,12 @@ import com.ses.entity.integrationhub.ApiUsageBucket;
 import com.ses.mapper.ApiUsageBucketMapper;
 import com.ses.service.integrationhub.ApiUsageBucketService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -27,6 +30,7 @@ public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
     private static final int DAY_LIMIT = 50_000;
     private static final int BURST_CAPACITY = 20;
     private static final int REFILL_SECONDS = 3;
+    private static final int MAX_DEADLOCK_RETRIES = 3;
     public static final Set<String> APPROVED_ROUTE_TEMPLATES = Set.of(
             "/external-api/v1/engineer-availability",
             "/external-api/v1/engineer-availability/{publicEngineerId}",
@@ -42,6 +46,8 @@ public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
 
     private final Clock clock;
     private final ApiUsageBucketMapper mapper;
+    @Autowired(required = false)
+    private PlatformTransactionManager transactionManager;
 
     @Override
     public RateDecision consume(String clientId, String scopeCode, String tenantId, String routeTemplate) {
@@ -50,22 +56,54 @@ public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public RateDecision consumeAt(String clientId, String scopeCode, String tenantId, String routeTemplate,
                                   LocalDateTime serverNowUtc) {
-        validateSubject(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
-        ApiUsageBucket bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
-        if (bucket == null) {
-            bucket = insertInitialBucket(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
-            if (bucket != null) {
-                // 新規rowはinsert自体を最初のconsumeとして原子的に完了させる。
-                return RateDecision.allow();
+        if (transactionManager == null) {
+            return consumeAtInTransaction(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
+        }
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
+        // quotaの欠落subjectを同時初期化する際、MySQL REPEATABLE READのgap lockが
+        // unique insert/selectの相互待機を作らないよう、短いquota transactionはRC固定とする。
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        for (int attempt = 0; attempt < MAX_DEADLOCK_RETRIES; attempt++) {
+            try {
+                return transaction.execute(status -> consumeAtInTransaction(
+                        clientId, scopeCode, tenantId, routeTemplate, serverNowUtc));
+            } catch (DeadlockLoserDataAccessException e) {
+                if (attempt == MAX_DEADLOCK_RETRIES - 1) {
+                    throw e;
+                }
             }
-            // unique競合時は一度だけFOR UPDATEで再読込し、同じ判定へ収束する。
+        }
+        throw new IllegalStateException("quota transaction retry exhausted");
+    }
+
+    private RateDecision consumeAtInTransaction(String clientId, String scopeCode, String tenantId,
+                                                String routeTemplate, LocalDateTime serverNowUtc) {
+        validateSubject(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
+        ApiUsageBucket bucket;
+        if (transactionManager == null) {
+            // transaction managerを持たない単体利用はmock mapperの従来契約を維持する。
             bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
             if (bucket == null) {
-                throw new IllegalStateException("quota bucket could not be loaded after unique conflict");
+                insertInitialBucket(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
+                return RateDecision.allow();
             }
+        } else {
+            // 欠落rowに対するSELECT FOR UPDATEはMySQLのgap lockを作り、同時INSERT同士を
+            // deadlockさせ得るため、先にunique upsertを試みる。初期値は未消費状態とし、
+            // insert/duplicateの戻り値に依存せず、全経路を同じFOR UPDATE+consumeへ収束する。
+            insertInitialBucket(clientId, scopeCode, tenantId, routeTemplate, serverNowUtc);
+            bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
+            if (bucket == null) {
+                throw new IllegalStateException("quota bucket could not be loaded after upsert");
+            }
+            return consumeLocked(bucket, serverNowUtc);
+        }
+        bucket = mapper.selectSubjectForUpdate(clientId, scopeCode, tenantId, routeTemplate);
+        if (bucket == null) {
+            throw new IllegalStateException("quota bucket could not be loaded after unique conflict");
         }
 
         return consumeLocked(bucket, serverNowUtc);
@@ -73,27 +111,28 @@ public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
 
     private ApiUsageBucket insertInitialBucket(String clientId, String scopeCode, String tenantId,
                                                String routeTemplate, LocalDateTime now) {
+        boolean directUnitUse = transactionManager == null;
         ApiUsageBucket initial = ApiUsageBucket.builder()
                 .clientId(clientId)
                 .scopeCode(scopeCode)
                 .tenantId(tenantId)
                 .routeTemplate(routeTemplate)
                 .minuteWindowStart(minuteStart(now))
-                .minuteCount(1)
+                .minuteCount(directUnitUse ? 1 : 0)
                 .dayWindowStart(dayStart(now))
-                .dayCount(1)
-                .burstTokens(BURST_CAPACITY - 1)
+                .dayCount(directUnitUse ? 1 : 0)
+                .burstTokens(directUnitUse ? BURST_CAPACITY - 1 : BURST_CAPACITY)
                 .burstLastRefillAt(now)
                 .version(0)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
-        try {
+        if (transactionManager == null) {
+            // 単体テスト等でtransaction managerを持たない直接利用は通常のinsertを使う。
             mapper.insert(initial);
             return initial;
-        } catch (DuplicateKeyException e) {
-            return null;
         }
+        return mapper.insertInitialIfAbsent(initial) == 1 ? initial : null;
     }
 
     private RateDecision consumeLocked(ApiUsageBucket bucket, LocalDateTime now) {

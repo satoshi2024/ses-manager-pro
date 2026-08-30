@@ -95,6 +95,10 @@ class ApiDeliveryServiceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> ExternalDtoSnapshot.of("{\"payload\":{\"internalDbId\":1}}"));
         assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"payload\":\"{\\\"password\\\":\\\"secret\\\"}\"}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ExternalDtoSnapshot.of("{\"canonicalPayload\":\"raw-provider-body-with-PII\"}"));
+        assertThrows(IllegalArgumentException.class,
                 () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
                         "event.type", "v1", "corr-1",
                         ExternalDtoSnapshot.of("{\"code\":\"not-an-outbound-field\"}"), now));

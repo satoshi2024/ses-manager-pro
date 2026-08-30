@@ -91,6 +91,7 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     @Delete("DELETE FROM t_api_delivery WHERE id = #{id} AND version = #{version} "
             + "AND retention_expires_at IS NOT NULL AND retention_expires_at <= #{now} "
             + "AND status IN ('SUCCEEDED', 'FAILED', 'DLQ') "
-            + "AND (lease_token IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= #{now})")
+            + "AND ((lease_token IS NULL AND lease_expires_at IS NULL) "
+            + "OR (lease_token IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now}))")
     int deleteExpired(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);
 }

@@ -47,6 +47,14 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             "renewalStatus", "publicInvoiceId", "issueDate", "dueDate", "paidAt", "settlementStatus",
             "payload");
 
+    /** canonicalPayload内部はprovider metadataとpublic fieldだけを持つ構造化objectとする。 */
+    private static final Set<String> CANONICAL_PAYLOAD_FIELDS = Set.of(
+            "providerEventId", "provider", "eventType", "receivedAt", "signatureResult", "processingStatus",
+            "resultCode", "publicResourceId", "publicEngineerId", "availabilityStatus", "availableFrom",
+            "availableTo", "skillTagCode", "publicProjectId", "status", "startDate", "endDate",
+            "publicCustomerId", "publicContractId", "renewalStatus", "publicInvoiceId", "issueDate",
+            "dueDate", "paidAt", "settlementStatus", "changedFieldNames", "payload");
+
     public ExternalDtoSnapshot {
         validateDigest(json, payloadHash);
         validateAllowList(json, APPROVED_FIELDS);
@@ -99,22 +107,41 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
     }
 
     private static void validateNode(JsonNode node, Set<String> allowedFields) {
-        if (node.isObject()) {
-            node.fieldNames().forEachRemaining(field -> {
-                if (!allowedFields.contains(field)) {
-                    throw new IllegalArgumentException("external DTO snapshot contains non-allow-listed field");
-                }
-                validateNode(node.get(field), allowedFields);
-            });
-        } else if (node.isArray()) {
-            if (node.size() > 100) {
-                throw new IllegalArgumentException("external DTO snapshot array is too large");
+        if (!node.isObject()) {
+            throw new IllegalArgumentException("external DTO snapshot nested value must be an object");
+        }
+        node.fieldNames().forEachRemaining(field -> {
+            if (!allowedFields.contains(field)) {
+                throw new IllegalArgumentException("external DTO snapshot contains non-allow-listed field");
             }
-            node.forEach(item -> validateNode(item, allowedFields));
-        } else if (node.isTextual() && node.textValue().length() > 512) {
+            validateFieldValue(field, node.get(field), allowedFields);
+        });
+    }
+
+    private static void validateFieldValue(String field, JsonNode value, Set<String> allowedFields) {
+        if ("payload".equals(field) || "canonicalPayload".equals(field)) {
+            if (!value.isObject()) {
+                throw new IllegalArgumentException("external DTO payload must be a structured object");
+            }
+            validateNode(value, "canonicalPayload".equals(field) ? CANONICAL_PAYLOAD_FIELDS : allowedFields);
+            return;
+        }
+        if ("changedFieldNames".equals(field)) {
+            if (!value.isArray() || value.size() > 100) {
+                throw new IllegalArgumentException("external DTO changedFieldNames must be a bounded array");
+            }
+            value.forEach(item -> {
+                if (!item.isTextual() || item.textValue().length() > 128) {
+                    throw new IllegalArgumentException("external DTO changedFieldNames value is invalid");
+                }
+            });
+            return;
+        }
+        if (!value.isTextual() && !value.isNull()) {
+            throw new IllegalArgumentException("external DTO scalar field has invalid type");
+        }
+        if (value.isTextual() && value.textValue().length() > 512) {
             throw new IllegalArgumentException("external DTO snapshot value is too large");
-        } else if (!(node.isValueNode() || node.isNull())) {
-            throw new IllegalArgumentException("invalid external DTO snapshot value");
         }
     }
 }
