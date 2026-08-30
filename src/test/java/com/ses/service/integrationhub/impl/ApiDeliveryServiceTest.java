@@ -79,12 +79,12 @@ class ApiDeliveryServiceTest {
 
     @Test
     void resultCASはlease世代とprovider冪等keyとpayloadHashを全て照合する() {
-        when(mapper.transitionSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+        when(mapper.transitionSucceeded(7L, 3, 1, "lease-1", providerKey, payloadHash,
                 "provider-request-1", now, now.plusDays(30))).thenReturn(1);
 
-        assertTrue(service.markSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+        assertTrue(service.markSucceeded(7L, 3, 1, "lease-1", providerKey, payloadHash,
                 "provider-request-1", now));
-        verify(mapper).transitionSucceeded(7L, 3, "lease-1", providerKey, payloadHash,
+        verify(mapper).transitionSucceeded(7L, 3, 1, "lease-1", providerKey, payloadHash,
                 "provider-request-1", now, now.plusDays(30));
     }
 

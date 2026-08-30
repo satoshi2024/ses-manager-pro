@@ -102,43 +102,43 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean markSucceeded(Long id, Integer version, String leaseToken, String providerIdempotencyKey,
+    public boolean markSucceeded(Long id, Integer version, Integer generation, String leaseToken, String providerIdempotencyKey,
                                  String payloadHash,
                                  String providerRequestId, LocalDateTime now) {
-        validateResult(id, version, leaseToken, providerIdempotencyKey, payloadHash, now);
-        return mapper.transitionSucceeded(id, version, leaseToken, providerIdempotencyKey, payloadHash, providerRequestId,
+        validateResult(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, now);
+        return mapper.transitionSucceeded(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, providerRequestId,
                 now, now.plusDays(30)) == 1;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean markRetryable(Long id, Integer version, String leaseToken, String providerIdempotencyKey,
+    public boolean markRetryable(Long id, Integer version, Integer generation, String leaseToken, String providerIdempotencyKey,
                                  String payloadHash,
                                  String errorCode, LocalDateTime now, LocalDateTime nextAttemptAt) {
-        validateResult(id, version, leaseToken, providerIdempotencyKey, payloadHash, now);
+        validateResult(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, now);
         if (errorCode == null || errorCode.isBlank() || errorCode.length() > 64 || nextAttemptAt == null) {
             throw new IllegalArgumentException("invalid retry result");
         }
         ApiDelivery row = mapper.selectById(id);
         if (row == null || row.getAttemptCount() == null || row.getAttemptCount() >= MAX_ATTEMPTS) {
-            return markTerminal(id, version, leaseToken, providerIdempotencyKey, payloadHash, IntegrationHubStates.DELIVERY_DLQ,
+            return markTerminal(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, IntegrationHubStates.DELIVERY_DLQ,
                     "MAX_ATTEMPTS", now);
         }
-        return mapper.transitionRetryable(id, version, leaseToken, providerIdempotencyKey, payloadHash, errorCode,
+        return mapper.transitionRetryable(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, errorCode,
                 nextAttemptAt, now) == 1;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean markTerminal(Long id, Integer version, String leaseToken, String providerIdempotencyKey,
+    public boolean markTerminal(Long id, Integer version, Integer generation, String leaseToken, String providerIdempotencyKey,
                                 String payloadHash,
                                 String status, String errorCode, LocalDateTime now) {
-        validateResult(id, version, leaseToken, providerIdempotencyKey, payloadHash, now);
+        validateResult(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, now);
         if (!IntegrationHubStates.DELIVERY_FAILED.equals(status) && !IntegrationHubStates.DELIVERY_DLQ.equals(status)
                 || errorCode == null || errorCode.isBlank() || errorCode.length() > 64) {
             throw new IllegalArgumentException("invalid terminal result");
         }
-        return mapper.transitionTerminal(id, version, leaseToken, providerIdempotencyKey, payloadHash, status, errorCode,
+        return mapper.transitionTerminal(id, version, generation, leaseToken, providerIdempotencyKey, payloadHash, status, errorCode,
                 now, now.plusDays(90)) == 1;
     }
 
@@ -151,9 +151,10 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
         return mapper.recoverExpiredLeases(now);
     }
 
-    private void validateResult(Long id, Integer version, String leaseToken, String providerIdempotencyKey,
+    private void validateResult(Long id, Integer version, Integer generation, String leaseToken, String providerIdempotencyKey,
                                 String payloadHash, LocalDateTime now) {
-        if (id == null || version == null || leaseToken == null || leaseToken.isBlank()
+        if (id == null || version == null || generation == null || generation <= 0
+                || leaseToken == null || leaseToken.isBlank()
                 || providerIdempotencyKey == null || !providerIdempotencyKey.matches("[0-9a-fA-F]{64}")
                 || payloadHash == null || !payloadHash.matches("[0-9a-fA-F]{64}") || now == null) {
             throw new IllegalArgumentException("invalid delivery result");

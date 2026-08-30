@@ -45,9 +45,11 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
             + "last_error_code = NULL, terminal_at = #{terminalAt}, retention_class = 'SUCCEEDED_PAYLOAD_30D', "
             + "retention_expires_at = #{retentionExpiresAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{terminalAt} WHERE id = #{id} AND version = #{version} "
+            + "AND delivery_generation = #{generation} "
             + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
             + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
     int transitionSucceeded(@Param("id") Long id, @Param("version") Integer version,
+                            @Param("generation") Integer generation,
                             @Param("leaseToken") String leaseToken,
                             @Param("providerIdempotencyKey") String providerIdempotencyKey,
                             @Param("payloadHash") String payloadHash,
@@ -58,9 +60,11 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
     @Update("UPDATE t_api_delivery SET status = 'RETRYABLE', last_error_code = #{errorCode}, "
             + "next_attempt_at = #{nextAttemptAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{now} WHERE id = #{id} AND version = #{version} "
+            + "AND delivery_generation = #{generation} "
             + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
             + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED'")
     int transitionRetryable(@Param("id") Long id, @Param("version") Integer version,
+                            @Param("generation") Integer generation,
                             @Param("leaseToken") String leaseToken,
                             @Param("providerIdempotencyKey") String providerIdempotencyKey,
                             @Param("payloadHash") String payloadHash,
@@ -71,10 +75,12 @@ public interface ApiDeliveryMapper extends BaseMapper<ApiDelivery> {
             + "terminal_at = #{terminalAt}, retention_class = 'FAILED_DLQ_PAYLOAD_90D', "
             + "retention_expires_at = #{retentionExpiresAt}, lease_token = NULL, lease_expires_at = NULL, "
             + "version = version + 1, updated_at = #{terminalAt} WHERE id = #{id} AND version = #{version} "
+            + "AND delivery_generation = #{generation} "
             + "AND lease_token = #{leaseToken} AND provider_idempotency_key = #{providerIdempotencyKey} "
             + "AND payload_hash = #{payloadHash} AND status = 'CLAIMED' "
             + "AND #{status} IN ('FAILED', 'DLQ')")
     int transitionTerminal(@Param("id") Long id, @Param("version") Integer version,
+                           @Param("generation") Integer generation,
                            @Param("leaseToken") String leaseToken,
                            @Param("providerIdempotencyKey") String providerIdempotencyKey,
                            @Param("payloadHash") String payloadHash,

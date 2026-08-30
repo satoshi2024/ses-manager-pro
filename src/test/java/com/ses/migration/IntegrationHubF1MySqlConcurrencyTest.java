@@ -135,7 +135,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
     }
 
     @Test
-    void deliveryCASはproviderKey_payloadHash_version_leaseを同時に要求する() throws Exception {
+    void deliveryCASはproviderKey_payloadHash_version_lease_generationを同時に要求する() throws Exception {
         long subscriptionId;
         long deliveryId;
         String providerKey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
@@ -165,24 +165,36 @@ class IntegrationHubF1MySqlConcurrencyTest {
         String update = "UPDATE t_api_delivery SET status = 'SUCCEEDED', terminal_at = ?, "
                 + "retention_class = 'SUCCEEDED_PAYLOAD_30D', retention_expires_at = ?, "
                 + "lease_token = NULL, lease_expires_at = NULL, version = version + 1 "
-                + "WHERE id = ? AND version = 0 AND lease_token = ? AND provider_idempotency_key = ? "
+                + "WHERE id = ? AND version = 0 AND delivery_generation = ? AND lease_token = ? AND provider_idempotency_key = ? "
                 + "AND payload_hash = ? AND status = 'CLAIMED'";
         try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
             statement.setObject(1, NOW);
             statement.setObject(2, NOW.plusDays(30));
             statement.setLong(3, deliveryId);
-            statement.setString(4, "lease-1");
-            statement.setString(5, providerKey);
-            statement.setString(6, HASH);
+            statement.setInt(4, 2);
+            statement.setString(5, "lease-1");
+            statement.setString(6, providerKey);
+            statement.setString(7, HASH);
+            assertEquals(0, statement.executeUpdate());
+        }
+        try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
+            statement.setObject(1, NOW);
+            statement.setObject(2, NOW.plusDays(30));
+            statement.setLong(3, deliveryId);
+            statement.setInt(4, 1);
+            statement.setString(5, "lease-1");
+            statement.setString(6, providerKey);
+            statement.setString(7, HASH);
             assertEquals(1, statement.executeUpdate());
         }
         try (Connection connection = MYSQL.createConnection(""); PreparedStatement statement = connection.prepareStatement(update)) {
             statement.setObject(1, NOW);
             statement.setObject(2, NOW.plusDays(30));
             statement.setLong(3, deliveryId);
-            statement.setString(4, "lease-1");
-            statement.setString(5, providerKey);
-            statement.setString(6, HASH);
+            statement.setInt(4, 1);
+            statement.setString(5, "lease-1");
+            statement.setString(6, providerKey);
+            statement.setString(7, HASH);
             assertEquals(0, statement.executeUpdate());
         }
     }
