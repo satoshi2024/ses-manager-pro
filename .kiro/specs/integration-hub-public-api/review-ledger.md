@@ -125,7 +125,7 @@ quota、correlation、専用audit、stable error boundaryとfilter自動二重�
 | tests | remediation focused suite 16 tests、failure/error/skipなし。Windows connector E2Eはcrypto fixture修正後もloopback接続制約でHTTP assertion未到達 | E2E制約を隠さず記録 | 再Review待ち |
 
 A1 implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`の初回Review FAIL（P0=0/P1=2/P2=2）を、remediation commit
-`874fface3bfe90dd27b766ddf9aeff4e00eae591`で対応した。同じR-NF05へ独立A1再Reviewとしてhandoffし、PASS受領まではB1を開始しない。
+`874fface3bfe90dd27b766ddf9aeff4e00eae591`で対応し、entity serialization negativeの強化を`9ed77cf3056d1bd3f913e461115f4ca732639519`で追加した。同じR-NF05へ独立A1再Reviewとしてhandoffし、PASS受領まではB1を開始しない。
 
 ### A1 Implementation Review remediation findings
 

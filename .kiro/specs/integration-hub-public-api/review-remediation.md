@@ -228,6 +228,7 @@ Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
 ### A1 remediation evidence
 
 - code/test/migration commit: `874fface3bfe90dd27b766ddf9aeff4e00eae591`
+- entity serialization negative strengthening follow-up: `9ed77cf3056d1bd3f913e461115f4ca732639519`
 - remediation focused suite: cursor 3、service 5、DTO 5、mapper 2、snapshot integration 1。failure/error/skipなし。
 - enabled connector browser E2Eはcrypto fixture未設定を修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewへ環境制約としてhandoffする。
 - production enablement、実顧客credential、実provider送信、A2 command/export、PR、mergeは引き続き禁止。

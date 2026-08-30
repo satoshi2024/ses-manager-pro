@@ -64,6 +64,7 @@ R-NF05 state mapping cleanup: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 F1 implementation follow-up remediation: 5a2a023178433882bc1c5dcf92e19b5ecfa19db6
 F1 typed snapshot correction: 96d6801c37d4b952e2601a06cf7edc1bc1a1bef8
 A1 remediation: 874fface3bfe90dd27b766ddf9aeff4e00eae591
+A1 entity serialization contract follow-up: 9ed77cf3056d1bd3f913e461115f4ca732639519
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）
 
 ## F1実装証跡
