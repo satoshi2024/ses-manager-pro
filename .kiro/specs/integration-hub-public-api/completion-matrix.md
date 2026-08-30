@@ -1,4 +1,4 @@
-# NF-05 完了対応表（scope expansion承認済み・F2/A1 PASS・B1独立Review待ち）
+# NF-05 完了対応表（scope expansion承認済み・F2/A1 PASS・B1再Review待ち）
 
 ## Task対応
 
@@ -21,7 +21,8 @@
 | F2 Implementation Review remediation | F2専用chain、V130、H2 schema、F2 tests | raw request-target供給、client×route scope intersection、audit一request一record、strict IP、metrics cardinality、namespace root | CLOSED_BY_REVIEW | fixed FAIL Head `220ac86f` → `e47025b5`（6件）、fixed FAIL Head `f57df6d2` → `a16cdcba`（2件）。19追加tests PASS |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate、A1 production/test classes、V131/H2 snapshot schema、purge scheduler/tests | GET-only 11 paths、external DTO allow-list、invoice customer predicate、multi-contract非偽装、snapshot-bound cursor、canonical Base64URL、scope-bound list/detail/count、独立bounded purge、秒精度asOf、UTC E2E fixture | IMPLEMENTATION_PASS | remediation series後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Review PASS（P0/P1/P2=0/0/0）。focused/integration 24/24 PASS |
 | A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
-| B1 outbound webhook | tasks/design/requirements/inventory、V132、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event、provider idempotency key、retry/DLQ/replay、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_IN_PROGRESS | implementation commit `971c17d7`、focused 28 tests PASS。独立Implementation Review待ち |
+| B1 outbound webhook | tasks/design/requirements/inventory、V132/V133、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event/envelope binding、provider idempotency key、retry/DLQ/replay authorization、独立retention purge、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | 初回FAIL fixed Head `0f1a9297`（P0=0/P1=4/P2=1）を`30199db8`でremediate。focused/H2/MySQL証跡PASS、独立再Review待ち |
+| B1 Review remediation | `IntegrationHubWebhookSigner`、replay authorization、V133、worker/CAS、H2/MySQL evidence | 署名/envelope binding、現行scope再認可、audit/payload retention分離、fresh clock、attempt 8/DLQ、stale/CAS/claim/rollback/replay purge | SPEC_ADDRESSED（独立再Review待ち） | `30199db8` |
 | B2 inbound/DLQ/admin UI | tasks/design/requirements | B1 Review後。production受信enablementなし | APPROVED_SEQUENCED | — |
 | M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
 
@@ -38,7 +39,7 @@ scope expansionのPlan delta Reviewは既存R-NF05へ固定remote Headを渡す�
 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL（P0=0、P1=4、P2=2）、
 固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）であり、
 NF05-PLAN-EXP-007〜009のspec/architecture remediationだけを同じbranchへcommit/pushする。
-Plan deltaはca27f455でPASS済み、F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS。B1は`971c17d7`で実装済み・独立Implementation Review待ち。A2はN/Aで全体完了をblockしない。
+Plan deltaはca27f455でPASS済み、F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS。B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediate済み・独立再Review待ち。A2はN/Aで全体完了をblockしない。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止し、production enablement、実顧客credential、実provider送信、
 merge、auto-mergeも禁止する。
 
@@ -67,10 +68,11 @@ A1 remediation: 874fface3bfe90dd27b766ddf9aeff4e00eae591
 A1 entity serialization contract follow-up: 9ed77cf3056d1bd3f913e461115f4ca732639519
 A1 snapshot purge/asOf/E2E remediation: fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS
 
-B1 implementation evidence: `971c17d7`でNF-05専用`t_api_delivery`を再利用するoutbound worker、HMAC-SHA256 signer、MOCK/STUB/LOOPBACK transport、
-DLQ replay audit、V132、H2 schema/testを追加した。fixed framing golden vector、実loopback server、redirect拒否、provider idempotency header、
-credential version、claim/HTTP/CAS、retry/no-retry、scope、replay、設定fail-closedを含むfocused 28 testsはfailure/error/skipなしでPASSした。
-外部I/OはDB transaction外であり、実顧客credential、実provider、production enablementは未実施。B1独立Implementation Review後までB2を開始しない。
+B1 implementation/remediation evidence: `971c17d7`でNF-05専用`t_api_delivery`を再利用するoutbound worker、HMAC-SHA256 signer、MOCK/STUB/LOOPBACK transport、
+DLQ replay audit、V132を追加し、`30199db8`で署名/envelope binding、replay current authorization、V133 audit/payload retention分離、fresh clock/CAS、
+failure/concurrency証跡を追加した。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。外部I/OはDB transaction外であり、
+実顧客credential、実provider、production enablementは未実施。B1独立再Review後までB2を開始しない。
+B1 remediation commit: `30199db8`（独立再Review待ち）。docs trace commitと最終remote Headは外部handoff通知で固定する。
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）
 
 ## F1実装証跡

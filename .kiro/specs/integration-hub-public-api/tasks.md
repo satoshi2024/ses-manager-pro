@@ -1,4 +1,4 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1 PASS・B1独立Review待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1 PASS・B1再Review待ち）
 
 ## 実行停止規則
 
@@ -166,18 +166,21 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task B1: outbound webhook
 
-- [ ] Status: IMPLEMENTATION_IN_PROGRESS。実装commit `971c17d7`、独立Implementation Review待ち。
+- [ ] Status: IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。初回FAIL（fixed Head `0f1a9297`、P0=0/P1=4/P2=1）を`30199db8`でremediateし、独立再Review待ち。
 - [x] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
 - Preconditions: A1 Implementation Review PASS（fixed Head `69f857d3`）、scope expansion Decision。production enablement、実顧客credential、
   実provider送信なし。development/testのMOCK/STUB/LOOPBACKのみ。
 - Implementation: 第二outboxを作らず`t_api_delivery`を再利用し、atomic enqueue、claim/lease transaction、DB transaction外のtransport、
-  provider idempotency key・payload hash・generation・lease token付き結果CASを実装する。固定framing HMAC-SHA256、credential version/key ID、
+  provider idempotency key・payload hash・generation・lease token付き結果CASを実装する。固定framing HMAC-SHA256へcredential versionと
+  provider idempotency keyを含め、outbound event envelopeとledger値を送信前に一致検証する。credential version/key ID、
   correlation、8回上限の指数backoff+jitter、429/5xx/timeout retry、その他4xx no-retry、DLQ、新generation manual replay auditを含む。
   LOOPBACKはstrict literal IP、allow-list port、peer検証、redirect/proxy/DNSなしとする。
-- Test requirements: signature/timestamp/key overlap、duplicate、claim競合、timeout、429/5xx、4xx no-retry、
-  backoff、DLQ、manual replay、provider/correlation ID、snapshot purge、実loopback server、idempotency header、設定fail-closed。
-- Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。focused B1 suite 28 testsをfailure/error/skipなしで実行し、
-  remote/local Head一致を独立Reviewへ渡す。
+- Test requirements: signature/timestamp/key overlap、各署名field改ざん、envelope/ledger不一致、duplicate、claim競合、timeout、429/5xx、4xx no-retry、
+  backoff、attempt 8/DLQ、provider成功直後CAS障害、stale recovery、slow transport、manual replayのpermission/current scope再検証、
+  replay後payload/audit purge、atomic rollback、provider/correlation ID、snapshot purge、実loopback server、idempotency header、設定fail-closed。
+- Remediation evidence: `30199db8`、V133、H2 retention、MySQL 8 concurrency/retentionを追加。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASS。
+- Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。独立再Review受領まではB1 PASSと扱わず、
+  remote/local Head一致を再確認してR-NF05へ渡す。
 
 ## Task B2: inbound webhook / DLQ / admin UI
 

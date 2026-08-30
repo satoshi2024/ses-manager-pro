@@ -3,9 +3,10 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: F1/F2独立Implementation Review PASSを維持。A1は固定Head
+- 本specの状態: F1/F2/A1独立Implementation Review PASSを維持。A1は固定Head
   `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-  B1は実装commit `971c17d7`をpush済みで、同じR-NF05へ独立Implementation Reviewをhandoffする段階である。
+  B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を
+  `30199db8`でremediateし、同じR-NF05へ独立再Reviewをhandoffする段階である。
   B2/Mは順次承認、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -45,7 +46,7 @@ PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
 （P0/P1/P2=0/0/0）を受領した。A1は`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-B1を`971c17d7`で実装し、独立B1 Implementation Reviewへ渡す。B1 Review PASS後にB2→Mを順次実装する。
+B1を`971c17d7`で実装し、独立Review FAILを`30199db8`でremediateした。独立B1再Review PASS後にB2→Mを順次実装する。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -95,9 +96,9 @@ snapshot IDをopaque cursorへbindする。Base64URLはpaddingなし再encode一
 snapshot insert/update/delete/reparentの契約テストを追加し、E2E fixtureへtest crypto keyを明示した。
 focused remediation suiteはcursor 3、service 5、DTO 5、mapper 2、snapshot 1（計16 tests）、failure/error/skipなしでPASSした。
 Windowsのbrowser profileはcrypto設定エラーを解消した後もTomcat loopback接続確立失敗でHTTP assertion前に停止したため、この環境結果をPASS根拠にはしない。
-A1独立再Review PASSを受領したため、B1を`971c17d7`で開始した。B1の独立Implementation Review PASSまではB2を開始しない。
+A1独立再Review PASSを受領したため、B1を`971c17d7`で開始した。B1初回Review FAILは`30199db8`でremediate済みであり、独立再Review PASSまではB2を開始しない。
 
-## B1 outbound webhook実装
+## B1 outbound webhook実装・Review remediation
 
 `971c17d7`で、NF-05専用`t_api_delivery`を再利用するoutbound delivery workerを追加した。業務stateとdelivery rowのatomic insert、
 短いclaim/lease transaction、transaction外のHTTP、provider idempotency key・payload hash・generation・lease tokenを含む結果CASを分離し、
@@ -106,6 +107,13 @@ timeout/429/5xxだけを最大8回backoff+jitter、その他4xxをFAILED、上�
 署名は固定framingのHMAC-SHA256、credential version/key ID、timestamp、correlation、payload hash、provider idempotency keyをbounded headerへ出力する。
 MOCK/STUBは無接続、LOOPBACKはstrict literal IP・allow-list port・peer検証・redirectなし・proxy/DNSなしである。V132、H2 schema、
 properties/transport/worker/replay testを追加したが、実顧客credential・実provider送信・production enablementは行わない。
+
+初回B1 Implementation Review（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`）のP1-001〜004/P2-005を
+`30199db8`でremediateした。署名のcanonical framingへcredential versionとprovider idempotency keyを含め、outbound envelopeとdelivery ledgerの
+一致を送信直前に検証する。manual replayは`integration.webhook.replay` permission、active subscription、client/permission/subscriptionの
+current data scope、tenant/legal entity、payload membershipをDBから再取得して再計算する。V133でreplay auditとdelivery payloadのlifecycleを
+分離し、delivery purgeはauditを阻害せず、audit metadataは独立1年purgeとする。workerはclaim直前・HTTP完了後にclockを再取得し、結果CAS障害は
+transport retryへ変換せずlease recoveryへ委ねる。focused unit/H2/MySQL証跡はPASS済みだが、独立再Review受領まではB1 IMPLEMENTATION PASSへ昇格しない。
 
 ## 既知の重要差分
 

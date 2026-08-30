@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `971c17d7`（B1 implementation complete、独立Implementation Review pending） |
+| Current implementation Head | `30199db8`（B1 review remediation complete、独立再Review pending） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -56,7 +56,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | F2 | IMPLEMENTATION_PASS | 独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
-| B1 | IMPLEMENTATION_IN_PROGRESS | implementation Head `971c17d7`、focused 28 tests PASS、独立Implementation Review待ち。mock/stub/loopbackのみ、実provider送信なし |
+| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | implementation/remediation `30199db8`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ、実provider送信なし |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
 
@@ -104,6 +104,8 @@ PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで�
 
 Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2 PASS後、A1を
 `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、remediationを経て固定Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で
-独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1を`971c17d7`で実装し、独立B1 Implementation Reviewへhandoffする。
-B1 Review PASS後はB2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1を`971c17d7`で実装し、独立B1 Implementation Reviewへhandoffする。初回B1 Reviewはfixed Head
+`0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）となったため、`30199db8`で署名/envelope、replay再認可、
+audit/payload retention分離、fresh-clock/CAS、実DB failure/concurrency証跡をremediateした。独立再Review受領までB1 PASSとは扱わない。
+B1再Review PASS後はB2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

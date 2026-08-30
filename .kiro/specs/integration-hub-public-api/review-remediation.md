@@ -1,4 +1,4 @@
-# NF-05 Review Remediation（Task 0R）
+# NF-05 Review Remediation（Task 0R / B1 remediation）
 
 ## 判定の扱い
 
@@ -147,7 +147,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は`971c17d7`でdevelopment/testのみ実装済み・独立Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
+外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -170,7 +170,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
 F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1はfixed Head
-`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は実装commit `971c17d7`で独立Review待ちである。A2/command/exportは
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -238,10 +238,26 @@ Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
 - enabled connector browser E2EはUTC `LocalDateTime` fixtureへ修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewで401/200を確認する。
 - production enablement、実顧客credential、実provider送信、A2 command/export、PR、mergeは引き続き禁止。
 
-## B1 Implementation Review handoff（実装済み・独立Review待ち）
+## B1 Implementation Review handoff（初回FAIL remediation済み・独立再Review待ち）
 
 `971c17d7`でB1 approved scopeを実装した。NF-05専用`t_api_delivery`を唯一のoutbound delivery ledgerとして再利用し、業務stateとのatomic insert、
 claim/lease transaction、DB transaction外のHTTP、provider idempotency key・payload hash・generation・lease tokenを用いる結果CASを分離した。
 固定framing HMAC-SHA256署名、credential version/key ID、correlation、最大8回のtimeout/429/5xx retry、その他4xx no-retry、DLQ、new-generation replay audit、
 MOCK/STUB無接続、LOOPBACK strict literal/peer検証・redirect/proxy/DNSなしを含む。V132 migration、H2 schema、focused 28 tests（failure/error/skipなし）、
 実loopback test server、署名golden vector、設定fail-closedを確認済みである。B1の固定remote Headを同じR-NF05へ独立Implementation Reviewとしてhandoffし、PASS受領までB2を開始しない。
+
+## B1 Implementation Review remediation（fixed Head `0f1a9297` → `30199db8`）
+
+初回B1独立Implementation ReviewはFAIL（P0=0、P1=4、P2=1）だった。以下はproduction enablementや実provider送信を行わず、
+approved B1 scope内で実装・テスト可能な修正である。状態は独立再ReviewまでSPEC_ADDRESSEDとし、IMPLEMENTATION PASSへ自己昇格させない。
+
+| ID | Severity | Finding | Remediation / evidence | Status |
+|---|---|---|---|---|
+| NF05-IMPL-B1-001 | P1 | outbound署名fieldとevent envelope/ledger bindingが未完結 | `IntegrationHubWebhookSigner`の固定canonical framingへcredential version/provider idempotency keyを追加し、`ExternalDtoSnapshot.requireOutboundEnvelope`でevent ID/type/schema/createdAt/correlation/resource/payloadをledgerと一致検証。golden vector・field tamper negativeを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-002 | P1 | manual replayのpermission/current scope再検証不足 | `IntegrationHubWebhookReplayAuthorizationService`が`integration.webhook.replay`、active client/subscription、permission、client/permission/subscription scope intersection、tenant/legal entity、payload membershipをDBから再取得。revoked・scope縮小・resource除外を検証 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-003 | P1 | replay auditがdelivery payload purgeを阻害 | V133でdelivery FKを`ON DELETE SET NULL`へ変更し、audit metadataの`retention_expires_at`と独立bounded purgeを追加。H2/MySQLでreplay後にpayload 30/90日とaudit 1年を別々にpurge | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-004 | P1 | batch開始時刻の再利用でlease/backoffが過去化 | claim直前・HTTP完了後にclockを再取得し、retryをHTTP完了時刻基準へ変更。provider timeoutを上回るlease制約、slow transport、CAS failure recoveryを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-005 | P2 | failure/concurrency/attempt 8の実DB証跡不足 | timeout/5xx、attempt 8/DLQ、provider成功直後CAS障害、stale recovery、同時claim、atomic rollback、replay後purgeをworker/H2/MySQLへ追加 | SPEC_ADDRESSED（独立再Review待ち） |
+
+実装commitは`30199db8`。focused unit、H2 retention/schema、MySQL 8 concurrency/retentionはfailure/error/skipなしでPASSした。
+独立再Review、B2、M、production enablement、実顧客credential、実provider送信、PR/mergeは未完了・禁止である。

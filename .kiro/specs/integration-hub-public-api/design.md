@@ -447,7 +447,7 @@ list/countはscope適用後の母集団だけを返す。
 同じkey・同じdigestは保存済み結果を返し、同じkey・別digestはconflictを返す。並行requestは一つだけ
 実行し、IN_PROGRESSを二重処理しない。
 
-## 7. Webhook契約（B1実装済み・B2受入待ち）
+## 7. Webhook契約（B1再Review待ち・B2受入待ち）
 
 webhook persistence contractに基づき、B1 outbound deliveryを実装する。outbound eventは
 eventId、eventType、schemaVersion、createdAt、opaque public resource ID、allow-list changedFieldNames、
@@ -471,16 +471,33 @@ CONFLICT/DLQとする。
 payload hash、delivery generation、lease token、row versionを含む短いCAS transactionでSUCCEEDED、RETRYABLE、FAILED、DLQへ遷移させる。
 
 署名は`IntegrationHubWebhookSigner`の`IH-WEBHOOK-1`固定prefixとUTF-8 byte length/LF framingを使い、event ID/type/schema/createdAt/correlation、
-timestamp、key ID、payload hash、raw body bytesを固定順でHMAC-SHA256する。送信headerにはcredential version、key ID、timestamp、signature、
+timestamp、credential version、key ID、provider idempotency key、payload hash、raw body bytesを固定順でHMAC-SHA256する。送信headerにはcredential version、key ID、timestamp、signature、
 correlation ID、同じdeliveryで再利用する`Idempotency-Key`を出力し、secret、raw response body、internal entityを送信・保存しない。
+署名計算前に送信headerとledger値を確定し、`ExternalDtoSnapshot.requireOutboundEnvelope`でevent ID/type/schema/createdAt/correlation、
+public resource ID、構造化payloadの存在とledger一致を検証する。canonical framingに含まれないheaderは作らず、credential versionと
+provider idempotency keyの改ざんは署名不一致として拒否する。
 
 transport beanは`integration.hub.external-transport.enabled=true`かつ明示された`provider.mode`だけで生成する。MOCK/STUBはnetworkless、LOOPBACKは
 strict literal `127.0.0.1`/`[::1]`、明示allow-list port、connection直前のpeer検証を必須とし、hostname/DNS、proxy、redirect、userinfo、
 path traversalを拒否する。LOOPBACKの接続先portが未設定ならstartupをfail-closedにする。
 
 provider応答は2xxを成功、429/5xx/timeout/networkを最大8回の指数backoff+jitter、その他4xx/3xxをretryなしFAILEDへ分類する。DLQ replayは専用
-admin permission seamからのみ呼び出し、元scope digestの再検証、連続generation、新しいprovider idempotency key、operator/reason/payload hashの
-safe auditを同じtransactionで保存する。実顧客credential、実provider URL、production enablementはこのwaveで許可しない。
+service boundaryで`integration.webhook.replay` permissionを要求し、active client、subscription、permission、data scope、tenant/legal entity、
+resource allow-list、payload membershipをDBから再取得してintersectionを再計算する。元scope digest、連続generation、新しいprovider idempotency key、
+operator/reason/payload hashのsafe auditを保存し、revoked client、scope縮小、resource除外、subscription無効化は拒否する。実顧客credential、実provider URL、
+production enablementはこのwaveで許可しない。
+
+### 7.2 B1 Review remediationの固定契約
+
+初回B1 Implementation ReviewのP1-001〜004/P2-005を`30199db8`で補正した。`t_api_delivery`は唯一のNF-05 outbound delivery ledgerとして
+再利用し、V133で`t_api_delivery_replay_audit`のdelivery FKを`ON DELETE SET NULL`へ分離する。delivery payloadは成功30日・失敗/DLQ 90日、
+replay audit metadataは1年で各々独立purgeし、auditの存在がdelivery purgeを阻害しない。auditの期限は`retention_expires_at`で保存し、
+purgeはexpiry index/keysetとbounded batchで実行する。
+
+workerはbatch scanの時刻をclaimへ使い回さず、recovery・claim直前・HTTP完了後にUTC clockを再取得する。leaseはprovider timeoutを上回る設定を
+起動時に要求し、retry時刻はHTTP完了時刻から計算する。HTTP後のresult CASが失敗した場合はtransport failureへ変換せず、lease expiry/recoveryで
+同じdelivery generationとprovider idempotency keyを再取得できる状態へ委ねる。attempt 8、timeout/5xx、slow transport、stale lease、同時claim、
+provider成功直後CAS障害、atomic enqueue rollback、replay後の独立payload/audit purgeをH2/MySQL実DB経路で検証する。
 
 ## 8. トランザクション・運用
 
@@ -561,7 +578,7 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
 - Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head
-  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は`971c17d7`で実装し、独立Implementation Review後にB2→Mを順次開始する。
+  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ちであり、再Review PASS後にB2→Mを順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F2/A1 PASS・B1独立Review待ち）
+# NF-05 Review Ledger（scope expansion承認・F2/A1 PASS・B1再Review待ち）
 
 ## Approval gate
 
@@ -23,7 +23,7 @@
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
-| B1 | IMPLEMENTATION_IN_PROGRESS | implementation Head `971c17d7`、focused 28 tests PASS、独立Implementation Review待ち。development/test mock/stub/loopbackのみ |
+| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`、focused/H2/MySQL証跡PASS、独立再Review待ち。development/test mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。最終security/recovery/performance/scan/runbook Review |
 
@@ -148,13 +148,13 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`の独立再Reviewで全件
 | 対象 | 実装/証跡 | 状態 |
 |---|---|---|
 | delivery ledger | `ApiDeliveryServiceImpl`、`ApiDeliveryMapper`、`t_api_delivery`。第二outboxなし、atomic enqueue、claim/lease、結果CAS | 実装済み・Review待ち |
-| signed transport | `IntegrationHubWebhookSigner`、credential version/key ID、timestamp、correlation、payload hash、provider idempotency key | 実装済み・Review待ち |
+| signed transport | `IntegrationHubWebhookSigner`、credential version/key ID、timestamp、correlation、payload hash、provider idempotency key、canonical envelope binding | `30199db8`でremediate済み・再Review待ち |
 | provider boundary | MOCK/STUB無接続、LOOPBACK literal IP/allow-list port/peer検証、redirect/proxy/DNSなし | 実装済み・Review待ち |
-| retry/DLQ/replay | `IntegrationHubWebhookDeliveryWorker`、最大8回backoff+jitter、4xx no-retry、DLQ、new generation replay audit | 実装済み・Review待ち |
-| persistence | V132、`ApiDeliveryReplayAudit`、H2 schema、migration contract | 実装済み・Review待ち |
-| tests | focused B1 suite 28 tests、failure/error/skipなし。実loopback server、署名golden vector、設定fail-closedを含む | 実装済み・Review待ち |
+| retry/DLQ/replay | `IntegrationHubWebhookDeliveryWorker`、最大8回backoff+jitter、4xx no-retry、DLQ、new generation replay audit、current scope authorization | `30199db8`でremediate済み・再Review待ち |
+| persistence | V132/V133、`ApiDeliveryReplayAudit`、独立audit purge、H2 schema、migration contract | `30199db8`でremediate済み・再Review待ち |
+| tests | focused B1 suite、実loopback server、署名golden/tamper、attempt 8、timeout、slow transport、CAS/claim/rollback/replay purge | `30199db8`で追加・再Review待ち |
 
-B1 implementation commitは`971c17d7`で、実顧客credential、実provider送信、production enablementは行わない。固定remote Headを同じR-NF05へ独立Implementation Reviewとしてhandoffする。
+B1 implementation commitは`971c17d7`、remediation commitは`30199db8`で、実顧客credential、実provider送信、production enablementは行わない。固定remote Headを同じR-NF05へ独立再Implementation Reviewとしてhandoffする。
 
 ## Findings
 
@@ -209,6 +209,19 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 | NF05-IMPL-FU-003 | P1 | holdとpurgeのcheckpoint/target/hold lock順序が逆でdeadlockし得る | hold acquire/releaseをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | CLOSED_BY_REVIEW |
 | NF05-IMPL-FU-004 | P1 | MySQL複数connectionのproduction service/mapper競合証跡が不足 | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | CLOSED_BY_REVIEW |
 
+## B1 Implementation Review findings（fixed Head `0f1a9297`）
+
+初回B1独立Implementation ReviewはFAIL（P0=0、P1=4、P2=1）だった。下記は`30199db8`へ反映したremediationであり、
+独立再Review受領までB1 IMPLEMENTATION PASSへ昇格させない。
+
+| ID | Severity | Finding | 対応 | Status |
+|---|---|---|---|---|
+| NF05-IMPL-B1-001 | P1 | outbound署名へcredential version/idempotency keyが含まれず、event envelopeとledger一致も強制されない | `IntegrationHubWebhookSigner`の固定framingへ両値を含め、`ExternalDtoSnapshot.requireOutboundEnvelope`で必須fieldとledger値を送信前に検証。golden vectorと各署名field改ざんnegative testを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-002 | P1 | manual replayがadmin permissionとcurrent scopeを再検証しない | `IntegrationHubWebhookReplayAuthorizationService`で`integration.webhook.replay`、active client/subscription、permission、scope intersection、tenant/legal entity、resource payload membershipをDBから再取得・再計算。revoked/scope縮小/resource除外testを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-003 | P1 | replay auditのFKがdelivery payload purgeを阻害し、audit期限がない | V133でFKを`ON DELETE SET NULL`へ変更し、audit metadataの期限列と独立bounded purgeを追加。H2/MySQLでreplay後のpayload 30/90日・audit 1年purgeを検証 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-004 | P1 | batch開始時刻の再利用でlease/backoffが過去化する | claim直前・HTTP完了後にclockを再取得し、retryはHTTP完了時刻基準。leaseがprovider timeoutを上回る起動検証とslow transport/CAS failure recovery testを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B1-005 | P2 | attempt 8、failure、claim/CAS/replay retentionの実DB証跡が不足 | worker/H2/MySQLへtimeout、5xx、attempt 8/DLQ、provider成功直後CAS障害、stale recovery、同時claim、atomic rollback、replay後purgeを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+
 ## F1 implementation trace
 
 | Task | Evidence | Status | Review boundary |
@@ -257,8 +270,8 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head
   7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）を正本化している。
 - F1はPLAN PASS / IMPLEMENTATION PASSを維持する。scope expansion Plan deltaはca27f455でPLAN PASS、
-  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface`系列でremediateした。追加remediation後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でA1独立Implementation Review PASS、B1は`971c17d7`で実装済み・独立Review待ち、B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
-- B1 `971c17d7`を既存R-NF05へ独立Implementation Reviewとして依頼する。F1/F2/A1 gate、Owner Gate、0R/0R-Dの状態は再オープンしない。B1 PASS後にB2を開始する。
+  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface`系列でremediateした。追加remediation後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でA1独立Implementation Review PASS、B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ち、B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
+- B1初回Review fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`はFAIL（P0=0、P1=4、P2=1）だった。`30199db8`で署名/envelope、replay再認可、audit/payload retention分離、fresh-clock/CAS、failure/concurrency証跡をremediateし、既存R-NF05へ独立再Reviewとして依頼する。F1/F2/A1 gate、Owner Gate、0R/0R-Dの状態は再オープンしない。B1再Review PASS後にB2を開始する。
 - P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。production endpoint enablement、実顧客credential、実provider送信、PR、mergeは引き続き禁止する。
 
 ## F1 gate evidence

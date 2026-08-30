@@ -7,8 +7,8 @@ NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansion Pla
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。A1は
 初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）をremediateし、固定Head
-`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1はimplementation Head
-`971c17d7`で実装し、独立Implementation Review待ちである。production implementationの
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1は初回Review FAILを
+`30199db8`でremediateし、独立Implementation再Review待ちである。production implementationの
 public endpoint enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -33,7 +33,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
-| B1 | IMPLEMENTATION_IN_PROGRESS | `971c17d7`、focused 28 tests PASS、独立Review待ち。mock/stub/loopbackのみ |
+| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
@@ -125,8 +125,8 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
    scope expansionは開発実装を承認し、Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASSした。
     F2実装はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済みである。A1は初回Review FAILをremediateし、
-    fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は`971c17d7`で実装し、
-    独立Implementation Reviewへ提出する。production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
+    fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`で
+    remediate済み・独立再Review待ちである。独立再Review PASSを受領するまでB2を開始しない。production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。
@@ -179,13 +179,16 @@ cursorはAES-GCMでsnapshot IDを含むclient/tenant/legal entity/route/scope/as
 failure/error/skipなしでPASSした。Windows browser profileのTomcat connector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
 この環境制約はPASS根拠にしない。固定Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`の独立ReviewでP0/P1/P2=0/0/0を受領した。
 
-### B1実装証跡（独立Implementation Review待ち）
+### B1実装証跡・初回Review remediation（独立再Review待ち）
 
 `971c17d7`で、`t_api_delivery`を唯一のNF-05 outbound delivery ledgerとして再利用するworker、signed request transport、DLQ replay service、
 V132 migration、H2 schema/testを追加した。業務stateとdelivery rowのatomic insert、claim/lease transaction、外部HTTP、provider idempotency key・
 payload hash・generation・lease tokenを用いる結果CASを分離する。timeout/429/5xxは最大8回の指数backoff+jitter、その他4xxはretryせずFAILED、
 上限到達はDLQとする。MOCK/STUBは無接続、LOOPBACKはliteral loopback/allow-list port/peer検証、redirectなし、proxy/DNSなしである。
-focused B1 suiteは28 tests、failure/error/skipなしでPASSした。実顧客credential、実provider送信、production enablementは行わない。
+focused B1 suiteは28 tests、failure/error/skipなしでPASSした。初回ReviewのP1-001〜004/P2-005を`30199db8`でremediateし、
+署名canonical framing/envelope binding、replay current authorization、V133 audit/payload retention分離、fresh-clock/CAS recovery、
+attempt 8・timeout・slow transport・同時claim・atomic rollback・replay後purgeを追加した。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。
+実顧客credential、実provider送信、production enablementは行わない。独立再Review受領まではB1 IMPLEMENTATION PASSとは扱わない。
 
 ## IH-R3 Inbound / outbound webhook
 
