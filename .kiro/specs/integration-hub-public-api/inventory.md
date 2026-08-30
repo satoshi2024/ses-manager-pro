@@ -30,9 +30,9 @@
 |---|---|
 | DecisionId | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 |
 | Decision date / Owner | 2026-08-30 / PROJECT_OWNER（ROLE） |
-| Reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268 |
+| Scope expansion approval reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値） |
 | F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
-| F2 | APPROVED_NOT_STARTED。Plan delta PASS後に専用security chainを実装 |
+| F2 | IMPLEMENTED_REVIEW_PENDING。Plan delta PASS後に専用security chainを実装済み、独立Implementation Review待ち |
 | A1 | APPROVED_SEQUENCED。F2 Review PASS後にGET-only 11 pathsを実装 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
@@ -45,8 +45,8 @@
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcの独立Plan deltaはPLAN FAIL
 （P0=0、P1=4、P2=2）となり補正した。固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の
 再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）である。F1のPLAN/IMPLEMENTATION PASS、Owner Gate、
-0R/0R-DおよびP1-EXP-004/P2-EXP-005/006の対応状態は再オープンしない。F2は次の3契約の
-再補正とR-NF05の再Reviewが完了するまでAPPROVED_NOT_STARTEDのままとする。
+0R/0R-DおよびP1-EXP-004/P2-EXP-005/006の対応状態は再オープンしない。3契約の再補正後、
+固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPlan delta PASSを受領し、F2実装を開始した。
 
 | finding | inventoryで固定する契約 | status |
 |---|---|---|
@@ -68,7 +68,7 @@
 | Portal認証 | PortalLoginUser + PortalSessionFilter | PortalSecurityConfig.java:31-40 | internal roleへ偽装しない既存パターンをclient principalにも適用 |
 | Portal rate filter | PortalRateLimitFilter | PortalRateLimitFilter.java:39-75 | endpoint種別ごとの既存判定を参考にするが、公開client/IP/rateは別設計 |
 
-### 3.1 F2実装前に固定するdedicated chain境界
+### 3.1 F2 dedicated chain境界（実装済み、独立Review待ち）
 
 | 項目 | 契約 |
 |---|---|
@@ -80,10 +80,10 @@
 | state | STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/OIDC/anonymous継承なし |
 | deny | 承認済みGET allow-list以外とunknown path/methodはanyRequest().denyAll() |
 | disabled | public-api.enabled=falseでもdeny-only chainを生成し、controller/worker/scheduler/transportを生成せずinternal/portalへfall-throughさせない |
-| registration | HMAC/ExternalApiAuditBoundaryをServlet自動登録せず、各request一回だけ実行 |
+| registration | HMAC/ExternalApiAuditBoundaryをServlet自動登録せず、各request一回だけ実行。外部filter全件はFilterRegistrationBeanでdisable |
 | destination | MOCK/STUB（無接続）またはliteral loopback allow-list portのみ。redirect/proxy/DNS/non-loopbackを拒否 |
 
-### 3.2 HMACと起動fail-closedの実装入力
+### 3.2 HMACと起動fail-closedの実装入力（実装済み）
 
 canonical bytesはOpenAPI candidateのwire header（X-Client-ID、X-Credential-Version、X-Key-ID、
 X-Timestamp、X-Nonce、X-Client-Signature）、raw request-target取得元、path/query split/rebuild、
@@ -94,7 +94,9 @@ public-api=false、external-transport=false、provider.mode=MOCKのみとし、m
 configは起動拒否する。disabled時もdeny-only chainを残し、controller/worker/scheduler/transportを
 生成しない。LOOPBACKは127.0.0.1または[::1]のliteralとallow-list portだけで、connection直前の
 socket peerも検証する。
-| 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 新filterもSecurityFilterChainへの明示登録と二重登録試験が必要 |
+| 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
+
+F2実装証跡は専用packageとF2 testsに限定し、A1 controller、B1/B2 provider transport、production enablementは未着手である。
 
 ## 4. Secret encryption / rotation inventory
 
@@ -144,7 +146,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | Accounting job | providerRequestId、payload hash、job idを保持 | 参考。公開client request、delivery、inbound eventを同一traceへ結ぶ必要 |
 | Expense/Attendance | provider callへcorrelationIdを渡す経路あり | 参考。global MDC/filterの代替ではない |
 | AI/Compliance | traceId/correlationIdを業務recordへ保存する個別経路あり | 参考。横断公開API correlation contractは未実装 |
-| HTTP filter/MDC | correlation ID専用filter、MDC設定・finally解除を確認できない | F2 APPROVED_NOT_STARTED。edge filter、validation、log/audit/worker propagationを実装する |
+| HTTP filter/MDC | F2で専用correlation filterを追加し、全responseへheaderを付与 | F2 IMPLEMENTED_REVIEW_PENDING。worker propagationはB1/B2で実装 |
 
 ## 7. Rate limiter / IP inventory
 
@@ -155,7 +157,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
 | ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
-| 公開client rate | 専用実装なし | F2 APPROVED_NOT_STARTED。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで実装する |
+| 公開client rate | ExternalApiAuthorizationFilterからF1 ApiUsageBucketServiceを呼出し | F2 IMPLEMENTED_REVIEW_PENDING。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで適用 |
 
 ## 8. External DTO inventory
 
@@ -226,5 +228,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- F1 persistence基盤はImplementation PASS済み。F2/A1/B1/B2/Mは承認済みで順次実装するが、Plan delta PASS前は未着手。
+- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2を実装済み（独立Implementation Review待ち）。A1/B1/B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

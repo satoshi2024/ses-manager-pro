@@ -72,6 +72,15 @@ spring:
   flyway:
     enabled: false
 
+integration:
+  hub:
+    public-api:
+      enabled: false
+    external-transport:
+      enabled: false
+    provider:
+      mode: MOCK
+
 organization:
   scope:
     enabled: true

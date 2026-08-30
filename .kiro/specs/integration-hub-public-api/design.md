@@ -474,7 +474,7 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - scope expansionのPlan delta ReviewのPASS、approved Baseの再fetch確認、各waveのmigration最大値の再確認。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
-- F2はPlan delta PASS後に開始し、A1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
+- Plan deltaはca27f455でPASS済み。F2は実装済みで独立Implementation Review待ち、PASS後にA1→B1→B2→Mを各waveの独立Implementation Review後に順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

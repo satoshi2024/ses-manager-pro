@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F1 Implementation PASS・Plan delta remediation中）
+# NF-05 Review Ledger（scope expansion承認・F2実装・独立Implementation Review待ち）
 
 ## Approval gate
 
@@ -20,7 +20,7 @@
 | Wave | Decision status | Review/実装状態 |
 |---|---|---|
 | F1 | APPROVED | PLAN PASS / IMPLEMENTATION PASS。fixed reviewed Head 7e50bf1360ea8d7271acc0667593635451300268 |
-| F2 | APPROVED_NOT_STARTED | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。Plan delta PASS後に開始 |
+| F2 | IMPLEMENTED_REVIEW_PENDING | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。Plan delta PASS Head ca27f455、F2実装commit後に独立Implementation Review |
 | A1 | APPROVED_SEQUENCED | F2 Implementation Review PASS後に開始。GET-only 11 paths、allow-list DTOのみ |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。development/test mock/stub/loopbackのみ |
@@ -70,6 +70,19 @@ deny-only chainとbean不存在を仕様・受入テストへ固定した。SPEC
 PASSを意味せず、remediation commit e18f0d589b63223bf864bb33c6910b56a59d940eを同じremote branchへ
 pushしたうえで、新しいremote Headを同じR-NF05へ再提出する。
 
+## F2 implementation evidence（独立Implementation Review待ち）
+
+R-NF05のscope expansion Plan deltaは固定remote Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`で
+PLAN PASS（P0=0、P1=0、P2=0）となったため、同じ専用worktreeでF2を開始した。実装は
+`src/main/java/com/ses/config/integrationhub/`へ限定し、F1 serviceを利用する専用principal、
+`@Order(0)`/`/external-api/v1/**` chain、stateless/deny-only、HMAC canonical byte検証、
+trusted proxy/source IP/CIDR、nonce atomic commit、scope/data scope/command default deny、
+quota、correlation、専用audit、stable error boundaryとfilter自動二重登録防止を追加した。
+承認済みA1 controller、B1/B2 provider transport、production enablement、実顧客credential、
+実provider送信は変更していない。F2 testsはcanonical golden vector、proxy/CIDR、route、properties、
+認証/nonce/session/browser、scope/data/quota、disabled MockMvc chainを含む。独立Implementation Review
+PASS受領前にA1へ進まず、F2 commit後のremote Headを外部handoffで固定する。
+
 ## Findings
 
 | ID | Severity | Finding | Evidence | Disposition |
@@ -77,11 +90,11 @@ pushしたうえで、新しいremote Headを同じR-NF05へ再提出する。
 | NF05-DISC-BLOCK-001 | BLOCKER | approval ledgerがCANDIDATEで、DG-05と開始条件が未承認 | approval-decision.md、中央traceability | OWNER_GATE_RESOLVED |
 | NF05-DISC-002 | P1 | NotificationOutboxDispatcherがclaim→外部notify→resultをREQUIRES_NEW transaction内で実行 | NotificationOutboxDispatcher.java:44-70 | SPEC_ADDRESSED。実装は未着手 |
 | NF05-DISC-003 | P1 | provider token versionと暗号key versionが分離された公開credential envelopeなし | IntegrationConnection、FreeeIntegrationServiceImpl、MFA crypto services | F1 scope APPROVED。実装未着手 |
-| NF05-DISC-004 | P1 | ApiAuditFilterは公開API境界を監査しない | ApiAuditFilter.java:103-117 | F2 APPROVED_NOT_STARTED。Plan delta PASS後に公開境界を監査する |
-| NF05-DISC-005 | P1 | 公開client quotaのmulti-node rate limiterなし。既存portal limiterはJVMローカル | PortalRateLimiterImpl.java:15-45 | F2 APPROVED_NOT_STARTED。F1 persistence PASS済み、chain側は未実装 |
+| NF05-DISC-004 | P1 | ApiAuditFilterは公開API境界を監査しない | ApiAuditFilter.java:103-117 | F2 IMPLEMENTED_REVIEW_PENDING。ExternalApiAuditBoundaryを追加し、既存filterと分離 |
+| NF05-DISC-005 | P1 | 公開client quotaのmulti-node rate limiterなし。既存portal limiterはJVMローカル | PortalRateLimiterImpl.java:15-45 | F2 IMPLEMENTED_REVIEW_PENDING。F1 ApiUsageBucketServiceをchainから適用 |
 | NF05-DISC-006 | P1 | InvoiceDetailDtoがInvoice entityを継承する既存前例 | dto/.../InvoiceDetailDto | public DTOでは禁止 |
 | NF05-DISC-007 | P1 | 既存/api/webhooks/**はpermitAllかつCSRF ignore | SecurityConfig.java:130-145, 312-315 | 公開inboundと分離 |
-| NF05-DISC-008 | P2 | correlation IDのglobal edge filter/MDC propagationを確認できない | ad hoc provider/service経路のみ | F2 APPROVED_NOT_STARTED。Plan delta PASS後に横断実装 |
+| NF05-DISC-008 | P2 | correlation IDのglobal edge filter/MDC propagationを確認できない | ad hoc provider/service経路のみ | F2 IMPLEMENTED_REVIEW_PENDING。外部chain専用correlation filterを追加、worker propagationはB1/B2 |
 | NF05-DISC-009 | P1 | OpenAPI、HTTP status/error、version互換規則がなく外部契約をreviewできない | openapi-candidate.yaml | SPEC_APPROVED。A1 APPROVED_SEQUENCED、実装未着手 |
 | NF05-DISC-010 | P2 | metrics cardinalityと禁止labelの具体設計がない | design.md / requirements.md | SPEC_ADDRESSED。F2/M APPROVED_SEQUENCED、実装未着手 |
 | NF05-DISC-011 | P2 | payload retention、legal hold、purgeの契約がない | design.md / requirements.md | SPEC_ADDRESSED。F1 PASS、B1/B2/M APPROVED_SEQUENCED |
@@ -168,15 +181,12 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 ## Current scope expansion evidence
 
 - DecisionId DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 はOwnerRef PROJECT_OWNER、OwnerType ROLE、
-  Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、reviewed Head
-  7e50bf1360ea8d7271acc0667593635451300268を正本化している。
-- F1はPLAN PASS / IMPLEMENTATION PASSを維持する。F2はAPPROVED_NOT_STARTED、A1/B1/B2/Mは
-  APPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
-- 本docs-only gateをpush後、既存R-NF05へPlan delta Reviewを依頼する。PASS前はF2を開始せず、FAIL時は
-  spec/architecture remediationだけを行う。F1 gate、Owner Gate、0R/0R-DのPASS/対応状態は再オープンしない。
-- 現在のPlan delta FAIL remediationでは、専用chainの監査/error境界、canonicalTarget byte生成、
-  disabled deny-only/bean/config契約を補正する。固定remote Headはdocs-only commit後に更新し、
-  PLAN PASS受領前はF2を開始しない。P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。
+  Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head
+  7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）を正本化している。
+- F1はPLAN PASS / IMPLEMENTATION PASSを維持する。scope expansion Plan deltaはca27f455でPLAN PASS、
+  F2はIMPLEMENTED_REVIEW_PENDING、A1/B1/B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
+- F2 implementation commit後は既存R-NF05へ独立Implementation Reviewを依頼する。F1 gate、Owner Gate、0R/0R-DのPASS/対応状態は再オープンしない。
+- P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。production endpoint enablement、実顧客credential、実provider送信、PR、mergeは引き続き禁止する。
 
 ## F1 gate evidence
 

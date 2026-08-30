@@ -1,4 +1,4 @@
-# NF-05 完了対応表（scope expansion承認済み・F1 Implementation PASS・Plan delta FAIL remediation中）
+# NF-05 完了対応表（scope expansion承認済み・F2実装・独立Review継続中）
 
 ## Task対応
 
@@ -17,7 +17,7 @@
 | F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 5 tests、Flyway smoke PASS | IMPLEMENTATION_PASS | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、follow-up `5a2a0231`、typed snapshot `96d6801c`、独立Review PASS |
 | F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）とfollow-up FAIL（P1=4、再Review P1=1）への実装・テスト対応。typed snapshot field boundary、lease fail-closed、lock順序、delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTATION_PASS | `a184c1f4` + `d476614e` + `5a2a0231` + `96d6801c`、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3` → 独立Review PASS |
 | Scope expansion normalization | approval-decision、README、plan、requirements、design、tasks、inventory、review-ledger、中央traceability | DecisionId、OwnerRef、Base、reviewed Head、wave status、A2 N/A、production禁止境界を正本化。production変更なし | COMPLETE（docs-only gate、Plan delta FAIL remediation中） | f7d7d144（remoteへpush済み。最終handoff Headは外部通知で固定） |
-| F2 security chain | tasks/design/inventory | scope expansion承認済み。Plan delta PASS後に着手 | APPROVED_NOT_STARTED | — |
+| F2 security chain | tasks/design/inventory、`src/main/java/com/ses/config/integrationhub/`、F2 tests | `@Order(0)`専用chain、stateless、HMAC byte canonical、trusted proxy/CIDR、nonce、scope/data scope、route/quota、専用audit、deny-only、stable error | IMPLEMENTED（独立Implementation Review待ち） | 次のTask F2 commitで固定 |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | GET-only 11 paths、external DTO allow-list。F2 Review後に着手 | APPROVED_SEQUENCED | — |
 | A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
 | B1 outbound webhook | tasks/design/inventory | A1 Review後。development/test mock/stub/loopbackのみ | APPROVED_SEQUENCED | — |
@@ -37,7 +37,7 @@ scope expansionのPlan delta Reviewは既存R-NF05へ固定remote Headを渡す�
 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL（P0=0、P1=4、P2=2）、
 固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）であり、
 NF05-PLAN-EXP-007〜009のspec/architecture remediationだけを同じbranchへcommit/pushする。
-Plan delta PASS前はF2を開始せず、A2はN/Aで全体完了をblockしない。
+Plan deltaはca27f455でPASS済み、F2は実装済みで独立Implementation Review待ち。A2はN/Aで全体完了をblockしない。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止し、production enablement、実顧客credential、実provider送信、
 merge、auto-mergeも禁止する。
 
@@ -50,6 +50,8 @@ Scope expansion DecisionId: DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02
 Scope expansion Plan delta FAIL Head: 1547871caed049ba14d1e5e4a25ad50fa19771fc（P0=0、P1=4、P2=2）
 Scope expansion Plan delta re-Review FAIL Head: 9cca2deec9ab1bd5417aaba98f859ed14210da13（P0=0、P1=3、P2=0）
 Scope expansion Plan delta remediation commit: 8d25215b9b651e99433becf50d13498da3699d2a
+Scope expansion Plan delta PASS: ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a（P0=0、P1=0、P2=0）
+F2 implementation evidence: dedicated external security chain、F2 boundary tests、production enablementなし（Task F2 commitで固定）
 Scope expansion Plan delta residual remediation commit: e18f0d589b63223bf864bb33c6910b56a59d940e（docs-only、remoteへpush済み）
 Task 0R remediation: 48037c923224f684968dbaf3410cdb37307ed100
 Task 0R-D delta remediation: 11ee82c15a5cdf8f961b2a2d0518a52d81f4de71

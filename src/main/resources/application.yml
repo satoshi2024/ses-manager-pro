@@ -416,6 +416,16 @@ compliance:
 # deployment secret storeからのみ注入する。未設定時に開発用secretへfallbackしない。
 integration:
   hub:
+    # NF-05 F2はdefault-off。値を省略せず、起動validatorでfail-closedにする。
+    public-api:
+      enabled: false
+    external-transport:
+      enabled: false
+    provider:
+      mode: MOCK
+    security:
+      trusted-proxies: []
+      allowed-loopback-ports: []
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}

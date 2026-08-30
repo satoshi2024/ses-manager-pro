@@ -1,0 +1,19 @@
+package com.ses.config.integrationhub;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+class ExternalApiRouteCatalogTest {
+    @Test
+    void onlyApprovedGetTemplatesResolve() {
+        assertEquals("/external-api/v1/projects/count",
+                ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/projects/count").template());
+        assertEquals("/external-api/v1/projects/{publicProjectId}",
+                ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/projects/p-1").template());
+        assertNull(ExternalApiRouteCatalog.resolve("POST", "/external-api/v1/projects"));
+        assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/projects/p-1/extra"));
+        assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/engineer-availability/count"));
+    }
+}

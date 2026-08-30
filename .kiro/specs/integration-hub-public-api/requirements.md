@@ -3,11 +3,10 @@
 ## 0. 状態と適用範囲
 
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
-NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansionのPlan deltaは固定Head
-1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL（P0=0、P1=4、P2=2）となり補正した。
-固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）であり、
-現在はdocs-only remediation中である。Plan delta PASS前にF2以降のproduction implementation、public endpoint、
-外部送信を開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
+NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansion Plan deltaは固定Head
+ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
+F2は実装済みで独立Implementation Review待ち、PASS受領前にA1へ進まない。production implementationの
+public endpoint enablement、外部送信は引き続き開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
@@ -28,7 +27,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
 | Wave | 状態 | 開始条件・境界 |
 |---|---|---|
-| F2 | APPROVED_NOT_STARTED | scope expansion Plan delta PASS。専用security chain、認証境界、audit/rate/IP |
+| F2 | IMPLEMENTED_REVIEW_PENDING | scope expansion Plan delta PASS済み。専用security chain、認証境界、audit/rate/IP |
 | A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 pathsとexternal DTO allow-list |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
@@ -104,8 +103,8 @@ IH-R1-15. development/testのprovider.mode enumはMOCK、STUB、LOOPBACKの三�
 ## IH-R2 External contract
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
-   scope expansionは開発実装を承認するが、現在はPlan delta FAIL（P1=3、P2=0）のためF2を開始せず、
-   production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
+   scope expansionは開発実装を承認し、Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASSした。
+   F2実装は独立Implementation Review待ちで、production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。

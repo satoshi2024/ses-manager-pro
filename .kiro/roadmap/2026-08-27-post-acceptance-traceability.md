@@ -26,7 +26,7 @@
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | APPROVED | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document、NF-01 lifecycle | `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@76e45340`。経費締めA、PII AES-256-GCM、as-of event、AI候補のみ。詳細: `.kiro/specs/certification-learning-skill-gap/approval-decision.md` | 実装・独立Review完了後 |
 | NF-04 | `mobile-pwa-self-service` | APPROVED | 管理者（プロジェクト責任者） | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 2026-08-28承認。Base=`origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、branch=`codex/mobile-pwa-self-service`、worktree=`C:\\work\\ses-mobile-pwa-self-service`。Chrome/Edge/Safari現行版・直前版、Android Chrome/iOS Safariを対象。install任意、pushなし。承認済みoffline/cache、idempotency、version/CAS、logout/user switch、30日保持、409差分UXをNF-04専用specへ固定する | 2026-08-28 |
-| NF-05 | `integration-hub-public-api` | APPROVED | `PROJECT_OWNER` | API成功率、DLQ滞留、p95、rate境界 | identity、outbox、audit、data scope | DG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（2026-08-30）。OwnerRef=PROJECT_OWNER、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd。F1 PLAN/IMPLEMENTATION PASS済み。F2 APPROVED_NOT_STARTED、A1/B1/B2/M APPROVED_SEQUENCED、A2 NOT_APPLICABLE_UNDER_CURRENT_DECISION。scope expansion Plan delta再Reviewは9cca2deec9ab1bd5417aaba98f859ed14210da13でPLAN FAIL（P0=0、P1=3、P2=0）、現在docs-only remediation中。詳細: .kiro/specs/integration-hub-public-api/approval-decision.md | Plan delta再Review後に順次実装・独立Review |
+| NF-05 | `integration-hub-public-api` | APPROVED | `PROJECT_OWNER` | API成功率、DLQ滞留、p95、rate境界 | identity、outbox、audit、data scope | DG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（2026-08-30）。OwnerRef=PROJECT_OWNER、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd。F1 PLAN/IMPLEMENTATION PASS済み。scope expansion Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS。F2 IMPLEMENTED_REVIEW_PENDING、A1/B1/B2/M APPROVED_SEQUENCED、A2 NOT_APPLICABLE_UNDER_CURRENT_DECISION。詳細: .kiro/specs/integration-hub-public-api/approval-decision.md | F2 Implementation Review後にA1→B1→B2→Mを順次実装・独立Review |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
@@ -135,8 +135,8 @@
 #### DG-05 scope expansion
 
 - DecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、OwnerRef=PROJECT_OWNER、OwnerType=ROLE。
-- Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、Implementation branch=codex/integration-hub-public-api、current reviewed remote Head=7e50bf1360ea8d7271acc0667593635451300268。
-- F1はPLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持し再オープンしない。F2=APPROVED_NOT_STARTED、A1/B1/B2/M=APPROVED_SEQUENCED。
+- Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、Implementation branch=codex/integration-hub-public-api、scope expansion approval reviewed Head=7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）。
+- F1はPLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持し再オープンしない。scope expansion Plan deltaはca27f455でPASS、F2=IMPLEMENTED_REVIEW_PENDING、A1/B1/B2/M=APPROVED_SEQUENCED。
 - A2=NOT_APPLICABLE_UNDER_CURRENT_DECISION（approved command=0件）であり、command/exportはdefault deny、全体完了をblockしない。
 - scope expansion Plan delta PASS後はF2→A1→B1→B2→Mを各waveの独立Review後に順次実装する。development/testのmock/stub providerとloopback test serverのみを許可する。
 - production enablement、実顧客credential、実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
@@ -144,11 +144,8 @@
   （P0=0、P1=4、P2=2）。dedicated chain、HMAC canonical bytes、production fail-closed、
   mock/loopback destination、A2 N/A、旧traceをdocs-onlyで補正後、同じR-NF05へ再Reviewする。
 - scope expansion Plan delta remediationは8d25215b9b651e99433becf50d13498da3699d2aへpush済み。
-- scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL
-  （P0=0、P1=3、P2=0）。security chain監査/error boundary、canonicalTarget byte生成、
-  disabled deny-only/bean/config契約をdocs-onlyで補正後、同じR-NF05へ再Reviewする。
-- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。
-  最終trace commit後のremote Headを同じR-NF05へ再提出し、PLAN PASS受領前はF2を開始しない。
+- scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13はPLAN FAILだったが、remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
+- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。PASS後、F2を実装し、独立Implementation Reviewへ渡す。
 
 ### DG-06 NF-06
 

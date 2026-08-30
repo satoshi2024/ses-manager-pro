@@ -38,7 +38,7 @@ F1 Decision時点ではpublic endpointの公開、外部送信、A1、A2、B1、
 | OwnerRef | PROJECT_OWNER |
 | OwnerType | ROLE |
 | Base | origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
-| Current reviewed remote Head | 7e50bf1360ea8d7271acc0667593635451300268 |
+| Current reviewed remote Head | ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a（scope expansion Plan PASS） |
 | F1 gate | PLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持。再オープンしない |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
@@ -52,7 +52,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 
 | Wave | Decision status | 境界 |
 |---|---|---|
-| F2 | APPROVED_NOT_STARTED | Plan delta PASS後に着手。専用security chain、client principal、scope/data scope、audit、rate/IP |
+| F2 | IMPLEMENTED_REVIEW_PENDING | Plan delta PASS済み。専用security chain、client principal、scope/data scope、audit、rate/IP |
 | A1 | APPROVED_SEQUENCED | F2 Implementation PASS後。GET-only 11 paths、inventory allow-list、external DTOのみ |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
@@ -95,12 +95,9 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 ## Required next gate
 
 F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、
-再オープンしない。scope expansionの固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL
-（P0=0、P1=4、P2=2）となり補正したが、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13も
-PLAN FAIL（P0=0、P1=3、P2=0）だった。security chain監査/error boundary、canonicalTarget byte
-生成、disabled deny-only/bean/config契約のspec/architecture remediationだけを同じbranchへcommit/pushし、
-既存R-NF05へPlan delta再Reviewとして渡す。Plan delta PASS前はF2 implementationを開始しない。
+再オープンしない。scope expansionのPlan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aで
+PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで実装済みであり、独立Implementation Reviewへ渡す。
 
-Plan delta PASS後はF2→独立Implementation Review→A1→Review→B1→Review→B2→Review→M→最終Reviewの順に
-継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2は実装済みで独立Implementation Reviewへ渡し、
+PASS後はA1→Review→B1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

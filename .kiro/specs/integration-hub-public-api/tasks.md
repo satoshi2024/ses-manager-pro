@@ -1,11 +1,10 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1 Implementation PASS・Plan delta FAIL remediation中）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2実装・独立Review継続中）
 
 ## 実行停止規則
 
-F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。前回のscope expansion Plan deltaは
-P0=0、P1=4、P2=2であり、補正後の固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13も
-P0=0、P1=3、P2=0のFAILであるため、下記0R-P6のspec/architecture remediationと同じR-NF05の
-再Review以外のF2実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansion Plan deltaは固定Head
+ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでP0=0、P1=0、P2=0のPASSを受領したため、F2を実施する。
+F2の独立Implementation Review PASS後はA1→B1→B2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -42,12 +41,12 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task 0R-P6: scope expansion Plan delta residual remediation（spec / architecture only）
 
-- [ ] Objective: security chainのnonce前IP確定・専用監査・error boundary、canonicalTarget完全byte手順、
+- [x] Objective: security chainのnonce前IP確定・専用監査・error boundary、canonicalTarget完全byte手順、
   disabled deny-only chainとbean/config生成条件をrequirements/design/inventory/plan/ledgerへ同期する。
 - Test requirements: docs-only差分、golden vector、filter/error/CORS/CSRF/anonymous境界、default/prod profile、
   disabled route、controller/worker/scheduler/transport bean不存在の受入条件を独立Plan Reviewが照合する。
-- Demo: 固定remote Headを既存R-NF05へ渡し、PLAN PASS受領前にF2を開始しない。production source、migration、
-  test、endpoint、外部送信、PRは変更しない。
+- Demo: 固定remote Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aの独立Plan PASSを受領した後にF2へ進む。
+  0R-P6自体はspec-onlyであり、production endpoint、外部送信、PRは変更しない。
 
 ## Task F1: client / credential / scope / idempotency DDL
 
@@ -83,14 +82,14 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 - 実施証跡: `a7654b44`でV129 MySQL migration、H2 schema/init、entity/mapper/service/crypto基盤、
   `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、`5a2a0231`でfollow-up reviewの4 P1を実装・テストremediateし、`96d6801c`でsnapshotのfield固有型検証を追加して、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
   Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
-  production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで終了している。独立Implementation Reviewの
+  production-config系およびloopback接続環境を含む既存テストの11 errorsと2 failuresで終了している。独立Implementation Reviewの
   旧remediation時点の再Reviewは未実施だった。follow-up remediation後の固定Headを独立Implementation Reviewへ再提出し、
   P1-FU-001の追加修正後に独立Implementation Review PASS（P0/P1/P2=0）を受領した。MySQL
   `IntegrationHubF1MySqlConcurrencyTest` 5件はPASSした。
 
 ## Task F2: dedicated security chain
 
-- [ ] Objective: /external-api/v1/**専用principal、client scope、data scope、command permission、audit、
+- [x] Objective: /external-api/v1/**専用principal、client scope、data scope、command permission、audit、
   correlation、rate/IP境界を実装する。@Order(0)のsecurityMatcher、既存portal/internal chainとの
   排他、STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/OIDC/
   anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定する。filter順序はcorrelation/
@@ -100,7 +99,7 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   GET監査の正本にせず同一filterの自動
   二重登録を防ぐ。CSRFはexternal chainだけdisable、CORSは許可originなし、anonymousはdisable、
   401/403は専用stable JSON entrypointとcorrelation headerでinternal errorへfall-throughさせない。
-- Preconditions: F1 Implementation PASS、scope expansion Decision、既存R-NF05 Plan delta PASS。現在はAPPROVED_NOT_STARTED。
+- Preconditions: F1 Implementation PASS、scope expansion Decision、R-NF05 Plan delta PASS。F2独立Implementation Review待ち。
 - Implementation guidance: HMAC wire headerはOpenAPI candidateのX-Client-ID、X-Credential-Version、
   X-Key-ID、X-Timestamp、X-Nonce、X-Client-Signatureへ固定し、credentialVersion/keyIdの形式、
   raw header block 16,384 byte/32 field、Content-Length、body 1,048,576 byte、Content-Encodingの
@@ -125,6 +124,10 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   disabled deny-only chainとcontroller/worker/scheduler/transport bean不存在、MOCK/STUB無接続、
   loopback IPv4/IPv6、DNS/redirect/proxy/peer検証も含む。
 - Demo: internal/portal chainと公開chainが相互にprincipalを偽装しない。
+
+- 実施証跡: `src/main/java/com/ses/config/integrationhub/` の専用chain/filter/principal/canonicalizer、
+  `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象41件のcombined suite）および
+  `ExternalApiSecurityChainIntegrationTest`。A1 controller、B1/B2 transport、production enablementは未実装。
 
 ## Task A1: v1 read APIs / OpenAPI
 

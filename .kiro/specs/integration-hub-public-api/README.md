@@ -3,9 +3,9 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: F1独立Implementation Review PASSを維持。scope expansionは承認済みだが、固定Head
-  9cca2deec9ab1bd5417aaba98f859ed14210da13のPlan deltaはPLAN FAIL（P0=0、P1=3、P2=0）で、
-  現在はdocs-only remediation中。F2未着手、A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
+- 本specの状態: F1独立Implementation Review PASSを維持。scope expansion Plan deltaは固定Head
+  ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2実装済みで独立
+  Implementation Review待ち、A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -16,8 +16,8 @@
 - 専用branch: codex/integration-hub-public-api
 
 この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。scope expansionの
-Plan delta ReviewがPASSするまでF2のproduction Java、SQL/migration、画面、既存shared file、production test、
-外部送信、public endpointを開始しない。Plan delta PASS後は承認済みwaveを順に実装できるが、development/testの
+Plan delta PASS後は承認済みwaveを順に実装できるが、F2独立Implementation Review PASSまではA1へ進まず、productionの
+外部送信、実顧客credential、public endpoint enablementは開始しない。development/testの
 mock/stub providerとloopback test serverに限定し、production enablement、実顧客credential、実provider送信は
 行わない。force push、main変更、PR、merge、auto-mergeは禁止する。
 
@@ -40,11 +40,9 @@ mock/stub providerとloopback test serverに限定し、production enablement、
 scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implementation ReviewはPASS済みであり、
 固定Head 7e50bf1360ea8d7271acc0667593635451300268で再オープンしない。scope expansionのdocs-only gateを
 同Headから作成し、既存R-NF05へPlan delta Reviewを渡した。固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcは
-PLAN FAIL（P0=0、P1=4、P2=2）だったためdocs-only補正を行ったが、固定Head
-9cca2deec9ab1bd5417aaba98f859ed14210da13でもPLAN FAIL（P0=0、P1=3、P2=0）となった。
-残るsecurity chain監査/error境界、canonicalTarget byte生成、disabled deny-only/bean/config契約を
-docs-onlyで補正し、同じR-NF05へ再提出する。
-Plan delta PASS後はF2→A1→B1→B2→Mを順次実装し、A2はapproved command=0件のためN/Aとする。
+PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
+remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
+F2を実装済みで独立Implementation Reviewへ渡し、PASS後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
 `d476614e`、follow-up remediationは `5a2a0231`、typed snapshot correctionは `96d6801c`。V129 MySQL Flyway smoke、F1 H2 targeted
@@ -53,8 +51,8 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `5a2a0231`の再Reviewを行った。固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1=1（nested scalar bypass）が残ったため、
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
-public endpoint、外部送信、production enablementは未完了である。F2/A1/B1/B2/Mはscope expansion承認済みだが、
-Plan delta PASSまでは未着手とする。
+public endpoint、外部送信、production enablementは未完了である。F2は実装済みだが独立Implementation Review待ちで、
+A1/B1/B2/Mは順次未着手とする。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
