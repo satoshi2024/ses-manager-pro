@@ -65,6 +65,7 @@ class DocumentServiceImplTest {
     @Mock ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
     @Mock ObjectProvider<com.ses.service.EngineerAccountLinkService> engineerAccountLinkServiceProvider;
     @Mock ObjectProvider<com.ses.service.security.OrganizationScopeService> organizationScopeServiceProvider;
+    @Mock com.ses.service.AssetScopeService assetScopeService;
 
     DocumentServiceImpl sut;
 
@@ -105,7 +106,8 @@ class DocumentServiceImplTest {
                 documentHashClaimMapper,
                 authorizationServiceProvider,
                 engineerAccountLinkServiceProvider,
-                organizationScopeServiceProvider);
+                organizationScopeServiceProvider,
+                assetScopeService);
     }
 
     @AfterEach
@@ -520,6 +522,22 @@ class DocumentServiceImplTest {
 
         var ex = assertThrows(BusinessException.class, () -> sut.assertDocumentAccessAllowed(doc));
         assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    void assertDocumentAccessAllowed_lostIncidentLinkAllowsScopedManager() {
+        loginAsRole("マネージャー");
+        Document doc = new Document();
+        doc.setId(81L);
+        doc.setDocumentType("INTERNAL");
+        DocumentLink incidentLink = new DocumentLink();
+        incidentLink.setDocumentId(81L);
+        incidentLink.setTargetType("ASSET_LOST_INCIDENT");
+        incidentLink.setTargetId(7L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(incidentLink));
+        when(assetScopeService.isAccessibleByDocumentLink(81L, "マネージャー", 99L)).thenReturn(true);
+
+        assertDoesNotThrow(() -> sut.assertDocumentAccessAllowed(doc));
     }
 
     @Test

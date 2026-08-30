@@ -211,7 +211,6 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                         ApprovalNotificationKeys.conflict(requestId, roundNo(request), currentStep.stepNo()));
                 return;
             }
-            adapter.applyApproved(request);
         }
         boolean finalized = casUpdate(request, w -> w
                 .eq("current_step", request.getCurrentStep())
@@ -220,6 +219,12 @@ public class ApprovalEngineServiceImpl implements ApprovalEngineService {
                 .set("idempotency_key", null));
         if (!finalized) {
             throw BusinessException.of("error.common.optimisticLock");
+        }
+        request.setStatus(STATUS_APPROVED);
+        // 承認済み状態を永続化した同一transaction内で対象adapterを適用する。
+        // adapter側の失敗時は承認状態と対象更新をまとめてrollbackする。
+        if (adapter != null) {
+            adapter.applyApproved(request);
         }
     }
 

@@ -9,7 +9,7 @@
 | 欠陥ID | Severity | 対象モジュール | 関連用例ID | 状態 | 担当Owner | 概要 |
 |---|:---:|---|---|:---:|:---:|---|
 | D-20260816-001 | P2 | MOD-10 S12 / StaffingHeatmapService | `StaffingPerformanceTest` | OPEN | 開発（S12） | 代表データ量（200要員×50position×24月）需給集計時のN+1多表クエリによるp95遅延超過（実測402s > 10s閾値） |
-| D-20260817-002 | P2 | MOD-07 / ContractApiController | `E2E-07-R / MOD07-07 / PILOT-05` | OPEN | 開発（契約管理） | `ContractSaveDto` に `version` 属性が欠落しており、更新APIでMyBatis-Plus楽観ロックがバイパスされる。行ロック（`selectByIdForUpdate`）により直列化されるが、409競合検知が行われず後勝ち上書きとなる。 |
+| D-20260817-002 | P2 | MOD-07 / ContractApiController | `E2E-07-R / MOD07-07 / PILOT-05` | VERIFIED_CLOSED | 開発（契約管理） | `ContractSaveDto` に `version` 属性が欠落しており、更新APIでMyBatis-Plus楽観ロックがバイパスされる。行ロック（`selectByIdForUpdate`）により直列化されるが、409競合検知が行われず後勝ち上書きとなる。 |
 | D-20260817-003 | P2 | MOD-03 / ActionPermissionResolver | `MOD03-18` | OPEN | 開発（セキュリティ・認証） | `ActionPermissionResolver` に `bp-affiliations` のルートマッピングが欠落しており、`MenuPermissionFilter` により全ロール（管理者含む）で `/api/bp-affiliations/**` が 403 拒否される。 |
 | D-20260818-004 | P1 | MOD-07 / CloudSignDispatchService | `MOD07-09` | OPEN | 開発（電子契約・外部連携） | CloudSign外部POST（`createDocument`）成功直後にDB更新が失敗（障害注入）した場合、外部docIdが未永続化のまま残り、再送時に外部重複/孤児ドキュメントが生成される（冪等補償欠落）。 |
 | D-20260818-005 | P2 | MOD-03 / ActionPermissionResolver | `MOD03-19 / BpMigrationApiController` | OPEN | 開発（セキュリティ・認証） | `ActionPermissionResolver` に `bp-migrations` のルートマッピングが欠落しており、`MenuPermissionFilter` により全ロール（管理者含む）で `/api/bp-migrations/**` が 403 拒否される。 |
@@ -57,12 +57,12 @@
 - **関連用例ID**: `E2E-07-R / MOD07-07 / PILOT-05`
 - **検出Build SHA**: `f00360f95d3875b30d0f343ed9cc47e76d72b803`
 - **RUN_ID**: `E2E-20260816-001`
-- **状態**: `OPEN`
+- **状態**: `VERIFIED_CLOSED`
 - **担当Owner**: 開発（契約管理）
 - **ロック実装証跡**:
   - `ContractServiceImpl.java` L227: `Contract old = this.baseMapper.selectByIdForUpdate(contract.getId());`（行ロック実装を確認）
   - `Contract.java`: `@Version private Integer version;`（MyBatis-Plus楽観ロック注釈あり）
-  - `ContractSaveDto.java`: `version` 属性が未定義（L1-73）
+  - `ContractSaveDto.java`: `version` 属性と更新時必須Validation groupを実装済み。
 - **再現手順**:
   1. 契約 `id: X`（初期 `version: 0`）を用意。
   2. 2 つのクライアント A と B が同時に同一の `version: 0` を前提として `PUT /api/contracts/X`（異なる単価/備考）を送信。
@@ -75,6 +75,9 @@
   - MyBatis-Plus に `version` が渡されないため `version` のインクリメントおよび不一致チェックがスキップされ、後からコミットしたリクエストで上書き（Last Write Wins）される。
 - **対応方針 / 回帰条件**:
   - `ContractSaveDto` に `@NotNull Integer version` を追加し、`ContractApiController.update` 経由で MyBatis-Plus の楽観ロックまたは明示的な版番号不一致チェック（409 返却）を有効化する。
+- **対応内容 / 検証**:
+  - 更新APIを更新専用Validation groupで版番号必須とし、画面は取得した契約versionをPUT payloadへ含める。サービスは行ロック後に版番号を照合し、版不一致または更新件数0を409で拒否する。
+  - `ContractApiControllerTest`（version省略400・version引き渡し）および `ContractServiceImplTest`（版不一致409・更新件数0の409）が成功した。
 
 ---
 

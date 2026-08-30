@@ -69,6 +69,12 @@ class LifecycleDomainServiceTest {
     private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Autowired
+    private com.ses.mapper.ApprovalActionMapper approvalActionMapper;
+
+    @Autowired
+    private com.ses.mapper.AssetOffboardingWaiverMapper assetOffboardingWaiverMapper;
+
+    @Autowired
     private com.ses.mapper.DocumentMapper documentMapper;
 
     @Autowired
@@ -522,12 +528,29 @@ class LifecycleDomainServiceTest {
                 .build();
         approvalRequestMapper.insert(req);
 
+        approvalActionMapper.insert(ApprovalAction.builder()
+                .requestId(req.getId())
+                .roundNo(1)
+                .stepNo(1)
+                .slotIndex(0)
+                .approverUserId(adminUser.getId())
+                .approverSlotUserId(adminUser.getId())
+                .action("APPROVE")
+                .comment("承認")
+                .actedAt(java.time.LocalDateTime.now())
+                .build());
+
         approvalAdapter.applyApproved(req);
 
         LifecycleTask waivedTask = taskMapper.selectById(task.getId());
         assertEquals("WAIVED", waivedTask.getStatus());
         assertEquals(req.getId(), waivedTask.getApprovalRequestId());
         assertTrue(waivedTask.getCompletionComment().contains("私物なし確認済み"));
+        AssetOffboardingWaiver waiver = assetOffboardingWaiverMapper.selectByApprovalRequestId(req.getId());
+        assertNotNull(waiver);
+        assertEquals(adminUser.getId(), waiver.getApprovedBy(), "申請者ではなく実承認者をapproved_byへ保存すること");
+        assertEquals(caseDto.getId(), waiver.getLifecycleCaseId());
+        assertEquals(task.getId(), waiver.getLifecycleTaskId());
     }
 
     @Test

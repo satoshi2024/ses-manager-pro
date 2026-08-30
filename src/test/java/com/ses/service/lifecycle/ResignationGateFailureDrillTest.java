@@ -1,5 +1,6 @@
 package com.ses.service.lifecycle;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleCaseDto;
@@ -8,6 +9,7 @@ import com.ses.dto.lifecycle.LifecycleTemplateTaskDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
+import com.ses.service.AssetOffboardingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -79,6 +81,30 @@ class ResignationGateFailureDrillTest {
     @Autowired
     private LifecycleEventMapper eventMapper;
 
+    @Autowired
+    private AssetMapper assetMapper;
+
+    @Autowired
+    private AssetAssignmentMapper assetAssignmentMapper;
+
+    @Autowired
+    private ExternalAccountSystemMapper externalAccountSystemMapper;
+
+    @Autowired
+    private ExternalAccountReferenceMapper externalAccountReferenceMapper;
+
+    @Autowired
+    private LicensePlanMapper licensePlanMapper;
+
+    @Autowired
+    private LicenseAssignmentMapper licenseAssignmentMapper;
+
+    @Autowired
+    private ApprovalRequestMapper approvalRequestMapper;
+
+    @Autowired
+    private AssetOffboardingService assetOffboardingService;
+
     private SysUser adminUser;
     private SysUser salesUser;
     private SysUser engineerUser;
@@ -140,6 +166,18 @@ class ResignationGateFailureDrillTest {
                 .build();
         engineer.setOrganizationId(org.getId());
         engineerMapper.insert(engineer);
+
+        // 共有H2では@Sqlが要員台帳だけを再構築し、資産台帳を残す場合があるため、
+        // AUTO_INCREMENT再利用で前テストのblockerが同じ要員IDに紐づくのを防ぐ。
+        assetAssignmentMapper.delete(new LambdaQueryWrapper<AssetAssignment>()
+                .eq(AssetAssignment::getAssigneeType, "ENGINEER")
+                .eq(AssetAssignment::getAssigneeId, engineer.getId()));
+        externalAccountReferenceMapper.delete(new LambdaQueryWrapper<ExternalAccountReference>()
+                .eq(ExternalAccountReference::getAssigneeType, "ENGINEER")
+                .eq(ExternalAccountReference::getAssigneeId, engineer.getId()));
+        licenseAssignmentMapper.delete(new LambdaQueryWrapper<LicenseAssignment>()
+                .eq(LicenseAssignment::getAssigneeType, "ENGINEER")
+                .eq(LicenseAssignment::getAssigneeId, engineer.getId()));
 
         // 要員とユーザーの紐付け
         EngineerAccountLink link = new EngineerAccountLink();
@@ -219,6 +257,75 @@ class ResignationGateFailureDrillTest {
                 caseService.completeCase(caseDto.getId(), adminUser.getId()));
         assertEquals(400, ex.getCode());
         assertEquals("error.lifecycle.blockingTasksUncompleted", ex.getMessageKey());
+    }
+
+    @Test
+    @DisplayName("M-1-B: 退社gateが3大blocker台帳を直接照合し、承認済み例外だけを許可する")
+    void testResignationGateUsesAssetOffboardingBlockersAndPersistedWaiver() {
+        LifecycleCaseDto caseDto = caseService.createCase(adminUser.getId(), CreateLifecycleCaseCommand.builder()
+                .engineerId(engineer.getId())
+                .lifecycleType("RESIGNATION")
+                .templateId(resignationTemplate.getId())
+                .anchorDate(LocalDate.now())
+                .title("3大blocker連携検証")
+                .build());
+        LifecycleTask assetTask = taskMapper.selectByCaseId(caseDto.getId()).stream()
+                .filter(t -> "RESIGN_ASSET_RETURN".equals(t.getTaskCode()))
+                .findFirst().orElseThrow();
+
+        Asset asset = Asset.builder()
+                .assetTag("AST-GATE-BLOCKER-" + System.nanoTime())
+                .assetName("Gate Blocker PC")
+                .category("PC")
+                .status("ASSIGNED")
+                .build();
+        assetMapper.insert(asset);
+        assetAssignmentMapper.insert(AssetAssignment.builder()
+                .assetId(asset.getId()).assigneeType("ENGINEER").assigneeId(engineer.getId())
+                .startDate(LocalDate.now().minusDays(10)).status("ACTIVE").build());
+
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("GATE-BLOCKER-SYS-" + System.nanoTime())
+                .systemName("Gate Blocker SaaS").systemType("SAAS_SCM").isActive(1).build();
+        externalAccountSystemMapper.insert(system);
+        externalAccountReferenceMapper.insert(ExternalAccountReference.builder()
+                .systemId(system.getId()).accountIdentifier("gate.blocker@example.jp")
+                .assigneeType("ENGINEER").assigneeId(engineer.getId()).status("ACTIVE").build());
+
+        LicensePlan plan = LicensePlan.builder()
+                .planCode("GATE-BLOCKER-LIC-" + System.nanoTime()).planName("Gate Blocker License")
+                .seatLimit(1).allocatedCount(1).status("ACTIVE").build();
+        licensePlanMapper.insert(plan);
+        licenseAssignmentMapper.insert(LicenseAssignment.builder()
+                .planId(plan.getId()).assigneeType("ENGINEER").assigneeId(engineer.getId())
+                .assignedDate(LocalDate.now()).status("ACTIVE").build());
+
+        ResignationGateResultDto blocked = resignationGateChecker.evaluate(
+                caseMapper.selectById(caseDto.getId()), engineer);
+        ResignationGateResultDto.GateItemResult blockedAsset = blocked.getItems().stream()
+                .filter(i -> "ASSET_RETURN".equals(i.getCode())).findFirst().orElseThrow();
+        assertFalse(blockedAsset.isPassed());
+        assertTrue(blockedAsset.getMessage().contains("blocker"));
+
+        ApprovalRequest approval = ApprovalRequest.builder()
+                .requestNo("AR-GATE-BLOCKER-" + System.nanoTime())
+                .requestType("LIFECYCLE_EXCEPTION").targetType("LIFECYCLE_TASK")
+                .targetId(assetTask.getId()).targetVersion(0L).applicantId(adminUser.getId())
+                .payloadJson("{\"reason\":\"経営承認済み\",\"riskOwner\":\"HR\",\"remedyDeadline\":\""
+                        + LocalDate.now().plusMonths(1) + "\"}")
+                .routeSnapshotJson("[]").status("APPROVED").version(1).build();
+        approvalRequestMapper.insert(approval);
+        assetOffboardingService.approveOffboardingWaiver(
+                engineer.getId(), caseDto.getId(), assetTask.getId(),
+                "経営承認済み", approval.getId(), adminUser.getId());
+        taskService.waiveTask(assetTask.getId(), adminUser.getId(), approval.getId(), "経営承認済み");
+
+        ResignationGateResultDto waived = resignationGateChecker.evaluate(
+                caseMapper.selectById(caseDto.getId()), engineer);
+        ResignationGateResultDto.GateItemResult waivedAsset = waived.getItems().stream()
+                .filter(i -> "ASSET_RETURN".equals(i.getCode())).findFirst().orElseThrow();
+        assertTrue(waivedAsset.isPassed());
+        assertTrue(waivedAsset.isWaived());
     }
 
     @Test
@@ -562,4 +669,3 @@ class ResignationGateFailureDrillTest {
         assertThrows(UnsupportedOperationException.class, () -> eventMapper.updateById(new LifecycleEvent()));
     }
 }
-

@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -105,6 +106,26 @@ class ContractApiControllerTest {
                         .content(objectMapper.writeValueAsString(c)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    @Test
+    @WithMockUser
+    void update_version未指定は400でサービスを呼ばない() throws Exception {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("engineerId", 1);
+        body.put("projectId", 2);
+        body.put("customerId", 3);
+        body.put("startDate", "2026-07-01");
+        body.put("sellingPrice", 80);
+        body.put("costPrice", 60);
+
+        mockMvc.perform(put("/api/contracts/10").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+
+        verify(contractService, never()).updateWithBusinessRules(any(Contract.class), any());
     }
 
     @Test
@@ -206,6 +227,7 @@ class ContractApiControllerTest {
         c.setStartDate(LocalDate.of(2026, 7, 1));
         c.setSellingPrice(new BigDecimal("80"));
         c.setCostPrice(new BigDecimal("60"));
+        c.setVersion(0);
         c.setStatus("稼動中");
 
         mockMvc.perform(put("/api/contracts/10").with(csrf())
@@ -215,7 +237,8 @@ class ContractApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         verify(contractService).updateWithBusinessRules(argThat(updated -> updated.getId().equals(10L)
-                && updated.getStatus() == null), any());
+                && updated.getStatus() == null
+                && updated.getVersion().equals(0)), any());
     }
 
     /**
@@ -232,6 +255,7 @@ class ContractApiControllerTest {
         body.put("startDate", "2026-07-01");
         body.put("sellingPrice", 80);
         body.put("costPrice", 60);
+        body.put("version", 0);
         // salesUserId / commissionBaseType / commissionRate / endDate は意図的に省略
 
         mockMvc.perform(put("/api/contracts/10").with(csrf())
@@ -268,6 +292,7 @@ class ContractApiControllerTest {
         body.put("startDate", "2026-07-01");
         body.put("sellingPrice", 80);
         body.put("costPrice", 60);
+        body.put("version", 0);
         body.put("salesUserId", null);
 
         mockMvc.perform(put("/api/contracts/10").with(csrf())

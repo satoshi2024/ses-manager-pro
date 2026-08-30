@@ -331,6 +331,7 @@ function getStatusBadge(status) {
 function openNewContract() {
     $('#contract-form')[0].reset();
     $('#cont-id').val('');
+    $('#cont-version').val('');
     $('#complianceWarning').addClass('d-none').text('');
     $('#contractModalTitle').text(SES.i18n.t('contract.new'));
     $('#contractSaveBtnLabel').text(SES.i18n.t('common.register'));
@@ -350,6 +351,7 @@ function openEditContract(id) {
         $('#contract-form')[0].reset();
         $('#complianceWarning').addClass('d-none').text('');
         $('#cont-id').val(c.id);
+        $('#cont-version').val(c.version != null ? c.version : '');
         $('#cont-directCommandFlag').prop('checked', !!c.directCommandFlag);
         // 検収要否（既定 true）と検収不要理由（R3.3 / R09-P1-01）
         $('#cont-acceptanceRequired').prop('checked', c.acceptanceRequired !== false);
@@ -396,6 +398,7 @@ function openEditContract(id) {
 function buildContractPayload() {
     const val = (sel) => { const v = $(sel).val(); return v !== '' && v != null ? v : null; };
     return {
+        version: val('#cont-version') != null ? parseInt(val('#cont-version'), 10) : null,
         engineerId: val('#cont-engineerId') ? parseInt(val('#cont-engineerId')) : null,
         projectId: val('#cont-projectId') ? parseInt(val('#cont-projectId')) : null,
         customerId: val('#cont-customerId') ? parseInt(val('#cont-customerId')) : null,
@@ -443,6 +446,9 @@ function saveContract() {
             if (res.code === 200) {
                 Toast.success(id ? SES.i18n.t('js.contract.success.update') : SES.i18n.t('js.contract.success.register'));
                 loadContracts(contractCurrentPage);
+                if (id && res.data && res.data.version != null) {
+                    $('#cont-version').val(res.data.version);
+                }
                 const findings = (res.data && res.data.complianceFindings) || [];
                 const hasWarning = (res.data && res.data.negativeProfit) || findings.length > 0;
                 if (hasWarning) {

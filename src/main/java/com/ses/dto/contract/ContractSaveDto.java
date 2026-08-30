@@ -6,6 +6,7 @@ import lombok.Setter;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.groups.Default;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collections;
@@ -23,6 +24,10 @@ import java.util.Set;
 @Getter
 @Setter
 public class ContractSaveDto {
+
+    /** 更新時だけ要求する入力グループ。新規登録ではDB採番前のversionを送らない。 */
+    public interface Update extends Default {
+    }
 
     /**
      * 本 DTO が運ぶ ALWAYS フィールド名。コントローラ経由の更新ではこれらを「payload 出現」と扱う。
@@ -100,6 +105,11 @@ public class ContractSaveDto {
     private Boolean acceptanceRequired;
     /** 検収不要理由（acceptanceRequired=false時は必須。R3.3）。 */
     private String acceptanceExemptionReason;
+
+    /** 更新対象としてクライアントが読み取った契約行の版番号。 */
+    @NotNull(groups = Update.class, message = "契約更新時はversionが必須です")
+    @PositiveOrZero(groups = Update.class, message = "versionは0以上で指定してください")
+    private Integer version;
 
     /**
      * Jackson が setter を呼んだ ALWAYS フィールド（キー出現＝明示 null もクリア可）。

@@ -22,6 +22,7 @@ public class DocumentLink extends BaseEntity {
      * リンク先種別。
      * CUSTOMER / BP_COMPANY / ENGINEER / PROJECT / PROPOSAL / QUOTATION
      * / CONTRACT / WORK_RECORD / INVOICE / BANK_DEPOSIT / BP_PAYMENT
+     * / ASSET_ASSIGNMENT / ASSET_LOST_INCIDENT
      */
     private String targetType;
 

@@ -13,6 +13,9 @@ public final class ActionPermissionResolver {
     private static final Map<String, String> RESOURCE_NAMES = Map.ofEntries(
             Map.entry("ai", "ai"),
             Map.entry("analytics", "analytics"),
+            Map.entry("assets", "asset"),
+            Map.entry("asset-assignments", "asset"),
+            Map.entry("asset-inventory", "asset"),
             Map.entry("autocomplete", "autocomplete"),
             Map.entry("audit-logs", "audit"),
             // approval-workflow-internal-control(S07)。未登録のままだと/api/approval/**が
@@ -49,6 +52,8 @@ public final class ActionPermissionResolver {
             // 管理者を含む全roleで403になる（CRM-R2-P1-01と同じ罠）。V105の権限seedと対にする。
             Map.entry("engineer-change-requests", "engineer-change-request"),
             Map.entry("expense-requests", "expense-request"),
+            Map.entry("external-accounts", "asset"),
+            Map.entry("licenses", "asset"),
             Map.entry("one-on-ones", "one-on-one"),
             Map.entry("surveys", "survey"),
             Map.entry("accounting", "accounting"),
@@ -66,6 +71,7 @@ public final class ActionPermissionResolver {
             Map.entry("management-reports", "management-report"),
             Map.entry("monthly-closing", "monthly-closing"),
             Map.entry("my", "my"),
+            Map.entry("my-assets", "my"),
             Map.entry("notifications", "notifications"),
             Map.entry("organizations", "organization"),
             Map.entry("payroll", "payroll"),
@@ -134,6 +140,14 @@ public final class ActionPermissionResolver {
         String resource = RESOURCE_NAMES.get(root);
         if (resource == null) {
             return null;
+        }
+        // 資産貸与証跡のdetail/downloadはDocumentLinkをserviceで再認可する本人向けaction。
+        // 要員のpermission groupはmy.*のみを持つため、通常のdocument.view/file.downloadへ
+        // 置き換えず、同じ本人向けactionで入口だけを開ける。
+        if ("GET".equals(method)
+                && (uri.matches("/api/documents/\\d+")
+                || uri.matches("/api/documents/\\d+/versions/\\d+/download"))) {
+            return "my.asset.view";
         }
         if (isExportPath(uri)) {
             return "export.execute";

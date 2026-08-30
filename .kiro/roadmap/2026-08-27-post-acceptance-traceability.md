@@ -30,7 +30,7 @@
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
-| NF-09 | `asset-account-license-lifecycle` | CANDIDATE | 未定 | 未返却、active account残存 | NF-01、identity、document | 未決定 | 未定 |
+| NF-09 | `asset-account-license-lifecycle` | APPROVED | `PROJECT_OWNER` | 未返却0件、外部account残存0件、ライセンス席数超過0件 | NF-01、identity、document | `DG-09-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`。branch `codex/asset-account-license-lifecycle`。期間重複代数排他、秘密非保存、席数CAS、不変イベント台帳、NF-01退社ゲート（`RESIGN_ASSET_RETURN`/`LIFECYCLE_EXCEPTION`）連携、自己完結型プロバイダ境界を承認。詳細: `.kiro/specs/asset-account-license-lifecycle/` | 実装・独立Review完了後 |
 | NF-10 | `scheduled-management-reporting` | APPROVED | 管理者（経営管理責任者） | 作成時間、配布失敗率、scope外配布0件、snapshot不変性 | dashboard、document、notification、NF-02（ServiceDesk sectionはNF-02 PASSまで対象外） | 2026-08-28承認。管理者/マネージャーを利用者とし、月次report、Asia/Tokyo、7年保持、immutable snapshot、outbox経由のアプリ内通知＋期限付きlink、recipient preview・生成時/取得時scope検証を確定 | 実装・独立Review完了後 |
 
 ## 3. 要件→既存資産→追加境界
@@ -156,9 +156,40 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 
 ### DG-09 NF-09
 
-- 資産種別、所有法人、棚卸し頻度。
-- 外部MDM/IdPとの連携範囲と正本。
-- 紛失時のincident/法務/セキュリティ連絡。
+#### 開発開始承認（DecisionId `DG-09-SCOPE-APPROVAL-20260828-01`、2026-08-28）
+
+| 項目 | 値 |
+|---|---|
+| OwnerRef | `PROJECT_OWNER` |
+| Base branch | `origin/main` |
+| Base commit | `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` |
+| Branch | `codex/asset-account-license-lifecycle` |
+
+**Approved scope（要約）:**
+- 資産台帳管理（PC/モニター/端末等、シリアル、保管場所、取得日/価格、リース満了日、不変イベント台帳 `t_asset_event`、ステータスCAS）
+- 貸与・返却管理（期間重複代数排他 `[start_date, expected_return_date]`、行ロック `FOR UPDATE`、返却時 `IN_STOCK` 復帰、証跡文書リンク）
+- 外部アカウント参照管理（SaaS/IdP識別子と状態、パスワード/トークン秘密非保存原則、失効要求 `revoke_requested_at` と失効確認 `revoke_confirmed_at` の分離）
+- 有償ライセンス席数管理（プラン別 `seat_limit`、CAS 条件付きインクリメント `allocated_count < seat_limit`、割当・解放）
+- 定期実地棚卸し・差異照合（理論在庫スナップショット展開、実地ステータス/場所入力、MATCH/DISCREPANCY/MISSING集計、完了確定固定）
+- 期限監視・アラート通知（返却期限超過、リース満了30日前、紛失インシデント緊急初動通知、日次スケジューラ）
+- 要員マイポータル（`/my/assets`、有効貸与/アカウント/ライセンス確認、紛失・盗難自己報告）
+- NF-01 退社ゲート連携（`RESIGN_ASSET_RETURN` 未返却/未失効ブロック、`LIFECYCLE_EXCEPTION` による特例免除 WAIVE 連携、退社確定時一括失効トリガー）
+- 外部プロバイダ連携境界（NF-09配下自己完結型 `ExternalAccountProviderClient` / Mock、タイムアウト/未確認を成功扱いにしない統制。NF-05開工時にNF-05実アダプターへ委譲）
+
+**Out of scope:**
+- パスワード・クレデンシャル・シークレット・回復コードの保存（厳格禁止）
+- MDM サーバー本体・IdP プロトコルサーバー本体の実装（外部SaaS参照およびNF-05委譲前提）
+- 外部APIタイムアウト時の自動成功みなす処理（厳格禁止）
+
+| DG | 確定値 |
+|---|---|
+| DG-09-1 資産識別・所属 | 管理タグ `asset_tag` 一意、シリアル番号 `serial_no`、所有法人 `owner_company_id`、状態6区分（`IN_STOCK`, `ASSIGNED`, `UNDER_MAINTENANCE`, `LOST`, `DISPOSED`, `RESERVED`） |
+| DG-09-2 秘密非保持・外部参照 | `t_external_account_reference` にシークレット列を一切持たない。外部アカウント識別子と状態（`ACTIVE`, `SUSPENDED`, `REVOKED`）、失効要求/確認日時のみ保持 |
+| DG-09-3 ライセンス席数CAS | `UPDATE m_license_plan SET allocated_count = allocated_count + 1 WHERE allocated_count < seat_limit AND version = :v` で席数上限を原子保護 |
+| DG-09-4 NF-01 Link Contract | 退社タスク `RESIGN_ASSET_RETURN` に対し、未返却端末・未失効アカウント・未解放ライセンス残存時は退社ブロック。`LIFECYCLE_EXCEPTION` 承認時のみ WAIVED バイパス |
+| DG-09-5 外部連携所有境界 | NF-09配下の `ExternalAccountProviderClient` / Mock を利用。失効要求と確証ステータス確認を厳格分離し、タイムアウトは未完了（非成功）として保持。NF-05開工時に実アダプターへ透過委譲 |
+
+詳細: `.kiro/specs/asset-account-license-lifecycle/`
 
 ### DG-10 NF-10
 
