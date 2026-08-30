@@ -20,7 +20,7 @@
 | Wave | Decision status | Review/実装状態 |
 |---|---|---|
 | F1 | APPROVED | PLAN PASS / IMPLEMENTATION PASS。fixed reviewed Head 7e50bf1360ea8d7271acc0667593635451300268 |
-| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。F2 FAIL（220ac86f、P1=4/P2=2）をe47025b5でremediate、独立再Review待ち |
+| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING | DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02。F2 FAIL（220ac86f、P1=4/P2=2）をe47025b5でremediateし、再Review（f57df6d2、P1=1/P2=1）をa16cdcbaで追加remediate、独立再Review待ち |
 | A1 | APPROVED_SEQUENCED | F2 Implementation Review PASS後に開始。GET-only 11 paths、allow-list DTOのみ |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。development/test mock/stub/loopbackのみ |
