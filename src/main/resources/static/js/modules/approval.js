@@ -10,7 +10,7 @@ $(function () {
 
 function showApprovalApiError(error, fallback) {
     console.error(error);
-    SES.toast.error(error && error.message ? error.message : fallback);
+    console.error(error && error.message ? error.message : fallback);
 }
 
 function loadApprovalCreateOptions() {

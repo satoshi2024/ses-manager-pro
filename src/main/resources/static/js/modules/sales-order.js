@@ -407,7 +407,7 @@ function uploadSourceDocument(id) {
             }
             SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
             openSalesOrderDetail(id);
-        }).catch(() => console.error(SES.i18n.t('error.networkError', '通信エラー')));
+        }).catch(() => SES.toast.error(SES.i18n.t('error.networkError', '通信エラー')));
     };
     input.click();
 }
@@ -429,7 +429,7 @@ function generateAckPdf(id) {
         SES.toast.success(SES.i18n.t('common.saved', '保存しました'));
         openSalesOrderDetail(id);
         loadSalesOrders(1);
-    }).catch(e => console.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
+    }).catch(e => SES.toast.error(e.message || SES.i18n.t('error.networkError', '通信エラー')));
 }
 
 function createOrderContracts(id) {

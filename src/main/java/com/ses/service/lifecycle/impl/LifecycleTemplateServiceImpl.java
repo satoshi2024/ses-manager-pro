@@ -1,6 +1,7 @@
 package com.ses.service.lifecycle.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
@@ -104,9 +105,31 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
         }
 
         List<LifecycleTemplate> list = templateMapper.selectList(wrapper);
-        return list.stream().map(t -> {
-            Long count = templateTaskMapper.selectCount(new LambdaQueryWrapper<LifecycleTemplateTask>().eq(LifecycleTemplateTask::getTemplateId, t.getId()));
-            return LifecycleTemplateDto.builder()
+        if (list.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> templateIds = list.stream().map(LifecycleTemplate::getId).collect(Collectors.toList());
+        QueryWrapper<LifecycleTemplateTask> taskQw = new QueryWrapper<>();
+        taskQw.select("template_id", "count(id) as taskCount")
+              .in("template_id", templateIds)
+              .groupBy("template_id");
+        List<Map<String, Object>> countMaps = templateTaskMapper.selectMaps(taskQw);
+
+        Map<Long, Integer> countMap = new HashMap<>();
+        for (Map<String, Object> map : countMaps) {
+            Number tId = null;
+            Number tCount = null;
+            for (Map.Entry<String, Object> e : map.entrySet()) {
+                if ("template_id".equalsIgnoreCase(e.getKey()) || "TEMPLATE_ID".equalsIgnoreCase(e.getKey())) tId = (Number) e.getValue();
+                if ("taskCount".equalsIgnoreCase(e.getKey()) || "TASKCOUNT".equalsIgnoreCase(e.getKey())) tCount = (Number) e.getValue();
+            }
+            if (tId != null && tCount != null) {
+                countMap.put(tId.longValue(), tCount.intValue());
+            }
+        }
+
+        return list.stream().map(t -> LifecycleTemplateDto.builder()
                 .id(t.getId())
                 .templateType(t.getTemplateType())
                 .name(t.getName())
@@ -115,9 +138,8 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
                 .status(t.getStatus())
                 .validFrom(t.getValidFrom())
                 .validTo(t.getValidTo())
-                .taskCount(count != null ? count.intValue() : 0)
-                .build();
-        }).collect(Collectors.toList());
+                .taskCount(countMap.getOrDefault(t.getId(), 0))
+                .build()).collect(Collectors.toList());
     }
 
     @Override
@@ -159,11 +181,15 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
             throw BusinessException.of(404, "error.lifecycle.templateNotFound", "テンプレートが見つかりません");
         }
 
+        Integer maxVer = templateMapper.selectMaxVersionNo(existing.getTemplateType());
+        if (maxVer != null && maxVer > existing.getVersionNo()) {
+            throw BusinessException.of(400, "error.lifecycle.notLatestVersion", "最新版のテンプレートのみ改定可能です");
+        }
+
         dagValidator.validateDtoDag(dto.getTasks());
 
         // 改定時は過去の進行中案件の定義を保護するため、旧バージョンを変更せず新バージョンとして保存
-        Integer maxVer = templateMapper.selectMaxVersionNo(existing.getTemplateType());
-        int nextVer = (maxVer != null) ? maxVer + 1 : existing.getVersionNo() + 1;
+        int nextVer = existing.getVersionNo() + 1;
 
         LocalDate existingValidFrom = existing.getValidFrom();
         LocalDate newValidFrom = dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now();

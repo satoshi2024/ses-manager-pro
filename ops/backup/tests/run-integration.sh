@@ -30,8 +30,9 @@ INTEGRATION_SRC_PW=${INTEGRATION_SRC_PW:-"int-src-$(date +%s)-pw"}
 INTEGRATION_TGT_PW=${INTEGRATION_TGT_PW:-"int-tgt-$(date +%s)-pw"}
 WORK="${INTEGRATION_WORK_DIR:-$HERE/.integration-work}"
 rm -rf "$WORK"
-mkdir -p "$WORK/evid" "$WORK/uploads" "$WORK/work" "$WORK/repo" "$WORK/staging" \
+mkdir -p "$WORK/evidence" "$WORK/drill-evidence" "$WORK/uploads" "$WORK/work" "$WORK/repo" "$WORK/staging" \
   "$WORK/locks" "$WORK/capath" "$WORK/capath-tgt" "$WORK/heartbeats" "$WORK/scheduler"
+chmod -R 777 "$WORK" 2>/dev/null || true
 export INTEGRATION_SRC_PW INTEGRATION_TGT_PW
 WWORK=$(cygpath -w "$WORK" 2>/dev/null || echo "$WORK")
 export INTEGRATION_WORK_DIR="$WWORK"
@@ -39,7 +40,19 @@ printf '%s\n' "$INTEGRATION_SRC_PW" > "$WORK/src-password"
 printf '%s\n' "$INTEGRATION_TGT_PW" > "$WORK/tgt-password"
 printf '%s\n' "$INTEGRATION_SRC_PW" > "$WORK/repo-password"
 
+normalize_permissions() {
+  local host_uid host_gid
+  host_uid=$(id -u 2>/dev/null || echo 0)
+  host_gid=$(id -g 2>/dev/null || echo 0)
+  if docker info > /dev/null 2>&1; then
+    docker run --rm -v "$WWORK:/work:rw" ses-backup-tool:integration \
+      sh -c "chmod -R a+rwX /work/evidence /work/drill-evidence 2>/dev/null || true; chown -R ${host_uid}:${host_gid} /work/evidence /work/drill-evidence 2>/dev/null || true" 2>/dev/null || true
+  fi
+  chmod -R a+rwX "$WORK/evidence" "$WORK/drill-evidence" 2>/dev/null || true
+}
+
 cleanup() {
+  normalize_permissions
   docker compose -f "$COMPOSE_FILE" down -v > /dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -105,6 +118,7 @@ if [[ "$PITR_RC" -ne 0 ]]; then
   echo "FAIL: integration-pitr.sh（rc=$PITR_RC）" >&2
   exit 1
 fi
+normalize_permissions
 
 echo "== restore-drill 実行（実環境に対する drill。RPO/RTO segment 記録） =="
 PLAN_ID=$(docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
@@ -147,6 +161,8 @@ if [[ "$DRILL_RC" -ne 0 ]]; then
   echo "FAIL: restore-drill（rc=$DRILL_RC）" >&2
   exit 1
 fi
+normalize_permissions
+
 docker run --rm -v "$WWORK:/work:ro" ses-backup-tool:integration \
   jq '{state, rpo_seconds, rto_seconds, total_seconds, rto_ok, rpo_ok, segments}' \
   /work/drill-evidence/drill-report.json | tee "$WORK/evidence/drill-report.json"
@@ -185,5 +201,6 @@ echo "secret scan: 0 matches"
 
 echo "== evidence SHA =="
 (cd "$WORK/evidence" && sha256sum integration-summary.json validate.json restore.log target-markers.txt uploads-markers.txt source-state.txt report-restore-contract.txt | tee "$WORK/evidence/evidence-sha.txt")
+normalize_permissions
 
 echo "== integration suite SUCCESS（skip 0・全ステップ実実行） =="

@@ -1,1 +1,6 @@
-[]
+{
+  "base": "http://localhost:8081",
+  "runAt": "2026-08-30T03:11:36.229Z",
+  "totalIssues": 0,
+  "issues": []
+}

@@ -32,10 +32,14 @@ class ProjectSkillServiceImplTest {
     private JdbcTemplate jdbcTemplate;
 
     private long projectId;
+    private long skillId;
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.update("INSERT INTO m_skill_tag (id, skill_name) VALUES (30, 'Go')");
+        String skillName = "skill-" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO m_skill_tag (skill_name) VALUES (?)", skillName);
+        skillId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_skill_tag WHERE skill_name = ?", Long.class, skillName);
         String name = "proj-skill-" + System.nanoTime();
         jdbcTemplate.update("INSERT INTO m_customer (company_name) VALUES (?)", name);
         long customerId = jdbcTemplate.queryForObject(
@@ -49,7 +53,7 @@ class ProjectSkillServiceImplTest {
     @Test
     void replaceSkills_closesOpenIntervalOnChangeDate() {
         ProjectSkill skill = new ProjectSkill();
-        skill.setSkillId(30L);
+        skill.setSkillId(skillId);
         skill.setRequiredLevel("上級");
         projectSkillService.replaceSkills(projectId, List.of(skill));
 
@@ -59,7 +63,7 @@ class ProjectSkillServiceImplTest {
         assertEquals(1, events.size());
         LocalDate today = LocalDate.now();
         assertEquals(today.minusDays(1), events.get(0).getEffectiveTo());
-        assertTrue(noActiveOpenEvent(events, 30L, today));
+        assertTrue(noActiveOpenEvent(events, skillId, today));
     }
 
     private static boolean noActiveOpenEvent(List<com.ses.entity.ProjectSkillEvent> events, Long skillId,
