@@ -2,6 +2,50 @@
 
 ---
 
+## Review follow-up（第10回Review P1/P2是正）
+
+### Task R10.1: 紛失インシデントAPIの認可境界
+- **Status**: [x] COMPLETED
+- **Objective**: 紛失インシデントの参照・更新を管理者/HR/マネージャーへ限定し、営業/要員が担当資産を持っていても機微な事故情報を取得できないようにする。
+- **Implementation**: `AssetApiController.getLostIncident` にGETのメソッド認可を追加し、PUTと同じ管理者/HR/マネージャー境界へ統一する。
+- **Test requirements**: 営業ロールによる `GET /api/assets/{assetId}/lost-incident` を403で拒否し、管理者/HR/マネージャーの既存参照・更新を維持する。
+- **Result**: `AssetApiControllerTest.testSalesCannotReadLostIncidentDetails`、`AssetApiControllerTest.testLostIncidentApiFlow` **PASS**。
+- **Demo / rollback**: controllerのclass-level権限に依存せずGET/PUTの両方の実効権限を照合する。失敗時はR10.1のcontroller・テスト変更を個別revertする。
+
+### Task R10.2: 紛失インシデント証跡のdetail/download認可
+- **Status**: [x] COMPLETED
+- **Objective**: `ASSET_LOST_INCIDENT` にのみリンクされた文書も、対象資産のscopeに従って管理者/HR/マネージャーがdetail/downloadできるようにし、営業/要員や無関係scopeには公開しない。
+- **Implementation**: `DocumentServiceImpl.assertDocumentAccessAllowed` の共通認可で `ASSET_ASSIGNMENT` と `ASSET_LOST_INCIDENT` を同じ `AssetScopeService` 判定へ渡す。
+- **Test requirements**: managerが紛失インシデント専用リンクの文書detailを取得できること、共通guardがdownloadにも適用されることを確認する。
+- **Result**: `DocumentServiceImplTest.assertDocumentAccessAllowed_lostIncidentLinkAllowsScopedManager`、`AssetBoundaryAndLifecycleIntegrationTest.testSalesAndManagerScopeUsesAssignmentAndManagedOrganization` **PASS**。
+- **Demo / rollback**: 紛失インシデントだけにリンクされた証跡のdetail/downloadと、無関係scopeの拒否を照合する。失敗時はR10.2の文書認可変更を個別revertする。
+
+### Task R10.3: 紛失証跡DocumentLinkのscope検証
+- **Status**: [x] COMPLETED
+- **Objective**: 非管理者/非HRが推測した文書IDで別法人・別組織の証跡を紛失インシデントへリンクできないようにする。
+- **Implementation**: `AssetLostIncidentServiceImpl.linkDocuments` で、文書存在だけでなく対象資産scopeと既存DocumentLink scopeを検証する。actor IDが渡された場合は `SysUserMapper` の永続ロールを解決し、SecurityContextの古いロールを認可根拠にしない。
+- **Test requirements**: managerによるcross-scope文書リンクを業務例外で拒否し、拒否後に資産状態・incident・既存リンクが変更されないことを確認する。
+- **Result**: `AssetBoundaryAndLifecycleIntegrationTest.testSalesAndManagerScopeUsesAssignmentAndManagedOrganization` **PASS**。
+- **Demo / rollback**: 外側トランザクションの未確定状態を認可判定へ混入させず、拒否後のDB状態を独立読取で照合する。失敗時はR10.3のservice・テスト変更を個別revertする。
+
+### Task R10.4: 紛失通知の再送・並行重複防止証跡
+- **Status**: [x] COMPLETED
+- **Objective**: 同一紛失インシデントの再送と並行報告で、台帳行・緊急通知が増殖せず、recipient単位の通知件数が不変であることを証明する。
+- **Implementation**: 既存のincident ID dedupe経路に対し、H2再送テストで前後件数を比較し、MySQL 8で同一資産への並行report-lostを実行する検証を追加する。
+- **Test requirements**: H2で再送前後の通知件数・dedupe key不変、MySQLで並行報告のincident 1行・recipientごとの通知1件・再送後の件数不変をassertする。
+- **Result**: `AssetServiceTest.testLostIncidentLedgerAndEmergencyAlert`、`AssetMySqlIntegrationTest.testConcurrentLostReportPublishesOnceOnMySQL` **PASS**。
+- **Demo / rollback**: SurefireのH2/MySQL結果と通知件数を照合する。失敗時はR10.4のテスト変更を個別revertし、dedupe実装は維持して再検証する。
+
+### Task R10.5: 第10回Review証跡・完了台帳の同期
+- **Status**: [x] COMPLETED
+- **Objective**: 第10回ReviewのP1-01/P1-02/P1-03/P2-01対応、テスト名、実測件数、remote引渡し条件をrequirements/design/tasks/ledger/evidenceへ同期する。
+- **Implementation**: 本tasks.md、`requirements.md`、`design.md`、`review-ledger.md`、`review-evidence.md` の紛失インシデント認可・DocumentLink scope・通知dedupe・ゲート件数を更新する。
+- **Test requirements**: NF-09 Fast 78/78、文書service 23/23、MySQL asset 10/10、migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1をfailure=0/error=0/skip=0で確認する。リポジトリ全体Fast gateはBase比較と分離して未PASSと記録する。
+- **Result**: 上記対象ゲートをすべて **PASS**。独立ReviewのPLAN/IMPLEMENTATION双方PASSまではPRを作成しない。
+- **Demo / rollback**: 全文書の対応表・テスト名・件数・Head/Remote確認条件を相互照合する。失敗時は文書同期commitを個別revertする。
+
+---
+
 ## Review follow-up（第9回Review P1/P2是正）
 
 ### Task R9.1: 資産状態遷移と専用貸与入口の強制
@@ -415,13 +459,13 @@
 ### Task B2.3: MySQL 8 実コンテナ統合テスト & Shard Inventory 登録 (CR-06)
 - **Status**: [x] COMPLETED
 - **Requirements ID**: `CR-06`
-- **Objective**: Testcontainers による MySQL 8 実コンテナ上で Flyway V129/V130/V131/V132 DDL、行ロック `FOR UPDATE`、CAS更新、5競合シナリオを検証する `@Tag("mysql")` テストを実装し、`mysql-shard-1.txt` に登録して `MySqlTestShardInventoryTest` と完全一致させる。
+- **Objective**: Testcontainers による MySQL 8 実コンテナ上で Flyway V129/V130/V131/V132/V133 DDL、行ロック `FOR UPDATE`、CAS更新、6競合シナリオを検証する `@Tag("mysql")` テストを実装し、`mysql-shard-1.txt` に登録して `MySqlTestShardInventoryTest` と完全一致させる。
 - **実装内容**:
   - `src/test/java/com/ses/migration/AssetMySqlIntegrationTest.java`
   - `scripts/test-suites/mysql-shard-1.txt` 登録
 - **Test 要件と assertion**:
   - `MySqlTestShardInventoryTest.testInventoryMatchesTaggedClasses`: PASS
-  - `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest`: **9/9 PASS (0 failure, 0 error, 0 skipped)**
+  - `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest`: **10/10 PASS (0 failure, 0 error, 0 skipped)**
 - **手動 Demo と証跡**:
   - `AssetMySqlIntegrationTest.testAssetCreationAndRowLockOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testAssetAssignmentLifecycleOnMySQL`: PASS
@@ -431,6 +475,7 @@
   - `AssetMySqlIntegrationTest.testConcurrentReturnAndWaiveOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentLicenseReleaseDecrementsOnceOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testConcurrentInventoryCompletionOnMySQL`: PASS
+  - `AssetMySqlIntegrationTest.testConcurrentLostReportPublishesOnceOnMySQL`: PASS
   - `AssetMySqlIntegrationTest.testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL`: PASS
 - **Rollback**: テストクラスの revert
 - **未検証事項**: なし
@@ -444,18 +489,20 @@
 - **Requirements ID**: `CR-06`
 - **Objective**: NF-09 で作成・改修した対象テストとMySQLゲートを実行し、スキップ 0 件、0 Failure / 0 Error を確認する。リポジトリ全体Fast gateの合否は既存テスト・実行環境の結果と分離して記録する。
 - **Test 要件と assertion**:
-  - NF-09対象Fast Suite: 77/77 tests PASS (0 skipped, 0 failed, 0 errors)
+  - NF-09対象Fast Suite: 78/78 tests PASS (0 skipped, 0 failed, 0 errors)
+  - 文書認可補助suite: `DocumentServiceImplTest` 23/23 tests PASS (0 skipped, 0 failed, 0 errors)
   - 実退社gate drill: `ResignationGateFailureDrillTest` 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
-  - MySQL asset Gate: 9/9 tests PASS (0 skipped, 0 failed, 0 errors)
+  - MySQL asset Gate: 10/10 tests PASS (0 skipped, 0 failed, 0 errors)
   - V133追随 migration smoke: 4/4 tests PASS (0 skipped, 0 failed, 0 errors)
   - MySQL shard inventory: `MySqlTestShardInventoryTest` 1/1 PASS (0 skipped, 0 failed, 0 errors)
 - **手動 Demo と証跡**:
-  - Maven Surefire 対象suite出力ログ (`Tests run: 77, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire 対象suite出力ログ (`Tests run: 78, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire 文書認可補助suite出力ログ (`Tests run: 23, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire resignation gate出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
-  - Maven Surefire MySQL asset出力ログ (`Tests run: 9, Failures: 0, Errors: 0, Skipped: 0`)
+  - Maven Surefire MySQL asset出力ログ (`Tests run: 10, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire V133追随migration smoke出力ログ (`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`)
   - Maven Surefire shard inventory出力ログ (`Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`)
-- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し72/72を確認し、第9回Review後はR9.1〜R9.3の修正を含むNF-09専用75/75、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。今回の第9回Review追加是正後はNF-09専用77/77、MySQL asset 9/9、V133追随migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1を再確認した。
+- **全体gate注記（R5/R6比較）**: R5時点Head `e6659c90` は `tests=3118, failures=2, errors=11, skipped=0`、R6実装時点は `tests=3123, failures=2, errors=11, skipped=0`。残存は `ControllerTransactionalBanTest`、`PinningHttpsTransportTest`、`ProductionSecurityConfigurationTest`、`PrometheusScraperLabE2ETest`、`CapacityBaselineScriptTest`、`ProjectSkillServiceImplTest`、`WebhookNotifierLoopbackIntegrationTest`、`I18nJsControllerTest`。Baseにも同じ残存クラスがあり、今回のfeature起因とは判定しない。R8ではfeature対象の状態/境界修正を反映し72/72を確認し、第9回Review後はR9.1〜R9.3の修正を含むNF-09専用75/75、MySQL asset 9/9、V132追随migration smoke 4/4を再確認した。第9回Review追加是正後はNF-09専用77/77、MySQL asset 9/9、V133追随migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1を再確認し、第10回Review是正後はNF-09専用78/78、文書認可補助23/23、MySQL asset 10/10、V133追随migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1を再確認した。
 - **Rollback**: なし
 - **未検証事項**: リポジトリ全体Fast gateのPASS、および独立ReviewのPASS。全体Fast gateは未PASSのままなので、独立ReviewでBase差分と環境復旧後の再実行要否を判断する。
 

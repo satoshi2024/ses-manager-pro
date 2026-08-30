@@ -9,8 +9,8 @@
 - **Branch**: `codex/asset-account-license-lifecycle`
 - **Base branch**: `origin/main`
 - **Base**: `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd` (`origin/main`)
-- **実装検証Head**: 第9回Review追加是正の実装・テスト・文書commitをpush済みの最終提出Headとして扱い、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
-- **Remote確認**: 第9回Review追加是正の各commitはpush済み。最終remote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
+- **実装検証Head**: 第10回Review追加是正の実装・テスト・文書commitをpush済みの最終提出Headとして扱い、Review開始時に `git rev-parse HEAD` と `git ls-remote origin refs/heads/codex/asset-account-license-lifecycle` で再固定する。
+- **Remote確認**: 第10回Review追加是正の各commitはpush済み。最終remote Headは自己参照SHA循環を避けるため、Review開始時に同コマンドで再固定する。
 - **PR**: 実装対話では未作成。独立ReviewのPLAN/IMPLEMENTATION双方PASS後にのみ作成する。
 
 ## 2. DG-09 / NF-01 決定事項
@@ -36,7 +36,7 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetEntityMapperTest,AssetApiControllerTest,AssetApiRoleScopeIntegrationTest,AssetAssignmentConcurrencyTest,AssetAlertServiceTest,DocumentApiControllerTest,MyAssetApiControllerTest,AssetServiceTest,AssetSecretFieldScanTest,AssetOffboardingServiceTest,AssetComprehensiveSecretScanTest,AssetBoundaryAndLifecycleIntegrationTest,ScheduledMethodsHaveSchedulerLockTest,ActionPermissionResolverTest,AssetLifecycleAppendOnlyApiContractTest' test
 ```
 
-結果: **77/77 PASS, Failures=0, Errors=0, Skipped=0**。R7/R8で追加した回帰に加え、R9で追加した状態遷移・返却日範囲・棚卸し6状態・`AssetService` API境界、および紛失インシデント台帳/APIテストも同一コマンドへ含む。
+結果: **78/78 PASS, Failures=0, Errors=0, Skipped=0**。R7/R8で追加した回帰に加え、R9で追加した状態遷移・返却日範囲・棚卸し6状態・`AssetService` API境界、紛失インシデント台帳/APIテスト、および第10回Reviewの認可境界・DocumentLink scope・通知再送assertionを同一コマンドへ含む。
 
 専用suite外の実退社gate drill `ResignationGateFailureDrillTest` も **9/9 PASS, Failures=0, Errors=0, Skipped=0**。3 blocker照合と永続waiverのテストを含む。
 
@@ -48,6 +48,8 @@
 - NF-01の資産/license blockerはstatusまたは未返却/未解放日付のOR条件で不整合行も検出する。
 - 法人A/B、営業担当範囲（別法人所有でも担当要員への現在貸与は許可、未貸与は拒否）、マネージャー組織・法人範囲（共有または管轄法人のみ）、要員本人、空集合fail-closedを確認。
 - 実在 `t_document` の `ASSET_ASSIGNMENT` linkについて、無関係要員のdetail/downloadを貸与中・返却後とも403。旧assignmentの本人だけは履歴文書へアクセス可能。
+- `ASSET_LOST_INCIDENT` linkだけを持つ証跡について、managerのdetail認可を確認。`DocumentServiceImpl.assertDocumentAccessAllowed` の同じguardがdetail/download双方へ適用され、営業/要員の紛失インシデントAPI GETは403。
+- managerが別法人/別組織の既存assignment文書を紛失インシデントへリンクする操作は、対象資産scopeと既存文書link scopeの不一致として拒否し、拒否後のincident/linkを独立読取で確認。
 - `AssetComprehensiveSecretScanTest`: **4/4 PASS**。全 `src/main/java` を対象に、multilineのログ・例外・監査payloadを含む未マスク値を検査。
 - provider実装のidentifierログはマスク済みで、scan getter patternも`getAccountIdentifier`を含む。`AssetBoundaryAndLifecycleIntegrationTest` では同一key再送なし・別key上書き拒否を確認。
 - 退社3大blocker、承認済み例外、棚卸し確定後更新拒否・二重確定拒否、資産・アカウント・ライセンスのsoft-delete安全条件を確認し、`RETURNED`/`REVOKED`/`RELEASED` 終端履歴の削除拒否をassert。
@@ -63,9 +65,9 @@
 .\apache-maven-3.9.6\bin\mvn '-Dtest=AssetMySqlIntegrationTest' test -Pmysql-tests
 ```
 
-結果: **9/9 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130/V131/V132/V133、`FOR UPDATE`、CAS、貸与履歴、およびclaim・異なるaccountの同一key・返却/免除・license解放・棚卸し確定の5並行シナリオを実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
+結果: **10/10 PASS, Failures=0, Errors=0, Skipped=0**。MySQL 8 TestcontainersでFlyway V129/V130/V131/V132/V133、`FOR UPDATE`、CAS、貸与履歴、およびclaim・異なるaccountの同一key・返却/免除・license解放・棚卸し確定・紛失報告の6並行シナリオを実行。`MySqlTestShardInventoryTest`のshard登録整合も確認済み。
 
-追加した並行assertionは、同一keyのprovider call count=1、異なるaccountの同一keyは409かつprovider call count=1、返却/免除の勝者1件と終端event 1件、license席数の1回減算、棚卸し二重確定の勝者1件です。V132 smokeではwaiverのscope列・unique/FKと`t_asset_event` UPDATE/DELETE triggerを、同じMySQL schema testでV133の紛失インシデントtable・列・unique/FKを確認しました。
+追加した並行assertionは、同一keyのprovider call count=1、異なるaccountの同一keyは409かつprovider call count=1、返却/免除の勝者1件と終端event 1件、license席数の1回減算、棚卸し二重確定の勝者1件、同一assetの紛失報告でincident 1行・recipientごとの通知1件です。H2再送では通知件数とdedupe keyの不変性も確認しました。V132 smokeではwaiverのscope列・unique/FKと`t_asset_event` UPDATE/DELETE triggerを、同じMySQL schema testでV133の紛失インシデントtable・列・unique/FKを確認しました。
 
 V133追加による既存migration smokeの追随確認として、`FlywaySelfServiceSchemaSmokeTest`（3メソッド）と`FlywayCertificationLearningSkillGapSchemaSmokeTest`（1メソッド）も同時実行し、**4/4 PASS**。Flyway latest versionは133で、旧来のlatest version assertionもV133へ同期した。
 
@@ -76,7 +78,7 @@ V133追加による既存migration smokeの追随確認として、`FlywaySelfSe
 - Base `b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd`: `tests=3060, failures=2, errors=16, skipped=0`。
 - R5時点Head `e6659c90`: `tests=3118, failures=2, errors=11, skipped=0`。
 - R6実装時点: `tests=3123, failures=2, errors=11, skipped=0`。R7追加修正による対象Fast suiteの失敗はなく、残存はBase/R5から継続する8クラス（loopback接続、固定H2 ID、既存Controller/I18n/production設定）だった。
-- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6までにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、R7ではclaim競合・poll継続・service API境界・V132 DB保護を追加で修正した。R8では6状態契約・返却日当日再貸与・NF-01 blocker OR条件・異なるaccount間の同一key競合409を追加で修正した。R9ではサービス状態遷移表、実返却日範囲、棚卸し6状態、`AssetService` 汎用mutation入口を追加で修正し、今回の第9回Review追加是正ではV133紛失インシデント追跡とLOST/DISPOSED専用経路を追加した。現行対象Fast 77/77、MySQL 9/9、migration smoke 4/4を再実行してPASSした。
+- Head初回比較では `TransactionalRollbackForAuditTest` と `MyAssetApiControllerTest` が追加で検出されたが、前者は資産系更新@TransactionalのrollbackFor不足、後者はscope fixtureのH2共有DB汚染であり、R5時点で修正済み。R6までにP1競合・承認台帳・identifier mask・終端履歴保全を修正し、R7ではclaim競合・poll継続・service API境界・V132 DB保護を追加で修正した。R8では6状態契約・返却日当日再貸与・NF-01 blocker OR条件・異なるaccount間の同一key競合409を追加で修正した。R9ではサービス状態遷移表、実返却日範囲、棚卸し6状態、`AssetService` 汎用mutation入口を追加で修正し、第9回Review追加是正ではV133紛失インシデント追跡とLOST/DISPOSED専用経路を追加した。第10回Review追加是正ではGET認可、紛失証跡のdetail/download scope、DocumentLink cross-scope拒否、通知再送・並行重複assertionを追加した。現行対象Fast 78/78、文書認可補助23/23、MySQL 10/10、migration smoke 4/4、退社gate drill 9/9、shard inventory 1/1を再実行してPASSした。
 
 - `ControllerTransactionalBanTest`
 - `ProductionSecurityConfigurationTest`
@@ -139,7 +141,7 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 - `AssetBoundaryAndLifecycleIntegrationTest.testReassignImmediatelyAfterReturn`: 返却日と同日の再貸与を許可する期間境界を確認。
 - `AssetBoundaryAndLifecycleIntegrationTest.testOffboardingBlockersUseStatusOrDateContract`: `ACTIVE + actual_return_date`、`RETURNED + actual_return_date=NULL`、`ACTIVE + released_date`、`RELEASED + released_date=NULL` の不整合行を退社blockerとして検出することを確認。
 - `AssetMySqlIntegrationTest.testConcurrentRevokeClaimSameKeyAcrossAccountsReturns409OnMySQL`: 異なるaccountが同一keyを並行claimした場合、provider call count=1、成功1件、409が1件であることをMySQL 8 Testcontainersで確認。
-- R8時点でNF-09専用Fastコマンドへ `AssetLifecycleAppendOnlyApiContractTest` を追加し、**72/72 PASS**（0 failure / 0 error / 0 skipped）を記録した。現行のR9追加後実績は上記の **77/77** である。
+- R8時点でNF-09専用Fastコマンドへ `AssetLifecycleAppendOnlyApiContractTest` を追加し、**72/72 PASS**（0 failure / 0 error / 0 skipped）を記録した。R9追加後実績は **77/77**、第10回Review追加是正後の現行実績は上記の **78/78** である。
 
 ### 5.3 第9回Review P1/P2対応の実測
 
@@ -156,6 +158,14 @@ ORDER BY aa.expected_return_date, a.asset_tag;
 - `AssetServiceTest.testAssetStatusTransitionGuard`: 汎用 `changeStatus` の `ASSIGNED`/`IN_STOCK`/`LOST`/`DISPOSED` 遷移と、POST相当のLOST初期登録を拒否し、専用処理の副作用迂回を防止することを確認。
 - `AssetMySqlIntegrationTest.testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL`: Flyway latest=133、`t_asset_lost_incident` の必須列、asset unique key、asset FKをMySQL 8で確認。
 - NF-09専用Fast **77/77 PASS**、MySQL asset **9/9 PASS**、V133追随migration smoke **4/4 PASS**、実退社gate drill **9/9 PASS**、`MySqlTestShardInventoryTest` **1/1 PASS**（すべてfailure=0、error=0、skip=0）。
+
+### 5.5 第10回Review指摘の実測
+
+- `AssetApiControllerTest.testSalesCannotReadLostIncidentDetails`: 担当資産を持つ営業でも `GET /api/assets/{assetId}/lost-incident` が403となり、GETを管理者/HR/マネージャー限定にするメソッド認可を確認。
+- `DocumentServiceImplTest.assertDocumentAccessAllowed_lostIncidentLinkAllowsScopedManager` と `AssetBoundaryAndLifecycleIntegrationTest.testSalesAndManagerScopeUsesAssignmentAndManagedOrganization`: `ASSET_LOST_INCIDENT` 専用linkの文書detailをmanagerが取得でき、detail/download共通guardのscope判定を確認。cross-scope文書を紛失インシデントへリンクするmanager操作は拒否され、拒否後の状態を独立読取で確認。
+- `AssetServiceTest.testLostIncidentLedgerAndEmergencyAlert`: 紛失報告再送前後の通知件数とdedupe keyが不変であることを確認。
+- `AssetMySqlIntegrationTest.testConcurrentLostReportPublishesOnceOnMySQL`: MySQL 8で同一assetの並行紛失報告を実行し、incident 1行、recipientごとの通知1件、再送後の件数不変を確認。
+- 第10回Review是正後の対象gateはNF-09専用Fast **78/78**、文書認可補助suite **23/23**、MySQL asset **10/10**、V133追随migration smoke **4/4**、実退社gate drill **9/9**、`MySqlTestShardInventoryTest` **1/1**（すべてfailure=0、error=0、skip=0）。
 
 ## 6. Secret scan
 

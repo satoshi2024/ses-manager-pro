@@ -77,7 +77,7 @@ MyBatis-Plus の `logic-delete-field: deletedFlag` によりすべての `remove
 | マネージャー | 管轄組織の要員に対する現在貸与を既存OrganizationScope/DataScopeの母集団から導出し、owner法人は `NULL`（共有）または管轄組織の `legal_entity_id` と積集合 | 所属/管理組織が解決できない、許可要員0名、非NULL法人が不一致 |
 | 要員 | 自身の貸与記録にリンクされた証跡文書、ポータルは自身の現在貸与のみ | ログイン要員リンクなし、他要員の資産、管理台帳API |
 
-一覧・count・detail・event・assignment history・CSV・通知・外部アカウント/ライセンスの担当者参照はこの同一母集団を使う。営業・マネージャーへ未貸与資産は公開しない。`owner_company_id IS NULL` の共有資産も、営業・マネージャーに許可された要員への現在貸与がある場合だけ公開する。`DocumentLink(ASSET_ASSIGNMENT)` は実在する `t_document` → assignment → asset を検証し、リンクされたassignmentの記録上のassignee（要員自身）または現在の資産スコープが許可される場合だけ詳細/downloadを許可する。返却・移管で新しいassignmentが作られた場合、旧assignmentの文書権限は旧assigneeにのみ再評価され、新assigneeへ暗黙継承しない。
+一覧・count・detail・event・assignment history・CSV・通知・外部アカウント/ライセンスの担当者参照はこの同一母集団を使う。営業・マネージャーへ未貸与資産は公開しない。`owner_company_id IS NULL` の共有資産も、営業・マネージャーに許可された要員への現在貸与がある場合だけ公開する。`DocumentLink(ASSET_ASSIGNMENT)` と `DocumentLink(ASSET_LOST_INCIDENT)` は、実在する `t_document` → 対象assignment/incident → asset を検証し、共通の `AssetScopeService` が許可する場合だけdetail/downloadを許可する。返却・移管で新しいassignmentが作られた場合、旧assignmentの文書権限は旧assigneeにのみ再評価され、新assigneeへ暗黙継承しない。紛失インシデントの文書リンク追加は、管理者/HR以外ではactorの対象資産scopeと既存文書リンクのscopeをともに満たす場合だけ許可し、未リンク文書または別scope文書はfail-closedで拒否する。
 
 ---
 
@@ -226,7 +226,7 @@ CREATE TABLE t_asset_lost_incident (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='紛失資産インシデント対応台帳（秘密非保存）';
 ```
 
-APIは `GET/PUT /api/assets/{assetId}/lost-incident` とし、管理者/HR/マネージャーが資産scope内で対応情報を更新する。要員の自己紛失報告は `AssetService.reportLost` の専用経路だけを使用し、controllerから個別通知を呼び出さない。
+APIは `GET/PUT /api/assets/{assetId}/lost-incident` とし、GET/PUTの両方をメソッド単位で管理者/HR/マネージャーに限定し、営業/要員からは403とする。サービス内でも資産scopeを検証して対応情報を参照・更新する。`DocumentServiceImpl.assertDocumentAccessAllowed` は `ASSET_ASSIGNMENT` と `ASSET_LOST_INCIDENT` の両target typeを同じscope判定へ渡し、detail/downloadで共通利用する。`AssetLostIncidentService.linkDocuments` は対象資産とactorのscopeに加えて既存文書リンクのscopeを検証し、管理者/HR以外の未リンク文書・cross-scope文書追加を拒否する。actor IDが渡された場合はSecurityContextのロールを信頼せず、`SysUserMapper` で永続化された実ロールを解決する。要員の自己紛失報告は `AssetService.reportLost` の専用経路だけを使用し、controllerから個別通知を呼び出さない。
 
 ### 2.6 外部アカウント参照 (`m_external_account_system`, `t_external_account_reference`)
 

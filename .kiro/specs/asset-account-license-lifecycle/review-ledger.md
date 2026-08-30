@@ -29,7 +29,7 @@
 | **CR-03** | データ・マイグレーション (V129/V130/V131/V132/V133, V1/H2同期, DocumentLink契約準拠) | `V129`, `V130`, `V131`, `V132`, `V133`, `schema-asset-account-license-lifecycle-h2.sql`, `V1__create_tables.sql` | `AssetEntityMapperTest`, `AssetMySqlIntegrationTest`、migration smoke 4件、全対象コンテキスト起動 (0 failures) | **PASS** |
 | **CR-04** | 監査・セキュリティ・包括的秘密非保存 (Comprehensive No-Secrets Policy) | `AssetComprehensiveSecretScanTest`, `ApiAuditFilter`, `t_asset_event`, `ExternalAccountServiceImpl.maskIdentifier`, `MockExternalAccountProviderClientImpl.maskIdentifier` | `AssetComprehensiveSecretScanTest` (全Javaソースファイル走査・`getAccountIdentifier`を含む0 secret/PII fields検証: 4/4 PASS) | **PASS** |
 | **CR-05** | UI・390pxレスポンシブ・4言語メッセージ同期 (ja, en, zh-CN, ko) | `templates/asset/*.html`, `templates/my/assets.html`, `static/js/modules/asset*.js`, `messages*.properties` | 4言語プロパティ同期 & MockMvc レンダリング検証 | **PASS** |
-| **CR-06** | NF-09対象テストの完全性（専用Fast 77件 + MySQL実コンテナ 9件） | NF-09対象15テストクラス (77メソッド) + MySQL 1クラス (9メソッド) | NF-09専用Fast: **77/77 tests PASS (0 failure, 0 error, 0 skipped)**<br>MySQL Gate: `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest` (**9/9 PASS, 0 failure, 0 error, 0 skipped**)。V133 migration smoke 4件、実退社gate drill 9件もPASS。`MySqlTestShardInventoryTest` PASS & `AssetMySqlIntegrationTest` 登録。固定seed `27838638095700` の全体比較は Base `3060 tests / 2 failures / 16 errors / 0 skipped`、R6実装時点 `3123 tests / 2 failures / 11 errors / 0 skipped`。残存はBaseにも存在する既存/環境側テスト。全体Fast gateは **未PASS** | **NF-09対象PASS / 全体gate未PASS（Base比較済み）** |
+| **CR-06** | NF-09対象テストの完全性（専用Fast 78件 + MySQL実コンテナ 10件） | NF-09対象15テストクラス (78メソッド) + MySQL 1クラス (10メソッド) | NF-09専用Fast: **78/78 tests PASS (0 failure, 0 error, 0 skipped)**<br>MySQL Gate: `mvn test -Pmysql-tests -Dtest=AssetMySqlIntegrationTest` (**10/10 PASS, 0 failure, 0 error, 0 skipped**)。文書認可補助suite 23件、V133 migration smoke 4件、実退社gate drill 9件もPASS。`MySqlTestShardInventoryTest` PASS & `AssetMySqlIntegrationTest` 登録。固定seed `27838638095700` の全体比較は Base `3060 tests / 2 failures / 16 errors / 0 skipped`、R6実装時点 `3123 tests / 2 failures / 11 errors / 0 skipped`。残存はBaseにも存在する既存/環境側テスト。全体Fast gateは **未PASS** | **NF-09対象PASS / 全体gate未PASS（Base比較済み）** |
 
 ---
 
@@ -117,3 +117,14 @@ R9の対象gateはすべて0 failure / 0 error / 0 skipped。リポジトリ全�
 | P2-01 ledgerの固定Head説明 | R7表記を第9回Review追加是正の引渡し説明へ更新し、現行Fast/MySQL/V133 smokeの対象をtraceabilityへ追加 | 本台帳、`tasks.md`、`review-evidence.md` の相互照合 |
 
 第9回Review追加是正の対象gateは実行後に0 failure / 0 error / 0 skippedを記録する。独立ReviewのPLAN/IMPLEMENTATION双方PASSまではPRを作成しない。
+
+## 9. 第10回Review指摘への対応
+
+| 指摘 | 対応 | 検証 |
+|---|---|---|
+| P1-01 紛失インシデント閲覧権限の過広 | `GET /api/assets/{assetId}/lost-incident` にも管理者/HR/マネージャー限定のメソッド認可を付与し、営業/要員を403で拒否。PUTと同じ権限境界へ統一 | `AssetApiControllerTest.testSalesCannotReadLostIncidentDetails`、`AssetApiControllerTest.testLostIncidentApiFlow`、NF-09 Fast 78/78 |
+| P1-02 紛失証跡detail/downloadのmanager認可欠落 | `DocumentServiceImpl.assertDocumentAccessAllowed` で `ASSET_LOST_INCIDENT` を `ASSET_ASSIGNMENT` と同じ `AssetScopeService` 判定へ追加し、detail/download共通guardで認可 | `DocumentServiceImplTest.assertDocumentAccessAllowed_lostIncidentLinkAllowsScopedManager`、`AssetBoundaryAndLifecycleIntegrationTest.testSalesAndManagerScopeUsesAssignmentAndManagedOrganization` |
+| P1-03 紛失証跡DocumentLinkのcross-scope追加 | `AssetLostIncidentServiceImpl.linkDocuments` で対象資産scopeと既存文書リンクscopeを検証。actor ID指定時は `SysUserMapper` の永続ロールを解決し、未リンク/別scope文書を非管理者・非HRからfail-closedで拒否 | `AssetBoundaryAndLifecycleIntegrationTest.testSalesAndManagerScopeUsesAssignmentAndManagedOrganization`（拒否後の状態を独立読取） |
+| P2-01 紛失通知再送assertion不足 | H2で再送前後の通知件数・dedupe keyを比較し、MySQL 8で同一資産の並行報告についてincident 1行・recipientごとの通知1件・再送後件数不変を検証 | `AssetServiceTest.testLostIncidentLedgerAndEmergencyAlert`、`AssetMySqlIntegrationTest.testConcurrentLostReportPublishesOnceOnMySQL` |
+
+第10回Review是正後の対象gateは、NF-09 Fast **78/78**、文書認可補助suite **23/23**、MySQL asset **10/10**、V133 migration smoke **4/4**、実退社gate drill **9/9**、shard inventory **1/1**で、すべてfailure=0 / error=0 / skipped=0。リポジトリ全体Fast gateはBase比較由来の残存失敗を含むため未PASSとして扱う。独立ReviewのPLAN/IMPLEMENTATION双方PASSまではPRを作成しない。

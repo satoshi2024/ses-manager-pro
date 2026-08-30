@@ -48,8 +48,9 @@ SES企業において、PC・スマートフォン・セキュリティキー・
 2. THE 棚卸し明細（`t_asset_inventory_item`） SHALL 理論上の保管場所/貸与先（`expected`）と実地確認結果（`observed`）、確認者、確認日時、差異区分（`MATCH: 一致`, `DISCREPANCY: 差異あり`, `MISSING: 所在不明`, `UNREGISTERED: 未登録資産`）、差異理由、および是正措置を記録する。棚卸し確定（`COMPLETED`）後の明細更新および二重確定は厳格に拒否する。
 3. **紛失インシデント追跡 (Lost Asset Incident)**: 資産の紛失が報告された場合、THE システム SHALL ステータスを `LOST` に変更し、インシデント起票日時、リモートワイプ実施/確認状態、警察届出番号、保険申請状況、および関連文書リンクを追跡可能にし、関係者へ緊急アラートを即時一斉配信する。
    - (a) `t_asset_lost_incident` を紛失資産ごとの正本台帳とし、起票日時・報告者・リモートワイプ（要求/実施/確認日時を含む）・警察届出番号・保険申請状態/日時を保持する。password/token/recovery code等の秘密は保持しない。
-   - (b) `GET/PUT /api/assets/{assetId}/lost-incident` で認可済みの管理者/HR/マネージャーが対応状態を参照・更新できる。関連証跡は `DocumentLink.target_type = 'ASSET_LOST_INCIDENT'` で追記する。
-   - (c) `LOST` 遷移、専用インシデント起票、緊急一斉通知のoutbox登録は同一トランザクションで完了し、同一インシデントの再送で重複通知・重複台帳を作らない。
+   - (b) `GET/PUT /api/assets/{assetId}/lost-incident` は管理者/HR/マネージャーだけに許可し、営業/要員には資産担当範囲にかかわらず許可しない。関連証跡は `DocumentLink.target_type = 'ASSET_LOST_INCIDENT'` で追記する。
+   - (c) 紛失インシデントにリンクされた証跡のdetail/downloadは、インシデント対象資産の通常の `AssetScopeService` と同一の認可を適用する。管理者/HR以外が文書をリンク・追加する場合は、対象資産のactor scopeと既存文書リンクのscopeをともに満たすことを必須とし、未リンク文書・別法人/別組織文書・推測IDによるcross-scope操作はfail-closedで拒否する。
+   - (d) `LOST` 遷移、専用インシデント起票、緊急一斉通知のoutbox登録は同一トランザクションで完了し、同一インシデントの再送で重複通知・重複台帳を作らない。
 4. **退社ゲート連携 (NF-01 Link Contract)**:
    - WHEN `engineer-lifecycle-workflow` (NF-01) の退社案件（`RESIGNATION`）が完了ゲート検証を行う場合、THE システム SHALL 対象要員に紐づく以下の **3大残存アイテム** を blocker として検出・報告する:
      - (a) 未返却貸与資産（`status = ACTIVE` または `actual_return_date IS NULL`）
