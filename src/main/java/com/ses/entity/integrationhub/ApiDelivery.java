@@ -26,6 +26,7 @@ public class ApiDelivery {
     private String clientId;
     private String scopeCode;
     private String tenantId;
+    private String scopeDigest;
     private String eventType;
     private String schemaVersion;
     private String correlationId;

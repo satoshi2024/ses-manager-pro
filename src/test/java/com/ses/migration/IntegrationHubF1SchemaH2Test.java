@@ -24,7 +24,8 @@ class IntegrationHubF1SchemaH2Test {
         for (String table : new String[]{
                 "M_API_CLIENT", "M_API_CLIENT_SCOPE", "T_CREDENTIAL_VERSION", "T_API_IDEMPOTENCY_RECORD",
                 "M_WEBHOOK_SUBSCRIPTION", "T_API_DELIVERY", "T_INBOUND_EVENT", "T_API_USAGE_BUCKET",
-                "T_API_NONCE_REPLAY", "T_API_RETENTION_HOLD", "T_API_PURGE_CHECKPOINT"}) {
+                "T_API_NONCE_REPLAY", "T_API_RETENTION_HOLD", "T_API_PURGE_CHECKPOINT",
+                "T_API_DELIVERY_REPLAY_AUDIT"}) {
             Boolean exists = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) > 0 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?", Boolean.class, table);
             assertTrue(Boolean.TRUE.equals(exists), "missing H2 table: " + table);

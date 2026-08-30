@@ -98,6 +98,7 @@ CREATE TABLE m_webhook_subscription (
     event_type VARCHAR(100) NOT NULL,
     endpoint_url VARCHAR(512) NOT NULL,
     key_id VARCHAR(100) NOT NULL,
+    signing_credential_version INT NOT NULL DEFAULT 1,
     encrypted_signing_secret TEXT NOT NULL,
     crypto_key_version VARCHAR(64) NOT NULL,
     data_scope_json TEXT NOT NULL,
@@ -118,6 +119,7 @@ CREATE TABLE t_api_delivery (
     client_id VARCHAR(100) NOT NULL,
     scope_code VARCHAR(100) NOT NULL,
     tenant_id VARCHAR(64) NOT NULL,
+    scope_digest CHAR(64) NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
     event_type VARCHAR(100) NOT NULL,
     schema_version VARCHAR(32) NOT NULL,
     correlation_id VARCHAR(128),
@@ -242,3 +244,18 @@ CREATE INDEX idx_api_delivery_expiry ON t_api_delivery (status, retention_expire
 CREATE INDEX idx_inbound_expiry ON t_inbound_event (status, retention_expires_at, id);
 CREATE INDEX idx_api_nonce_expiry ON t_api_nonce_replay (expires_at, id);
 CREATE INDEX idx_retention_hold_status ON t_api_retention_hold (record_kind, status, record_id);
+
+CREATE TABLE t_api_delivery_replay_audit (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    delivery_id BIGINT NOT NULL,
+    event_id VARCHAR(128) NOT NULL,
+    replay_generation INT NOT NULL,
+    operator_ref VARCHAR(128) NOT NULL,
+    reason_code VARCHAR(64) NOT NULL,
+    scope_digest CHAR(64) NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_api_delivery_replay_generation UNIQUE (delivery_id, replay_generation),
+    CONSTRAINT fk_api_delivery_replay_delivery FOREIGN KEY (delivery_id) REFERENCES t_api_delivery (id)
+);
+CREATE INDEX idx_api_delivery_replay_event ON t_api_delivery_replay_audit (event_id, created_at, id);

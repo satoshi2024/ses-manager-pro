@@ -4,7 +4,7 @@ import java.net.InetAddress;
 import java.util.List;
 
 /** DNS解決を行わず、IPv4/IPv6の正規化とCIDR比較だけを行う。 */
-final class ExternalApiCidrMatcher {
+public final class ExternalApiCidrMatcher {
     private ExternalApiCidrMatcher() {
     }
 
@@ -44,6 +44,19 @@ final class ExternalApiCidrMatcher {
             return InetAddress.getByAddress(bytes).getHostAddress();
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** literal input専用。InetAddress.getByNameを使わず、DNS解決経路を持たない。 */
+    public static InetAddress parseLiteral(String value) {
+        byte[] bytes = parseIp(value);
+        if (bytes == null) {
+            throw new IllegalArgumentException("IP literal is invalid");
+        }
+        try {
+            return InetAddress.getByAddress(bytes);
+        } catch (java.net.UnknownHostException e) {
+            throw new IllegalArgumentException("IP literal is invalid", e);
         }
     }
 

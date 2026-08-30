@@ -44,6 +44,17 @@ public class IntegrationHubExternalApiProperties {
                 || publicApi.readSnapshotPurgeFixedDelayMs > 86_400_000L) {
             throw new IllegalStateException("read snapshot purge設定が不正です");
         }
+        if (externalTransport.batchSize < 1 || externalTransport.batchSize > 32
+                || externalTransport.leaseSeconds < 1 || externalTransport.leaseSeconds > 900
+                || externalTransport.fixedDelayMs < 100 || externalTransport.fixedDelayMs > 86_400_000L
+                || externalTransport.connectTimeoutMs < 100 || externalTransport.connectTimeoutMs > 30_000
+                || externalTransport.readTimeoutMs < 100 || externalTransport.readTimeoutMs > 30_000) {
+            throw new IllegalStateException("external transport設定が不正です");
+        }
+        if (externalTransport.enabled && provider.mode == ProviderMode.LOOPBACK
+                && security.allowedLoopbackPorts.isEmpty()) {
+            throw new IllegalStateException("LOOPBACK transportには明示的な許可portが必要です");
+        }
         for (String proxy : security.trustedProxies) {
             if (!StringUtils.hasText(proxy)) {
                 throw new IllegalStateException("trusted proxyに空要素は指定できません");
@@ -68,6 +79,11 @@ public class IntegrationHubExternalApiProperties {
     @Data
     public static class ExternalTransport {
         private Boolean enabled;
+        private int batchSize = 32;
+        private int leaseSeconds = 60;
+        private long fixedDelayMs = 1_000L;
+        private int connectTimeoutMs = 3_000;
+        private int readTimeoutMs = 3_000;
     }
 
     @Data

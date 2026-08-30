@@ -40,4 +40,14 @@ class IntegrationHubExternalApiPropertiesTest {
 
         assertThrows(IllegalStateException.class, properties::validateBoundaries);
     }
+
+    @Test
+    void enabledLoopbackTransportWithoutExplicitPortFailsClosedAtStartup() {
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setEnabled(false);
+        properties.getExternalTransport().setEnabled(true);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.LOOPBACK);
+
+        assertThrows(IllegalStateException.class, properties::validateBoundaries);
+    }
 }

@@ -6,6 +6,7 @@ import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import com.ses.service.integrationhub.IntegrationHubStates;
+import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -49,6 +50,7 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
                 .clientId(clientId)
                 .scopeCode(scopeCode)
                 .tenantId(tenantId)
+                .scopeDigest(IntegrationHubWebhookScopeDigest.of(clientId, scopeCode, tenantId))
                 .eventType(eventType)
                 .schemaVersion(schemaVersion)
                 .correlationId(correlationId)

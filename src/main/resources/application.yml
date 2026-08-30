@@ -425,6 +425,11 @@ integration:
       read-snapshot-purge-fixed-delay-ms: 60000
     external-transport:
       enabled: false
+      batch-size: 32
+      lease-seconds: 60
+      fixed-delay-ms: 1000
+      connect-timeout-ms: 3000
+      read-timeout-ms: 3000
     provider:
       mode: MOCK
     security:

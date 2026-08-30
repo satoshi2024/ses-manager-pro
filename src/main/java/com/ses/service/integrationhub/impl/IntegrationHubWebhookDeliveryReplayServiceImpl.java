@@ -1,0 +1,105 @@
+package com.ses.service.integrationhub.impl;
+
+import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.entity.integrationhub.ApiDeliveryReplayAudit;
+import com.ses.mapper.ApiDeliveryMapper;
+import com.ses.mapper.ApiDeliveryReplayAuditMapper;
+import com.ses.service.integrationhub.ApiDeliveryService;
+import com.ses.service.integrationhub.IntegrationHubDigest;
+import com.ses.service.integrationhub.IntegrationHubStates;
+import com.ses.service.integrationhub.IntegrationHubWebhookDeliveryReplayService;
+import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+
+/** DLQ replayを新generationとしてatomicに作り、safe metadataだけを監査する。 */
+@Service
+@RequiredArgsConstructor
+public class IntegrationHubWebhookDeliveryReplayServiceImpl
+        implements IntegrationHubWebhookDeliveryReplayService {
+    private static final int MAX_GENERATION = 1_000_000;
+
+    private final ApiDeliveryMapper deliveryMapper;
+    private final ApiDeliveryReplayAuditMapper replayAuditMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ApiDelivery replay(Long deliveryId, int replayGeneration, String operatorRef, String reasonCode,
+                              String revalidatedScopeDigest, LocalDateTime now) {
+        if (deliveryId == null || replayGeneration <= 0 || replayGeneration > MAX_GENERATION
+                || !safeOperator(operatorRef) || !safeReason(reasonCode)
+                || !isHash(revalidatedScopeDigest) || now == null) {
+            throw new IllegalArgumentException("invalid webhook replay request");
+        }
+        ApiDelivery original = deliveryMapper.selectForUpdate(deliveryId);
+        if (original == null || !IntegrationHubStates.DELIVERY_DLQ.equals(original.getStatus())) {
+            throw new IllegalStateException("only DLQ delivery can be replayed");
+        }
+        if (original.getDeliveryGeneration() == null
+                || replayGeneration != original.getDeliveryGeneration() + 1
+                || !revalidatedScopeDigest.equalsIgnoreCase(original.getScopeDigest())
+                || !revalidatedScopeDigest.equalsIgnoreCase(
+                IntegrationHubWebhookScopeDigest.of(original.getClientId(), original.getScopeCode(), original.getTenantId()))) {
+            throw new IllegalArgumentException("webhook replay scope or generation is invalid");
+        }
+        if (replayAuditMapper.selectByDeliveryGeneration(deliveryId, replayGeneration) != null) {
+            throw new IllegalStateException("webhook replay generation already exists");
+        }
+
+        ApiDelivery replay = ApiDelivery.builder()
+                .eventId(original.getEventId())
+                .subscriptionId(original.getSubscriptionId())
+                .deliveryGeneration(replayGeneration)
+                .clientId(original.getClientId())
+                .scopeCode(original.getScopeCode())
+                .tenantId(original.getTenantId())
+                .scopeDigest(original.getScopeDigest())
+                .eventType(original.getEventType())
+                .schemaVersion(original.getSchemaVersion())
+                .correlationId(original.getCorrelationId())
+                .providerIdempotencyKey(IntegrationHubDigest.sha256Hex(
+                        original.getEventId() + "|" + original.getSubscriptionId() + "|" + replayGeneration))
+                .externalDtoSnapshot(original.getExternalDtoSnapshot())
+                .payloadHash(original.getPayloadHash())
+                .status(IntegrationHubStates.DELIVERY_PENDING)
+                .attemptCount(0)
+                .maxAttempts(8)
+                .nextAttemptAt(now)
+                .version(0)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        try {
+            deliveryMapper.insert(replay);
+            ApiDeliveryReplayAudit audit = new ApiDeliveryReplayAudit();
+            audit.setDeliveryId(deliveryId);
+            audit.setEventId(original.getEventId());
+            audit.setReplayGeneration(replayGeneration);
+            audit.setOperatorRef(operatorRef);
+            audit.setReasonCode(reasonCode);
+            audit.setScopeDigest(revalidatedScopeDigest.toLowerCase());
+            audit.setPayloadHash(original.getPayloadHash());
+            audit.setCreatedAt(now);
+            replayAuditMapper.insert(audit);
+            return replay;
+        } catch (DuplicateKeyException e) {
+            throw new IllegalStateException("webhook replay generation conflict", e);
+        }
+    }
+
+    private boolean safeOperator(String value) {
+        return value != null && value.matches("[A-Za-z0-9._:-]{1,128}");
+    }
+
+    private boolean safeReason(String value) {
+        return value != null && value.matches("[A-Z][A-Z0-9_]{0,63}");
+    }
+
+    private boolean isHash(String value) {
+        return value != null && value.matches("[0-9a-fA-F]{64}");
+    }
+}

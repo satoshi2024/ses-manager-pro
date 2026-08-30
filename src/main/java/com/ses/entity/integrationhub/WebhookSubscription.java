@@ -25,6 +25,7 @@ public class WebhookSubscription {
     private String eventType;
     private String endpointUrl;
     private String keyId;
+    private Integer signingCredentialVersion;
     private String encryptedSigningSecret;
     private String cryptoKeyVersion;
     private String dataScopeJson;
