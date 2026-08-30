@@ -38,6 +38,12 @@
 | NF05-PLAN-005 | P1 | burst 20のcapacity、refill、atomic predicate、clock rollbackが未固定 | design.md 2.1、requirements IH-R1-8、tasks F1 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
 | NF05-PLAN-006 | P1 | idempotency/delivery/inboundのcanonical enumとterminal retention mappingが不一致 | design.md 2.1/5.3、requirements IH-R6-3、tasks F1 | SPEC_ADDRESSED。R-NF05 PLAN PASSでクローズ |
 
+## F1 implementation trace
+
+| Task | Evidence | Status | Review boundary |
+|---|---|---|---|
+| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡、F1 targeted 23 tests | IMPLEMENTED_PENDING_REVIEW | 独立Implementation Review未実施。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
+
 ## Evidence status
 
 - T0: read-only inventory、dedicated worktree、通常checkout非変更を確認。Discovery Review Headは6e0f5067。
@@ -58,12 +64,15 @@
 - R-NF05 state mapping cleanup: fdea4bb18db3d3ae6542dc0c534425783dd28a24で旧aliasを除去し、canonical enum/terminal
   retention mappingをdesign/tasksへ同期した。
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
-- F1: Approved scopeのpersistence基盤を実装中。F2、A1、A2、B1、B2、M: 未着手。
+- F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
+  独立Implementation Reviewは未実施。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
   persistence基盤の実装に限定している。
 
-## Required gates before F1
+## F1 gate evidence
 
 1. F1開始時にorigin/mainをfetchし、migration最大値、H2 schema/init経路、backup/rollback前提を再確認する（完了）。
 2. 実装はapproved implementation scopeへ限定し、public endpoint、外部送信、A1/A2/B1/B2、production enablementを行わない。
+3. 実装commit `a7654b44`を許可されたbranchへpush済み。対象F1 suiteはfailure/error/skipなし、全fast
+   suiteのF1対象外failure/errorは全体PASSへ昇格させない。

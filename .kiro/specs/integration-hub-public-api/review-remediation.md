@@ -18,7 +18,7 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 | remote Headなし | P1 | Discovery/0R/0R-D seriesをorigin/codex/integration-hub-public-apiへpushし、local/remote一致を確認 | SPEC_ADDRESSED | Task単位pushと最終Head固定 |
 | outbox insert after-commit | P1 | 業務stateとoutbox rowを同一DB transactionでatomic commitする設計へ修正。claim/HTTP/CASを分離 | SPEC_ADDRESSED | F1/B1実装とcrash/stale/replay test |
 | 外部契約なし | P1 | Owner承認済みの非公開openapi-candidate.yamlを保持。read-only allow-list、status/error/cursor/securityを固定 | SPEC_ADDRESSED | A1は別scope、public endpointは未実装 |
-| 実装・検証証拠なし | P1 | F1〜Mを未着手のまま維持。Task 0Rのdocs-only検証だけを記録 | OPEN | F1〜Mの実装・独立test |
+| 実装・検証証拠なし | P1 | F1 approved persistence基盤を`a7654b44`で実装し、F1 targeted testとMySQL migration smokeの証跡を追加 | IMPLEMENTED_PENDING_REVIEW | 独立Implementation Review、F2〜Mの実装・検証 |
 | metrics cardinality不足 | P2 | finite label set、禁止label、scrape/cardinality test、safe trace/audit方針を追加 | SPEC_ADDRESSED | F2/Mの実装・scrape証拠 |
 | payload retention不足 | P2 | digest/hash/allow-list snapshot、承認retention、legal hold、purge/restore testを追加 | SPEC_ADDRESSED | F1/B1/B2/M実装 |
 | handoff commit系列不足 | P2 | Review Head 6e0f5067を基点として記録し、remediation commitと最終Headをcommit series＋外部handoffで追跡 | SPEC_ADDRESSED | remediation push後の最終Head通知 |
@@ -45,9 +45,9 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 
 ## 実装範囲の残存ゲート
 
-Owner承認により、F1 persistence基盤の実装条件は確定した。独立Plan ReviewのPLAN PASSまではF1 production
-code/migration/testを開始しない。public endpoint、外部送信、A1/A2/B1/B2、production enablement、command、
-exportは引き続きこのimplementation scope外である。
+Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1は`a7654b44`で実装済みだが、
+独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
+command、exportは引き続きこのimplementation scope外である。
 
 ## Handoff checkpoint
 
@@ -61,6 +61,7 @@ exportは引き続きこのimplementation scope外である。
 - R-NF05 residual remediation commit: a3b63d70f53bc799d1abcb6e26e34ad163aa9843
 - R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
+- F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応

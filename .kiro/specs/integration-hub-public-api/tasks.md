@@ -1,4 +1,4 @@
-# NF-05 Public API Tasks（Owner承認済み・Plan Review待ち）
+# NF-05 Public API Tasks（Owner承認済み・Plan PASS・F1実装完了）
 
 ## 実行停止規則
 
@@ -39,7 +39,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 
 ## Task F1: client / credential / scope / idempotency DDL
 
-- [ ] Objective: client、credential version、scope、idempotency、usage bucket、nonce replay ledger、
+- [x] Objective: client、credential version、scope、idempotency、usage bucket、nonce replay ledger、
   webhook/inbound、retention hold/checkpointの保存契約を実装する。
 - Preconditions: Task 0/0R/0R-D/0R-P/0R-P2/0R-P3完了、approval-decision.md、指定Base再確認、独立Plan Review PLAN PASS。
 - Implementation: usage bucketのDB natural keyはclient×scope×tenant×route templateに限定し、minute/day counterと
@@ -59,6 +59,10 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
 - Demo: secret原文非表示、同key別payload拒否、rate key/IP分離、nonce replay拒否、t_api_delivery分離、
   burst/refillと三つのquota境界、migration証跡、DB transaction内外の境界、canonical state遷移、hold/purge/restoreの
   状態遷移を示す。
+- 実施証跡: `a7654b44`でV129 MySQL migration、H2 schema/init、entity/mapper/service/crypto基盤、
+  purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは23 tests、failure/error/skipなし。MySQL
+  Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
+  production-config系10 errorsと2 failuresで終了しており、F1の独立Implementation Reviewは未実施である。
 
 ## Task F2: dedicated security chain
 
