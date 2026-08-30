@@ -25,8 +25,9 @@ idempotency、usage bucket、webhook-inbound-outbound persistence contractのDDL
 service基盤、H2/MySQL migration、test、purge、rollback証跡、およびF1に必要な最小config/crypto abstraction
 である。ただし同じ開工対話で独立Plan ReviewのPLAN PASSを先に受領する。
 
-public endpointの公開、外部送信、A1、A2、B1、B2、production enablementはこの承認では開始しない。
-command/exportはdefault denyとし、A2 commandは未承認である。
+F1 Decision時点ではpublic endpointの公開、外部送信、A1、A2、B1、B2、production enablementを開始しない。
+後続のscope expansion DecisionでF2/A1/B1/B2/Mの開発だけを追加承認したが、production enablement、
+実顧客credential、実provider送信は禁止し、command/exportはdefault deny、A2はN/Aである。
 
 ## Scope expansion decision
 
@@ -94,9 +95,10 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 ## Required next gate
 
 F1は固定Head 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、
-再オープンしない。scope expansion docs-only gateのcommit/push後、同じ固定remote branchを既存R-NF05へ
-Plan delta Reviewとして渡す。Plan delta PASS前はF2 implementationを開始しない。FAILの場合はspec/architecture
-remediationだけを同じbranchへcommit/pushして再Reviewする。
+再オープンしない。scope expansionの固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL
+（P0=0、P1=4、P2=2）だったため、dedicated chain、HMAC byte canonical、production fail-closed、
+mock/loopback destination、A2 N/A、traceのspec/architecture remediationだけを同じbranchへcommit/pushし、
+既存R-NF05へPlan delta再Reviewとして渡す。Plan delta PASS前はF2 implementationを開始しない。
 
 Plan delta PASS後はF2→独立Implementation Review→A1→Review→B1→Review→B2→Review→M→最終Reviewの順に
 継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、

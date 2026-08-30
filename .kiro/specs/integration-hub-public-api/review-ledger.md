@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F1 Implementation PASS・Plan delta待ち）
+# NF-05 Review Ledger（scope expansion承認・F1 Implementation PASS・Plan delta remediation中）
 
 ## Approval gate
 
@@ -31,6 +31,26 @@ scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20
 OwnerRef=PROJECT_OWNER、OwnerType=ROLE、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、
 Implementation branch=codex/integration-hub-public-apiである。production enablement、実顧客credential、
 実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
+
+## Scope expansion Plan delta remediation
+
+固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcの独立Plan deltaはPLAN FAIL（P0=0、P1=4、P2=2）
+だった。F1 PASSとOwner Gateは再オープンせず、F2は再Reviewの
+PLAN PASSまで開始しない。今回のdocs-only remediationで次をSPEC_ADDRESSEDへ移し、
+同じR-NF05へ新しいremote Headを渡して独立再Reviewを受ける。
+
+| Finding ID | Severity | Finding | 対応証跡 | Status |
+|---|---|---|---|---|
+| NF05-PLAN-EXP-001 | P1 | F2 chainの順序、stateless、既存chain排他、default denyが未固定 | design 1.1、inventory 3.1、requirements IH-R1-12、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-002 | P1 | HMAC canonical requestのbyte単位仕様が不足 | design 3.1、inventory 3.2、requirements IH-R1-13、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-003 | P1 | production enablement禁止のdefault-off/fail-closed起動契約が不足 | design 8.1、requirements IH-R1-14/IH-R5-4、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-004 | P1 | mock/stub/loopback限定のdestination、redirect、proxy、DNS検証が不足 | design 8.2、inventory 3.1/3.2、requirements IH-R1-15/IH-R5-4、tasks F2 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-005 | P2 | A2=N/Aとcommand implementation taskが不整合 | requirements IH-R2-6、tasks A2、inventory 9 | SPEC_ADDRESSED |
+| NF05-PLAN-EXP-006 | P2 | requirements/planの旧Plan delta trace | README、plan、requirements、completion-matrix、中央traceability | SPEC_ADDRESSED |
+
+SPEC_ADDRESSEDは独立ReviewのPLAN PASSを意味しない。production source、migration、test、
+public endpoint、external transportはこのremediationで変更していない。再Reviewで各契約、
+evidence path、F2開始条件を照合する。
 
 ## Findings
 
@@ -101,7 +121,7 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 - Owner approval: approval-decision.mdと中央traceabilityへDecisionId、OwnerRef、Base、scope、auth、SLA、
   field inventory、threat modelを正本化した。
 - R-NF05 Plan Review: fixed Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecでPLAN FAIL（P0=0、P1=4）。
-  Owner Gateは再オープンせず、NF05-PLAN-001〜004のspec remediation後に同Reviewへ再提出する。
+  Owner Gateは再オープンせず、NF05-PLAN-001〜004のspec remediation後に同Reviewへ再提出した。
 - R-NF05 remediation: b0151e7d8acc54da124c4464db1df263e4b3f716でNF05-PLAN-001〜004をSPEC_ADDRESSEDへ更新した。
   再ReviewのPLAN PASSまではF1を開始しない。
 - R-NF05 delta Plan Review: fixed Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でPLAN FAIL（P0=0、P1=2）。
@@ -111,6 +131,8 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 - R-NF05 state mapping cleanup: fdea4bb18db3d3ae6542dc0c534425783dd28a24で旧aliasを除去し、canonical enum/terminal
   retention mappingをdesign/tasksへ同期した。
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
+- Scope expansion Plan delta Review: fixed Head 1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL
+  （P0=0、P1=4、P2=2）。NF05-PLAN-EXP-001〜006をSPEC_ADDRESSEDへ補正し、同じR-NF05へ再提出する。
 - F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
 - F1 Implementation Review: `b420911b63177763544edd1e02d663bf528d9dc1`でFAIL（P0=0、P1=7、P2=2）。
   `a184c1f4`および`d476614e`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
@@ -132,6 +154,8 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   APPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
 - 本docs-only gateをpush後、既存R-NF05へPlan delta Reviewを依頼する。PASS前はF2を開始せず、FAIL時は
   spec/architecture remediationだけを行う。F1 gate、Owner Gate、0R/0R-DのPASS/対応状態は再オープンしない。
+- 現在のPlan delta FAIL remediationでは、専用chain、canonical bytes、起動fail-closed、loopback destination、
+  A2 N/A、旧traceを補正する。固定remote Headはdocs-only commit後に更新し、PLAN PASS受領前はF2を開始しない。
 
 ## F1 gate evidence
 

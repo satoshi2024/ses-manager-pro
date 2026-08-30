@@ -4,7 +4,8 @@
 
 この文書はReview指摘のうち、実装AIがdocs/architectureで解消可能な範囲を追跡する。
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
-Owner承認済みのscopeはF1 persistence基盤までであり、Plan ReviewのPLAN PASSと実装Reviewは別ゲートである。
+scope expansion DecisionはF2/A1/B1/B2/Mの開発を承認しているが、Plan ReviewのPLAN PASSと各実装Reviewは
+別ゲートである。production enablement、実顧客credential、実provider送信は常に禁止する。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
 最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
 Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正した結果、
@@ -28,6 +29,24 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 | R-NF05 retention/legal hold契約不足 | P1 | retention class/expiry、t_api_retention_hold、lock/CAS競合、active lease、部分失敗、restore epoch後全件再評価を保存モデルへ固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 | R-NF05 burst algorithm不足 | P1 | capacity 20、初期token 20、3秒ごとに1 token refill、minute/dayと同一transactionのatomic predicate、clock rollback、Retry-Afterを固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
 | R-NF05 canonical state/terminal mapping不足 | P1 | idempotency/delivery/inboundのcanonical enum、遷移、非terminal/terminal、30/90日classと起算点、alias/逆遷移拒否を固定 | SPEC_ADDRESSED | R-NF05再ReviewでPLAN PASS |
+
+## Scope expansion Plan delta remediation
+
+固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
+（P0=0、P1=4、P2=2）である。F1 PASSとOwner Gateは維持し、F2は再ReviewのPLAN PASSまで開始しない。
+以下は実装ではなく、P1/P2を仕様・architectureとして分離して補正した証跡である。
+
+| Finding | 対応 | 状態 | 再Review条件 |
+|---|---|---|---|
+| P1 chain order/stateless/exclusivity/default deny | dedicated chainのorder、排他matcher、stateless、filter順序、anyRequest deny、非共有principalをdesign/inventory/requirements/tasksへ追加 | SPEC_ADDRESSED | 独立Plan delta Review |
+| P1 HMAC canonical bytes | raw body bytes、UTF-8 byte length、RFC3986 path/query、duplicate sort、固定LF framing、厳密base64urlを追加 | SPEC_ADDRESSED | 署名vectorとbyte契約の照合 |
+| P1 production enablement guard | default-off、MOCK default、missing/unknown/conflict/real URL/credentialのstartup fail-closedを追加 | SPEC_ADDRESSED | 起動fail-closed契約の照合 |
+| P1 mock/loopback destination | literal loopback/port、peer/DNS、redirect/proxy、rebind/multi-address拒否を追加 | SPEC_ADDRESSED | SSRF境界とtest要求の照合 |
+| P2 A2 inconsistency | A2をNOT_APPLICABLE_UNDER_CURRENT_DECISIONへ統一し、command implementation objectiveを除去 | SPEC_ADDRESSED | inventory/requirements/tasks/matrix一致 |
+| P2 old trace | README/plan/requirements/ledger/matrix/中央traceabilityを現HeadのFAILへ同期 | SPEC_ADDRESSED | current Headと履歴の照合 |
+
+この表のSPEC_ADDRESSEDはPLAN PASSではない。production source、migration、test、endpoint、外部送信の
+変更はなく、remediation後の新しいremote Headを同じR-NF05へhandoffする。
 
 ## F1 Implementation Review remediation
 
@@ -86,8 +105,9 @@ lease fail-closed、lock順序、MySQL競合証跡を追加したが、public en
 
 Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1初回実装は`a7654b44`、Review remediationは
 `a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
-固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
-command、exportは引き続きこのimplementation scope外である。
+固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
+scope expansionで開発承認済みだが、current Plan delta FAILのためF2は未着手である。A2/command/exportは
+NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
 
@@ -101,6 +121,7 @@ command、exportは引き続きこのimplementation scope外である。
 - R-NF05 residual remediation commit: a3b63d70f53bc799d1abcb6e26e34ad163aa9843
 - R-NF05 state mapping cleanup commit: fdea4bb18db3d3ae6542dc0c534425783dd28a24
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
+- Scope expansion Plan delta Review: 1547871caed049ba14d1e5e4a25ad50fa19771fc、PLAN FAIL（P0=0、P1=4、P2=2）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS（当時点の証跡）
 - delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS

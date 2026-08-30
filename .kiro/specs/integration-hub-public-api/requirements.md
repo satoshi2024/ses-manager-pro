@@ -3,9 +3,11 @@
 ## 0. 状態と適用範囲
 
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
-NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansionはPlan delta Review待ちである。Plan delta
-PASS前にF2以降のproduction implementation、public endpoint、外部送信を開始しない。PASS後もproduction enablement、
-実顧客credential、実provider送信は禁止し、development/testのmock/stubとloopbackだけを許可する。
+NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansionのPlan deltaは固定Head
+1547871caed049ba14d1e5e4a25ad50fa19771fcでPLAN FAIL（P0=0、P1=4、P2=2）であり、現在は
+docs-only remediation中である。Plan delta PASS前にF2以降のproduction implementation、public endpoint、
+外部送信を開始しない。PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
+development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
 参照:
@@ -66,13 +68,30 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
      token、日付/date-timeはRFC形式、status/resultCodeはbounded code pattern、availability/signature/processing statusと
      error codeは承認済みenumで検証し、raw body/PIIの文字列埋込みや未型付けscalarを拒否する。
 11. Idempotency-Keyのdigest不一致は例外を返す前にIN_PROGRESS rowをCONFLICT、409、安全な固定code、
-    90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
-    RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。
+     90日retentionへCAS遷移させる。同一provider eventのinsert競合でhashが異なる場合も、row lock後に
+     RECEIVED/PROCESSINGからCONFLICTへ永続化し、単なるメモリ上の拒否にしない。
+IH-R1-12. F2は /external-api/v1/** にだけ一致する@Order(0)の専用security chainとし、既存portal/internal
+    chainとのmatcherを排他的にする。STATELESS、NullSecurityContextRepository、request cache無効、
+    session/form/basic/OIDC/anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定し、
+    HMAC、trusted proxy/CIDR、scope/data scope/command permission、rate、auditの順序とfilter一回実行を
+    contract testで検証する。
+IH-R1-13. HMAC canonical requestは値の意味だけでなくbyte列を固定する。raw body bytesのSHA-256、uppercase
+    method、RFC3986 path/query、duplicate query保持、encoded byte順sort、UTF-8 byte length prefix、
+    field順、LF framing、base64url paddingなし、constant-time compareを正本とし、JSON再シリアライズ、
+    trim、Forwarded/X-Forwarded-Forの影響を許可しない。
+IH-R1-14. productionのpublic-apiとexternal-transportはdefault false、provider modeはMOCKをdefaultとし、
+    未設定・unknown・型不正・矛盾設定、productionでのenablement、実credential/real provider URLを
+    startup validatorがfail-closedで拒否する。MOCK/LOOPBACK以外のprovider beanを生成せず、起動後の
+    外部callなしを検証する。
+IH-R1-15. development/testの接続先はMOCKまたはliteral loopback（127.0.0.1/[::1]とallow-list port）だけとし、
+    hostname/DNS、redirect、proxy、userinfo、non-loopback、DNS rebinding/multi-addressを拒否する。
+    redirectはNEVER、HTTP_PROXY等とJVM proxyは適用せず、config時とconnection直前のpeer検証を行う。
 
 ## IH-R2 External contract
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
-   この承認ではpublic endpointのenablementを行わない。
+   scope expansionは開発実装を承認するが、現在はPlan delta FAIL（P1=4、P2=2）のためF2を開始せず、
+   production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。
@@ -85,9 +104,10 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    400=request/cursor invalid、401=authentication failed、403=forbidden scope、404=resource not found、
    429=rate limited、500=internal errorに限定する。認証失敗・scope外・不存在の
    distinctionがclient dataを推測させる場合は同一の外部エラー契約に収束させる。
-6. command surfaceはdefault denyとし、A2 commandと万能CRUDは未承認である。将来承認されたcommandでは
-   Idempotency-Keyとcanonical request digestを必須とし、同一key・同一payloadは最初の結果を再返却し、
-   同一key・別payloadはpayload conflictとして拒否する。
+6. command surfaceはdefault denyとし、approved command=0件のためA2は
+   NOT_APPLICABLE_UNDER_CURRENT_DECISIONである。A2の実装taskやcommand/exportの公開を作成せず、
+   current scopeの全体完了をblockしない。将来別Decisionで承認された場合だけIdempotency-Keyと
+   canonical request digestの要件を再評価する。
 7. external DTO contract testは、許可fieldの集合と禁止fieldの不在を反射/JSON assertionで固定する。
    entity型、internal DTO、Lombokの自動getterに依存して公開形を生成しない。
 
@@ -136,6 +156,9 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
    manual replay失敗のrunbookとalertを持つ。
 3. Mではsecurity review、負荷、障害訓練、key rotation、secret/PII scan、backup/restore、
    recovery、runbook、remote Head固定を完了する。
+IH-R5-4. public-api.enabledとexternal-transport.enabledはdefault-offで、productionでは有効化不能な
+   fail-closed起動契約を持つ。MOCK/LOOPBACK以外の接続先、real provider URL、proxy、redirectを
+   起動時またはconnection直前に検出した場合は送信せず停止する。
 
 ## IH-R6 Metrics / payload retention
 
@@ -170,6 +193,14 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
   条件付きincrementとunique競合がmulti-nodeで同じ結果になること。burst capacity 20、3秒ごとの1 token refill、
   refill直前/直後、minute/day境界、clock rollback、片方のquota更新失敗、Retry-Afterを検証する。
 - nonce ledgerのatomic unique、rotationを跨ぐ再利用拒否、future timestampを含むTTL、bounded purge再実行。
+- dedicated chainの@Order、matcher排他、stateless/session拒否、filter一回実行、unknown method/pathの
+  default deny、既存portal/internal chainとのprincipal非共有。
+- canonical bytesの署名vector、Unicode UTF-8 byte length、duplicate query、percent encoding、
+  empty body、invalid header/path、body上限、再シリアライズ差異の拒否。
+- default-off、missing/unknown/malformed/conflicting config、production violation、real URL/credential、
+  MOCKの無接続、起動後outboundなし。
+- MOCK/STUBの無接続、LOOPBACKのliteral IPv4/IPv6とport、hostname/DNS/multi-address/rebinding、non-loopback、userinfo、
+  redirect、HTTP_PROXY/HTTPS_PROXY/NO_PROXY、JVM proxyの拒否およびconnection直前peer検証。
 - service汎用CRUDの非公開、safe response/inbound/outbound snapshotの構造allow-list、idempotency/inboundの
   hash conflict永続化。
 - cursor stability、limit上限、count/export/errorからの存在推測防止。

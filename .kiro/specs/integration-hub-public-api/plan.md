@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（scope expansion承認済み・F1 Implementation PASS・Plan delta待ち）
+# NF-05 Public API 実装計画（scope expansion承認済み・F1 Implementation PASS・Plan delta FAIL remediation中）
 
 ## 現在のゲート
 
@@ -6,9 +6,10 @@ NF-05はAPPROVEDであり、F1 Decision DG-05-F1-APPROVAL-20260830-01とscope ex
 DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（いずれも2026-08-30）、OwnerRef=PROJECT_OWNER、
 Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.mdへ固定した。F1は
 7e50bf1360ea8d7271acc0667593635451300268でPLAN PASS / IMPLEMENTATION PASS済みであり、再オープンしない。
-現在はscope expansion docs-only gateを既存R-NF05へPlan delta Reviewとして引き渡す段階である。Plan delta PASS後は
-F2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、production enablementと実顧客/実providerは
-引き続き禁止する。
+固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
+（P0=0、P1=4、P2=2）である。現在はP1/P2のdocs-only remediationを既存R-NF05へ再提出する段階であり、
+F2は開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のため
+N/A、production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
 
@@ -19,6 +20,7 @@ F2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のため
 | 0R-D | delta Review remediation | count/asOf/status-code/correlation header契約 | docs-only範囲で完了。実装PASSではない |
 | 0R-P | R-NF05 Plan finding remediation | rate key、nonce ledger、delivery分離、retention/hold/restore contract | docs-only修正後、R-NF05再Review |
 | 0R-P2 | R-NF05 residual Plan remediation | burst algorithm、canonical state/terminal retention mapping | docs-only修正後、R-NF05再Review |
+| 0R-P5 | scope expansion Plan delta remediation | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、trace | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | APPROVED_NOT_STARTED。Plan delta PASS後 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | APPROVED_SEQUENCED。F2 Review PASS後 |
@@ -40,6 +42,18 @@ F2→A1→B1→B2→Mを順次実装する。A2はapproved command=0件のため
 4. idempotency/delivery/inboundのcanonical enumと全遷移を一つに固定し、全terminal stateをretention class/起算点へ
    漏れなく接続すること。retention_class、retention_expires_at、t_api_retention_hold、t_api_purge_checkpointの
     保存モデルと、hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
+
+## Scope expansion Plan delta remediationの完了条件
+
+1. F2専用chainのorder、/external-api/v1/** matcher排他、stateless境界、filter順序、既存chainとの
+   principal非共有、unknown method/pathのdefault denyをdesign/requirements/tasks/inventoryへ同期する。
+2. HMAC canonical requestのraw body bytes、UTF-8 byte length、RFC3986 path/query、duplicate保持、
+   encoded byte順sort、固定field/LF framing、厳密base64urlを固定する。
+3. production public-api/external-transport default-off、MOCK default、unknown/malformed/conflicting
+   configとreal URL/credentialの起動fail-closedを固定する。
+4. MOCK/LOOPBACKのみ、literal loopback/port、peer/DNS、redirect/proxy、multi-address/rebinding拒否を
+   config時とconnection直前の契約として固定する。
+5. A2をN/Aへ統一し、current Plan delta FAIL、F1 PASS維持、F2未着手、Owner/Base正本値を全traceへ同期する。
 
 ## F1 Implementation Review remediation（独立Review PASS）
 
@@ -72,7 +86,7 @@ F2はAPPROVED_NOT_STARTED、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、Plan delt
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
 credential、実providerへの外部送信は引き続き禁止する。
 
-これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P2 docs-only commit後、R-NF05が独立に再判定する。
+これらはPlan ReviewをPASS扱いにする自己判定ではない。0R-P5 docs-only commit後、R-NF05が独立に再判定する。
 
 ## 完了・引き渡し条件
 

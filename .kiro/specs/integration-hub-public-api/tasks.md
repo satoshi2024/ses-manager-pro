@@ -1,9 +1,10 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1 Implementation PASS・Plan delta待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1 Implementation PASS・Plan delta FAIL remediation中）
 
 ## 実行停止規則
 
-F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansionのPlan delta PASS前はF2、API、UI、
-外部送受信の実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
+F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。現在のscope expansion Plan deltaはP0=0、
+P1=4、P2=2のFAILであるため、下記0R-P5のspec/architecture remediationと同じR-NF05の再Review
+以外のF2実装を開始しない。Plan delta PASS後はF2→A1→B1→B2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -80,10 +81,24 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 ## Task F2: dedicated security chain
 
 - [ ] Objective: /external-api/v1/**専用principal、client scope、data scope、command permission、audit、
-  correlation、rate/IP境界を実装する。
+  correlation、rate/IP境界を実装する。@Order(0)のsecurityMatcher、既存portal/internal chainとの
+  排他、STATELESS、NullSecurityContextRepository、request cache無効、session/form/basic/OIDC/
+  anonymous継承なし、認可済みGET以外anyRequest().denyAll()を固定する。filter順序はcorrelation/
+  size/canonical precheck→HMAC→trusted proxy/CIDR→scope/data scope/command permission→rate/quota→
+  ApiAuditFilter→controllerとし、同一filterの自動二重登録を防ぐ。
 - Preconditions: F1 Implementation PASS、scope expansion Decision、既存R-NF05 Plan delta PASS。現在はAPPROVED_NOT_STARTED。
+- Implementation guidance: HMAC canonical bytesはraw body SHA-256、uppercase method、RFC3986 path/query、
+  duplicate query保持、encoded byte順sort、UTF-8 byte length prefix、固定field順/LF framing、
+  base64url paddingなし/constant-time compareを使い、JSON再シリアライズやForwarded/XFFの影響を
+  受けない。startupではpublic-api.enabled=false、external-transport.enabled=false、provider.mode=MOCK
+  をdefaultにし、unknown/malformed/conflicting config、production enablement、real URL/credentialを
+  fail-closedで拒否する。MOCK/STUBまたはliteral loopbackのallow-list portだけを許可し、redirect、proxy、
+  hostname/DNS、multi-address/rebinding、non-loopbackをconfig時とconnection直前に拒否する。
 - Test requirements: client A/B、scope差、data差、command差、rotation overlap/revoke/expiry、spoof、429、
-  Retry-After、filter二重登録、CSRF/anonymous webhook非混入、metrics scrape cardinality。
+  Retry-After、filter二重登録、chain順序/排他、stateless/session拒否、unknown method/path default deny、
+  CSRF/anonymous webhook非混入、metrics scrape cardinality。Unicode byte length、duplicate query、
+  percent encoding、empty body、malformed header/pathのsignature vector、default-off/起動fail-closed、
+  MOCK無接続、loopback IPv4/IPv6、DNS/redirect/proxy/peer検証も含む。
 - Demo: internal/portal chainと公開chainが相互にprincipalを偽装しない。
 
 ## Task A1: v1 read APIs / OpenAPI
@@ -94,13 +109,14 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   count/detail/list非列挙、error body secret/PII/内部情報なし。
 - Demo: internal entityを一つもserializeせず、OpenAPIと実レスポンスが一致する。
 
-## Task A2: limited command APIs
+## Task A2: limited command APIs（N/A under current decision）
 
-- [ ] Objective: 承認済みの最小commandだけをCAS、audit、idempotency付きで実装する。
-- Preconditions: approved command=0件。NOT_APPLICABLE_UNDER_CURRENT_DECISION、command/exportはdefault denyのまま。
-- Test requirements: same key/same payload、same key/different payload、並行claim、CAS失敗、scope/command拒否、
-  external call outside transaction。
-- Demo: commandごとにclient scope、data scope、command permissionが独立して評価される。
+- [ ] Status: NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件のため実装対象なし。
+- Preconditions: command/exportはdefault denyのまま。command実装、source変更、migration、test、Demoを
+  このDecisionでは作成しない。A2の未着手はapproved scope全体の完了をblockしない。
+- Test requirements: command endpointが存在せず、read-only clientからcommand/exportへ到達できないことを
+  default-deny testで確認する。
+- Demo: A2を実装完了へcheckせず、inventory/plan/requirements/completion-matrixのN/A状態が一致する。
 
 ## Task B1: outbound webhook
 

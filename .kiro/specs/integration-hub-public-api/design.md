@@ -12,6 +12,30 @@ command permission、credential version、correlation IDを束ねる。
 外部呼出しはDB transaction内に置かない。DB transactionはclaimまたはresult CASまでに限定し、
 外部HTTPはtransaction外で実行する。公開APIの業務commandも、長い外部処理はoutbox/jobへ切り離す。
 
+### 1.1 F2専用security filter chain契約
+
+公開APIはBean名 externalApiSecurityFilterChain、@Order(0)、securityMatcher
+/external-api/v1/** の専用chainで処理する。既存portal chainは@Order(1)で
+/portal/** と /api/portal/**だけを担当し、内部管理chainはその残りを担当する。各chainの
+matcherは相互排他的であり、/api/webhooks/**、/login、portal path、内部/api pathを
+external chainへ含めない。external chainへServlet FilterRegistrationBeanで同じfilterを
+自動登録せず、HMAC filterとApiAuditFilterの実行回数が各request一回であることを検証する。
+
+external chainはSessionCreationPolicy.STATELESS、NullSecurityContextRepository、request
+cache無効を固定し、form login、basic、OIDC、anonymous session継承、JSESSIONIDによる認証を
+受け付けない。client principalは内部roleまたはportal userへ変換せず、既存chainの
+Authenticationをexternal chainで再利用しない。明示的なfilter順序は、(1) correlation ID・
+request size・canonical target事前検証、(2) HMAC authentication、(3) trusted proxy/CIDR、
+(4) client scope・data scope・command permission、(5) distributed rate/quota、
+(6) ApiAuditFilter、(7) controllerとする。認証前の監査にはsecretを含めず、認証後は
+principalとdecisionをsafe metadataだけで記録する。
+
+external chainの認可は承認済みGET routeの完全一致allow-listだけを通し、anyRequest().denyAll()
+を最後に置く。unknown path、unknown method、command、export、matcher外のrequestには
+permitAllを適用しない。既存portal/internal chainはexternal clientを認証・認可せず、
+external chainはinternal user/sessionを認証根拠にしない。chain選択、順序、排他、stateless、
+default deny、filter一回実行を起動時assertionとsecurity testで固定する。
+
 ## 2. F1コンポーネントと保存モデル
 
 F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具体実装は開始時に現行最大値を再確認する。
@@ -167,6 +191,48 @@ DB・metricsには原文を流さず、失敗時はsafe errorにする。rotatio
 overlapは24時間、revokeは即時、credential有効期間は90日とする。旧keyのdecrypt失敗、expired、revoked、
 unknown versionはfail-closedとする。
 
+### 3.1 HMAC canonical requestのbyte契約
+
+署名対象headerは X-Api-Client-Id、X-Api-Credential-Version、X-Api-Timestamp、
+X-Api-Nonce、X-Api-Signature とし、header名の重複、obs-fold、CR/LF、前後空白、許可外ASCIIを
+拒否する。clientIdとcredential versionは長さ上限付きのASCII識別子、timestampはUTC Unix
+秒の符号なし10進表記（先頭ゼロ禁止、空白禁止、符号禁止）、nonceは上限付きbase64url
+（paddingなし）とする。署名値もbase64url paddingなしで、trimせず厳密にdecodeする。
+
+bodySha256はrequestで受信した未加工byte列に対するSHA-256の小文字64桁hexとする。
+bodyが空の場合も空byte列のhashを使い、JSON parse、charset変換、再シリアライズ後のbodyを
+使わない。request size上限を超えるbodyは署名前に拒否し、raw bodyを永続化・logしない。
+methodはuppercase ASCIIとし、pathは / で始まり、NUL、backslash、dot segment、invalid
+UTF-8、曖昧なpercent encodingを拒否する。RFC3986 unreserved文字のpercent encodingだけを
+一度decodeし、percent hexはuppercaseで出力し、reserved文字のencodingは保持する。
+queryはformのplus規則を使わずRFC3986としてparseし、名前・値をencoded byte列の順に
+sortし、duplicate pairを保持する。queryなしは空byte列とし、Forwarded/X-Forwarded-For
+やproxy headerはcanonical targetに影響させない。
+
+canonicalBytesは、先頭のASCII文字列 IH-HMAC-SHA256-V1 とLF byteに続けて、次の固定順序で
+構成する。field(name,value)はASCIIの name + ":" + UTF-8 byte lengthの10進表記 + ":" に
+続けて、そのvalueのUTF-8 bytesとLF byteを置く。したがって実装上は
+ASCII("IH-HMAC-SHA256-V1" + LF) || field("clientId", clientId) || field("credentialVersion",
+credentialVersion) || field("timestamp", timestamp) || field("nonce", nonce) || field("method",
+method) || field("canonicalTarget", canonicalTarget) || field("bodySha256", bodySha256) とし、
+値をtrimまたは再正規化しない。値のbyte lengthは文字数ではなくUTF-8 byte数である。
+
+    IH-HMAC-SHA256-V1
+    clientId
+    credentialVersion
+    timestamp
+    nonce
+    method
+    canonicalTarget
+    bodySha256
+
+上記は説明上のfield順であり、実装では各fieldのlength prefixを含むbyte列を連結する。
+署名はそのcanonicalBytesへHMAC-SHA256を適用し、base64url paddingなしでconstant-time
+compareする。byte lengthは文字数ではなくUTF-8 byte数であり、Unicode client value、
+duplicate query、percent encoding、空body、malformed header、path ambiguity、署名vectorを
+固定したcontract testを持つ。webhook eventもJSON serializer任せにせず、同じくallow-list
+された明示的byte encodingを使う。
+
 IPはclientごとのCIDR allow-listをdefault denyで適用する。Forwarded/X-Forwarded-Forは明示設定された
 trusted proxyからのみ採用し、unknown、malformed、multi-hop不正を拒否する。IPv4/IPv6を正規化し、
 client identityとsource IPの両方を許可判定へ含める。
@@ -202,7 +268,7 @@ role、PII、secret、原価・粗利・単価、provider raw body、DLQ内部�
 | subject | operation | visible population | deny時の応答 |
 |---|---|---|---|
 | client principal | list/detail/count | client scope ∩ tenant ∩ legal entity ∩ data scope | empty/404の非列挙規則を承認値どおり適用 |
-| client principal | command | default deny。A2は未承認 | stable error、内部理由を出さない |
+| client principal | command | default deny。A2はNOT_APPLICABLE_UNDER_CURRENT_DECISION（approved command=0件） | stable error、内部理由を出さない |
 | webhook worker | delivery | subscription scope ∩ event allow-list | claim対象外は処理しない |
 | admin operator | replay/rotate | 内部admin action permission ∩ audit requirement | internal admin UIの規則に従う |
 
@@ -286,6 +352,37 @@ safe codeとhashの一部だけを使う。
 Mではsecurity review、負荷とrate boundary、DB/worker/provider停止、restore、key rotation/revoke、
 secret/PII scan、payload purge、alert、runbook、固定remote Headを証拠化する。全テストとReviewの
 PLAN/IMPLEMENTATION PASS後のみPR作成を許可する。
+
+### 8.1 production enablementのdefault-off / fail-closed起動契約
+
+設定の正本名は integration.hub.public-api.enabled=false、
+integration.hub.external-transport.enabled=false、
+integration.hub.provider.mode=MOCK とする。public-api、external-transport、provider.modeは
+未設定・unknown・型不正・矛盾するprofile/env値が一つでもあれば起動を拒否し、defaultを
+trueへ補うfallbackを持たない。production profileではpublic-apiまたはexternal-transportが
+true、provider modeがMOCK/LOOPBACK以外、実credential、実provider URL、未承認の接続先が
+存在する場合にstartup validatorがfail-closedで停止する。実provider beanまたはreal HTTP
+clientをproductionへ生成しない。
+
+development/testでは明示的にMOCKまたはLOOPBACKを選択できるが、これは実装・test専用であり、
+実顧客credentialとreal provider送信を許可しない。default-off、missing property、unknown
+mode、production violation、real URL混入、startup後のoutbound callなしをtestする。config
+guardは単なるfeature flagではなく、起動時とconnection直前の二重境界として実装する。
+
+### 8.2 mock/stub/loopback接続先検証契約
+
+development/testのtransportはMOCK/STUB（ネットワークなし）またはLOOPBACKだけを許可する。
+LOOPBACKのURLは明示されたhttp scheme、literal 127.0.0.1または [::1]、allow-listされた
+portだけとし、hostname、localhost alias、userinfo、credential、非http scheme、未許可port、
+path traversalを拒否する。config parse時だけでなく各connection直前にもremote socket peerが
+loopbackかつallow-list portであることを検証する。DNS名、多重answer、unresolvable、
+DNS rebinding、non-loopback解決はすべて拒否し、literal IPでもpeer検証を省略しない。
+
+HTTP redirectはNEVERに固定し、3xxは失敗として扱う。HTTP_PROXY、HTTPS_PROXY、NO_PROXY、
+JVM system proxyその他の暗黙proxyをloopback transportへ適用せず、明示proxy設定や環境変数
+混入もfail-closedで拒否する。Forwarded/X-Forwarded-Forは接続先判定に使わない。hostname/
+DNS、IPv4/IPv6、redirect、proxy、multi-address/rebinding、non-loopback、credential URL、
+MOCKの無接続をtestし、SSRF経路を残さない。
 
 ## 9. Wave開始条件と禁止範囲
 
