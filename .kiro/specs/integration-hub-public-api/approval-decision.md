@@ -14,6 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
+| Current implementation Head | `971c17d7`（B1 implementation complete、独立Implementation Review pending） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -53,9 +54,9 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | Wave | Decision status | 境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | 独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | 初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でもP1=1/P2=2が残った。snapshot purge、秒精度asOf、UTC E2E fixtureを追加remediate中 |
+| A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
-| B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
+| B1 | IMPLEMENTATION_IN_PROGRESS | implementation Head `971c17d7`、focused 28 tests PASS、独立Implementation Review待ち。mock/stub/loopbackのみ、実provider送信なし |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
 
@@ -102,5 +103,7 @@ PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで�
 `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のF2 IMPLEMENTATION PASSを受領した。
 
 Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2 PASS後、A1を
-`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装した。初回A1 Implementation Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0/P1=2/P2=2）だったため、`874fface`系列でremediateした。再Review fixed Head `cddd4850`ではP1=1/P2=2（snapshot purge、asOf精度、connector E2E fixture）が残ったため、追加remediationを行い独立再Reviewへhandoffする。A1 Review PASS後はB1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、remediationを経て固定Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で
+独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1を`971c17d7`で実装し、独立B1 Implementation Reviewへhandoffする。
+B1 Review PASS後はB2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

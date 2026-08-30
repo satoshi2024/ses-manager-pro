@@ -3,14 +3,10 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: F1独立Implementation Review PASSを維持。scope expansion Plan deltaは固定Head
-  ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2は独立Implementation
-  ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加した。再Review固定Head
-  f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationした。fixed Head
-  d022e600でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領し、A1の初回独立Implementation ReviewはFAIL
-  （固定Head `111f4baa`、P0=0、P1=2、P2=2）だった。`874fface`系列で実装remediationしたが、再Review固定Head
-  `cddd4850`でもP1=1、P2=2が残ったため、追加remediation中で独立再Review待ち。
-  B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
+- 本specの状態: F1/F2独立Implementation Review PASSを維持。A1は固定Head
+  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
+  B1は実装commit `971c17d7`をpush済みで、同じR-NF05へ独立Implementation Reviewをhandoffする段階である。
+  B2/Mは順次承認、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -21,7 +17,7 @@
 - 専用branch: codex/integration-hub-public-api
 
 この文書は、DG-05 Owner承認後のPlan Review対象specとReview remediationの成果物である。scope expansionの
-Plan delta PASS後は承認済みwaveを順に実装できる。F2独立Implementation Review PASSを受領し、A1実装を完了したが、A1独立Implementation ReviewまではB1へ進まない。productionの
+Plan delta PASS後は承認済みwaveを順に実装できる。F2/A1独立Implementation Review PASSを受領し、B1実装を開始した。productionの
 外部送信、実顧客credential、public endpoint enablementは開始しない。development/testの
 mock/stub providerとloopback test serverに限定し、production enablement、実顧客credential、実provider送信は
 行わない。force push、main変更、PR、merge、auto-mergeは禁止する。
@@ -48,9 +44,8 @@ scope、auth、SLA、field inventoryを固定した。R-NF05のF1 Plan/Implement
 PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
-（P0/P1/P2=0/0/0）を受領した。A1は`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、独立A1 Implementation Reviewへ渡す。
-A1 Review PASS後にB1→B2→Mを順次実装する。A1再Review FAILの追加3件（snapshot purgeの非bounded/request依存、asOf精度、
-connector E2E fixture timezone）は、独立schedulerの有限purge、秒精度正規化、UTC `LocalDateTime` fixtureへremediateする。
+（P0/P1/P2=0/0/0）を受領した。A1は`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
+B1を`971c17d7`で実装し、独立B1 Implementation Reviewへ渡す。B1 Review PASS後にB2→Mを順次実装する。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -61,7 +56,7 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
 public endpoint、外部送信、production enablementは未完了である。F2はremediation済みだが独立Implementation
-Review再判定でPASS済み、A1は追加remediation済みで独立再Review待ち、B1/B2/Mは順次未着手とする。
+Review再判定でPASS済み、A1は独立再Review PASS、B1は実装済みで独立Review待ち、B2/Mは順次未着手とする。
 全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
@@ -100,7 +95,17 @@ snapshot IDをopaque cursorへbindする。Base64URLはpaddingなし再encode一
 snapshot insert/update/delete/reparentの契約テストを追加し、E2E fixtureへtest crypto keyを明示した。
 focused remediation suiteはcursor 3、service 5、DTO 5、mapper 2、snapshot 1（計16 tests）、failure/error/skipなしでPASSした。
 Windowsのbrowser profileはcrypto設定エラーを解消した後もTomcat loopback接続確立失敗でHTTP assertion前に停止したため、この環境結果をPASS根拠にはしない。
-A1独立再Reviewを受領するまでB1は開始しない。
+A1独立再Review PASSを受領したため、B1を`971c17d7`で開始した。B1の独立Implementation Review PASSまではB2を開始しない。
+
+## B1 outbound webhook実装
+
+`971c17d7`で、NF-05専用`t_api_delivery`を再利用するoutbound delivery workerを追加した。業務stateとdelivery rowのatomic insert、
+短いclaim/lease transaction、transaction外のHTTP、provider idempotency key・payload hash・generation・lease tokenを含む結果CASを分離し、
+timeout/429/5xxだけを最大8回backoff+jitter、その他4xxをFAILED、上限到達をDLQへ収束させる。DLQ replayは新generationとsafe audit metadataへ固定する。
+
+署名は固定framingのHMAC-SHA256、credential version/key ID、timestamp、correlation、payload hash、provider idempotency keyをbounded headerへ出力する。
+MOCK/STUBは無接続、LOOPBACKはstrict literal IP・allow-list port・peer検証・redirectなし・proxy/DNSなしである。V132、H2 schema、
+properties/transport/worker/replay testを追加したが、実顧客credential・実provider送信・production enablementは行わない。
 
 ## 既知の重要差分
 

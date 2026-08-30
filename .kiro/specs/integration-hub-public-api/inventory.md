@@ -33,9 +33,9 @@
 | Scope expansion approval reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値） |
 | F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
 | F2 | IMPLEMENTATION_PASS。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING。初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でP1=1/P2=2が残り、追加remediation中 |
+| A1 | IMPLEMENTATION_PASS。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
-| B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
+| B1 | IMPLEMENTATION_IN_PROGRESS。`971c17d7`、focused 28 tests PASS、独立Review待ち。mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |
 | M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
 | 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
@@ -47,7 +47,8 @@
 再ReviewもPLAN FAIL（P0=0、P1=3、P2=0）である。F1のPLAN/IMPLEMENTATION PASS、Owner Gate、
 0R/0R-DおよびP1-EXP-004/P2-EXP-005/006の対応状態は再オープンしない。3契約の再補正後、
 固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPlan delta PASSを受領し、F2実装を開始した。F2はfixed Head
-`d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASSを受領し、A1実装へ進んだ。
+`d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASSを受領し、A1を実装した。A1はfixed Head
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領し、B1を`971c17d7`で実装した。
 
 | finding | inventoryで固定する契約 | status |
 |---|---|---|
@@ -59,11 +60,11 @@
 
 | finding | inventoryで固定する契約 | 実装/evidence | status |
 |---|---|---|---|
-| invoice customer scope | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contractは単一publicContractIdを返さない | `ExternalApiReadMapper`、`ExternalApiReadRow.contractCount`、mapper/service tests | REMEDIATED_REVIEW_PENDING |
-| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を`t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind。as-ofは秒精度で固定 | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration/pagination precision test | REMEDIATED_REVIEW_PENDING |
-| cursor token encoding | paddingなしBase64URL、decode後canonical再encode完全一致、unused bits拒否 | `ExternalApiCursorCodec`、tamper test | REMEDIATED_REVIEW_PENDING |
-| external contract evidence | 4 DTO allow-list、11 GET-only paths、entity negative、enabled E2E key fixture | `ExternalApiDtoContractTest`、`ExternalApiEnabledConnectorE2ETest` | REMEDIATED_REVIEW_PENDING |
-| snapshot retention purge | expiry index順の最大32 headerを公開readと別schedulerでpurge。FK cascade、partial failure rollback、再実行、無通信時期限超過 | `ExternalApiReadSnapshotPurgeService`/`Scheduler`、H2 purge integration/service tests | REMEDIATED_REVIEW_PENDING |
+| invoice customer scope | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contractは単一publicContractIdを返さない | `ExternalApiReadMapper`、`ExternalApiReadRow.contractCount`、mapper/service tests | IMPLEMENTATION_PASS（A1独立Review） |
+| cursor visible population | 初回as-ofのmembershipとallow-list DTO値を`t_api_read_snapshot`/itemへ保存し、snapshot IDをcursorへbind。as-ofは秒精度で固定 | V131、H2 schema、`ExternalApiReadSnapshotMapper`、snapshot integration/pagination precision test | IMPLEMENTATION_PASS（A1独立Review） |
+| cursor token encoding | paddingなしBase64URL、decode後canonical再encode完全一致、unused bits拒否 | `ExternalApiCursorCodec`、tamper test | IMPLEMENTATION_PASS（A1独立Review） |
+| external contract evidence | 4 DTO allow-list、11 GET-only paths、entity negative、enabled E2E key fixture | `ExternalApiDtoContractTest`、`ExternalApiEnabledConnectorE2ETest` | IMPLEMENTATION_PASS（A1独立Review） |
+| snapshot retention purge | expiry index順の最大32 headerを公開readと別schedulerでpurge。FK cascade、partial failure rollback、再実行、無通信時期限超過 | `ExternalApiReadSnapshotPurgeService`/`Scheduler`、H2 purge integration/service tests | IMPLEMENTATION_PASS（A1独立Review） |
 
 ## 3. Filter chain inventory
 
@@ -107,7 +108,7 @@ configは起動拒否する。disabled時もdeny-only chainを残し、controlle
 socket peerも検証する。
 | 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
 
-F2実装証跡は専用packageとF2 testsに限定し、production enablementとB1/B2 provider transportは未着手である。A1 controllerは`466bd9aa`で実装済みである。
+F2実装証跡は専用packageとF2 testsに限定し、production enablementと実顧客/provider接続は未実施である。A1 controllerは`69f857d3`で独立Implementation Review PASS済み、B1 development/test transportとworkerは`971c17d7`で実装済み・独立Review待ちである。
 
 ### 3.3 F2 Implementation Review remediation inventory（fixed Head `d022e600`でPASS）
 
@@ -170,7 +171,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | Accounting job | providerRequestId、payload hash、job idを保持 | 参考。公開client request、delivery、inbound eventを同一traceへ結ぶ必要 |
 | Expense/Attendance | provider callへcorrelationIdを渡す経路あり | 参考。global MDC/filterの代替ではない |
 | AI/Compliance | traceId/correlationIdを業務recordへ保存する個別経路あり | 参考。横断公開API correlation contractは未実装 |
-| HTTP filter/MDC | F2で専用correlation filterを追加し、全responseへheaderを付与 | F2 IMPLEMENTATION_PASS。worker propagationはB1/B2で実装 |
+| HTTP filter/MDC | F2で専用correlation filterを追加し、全responseへheaderを付与 | F2 IMPLEMENTATION_PASS。B1 workerがcorrelation headerをoutboundへ伝播 |
 
 ## 7. Rate limiter / IP inventory
 
@@ -206,6 +207,16 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | cursor | `ExternalApiCursorCodec`、`ExternalApiReadSnapshotMapper` | AES-GCM暗号化、client/tenant/legal entity/route/scope/snapshot/as-of/expiryへbind。初回visible membership/DTO値をV131 snapshotへmaterializeし、noncanonical Base64URLを拒否 |
 | tests | `ExternalApiReadMapperIntegrationTest`、`ExternalApiReadSnapshotIntegrationTest`、DTO/path/entity tests、purge tests | remediation focused 23 tests、failure/error/skipなし。browser connector E2Eはcrypto fixture修正後もWindows loopback制約でHTTP assertion未到達 |
 
+### 8.2 B1実装インベントリ（独立Implementation Review待ち）
+
+| 境界 | 実装正本 | 固定内容 |
+|---|---|---|
+| delivery ledger | `ApiDeliveryServiceImpl`、`ApiDeliveryMapper`、`t_api_delivery` | 第二outboxなし。atomic enqueue、claim/lease、provider idempotency key・payload hash・generation・lease token付きCAS |
+| subscription/signing | `WebhookSubscription`、`IntegrationHubWebhookSigner`、AES-GCM crypto abstraction | credential version/key ID、固定framing HMAC-SHA256、timestamp、correlation、secret平文非保存 |
+| transport | `MockIntegrationHubWebhookTransport`、`StubIntegrationHubWebhookTransport`、`LoopbackIntegrationHubWebhookTransport` | MOCK/STUB無接続。LOOPBACKはliteral IP・allow-list port・peer検証、DNS/proxy/redirectなし |
+| retry/DLQ/replay | `IntegrationHubWebhookDeliveryWorker`、`IntegrationHubWebhookDeliveryReplayServiceImpl` | timeout/429/5xxのみ最大8回backoff+jitter、4xx no-retry、DLQ、新generation replayとsafe audit |
+| schema/test | `V132__integration_hub_public_api_b1.sql`、H2 schema、B1 focused tests | replay audit、scope digest、migration/H2、実loopback server、署名golden、設定fail-closed |
+
 ## 9. 公開resource / field / operation matrix（Owner承認済み初期契約）
 
 この表はDG-05-F1-APPROVAL-20260830-01で承認された初期契約である。実装時もfieldはallow-listを先に定義し、
@@ -232,7 +243,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 
 | 種別 | direction | field allow-list | scope/permission | 状態 |
 |---|---|---|---|---|
-| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | APPROVED_SEQUENCED（B1） |
+| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId, changedFieldNames（allow-list）, payload, correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver | IMPLEMENTATION_IN_PROGRESS（B1、`971c17d7`、Review待ち） |
 | provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | APPROVED_SEQUENCED（B2） |
 | DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | APPROVED_SEQUENCED（B2 admin UI） |
 
@@ -264,5 +275,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1初回Review FAIL（`111f4baa`、P1=2/P2=2）は`874fface`でremediate済み、独立再Review待ちであり、B1/B2/Mは各wave Review後に順次実装する。
+- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は`971c17d7`で実装済み・独立Review待ちであり、B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

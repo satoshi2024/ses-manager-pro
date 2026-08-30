@@ -6,8 +6,10 @@
 NF-05基線である。F1はPLAN/IMPLEMENTATION PASS済み、scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。A1は
-初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）を`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediateし、独立再Review待ちである。production implementationの
-public endpoint enablement、外部送信は引き続き開始しない。A1 Review PASS後もproduction enablement、実顧客credential、実provider送信は禁止し、
+初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）をremediateし、固定Head
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1はimplementation Head
+`971c17d7`で実装し、独立Implementation Review待ちである。production implementationの
+public endpoint enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 
@@ -29,9 +31,9 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | Wave | 状態 | 開始条件・境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | 初回FAILを`874fface`系列で修正したが、再Review fixed Head `cddd4850`でP1=1/P2=2（purge、asOf精度、E2E fixture）が残り、追加remediation中 |
+| A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
-| B1 | APPROVED_SEQUENCED | A1 Review後。mock/stub/loopbackのみで外部送信を検証 |
+| B1 | IMPLEMENTATION_IN_PROGRESS | `971c17d7`、focused 28 tests PASS、独立Review待ち。mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
@@ -122,8 +124,9 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
 
 1. 公開APIは /external-api/v1/** のversion namespaceと、Owner承認済みOpenAPI candidate契約を持つ。
    scope expansionは開発実装を承認し、Plan deltaはca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASSした。
-    F2実装はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済みである。A1は初回Reviewが
-    fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0、P1=2、P2=2）となったが、`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediateし、独立再Reviewへ提出中である。production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
+    F2実装はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済みである。A1は初回Review FAILをremediateし、
+    fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は`971c17d7`で実装し、
+    独立Implementation Reviewへ提出する。production endpoint enablementは常に禁止する。candidateは承認前のread-only契約候補である。
 2. responseはinventoryのexternal専用DTO allow-listだけを返し、internal entityを直接serializeしない。
    internal DB id、secret、audit metadata、internal path、PII、原価、口座、文書本文、raw provider
    responseは返さない。
@@ -166,7 +169,7 @@ IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに
 14. enabled connector E2E fixtureはcredentialのDATETIMEを認証filterと同じUTC `LocalDateTime`で登録する。Linux実Tomcat
     connectorを通した401/200のHTTP assertionを実行し、Windows固有のloopback起動不能はPASS根拠にしない。
 
-### A1実装証跡（独立再Implementation Review待ち）
+### A1実装証跡（独立Implementation Review PASS）
 
 `ExternalApiReadController`はcandidateのGET-only 11 pathsだけを公開し、`ExternalApiReadService`がF2のimmutable effective scopeを
 唯一のvisible populationとしてlist/detail/countへ渡す。`ExternalApiReadMapper`はallow-list列、deleted除外、scope ID predicate、
@@ -174,7 +177,15 @@ stable ID-desc sort、limit+1 cursorだけをSQLへ固定する。invoiceは`inv
 複数contract時に単一public contract IDを返さない。external DTOは4 resourceのallow-list fieldだけを持ち、public IDはHMAC-SHA256、
 cursorはAES-GCMでsnapshot IDを含むclient/tenant/legal entity/route/scope/as-of/expiryへbindする。remediation focused suiteは23 tests、
 failure/error/skipなしでPASSした。Windows browser profileのTomcat connector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
-この環境制約はPASS根拠にしない。
+この環境制約はPASS根拠にしない。固定Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`の独立ReviewでP0/P1/P2=0/0/0を受領した。
+
+### B1実装証跡（独立Implementation Review待ち）
+
+`971c17d7`で、`t_api_delivery`を唯一のNF-05 outbound delivery ledgerとして再利用するworker、signed request transport、DLQ replay service、
+V132 migration、H2 schema/testを追加した。業務stateとdelivery rowのatomic insert、claim/lease transaction、外部HTTP、provider idempotency key・
+payload hash・generation・lease tokenを用いる結果CASを分離する。timeout/429/5xxは最大8回の指数backoff+jitter、その他4xxはretryせずFAILED、
+上限到達はDLQとする。MOCK/STUBは無接続、LOOPBACKはliteral loopback/allow-list port/peer検証、redirectなし、proxy/DNSなしである。
+focused B1 suiteは28 tests、failure/error/skipなしでPASSした。実顧客credential、実provider送信、production enablementは行わない。
 
 ## IH-R3 Inbound / outbound webhook
 

@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（scope expansion承認済み・F2 PASS・A1独立再Review待ち）
+# NF-05 Public API 実装計画（scope expansion承認済み・F2/A1 PASS・B1独立Review待ち）
 
 ## 現在のゲート
 
@@ -9,8 +9,9 @@ Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.md
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
 （P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2は独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のIMPLEMENTATION PASSを受領した。A1の初回独立Reviewは
-fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0、P1=2、P2=2）だった。`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediationし、独立再Reviewへ提出する。A1 Review PASS後にB1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
+F2は独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のIMPLEMENTATION PASSを受領した。A1はremediation後、
+fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立Implementation PASSを受領した。B1を`971c17d7`で実装し、
+独立Implementation Reviewへ提出する。B1 Review PASS後にB2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -26,9 +27,9 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | 0R-P6 | scope expansion Plan delta residual remediation | security chain監査/error境界、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約 | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
-| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | REMEDIATED_REVIEW_PENDING。再Review FAIL（`cddd4850`、P1=1/P2=2）の3件を追加remediate中 |
+| A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | APPROVED_SEQUENCED。A1 Review後、mock/loopbackのみ |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | IMPLEMENTATION_IN_PROGRESS。`971c17d7`、focused 28 tests PASS、独立Review待ち。mock/stub/loopbackのみ |
 | B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
@@ -57,7 +58,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
    peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
-5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1初回Review FAIL（`111f4baa`）を`874fface`でremediateして独立再Review待ち、Owner/Base正本値を全traceへ同期する。
+5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1 implementation `971c17d7`の独立Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
 
 6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
    前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
@@ -68,7 +69,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
    profileへfalse/MOCKを明示し、missingはimplicit defaultで補わず起動拒否する。mode enumはMOCK/STUB/
    LOOPBACKへ統一する。
 
-## A1実装証跡（独立再Implementation Review待ち）
+## A1実装証跡（独立Implementation Review PASS）
 
 `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`でA1 read APIを実装した。初回Review（fixed Head `111f4baa`、P0=0、P1=2、P2=2）は
 invoice customer scope、cursor可視母集団、非canonical cursor、DTO/E2E証跡を指摘した。`874fface3bfe90dd27b766ddf9aeff4e00eae591`で次をremediateした。
@@ -87,7 +88,15 @@ invoice customer scope、cursor可視母集団、非canonical cursor、DTO/E2E�
 scope IDだけを選択する。cursorはclient/tenant/legal entity/route/scope/as-of/expiryへbindし、detailの不存在とscope外は同じ404へ収束する。
 
 remediation focused/integration suiteは23 tests、failure/error/skipなしでPASSした。Windowsのenabled connector browser E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
-独立Reviewではこの環境制約をPASS根拠にしない。production public APIはdisabledのままであり、A1再Review PASSまでB1は開始しない。
+独立Reviewではこの環境制約をPASS根拠にしない。固定Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
+
+## B1実装証跡（独立Implementation Review待ち）
+
+`971c17d7`でNF-05専用`t_api_delivery`を再利用するoutbound delivery workerを実装した。業務stateとdelivery rowのatomic insert、
+claim/lease transaction、外部HTTP、provider idempotency key・payload hash・generation・lease tokenを用いる結果CASを分離し、
+timeout/429/5xxのみ最大8回のbackoff+jitter、その他4xxはFAILED、上限到達はDLQへ収束させる。DLQ replayは新generationとsafe metadata auditへ固定する。
+固定framingのHMAC-SHA256署名、credential version/key ID、correlation、provider idempotency key header、MOCK/STUB無接続、LOOPBACK strict literal/peer検証/
+redirectなし/proxy・DNSなしを実装した。V132、H2 schema、focused B1 suite 28 tests（failure/error/skipなし）を確認済みで、実顧客credential・実provider送信・production enablementは行わない。
 
 ## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）
 
@@ -151,11 +160,12 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2はIMPLEMENTATION_PASS、A1は初回Review FAIL（fixed Head `111f4baa`、P0=0/P1=2/P2=2）を`874fface`系列でremediateしたが、再Review fixed Head `cddd4850`でP1=1/P2=2が残ったREMEDIATED_REVIEW_PENDINGである。追加3件の独立再Review PASS後にB1→B2→Mを順次開始する。A2は
-NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
-credential、実providerへの外部送信は引き続き禁止する。
+F2はIMPLEMENTATION_PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でIMPLEMENTATION_PASS、B1は`971c17d7`で実装済みの
+独立Implementation Review待ちである。B1 Review PASS後にB2→Mを順次開始する。A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportは
+default denyのままとする。production enablement、実顧客credential、実providerへの外部送信は引き続き禁止する。
 
-F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSした。A1の独立Implementation Review完了まではB1を開始せず、これを公開可能または全体PASSとは扱わない。
+F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSし、A1の独立Implementation Reviewも
+fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でPASSした。B1の独立Implementation Review完了まではB2を開始せず、公開可能または全体PASSとは扱わない。
 
 ## 完了・引き渡し条件
 

@@ -1,11 +1,12 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 PASS・A1独立再Review待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1 PASS・B1独立Review待ち）
 
 ## 実行停止規則
 
 F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでP0=0、P1=0、P2=0のPASSを受領したため、F2を実施する。
-F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSした。A1を実装済みで独立Reviewへ提出し、
-A1 Review PASS後はB1→B2→Mを順次実施し、各waveの独立Reviewと
+F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSした。A1もfixed Head
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領した。B1を実装済みで独立Reviewへ提出し、
+B1 Review PASS後はB2→Mを順次実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -135,15 +136,15 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   `src/main/java/com/ses/entity/integrationhub/ExternalApiAudit.java` と `V130__integration_hub_external_api_audit.sql`、
   `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象29件の再確認）および
   `ExternalApiSecurityChainIntegrationTest`。request attribute手動注入なしのenabled connector E2Eも追加したが、Windows loopback接続エラーでHTTP assertion前に停止。
-  F2のproduction enablement、B1/B2 transportは未実装。A1 controllerはTask A1で実装済み。
+  F2のproduction enablement、B1/B2の実顧客/provider接続は未承認。A1 controllerとB1 development/test transportは実装済み。
 - 追加境界証跡: `a16cdcba`、tenant/legal entity authoritative singletonとmapped IPv6 CIDR familyのfocused suite 19 tests、failure/error/skipなし。
 - F2独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS（P0/P1/P2=0/0/0）。
 
 ## Task A1: v1 read APIs / OpenAPI
 
 - [x] Objective: 承認済みread resourceのlist/detail/count、opaque cursor、stable error、OpenAPIを実装する。
-- Preconditions: F2 Implementation PASS、scope expansion Decisionを満たした。初回Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0、P1=2、P2=2）。
-  remediation commit `874fface3bfe90dd27b766ddf9aeff4e00eae591`をpush済み、現在はREMEDIATED_REVIEW_PENDING。
+- Preconditions: F2 Implementation PASS、scope expansion Decisionを満たした。初回Reviewのremediation後、fixed Head
+  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）。
 - Test requirements: external DTO allow-list、entity serialization negative、scope一致、cursor tamper/expiry、
   count/detail/list非列挙、error body secret/PII/内部情報なし。
 - Demo: internal entityを一つもserializeせず、OpenAPI candidateのGET-only 11 pathsとexternal DTO allow-listへ一致させる。invoice customer scope、
@@ -151,8 +152,8 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   expiry index順の有限batch、FK cascade、複数batch、再実行、部分失敗rollback、無通信時期限超過を確認する。
 - 実装証跡: `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、4 resource DTO、
   `ExternalApiPublicIdCodec`、`ExternalApiCursorCodec`、enabled key未設定時のfail-closed起動検証。
-- 検証結果: remediation focused suite 23 tests、failure/error/skipなし。Windows browser profileはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
-  独立ReviewのPASS根拠にはしない。A1独立再Implementation Review完了までB1を開始しない。
+- 検証結果: remediation focused/integration suite 24 tests、failure/error/skipなし。Windows browser profileはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
+  独立ReviewのPASS根拠にはしない。A1独立Implementation Review PASS後にB1を開始した。
 
 ## Task A2: limited command APIs（N/A under current decision）
 
@@ -165,11 +166,18 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task B1: outbound webhook
 
-- [ ] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
-- Preconditions: A1 Implementation Review PASS、scope expansion Decision。APPROVED_SEQUENCED、mock/stub/loopbackのみ。
+- [ ] Status: IMPLEMENTATION_IN_PROGRESS。実装commit `971c17d7`、独立Implementation Review待ち。
+- [x] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
+- Preconditions: A1 Implementation Review PASS（fixed Head `69f857d3`）、scope expansion Decision。production enablement、実顧客credential、
+  実provider送信なし。development/testのMOCK/STUB/LOOPBACKのみ。
+- Implementation: 第二outboxを作らず`t_api_delivery`を再利用し、atomic enqueue、claim/lease transaction、DB transaction外のtransport、
+  provider idempotency key・payload hash・generation・lease token付き結果CASを実装する。固定framing HMAC-SHA256、credential version/key ID、
+  correlation、8回上限の指数backoff+jitter、429/5xx/timeout retry、その他4xx no-retry、DLQ、新generation manual replay auditを含む。
+  LOOPBACKはstrict literal IP、allow-list port、peer検証、redirect/proxy/DNSなしとする。
 - Test requirements: signature/timestamp/key overlap、duplicate、claim競合、timeout、429/5xx、4xx no-retry、
-  backoff、DLQ、manual replay、provider/correlation ID、snapshot purge。
-- Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。
+  backoff、DLQ、manual replay、provider/correlation ID、snapshot purge、実loopback server、idempotency header、設定fail-closed。
+- Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。focused B1 suite 28 testsをfailure/error/skipなしで実行し、
+  remote/local Head一致を独立Reviewへ渡す。
 
 ## Task B2: inbound webhook / DLQ / admin UI
 

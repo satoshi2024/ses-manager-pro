@@ -91,9 +91,9 @@ canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。初回r
 | 対象 | 状態 | Review境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | REMEDIATED_REVIEW_PENDING | 再Review FAIL fixed Head `cddd4850`のNF05-IMPL-A1-005〜007を`626e3e65`で追加remediate。独立再Review完了までB1を開始しない |
+| A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 
-remediation focused/integration suiteは23/23 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。Linux実connectorの401/200再実行結果を独立Reviewで確認する。
+remediation focused/integration suiteは24/24 PASS、V131を含むMySQL 8 Flyway smokeは2/2 PASS（空DBおよびlegacy baseline経路）だった。Windows browser profileのconnector E2EはUTC fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Review PASS（P0/P1/P2=0/0/0）を受領した。
 
 ## Scope expansion Plan delta re-review remediation
 
@@ -122,7 +122,7 @@ P1=7、P2=2）だった。以下は実装・テストへ反映し、後続の独
 | P1-003 purge starvation | active hold除外、hold acquire/release reset、checkpoint→target→holdの共通lock順序、keyset末尾reset | CLOSED_BY_REVIEW | IntegrationHubF1RetentionH2Testのhold/lease-cursor境界、`5a2a0231`のMySQL hold/purge race。独立Implementation Review PASS |
 | P1-004 purge lease/version CAS | lock後のdelete predicateへversion、terminal、expiry、lease token/expiryのstrict NULL組合せを含める | CLOSED_BY_REVIEW | H2 + `5a2a0231`のIntegrationHubF1MySqlConcurrencyTest。独立Implementation Review PASS |
 | P1-005 idempotency CONFLICT | mismatchを固定409/90日retentionへ永続化後に拒否 | CLOSED_BY_REVIEW | ApiIdempotencyServiceTest、mapper CAS。独立Implementation Review PASS |
-| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求し、`d476614e`でSQL predicateにもdelivery_generationを追加 | CLOSED_BY_REVIEW | H2 + MySQL CAS test。独立Implementation Review PASS。B1外部provider実装は未着手 |
+| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求し、`d476614e`でSQL predicateにもdelivery_generationを追加 | CLOSED_BY_REVIEW | H2 + MySQL CAS test。独立Implementation Review PASS。B1外部provider実装はF1時点では未着手（現在は`971c17d7`でdevelopment/test境界のみ実装） |
 | P1-007 F1 evidence不足 | H2 31 tests、実service/mapperを使うMySQL multi-connection 5 tests、shard inventoryを追加 | CLOSED_BY_REVIEW | `5a2a0231`、F1 scopeの独立Implementation Review PASS。M/security/load/recoveryは未完了 |
 | P2-001 credential overlap NULL | non-null overlap_untilの将来期限だけ有効 | CLOSED_BY_REVIEW | CredentialVersionServiceTest。独立Implementation Review PASS |
 | P2-002 raw route template | candidate 11 fixed templates以外を拒否 | CLOSED_BY_REVIEW | ApiUsageBucketServiceTest。独立Implementation Review PASS |
@@ -147,7 +147,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、B1/B2/Mは未着手であり（F2はPASS、A1はremediation済みで独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
+外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は`971c17d7`でdevelopment/testのみ実装済み・独立Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -169,7 +169,8 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 `a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
-F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1は初回Review FAILをremediate済みで独立再Implementation Review待ちである。A2/command/exportは
+F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1はfixed Head
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は実装commit `971c17d7`で独立Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -216,17 +217,18 @@ Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
 ## A1 Implementation Review remediation（固定Head `111f4baa` → `874fface`）
 
 初回A1独立Implementation ReviewはFAIL（P0=0、P1=2、P2=2）だった。以下はapproved A1 scope内で実装・テスト可能な修正であり、
-`874fface3bfe90dd27b766ddf9aeff4e00eae591`へ反映しpush済みである。独立再Review受領まではA1をPASS扱いにせず、B1を開始しない。
+`874fface3bfe90dd27b766ddf9aeff4e00eae591`へ反映しpush済みである。追加remediation後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で
+独立Implementation Review PASSを受領し、B1を開始した。
 
 | ID | Severity | Review finding | Remediation | Status |
 |---|---|---|---|---|
-| NF05-IMPL-A1-001 | P1 | invoice customer scope未適用、複数contractを単一publicContractIdとして返す | `invoiceIds × customerIds`をlist/detail/countの同一predicateへ適用し、contractCountが1の場合だけpublic IDを返す。mapper/service testでscope外customerとmulti-contractを固定 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-002 | P1 | cursorのasOfがvisible membership/public valueをページ間で固定しない | `t_api_read_snapshot`/itemへ初回allow-list DTOをmaterializeし、snapshot IDを暗号化cursorへbind。insert/update/delete/reparent integration testを追加 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-003 | P2 | noncanonical Base64URL unused bitsを受理 | paddingなしBase64URLのdecode後canonical再encode完全一致を要求し、unused bits tamper testを追加 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-004 | P2 | DTO/path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | 4 DTO allow-list、11 GET-only path、entity negative、明示test key付きenabled E2E fixtureを追加 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-005 | P1 | snapshot purgeが公開request依存かつ非bounded | expiry index順の最大32 headerを独立schedulerが短いtransactionで削除し、FK cascadeでitemを削除。read pathからpurgeを除去し、bounded/cascade/retry/read非DELETE testを追加 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-006 | P2 | cursor page間でfractional asOf精度が変化 | 初回からUTC epoch secondsへ正規化し、snapshot/cursor/後続responseを同じ秒精度に固定。fractional clock testを追加 | REMEDIATED_REVIEW_PENDING |
-| NF05-IMPL-A1-007 | P2 | connector E2E fixtureのDATETIME timezone変換で認証時刻が未来化 | fixtureをUTC `LocalDateTime`で登録。Windows loopbackは環境制約、Linux実connectorで401/200を再検証する | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-001 | P1 | invoice customer scope未適用、複数contractを単一publicContractIdとして返す | `invoiceIds × customerIds`をlist/detail/countの同一predicateへ適用し、contractCountが1の場合だけpublic IDを返す。mapper/service testでscope外customerとmulti-contractを固定 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-002 | P1 | cursorのasOfがvisible membership/public valueをページ間で固定しない | `t_api_read_snapshot`/itemへ初回allow-list DTOをmaterializeし、snapshot IDを暗号化cursorへbind。insert/update/delete/reparent integration testを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-003 | P2 | noncanonical Base64URL unused bitsを受理 | paddingなしBase64URLのdecode後canonical再encode完全一致を要求し、unused bits tamper testを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-004 | P2 | DTO/path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | 4 DTO allow-list、11 GET-only path、entity negative、明示test key付きenabled E2E fixtureを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-005 | P1 | snapshot purgeが公開request依存かつ非bounded | expiry index順の最大32 headerを独立schedulerが短いtransactionで削除し、FK cascadeでitemを削除。read pathからpurgeを除去し、bounded/cascade/retry/read非DELETE testを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-006 | P2 | cursor page間でfractional asOf精度が変化 | 初回からUTC epoch secondsへ正規化し、snapshot/cursor/後続responseを同じ秒精度に固定。fractional clock testを追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-A1-007 | P2 | connector E2E fixtureのDATETIME timezone変換で認証時刻が未来化 | fixtureをUTC `LocalDateTime`で登録。Windows loopbackは環境制約、Linux実connectorで401/200を再検証する | CLOSED_BY_REVIEW |
 
 ### A1 remediation evidence
 
@@ -235,3 +237,11 @@ Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
 - remediation focused/integration suite: cursor 3、service 6、DTO 5、mapper 2、snapshot integration 1、purge integration 2。計23 tests、failure/error/skipなし。
 - enabled connector browser E2EはUTC `LocalDateTime` fixtureへ修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewで401/200を確認する。
 - production enablement、実顧客credential、実provider送信、A2 command/export、PR、mergeは引き続き禁止。
+
+## B1 Implementation Review handoff（実装済み・独立Review待ち）
+
+`971c17d7`でB1 approved scopeを実装した。NF-05専用`t_api_delivery`を唯一のoutbound delivery ledgerとして再利用し、業務stateとのatomic insert、
+claim/lease transaction、DB transaction外のHTTP、provider idempotency key・payload hash・generation・lease tokenを用いる結果CASを分離した。
+固定framing HMAC-SHA256署名、credential version/key ID、correlation、最大8回のtimeout/429/5xx retry、その他4xx no-retry、DLQ、new-generation replay audit、
+MOCK/STUB無接続、LOOPBACK strict literal/peer検証・redirect/proxy/DNSなしを含む。V132 migration、H2 schema、focused 28 tests（failure/error/skipなし）、
+実loopback test server、署名golden vector、設定fail-closedを確認済みである。B1の固定remote Headを同じR-NF05へ独立Implementation Reviewとしてhandoffし、PASS受領までB2を開始しない。
