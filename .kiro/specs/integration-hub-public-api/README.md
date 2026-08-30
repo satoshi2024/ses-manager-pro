@@ -38,7 +38,8 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。P2はPENDINGの非terminal要約
 妨げない。F1の実装は承認済みpersistence基盤に限定し、public endpoint、外部送信、A1/A2/B1/B2、
 production enablement、command/exportは引き続き禁止する。
 
-F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`。V129 MySQL Flyway smoke、F1 H2 targeted
+F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
+`d476614e`。V129 MySQL Flyway smoke、F1 H2 targeted
 suite（31 tests、failure/error/skipなし）、MySQL multi-connection concurrency（3 tests、failure/error/skipなし）を確認した。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
 終了しているため、全体PASSとは扱わず、独立Implementation Reviewを残している。

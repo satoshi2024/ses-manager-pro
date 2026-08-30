@@ -50,7 +50,7 @@ FAIL（P0=0、P1=7、P2=2）だった。以下はapproved F1 scope内のremediat
 | NF05-IMPL-003 | P1 | active holdを含むpurge batchでcheckpointがstarveする | active holdを候補から除外し、hold acquire/release時に対象class cursorをreset。keyset末尾resetを仕様・実装へ追加 | IMPLEMENTED_PENDING_REVIEW |
 | NF05-IMPL-004 | P1 | purge deleteがactive leaseとrow versionを直前に再確認しない |対象row lock後にversion、retention、terminal、lease expiryをdelete predicateへ含め、H2/MySQL test追加 | IMPLEMENTED_PENDING_REVIEW |
 | NF05-IMPL-005 | P1 | idempotency conflictが永続化されずCONFLICT状態へ到達しない | mismatch時に固定409 code、terminal/90日retentionをCAS保存してから例外を返す | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-006 | P1 | delivery result CASがgeneration/provider idempotency keyを要求しない | row version、lease token、payload hash、provider idempotency key、generation由来のCAS契約へ修正し、H2/MySQL test追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-006 | P1 | delivery result CASがgeneration/provider idempotency keyを要求しない | row version、lease token、payload hash、provider idempotency key、generation由来のCAS契約へ修正し、`d476614e`でSQL predicateにもdelivery_generationを追加。H2/MySQL test更新 | IMPLEMENTED_PENDING_REVIEW |
 | NF05-IMPL-007 | P1 | F1のmulti-node/境界/遷移/hold-purge証跡が不足 | MySQL multi-connection usage、delivery CAS、active lease purge 3件とH2 inbound/purge境界を追加。残る網羅的境界・M証跡は未完了 | IMPLEMENTED_PENDING_REVIEW |
 | NF05-IMPL-008 | P2 | credential OVERLAPのNULL期限がfail-open | overlap_until IS NOT NULL AND overlap_until > server_nowへ修正 | IMPLEMENTED_PENDING_REVIEW |
 | NF05-IMPL-009 | P2 | raw pathをroute templateとしてusage bucketへ保存可能 | OpenAPI candidateの11 fixed route template exact setへ制限し、raw resource path test追加 | IMPLEMENTED_PENDING_REVIEW |
@@ -83,7 +83,7 @@ FAIL（P0=0、P1=7、P2=2）だった。以下はapproved F1 scope内のremediat
 - R-NF05 Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）。P2は非blocking。
 - F1: Approved scopeのpersistence基盤を`a7654b44`で実装完了。F1 targeted suiteは23 tests PASS、MySQL Flyway smokeもPASS。
 - F1 Implementation Review: `b420911b63177763544edd1e02d663bf528d9dc1`でFAIL（P0=0、P1=7、P2=2）。
-  `a184c1f4`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
+  `a184c1f4`および`d476614e`でapproved F1 scope内のP1/P2 remediationを実装し、H2 F1対象31 testsとMySQL multi-connection
   concurrency 3 testsをPASSした。独立Implementation Review再Review待ち。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1

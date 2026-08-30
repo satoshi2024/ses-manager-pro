@@ -64,7 +64,7 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   burst/refillと三つのquota境界、migration証跡、DB transaction内外の境界、canonical state遷移、hold/purge/restoreの
   状態遷移を示す。
 - 実施証跡: `a7654b44`でV129 MySQL migration、H2 schema/init、entity/mapper/service/crypto基盤、
-  `a184c1f4`でImplementation Review remediation、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
+  `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
   Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
   production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで終了している。独立Implementation Reviewの
   remediation再Reviewは未実施である。MySQL multi-connection F1 concurrency test 3件はPASSした。

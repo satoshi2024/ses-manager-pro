@@ -12,8 +12,8 @@
 | 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | SPEC_ADDRESSED（state alias残存を追加補正） | a3b63d70f53bc799d1abcb6e26e34ad163aa9843（remoteへpush済み） |
 | 0R-P3 R-NF05 state mapping cleanup | design, tasks | design内の旧RETRY/SENT/EXPIRED aliasをcanonical enum・retention mappingから除去。production変更なし | COMPLETE（docs-only） | fdea4bb18db3d3ae6542dc0c534425783dd28a24（remoteへpush済み） |
 | 0R-P4 R-NF05 final Plan Review | review-ledger, review-remediation, completion-matrix | 独立ReviewがP0=0、P1=0、P2=2でPLAN PASS。P2は非blocking | COMPLETE（Review gate） | 1db3b2fc2657831b7c6c1e59217301302b7caa80（fixed review Head） |
-| F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 3 tests、Flyway smoke PASS | IMPLEMENTED_PENDING_REVIEW | initial `a7654b44`、remediation `a184c1f4`、再Review待ち |
-| F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）への実装・テスト対応。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4` → 独立再Reviewへhandoff |
+| F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 3 tests、Flyway smoke PASS | IMPLEMENTED_PENDING_REVIEW | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、再Review待ち |
+| F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）への実装・テスト対応。delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4` + `d476614e` → 独立再Reviewへhandoff |
 | F2 security chain | tasks/design/inventory | 未着手 | DEFERRED_BY_SCOPE | — |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | candidateのみ。public endpoint未実装 | DEFERRED_BY_SCOPE | — |
 | A2 commands | tasks/design/requirements | command/export未承認・default deny | DISABLED | — |
@@ -44,6 +44,7 @@ Final remote Head: 外部handoff通知で固定（この行を含むcommit自身
 
 - Implementation commit: `a7654b44`（`feat: implement NF-05 F1 persistence foundation`）
 - Remediation commit: `a184c1f4`（`fix: remediate NF-05 F1 implementation review findings`）
+- Delivery CAS correction: `d476614e`（`fix: bind delivery CAS to generation`）
 - MySQL: `FlywayMigrationSmokeTest`を`-Pmysql-tests`で実行し、empty/legacy V78/normal DBのV129適用を確認。
 - H2: `IntegrationHubF1SchemaH2Test`、`IntegrationHubF1RetentionH2Test`および既存schema sweepを確認。
 - F1 targeted suite: 31 tests、failure 0、error 0、skip 0。

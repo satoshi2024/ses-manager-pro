@@ -44,7 +44,8 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンし�
 独立Implementation Reviewは初回固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対して
 FAIL（P0=0、P1=7、P2=2）だった。F1 approved scope内で、typed snapshot/service boundary、conflictの
 canonical persistence、delivery CAS、purge keyset/hold/lease競合、credential overlap、route templateを
-修正し、implementation commit `a184c1f4`へpushした。H2 F1対象31 testsとMySQL multi-connection concurrency
+修正し、implementation commit `a184c1f4`へpushした。その後、delivery CASへgeneration predicateを追加する
+残存指摘を`d476614e`で修正した。H2 F1対象31 testsとMySQL multi-connection concurrency
 3 testsはPASSしたが、独立Implementation Reviewの再判定を受けるまでF1をPASS扱いしない。
 
 F2、A1、A2、B1、B2、M、public endpoint、外部送信、production enablement、command/exportは引き続き未着手・禁止である。

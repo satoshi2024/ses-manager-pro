@@ -41,7 +41,7 @@ P1=7、P2=2）だった。以下は実装・テストへ反映したが、独立
 | P1-003 purge starvation | active hold除外、hold acquire/release reset、keyset末尾reset | IMPLEMENTED_PENDING_REVIEW | IntegrationHubF1RetentionH2Testのhold/lease-cursor境界。再Review |
 | P1-004 purge lease/version CAS | lock後のdelete predicateへversion、terminal、expiry、leaseを含める | IMPLEMENTED_PENDING_REVIEW | H2 + IntegrationHubF1MySqlConcurrencyTest |
 | P1-005 idempotency CONFLICT | mismatchを固定409/90日retentionへ永続化後に拒否 | IMPLEMENTED_PENDING_REVIEW | ApiIdempotencyServiceTest、mapper CAS。再Review |
-| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求 | IMPLEMENTED_PENDING_REVIEW | H2 + MySQL CAS test。B1外部provider実装は未着手 |
+| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求し、`d476614e`でSQL predicateにもdelivery_generationを追加 | IMPLEMENTED_PENDING_REVIEW | H2 + MySQL CAS test。B1外部provider実装は未着手 |
 | P1-007 F1 evidence不足 | H2 31 tests、MySQL multi-connection 3 tests、shard inventoryを追加 | IMPLEMENTED_PENDING_REVIEW | 全境界網羅、M/security/load/recoveryは未完了 |
 | P2-001 credential overlap NULL | non-null overlap_untilの将来期限だけ有効 | IMPLEMENTED_PENDING_REVIEW | CredentialVersionServiceTest |
 | P2-002 raw route template | candidate 11 fixed templates以外を拒否 | IMPLEMENTED_PENDING_REVIEW | ApiUsageBucketServiceTest |
@@ -66,7 +66,7 @@ P1=7、P2=2）だった。以下は実装・テストへ反映したが、独立
 ## 実装範囲の残存ゲート
 
 Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1初回実装は`a7654b44`、Review remediationは
-`a184c1f4`であるが、独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
+`a184c1f4`、追加CAS修正は`d476614e`であるが、独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
 command、exportは引き続きこのimplementation scope外である。
 
 ## Handoff checkpoint
@@ -83,6 +83,7 @@ command、exportは引き続きこのimplementation scope外である。
 - R-NF05 final Plan Review: 1db3b2fc2657831b7c6c1e59217301302b7caa80、PLAN PASS（P0=0、P1=0、P2=2）
 - F1 implementation commit: a7654b44、F1 targeted suite 23 tests PASS、MySQL V129 smoke PASS
 - F1 implementation remediation commit: a184c1f4、F1 H2 targeted suite 31 tests PASS、MySQL multi-connection concurrency 3 tests PASS
+- delivery CAS generation predicate correction: d476614e、ApiDeliveryServiceTest/MySQL CAS test PASS
 - 初回Implementation Review: b420911b63177763544edd1e02d663bf528d9dc1、FAIL（P0=0、P1=7、P2=2）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
