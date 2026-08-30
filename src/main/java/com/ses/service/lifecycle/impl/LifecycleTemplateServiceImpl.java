@@ -193,14 +193,14 @@ public class LifecycleTemplateServiceImpl extends ServiceImpl<LifecycleTemplateM
 
         LocalDate existingValidFrom = existing.getValidFrom();
         LocalDate newValidFrom = dto.getValidFrom() != null ? dto.getValidFrom() : LocalDate.now();
-        
+
         if (!newValidFrom.isAfter(existingValidFrom)) {
             newValidFrom = LocalDate.now();
             if (!newValidFrom.isAfter(existingValidFrom)) {
                 newValidFrom = existingValidFrom.plusDays(1);
             }
         }
-        
+
         if (dto.getValidTo() != null && newValidFrom.isAfter(dto.getValidTo())) {
             throw BusinessException.of(400, "error.lifecycle.invalidDateOrder", "開始日は終了日以前である必要があります");
         }

@@ -21,7 +21,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:lifecycle-domain-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Transactional
 class LifecycleDomainServiceTest {
@@ -73,15 +73,6 @@ class LifecycleDomainServiceTest {
 
     @Autowired
     private com.ses.mapper.AssetOffboardingWaiverMapper assetOffboardingWaiverMapper;
-
-    @Autowired
-    private com.ses.mapper.AssetAssignmentMapper assetAssignmentMapper;
-
-    @Autowired
-    private com.ses.mapper.ExternalAccountReferenceMapper externalAccountReferenceMapper;
-
-    @Autowired
-    private com.ses.mapper.LicenseAssignmentMapper licenseAssignmentMapper;
 
     @Autowired
     private com.ses.mapper.DocumentMapper documentMapper;
@@ -165,23 +156,6 @@ class LifecycleDomainServiceTest {
         testEngineer.setOrganizationId(testOrg.getId());
         engineerMapper.insert(testEngineer);
 
-        // 共有H2では@Sqlが要員台帳だけを再構築し、資産台帳を残す場合があるため、
-        // AUTO_INCREMENT再利用で前テストのblockerが同じ要員IDに紐づくのを防ぐ。
-        assetAssignmentMapper.delete(new LambdaQueryWrapper<AssetAssignment>()
-                .eq(AssetAssignment::getAssigneeType, "ENGINEER")
-                .eq(AssetAssignment::getAssigneeId, testEngineer.getId()));
-        externalAccountReferenceMapper.delete(new LambdaQueryWrapper<ExternalAccountReference>()
-                .eq(ExternalAccountReference::getAssigneeType, "ENGINEER")
-                .eq(ExternalAccountReference::getAssigneeId, testEngineer.getId()));
-        licenseAssignmentMapper.delete(new LambdaQueryWrapper<LicenseAssignment>()
-                .eq(LicenseAssignment::getAssigneeType, "ENGINEER")
-                .eq(LicenseAssignment::getAssigneeId, testEngineer.getId()));
-
-        // 要員アカウントリンク（既存のリンクがあれば事前削除して一意性を確保）
-        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
-                .eq(EngineerAccountLink::getSysUserId, engineerUser.getId())
-                .or()
-                .eq(EngineerAccountLink::getEngineerId, testEngineer.getId()));
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(testEngineer.getId());
         link.setSysUserId(engineerUser.getId());
@@ -250,11 +224,11 @@ class LifecycleDomainServiceTest {
         LifecycleTemplateDto created = templateService.createTemplate(tpl, adminUser.getId());
         assertNotNull(created.getId());
         assertEquals(1, created.getVersionNo());
-        
+
         // Assert that taskCount is set in listTemplates
         List<LifecycleTemplateDto> allTpls = templateService.listTemplates("JOIN", "ACTIVE");
         assertTrue(allTpls.stream().anyMatch(t -> t.getId().equals(created.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list");
-        
+
         // Assert invalidDateOrder for createTemplate
         LifecycleTemplateDto invalidTpl = LifecycleTemplateDto.builder()
                 .templateType("JOIN").name("Bad").validFrom(LocalDate.now().plusDays(10)).validTo(LocalDate.now())
@@ -276,11 +250,11 @@ class LifecycleDomainServiceTest {
         tpl.getTasks().get(0).setTaskName("書類提出(電子的)");
         LifecycleTemplateDto v2 = templateService.updateTemplate(created.getId(), tpl, adminUser.getId());
         assertEquals(2, v2.getVersionNo());
-        
+
         // Check validFrom overlap adjustment logic
         LifecycleTemplate oldTpl = templateService.getById(created.getId());
         assertTrue(oldTpl.getValidTo().isBefore(v2.getValidFrom()), "Old version must end before new version begins");
-        
+
         // Assert taskCount for v2
         List<LifecycleTemplateDto> allTplsV2 = templateService.listTemplates("JOIN", "ACTIVE");
         assertTrue(allTplsV2.stream().anyMatch(t -> t.getId().equals(v2.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list for v2");

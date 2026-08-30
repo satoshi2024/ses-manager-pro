@@ -1,7 +1,6 @@
 package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleTemplateDto;
@@ -36,7 +35,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:my-lifecycle-api-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @AutoConfigureMockMvc
 @Transactional
 @ActiveProfiles("test")
@@ -78,6 +77,7 @@ class MyLifecycleApiControllerTest {
 
     @BeforeEach
     void setUp() {
+        long suffix = System.nanoTime();
         adminUser = SysUser.builder()
                 .username("admin_my_test")
                 .password("pass")
@@ -115,8 +115,8 @@ class MyLifecycleApiControllerTest {
         sysUserMapper.insert(engineerUser2);
 
         OrganizationUnit org = OrganizationUnit.builder()
-                .code("ORG-MY-01")
-                .name("開発部")
+                .code("ORG-MY-" + suffix)
+                .name("開発部-" + suffix)
                 .type("DEPARTMENT")
                 .status("ACTIVE")
                 .validFrom(LocalDate.now().minusYears(1))
@@ -124,7 +124,7 @@ class MyLifecycleApiControllerTest {
         organizationUnitMapper.insert(org);
 
         engineer1 = Engineer.builder()
-                .fullName("要員テスト1")
+                .fullName("要員テスト1-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
                 .build();
@@ -132,22 +132,12 @@ class MyLifecycleApiControllerTest {
         engineerMapper.insert(engineer1);
 
         engineer2 = Engineer.builder()
-                .fullName("要員テスト2")
+                .fullName("要員テスト2-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
                 .build();
         engineer2.setOrganizationId(org.getId());
         engineerMapper.insert(engineer2);
-
-        // 共有H2では別contextが採番を再利用するため、前回fixtureのリンクを先に除去する。
-        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
-                .eq(EngineerAccountLink::getEngineerId, engineer1.getId()));
-        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
-                .eq(EngineerAccountLink::getEngineerId, engineer2.getId()));
-        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
-                .eq(EngineerAccountLink::getSysUserId, engineerUser1.getId()));
-        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
-                .eq(EngineerAccountLink::getSysUserId, engineerUser2.getId()));
 
         EngineerAccountLink link1 = new EngineerAccountLink();
         link1.setEngineerId(engineer1.getId());

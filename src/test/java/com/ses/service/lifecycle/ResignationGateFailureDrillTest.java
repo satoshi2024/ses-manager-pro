@@ -1,6 +1,5 @@
 package com.ses.service.lifecycle;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleCaseDto;
@@ -28,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * 退社統制ゲート障害訓練・網羅的ブロック検証テスト (Task M)
  */
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:resignation-gate-drill-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Transactional
 class ResignationGateFailureDrillTest {
@@ -114,8 +113,9 @@ class ResignationGateFailureDrillTest {
 
     @BeforeEach
     void setUp() {
+        long suffix = System.nanoTime();
         adminUser = SysUser.builder()
-                .username("admin_drill")
+                .username("admin_drill_" + suffix)
                 .password("pass")
                 .realName("管理者ドリル")
                 .role("管理者")
@@ -124,7 +124,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(adminUser);
 
         salesUser = SysUser.builder()
-                .username("sales_drill")
+                .username("sales_drill_" + suffix)
                 .password("pass")
                 .realName("営業ドリル")
                 .role("営業")
@@ -133,7 +133,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(salesUser);
 
         SysUser hrUser = SysUser.builder()
-                .username("hr_drill")
+                .username("hr_drill_" + suffix)
                 .password("pass")
                 .realName("人事ドリル")
                 .role("HR")
@@ -142,7 +142,7 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(hrUser);
 
         engineerUser = SysUser.builder()
-                .username("eng_drill")
+                .username("eng_drill_" + suffix)
                 .password("pass")
                 .realName("退職要員")
                 .role("要員")
@@ -151,8 +151,8 @@ class ResignationGateFailureDrillTest {
         sysUserMapper.insert(engineerUser);
 
         org = OrganizationUnit.builder()
-                .code("ORG-DRILL")
-                .name("システム開発本部")
+                .code("ORG-DRILL-" + suffix)
+                .name("システム開発本部-" + suffix)
                 .type("DEPARTMENT")
                 .status("ACTIVE")
                 .validFrom(LocalDate.now().minusYears(1))
@@ -160,24 +160,12 @@ class ResignationGateFailureDrillTest {
         organizationUnitMapper.insert(org);
 
         engineer = Engineer.builder()
-                .fullName("退職要員")
+                .fullName("退職要員-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
                 .build();
         engineer.setOrganizationId(org.getId());
         engineerMapper.insert(engineer);
-
-        // 共有H2では@Sqlが要員台帳だけを再構築し、資産台帳を残す場合があるため、
-        // AUTO_INCREMENT再利用で前テストのblockerが同じ要員IDに紐づくのを防ぐ。
-        assetAssignmentMapper.delete(new LambdaQueryWrapper<AssetAssignment>()
-                .eq(AssetAssignment::getAssigneeType, "ENGINEER")
-                .eq(AssetAssignment::getAssigneeId, engineer.getId()));
-        externalAccountReferenceMapper.delete(new LambdaQueryWrapper<ExternalAccountReference>()
-                .eq(ExternalAccountReference::getAssigneeType, "ENGINEER")
-                .eq(ExternalAccountReference::getAssigneeId, engineer.getId()));
-        licenseAssignmentMapper.delete(new LambdaQueryWrapper<LicenseAssignment>()
-                .eq(LicenseAssignment::getAssigneeType, "ENGINEER")
-                .eq(LicenseAssignment::getAssigneeId, engineer.getId()));
 
         // 要員とユーザーの紐付け
         EngineerAccountLink link = new EngineerAccountLink();
