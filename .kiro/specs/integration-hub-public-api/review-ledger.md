@@ -45,15 +45,15 @@ FAIL（P0=0、P1=7、P2=2）だった。以下はapproved F1 scope内のremediat
 
 | ID | Severity | Finding | 対応 | Status |
 |---|---|---|---|---|
-| NF05-IMPL-001 | P1 | secret/PII/raw body非永続化とgeneric CRUD迂回がservice境界で保証されない | typed ExternalDtoSnapshotの用途別構造allow-list、payload/canonicalPayloadのfield-specific object検証、changedFieldNamesのbounded array、safe response/inbound/outbound検証、F1 serviceからIService/ServiceImpl継承を除去 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-002 | P1 | inbound DuplicateKey hash conflictがCONFLICTへ永続化されずRECEIVEDに残る | provider event rowをFOR UPDATEで再読し、RECEIVED/PROCESSINGをversion CASでCONFLICTへ遷移。unit testと実MySQL duplicate race追加 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-003 | P1 | active holdを含むpurge batchでcheckpointがstarveする | active holdを候補から除外し、hold acquire/release時に対象class cursorをreset。checkpoint→target→holdの共通lock順序とkeyset末尾resetを実装 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-004 | P1 | purge deleteがactive leaseとrow versionを直前に再確認しない |対象row lock後にversion、retention、terminal、lease token/expiryのstrict NULL組合せをdelete predicateへ含め、H2/MySQL test追加 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-005 | P1 | idempotency conflictが永続化されずCONFLICT状態へ到達しない | mismatch時に固定409 code、terminal/90日retentionをCAS保存してから例外を返す | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-006 | P1 | delivery result CASがgeneration/provider idempotency keyを要求しない | row version、lease token、payload hash、provider idempotency key、generation由来のCAS契約へ修正し、`d476614e`でSQL predicateにもdelivery_generationを追加。H2/MySQL test更新 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-007 | P1 | F1のmulti-node/境界/遷移/hold-purge証跡が不足 | 実service/mapperを使うMySQL multi-connection usage unique初期化、delivery CAS、hold/purge race、malformed lease、inbound duplicateの5件とH2 inbound/purge境界を追加。残る網羅的境界・M証跡は未完了 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-008 | P2 | credential OVERLAPのNULL期限がfail-open | overlap_until IS NOT NULL AND overlap_until > server_nowへ修正 | IMPLEMENTED_PENDING_REVIEW |
-| NF05-IMPL-009 | P2 | raw pathをroute templateとしてusage bucketへ保存可能 | OpenAPI candidateの11 fixed route template exact setへ制限し、raw resource path test追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-001 | P1 | secret/PII/raw body非永続化とgeneric CRUD迂回がservice境界で保証されない | typed ExternalDtoSnapshotの用途別構造allow-list、payload/canonicalPayloadのfield-specific object検証、changedFieldNamesのbounded array、safe response/inbound/outbound検証、F1 serviceからIService/ServiceImpl継承を除去 | CLOSED_BY_REVIEW |
+| NF05-IMPL-002 | P1 | inbound DuplicateKey hash conflictがCONFLICTへ永続化されずRECEIVEDに残る | provider event rowをFOR UPDATEで再読し、RECEIVED/PROCESSINGをversion CASでCONFLICTへ遷移。unit testと実MySQL duplicate race追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-003 | P1 | active holdを含むpurge batchでcheckpointがstarveする | active holdを候補から除外し、hold acquire/release時に対象class cursorをreset。checkpoint→target→holdの共通lock順序とkeyset末尾resetを実装 | CLOSED_BY_REVIEW |
+| NF05-IMPL-004 | P1 | purge deleteがactive leaseとrow versionを直前に再確認しない |対象row lock後にversion、retention、terminal、lease token/expiryのstrict NULL組合せをdelete predicateへ含め、H2/MySQL test追加 | CLOSED_BY_REVIEW |
+| NF05-IMPL-005 | P1 | idempotency conflictが永続化されずCONFLICT状態へ到達しない | mismatch時に固定409 code、terminal/90日retentionをCAS保存してから例外を返す | CLOSED_BY_REVIEW |
+| NF05-IMPL-006 | P1 | delivery result CASがgeneration/provider idempotency keyを要求しない | row version、lease token、payload hash、provider idempotency key、generation由来のCAS契約へ修正し、`d476614e`でSQL predicateにもdelivery_generationを追加。H2/MySQL test更新 | CLOSED_BY_REVIEW |
+| NF05-IMPL-007 | P1 | F1のmulti-node/境界/遷移/hold-purge証跡が不足 | 実service/mapperを使うMySQL multi-connection usage unique初期化、delivery CAS、hold/purge race、malformed lease、inbound duplicateの5件とH2 inbound/purge境界を追加。M証跡は未完了 | CLOSED_BY_REVIEW |
+| NF05-IMPL-008 | P2 | credential OVERLAPのNULL期限がfail-open | overlap_until IS NOT NULL AND overlap_until > server_nowへ修正 | CLOSED_BY_REVIEW |
+| NF05-IMPL-009 | P2 | raw pathをroute templateとしてusage bucketへ保存可能 | OpenAPI candidateの11 fixed route template exact setへ制限し、raw resource path test追加 | CLOSED_BY_REVIEW |
 
 ## F1 Implementation Review follow-up findings
 
@@ -63,7 +63,7 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 
 | ID | Severity | Finding | 対応 | Status |
 |---|---|---|---|---|
-| NF05-IMPL-FU-001 | P1 | ExternalDtoSnapshotの許可fieldへraw body/PIIを文字列または未制約nested valueとして埋め込める | `96d6801c`でpublic ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | IMPLEMENTED_PENDING_REVIEW |
+| NF05-IMPL-FU-001 | P1 | ExternalDtoSnapshotの許可fieldへraw body/PIIを文字列または未制約nested valueとして埋め込める | `96d6801c`でpublic ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | CLOSED_BY_REVIEW |
 | NF05-IMPL-FU-002 | P1 | delivery purgeのlease token/expiry片側NULLがfail-open | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | CLOSED_BY_REVIEW |
 | NF05-IMPL-FU-003 | P1 | holdとpurgeのcheckpoint/target/hold lock順序が逆でdeadlockし得る | hold acquire/releaseをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | CLOSED_BY_REVIEW |
 | NF05-IMPL-FU-004 | P1 | MySQL複数connectionのproduction service/mapper競合証跡が不足 | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | CLOSED_BY_REVIEW |
@@ -72,7 +72,7 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
 
 | Task | Evidence | Status | Review boundary |
 |---|---|---|---|
-| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`、`d476614e`、`5a2a0231`、`96d6801c`でIMPL findingsをremediate。F1 H2 31 tests、MySQL concurrency 5 testsはPASS。最新独立ReviewはP1-FU-001の再Review待ち。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
+| F1 persistence foundation | `a7654b44`、V129 MySQL migration、H2 schema/init、entity/mapper/service/crypto、purge/rollback証跡 | IMPLEMENTATION_PASS | `a184c1f4`、`d476614e`、`5a2a0231`、`96d6801c`でIMPL findingsをremediate。固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewはP0/P1/P2=0でPASS。F2/A1/A2/B1/B2/M、public endpoint、外部送信、production enablementは未着手 |
 
 ## Evidence status
 
@@ -100,7 +100,7 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
  concurrency 3 testsをPASSした。follow-upの固定Head `dff90b3961b647035436abd378a352b1fa000dd1`はFAIL（P0=0、P1=4、P2=0）だったが、
   `5a2a0231`で4件をremediateし、H2 F1対象31 testsとMySQL `IntegrationHubF1MySqlConcurrencyTest` 5 testsをPASSした。最新の再Review固定Head
   `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`はFAIL（P0=0、P1=1、P2=0）で、FU-002〜004はクローズ、FU-001のnested scalar bypassのみ残った。
-  `96d6801c`でこれをremediateし、H2 F1対象31 testsを再PASSした。独立Implementation Review再Review待ち。F2、A1、A2、B1、B2、M: 未着手。
+  `96d6801c`でこれをremediateし、H2 F1対象31 testsを再PASSした。固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewはPASS（P0=0、P1=0、P2=0）となった。F2、A1、A2、B1、B2、M: 未着手。
 - N/A扱いのテストはない。必須テストは各Taskのpreconditionとして保持する。
 - Plan Review完了時点では外部送信、migration、production Java、UI変更は行っていなかった。以降は承認済みF1
   persistence基盤の実装に限定している。

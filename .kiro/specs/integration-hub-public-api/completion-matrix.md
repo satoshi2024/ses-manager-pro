@@ -1,4 +1,4 @@
-# NF-05 完了対応表（Owner承認済み・R-NF05 Plan PASS・F1 follow-up implementation remediation中）
+# NF-05 完了対応表（Owner承認済み・R-NF05 Plan PASS・F1 Implementation PASS・M未完了）
 
 ## Task対応
 
@@ -12,8 +12,8 @@
 | 0R-P2 R-NF05 residual Plan remediation | plan, design, requirements, tasks, inventory, review-ledger, review-remediation | P1-005 burst algorithm、P1-006 canonical state/terminal retention mappingを具体化。production変更なし | SPEC_ADDRESSED（state alias残存を追加補正） | a3b63d70f53bc799d1abcb6e26e34ad163aa9843（remoteへpush済み） |
 | 0R-P3 R-NF05 state mapping cleanup | design, tasks | design内の旧RETRY/SENT/EXPIRED aliasをcanonical enum・retention mappingから除去。production変更なし | COMPLETE（docs-only） | fdea4bb18db3d3ae6542dc0c534425783dd28a24（remoteへpush済み） |
 | 0R-P4 R-NF05 final Plan Review | review-ledger, review-remediation, completion-matrix | 独立ReviewがP0=0、P1=0、P2=2でPLAN PASS。P2は非blocking | COMPLETE（Review gate） | 1db3b2fc2657831b7c6c1e59217301302b7caa80（fixed review Head） |
-| F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 5 tests、Flyway smoke PASS | IMPLEMENTED_PENDING_REVIEW | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、follow-up `5a2a0231`、typed snapshot `96d6801c`、再Review待ち |
-| F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）とfollow-up FAIL（P1=4、再Review P1=1）への実装・テスト対応。typed snapshot field boundary、lease fail-closed、lock順序、delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4` + `d476614e` + `5a2a0231` + `96d6801c` → 独立再Reviewへhandoff |
+| F1 DDL | approval-decision, tasks, design, V129, H2 schema, entity/mapper/service/crypto, F1 tests | client/credential/scope/idempotency/usage bucket/nonce/webhook/retention persistence基盤。初回review指摘をtyped boundary、conflict/CAS、purge、route/overlapでremediate。H2 F1 31 tests、MySQL concurrency 5 tests、Flyway smoke PASS | IMPLEMENTATION_PASS | initial `a7654b44`、remediation `a184c1f4`、CAS correction `d476614e`、follow-up `5a2a0231`、typed snapshot `96d6801c`、独立Review PASS |
+| F1 Implementation Review remediation | requirements, design, tasks, review-ledger, review-remediation, implementation/tests | 初回FAIL（P1=7、P2=2）とfollow-up FAIL（P1=4、再Review P1=1）への実装・テスト対応。typed snapshot field boundary、lease fail-closed、lock順序、delivery_generation predicateを追加。public endpoint/外部送信/F2以降は未実装 | IMPLEMENTATION_PASS | `a184c1f4` + `d476614e` + `5a2a0231` + `96d6801c`、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3` → 独立Review PASS |
 | F2 security chain | tasks/design/inventory | 未着手 | DEFERRED_BY_SCOPE | — |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate | candidateのみ。public endpoint未実装 | DEFERRED_BY_SCOPE | — |
 | A2 commands | tasks/design/requirements | command/export未承認・default deny | DISABLED | — |
@@ -28,7 +28,8 @@ R-NF05の固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecはPLAN FAIL（P0=0�
 1db3b2fc2657831b7c6c1e59217301302b7caa80でPLAN PASS（P0=0、P1=0、P2=2）を受領し、F1を開始した。
 Implementation Review follow-upは`dff90b3961b647035436abd378a352b1fa000dd1`でFAIL（P0=0、P1=4、P2=0）だったため、
 `5a2a023178433882bc1c5dcf92e19b5ecfa19db6`のremediationを同一Reviewへ再提出した。再ReviewのP1-FU-001を
-`96d6801c6f1bfefae0a28d2925abf18fe5d5e3c5`で追加remediateし、同一Reviewへ再提出する。
+`96d6801c37d4b952e2601a06cf7edc1bc1a1bef8`で追加remediateし、fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`で
+独立Implementation Review PASS（P0=0、P1=0、P2=0）を受領した。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止する。
 
 Review Head 6e0f5067はremediationの比較基点として固定する。Task 0Rのremediation commit、Owner Gate normalization
@@ -58,4 +59,4 @@ Final remote Head: 外部handoff通知で固定（この行を含むcommit自身
   2 failuresが残るため、全体PASSとは扱わない。
 - 初回Implementation Review: fixed Head `b420911b63177763544edd1e02d663bf528d9dc1`、FAIL（P0=0、P1=7、P2=2）。
 - follow-up Implementation Review: fixed Head `dff90b3961b647035436abd378a352b1fa000dd1`、FAIL（P0=0、P1=4、P2=0）。再Review fixed Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`はFAIL（P0=0、P1=1、P2=0）。
-- 状態: `96d6801c`でP1-FU-001を追加remediate済み・独立Implementation Review再Review待ち。F2以降とproduction enablementは未着手。
+- 最終F1 Implementation Review: fixed Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`、PASS（P0=0、P1=0、P2=0）。状態: F1 IMPLEMENTATION_PASS、M/F2以降とproduction enablementは未着手。

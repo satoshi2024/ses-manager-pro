@@ -39,7 +39,7 @@ PLAN PASS（P0=0、P1=0、P2=2）となった。Owner Gateは再オープンし�
    漏れなく接続すること。retention_class、retention_expires_at、t_api_retention_hold、t_api_purge_checkpointの
     保存モデルと、hold/purgeのlock/CAS競合、active lease、部分失敗、restore epoch後の全件再評価を固定すること。
 
-## F1 Implementation Review remediation（再Review待ち）
+## F1 Implementation Review remediation（独立Review PASS）
 
 独立Implementation Reviewは初回固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対して
 FAIL（P0=0、P1=7、P2=2）だった。F1 approved scope内で、typed snapshot/service boundary、conflictの
@@ -54,7 +54,8 @@ H2 F1対象31 testsとMySQL 5 testsはPASSしたが、独立Implementation Revie
 再Reviewは固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`でFAIL（P0=0、P1=1、P2=0）となり、lease fail-closed、
 lock順序、MySQL競合証跡はクローズされた。残存したnested scalar bypassに対し、`96d6801c`でpublic ID、date/date-time、
 status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証し、nested object深度と配列項目も
-boundedにした。H2 F1対象31 testsは再実行でPASSし、同Headの再独立Review待ちである。
+boundedにした。H2 F1対象31 testsは再実行でPASSし、固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation
+ReviewはPASS（P0=0、P1=0、P2=0）となった。F1は実装Review gateを通過したが、MおよびF2以降は未完了である。
 
 follow-up remediationの実装境界:
 

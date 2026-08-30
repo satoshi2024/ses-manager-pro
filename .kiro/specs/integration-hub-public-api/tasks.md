@@ -72,8 +72,9 @@ commit/pushは指定remote branchへ実施できる。force push、main変更、
   `a184c1f4`でImplementation Review remediation、`d476614e`でdelivery_generation CAS predicate correction、`5a2a0231`でfollow-up reviewの4 P1を実装・テストremediateし、`96d6801c`でsnapshotのfield固有型検証を追加して、purge/rollback証跡とF1契約テストを実装した。対象F1 suiteは31 tests、failure/error/skipなし。MySQL
   Flyway smokeはempty/legacy V78/normal経路でV129までPASSした。全fast suiteはF1対象外の既存loopback・
   production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで終了している。独立Implementation Reviewの
-  旧remediation時点の再Reviewは未実施だった。follow-up remediation後の固定Headを独立Implementation Reviewへ再提出する。
-  MySQL `IntegrationHubF1MySqlConcurrencyTest` 5件はPASSした。
+  旧remediation時点の再Reviewは未実施だった。follow-up remediation後の固定Headを独立Implementation Reviewへ再提出し、
+  P1-FU-001の追加修正後に独立Implementation Review PASS（P0/P1/P2=0）を受領した。MySQL
+  `IntegrationHubF1MySqlConcurrencyTest` 5件はPASSした。
 
 ## Task F2: dedicated security chain
 

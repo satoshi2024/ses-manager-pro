@@ -18,7 +18,7 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 | remote Headなし | P1 | Discovery/0R/0R-D seriesをorigin/codex/integration-hub-public-apiへpushし、local/remote一致を確認 | SPEC_ADDRESSED | Task単位pushと最終Head固定 |
 | outbox insert after-commit | P1 | 業務stateとoutbox rowを同一DB transactionでatomic commitする設計へ修正。claim/HTTP/CASを分離 | SPEC_ADDRESSED | F1/B1実装とcrash/stale/replay test |
 | 外部契約なし | P1 | Owner承認済みの非公開openapi-candidate.yamlを保持。read-only allow-list、status/error/cursor/securityを固定 | SPEC_ADDRESSED | A1は別scope、public endpointは未実装 |
-| 実装・検証証拠なし | P1 | F1 approved persistence基盤を`a7654b44`で実装し、F1 targeted testとMySQL migration smokeの証跡を追加 | IMPLEMENTED_PENDING_REVIEW | 独立Implementation Review、F2〜Mの実装・検証 |
+| 実装・検証証拠なし | P1 | F1 approved persistence基盤を`a7654b44`で実装し、F1 targeted testとMySQL migration smokeの証跡を追加 | CLOSED_BY_REVIEW | F1独立Implementation Review PASS。F2〜Mの実装・検証は別gate |
 | metrics cardinality不足 | P2 | finite label set、禁止label、scrape/cardinality test、safe trace/audit方針を追加 | SPEC_ADDRESSED | F2/Mの実装・scrape証拠 |
 | payload retention不足 | P2 | digest/hash/allow-list snapshot、承認retention、legal hold、purge/restore testを追加 | SPEC_ADDRESSED | F1/B1/B2/M実装 |
 | handoff commit系列不足 | P2 | Review Head 6e0f5067を基点として記録し、remediation commitと最終Headをcommit series＋外部handoffで追跡 | SPEC_ADDRESSED | remediation push後の最終Head通知 |
@@ -32,36 +32,37 @@ Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADD
 ## F1 Implementation Review remediation
 
 初回Implementation Reviewは固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対してFAIL（P0=0、
-P1=7、P2=2）だった。以下は実装・テストへ反映したが、独立再Reviewを受けるまでIMPLEMENTATION PASSではない。
+P1=7、P2=2）だった。以下は実装・テストへ反映し、後続の独立Implementation Reviewでクローズされた。
 
 | Finding | 対応 | 状態 | 証跡 / 残る条件 |
 |---|---|---|---|
-| P1-001 snapshot保存境界・generic CRUD迂回 | typed ExternalDtoSnapshotの構造allow-list、payload/canonicalPayloadのfield-specific object、changedFieldNamesのbounded array、用途別service API。IService/ServiceImpl継承を除去 | IMPLEMENTED_PENDING_REVIEW | `a184c1f4`、`5a2a0231`、H2 targeted。再Review、M scan |
-| P1-002 inbound DuplicateKey conflict | provider event FOR UPDATE後にCONFLICTをversion CAS保存 | IMPLEMENTED_PENDING_REVIEW | InboundEventServiceTest 2件、`5a2a0231`の実MySQL inbound race。再Review |
-| P1-003 purge starvation | active hold除外、hold acquire/release reset、checkpoint→target→holdの共通lock順序、keyset末尾reset | IMPLEMENTED_PENDING_REVIEW | IntegrationHubF1RetentionH2Testのhold/lease-cursor境界、`5a2a0231`のMySQL hold/purge race。再Review |
-| P1-004 purge lease/version CAS | lock後のdelete predicateへversion、terminal、expiry、lease token/expiryのstrict NULL組合せを含める | IMPLEMENTED_PENDING_REVIEW | H2 + `5a2a0231`のIntegrationHubF1MySqlConcurrencyTest |
-| P1-005 idempotency CONFLICT | mismatchを固定409/90日retentionへ永続化後に拒否 | IMPLEMENTED_PENDING_REVIEW | ApiIdempotencyServiceTest、mapper CAS。再Review |
-| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求し、`d476614e`でSQL predicateにもdelivery_generationを追加 | IMPLEMENTED_PENDING_REVIEW | H2 + MySQL CAS test。B1外部provider実装は未着手 |
-| P1-007 F1 evidence不足 | H2 31 tests、実service/mapperを使うMySQL multi-connection 5 tests、shard inventoryを追加 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、全境界網羅、M/security/load/recoveryは未完了 |
-| P2-001 credential overlap NULL | non-null overlap_untilの将来期限だけ有効 | IMPLEMENTED_PENDING_REVIEW | CredentialVersionServiceTest |
-| P2-002 raw route template | candidate 11 fixed templates以外を拒否 | IMPLEMENTED_PENDING_REVIEW | ApiUsageBucketServiceTest |
+| P1-001 snapshot保存境界・generic CRUD迂回 | typed ExternalDtoSnapshotの構造allow-list、field固有型、用途別service API。IService/ServiceImpl継承を除去 | CLOSED_BY_REVIEW | `a184c1f4`、`5a2a0231`、`96d6801c`、H2 31件。独立Implementation Review PASS、M scanは別gate |
+| P1-002 inbound DuplicateKey conflict | provider event FOR UPDATE後にCONFLICTをversion CAS保存 | CLOSED_BY_REVIEW | InboundEventServiceTest 2件、`5a2a0231`の実MySQL inbound race。独立Implementation Review PASS |
+| P1-003 purge starvation | active hold除外、hold acquire/release reset、checkpoint→target→holdの共通lock順序、keyset末尾reset | CLOSED_BY_REVIEW | IntegrationHubF1RetentionH2Testのhold/lease-cursor境界、`5a2a0231`のMySQL hold/purge race。独立Implementation Review PASS |
+| P1-004 purge lease/version CAS | lock後のdelete predicateへversion、terminal、expiry、lease token/expiryのstrict NULL組合せを含める | CLOSED_BY_REVIEW | H2 + `5a2a0231`のIntegrationHubF1MySqlConcurrencyTest。独立Implementation Review PASS |
+| P1-005 idempotency CONFLICT | mismatchを固定409/90日retentionへ永続化後に拒否 | CLOSED_BY_REVIEW | ApiIdempotencyServiceTest、mapper CAS。独立Implementation Review PASS |
+| P1-006 delivery result CAS | provider key、payload hash、lease、row version、generation由来キーをCAS要求し、`d476614e`でSQL predicateにもdelivery_generationを追加 | CLOSED_BY_REVIEW | H2 + MySQL CAS test。独立Implementation Review PASS。B1外部provider実装は未着手 |
+| P1-007 F1 evidence不足 | H2 31 tests、実service/mapperを使うMySQL multi-connection 5 tests、shard inventoryを追加 | CLOSED_BY_REVIEW | `5a2a0231`、F1 scopeの独立Implementation Review PASS。M/security/load/recoveryは未完了 |
+| P2-001 credential overlap NULL | non-null overlap_untilの将来期限だけ有効 | CLOSED_BY_REVIEW | CredentialVersionServiceTest。独立Implementation Review PASS |
+| P2-002 raw route template | candidate 11 fixed templates以外を拒否 | CLOSED_BY_REVIEW | ApiUsageBucketServiceTest。独立Implementation Review PASS |
 
 ## F1 Implementation Review follow-up
 
 follow-up独立Implementation Reviewは固定Head `dff90b3961b647035436abd378a352b1fa000dd1` に対して
 FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023178433882bc1c5dcf92e19b5ecfa19db6`
-へ反映したremediationであり、再Review受領までIMPLEMENTATION PASSではない。
+へ反映したremediationであり、追加修正後の固定Headで独立Implementation Review PASSを受領した。
 
 | Finding | 対応 | 状態 | 証跡 / 残る条件 |
 |---|---|---|---|
-| P1-FU-001 raw body/PII nested snapshot | `ExternalDtoSnapshot`を用途別allow-listのstructured objectへ限定し、public ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | IMPLEMENTED_PENDING_REVIEW | `5a2a0231`、`96d6801c`、ApiDeliveryServiceTest。再Review、M scan |
+| P1-FU-001 raw body/PII nested snapshot | `ExternalDtoSnapshot`を用途別allow-listのstructured objectへ限定し、public ID、date/date-time、status/resultCode、signature/processing status、error codeをfield固有pattern/enumで検証。changedFieldNames/skillTagCode、nested深度もboundedにし、許可field内のraw JSON/provider body scalarを拒否するnegative testを追加 | CLOSED_BY_REVIEW | `5a2a0231`、`96d6801c`、ApiDeliveryServiceTest。独立Implementation Review PASS。M scanは別gate |
 | P1-FU-002 lease片側NULLのpurge | candidate queryとdelete CASを「両方NULL」または「両方non-NULLかつexpiry<=now」に限定し、期限欠落rowを実MySQLで検証 | CLOSED_BY_REVIEW | `5a2a0231`、IntegrationHubF1MySqlConcurrencyTest 5/5。独立再Reviewでクローズ |
 | P1-FU-003 hold/purge lock順序 | hold acquire/release/purgeをcheckpoint→target→holdへ統一し、checkpoint初期化もupsert-firstへ変更。実MySQL hold/purge raceを追加 | CLOSED_BY_REVIEW | `5a2a0231`、IntegrationHubF1RetentionH2Test/MySQL。独立再Reviewでクローズ |
 | P1-FU-004 MySQL multi-connection evidence | `IntegrationHubF1MySqlConcurrencyTest`をSpring経由の5テストへ拡張し、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを実証 | CLOSED_BY_REVIEW | `5a2a0231`、5/5 PASS。独立再Reviewでクローズ。M/security/load/recoveryは未完了 |
 
 再Review（`f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`）はP0=0、P1=1、P2=0だった。FU-002〜004は独立検証でクローズ、
 FU-001のみ許可nested scalarの迂回が残ったため、`96d6801c`でfield固有validatorとnegative testを追加した。現状態は
-IMPLEMENTED_PENDING_REVIEWであり、自己判定でIMPLEMENTATION PASSへ変更しない。
+`0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでPASS（P0=0、P1=0、P2=0）となり、
+F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2以降は別gateであり、ここで公開可能とは扱わない。
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
@@ -84,7 +85,8 @@ lease fail-closed、lock順序、MySQL競合証跡を追加したが、public en
 ## 実装範囲の残存ゲート
 
 Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は確定した。F1初回実装は`a7654b44`、Review remediationは
-`a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`であるが、独立Implementation Review PASSは未取得である。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
+`a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
+固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。public endpoint、外部送信、A1/A2/B1/B2、production enablement、
 command、exportは引き続きこのimplementation scope外である。
 
 ## Handoff checkpoint
@@ -105,6 +107,8 @@ command、exportは引き続きこのimplementation scope外である。
 - 初回Implementation Review: b420911b63177763544edd1e02d663bf528d9dc1、FAIL（P0=0、P1=7、P2=2）
 - follow-up Implementation Review: dff90b3961b647035436abd378a352b1fa000dd1、FAIL（P0=0、P1=4、P2=0）
 - follow-up remediation: 5a2a023178433882bc1c5dcf92e19b5ecfa19db6、H2 31 tests / MySQL 5 tests PASS
+- typed snapshot correction: 96d6801c37d4b952e2601a06cf7edc1bc1a1bef8、H2 31 tests / MySQL 5 tests再確認、独立Implementation Review PASS
+- Final F1 Implementation Review: fixed Head 0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3、PASS（P0=0、P1=0、P2=0）
 - Final remote Head: この文書を含む最終handoff commitの外部通知で固定する。自己参照hashは記録しない。
 
 ## Task 0R delta対応

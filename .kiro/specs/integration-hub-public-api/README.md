@@ -3,7 +3,7 @@
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1 follow-up implementation remediation済み・独立再Review待ち
+- 本specの状態: Owner承認済み、R-NF05独立Plan Review PASS（P0=0、P1=0、P2=2）、F1独立Implementation Review PASS（P0=0、P1=0、P2=0）、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（2026-08-30）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -43,10 +43,11 @@ F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、d
 suite（31 tests、failure/error/skipなし）、MySQL `IntegrationHubF1MySqlConcurrencyTest`（5 tests、failure/error/skipなし）を確認した。
 follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378a352b1fa000dd1`でFAIL（P0=0、P1=4、P2=0）だったため、
 `5a2a0231`の再Reviewを行った。固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1=1（nested scalar bypass）が残ったため、
-`96d6801c`でfield固有pattern/enum、型、深度の検証を追加し、同Reviewへ再提出する。FU-002〜004は独立検証でクローズ済みだが、
-F1は再Review判定までIMPLEMENTATION PASS扱いにしない。
+`96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
+`0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
+public endpoint、外部送信、production enablementは未完了である。
 全fast suiteはF1対象外の既存loopback・production-config系10 errorsと2 failuresに加え、既存fixture由来の1 errorで
-終了しているため、全体PASSとは扱わず、独立Implementation Reviewを残している。
+終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
 ## Task 0R remediation
 
