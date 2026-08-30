@@ -67,6 +67,20 @@ F2 remediation対象13クラスの再実行結果は29 tests、failure 0、error
 attribute注入なしで追加したが、Windows実行環境の`Unable to establish loopback connection`によりTomcat起動前に停止し、HTTP assertionへ到達していない。
 この環境制約をPASS根拠にせず、独立Reviewへ明示する。A1/B1/B2/M、production enablement、実顧客credential、実provider送信、PR/mergeは未実施である。
 
+## F2 Implementation Review追加remediation
+
+固定remote Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408` の独立再ReviewはFAIL（P0=0、P1=1、P2=1）だった。`a16cdcba`で次の2件を修正し、
+同じR-NF05へ再提出する。
+
+| Finding ID | Severity | Finding | 対応証跡 | Status |
+|---|---|---|---|---|
+| NF05-IMPL-F2-007 | P1 | tenant/legal entity矛盾がresource ID一致だけで許可される | `ExternalApiDataScope.requireAuthoritativeBinding`、`ExternalApiDataScope.intersect`の空dimension保持、`ExternalApiEffectiveScope`のsingleton注入/空predicate拒否、authorization/data-scope tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-008 | P2 | IPv4-mapped IPv6 source/CIDRがfamily長不一致で誤拒否される | `ExternalApiCidrMatcher`の`::ffff:0:0/96` collapseとprefix変換、mapped/IPv4双方向CIDR tests | REMEDIATED_REVIEW_PENDING |
+
+authoritative scopeはtenant/legal entityを常にprincipal singletonへ拘束し、JSON dimension省略時にもeffective populationへ追加する。明示dimensionの不一致、
+client/routeでの空intersection、resource dimensionの不在はfail-closedとする。CIDRはmapped IPv6をIPv4 predicateへ正規化して比較する。追加focused suiteは19 tests、
+failure/error/skipなしでPASSした。F2は独立再Review完了までPASS扱いせず、A1以降とproduction enablementは開始しない。
+
 ## Scope expansion Plan delta re-review remediation
 
 固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13の独立Plan delta再ReviewはPLAN FAIL

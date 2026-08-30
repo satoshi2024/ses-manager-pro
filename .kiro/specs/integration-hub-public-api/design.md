@@ -78,6 +78,18 @@ F2の実装は `e47025b5` で次の専用境界へ固定する。これは実装
    idempotency/resource/user/IP/provider IDをlabelへ入れず、unknown route/method/outcome/tierは固定bucketへ収束させる。
 6. `/external-api/v1` exact rootは `/external-api/v1/**`と同じsecurity matcher、route catalog、correlation、audit、disabled deny-only境界で処理する。
 
+### 1.3 F2追加remediation：authoritative scopeとmapped CIDR
+
+固定Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408` の再Reviewで、resource dimensionだけのintersectionではtenant/legal entity矛盾を検出できないことが判明した。
+そのため、`tenantIds`と`legalEntityIds`はeffective scopeのauthoritative singleton predicateとする。JSONに存在する場合はclient scope、route scope、
+およびそのintersectionの各段階で、principalのtenantとlegal entityのexact singletonと一致しなければ拒否する。intersectionは明示dimensionの空集合を
+削除せず保持し、`ExternalApiEffectiveScope`のconstructorが空predicateを拒否する。JSONからdimensionが省略された場合も、effective scopeへprincipalの
+tenant/legal entity singletonを追加する。A1以降はこのimmutable effective scopeを唯一のvisible population入力とし、raw client/route scopeを直接参照しない。
+
+CIDRはIPv4-mapped IPv6をfamily差異で誤拒否しない。`::ffff:0:0/96`に該当する16-byte address/CIDRを4-byte IPv4へcollapseし、mapped CIDRのprefix 96〜128を
+IPv4 prefix 0〜32へ変換して比較する。IPv4 source×mapped CIDRとmapped source×IPv4 CIDRは同じ4-byte predicateへ収束する。mapped prefixの範囲外、short/integer/
+leading-zero/zone ID/hostnameは引き続き拒否する。
+
 ## 2. F1コンポーネントと保存モデル
 
 F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具体実装は開始時に現行最大値を再確認する。

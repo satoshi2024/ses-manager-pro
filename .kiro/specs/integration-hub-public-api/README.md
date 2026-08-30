@@ -5,7 +5,8 @@
 - 中央台帳の状態: APPROVED
 - 本specの状態: F1独立Implementation Review PASSを維持。scope expansion Plan deltaは固定Head
   ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2は独立Implementation
-  ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加し、再Review待ち。
+  ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加した。再Review固定Head
+  f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationし、再Review待ち。
   A1/B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -71,6 +72,11 @@ PLAN PASS、IMPLEMENTATION PASSを混同しない。
 intersectionとimmutable effective scopeを認可へbindし、専用audit table/service、strict literal IP parser、有限metrics label、
 namespace root matcherを追加した。enabled connector E2Eは手動request属性を注入しない形で追加したが、実行環境のloopback接続確立失敗により
 HTTP assertion到達前に停止している。このためF2をPASSまたは公開可能とは扱わず、独立Implementation再Reviewを要求する。
+
+その後の独立再Review（fixed Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408`）で、explicit tenant/legal entityの矛盾を許可するP1と、
+IPv4-mapped IPv6 CIDR比較のP2が指摘された。`a16cdcba`でauthoritative tenant/legal entity singletonをeffective populationへ注入し、
+scope入力の明示値をprincipalと照合、空intersectionを保持してfail-closedにした。またmapped IPv6 source/CIDRを4-byte IPv4へcollapseし、
+mapped/IPv4双方のCIDR比較を追加した。独立再Reviewが完了するまでF2をPASS扱いしない。
 
 ## 既知の重要差分
 

@@ -32,7 +32,7 @@
 | Decision date / Owner | 2026-08-30 / PROJECT_OWNER（ROLE） |
 | Scope expansion approval reviewed Head | 7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値） |
 | F1 | PLAN PASS / IMPLEMENTATION PASS。再オープンしない |
-| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。Implementation FAIL後の6 findingをremediate済み、独立再Review待ち |
+| F2 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。Implementation FAIL後の8 findingをremediate済み、独立再Review待ち |
 | A1 | APPROVED_SEQUENCED。F2 Review PASS後にGET-only 11 pathsを実装 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | APPROVED_SEQUENCED。A1 Review後、mock/stub/loopbackのみ |
@@ -108,6 +108,8 @@ F2実装証跡は専用packageとF2 testsに限定し、A1 controller、B1/B2 pr
 | IP/CIDR | `ExternalApiCidrMatcher` | DNSなしstrict literal parser、IPv4/IPv6/mapped IPv6、曖昧表記拒否 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
 | metrics | `ExternalApiMetricsRecorder` | route/method/status class/outcome/client tierのみ有限label、識別子label禁止、scrape test | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
 | namespace root | `ExternalApiRouteCatalog`、`ExternalApiSecurityConfig` | `/external-api/v1`をexact matcher、filter、audit、correlationの同一専用境界で処理 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
+| authoritative scope | `ExternalApiDataScope`、`ExternalApiEffectiveScope`、`ExternalApiAuthorizationFilter` | tenant/legal entityのexplicit exact singleton照合、空intersection保持、未指定時もprincipal singletonをeffective populationへ注入 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
+| mapped CIDR | `ExternalApiCidrMatcher` | `::ffff:0:0/96`のsource/CIDRを4-byte IPv4へcollapseし、prefix 96〜128を0〜32へ変換 | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING |
 
 ## 4. Secret encryption / rotation inventory
 
@@ -167,7 +169,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 | PortalRateLimitFilter | login/inviteはresolved client IP、download/upload/acceptanceはportal user | 公開APIのclient、scope、method/resource、burst、Retry-After、quotaとは別 |
 | CloudSignRateLimiter | token単位、process内deque、最大800/minを既定500以下へ | provider専用。公開client rate boundaryに流用しない |
 | ExportConcurrencyLimiter | static Semaphore、process内2 permits既定 | concurrency制限のみ。公開API quotaや公平性を保証しない |
-| ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
+| ClientIpResolver | trusted proxyのときのみX-Forwarded-For先頭値を採用 | trusted proxy list、forwarded chain、spoof、IPv6、mapped IPv6 family、unknownをF1/F2で受入。IPはrate保存キーへ含めない |
 | 公開client rate | ExternalApiAuthorizationFilterからF1 ApiUsageBucketServiceを呼出し | F2 IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。保存キーはclient×scope×tenant×route templateのみ。60 req/min、burst 20、日次50,000をDB atomic counterで適用 |
 
 ## 8. External DTO inventory
@@ -239,5 +241,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はFAIL後のremediation済み（独立再Review待ち）。A1/B1/B2/Mは各wave Review後に順次実装する。
+- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2は再ReviewのP1/P2追加指摘をa16cdcbaでremediate済み（独立再Review待ち）。A1/B1/B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

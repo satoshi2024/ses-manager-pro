@@ -102,6 +102,9 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 - Preconditions: F1 Implementation PASS、scope expansion Decision、R-NF05 Plan delta PASS。F2独立Implementation Review再判定待ち。
 - Remediation: 前回F2 FAIL（fixed Head `220ac86f`、P1=4/P2=2）に対し、connector raw-target供給、typed effective scope、専用audit、strict IP parser、finite metrics、
   namespace root boundaryを `e47025b5` へ実装した。独立再ReviewまでF2 PASSへ昇格しない。
+- Additional remediation: fixed Head `f57df6d2` のP1（tenant/legal entity矛盾）とP2（mapped IPv6 CIDR比較）を `a16cdcba` へ実装した。
+  tenant/legal entityはclient/route各JSONでprincipal singletonへ照合し、intersectionの空authoritative dimensionを保持して拒否する。
+  mapped IPv6 source/CIDRは4-byte IPv4へcollapseし、両方向のCIDR比較をtestする。独立再ReviewまでF2 PASSへ昇格しない。
 - Implementation guidance: HMAC wire headerはOpenAPI candidateのX-Client-ID、X-Credential-Version、
   X-Key-ID、X-Timestamp、X-Nonce、X-Client-Signatureへ固定し、credentialVersion/keyIdの形式、
   raw header block 16,384 byte/32 field、Content-Length、body 1,048,576 byte、Content-Encodingの
@@ -132,6 +135,7 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   `src/test/java/com/ses/config/integrationhub/` のF2 unit/security boundary test（対象29件の再確認）および
   `ExternalApiSecurityChainIntegrationTest`。request attribute手動注入なしのenabled connector E2Eも追加したが、Windows loopback接続エラーでHTTP assertion前に停止。
   A1 controller、B1/B2 transport、production enablementは未実装。
+- 追加境界証跡: `a16cdcba`、tenant/legal entity authoritative singletonとmapped IPv6 CIDR familyのfocused suite 19 tests、failure/error/skipなし。
 
 ## Task A1: v1 read APIs / OpenAPI
 

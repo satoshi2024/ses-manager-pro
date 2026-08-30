@@ -9,7 +9,7 @@ Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.md
 固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcのscope expansion Plan deltaはPLAN FAIL
 （P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）だったが、
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
-F2は独立Implementation Review FAIL後のremediation済みで再Review待ちであり、PASS受領後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
+F2は独立Implementation Reviewの再判定でP1=1/P2=1が残ったため追加remediation済みで再Review待ちであり、PASS受領後にA1→B1→B2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -24,7 +24,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | 0R-P5 | scope expansion Plan delta remediation | dedicated chain、HMAC byte canonical、production fail-closed、mock/loopback destination、A2 N/A、trace | 前回P1-EXP-004/P2はSPEC_ADDRESSED。残存P1を0R-P6で補正 |
 | 0R-P6 | scope expansion Plan delta residual remediation | security chain監査/error境界、canonicalTarget完全byte手順、disabled deny-onlyとbean/config契約 | docs-only修正後、R-NF05 Plan delta再Review |
 | F1 | client / credential / scope / idempotency DDL | Flyway、H2、migration evidence、rollback、purge | 完了。PLAN/IMPLEMENTATION PASS |
-| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。F2 FAIL remediation済み |
+| F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_REMEDIATION_REVIEW_PENDING。追加remediation済み |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、contract tests | APPROVED_SEQUENCED。F2 Review PASS後 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
 | B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | APPROVED_SEQUENCED。A1 Review後、mock/loopbackのみ |
@@ -89,6 +89,18 @@ production enablementと実顧客/実providerは引き続き禁止する。
 実装commitは `e47025b5`。対象F2 suiteは29 testsがfailure/error/skipなしでPASSした。enabled connector E2EはWindowsのloopback接続確立失敗でHTTP assertion前に停止したため、独立Review再判定前は
 F2 IMPLEMENTATION_PASSへ昇格しない。
 
+## F2 Implementation Review追加remediation（固定Head f57df6d2 → a16cdcba）
+
+固定Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408` の独立再ReviewはFAIL（P0=0、P1=1、P2=1）だった。`a16cdcba`で次を追加した。
+
+1. `tenantIds`/`legalEntityIds`がJSONに存在する場合はprincipalのtenant/legal entityとexact singleton一致を要求し、client/route双方で検証する。
+   intersectionでは明示dimensionの空集合を削除せず、`ExternalApiEffectiveScope`が空predicateを拒否する。JSONでdimensionを省略した場合は、
+   principalのtenant/legal entity singletonをeffective scopeへ必ず追加する。
+2. CIDR parserはIPv4-mapped IPv6 `::ffff:0:0/96`を4-byte IPv4へcollapseし、mapped source×IPv4 CIDR、IPv4 source×mapped CIDRを同一familyで比較する。
+   mapped CIDR prefixは96〜128だけを受け付け、IPv4 prefixへ96を減算する。
+
+新規境界を含むfocused suiteは19 tests、failure/error/skipなしでPASSした。F2は独立再Review待ちであり、A1へ進まず、production enablementも禁止する。
+
 ## F1 Implementation Review remediation（独立Review PASS）
 
 独立Implementation Reviewは初回固定Head `b420911b63177763544edd1e02d663bf528d9dc1` に対して
@@ -116,7 +128,7 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2はIMPLEMENTATION_REMEDIATION_REVIEW_PENDING、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、F2 Implementation Review再PASS後に順次開始する。A2は
+F2はIMPLEMENTATION_REMEDIATION_REVIEW_PENDING、A1/B1/B2/MはAPPROVED_SEQUENCEDであり、F2 Implementation Review追加再PASS後に順次開始する。A2は
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportはdefault denyのままとする。production enablement、実顧客
 credential、実providerへの外部送信は引き続き禁止する。
 

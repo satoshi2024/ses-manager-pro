@@ -101,6 +101,17 @@ quota、correlation、専用audit、stable error boundaryとfilter自動二重�
 対象F2 suiteは29 tests、failure/error/skipなし。enabled connector E2EはWindowsのloopback接続確立エラーでHTTP到達前に停止したため、
 この実行制約を隠さず記録する。F2をPASS扱いせず、独立再Reviewの判定を待つ。
 
+## F2 additional implementation remediation evidence
+
+独立再Reviewの固定Head `f57df6d2cd962c4695d41b9a1980cc4b621cb408` はFAIL（P0=0、P1=1、P2=1）だった。`a16cdcba`で次の2件をremediateした。
+
+| Finding ID | Severity | Remediation | Verification | Status |
+|---|---|---|---|---|
+| NF05-IMPL-F2-007 | P1 | tenant/legal entityをauthoritative singleton predicateとしてclient/route/ intersection/effective scopeへbind | data scope 4 tests、authorization 7 tests、chain integration 3 tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-F2-008 | P2 | mapped IPv6 source/CIDRを4-byte IPv4へcollapseし、mapped prefix 96〜128を0〜32へ変換 | source IP 5 tests（mapped/IPv4双方向を含む） | REMEDIATED_REVIEW_PENDING |
+
+追加focused suiteは19 tests、failure/error/skipなし。F2は独立再Reviewの判定前にPASSへ昇格させない。
+
 ## Findings
 
 | ID | Severity | Finding | Evidence | Disposition |

@@ -110,8 +110,12 @@ IH-R1-17. client data scopeとroute data scopeはstrict typed modelへparseし�
 IH-R1-18. external専用auditは専用schema/serviceでsuccess、error、rejectを一request一recordへ収束させる。correlation ID、認証前後principal、
     credential version/key ID、allow-list route template、authentication/scope/dataScope/command/rateの各decision、status/result codeをbounded metadataとして
     保存し、audit service/schema欠落または永続化失敗は公開responseをfail-closed 500へする。raw target/body、IP、secret、PIIを保存・logしない。
-IH-R1-19. CIDR入力はDNSを一切使わないstrict literal parserで扱い、IPv4は4個のcanonical decimal octet、IPv6は厳密なhex group/`::`、
-    IPv4-mapped IPv6はIPv4へ正規化する。short/integer/leading-zero/zone ID/hostname/bracket/空白表記は拒否し、source IPとCIDRのfamily不一致も拒否する。
+IH-R1-19. CIDR入力はDNSを一切使わないstrict literal parserで扱い、IPv4は4個のcanonical decimal octet、IPv6は厳密なhex group/`::`とする。
+    IPv4-mapped IPv6は`::ffff:0:0/96`を境界としてsource/CIDRの双方を4-byte IPv4へcollapseし、mapped prefix 96〜128はIPv4 prefixへ
+    96を減算して比較する。short/integer/leading-zero/zone ID/hostname/bracket/空白表記は拒否する。
+IH-R1-20. `tenantIds`または`legalEntityIds`がclient/route data scope JSONに存在する場合、各dimensionはprincipalのtenant/legal entityと
+    exact singleton一致しなければならない。不一致またはclient×route intersectionの空集合は403へ収束する。dimension省略時もeffective scopeには
+    principalのtenant/legal entity singletonをauthoritative predicateとして必ず追加し、A1が利用する唯一のimmutable effective populationへbindする。
 
 ## IH-R2 External contract
 
@@ -251,6 +255,9 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを
 - metrics scrapeはroute template/method/status class/outcome/client tierの有限集合だけを確認し、client/correlation/request/idempotency/resource/user/IP/
   provider IDがlabelに存在しないことと、route unknownを固定bucketへ収束することを検証する。
 - enabled connector E2Eはrequest attributeの手動注入なしでraw request-targetを取得し、raw target欠落時はfail-closed、通常のrequestは認証境界まで到達することを検証する。
+- tenant一致/legal不一致、tenant不一致/legal一致、両方不一致、client/route双方のdimension省略、明示dimensionの空intersectionを403で検証し、
+  effective scopeへprincipal tenant/legal entityがsingletonで存在することを確認する。
+- mapped IPv6 source×IPv4 CIDR、IPv4 source×mapped CIDR、mapped prefixの96/128境界を検証する。
 - payload期限境界、succeeded/failed/DLQ purge、legal hold、backup/restore後purge、purge再実行。
 - legal hold取得/解除とpurgeの競合、row version/CAS、active lease、restore epoch後の全件再評価、部分失敗の再実行。
 - active leaseでkeyset先を通過した後のlease expiry再評価、hold解除時cursor reset、checkpointの同時claim/CAS。
