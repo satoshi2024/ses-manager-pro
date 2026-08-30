@@ -372,7 +372,17 @@ limit+1をSQL境界へ固定する。detailはopaque public IDを内部IDへ解�
 responseは`ExternalApiEngineerAvailability`、`ExternalApiProject`、`ExternalApiContractStatus`、
 `ExternalApiInvoiceStatus`およびlist/count wrapperだけを使う。engineer availabilityでは現行sourceの`available_date`だけを
 `availableFrom`へ写像し、`availableTo`と`skillTagCode`はcanonical sourceがないためnullとする。public IDはHMAC-SHA256で生成し、
-cursorはAES-GCM暗号化してclient、tenant、legal entity、route template、scope digest、as-of、expiryへbindする。
+cursorはAES-GCM暗号化してclient、tenant、legal entity、route template、scope digest、snapshot ID、as-of、expiryへbindする。
+
+初回listが次ページを持つ場合、serviceはrequest受信時のserver clockをas-ofとして、SQLでscope済みの全visible rowをallow-list DTOへ変換し、
+`t_api_read_snapshot`（client/tenant/legal entity/route/scope digest/as-of/expiry）と
+`t_api_read_snapshot_item`（resource ID、DTO JSON）へ同一transactionで保存する。次ページはsnapshot IDと内部keysetだけでitemを読むため、
+初回後のinsert、update、delete、customer/project reparentがmembershipと公開値を変更しない。snapshotにはinternal entity JSON、raw request、
+secret、PII、provider responseを保存せず、cursor TTL後にpurgeする。snapshot rowが失われた、期限切れた、またはDTO復元できない場合は
+`CURSOR_INVALID`へ収束する。
+
+invoice queryは`invoiceIds × customerIds`をlist/detail/countの同一WHERE predicateへ必須適用し、contract scopeがある場合はinvoice itemからの
+EXISTS predicateでintersectionする。invoiceが複数contractへ紐づくときは、単一contractを表す`publicContractId`を返さずnullとする。
 
 ## 5. 3つの決定表
 
@@ -521,8 +531,8 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - scope expansionのPlan delta ReviewのPASS、approved Baseの再fetch確認、各waveのmigration最大値の再確認。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
-- Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1は
-  `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装済みの独立Implementation Review待ちである。A1 Review PASS後にB1→B2→Mを各waveの独立Implementation Review後に順次開始する。
+- Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1初回Review FAILを
+  `874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediate済みの独立再Implementation Review待ちである。A1 Review PASS後にB1→B2→Mを各waveの独立Implementation Review後に順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

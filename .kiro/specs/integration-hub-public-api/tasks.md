@@ -1,4 +1,4 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 PASS・A1独立Review待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2 PASS・A1独立再Review待ち）
 
 ## 実行停止規則
 
@@ -142,14 +142,16 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 ## Task A1: v1 read APIs / OpenAPI
 
 - [x] Objective: 承認済みread resourceのlist/detail/count、opaque cursor、stable error、OpenAPIを実装する。
-- Preconditions: F2 Implementation PASS、scope expansion Decisionを満たした。実装commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`、現在はIMPLEMENTATION_REVIEW_PENDING。
+- Preconditions: F2 Implementation PASS、scope expansion Decisionを満たした。初回Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0、P1=2、P2=2）。
+  remediation commit `874fface3bfe90dd27b766ddf9aeff4e00eae591`をpush済み、現在はREMEDIATED_REVIEW_PENDING。
 - Test requirements: external DTO allow-list、entity serialization negative、scope一致、cursor tamper/expiry、
   count/detail/list非列挙、error body secret/PII/内部情報なし。
-- Demo: internal entityを一つもserializeせず、OpenAPI candidateのGET-only 11 pathsとexternal DTO allow-listへ一致させる。
+- Demo: internal entityを一つもserializeせず、OpenAPI candidateのGET-only 11 pathsとexternal DTO allow-listへ一致させる。invoice customer scope、
+  複数contract非偽装、初回as-of snapshotのinsert/update/delete/reparent、非canonical cursor拒否を確認する。
 - 実装証跡: `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`、4 resource DTO、
   `ExternalApiPublicIdCodec`、`ExternalApiCursorCodec`、enabled key未設定時のfail-closed起動検証。
-- 検証結果: focused A1 suite 15 tests、failure/error/skipなし。Windows browser profileのconnector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、
-  独立ReviewのPASS根拠にはしない。A1 Implementation Review完了までB1を開始しない。
+- 検証結果: remediation focused suite 16 tests、failure/error/skipなし。Windows browser profileはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、
+  独立ReviewのPASS根拠にはしない。A1独立再Implementation Review完了までB1を開始しない。
 
 ## Task A2: limited command APIs（N/A under current decision）
 

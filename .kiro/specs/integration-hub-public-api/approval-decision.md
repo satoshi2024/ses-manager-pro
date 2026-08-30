@@ -53,7 +53,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | Wave | Decision status | 境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | 独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | IMPLEMENTATION_REVIEW_PENDING | 実装commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`。GET-only 11 paths、inventory allow-list、external DTOのみ |
+| A1 | REMEDIATED_REVIEW_PENDING | 初回Review FAIL（`111f4baa`、P0=0/P1=2/P2=2）を`874fface3bfe90dd27b766ddf9aeff4e00eae591`で修正。独立再Review待ち |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。mock/loopbackのみ、実provider送信なし |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
@@ -102,5 +102,5 @@ PLAN PASS（P0=0、P1=0、P2=0）を受領した。F2は同じ専用worktreeで�
 `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のF2 IMPLEMENTATION PASSを受領した。
 
 Plan deltaは固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPASS済みである。F2 PASS後、A1を
-`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装し、独立A1 Implementation Reviewへhandoffする。A1 Review PASS後はB1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
+`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装した。初回A1 Implementation Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL（P0=0/P1=2/P2=2）だったため、`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediateし、独立再Reviewへhandoffする。A1 Review PASS後はB1→Review→B2→Review→M→最終Reviewの順に継続する。各waveはTask単位でcommit/pushし、production enablement、実顧客credential、実provider送信、
 PR、merge、auto-mergeは最終PLAN/IMPLEMENTATION PASS後も別途許可されるまで行わない。

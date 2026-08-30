@@ -7,7 +7,8 @@
   ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）。F2は独立Implementation
   ReviewでFAIL（固定Head 220ac86f、P1=4、P2=2）となったため、remediation commit e47025b5を追加した。再Review固定Head
   f57df6d2でもP1=1、P2=1が残ったため、a16cdcbaで追加remediationした。fixed Head
-  d022e600でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領し、A1を`466bd9aa`で実装済み、独立Review待ち。
+  d022e600でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領し、A1の初回独立Implementation ReviewはFAIL
+  （固定Head `111f4baa`、P0=0、P1=2、P2=2）だった。`874fface`で実装remediation済み、独立再Review待ち。
   B1/B2/Mは順次承認、A2は現DecisionでN/A、M未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -58,7 +59,7 @@ follow-upの独立Implementation Reviewは固定Head `dff90b3961b647035436abd378
 `96d6801c`でfield固有pattern/enum、型、深度の検証を追加した。FU-002〜004は独立検証でクローズ済みで、固定Head
 `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation ReviewでP0/P1/P2=0のPASSを受領した。M、F2以降、
 public endpoint、外部送信、production enablementは未完了である。F2はremediation済みだが独立Implementation
-Review再判定でPASS済み、A1は実装済みで独立Review待ち、B1/B2/Mは順次未着手とする。
+Review再判定でPASS済み、A1はremediation済みで独立再Review待ち、B1/B2/Mは順次未着手とする。
 全fast suiteはF1/F2対象外の既存loopback・production-config系11 errorsと2 failuresで
 終了しているため、全体PASSとは扱わない。F1の独立Implementation ReviewはPASSだが、MとF2以降のgateは残っている。
 
@@ -90,8 +91,14 @@ DB queryは許可された列とeffective scopeのID集合だけを選択し、i
 list/detail/countは同じimmutable effective populationを使う。client指定asOfは受け付けず、as-ofはrequest受信時のserver clockで固定する。
 enabled時にpublic ID keyが未設定なら起動を拒否し、production設定は引き続きpublic API disabledのままである。
 
-focused A1 suiteは15 tests、failure/error/skipなしでPASSした。Windowsのbrowser profileによるTomcat connector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、
-この環境結果をPASS根拠にはしない。A1の独立Implementation Reviewを受領するまでB1は開始しない。
+初回独立Reviewはinvoice customer scope、cursor snapshot、canonical Base64URL、DTO/E2E証跡の不足を指摘した。
+`874fface3bfe90dd27b766ddf9aeff4e00eae591`で、invoice list/detail/countへ`invoiceIds × customerIds`を同一predicateで適用し、
+複数contract invoiceのpublic contract IDをnullにした。cursorは初回as-of時点のmembershipとallow-list DTO JSONを短期materialized snapshotへ保存し、
+snapshot IDをopaque cursorへbindする。Base64URLはpaddingなし再encode一致を要求する。4 DTO、11 path、entity negative、
+snapshot insert/update/delete/reparentの契約テストを追加し、E2E fixtureへtest crypto keyを明示した。
+focused remediation suiteはcursor 3、service 5、DTO 5、mapper 2、snapshot 1（計16 tests）、failure/error/skipなしでPASSした。
+Windowsのbrowser profileはcrypto設定エラーを解消した後もTomcat loopback接続確立失敗でHTTP assertion前に停止したため、この環境結果をPASS根拠にはしない。
+A1独立再Reviewを受領するまでB1は開始しない。
 
 ## 既知の重要差分
 

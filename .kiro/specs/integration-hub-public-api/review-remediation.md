@@ -84,15 +84,16 @@ failure/error/skipなしでPASSした。fixed Head `d022e60039880dc5d4743f336661
 ## A1 Implementation Review handoff
 
 F2 PASS後、A1を `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装した。対象はGET-only 11 paths、external DTO allow-list、
-opaque public ID、暗号化cursor、effective scope-bound list/detail/countである。`ExternalApiReadMapper`はselected columnsとscope IDだけを
-queryし、internal entityをserializeしない。focused suiteは15 tests、failure/error/skipなしでPASSした。
+opaque public ID、暗号化cursor、effective scope-bound list/detail/countである。初回独立Reviewはfixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`でFAIL
+（P0=0、P1=2、P2=2）だった。`874fface3bfe90dd27b766ddf9aeff4e00eae591`でinvoice customer scope、snapshot-bound cursor、
+canonical Base64URL、4 DTO/11 path/entity/E2E証跡をremediateした。remediation focused suiteは16 tests、failure/error/skipなしでPASSした。
 
 | 対象 | 状態 | Review境界 |
 |---|---|---|
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | IMPLEMENTATION_REVIEW_PENDING | implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`を既存R-NF05へhandoff。独立Review完了までB1を開始しない |
+| A1 | REMEDIATED_REVIEW_PENDING | `874fface3bfe90dd27b766ddf9aeff4e00eae591`を既存R-NF05へ再handoff。独立再Review完了までB1を開始しない |
 
-Windows browser profileのconnector E2Eはloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
+Windows browser profileのconnector E2Eはcrypto fixture修正後もloopback接続確立失敗でHTTP assertion前に停止したため、この環境制約をA1 PASS根拠にはしない。
 
 ## Scope expansion Plan delta re-review remediation
 
@@ -146,7 +147,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、B1/B2/Mは未着手であり（F2はPASS、A1は実装済みで独立Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
+外部送信、B1/B2/Mは未着手であり（F2はPASS、A1はremediation済みで独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -168,7 +169,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 `a184c1f4`、追加CAS修正は`d476614e`、follow-up remediationは`5a2a0231`、typed snapshot correctionは`96d6801c`であり、
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
-F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1は実装済みで独立Implementation Review待ちである。A2/command/exportは
+F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1は初回Review FAILをremediate済みで独立再Implementation Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -211,3 +212,22 @@ NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客cred
 
 Task 0R-Dもdocs-onlyであり、OpenAPI implementation、contract test、security test、F1〜MをPASS扱いにしない。
 Owner approvalはPLAN PASSまたはimplementation PASSを意味しない。
+
+## A1 Implementation Review remediation（固定Head `111f4baa` → `874fface`）
+
+初回A1独立Implementation ReviewはFAIL（P0=0、P1=2、P2=2）だった。以下はapproved A1 scope内で実装・テスト可能な修正であり、
+`874fface3bfe90dd27b766ddf9aeff4e00eae591`へ反映しpush済みである。独立再Review受領まではA1をPASS扱いにせず、B1を開始しない。
+
+| ID | Severity | Review finding | Remediation | Status |
+|---|---|---|---|---|
+| NF05-IMPL-A1-001 | P1 | invoice customer scope未適用、複数contractを単一publicContractIdとして返す | `invoiceIds × customerIds`をlist/detail/countの同一predicateへ適用し、contractCountが1の場合だけpublic IDを返す。mapper/service testでscope外customerとmulti-contractを固定 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-002 | P1 | cursorのasOfがvisible membership/public valueをページ間で固定しない | `t_api_read_snapshot`/itemへ初回allow-list DTOをmaterializeし、snapshot IDを暗号化cursorへbind。insert/update/delete/reparent integration testを追加 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-003 | P2 | noncanonical Base64URL unused bitsを受理 | paddingなしBase64URLのdecode後canonical再encode完全一致を要求し、unused bits tamper testを追加 | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-004 | P2 | DTO/path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | 4 DTO allow-list、11 GET-only path、entity negative、明示test key付きenabled E2E fixtureを追加 | REMEDIATED_REVIEW_PENDING |
+
+### A1 remediation evidence
+
+- code/test/migration commit: `874fface3bfe90dd27b766ddf9aeff4e00eae591`
+- remediation focused suite: cursor 3、service 5、DTO 5、mapper 2、snapshot integration 1。failure/error/skipなし。
+- enabled connector browser E2Eはcrypto fixture未設定を修正したが、Windows Tomcat loopback接続確立失敗でcontext起動前に停止。Linux再実行PASSを推測せず、独立Reviewへ環境制約としてhandoffする。
+- production enablement、実顧客credential、実provider送信、A2 command/export、PR、mergeは引き続き禁止。

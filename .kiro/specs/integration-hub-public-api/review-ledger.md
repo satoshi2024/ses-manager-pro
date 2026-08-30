@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F2 PASS・A1独立Review待ち）
+# NF-05 Review Ledger（scope expansion承認・F2 PASS・A1独立再Review待ち）
 
 ## Approval gate
 
@@ -21,7 +21,7 @@
 |---|---|---|
 | F1 | APPROVED | PLAN PASS / IMPLEMENTATION PASS。fixed reviewed Head 7e50bf1360ea8d7271acc0667593635451300268 |
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
-| A1 | IMPLEMENTATION_REVIEW_PENDING | `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装。GET-only 11 paths、allow-list DTOのみ |
+| A1 | REMEDIATED_REVIEW_PENDING | 初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）を`874fface3bfe90dd27b766ddf9aeff4e00eae591`で修正。独立再Review待ち |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | APPROVED_SEQUENCED | A1 Review後。development/test mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。production受信enablementなし |
@@ -112,17 +112,29 @@ quota、correlation、専用audit、stable error boundaryとfilter自動二重�
 
 追加focused suiteは19 tests、failure/error/skipなし。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でF2 IMPLEMENTATION PASS（P0/P1/P2=0/0/0）を受領した。
 
-## A1 Implementation evidence（独立Review待ち）
+## A1 Implementation evidence（独立再Review待ち）
 
 | 対象 | 実装/証跡 | 状態 |
 |---|---|---|
-| read API | `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`。GET-only 11 paths、list/detail/count | 実装済み |
-| external contract | 4 external DTO、allow-list列、internal entity/ID/secret/PII/金額情報の非公開 | 実装済み |
-| identity/cursor | HMAC opaque public ID、AES-GCM cursor。client/tenant/legal entity/route/scope/as-of/expiry binding | 実装済み |
-| scope/non-enumeration | F2 immutable effective scopeを唯一のpopulation入力とし、list/detail/count同一母集団、scope外detailは404 | 実装済み |
-| tests | A1 focused suite 15 tests、failure/error/skipなし。Windows connector E2Eはloopback接続制約でHTTP assertion未到達 | 独立Reviewで確認待ち |
+| read API | `ExternalApiReadController`、`ExternalApiReadService`、`ExternalApiReadMapper`。GET-only 11 paths、list/detail/count | 実装済み・再Review待ち |
+| invoice scope | invoiceIds × customerIdsをlist/detail/countへ同一predicate。複数contract時はpublicContractIdをnull | `874fface`、mapper 2 tests、service test | 再Review待ち |
+| cursor population | 初回as-ofのmembership/allow-list DTOをV131 materialized snapshotへ保存し、snapshot IDをcursorへbind | `ExternalApiReadSnapshotMapper`、snapshot integration test | 再Review待ち |
+| external contract | 4 external DTO、allow-list列、internal entity/ID/secret/PII/金額情報の非公開、11 GET-only path | `ExternalApiDtoContractTest` | 再Review待ち |
+| identity/cursor | HMAC opaque public ID、AES-GCM cursor。client/tenant/legal entity/route/scope/snapshot/as-of/expiry binding、canonical Base64URL | `ExternalApiCursorCodecTest` 3 tests | 再Review待ち |
+| scope/non-enumeration | F2 immutable effective scopeを唯一のpopulation入力とし、list/detail/count同一母集団、scope外detailは404 | 実装済み | 再Review待ち |
+| tests | remediation focused suite 16 tests、failure/error/skipなし。Windows connector E2Eはcrypto fixture修正後もloopback接続制約でHTTP assertion未到達 | E2E制約を隠さず記録 | 再Review待ち |
 
-A1 implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`を同じR-NF05へ独立Reviewとしてhandoffする。
+A1 implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`の初回Review FAIL（P0=0/P1=2/P2=2）を、remediation commit
+`874fface3bfe90dd27b766ddf9aeff4e00eae591`で対応した。同じR-NF05へ独立A1再Reviewとしてhandoffし、PASS受領まではB1を開始しない。
+
+### A1 Implementation Review remediation findings
+
+| ID | Severity | Finding | Fix evidence | Status |
+|---|---|---|---|---|
+| NF05-IMPL-A1-001 | P1 | invoice customer scope未適用、複数contractを単一publicContractIdとして表現 | `ExternalApiReadMapper`共通customer predicate、`contractCount`、mapper/service tests | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-002 | P1 | cursorのasOfがページ間のvisible membership/public valueを固定しない | V131 read snapshot header/item、snapshot-only next page、insert/update/delete/reparent integration test | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-003 | P2 | noncanonical Base64URLのunused bitsを受理 | decode後paddingなしcanonical再encode完全一致、tamper test | REMEDIATED_REVIEW_PENDING |
+| NF05-IMPL-A1-004 | P2 | 4 DTO/11 path/entity negative/non-enumeration/E2E crypto fixtureの証跡不足 | DTO/path/entity contract tests、明示test key付きconnector E2E | REMEDIATED_REVIEW_PENDING |
 
 ## Findings
 
@@ -136,7 +148,7 @@ A1 implementation commit `466bd9aa44e8699f58cfe0ac033c9c444a7de71e`を同じR-NF
 | NF05-DISC-006 | P1 | InvoiceDetailDtoがInvoice entityを継承する既存前例 | dto/.../InvoiceDetailDto | public DTOでは禁止 |
 | NF05-DISC-007 | P1 | 既存/api/webhooks/**はpermitAllかつCSRF ignore | SecurityConfig.java:130-145, 312-315 | 公開inboundと分離 |
 | NF05-DISC-008 | P2 | correlation IDのglobal edge filter/MDC propagationを確認できない | ad hoc provider/service経路のみ | CLOSED_BY_REVIEW。F2外部chain専用correlation filterを追加、worker propagationはB1/B2 |
-| NF05-DISC-009 | P1 | OpenAPI、HTTP status/error、version互換規則がなく外部契約をreviewできない | openapi-candidate.yaml | A1 IMPLEMENTATION_REVIEW_PENDING。`466bd9aa`で実装済み |
+| NF05-DISC-009 | P1 | OpenAPI、HTTP status/error、version互換規則がなく外部契約をreviewできない | openapi-candidate.yaml | A1 remediation後も独立再Review待ち。`874fface`で契約テストを補強 |
 | NF05-DISC-010 | P2 | metrics cardinalityと禁止labelの具体設計がない | design.md / requirements.md | SPEC_ADDRESSED。F2/M APPROVED_SEQUENCED、実装未着手 |
 | NF05-DISC-011 | P2 | payload retention、legal hold、purgeの契約がない | design.md / requirements.md | SPEC_ADDRESSED。F1 PASS、B1/B2/M APPROVED_SEQUENCED |
 | NF05-DISC-012 | P2 | Review Headをcompletion traceへ固定する方式が曖昧 | completion-matrix.md | SPEC_ADDRESSED。最終Headは外部handoffで固定 |
@@ -225,8 +237,8 @@ FAIL（P0=0、P1=4、P2=0）だった。下記はapproved F1 scope内で`5a2a023
   Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head
   7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）を正本化している。
 - F1はPLAN PASS / IMPLEMENTATION PASSを維持する。scope expansion Plan deltaはca27f455でPLAN PASS、
-  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1は`466bd9aa44e8699f58cfe0ac033c9c444a7de71e`で実装済みのIMPLEMENTATION_REVIEW_PENDING、B1/B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
-- A1 implementationを既存R-NF05へ独立Reviewとして再依頼する。F1 gate、Owner Gate、0R/0R-D、F2 PASSの状態は再オープンしない。A1 Review完了までB1は開始しない。
+  F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）は`874fface3bfe90dd27b766ddf9aeff4e00eae591`でremediate済みのREMEDIATED_REVIEW_PENDING、B1/B2/MはAPPROVED_SEQUENCED、A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONである。
+- A1 remediationを既存R-NF05へ独立再Reviewとして依頼する。F1 gate、Owner Gate、0R/0R-D、F2 PASSの状態は再オープンしない。A1再Review完了までB1は開始しない。
 - P1-EXP-004、P2-EXP-005/006はクローズ状態を維持する。production endpoint enablement、実顧客credential、実provider送信、PR、mergeは引き続き禁止する。
 
 ## F1 gate evidence
