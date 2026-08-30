@@ -25,7 +25,8 @@ public class ExternalApiCursorCodec {
     private final SecureRandom secureRandom = new SecureRandom();
 
     public String encode(State state) {
-        if (state == null || state.lastInternalId() < 1 || state.expiresAtEpochSecond() <= state.asOfEpochSecond()) {
+        if (state == null || state.lastInternalId() < 1 || state.expiresAtEpochSecond() <= state.asOfEpochSecond()
+                || !isSnapshotId(state.snapshotId())) {
             throw new IllegalArgumentException("cursor state is invalid");
         }
         try {
@@ -59,8 +60,8 @@ public class ExternalApiCursorCodec {
             if (parts.length != 3) {
                 throw invalid();
             }
-            byte[] iv = Base64.getUrlDecoder().decode(parts[1]);
-            byte[] encrypted = Base64.getUrlDecoder().decode(parts[2]);
+            byte[] iv = decodeCanonicalBase64Url(parts[1]);
+            byte[] encrypted = decodeCanonicalBase64Url(parts[2]);
             if (iv.length != IV_BYTES || encrypted.length < 16 || encrypted.length > 1024) {
                 throw invalid();
             }
@@ -94,13 +95,14 @@ public class ExternalApiCursorCodec {
 
     private String payload(State state) {
         return String.join("|", state.clientId(), state.tenantId(), Long.toString(state.legalEntityId()),
-                state.routeTemplate(), state.scopeDigest(), Long.toString(state.asOfEpochSecond()),
+                state.routeTemplate(), state.scopeDigest(), state.snapshotId(), Long.toString(state.asOfEpochSecond()),
                 Long.toString(state.lastInternalId()), Long.toString(state.expiresAtEpochSecond()));
     }
 
     private State parse(String payload) {
         String[] values = payload.split("\\|", -1);
-        if (values.length != 8 || values[0].isBlank() || values[1].isBlank() || values[3].isBlank()
+        if (values.length != 9 || values[0].isBlank() || values[1].isBlank() || values[3].isBlank()
+                || !isSnapshotId(values[5])
                 || !values[1].matches("[A-Za-z0-9._~:-]{1,128}")
                 || !values[3].matches("/[A-Za-z0-9._~:/{}-]{1,256}")
                 || !values[4].matches("[0-9a-f]{64}")) {
@@ -108,13 +110,14 @@ public class ExternalApiCursorCodec {
         }
         try {
             long legalEntityId = Long.parseLong(values[2]);
-            long asOf = Long.parseLong(values[5]);
-            long lastId = Long.parseLong(values[6]);
-            long expires = Long.parseLong(values[7]);
+            long asOf = Long.parseLong(values[6]);
+            long lastId = Long.parseLong(values[7]);
+            long expires = Long.parseLong(values[8]);
             if (legalEntityId < 1 || asOf < 1 || lastId < 1 || expires <= asOf) {
                 throw invalid();
             }
-            return new State(values[0], values[1], legalEntityId, values[3], values[4], asOf, lastId, expires);
+            return new State(values[0], values[1], legalEntityId, values[3], values[4], values[5],
+                    asOf, lastId, expires);
         } catch (NumberFormatException e) {
             throw invalid();
         }
@@ -137,12 +140,33 @@ public class ExternalApiCursorCodec {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
     }
 
+    private boolean isSnapshotId(String value) {
+        return value != null && value.matches(
+                "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
+    private byte[] decodeCanonicalBase64Url(String value) {
+        if (value == null || value.isBlank() || value.length() % 4 == 1
+                || !value.matches("[A-Za-z0-9_-]+")) {
+            throw invalid();
+        }
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(value);
+            if (!value.equals(b64(decoded))) {
+                throw invalid();
+            }
+            return decoded;
+        } catch (IllegalArgumentException e) {
+            throw invalid();
+        }
+    }
+
     private ExternalApiSecurityException invalid() {
         return ExternalApiSecurityException.invalid("CURSOR_INVALID");
     }
 
     public record State(String clientId, String tenantId, long legalEntityId, String routeTemplate,
-                        String scopeDigest, long asOfEpochSecond, long lastInternalId,
+                        String scopeDigest, String snapshotId, long asOfEpochSecond, long lastInternalId,
                         long expiresAtEpochSecond) {
     }
 }

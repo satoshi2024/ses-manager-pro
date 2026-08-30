@@ -33,7 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.public-api.enabled=true",
                 "integration.hub.public-api.public-id-key=test-integration-hub-public-id-key-at-least-32-bytes",
                 "integration.hub.external-transport.enabled=false",
-                "integration.hub.provider.mode=MOCK"
+                "integration.hub.provider.mode=MOCK",
+                "integration.hub.crypto.current-key-version=test-key-v1",
+                "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
 @ActiveProfiles("test")
 @Tag("browser")

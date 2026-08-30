@@ -15,6 +15,7 @@ public class ExternalApiReadRow {
     private Long customerId;
     private Long projectId;
     private Long contractId;
+    private Long contractCount;
     private String renewalStatus;
     private LocalDate issueDate;
     private LocalDate dueDate;

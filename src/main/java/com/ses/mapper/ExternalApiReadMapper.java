@@ -105,11 +105,11 @@ public interface ExternalApiReadMapper {
 
     @Select("""
         <script>
-        SELECT i.id, i.status, i.issued_date AS issueDate, i.due_date AS dueDate, i.paid_date AS paidDate,
-               ii.contract_id AS contractId
+        SELECT i.id, i.status, i.customer_id AS customerId, i.issued_date AS issueDate, i.due_date AS dueDate, i.paid_date AS paidDate,
+               ii.contract_id AS contractId, ii.contract_count AS contractCount
         FROM t_invoice i
         LEFT JOIN (
-            SELECT invoice_id, MIN(c.id) AS contract_id
+            SELECT invoice_id, MIN(c.id) AS contract_id, COUNT(DISTINCT c.id) AS contract_count
             FROM t_invoice_item item
             JOIN t_work_record wr ON wr.id = item.work_record_id
             JOIN t_contract c ON c.id = wr.contract_id AND c.deleted_flag = 0
@@ -117,8 +117,19 @@ public interface ExternalApiReadMapper {
         ) ii ON ii.invoice_id = i.id
         WHERE i.deleted_flag = 0
           AND i.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+          <if test="customerIds != null">
+            AND i.customer_id IN <foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          </if>
           <if test="contractIds != null">
-            AND ii.contract_id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            AND EXISTS (
+              SELECT 1
+              FROM t_invoice_item scoped_item
+              JOIN t_work_record scoped_wr ON scoped_wr.id = scoped_item.work_record_id
+              JOIN t_contract scoped_contract ON scoped_contract.id = scoped_wr.contract_id
+                AND scoped_contract.deleted_flag = 0
+              WHERE scoped_item.invoice_id = i.id
+                AND scoped_contract.id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            )
           </if>
           <if test="afterId != null">AND i.id &lt; #{afterId}</if>
         ORDER BY i.id DESC
@@ -127,6 +138,7 @@ public interface ExternalApiReadMapper {
         """)
     List<ExternalApiReadRow> selectInvoices(@Param("ids") List<Long> ids,
                                             @Param("contractIds") List<Long> contractIds,
+                                            @Param("customerIds") List<Long> customerIds,
                                             @Param("afterId") Long afterId,
                                             @Param("limit") int limit);
 
@@ -135,7 +147,7 @@ public interface ExternalApiReadMapper {
         SELECT COUNT(*)
         FROM t_invoice i
         LEFT JOIN (
-            SELECT invoice_id, MIN(c.id) AS contract_id
+            SELECT invoice_id, MIN(c.id) AS contract_id, COUNT(DISTINCT c.id) AS contract_count
             FROM t_invoice_item item
             JOIN t_work_record wr ON wr.id = item.work_record_id
             JOIN t_contract c ON c.id = wr.contract_id AND c.deleted_flag = 0
@@ -143,11 +155,23 @@ public interface ExternalApiReadMapper {
         ) ii ON ii.invoice_id = i.id
         WHERE i.deleted_flag = 0
           AND i.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+          <if test="customerIds != null">
+            AND i.customer_id IN <foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          </if>
           <if test="contractIds != null">
-            AND ii.contract_id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            AND EXISTS (
+              SELECT 1
+              FROM t_invoice_item scoped_item
+              JOIN t_work_record scoped_wr ON scoped_wr.id = scoped_item.work_record_id
+              JOIN t_contract scoped_contract ON scoped_contract.id = scoped_wr.contract_id
+                AND scoped_contract.deleted_flag = 0
+              WHERE scoped_item.invoice_id = i.id
+                AND scoped_contract.id IN <foreach collection="contractIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            )
           </if>
         </script>
         """)
     long countInvoices(@Param("ids") List<Long> ids,
-                       @Param("contractIds") List<Long> contractIds);
+                       @Param("contractIds") List<Long> contractIds,
+                       @Param("customerIds") List<Long> customerIds);
 }

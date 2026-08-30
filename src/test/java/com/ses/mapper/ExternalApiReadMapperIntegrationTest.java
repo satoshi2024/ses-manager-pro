@@ -27,8 +27,13 @@ class ExternalApiReadMapperIntegrationTest {
     private static final long CONTRACT_OTHER_PROJECT = 9030002L;
     private static final long WORK_RECORD_ALLOWED = 9040001L;
     private static final long WORK_RECORD_OTHER = 9040002L;
+    private static final long WORK_RECORD_WRONG_CUSTOMER = 9040003L;
+    private static final long WORK_RECORD_MULTI_ALLOWED = 9040004L;
+    private static final long WORK_RECORD_MULTI_OTHER = 9040005L;
     private static final long INVOICE_ALLOWED = 9050001L;
     private static final long INVOICE_OTHER_CONTRACT = 9050002L;
+    private static final long INVOICE_WRONG_CUSTOMER = 9050003L;
+    private static final long INVOICE_MULTI_CONTRACT = 9050004L;
 
     @Autowired
     private ExternalApiReadMapper mapper;
@@ -94,30 +99,59 @@ class ExternalApiReadMapperIntegrationTest {
 
         jdbcTemplate.update("""
                 INSERT INTO t_work_record (id, contract_id, work_month, actual_hours, status)
-                VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
                 """, WORK_RECORD_ALLOWED, CONTRACT_ALLOWED, "2026-08", 160.0, "確定",
-                WORK_RECORD_OTHER, CONTRACT_OTHER_PROJECT, "2026-08", 160.0, "確定");
+                WORK_RECORD_OTHER, CONTRACT_OTHER_PROJECT, "2026-08", 160.0, "確定",
+                WORK_RECORD_WRONG_CUSTOMER, CONTRACT_OTHER_PROJECT, "2026-09", 160.0, "確定",
+                WORK_RECORD_MULTI_ALLOWED, CONTRACT_ALLOWED, "2026-09", 160.0, "確定",
+                WORK_RECORD_MULTI_OTHER, CONTRACT_OTHER_PROJECT, "2026-10", 160.0, "確定");
         jdbcTemplate.update("""
                 INSERT INTO t_invoice (id, invoice_no, customer_id, billing_month, subtotal, tax, total,
                                        status, issued_date, due_date, paid_date, deleted_flag)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
+                       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0),
                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """, INVOICE_ALLOWED, "INV-A1-0001", 9060001L, "2026-08", 100L, 10L, 110L,
                 "入金済", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), LocalDate.of(2026, 9, 15),
                 INVOICE_OTHER_CONTRACT, "INV-A1-0002", 9060002L, "2026-08", 200L, 20L, 220L,
+                "未送付", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), null,
+                INVOICE_WRONG_CUSTOMER, "INV-A1-0003", 9060002L, "2026-08", 300L, 30L, 330L,
+                "未送付", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), null,
+                INVOICE_MULTI_CONTRACT, "INV-A1-0004", 9060001L, "2026-08", 400L, 40L, 440L,
                 "未送付", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), null);
         jdbcTemplate.update("""
                 INSERT INTO t_invoice_item (id, invoice_id, work_record_id, amount)
-                VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)
                 """, 9070001L, INVOICE_ALLOWED, WORK_RECORD_ALLOWED, 110L,
-                9070002L, INVOICE_OTHER_CONTRACT, WORK_RECORD_OTHER, 220L);
+                9070002L, INVOICE_OTHER_CONTRACT, WORK_RECORD_OTHER, 220L,
+                9070003L, INVOICE_WRONG_CUSTOMER, WORK_RECORD_WRONG_CUSTOMER, 330L,
+                9070004L, INVOICE_MULTI_CONTRACT, WORK_RECORD_MULTI_ALLOWED, 220L,
+                9070005L, INVOICE_MULTI_CONTRACT, WORK_RECORD_MULTI_OTHER, 220L);
 
         List<ExternalApiReadRow> invoices = mapper.selectInvoices(
-                List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT), List.of(CONTRACT_ALLOWED), null, 10);
-        assertEquals(List.of(INVOICE_ALLOWED), invoices.stream().map(ExternalApiReadRow::getId).toList());
-        assertEquals(CONTRACT_ALLOWED, invoices.get(0).getContractId());
-        assertTrue(invoices.get(0).getPaidDate() != null);
-        assertEquals(1, mapper.countInvoices(
-                List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT), List.of(CONTRACT_ALLOWED)));
+                List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT, INVOICE_WRONG_CUSTOMER, INVOICE_MULTI_CONTRACT),
+                List.of(CONTRACT_ALLOWED), List.of(9060001L), null, 10);
+        assertEquals(List.of(INVOICE_MULTI_CONTRACT, INVOICE_ALLOWED), invoices.stream()
+                .map(ExternalApiReadRow::getId).toList());
+        ExternalApiReadRow allowed = invoices.stream()
+                .filter(row -> row.getId().equals(INVOICE_ALLOWED)).findFirst().orElseThrow();
+        assertEquals(CONTRACT_ALLOWED, allowed.getContractId());
+        assertEquals(1L, allowed.getContractCount());
+        assertTrue(allowed.getPaidDate() != null);
+        assertEquals(2, mapper.countInvoices(
+                List.of(INVOICE_ALLOWED, INVOICE_OTHER_CONTRACT, INVOICE_WRONG_CUSTOMER, INVOICE_MULTI_CONTRACT),
+                List.of(CONTRACT_ALLOWED), List.of(9060001L)));
+
+        assertTrue(mapper.selectInvoices(List.of(INVOICE_WRONG_CUSTOMER), List.of(CONTRACT_OTHER_PROJECT),
+                List.of(9060001L), null, 1).isEmpty());
+        assertEquals(0, mapper.countInvoices(List.of(INVOICE_WRONG_CUSTOMER), List.of(CONTRACT_OTHER_PROJECT),
+                List.of(9060001L)));
+
+        List<ExternalApiReadRow> multi = mapper.selectInvoices(
+                List.of(INVOICE_MULTI_CONTRACT), List.of(CONTRACT_ALLOWED, CONTRACT_OTHER_PROJECT),
+                List.of(9060001L), null, 10);
+        assertEquals(1, multi.size());
+        assertEquals(2L, multi.get(0).getContractCount());
     }
 }

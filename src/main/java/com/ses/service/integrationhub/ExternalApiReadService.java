@@ -5,6 +5,7 @@ import com.ses.config.integrationhub.ExternalApiEffectiveScope;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.config.integrationhub.ExternalApiSecurityException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.integrationhub.ExternalApiContractStatus;
 import com.ses.dto.integrationhub.ExternalApiCountResponse;
 import com.ses.dto.integrationhub.ExternalApiEngineerAvailability;
@@ -12,9 +13,12 @@ import com.ses.dto.integrationhub.ExternalApiInvoiceStatus;
 import com.ses.dto.integrationhub.ExternalApiListResponse;
 import com.ses.dto.integrationhub.ExternalApiProject;
 import com.ses.dto.integrationhub.ExternalApiReadRow;
+import com.ses.dto.integrationhub.ExternalApiSnapshotItem;
 import com.ses.mapper.ExternalApiReadMapper;
+import com.ses.mapper.ExternalApiReadSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -25,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.Function;
 
 /** A1 read service。唯一の入力はF2が作成したimmutable effective scopeである。 */
@@ -32,19 +37,23 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class ExternalApiReadService {
     private static final int MAX_LIMIT = 100;
+    private static final int MAX_SNAPSHOT_ITEMS = 512;
     private static final ZoneId SERVER_ZONE = ZoneId.of("Asia/Tokyo");
 
     private final ExternalApiReadMapper mapper;
+    private final ExternalApiReadSnapshotMapper snapshotMapper;
     private final ExternalApiPublicIdCodec publicIdCodec;
     private final ExternalApiCursorCodec cursorCodec;
+    private final ObjectMapper objectMapper;
     private final Clock clock;
 
+    @Transactional
     public ExternalApiListResponse<ExternalApiEngineerAvailability> listEngineerAvailability(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> engineerIds = requiredIds(scope, "engineerIds");
         return page(principal, scope, "/external-api/v1/engineer-availability", limit, cursor,
                 (afterId, fetchLimit) -> mapper.selectEngineers(engineerIds, afterId, fetchLimit),
-                row -> toEngineer(principal, row));
+                row -> toEngineer(principal, row), ExternalApiEngineerAvailability.class);
     }
 
     public ExternalApiEngineerAvailability getEngineerAvailability(
@@ -55,13 +64,14 @@ public class ExternalApiReadService {
                 .findFirst().map(row -> toEngineer(principal, row)).orElse(null);
     }
 
+    @Transactional
     public ExternalApiListResponse<ExternalApiProject> listProjects(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> projectIds = requiredIds(scope, "projectIds");
         List<Long> customerIds = optionalIds(scope, "customerIds");
         return page(principal, scope, "/external-api/v1/projects", limit, cursor,
                 (afterId, fetchLimit) -> mapper.selectProjects(projectIds, customerIds, afterId, fetchLimit),
-                row -> toProject(principal, row));
+                row -> toProject(principal, row), ExternalApiProject.class);
     }
 
     public ExternalApiProject getProject(
@@ -79,13 +89,14 @@ public class ExternalApiReadService {
                 clock.instant());
     }
 
+    @Transactional
     public ExternalApiListResponse<ExternalApiContractStatus> listContractStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> contractIds = requiredIds(scope, "contractIds");
         List<Long> projectIds = optionalIds(scope, "projectIds");
         return page(principal, scope, "/external-api/v1/contract-statuses", limit, cursor,
                 (afterId, fetchLimit) -> mapper.selectContracts(contractIds, projectIds, afterId, fetchLimit),
-                row -> toContract(principal, row));
+                row -> toContract(principal, row), ExternalApiContractStatus.class);
     }
 
     public ExternalApiContractStatus getContractStatus(
@@ -103,66 +114,126 @@ public class ExternalApiReadService {
                 clock.instant());
     }
 
+    @Transactional
     public ExternalApiListResponse<ExternalApiInvoiceStatus> listInvoiceStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> invoiceIds = requiredIds(scope, "invoiceIds");
         List<Long> contractIds = optionalIds(scope, "contractIds");
+        List<Long> customerIds = requiredIds(scope, "customerIds");
         return page(principal, scope, "/external-api/v1/invoice-statuses", limit, cursor,
-                (afterId, fetchLimit) -> mapper.selectInvoices(invoiceIds, contractIds, afterId, fetchLimit),
-                row -> toInvoice(principal, row));
+                (afterId, fetchLimit) -> mapper.selectInvoices(invoiceIds, contractIds, customerIds, afterId, fetchLimit),
+                row -> toInvoice(principal, row), ExternalApiInvoiceStatus.class);
     }
 
     public ExternalApiInvoiceStatus getInvoiceStatus(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, String publicId) {
         Long id = resolveId(principal, "invoice-status", publicId, requiredIds(scope, "invoiceIds"));
         if (id == null) return null;
-        return mapper.selectInvoices(List.of(id), optionalIds(scope, "contractIds"), null, 1).stream()
+        return mapper.selectInvoices(List.of(id), optionalIds(scope, "contractIds"), requiredIds(scope, "customerIds"), null, 1).stream()
                 .findFirst().map(row -> toInvoice(principal, row)).orElse(null);
     }
 
     public ExternalApiCountResponse countInvoiceStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope) {
         List<Long> invoiceIds = requiredIds(scope, "invoiceIds");
-        return new ExternalApiCountResponse(mapper.countInvoices(invoiceIds, optionalIds(scope, "contractIds")),
+        return new ExternalApiCountResponse(mapper.countInvoices(invoiceIds, optionalIds(scope, "contractIds"),
+                        requiredIds(scope, "customerIds")),
                 clock.instant());
     }
 
     private <T> ExternalApiListResponse<T> page(ExternalApiPrincipal principal, ExternalApiEffectiveScope scope,
                                                  String route, int limit, String cursor,
-                                                 RowFetcher fetcher, Function<ExternalApiReadRow, T> converter) {
+                                                 RowFetcher fetcher, Function<ExternalApiReadRow, T> converter,
+                                                 Class<T> dtoType) {
         if (limit < 1 || limit > MAX_LIMIT) {
             throw new IllegalArgumentException("limit is outside the approved bound");
         }
         String digest = scopeDigest(scope);
         Instant now = clock.instant();
-        ExternalApiCursorCodec.State cursorState;
-        Long afterId = null;
+        if (cursor != null && !cursor.isBlank()) {
+            return pageFromSnapshot(principal, route, digest, limit, cursor, dtoType, now);
+        }
+        snapshotMapper.deleteExpiredItems(now);
+        snapshotMapper.deleteExpiredSnapshots(now);
         Instant asOf = now;
         long expiresAt = cursorCodec.expiryFrom(now);
-        if (cursor != null && !cursor.isBlank()) {
-            cursorState = cursorCodec.decode(cursor, principal.clientId(), principal.tenantId(),
-                    principal.legalEntityId(), route, digest, now);
-            afterId = cursorState.lastInternalId();
-            asOf = Instant.ofEpochSecond(cursorState.asOfEpochSecond());
-            expiresAt = cursorState.expiresAtEpochSecond();
+        List<ExternalApiReadRow> rows = fetcher.fetch(null, MAX_SNAPSHOT_ITEMS + 1);
+        if (rows.size() > MAX_SNAPSHOT_ITEMS) {
+            throw ExternalApiSecurityException.forbidden("FORBIDDEN_SCOPE");
         }
-        List<ExternalApiReadRow> rows = fetcher.fetch(afterId, limit + 1);
+        List<T> allItems = rows.stream().map(converter).toList();
+        boolean hasMore = allItems.size() > limit;
+        String snapshotId = null;
+        if (hasMore) {
+            snapshotId = UUID.randomUUID().toString();
+            snapshotMapper.insertSnapshot(snapshotId, principal.clientId(), principal.tenantId(),
+                    principal.legalEntityId(), route, digest, asOf, Instant.ofEpochSecond(expiresAt));
+            for (int index = 0; index < rows.size(); index++) {
+                ExternalApiReadRow row = rows.get(index);
+                if (row == null || row.getId() == null || row.getId() < 1) {
+                    throw new IllegalStateException("external read row identifier is missing");
+                }
+                snapshotMapper.insertItem(snapshotId, row.getId(), serialize(allItems.get(index)));
+            }
+        }
+        List<T> items = allItems.subList(0, Math.min(limit, allItems.size()));
+        String nextCursor = null;
+        if (hasMore && !items.isEmpty()) {
+            Long lastId = rows.get(items.size() - 1).getId();
+            nextCursor = cursorCodec.encode(new ExternalApiCursorCodec.State(
+                    principal.clientId(), principal.tenantId(), principal.legalEntityId(), route,
+                    digest, snapshotId, asOf.getEpochSecond(), lastId, expiresAt));
+        }
+        return new ExternalApiListResponse<>(items, nextCursor, hasMore, asOf);
+    }
+
+    private <T> ExternalApiListResponse<T> pageFromSnapshot(ExternalApiPrincipal principal, String route,
+                                                              String digest, int limit, String cursor,
+                                                              Class<T> dtoType, Instant now) {
+        ExternalApiCursorCodec.State cursorState = cursorCodec.decode(cursor, principal.clientId(),
+                principal.tenantId(), principal.legalEntityId(), route, digest, now);
+        if (cursorState.snapshotId() == null || cursorState.snapshotId().isBlank()) {
+            throw ExternalApiSecurityException.invalid("CURSOR_INVALID");
+        }
+        List<ExternalApiSnapshotItem> rows = snapshotMapper.selectItemsAfter(
+                cursorState.snapshotId(), cursorState.lastInternalId(), limit + 1);
+        if (rows.isEmpty()) {
+            throw ExternalApiSecurityException.invalid("CURSOR_INVALID");
+        }
         boolean hasMore = rows.size() > limit;
         if (hasMore) {
             rows = new ArrayList<>(rows.subList(0, limit));
         }
-        List<T> items = rows.stream().map(converter).toList();
+        List<T> items = rows.stream().map(row -> deserialize(row.payloadJson(), dtoType)).toList();
         String nextCursor = null;
         if (hasMore && !rows.isEmpty()) {
-            Long lastId = rows.get(rows.size() - 1).getId();
+            Long lastId = rows.get(rows.size() - 1).resourceId();
             if (lastId == null || lastId < 1) {
                 throw new IllegalStateException("external read row identifier is missing");
             }
             nextCursor = cursorCodec.encode(new ExternalApiCursorCodec.State(
                     principal.clientId(), principal.tenantId(), principal.legalEntityId(), route,
-                    digest, asOf.getEpochSecond(), lastId, expiresAt));
+                    digest, cursorState.snapshotId(), cursorState.asOfEpochSecond(), lastId,
+                    cursorState.expiresAtEpochSecond()));
         }
-        return new ExternalApiListResponse<>(items, nextCursor, hasMore, asOf);
+        return new ExternalApiListResponse<>(items, nextCursor, hasMore,
+                Instant.ofEpochSecond(cursorState.asOfEpochSecond()));
+    }
+
+    private String serialize(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            throw new IllegalStateException("safe external snapshot serialization failed", e);
+        }
+    }
+
+    private <T> T deserialize(String payload, Class<T> dtoType) {
+        try {
+            return objectMapper.readValue(payload, dtoType);
+        } catch (Exception e) {
+            throw ExternalApiSecurityException.invalid("CURSOR_INVALID");
+        }
     }
 
     private ExternalApiEngineerAvailability toEngineer(ExternalApiPrincipal principal, ExternalApiReadRow row) {
@@ -189,7 +260,8 @@ public class ExternalApiReadService {
         Instant paidAt = row.getPaidDate() == null ? null
                 : row.getPaidDate().atStartOfDay(SERVER_ZONE).toInstant();
         return new ExternalApiInvoiceStatus(publicIdCodec.encode(principal, "invoice-status", row.getId()),
-                row.getContractId() == null ? null : publicIdCodec.encode(principal, "contract-status", row.getContractId()),
+                row.getContractId() == null || !Long.valueOf(1L).equals(row.getContractCount()) ? null
+                        : publicIdCodec.encode(principal, "contract-status", row.getContractId()),
                 boundedStatus(row.getStatus()), row.getIssueDate(), row.getDueDate(), paidAt,
                 settled ? "SETTLED" : "OUTSTANDING");
     }
