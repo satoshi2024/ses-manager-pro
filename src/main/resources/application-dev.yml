@@ -10,6 +10,8 @@ integration:
   hub:
     public-api:
       enabled: false
+      public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
+      cursor-ttl-seconds: 300
     external-transport:
       enabled: false
     provider:

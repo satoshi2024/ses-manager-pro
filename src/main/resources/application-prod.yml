@@ -22,6 +22,8 @@ integration:
     # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。
     public-api:
       enabled: false
+      public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
+      cursor-ttl-seconds: 300
     external-transport:
       enabled: false
     provider:

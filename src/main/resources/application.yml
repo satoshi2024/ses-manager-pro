@@ -419,6 +419,8 @@ integration:
     # NF-05 F2はdefault-off。値を省略せず、起動validatorでfail-closedにする。
     public-api:
       enabled: false
+      public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
+      cursor-ttl-seconds: 300
     external-transport:
       enabled: false
     provider:

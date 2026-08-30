@@ -28,6 +28,10 @@ public class IntegrationHubExternalApiProperties {
         if (publicApi.enabled == null || externalTransport.enabled == null || provider.mode == null) {
             throw new IllegalStateException("integration.hubのpublic-api/external-transport/provider.modeは明示設定が必要です");
         }
+        if (publicApi.enabled && (publicApi.publicIdKey == null
+                || publicApi.publicIdKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
+            throw new IllegalStateException("public-api.enabled=trueには32 byte以上のpublic-id-keyが必要です");
+        }
         if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))
                 && (publicApi.enabled || externalTransport.enabled || provider.mode != ProviderMode.MOCK)) {
             throw new IllegalStateException("productionの公開APIと外部transportはoff、provider.modeはMOCK固定です");
@@ -46,6 +50,10 @@ public class IntegrationHubExternalApiProperties {
     public static class PublicApi {
         /** nullを許し、設定バインド漏れを起動時に検知する。 */
         private Boolean enabled;
+        /** 公開IDとcursorの用途分離に使う環境注入鍵。平文IDを外部契約へ出さない。 */
+        private String publicIdKey;
+        /** cursorの有効秒数。短い上限で失効させる。 */
+        private int cursorTtlSeconds = 300;
     }
 
     @Data

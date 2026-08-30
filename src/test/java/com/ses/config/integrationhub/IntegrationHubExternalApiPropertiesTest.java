@@ -30,4 +30,14 @@ class IntegrationHubExternalApiPropertiesTest {
         properties.getSecurity().getAllowedLoopbackPorts().add(70000);
         assertThrows(IllegalStateException.class, properties::validateBoundaries);
     }
+
+    @Test
+    void enabledPublicApiWithoutPublicIdKeyFailsClosedAtStartup() {
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setEnabled(true);
+        properties.getExternalTransport().setEnabled(false);
+        properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.MOCK);
+
+        assertThrows(IllegalStateException.class, properties::validateBoundaries);
+    }
 }

@@ -77,6 +77,8 @@ integration:
   hub:
     public-api:
       enabled: false
+      public-id-key: test-integration-hub-public-id-key-at-least-32-bytes
+      cursor-ttl-seconds: 300
     external-transport:
       enabled: false
     provider:
