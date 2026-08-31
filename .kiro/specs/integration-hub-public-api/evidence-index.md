@@ -1,7 +1,7 @@
 # NF-05 M verification evidence index
 
-R-NF05 独立 Review（Head `374617da`）で IMPLEMENTATION FAIL（P1=4）後、P1 remediation を実装。
-B2/M の独立 Implementation Review PASS 前は production enablement、実 credential、PR/merge 禁止。
+R-NF05 REV3 独立 Review（Head `eac98db0`）: **PLAN PASS / IMPLEMENTATION PASS**（P0=0、P1=0、P2=5）。
+PR #97 作成済み。production enablement・merge・実 credential は別ゲートまで禁止。
 
 ## Wave status
 
@@ -11,8 +11,8 @@ B2/M の独立 Implementation Review PASS 前は production enablement、実 cre
 | F2 | IMPLEMENTATION PASS | security chain integration（既存） |
 | A1 | IMPLEMENTATION PASS | DTO contract + read mapper（既存） |
 | B1 | IMPLEMENTATION PASS | worker/signer/replay（既存） |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | inbound H2 + Linux connector E2E（R-NF05 P1 remediation 後に再 Review） |
-| M | IMPLEMENTATION_REVIEW_PENDING | 本 index + M test suite |
+| B2 | IMPLEMENTATION PASS | inbound H2 11 + Linux connector E2E + R-NF05 remediation |
+| M | IMPLEMENTATION PASS | 本 index + M test suite + runbook |
 
 ## M test matrix
 
@@ -32,7 +32,7 @@ B2/M の独立 Implementation Review PASS 前は production enablement、実 cre
 | read E2E | `ExternalApiEnabledConnectorE2ETest`（既存） | enabled chain 到達 |
 | MySQL concurrency | `IntegrationHubF1MySqlConcurrencyTest`（既存） | usage/delivery CAS、stale lease |
 | DTO allow-list | `ExternalApiDtoContractTest`（既存） | entity serialization 禁止 |
-| R-NF05 P1 remediation | `MenuPermissionFilterTest`、`ExternalApiSourceIpResolverTest`、`IntegrationHubOpenApiContractTest`、`IntegrationHubB2InboundH2Test` | admin API 到達、XFF spoof、OpenAPI/inbound 一致、inbound lease |
+| R-NF05 remediation | `MenuPermissionFilterTest`、`ExternalApiSourceIpResolverTest`、`IntegrationHubOpenApiContractTest`、`IntegrationHubB2InboundH2Test` | admin API 到達、XFF spoof、OpenAPI/inbound 一致、inbound lease + recordReceived retry |
 | metrics cardinality | `ExternalApiMetricsRecorderTest`（既存） | 有限 label 集合 |
 
 ## Operations artifacts
@@ -44,20 +44,20 @@ B2/M の独立 Implementation Review PASS 前は production enablement、実 cre
 | completion matrix | `.kiro/specs/integration-hub-public-api/completion-matrix.md` |
 | review ledger | `.kiro/specs/integration-hub-public-api/review-ledger.md` |
 
-## 実行コマンド（M focused suite）
+## Focused M suite command
 
 ```powershell
 cd c:\work\ses-manager-pro-integration-hub-public-api
 .\apache-maven-3.9.6\bin\mvn test -Dtest=IntegrationHubMPenetrationTest,IntegrationHubMFailureDrillTest,IntegrationHubMPerformanceBoundaryTest,IntegrationHubKeyRotationRecoveryDrillTest,IntegrationHubSecretLogScanTest
 ```
 
-## 禁止事項（M 完了まで）
+## 禁止事項（production enablement ゲートまで）
 
 - production `integration.hub.public-api.enabled=true`
 - 実顧客 credential / 実 provider 送信
-- main checkout 変更、force push、PR 作成、merge
+- main checkout 変更、force push、**merge / auto-merge**（PR #97 は open のまま）
 
 ## Handoff
 
-M 実装 commit 後、remote/local Head を独立 Review へ固定する。
-PLAN/IMPLEMENTATION 双方 PASS 後のみ PR 作成を許可する。
+Fixed Head: `eac98db06ccd9b9fa534306a7b542d3da34f38bb`（=`origin/codex/integration-hub-public-api`）。
+PR: https://github.com/satoshi2024/ses-manager-pro/pull/97

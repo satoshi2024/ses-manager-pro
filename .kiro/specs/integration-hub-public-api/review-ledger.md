@@ -1,4 +1,22 @@
-# NF-05 Review Ledger（R-NF05 REV2 remediation 後・独立再 Review 待ち）
+# NF-05 Review Ledger（R-NF05 REV3 IMPLEMENTATION PASS・PR #97 作成済）
+
+## R-NF05 REV3 independent Review（Head `eac98db0`）
+
+| Gate | 判定 |
+|---|---|
+| Stage A Plan Review | **PLAN PASS** |
+| Stage B Implementation | **IMPLEMENTATION PASS**（P0=0、P1=0、P2=5） |
+| 公開可否 | **不可**（dev/test MOCK のみ。production enablement は別ゲート） |
+| PR | https://github.com/satoshi2024/ses-manager-pro/pull/97（作成済み。**merge / auto-merge 禁止**） |
+
+| Finding ID | Severity | Status |
+|---|---|---|
+| NF05-REV-P1-001 | P1 | **CLOSED** |
+| NF05-REV-P1-002 | P1 | **CLOSED**（default `trusted-proxies: []`） |
+| NF05-REV-P1-003 | P1 | **CLOSED** |
+| NF05-REV-P1-004 / NF05-REV2-P1-001 | P1 | **CLOSED**（`receiptForSameHash` + `recordReceived` 再送 test） |
+
+残 P2（非ブロッキング・未着手）: P2-002 disabled bean、P2-003 admin DTO、P2-004 静的 log scan、P2-005 list 512、REV2-P2-001 trusted-proxies+strip。
 
 ## R-NF05 再 Review（Head `7d956f78`）
 
@@ -58,13 +76,13 @@ P2（docs 自己昇格、disabled bean、admin DTO 拡張、静的 log scan、li
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。development/test mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | R-NF05 Head `374617da` で FAIL（P1=4）。remediation 後に再 Review |
-| M | IMPLEMENTATION_REVIEW_PENDING | M test suite + runbook 実装済。B2 再 Review PASS 後に M 判定 |
+| B2 | IMPLEMENTATION_PASS | fixed Head `eac98db0`、R-NF05 REV3 P0/P1/P2=0/0/5 |
+| M | IMPLEMENTATION_PASS | M test suite + runbook。R-NF05 REV3 で B2/M 含め IMPLEMENTATION PASS |
 
 scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
 OwnerRef=PROJECT_OWNER、OwnerType=ROLE、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、
 Implementation branch=codex/integration-hub-public-apiである。production enablement、実顧客credential、
-実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
+実providerへの外部送信、force push、main変更、**merge、auto-merge**は禁止する（PR #97 は作成済み）。
 
 ## Scope expansion Plan delta remediation
 
