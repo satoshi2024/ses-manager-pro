@@ -1,6 +1,7 @@
 package com.ses.service.integrationhub;
 
 import com.ses.entity.integrationhub.ApiDelivery;
+import org.springframework.security.core.Authentication;
 
 import java.time.LocalDateTime;
 
@@ -8,5 +9,14 @@ import java.time.LocalDateTime;
 public interface IntegrationHubWebhookReplayAuthorizationService {
     String REPLAY_OPERATION = "integration.webhook.replay";
 
-    void authorize(ApiDelivery delivery, String revalidatedScopeDigest, LocalDateTime now);
+    ReplayAuthorization authorize(ApiDelivery delivery, String revalidatedScopeDigest,
+                                  Authentication authentication, LocalDateTime now);
+
+    record ReplayAuthorization(String operatorRef) {
+        public ReplayAuthorization {
+            if (operatorRef == null || operatorRef.isBlank()) {
+                throw new IllegalArgumentException("operator reference is missing");
+            }
+        }
+    }
 }

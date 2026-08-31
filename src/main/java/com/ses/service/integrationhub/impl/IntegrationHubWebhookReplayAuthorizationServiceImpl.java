@@ -3,6 +3,9 @@ package com.ses.service.integrationhub.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.config.integrationhub.ExternalApiDataScope;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
+import com.ses.config.LoginUser;
 import com.ses.entity.integrationhub.ApiClient;
 import com.ses.entity.integrationhub.ApiClientScope;
 import com.ses.entity.integrationhub.ApiDelivery;
@@ -10,12 +13,16 @@ import com.ses.entity.integrationhub.WebhookSubscription;
 import com.ses.mapper.ApiClientMapper;
 import com.ses.mapper.ApiClientScopeMapper;
 import com.ses.mapper.WebhookSubscriptionMapper;
+import com.ses.service.security.AuthorizationService;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IntegrationHubWebhookReplayAuthorizationService;
 import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -30,14 +37,19 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
     private final ApiClientScopeMapper clientScopeMapper;
     private final WebhookSubscriptionMapper subscriptionMapper;
     private final ObjectMapper objectMapper;
+    private final ExternalApiPublicIdCodec publicIdCodec;
+    private final AuthorizationService internalAuthorizationService;
 
     @Override
     @Transactional
-    public void authorize(ApiDelivery delivery, String revalidatedScopeDigest, LocalDateTime now) {
+    public IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization authorize(
+            ApiDelivery delivery, String revalidatedScopeDigest, Authentication authentication, LocalDateTime now) {
         if (delivery == null || delivery.getClientId() == null || delivery.getScopeCode() == null
                 || delivery.getTenantId() == null || revalidatedScopeDigest == null || now == null) {
             throw new IllegalArgumentException("replay authorization input is invalid");
         }
+        IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization operator =
+                requireAdminOperator(authentication);
         if (!revalidatedScopeDigest.equalsIgnoreCase(delivery.getScopeDigest())
                 || !revalidatedScopeDigest.equalsIgnoreCase(IntegrationHubWebhookScopeDigest.of(
                 delivery.getClientId(), delivery.getScopeCode(), delivery.getTenantId()))) {
@@ -69,7 +81,8 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
                 .intersect(parse(permission.getDataScopeJson()))
                 .intersect(parse(subscription.getDataScopeJson()));
         requireAuthoritativeScope(effective, client, delivery);
-        requirePayloadMembership(delivery, effective);
+        requirePayloadMembership(delivery, effective, client);
+        return operator;
     }
 
     private ExternalApiDataScope parse(String json) {
@@ -82,7 +95,7 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
         requireSingleton(effective.values(), "tenantIds", delivery.getTenantId());
     }
 
-    private void requirePayloadMembership(ApiDelivery delivery, ExternalApiDataScope effective) {
+    private void requirePayloadMembership(ApiDelivery delivery, ExternalApiDataScope effective, ApiClient client) {
         ExternalDtoSnapshot snapshot = new ExternalDtoSnapshot(delivery.getExternalDtoSnapshot(),
                 delivery.getPayloadHash());
         ExternalDtoSnapshot.requireOutboundEnvelope(snapshot, delivery.getEventId(), delivery.getEventType(),
@@ -90,6 +103,9 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
         try {
             JsonNode root = objectMapper.readTree(snapshot.json());
             JsonNode payload = root.get("payload");
+            ExternalApiPrincipal publicIdPrincipal = new ExternalApiPrincipal(client.getClientId(), client.getId(),
+                    client.getTenantId(), client.getLegalEntityId(), client.getDataScopeJson(), 1, "replay", client.getClientTier());
+            boolean resourceMembershipFound = false;
             for (Map.Entry<String, Set<String>> entry : effective.values().entrySet()) {
                 String field = publicField(entry.getKey());
                 if (field == null || "tenantIds".equals(entry.getKey()) || "legalEntityIds".equals(entry.getKey())) {
@@ -98,9 +114,15 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
                     }
                     continue;
                 }
-                if (entry.getValue().isEmpty() || !containsText(root, payload, field, entry.getValue())) {
+                resourceMembershipFound = true;
+                String resourceType = publicResourceType(entry.getKey());
+                if (entry.getValue().isEmpty() || resourceType == null
+                        || !containsOpaqueId(root, payload, field, entry.getValue(), publicIdPrincipal, resourceType)) {
                     throw new SecurityException("replay payload is outside current data scope");
                 }
+            }
+            if (!resourceMembershipFound) {
+                throw new SecurityException("replay payload has no scoped resource dimension");
             }
         } catch (SecurityException e) {
             throw e;
@@ -109,12 +131,29 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
         }
     }
 
-    private boolean containsText(JsonNode root, JsonNode payload, String field, Set<String> allowed) {
+    private boolean containsOpaqueId(JsonNode root, JsonNode payload, String field, Set<String> allowed,
+                                     ExternalApiPrincipal principal, String resourceType) {
         JsonNode value = root.get(field);
         if (value == null && payload != null) {
             value = payload.get(field);
         }
-        return value != null && value.isTextual() && allowed.contains(value.textValue());
+        if (value == null || !value.isTextual()) {
+            return false;
+        }
+        for (String internalValue : allowed) {
+            try {
+                long internalId = Long.parseLong(internalValue);
+                if (internalId > 0 && publicIdCodec.matches(principal, resourceType, internalId, value.textValue())) {
+                    JsonNode envelopeResourceId = root.get("publicResourceId");
+                    return "publicResourceId".equals(field)
+                            || (envelopeResourceId != null && envelopeResourceId.isTextual()
+                            && value.textValue().equals(envelopeResourceId.textValue()));
+                }
+            } catch (NumberFormatException ignored) {
+                // resource scopeはnumeric internal IDだけを許可し、文字列IDをpublic IDと直接比較しない。
+            }
+        }
+        return false;
     }
 
     private String publicField(String dimension) {
@@ -128,6 +167,41 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
             case "tenantIds", "legalEntityIds" -> null;
             default -> null;
         };
+    }
+
+    private String publicResourceType(String dimension) {
+        return switch (dimension) {
+            case "organizationIds" -> "organization";
+            case "customerIds" -> "customer";
+            case "engineerIds" -> "engineer-availability";
+            case "projectIds" -> "project";
+            case "contractIds" -> "contract-status";
+            case "invoiceIds" -> "invoice-status";
+            default -> null;
+        };
+    }
+
+    private IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization requireAdminOperator(
+            Authentication authentication) {
+        if (authentication == null || authentication instanceof AnonymousAuthenticationToken
+                || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof LoginUser loginUser)
+                || loginUser.getSysUser() == null || loginUser.getSysUser().getId() == null
+                || !loginUser.isEnabled() || !loginUser.isAccountNonLocked()
+                || !hasAuthority(authentication, "ROLE_管理者")
+                || internalAuthorizationService == null
+                || !internalAuthorizationService.isAllowed(authentication,
+                IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION)) {
+            throw new SecurityException("replay operator is not an authorized administrator");
+        }
+        // auditへは認証済みSysUserの内部IDだけをsafe referenceとして保存し、入力operatorRefを受け取らない。
+        return new IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization(
+                "sys-user:" + loginUser.getSysUser().getId());
+    }
+
+    private boolean hasAuthority(Authentication authentication, String expected) {
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(expected::equals);
     }
 
     private void requireSingleton(Map<String, Set<String>> values, String dimension, String expected) {
