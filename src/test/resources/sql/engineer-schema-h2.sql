@@ -703,6 +703,12 @@ CREATE TABLE t_audit_log (
   after_state VARCHAR(255),
   correlation_id VARCHAR(128),
   idempotency_key VARCHAR(128),
+  invoice_id VARCHAR(100),
+  digital_invoice_id VARCHAR(100),
+  job_id VARCHAR(100),
+  provider_operation_id VARCHAR(128),
+  error_code VARCHAR(64),
+  error_category VARCHAR(32),
   CONSTRAINT ck_engineer_audit_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
   CONSTRAINT ck_engineer_audit_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
   CONSTRAINT ck_engineer_audit_actor_pair CHECK (
@@ -2760,7 +2766,10 @@ CREATE TABLE t_integration_job (
     next_retry_at DATETIME,
     external_id VARCHAR(128),
     provider_request_id VARCHAR(128),
+    correlation_id VARCHAR(100),
+    provider_operation_id VARCHAR(128),
     error_code VARCHAR(64),
+    error_category VARCHAR(32),
     error_message_safe VARCHAR(500),
     sent_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -2778,7 +2787,8 @@ CREATE TABLE t_integration_job_event (
     from_status VARCHAR(32),
     to_status VARCHAR(32) NOT NULL,
     occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    safe_detail VARCHAR(1000)
+    safe_detail VARCHAR(1000),
+    correlation_id VARCHAR(100)
 );
 CREATE INDEX idx_job_event_job_id ON t_integration_job_event (job_id);
 -- H2 Schema for JP PINT Digital Invoice (T103)

@@ -62,7 +62,7 @@ class DigitalInvoiceSendTest {
     private com.ses.service.DocumentService documentService;
 
     @BeforeEach
-    void stubProviderDefaults() {
+    void プロバイダの既定応答を設定する() {
         when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> "mock-provider-" + inv.getArgument(2));
         when(documentService.registerGenerated(any(), any())).thenAnswer(inv -> {
@@ -73,7 +73,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testEnqueueInvoice_Success() {
+    void 請求書送信をキューへ登録する() {
         Customer c = newCustomer("Test Co");
         verifiedParticipant(c, "test-id");
 
@@ -87,7 +87,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testEnqueueInvoice_DuplicateThrowsException() {
+    void 請求書送信の重複登録を拒否する() {
         Customer c = newCustomer("Test Co 2");
         verifiedParticipant(c, "test-id-2");
 
@@ -113,7 +113,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testMockProvider_IdempotencyByMessageId() {
+    void モックプロバイダはメッセージIDで冪等に応答する() {
         when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), eq("MSG-IDEMPOTENT-1")))
                 .thenReturn("same-provider-id");
         String first = digitalInvoiceProvider.sendInvoice("<xml/>", "1.1.3", "MSG-IDEMPOTENT-1");
@@ -122,7 +122,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testCancelSent_CreatesCreditNoteAndDoesNotResendStandardInvoice() {
+    void 送信済み取消は打消し電文を作り通常請求を再送しない() {
         Customer c = newCustomer("Cancel Co");
         verifiedParticipant(c, "cancel-id");
         Invoice inv = validInvoice("INV-CANCEL-1", c.getId());
@@ -163,7 +163,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testProcessSendJob_RejectsCreditNoteProfile() {
+    void 通常送信ジョブは打消し電文を処理しない() {
         Customer c = newCustomer("Wrong Profile Co");
         verifiedParticipant(c, "wp-id");
         Invoice inv = validInvoice("INV-WP-1", c.getId());
@@ -192,7 +192,7 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testSendDigitalInvoice_ValidationFailure() {
+    void 請求書送信の検証失敗を記録する() {
         Customer c = newCustomer("Test Co 3");
         verifiedParticipant(c, "test-id-3");
 
@@ -222,28 +222,45 @@ class DigitalInvoiceSendTest {
     }
 
     @Test
-    void testSendDigitalInvoice_SystemErrorHidesExceptionMessage() {
-        Customer c = newCustomer("Test Co Secret");
-        verifiedParticipant(c, "test-id-secret");
-        Invoice inv = validInvoice("INV-SECRET", c.getId());
+    void 請求書送信のシステム例外原文を記録しない() {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(com.ses.service.impl.DigitalInvoiceServiceImpl.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
 
-        when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("db password=secret"));
+        try {
+            Customer c = newCustomer("Test Co Secret");
+            verifiedParticipant(c, "test-id-secret");
+            Invoice inv = validInvoice("INV-SECRET", c.getId());
 
-        DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
-        com.ses.entity.IntegrationJob job = integrationJobService.getLatestJob("t_digital_invoice", di.getId(), "DIGITAL_INVOICE_SEND");
+            when(digitalInvoiceProvider.sendInvoice(anyString(), anyString(), anyString()))
+                    .thenThrow(new RuntimeException("db password=secret"));
 
-        digitalInvoiceService.processSendJob(job.getId());
+            DigitalInvoice di = digitalInvoiceService.enqueueInvoiceForSend(inv.getId(), "1.1.3", c.getId());
+            com.ses.entity.IntegrationJob job = integrationJobService.getLatestJob("t_digital_invoice", di.getId(), "DIGITAL_INVOICE_SEND");
 
-        com.ses.entity.IntegrationJob updatedJob = integrationJobService.getById(job.getId());
-        assertNotNull(updatedJob.getErrorMessageSafe());
-        assertEquals("error.invoice.dispatchFailed", updatedJob.getErrorMessageSafe());
-        assertFalse(updatedJob.getErrorMessageSafe().contains("secret"));
-        assertEquals("SEND_ERROR", updatedJob.getErrorCode());
+            digitalInvoiceService.processSendJob(job.getId());
+
+            com.ses.entity.IntegrationJob updatedJob = integrationJobService.getById(job.getId());
+            assertNotNull(updatedJob.getErrorMessageSafe());
+            assertEquals("error.invoice.dispatchFailed", updatedJob.getErrorMessageSafe());
+            assertFalse(updatedJob.getErrorMessageSafe().contains("secret"));
+            assertEquals("PROVIDER_UNAVAILABLE", updatedJob.getErrorCode());
+
+            for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage()).doesNotContain("secret");
+                if (event.getThrowableProxy() != null && event.getThrowableProxy().getMessage() != null) {
+                    org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy().getMessage()).doesNotContain("secret");
+                }
+            }
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
-    void testSendDigitalInvoice_Success_MapsTaxAndOrderReference() {
+    void 請求書送信XMLへ税率と注文参照を反映する() {
         Customer c = newCustomer("Test Co 4");
         verifiedParticipant(c, "test-id-4");
         Invoice inv = validInvoice("INV-001", c.getId());

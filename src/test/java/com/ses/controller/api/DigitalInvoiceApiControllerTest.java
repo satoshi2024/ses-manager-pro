@@ -65,7 +65,7 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void testPreviewDelivery_PeppolVerified() throws Exception {
+    void Peppol検証済みプレビューを返す() throws Exception {
         Customer c = customer("Test Co", "PEPPOL");
         verifiedParticipant(c, "test-id");
         Invoice inv = invoice(c, "INV-001");
@@ -79,7 +79,7 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void testPreviewDelivery_PeppolUnverified() throws Exception {
+    void Peppol未検証プレビューを返す() throws Exception {
         Customer c = customer("Test Co 2", "PEPPOL");
         PeppolParticipant pp = new PeppolParticipant();
         pp.setOwnerType("CUSTOMER");
@@ -101,7 +101,7 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void testPreviewDelivery_AlreadySent() throws Exception {
+    void 送信済みプレビューを送信不可で返す() throws Exception {
         Customer c = customer("Test Co 3", "PEPPOL");
         Invoice inv = invoice(c, "INV-003");
 
@@ -122,7 +122,7 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void testGetStatusHistory_AdminCanViewXml() throws Exception {
+    void 管理者はステータス履歴からXML参照可能() throws Exception {
         Customer c = customer("Admin View XML Co", "PDF");
         Invoice inv = invoice(c, "INV-ADMIN-01");
 
@@ -147,7 +147,7 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "営業")
-    void testGetStatusHistory_SalesCannotViewXml() throws Exception {
+    void 営業はステータス履歴からXMLを参照できない() throws Exception {
         Customer c = customer("Sales View XML Co", "PDF");
         Invoice inv = invoice(c, "INV-SALES-01");
 
@@ -171,52 +171,86 @@ class DigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void dispatch_hidesRuntimeExceptionMessage() throws Exception {
-        Customer c = customer("Dispatch Leak Co", "PEPPOL");
-        Invoice inv = invoice(c, "INV-DISPATCH-LEAK");
-        doThrow(new RuntimeException(SECRET))
-                .when(deliveryDispatcher).dispatch(anyLong(), anyLong(), anyString());
+    void 送信ディスパッチのシステム例外原文を返さない() throws Exception {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(DigitalInvoiceApiController.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
 
-        mockMvc.perform(post("/api/digital-invoices/dispatch/" + inv.getId()).with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message", is("error.invoice.dispatchFailed")))
-                .andExpect(jsonPath("$.message", not(containsString("secret"))));
+        try {
+            Customer c = customer("Dispatch Leak Co", "PEPPOL");
+            Invoice inv = invoice(c, "INV-DISPATCH-LEAK");
+            doThrow(new RuntimeException(SECRET))
+                    .when(deliveryDispatcher).dispatch(anyLong(), anyLong(), anyString());
+
+            mockMvc.perform(post("/api/digital-invoices/dispatch/" + inv.getId()).with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message", is("error.invoice.dispatchFailed")))
+                    .andExpect(jsonPath("$.message", not(containsString("secret"))));
+
+            for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage()).doesNotContain("secret");
+                if (event.getThrowableProxy() != null && event.getThrowableProxy().getMessage() != null) {
+                    org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy().getMessage()).doesNotContain("secret");
+                }
+            }
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
     @WithMockUser(roles = "管理者")
-    void dispatch_rethrowsBusinessExceptionConflict() throws Exception {
+    void 送信ディスパッチの競合業務例外を安全に返す() throws Exception {
         Customer c = customer("Dispatch Conflict Co", "PEPPOL");
         Invoice inv = invoice(c, "INV-DISPATCH-409");
         doThrow(new BusinessException(409, "このインボイスはすでに送信されています（または送信キューにあります）。"))
                 .when(deliveryDispatcher).dispatch(anyLong(), anyLong(), anyString());
 
         mockMvc.perform(post("/api/digital-invoices/dispatch/" + inv.getId()).with(csrf()))
-                .andExpect(status().isConflict())
+                    .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is(409)))
                 .andExpect(jsonPath("$.message", containsString("すでに送信")));
     }
 
     @Test
     @WithMockUser(roles = "管理者")
-    void cancel_hidesRuntimeExceptionMessage() throws Exception {
-        Customer c = customer("Cancel Leak Co", "PDF");
-        Invoice inv = invoice(c, "INV-CANCEL-LEAK");
-        DigitalInvoice di = new DigitalInvoice();
-        di.setInvoiceId(inv.getId());
-        di.setDirection("SEND");
-        di.setProfile("Standard");
-        di.setSpecificationVersion("1.1.3");
-        di.setMessageId("MSG-CANCEL-LEAK-" + inv.getId());
-        di.setStatus("QUEUED");
-        digitalInvoiceService.save(di);
+    void 取消のシステム例外原文を返さない() throws Exception {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(DigitalInvoiceApiController.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
 
-        doThrow(new RuntimeException(SECRET)).when(digitalInvoiceService).cancelInvoice(di.getId());
+        try {
+            Customer c = customer("Cancel Leak Co", "PDF");
+            Invoice inv = invoice(c, "INV-CANCEL-LEAK");
+            DigitalInvoice di = new DigitalInvoice();
+            di.setInvoiceId(inv.getId());
+            di.setDirection("SEND");
+            di.setProfile("Standard");
+            di.setSpecificationVersion("1.1.3");
+            di.setMessageId("MSG-CANCEL-LEAK-" + inv.getId());
+            di.setStatus("QUEUED");
+            digitalInvoiceService.save(di);
 
-        mockMvc.perform(post("/api/digital-invoices/" + di.getId() + "/cancel").with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message", is("error.invoice.cancelFailed")))
-                .andExpect(jsonPath("$.message", not(containsString("secret"))));
+            doThrow(new RuntimeException(SECRET)).when(digitalInvoiceService).cancelInvoice(di.getId());
+
+            mockMvc.perform(post("/api/digital-invoices/" + di.getId() + "/cancel").with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message", is("error.invoice.cancelFailed")))
+                    .andExpect(jsonPath("$.message", not(containsString("secret"))));
+
+            for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage()).doesNotContain("secret");
+                if (event.getThrowableProxy() != null && event.getThrowableProxy().getMessage() != null) {
+                    org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy().getMessage()).doesNotContain("secret");
+                }
+            }
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private Customer customer(String name, String preference) {

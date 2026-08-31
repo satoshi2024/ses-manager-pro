@@ -38,21 +38,38 @@ class InboundDigitalInvoiceApiControllerTest {
 
     @Test
     @WithMockUser(roles = "管理者")
-    void accept_hidesRuntimeExceptionMessage() throws Exception {
-        when(digitalInvoiceService.acceptInboundReview(anyLong()))
-                .thenThrow(new RuntimeException(SECRET));
+    void 受入のシステム例外原文を返さない() throws Exception {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(InboundDigitalInvoiceApiController.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender = new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
 
-        mockMvc.perform(post("/api/inbound-invoices/1/review")
-                        .param("action", "ACCEPT")
-                        .with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message", is("error.invoice.acceptFailed")))
-                .andExpect(jsonPath("$.message", not(containsString("secret"))));
+        try {
+            when(digitalInvoiceService.acceptInboundReview(anyLong()))
+                    .thenThrow(new RuntimeException(SECRET));
+
+            mockMvc.perform(post("/api/inbound-invoices/1/review")
+                            .param("action", "ACCEPT")
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.message", is("error.invoice.acceptFailed")))
+                    .andExpect(jsonPath("$.message", not(containsString("secret"))));
+
+            for (ch.qos.logback.classic.spi.ILoggingEvent event : appender.list) {
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage()).doesNotContain("secret");
+                if (event.getThrowableProxy() != null && event.getThrowableProxy().getMessage() != null) {
+                    org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy().getMessage()).doesNotContain("secret");
+                }
+            }
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
     @WithMockUser(roles = "管理者")
-    void accept_rethrowsBusinessException() throws Exception {
+    void 受入の業務例外を安全に返す() throws Exception {
         when(digitalInvoiceService.acceptInboundReview(anyLong()))
                 .thenThrow(new BusinessException("レビュー待ちのインボイスではありません。"));
 

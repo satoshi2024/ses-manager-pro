@@ -37,6 +37,14 @@ public interface IntegrationJobService extends IService<IntegrationJob> {
      */
     void markSucceeded(Long jobId, String externalId, String providerRequestId, String safeDetail);
 
+    /** プロバイダ応答の識別子を保持したまま成功へ遷移する。 */
+    void markSucceededWithProviderMetadata(Long jobId, String externalId, String providerRequestId,
+                                           String providerOperationId, String safeDetail);
+
+    /** ローカル状態更新前にプロバイダ応答の識別子を記録する。 */
+    void recordProviderMetadata(Long jobId, String externalId, String providerRequestId,
+                                String providerOperationId);
+
     /**
      * 一時障害（429/5xx/timeout）による再試行待ちを記録する。
      */

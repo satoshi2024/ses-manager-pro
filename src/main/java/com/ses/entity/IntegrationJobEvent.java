@@ -26,6 +26,9 @@ public class IntegrationJobEvent {
     /** ジョブID */
     private Long jobId;
 
+    /** API・ワーカーを横断する相関ID */
+    private String correlationId;
+
     /** 遷移前状態 */
     private String fromStatus;
 
