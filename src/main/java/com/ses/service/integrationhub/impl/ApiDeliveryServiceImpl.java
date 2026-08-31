@@ -6,6 +6,7 @@ import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import com.ses.service.integrationhub.IntegrationHubStates;
+import com.ses.service.integrationhub.IntegrationHubWebhookDeliveryBindingValidator;
 import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
@@ -20,6 +21,7 @@ import java.time.LocalDateTime;
 public class ApiDeliveryServiceImpl implements ApiDeliveryService {
     private static final int MAX_ATTEMPTS = 8;
     private final ApiDeliveryMapper mapper;
+    private final IntegrationHubWebhookDeliveryBindingValidator bindingValidator;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -39,8 +41,8 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
         if (subscriptionId == null || generation <= 0 || now == null || snapshot == null) {
             throw new IllegalArgumentException("invalid delivery request");
         }
-        ExternalDtoSnapshot.requireAllowList(snapshot, ExternalDtoSnapshot.OUTBOUND_FIELDS);
-        ExternalDtoSnapshot.requireOutboundEnvelope(snapshot, eventId, eventType, schemaVersion, correlationId, now);
+        bindingValidator.requireForEnqueue(clientId, tenantId, primaryResourceType, primaryResourceId,
+                eventId, eventType, schemaVersion, correlationId, snapshot, now);
         ApiDelivery existing = mapper.selectByEventGeneration(eventId, subscriptionId, generation);
         if (existing != null) {
             if (!snapshot.payloadHash().equalsIgnoreCase(existing.getPayloadHash())
@@ -80,7 +82,9 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
             return row;
         } catch (DuplicateKeyException e) {
             ApiDelivery concurrent = mapper.selectByEventGeneration(eventId, subscriptionId, generation);
-            if (concurrent == null || !snapshot.payloadHash().equalsIgnoreCase(concurrent.getPayloadHash())) {
+            if (concurrent == null || !snapshot.payloadHash().equalsIgnoreCase(concurrent.getPayloadHash())
+                    || !primaryResourceType.equals(concurrent.getPrimaryResourceType())
+                    || !primaryResourceId.equals(concurrent.getPrimaryResourceId())) {
                 throw new IllegalArgumentException("delivery generation conflicts");
             }
             return concurrent;

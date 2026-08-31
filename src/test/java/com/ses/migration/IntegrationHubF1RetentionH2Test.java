@@ -1,6 +1,8 @@
 package com.ses.migration;
 
 import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.ApiNonceReplayService;
 import com.ses.service.integrationhub.ApiRetentionPurgeService;
@@ -39,6 +41,9 @@ class IntegrationHubF1RetentionH2Test {
 
     @Autowired
     private ApiDeliveryService deliveryService;
+
+    @Autowired
+    private ExternalApiPublicIdCodec publicIdCodec;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -178,13 +183,15 @@ class IntegrationHubF1RetentionH2Test {
 
         assertThrows(RollbackMarker.class, () -> template.executeWithoutResult(status -> {
             long subscriptionId = insertSubscription("atomic-enqueue-client", "https://example.invalid/atomic");
+            String publicProjectId = publicProjectId("atomic-enqueue-client", 1L);
             ApiDelivery delivery = deliveryService.enqueue("delivery-atomic-rollback", subscriptionId, 1,
                     "atomic-enqueue-client", "scope", "tenant-a", "project", 1L, "event.type", "v1",
                     "correlation-atomic-000001", ExternalDtoSnapshot.of(
                             "{\"eventId\":\"delivery-atomic-rollback\",\"eventType\":\"event.type\","
                                     + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\","
-                                    + "\"publicResourceId\":\"resource-1\",\"correlationId\":"
-                                    + "\"correlation-atomic-000001\",\"payload\":{\"status\":\"ACTIVE\"}}"), now);
+                                    + "\"publicResourceId\":\"" + publicProjectId + "\",\"correlationId\":"
+                                    + "\"correlation-atomic-000001\",\"payload\":{\"publicProjectId\":\""
+                                    + publicProjectId + "\",\"status\":\"ACTIVE\"}}"), now);
             assertTrue(delivery.getId() != null);
             throw new RollbackMarker();
         }));
@@ -193,10 +200,24 @@ class IntegrationHubF1RetentionH2Test {
     }
 
     private long insertSubscription(String clientId, String endpoint) {
+        String scope = "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}";
+        jdbcTemplate.update("INSERT INTO m_api_client (client_id, owner_ref, tenant_id, legal_entity_id, "
+                        + "data_scope_json, allowed_cidrs, client_tier, status) VALUES "
+                        + "(?, 'PROJECT_OWNER', 'tenant-a', 9, ?, '127.0.0.1/32', 'INTERNAL_TEST', 'ACTIVE')",
+                clientId, scope);
         jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, "
                 + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json) VALUES "
                 + "(?, 'OUTBOUND', 'event.type', ?, 'key-1', 'IHG1:v1:iv:cipher', 'v1', '{}')", clientId, endpoint);
         return jdbcTemplate.queryForObject("SELECT id FROM m_webhook_subscription WHERE client_id = ?", Long.class, clientId);
+    }
+
+    private String publicProjectId(String clientId, long projectId) {
+        Long clientDatabaseId = jdbcTemplate.queryForObject(
+                "SELECT id FROM m_api_client WHERE client_id = ?", Long.class, clientId);
+        return publicIdCodec.encode(new ExternalApiPrincipal(clientId, clientDatabaseId, "tenant-a", 9L,
+                "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],\"projectIds\":[\"1\"]}",
+                1, "delivery-binding", "INTERNAL_TEST"), "project", projectId);
     }
 
     private long insertDelivery(long subscriptionId, String eventId, String retentionClass) {

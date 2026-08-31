@@ -1,9 +1,13 @@
 package com.ses.service.integrationhub;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
+import com.ses.entity.integrationhub.ApiClient;
 import com.ses.entity.integrationhub.ApiDelivery;
 import com.ses.entity.integrationhub.WebhookSubscription;
+import com.ses.mapper.ApiClientMapper;
 import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.service.integrationhub.crypto.IntegrationHubSecretCryptoService;
 import org.mockito.ArgumentCaptor;
@@ -39,6 +43,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
     private WebhookSubscriptionService subscriptionService;
     private IntegrationHubSecretCryptoService crypto;
     private IntegrationHubWebhookTransport transport;
+    private IntegrationHubWebhookDeliveryBindingValidator bindingValidator;
     private IntegrationHubWebhookDeliveryWorker worker;
 
     @BeforeEach
@@ -48,6 +53,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         subscriptionService = mock(WebhookSubscriptionService.class);
         crypto = mock(IntegrationHubSecretCryptoService.class);
         transport = mock(IntegrationHubWebhookTransport.class);
+        bindingValidator = mock(IntegrationHubWebhookDeliveryBindingValidator.class);
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getExternalTransport().setEnabled(true);
         properties.getExternalTransport().setBatchSize(32);
@@ -56,7 +62,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         properties.getExternalTransport().setReadTimeoutMs(3000);
         worker = new IntegrationHubWebhookDeliveryWorker(deliveryMapper, deliveryService, subscriptionService,
                 crypto, transport, new IntegrationHubWebhookSigner(),
-                new IntegrationHubWebhookBackoffPolicy(() -> 0), properties,
+                new IntegrationHubWebhookBackoffPolicy(() -> 0), bindingValidator, properties,
                 Clock.fixed(Instant.parse("2026-08-31T12:00:00Z"), ZoneOffset.UTC), new ObjectMapper());
     }
 
@@ -155,7 +161,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         properties.getExternalTransport().setReadTimeoutMs(3000);
         worker = new IntegrationHubWebhookDeliveryWorker(deliveryMapper, deliveryService, subscriptionService,
                 crypto, transport, new IntegrationHubWebhookSigner(), new IntegrationHubWebhookBackoffPolicy(() -> 0),
-                properties, mutableClock, new ObjectMapper());
+                bindingValidator, properties, mutableClock, new ObjectMapper());
         ApiDelivery claimed = claimed(1);
         when(deliveryService.recoverExpiredLeases(any())).thenReturn(0);
         when(deliveryMapper.selectDue(any(), anyInt())).thenReturn(List.of(claimed));
@@ -206,6 +212,68 @@ class IntegrationHubWebhookDeliveryWorkerTest {
                 eq(claimed.getPayloadHash()), eq("FAILED"), eq("SUBSCRIPTION_INVALID"), eq(now));
     }
 
+    @Test
+    void workerは初回送信前にledgerのprimaryOpaqueBindingを検証し不一致なら送信しない() {
+        ApiDelivery claimed = claimed(1);
+        arrangeClaim(claimed);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        doThrow(new SecurityException("primary binding mismatch")).when(bindingValidator)
+                .requireForSend(eq(claimed), any(), any());
+        when(deliveryService.markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("FAILED"),
+                eq("PRIMARY_BINDING_INVALID"), eq(now))).thenReturn(true);
+
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(transport, never()).send(any());
+        verify(deliveryService).markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("FAILED"),
+                eq("PRIMARY_BINDING_INVALID"), eq(now));
+    }
+
+    @Test
+    void workerの実bindingvalidatorは初回送信前のprimaryID不一致を拒否する() {
+        IntegrationHubExternalApiProperties bindingProperties = new IntegrationHubExternalApiProperties();
+        bindingProperties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
+        ExternalApiPublicIdCodec codec = new ExternalApiPublicIdCodec(bindingProperties);
+        ApiClientMapper clientMapper = mock(ApiClientMapper.class);
+        when(clientMapper.selectByClientId("client-a")).thenReturn(ApiClient.builder()
+                .id(11L).clientId("client-a").tenantId("tenant-a").legalEntityId(9L)
+                .dataScopeJson("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"]}")
+                .clientTier("STANDARD").status("ACTIVE").build());
+        bindingValidator = new IntegrationHubWebhookDeliveryBindingValidator(clientMapper, codec);
+        IntegrationHubExternalApiProperties workerProperties = new IntegrationHubExternalApiProperties();
+        workerProperties.getExternalTransport().setEnabled(true);
+        workerProperties.getExternalTransport().setBatchSize(32);
+        workerProperties.getExternalTransport().setLeaseSeconds(60);
+        workerProperties.getExternalTransport().setConnectTimeoutMs(3000);
+        workerProperties.getExternalTransport().setReadTimeoutMs(3000);
+        worker = new IntegrationHubWebhookDeliveryWorker(deliveryMapper, deliveryService, subscriptionService,
+                crypto, transport, new IntegrationHubWebhookSigner(), new IntegrationHubWebhookBackoffPolicy(() -> 0),
+                bindingValidator, workerProperties,
+                Clock.fixed(Instant.parse("2026-08-31T12:00:00Z"), ZoneOffset.UTC), new ObjectMapper());
+
+        ExternalApiPrincipal principal = new ExternalApiPrincipal("client-a", 11L, "tenant-a", 9L,
+                "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"]}", 1,
+                "delivery-binding", "STANDARD");
+        String wrongPublicId = codec.encode(principal, "project", 2L);
+        String json = "{\"eventId\":\"event-1\",\"eventType\":\"resource.changed\","
+                + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-31T12:00:00Z\","
+                + "\"publicResourceId\":\"" + wrongPublicId + "\",\"correlationId\":\"correlation-000001\","
+                + "\"payload\":{\"publicProjectId\":\"" + wrongPublicId + "\",\"status\":\"ACTIVE\"}}";
+        ApiDelivery claimed = claimed(1);
+        claimed.setExternalDtoSnapshot(json);
+        claimed.setPayloadHash(com.ses.service.integrationhub.IntegrationHubDigest.sha256Hex(json));
+        claimed.setPrimaryResourceType("project");
+        claimed.setPrimaryResourceId(1L);
+        arrangeClaim(claimed);
+        when(subscriptionService.getActive(7L)).thenReturn(subscription());
+        when(deliveryService.markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("FAILED"),
+                eq("PRIMARY_BINDING_INVALID"), eq(now))).thenReturn(true);
+
+        assertTrue(worker.dispatchOne(7L, now));
+        verify(transport, never()).send(any());
+        verify(deliveryService).markTerminal(eq(7L), eq(1), eq(1), any(), any(), any(), eq("FAILED"),
+                eq("PRIMARY_BINDING_INVALID"), eq(now));
+    }
+
     private void arrangeClaim(ApiDelivery claimed) {
         when(deliveryService.claim(eq(7L), any(), eq(now), any())).thenReturn(claimed);
     }
@@ -218,6 +286,7 @@ class IntegrationHubWebhookDeliveryWorkerTest {
         return ApiDelivery.builder().id(7L).version(attempt).eventId("event-1").subscriptionId(7L)
                 .deliveryGeneration(1).clientId("client-a").scopeCode("resource.read").tenantId("tenant-a")
                 .scopeDigest(IntegrationHubWebhookScopeDigest.of("client-a", "resource.read", "tenant-a"))
+                .primaryResourceType("project").primaryResourceId(1L)
                 .eventType("resource.changed").schemaVersion("v1").correlationId("correlation-000001")
                 .providerIdempotencyKey(IntegrationHubDigest.sha256Hex("event-1|7|1"))
                 .externalDtoSnapshot(new String(body, StandardCharsets.UTF_8))

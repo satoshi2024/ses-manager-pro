@@ -38,6 +38,7 @@ public class IntegrationHubWebhookDeliveryWorker {
     private final IntegrationHubWebhookTransport transport;
     private final IntegrationHubWebhookSigner signer;
     private final IntegrationHubWebhookBackoffPolicy backoffPolicy;
+    private final IntegrationHubWebhookDeliveryBindingValidator bindingValidator;
     private final IntegrationHubExternalApiProperties properties;
     private final Clock clock;
     private final ObjectMapper objectMapper;
@@ -49,6 +50,7 @@ public class IntegrationHubWebhookDeliveryWorker {
                                                IntegrationHubWebhookTransport transport,
                                                IntegrationHubWebhookSigner signer,
                                                IntegrationHubWebhookBackoffPolicy backoffPolicy,
+                                               IntegrationHubWebhookDeliveryBindingValidator bindingValidator,
                                                IntegrationHubExternalApiProperties properties,
                                                Clock clock,
                                                ObjectMapper objectMapper) {
@@ -59,6 +61,7 @@ public class IntegrationHubWebhookDeliveryWorker {
         this.transport = transport;
         this.signer = signer;
         this.backoffPolicy = backoffPolicy;
+        this.bindingValidator = bindingValidator;
         this.properties = properties;
         this.clock = clock;
         this.objectMapper = objectMapper;
@@ -112,6 +115,14 @@ public class IntegrationHubWebhookDeliveryWorker {
             // payload契約違反は再試行せず、本文・例外本文を記録しない。
             return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
                     "PAYLOAD_INVALID", utcNow());
+        }
+
+        try {
+            bindingValidator.requireForSend(claimed, snapshot, utcNow());
+        } catch (RuntimeException e) {
+            // ledgerのprimary bindingとopaque public IDが一致しないrowは送信しない。
+            return terminal(claimed, leaseToken, IntegrationHubStates.DELIVERY_FAILED,
+                    "PRIMARY_BINDING_INVALID", utcNow());
         }
 
         final byte[] body = snapshot.json().getBytes(StandardCharsets.UTF_8);

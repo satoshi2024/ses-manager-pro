@@ -1,5 +1,7 @@
 package com.ses.migration;
 
+import com.ses.config.integrationhub.ExternalApiPrincipal;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.entity.integrationhub.ApiDelivery;
 import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.mapper.InboundEventMapper;
@@ -79,6 +81,10 @@ class IntegrationHubF1MySqlConcurrencyTest {
     private InboundEventService inboundEventService;
     @Autowired
     private InboundEventMapper inboundEventMapper;
+    @Autowired
+    private ExternalApiPublicIdCodec publicIdCodec;
+
+    private long clientDatabaseId;
 
     @AfterEach
     void cleanup() throws Exception {
@@ -89,6 +95,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 statement.executeUpdate("DELETE FROM m_webhook_subscription WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_usage_bucket WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_inbound_event WHERE client_id = '" + CLIENT_ID + "'");
+                statement.executeUpdate("DELETE FROM m_api_client WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_retention_hold");
                 statement.executeUpdate("DELETE FROM t_api_purge_checkpoint");
             }
@@ -472,6 +479,20 @@ class IntegrationHubF1MySqlConcurrencyTest {
     }
 
     private long insertSubscription(Connection connection) throws Exception {
+        try (PreparedStatement insertClient = connection.prepareStatement(
+                "INSERT INTO m_api_client (client_id, owner_ref, tenant_id, legal_entity_id, data_scope_json, "
+                        + "allowed_cidrs, client_tier, status) VALUES (?, 'PROJECT_OWNER', ?, 9, ?, '', 'INTERNAL_TEST', 'ACTIVE')",
+                Statement.RETURN_GENERATED_KEYS)) {
+            insertClient.setString(1, CLIENT_ID);
+            insertClient.setString(2, TENANT_ID);
+            insertClient.setString(3, "{\"tenantIds\":[\"" + TENANT_ID + "\"],\"legalEntityIds\":[\"9\"],"
+                    + "\"projectIds\":[\"1\"]}");
+            insertClient.executeUpdate();
+            try (ResultSet keys = insertClient.getGeneratedKeys()) {
+                keys.next();
+                clientDatabaseId = keys.getLong(1);
+            }
+        }
         try (PreparedStatement insert = connection.prepareStatement(
                 "INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, key_id, "
                         + "encrypted_signing_secret, crypto_key_version, data_scope_json) VALUES (?, 'OUTBOUND', "
@@ -488,9 +509,9 @@ class IntegrationHubF1MySqlConcurrencyTest {
     }
 
     private String outboundSnapshot(String eventId, String correlationId) {
-        return "{\"eventId\":\"" + eventId + "\",\"eventType\":\"resource.changed\","
-                + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\","
-                + "\"publicResourceId\":\"resource-1\",\"correlationId\":\"" + correlationId
-                + "\",\"payload\":{\"status\":\"ACTIVE\"}}";
+        String publicProjectId = publicIdCodec.encode(new ExternalApiPrincipal(CLIENT_ID, clientDatabaseId,
+                TENANT_ID, 9L, "{\"tenantIds\":[\"" + TENANT_ID + "\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}", 1, "delivery-binding", "INTERNAL_TEST"), "project", 1L);
+        return "{\"eventId\":\"" + eventId + "\",\"eventType\":\"resource.changed\",\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\",\"publicResourceId\":\"" + publicProjectId + "\",\"correlationId\":\"" + correlationId + "\",\"payload\":{\"publicProjectId\":\"" + publicProjectId + "\",\"status\":\"ACTIVE\"}}";
     }
 }

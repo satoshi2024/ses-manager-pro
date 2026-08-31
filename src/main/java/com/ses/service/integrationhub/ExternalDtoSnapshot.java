@@ -151,6 +151,35 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
         }
     }
 
+    /** primary resourceのopaque IDをenvelopeとresource DTOの両方へ同一値でbindする。 */
+    public static void requirePrimaryResourceBinding(ExternalDtoSnapshot snapshot, String primaryResourceType,
+                                                     String expectedPublicId) {
+        requireAllowList(snapshot, OUTBOUND_FIELDS);
+        if (primaryResourceType == null || expectedPublicId == null || expectedPublicId.isBlank()) {
+            throw new IllegalArgumentException("primary resource binding is incomplete");
+        }
+        String primaryField = switch (primaryResourceType) {
+            case "engineer-availability" -> "publicEngineerId";
+            case "project" -> "publicProjectId";
+            case "contract-status" -> "publicContractId";
+            case "invoice-status" -> "publicInvoiceId";
+            default -> throw new IllegalArgumentException("primary resource type is not approved");
+        };
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(snapshot.json());
+            requireTextEquals(root, "publicResourceId", expectedPublicId);
+            JsonNode payload = root.get("payload");
+            if (payload == null || !payload.isObject()) {
+                throw new IllegalArgumentException("outbound payload is missing");
+            }
+            requireTextEquals(payload, primaryField, expectedPublicId);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("primary resource binding is invalid", e);
+        }
+    }
+
     private static void requireTextEquals(JsonNode root, String field, String expected) {
         JsonNode actual = root.get(field);
         if (actual == null || !actual.isTextual() || !expected.equals(actual.textValue())) {

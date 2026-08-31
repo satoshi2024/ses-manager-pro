@@ -1,11 +1,17 @@
 package com.ses.service.integrationhub.impl;
 
 import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.entity.integrationhub.ApiClient;
 import com.ses.mapper.ApiDeliveryMapper;
+import com.ses.mapper.ApiClientMapper;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
+import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.IntegrationHubDigest;
+import com.ses.service.integrationhub.IntegrationHubWebhookDeliveryBindingValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.time.LocalDateTime;
 
@@ -21,6 +27,8 @@ import static org.mockito.Mockito.when;
 /** NF-05 F1: dedicated delivery ledger、allow-list snapshot、claim/CAS引数。 */
 class ApiDeliveryServiceTest {
     private ApiDeliveryMapper mapper;
+    private ApiClientMapper clientMapper;
+    private ExternalApiPublicIdCodec publicIdCodec;
     private ApiDeliveryServiceImpl service;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
     private final String payloadHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -29,7 +37,13 @@ class ApiDeliveryServiceTest {
     @BeforeEach
     void setUp() {
         mapper = mock(ApiDeliveryMapper.class);
-        service = new ApiDeliveryServiceImpl(mapper);
+        clientMapper = mock(ApiClientMapper.class);
+        IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
+        properties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
+        publicIdCodec = new ExternalApiPublicIdCodec(properties);
+        when(clientMapper.selectByClientIdForUpdate("client-a")).thenReturn(client());
+        service = new ApiDeliveryServiceImpl(mapper,
+                new IntegrationHubWebhookDeliveryBindingValidator(clientMapper, publicIdCodec));
     }
 
     @Test
@@ -115,9 +129,48 @@ class ApiDeliveryServiceTest {
                         ExternalDtoSnapshot.of("{\"code\":\"not-an-outbound-field\"}"), now));
     }
 
+    @Test
+    void enqueueはprimaryのtypeまたはIDとsnapshotのopaqueIDが不一致なら保存しない() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
+                        "project", 2L, "event.type", "v1", "correlation-000001",
+                        ExternalDtoSnapshot.of(snapshotJson()), now));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
+                        "contract-status", 1L, "event.type", "v1", "correlation-000001",
+                        ExternalDtoSnapshot.of(snapshotJson()), now));
+        verify(mapper, org.mockito.Mockito.never()).insert(any(ApiDelivery.class));
+    }
+
+    @Test
+    void 同時enqueueのDuplicateKey収束もpayloadHashとprimaryTypeIdを同時比較する() {
+        String eventId = "event-duplicate";
+        ExternalDtoSnapshot snapshot = ExternalDtoSnapshot.of(snapshotJson(eventId));
+        ApiDelivery concurrent = ApiDelivery.builder().payloadHash(snapshot.payloadHash())
+                .primaryResourceType("project").primaryResourceId(2L).build();
+        when(mapper.selectByEventGeneration(eventId, 7L, 1)).thenReturn(null, concurrent);
+        when(mapper.insert(any(ApiDelivery.class))).thenThrow(new DuplicateKeyException("race"));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.enqueue(eventId, 7L, 1, "client-a", "scope", "tenant-a",
+                        "project", 1L, "event.type", "v1", "correlation-000001", snapshot, now));
+    }
+
+    private ApiClient client() {
+        return ApiClient.builder().id(11L).clientId("client-a").tenantId("tenant-a").legalEntityId(9L)
+                .dataScopeJson("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"]}")
+                .clientTier("STANDARD").status("ACTIVE").build();
+    }
+
     private String snapshotJson() {
-        return "{\"eventId\":\"event-1\",\"eventType\":\"event.type\",\"schemaVersion\":\"v1\","
-                + "\"createdAt\":\"2026-08-30T12:00:00Z\",\"publicResourceId\":\"resource-1\","
-                + "\"correlationId\":\"correlation-000001\",\"payload\":{\"status\":\"ACTIVE\"}}";
+        return snapshotJson("event-1");
+    }
+
+    private String snapshotJson(String eventId) {
+        String publicProjectId = publicIdCodec.encode(new com.ses.config.integrationhub.ExternalApiPrincipal(
+                "client-a", 11L, "tenant-a", 9L,
+                "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"]}",
+                1, "delivery-binding", "STANDARD"), "project", 1L);
+        return "{\"eventId\":\"" + eventId + "\",\"eventType\":\"event.type\",\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\",\"publicResourceId\":\"" + publicProjectId + "\",\"correlationId\":\"correlation-000001\",\"payload\":{\"publicProjectId\":\"" + publicProjectId + "\",\"status\":\"ACTIVE\"}}";
     }
 }
