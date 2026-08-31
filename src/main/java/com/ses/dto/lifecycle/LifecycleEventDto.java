@@ -24,6 +24,8 @@ public class LifecycleEventDto {
     private Long actorUserId;
     private String actorName;
     private String actorRoleSnapshot;
+    private String actorType;
+    private String confirmationSource;
     private String beforeState;
     private String afterState;
     private String detailsJson;

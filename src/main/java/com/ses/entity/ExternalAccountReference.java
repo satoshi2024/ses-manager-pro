@@ -81,14 +81,26 @@ public class ExternalAccountReference extends BaseEntity {
     private LocalDateTime revokeRequestedAt;
 
     /**
+     * 失効要求を起票したユーザーID。失効確認主体とは別に保持する。
+     */
+    private Long revokeRequestedBy;
+
+    /**
      * 失効完了確認日時 (NULL=失効未確認)
      */
     private LocalDateTime revokeConfirmedAt;
 
-    /**
-     * 失効確認者ユーザーID
-     */
+    /** 人間確認時だけ設定される確認主体ID。 */
     private Long revokeConfirmedBy;
+
+    /** 確認主体: HUMAN, SYSTEM, PROVIDER, LEGACY_UNRESOLVED。 */
+    private String actorType;
+
+    /** 確認チャネル: MANUAL_API, SCHEDULER_POLL, PROVIDER_SYNC, PROVIDER_CALLBACK, LEGACY_UNRESOLVED。 */
+    private String confirmationSource;
+
+    /** 既存クライアント向けの読み取り互換列。正本は confirmationSource。 */
+    private String revokeConfirmedSource;
 
     /**
      * 外部連携ステータス: NONE, SYNC_PENDING, SYNC_SUCCESS, SYNC_FAILED, TIMEOUT

@@ -16,6 +16,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -592,5 +593,53 @@ class LifecycleDomainServiceTest {
 
         // 要員本人が案件ステータス変更（保留や完了）を試みると拒否される
         assertThrows(BusinessException.class, () -> caseService.holdCase(caseDto.getId(), engineerUser.getId(), "保留"));
+    }
+
+    @Test
+    @DisplayName("NF-09: actor_type 未設定の旧イベントは actor_user_id から操作者を表示する")
+    void legacyLifecycleEventPreservesHumanActorInDto() {
+        LifecycleTemplateDto tpl = LifecycleTemplateDto.builder()
+                .templateType("LEAVE")
+                .name("休職手続（旧イベント検証）")
+                .validFrom(LocalDate.now().minusDays(1))
+                .tasks(List.of(
+                        LifecycleTemplateTaskDto.builder()
+                                .taskCode("L_LEGACY")
+                                .taskName("休職届提出")
+                                .assigneeRule("ENGINEER_SELF")
+                                .isEngineerVisible(1)
+                                .build()
+                ))
+                .build();
+        LifecycleTemplateDto created = templateService.createTemplate(tpl, adminUser.getId());
+
+        CreateLifecycleCaseCommand cmd = CreateLifecycleCaseCommand.builder()
+                .engineerId(testEngineer.getId())
+                .lifecycleType("LEAVE")
+                .templateId(created.getId())
+                .anchorDate(LocalDate.now())
+                .build();
+        LifecycleCaseDto caseDto = caseService.createCase(hrUser.getId(), cmd);
+
+        eventMapper.insert(LifecycleEvent.builder()
+                .caseId(caseDto.getId())
+                .eventType("TASK_COMPLETED")
+                .actorUserId(hrUser.getId())
+                .actorRoleSnapshot("HR")
+                .beforeState("IN_PROGRESS")
+                .afterState("COMPLETED")
+                .occurredAt(LocalDateTime.now())
+                .build());
+
+        LifecycleCaseDto detail = caseService.getCaseDetail(caseDto.getId(), adminUser);
+        LifecycleEventDto legacyEvent = detail.getEvents().stream()
+                .filter(event -> "TASK_COMPLETED".equals(event.getEventType()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("HUMAN", legacyEvent.getActorType());
+        assertEquals("MANUAL_API", legacyEvent.getConfirmationSource());
+        assertEquals(hrUser.getId(), legacyEvent.getActorUserId());
+        assertEquals("人事花子", legacyEvent.getActorName());
     }
 }

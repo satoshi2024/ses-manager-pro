@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.common.audit.ActorType;
+import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.engineersales.EngineerSalesDto;
 import com.ses.dto.lifecycle.CreateLifecycleCaseCommand;
 import com.ses.dto.lifecycle.LifecycleCaseDto;
+import com.ses.dto.lifecycle.LifecycleEventDto;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
 import com.ses.dto.lifecycle.ResignationGateResultDto;
 import com.ses.entity.*;
@@ -233,8 +236,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         LifecycleEvent event = LifecycleEvent.builder()
                 .caseId(lcCase.getId())
                 .eventType("CASE_CREATED")
-                .actorUserId(applicantUserId)
+                .actorUserId(eventActorUserId(applicantUserId, applicant))
                 .actorRoleSnapshot(applicantRole)
+                .actorType(eventActorType(applicantUserId, applicant))
+                .confirmationSource(eventConfirmationSource(applicantUserId, applicant))
                 .afterState("ACTIVE")
                 .detailsJson("{\"caseNo\":\"" + caseNo + "\",\"templateVersion\":" + template.getVersionNo() + "}")
                 .occurredAt(LocalDateTime.now())
@@ -341,6 +346,27 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                     .build());
         }
 
+        List<LifecycleEvent> allEvents = eventMapper.selectByCaseId(caseId).stream()
+                .filter(event -> !isEngineerRole
+                        || event.getTaskId() == null
+                        || (taskMapById.get(event.getTaskId()) != null
+                        && scopeService.isTaskVisibleToUser(currentUser, taskMapById.get(event.getTaskId()))))
+                .collect(Collectors.toList());
+        Map<Long, SysUser> eventActorMap = allEvents.stream()
+                .map(LifecycleEvent::getActorUserId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .map(id -> {
+                    SysUser actor = sysUserMapper.selectById(id);
+                    return actor == null ? null : Map.entry(id, actor);
+                })
+                .filter(Objects::nonNull)
+                .filter(entry -> entry.getValue() != null)
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (left, right) -> left));
+        List<LifecycleEventDto> eventDtos = allEvents.stream()
+                .map(event -> toEventDto(event, taskMapById, eventActorMap))
+                .collect(Collectors.toList());
+
         int progressPercent = total > 0 ? (int) Math.round(((double) completed / total) * 100) : 0;
 
         return LifecycleCaseDto.builder()
@@ -372,7 +398,74 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                 .blockingUncompletedCount(blockingUncompleted)
                 .progressPercent(progressPercent)
                 .tasks(taskDtos)
+                .events(eventDtos)
                 .build();
+    }
+
+    private LifecycleEventDto toEventDto(LifecycleEvent event,
+                                         Map<Long, LifecycleTask> taskMapById,
+                                         Map<Long, SysUser> eventActorMap) {
+        ActorType actorType = parseActorType(event.getActorType());
+        ConfirmationSource source = parseConfirmationSource(event.getConfirmationSource());
+        if (actorType == null && source == null
+                && event.getActorUserId() != null && event.getActorUserId() > 0
+                && eventActorMap.containsKey(event.getActorUserId())) {
+            actorType = ActorType.HUMAN;
+            source = ConfirmationSource.MANUAL_API;
+        }
+        boolean valid = actorType != null && source != null
+                && ((actorType == ActorType.HUMAN && source == ConfirmationSource.MANUAL_API
+                && event.getActorUserId() != null && event.getActorUserId() > 0
+                && eventActorMap.containsKey(event.getActorUserId()))
+                || (actorType == ActorType.SYSTEM && source == ConfirmationSource.SCHEDULER_POLL
+                && event.getActorUserId() == null)
+                || (actorType == ActorType.PROVIDER
+                && (source == ConfirmationSource.PROVIDER_SYNC || source == ConfirmationSource.PROVIDER_CALLBACK)
+                && event.getActorUserId() == null)
+                || (actorType == ActorType.LEGACY_UNRESOLVED
+                && source == ConfirmationSource.LEGACY_UNRESOLVED
+                && event.getActorUserId() == null));
+        if (!valid) {
+            actorType = ActorType.LEGACY_UNRESOLVED;
+            source = ConfirmationSource.LEGACY_UNRESOLVED;
+        }
+
+        SysUser actor = actorType == ActorType.HUMAN ? eventActorMap.get(event.getActorUserId()) : null;
+        return LifecycleEventDto.builder()
+                .id(event.getId())
+                .caseId(event.getCaseId())
+                .taskId(event.getTaskId())
+                .taskName(event.getTaskId() != null && taskMapById.get(event.getTaskId()) != null
+                        ? taskMapById.get(event.getTaskId()).getTaskName() : null)
+                .eventType(event.getEventType())
+                .actorUserId(actorType == ActorType.HUMAN ? event.getActorUserId() : null)
+                .actorName(actor != null ? (actor.getRealName() != null ? actor.getRealName() : actor.getUsername()) : null)
+                .actorRoleSnapshot(event.getActorRoleSnapshot())
+                .actorType(actorType.name())
+                .confirmationSource(source.name())
+                .beforeState(event.getBeforeState())
+                .afterState(event.getAfterState())
+                .detailsJson(event.getDetailsJson())
+                .occurredAt(event.getOccurredAt())
+                .build();
+    }
+
+    private ActorType parseActorType(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return ActorType.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private ConfirmationSource parseConfirmationSource(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return ConfirmationSource.valueOf(value.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     @Override
@@ -463,8 +556,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
                 .eventType("CASE_ON_HOLD")
-                .actorUserId(userId)
-                .actorRoleSnapshot(user != null ? user.getRole() : null)
+                .actorUserId(eventActorUserId(userId, user))
+                .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("ON_HOLD")
                 .detailsJson("{\"reason\":\"" + (reason != null ? reason : "") + "\"}")
@@ -498,8 +593,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
                 .eventType("CASE_RESUMED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("ACTIVE")
                 .occurredAt(LocalDateTime.now())
@@ -559,8 +656,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
                 .eventType("CASE_COMPLETED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("COMPLETED")
                 .occurredAt(LocalDateTime.now())
@@ -611,8 +710,10 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         eventMapper.insert(LifecycleEvent.builder()
                 .caseId(caseId)
                 .eventType("CASE_CANCELLED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("CANCELLED")
                 .detailsJson("{\"reason\":\"" + (reason != null ? reason : "") + "\"}")
@@ -630,5 +731,19 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
         scopeService.assertCanViewCase(currentUser, lcCase, engineer);
 
         return resignationGateChecker.evaluate(lcCase, engineer);
+    }
+
+    private String eventActorType(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null
+                ? ActorType.HUMAN.name() : ActorType.LEGACY_UNRESOLVED.name();
+    }
+
+    private Long eventActorUserId(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null ? actorUserId : null;
+    }
+
+    private String eventConfirmationSource(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null
+                ? ConfirmationSource.MANUAL_API.name() : ConfirmationSource.LEGACY_UNRESOLVED.name();
     }
 }

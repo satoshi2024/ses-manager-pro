@@ -27,9 +27,15 @@ public class AssetEvent implements Serializable {
     private Long id;
 
     /**
-     * 資産ID (m_asset.id)
+     * 資産ID (m_asset.id)。外部アカウント確認イベントではNULL。
      */
     private Long assetId;
+
+    /** イベントの対象種別（例: EXTERNAL_ACCOUNT_REFERENCE）。 */
+    private String referenceType;
+
+    /** イベントの対象参照ID。 */
+    private Long referenceId;
 
     /**
      * イベント種別: CREATED, ASSIGNED, RETURNED, TRANSFERRED, REPAIRED, REPORTED_LOST, REMOTE_WIPED, DISPOSED, INVENTORIED
@@ -43,9 +49,18 @@ public class AssetEvent implements Serializable {
     private LocalDateTime eventTime = LocalDateTime.now();
 
     /**
-     * 操作者ユーザーID
+     * 人間操作者の互換ID。SYSTEM/PROVIDERではNULL。
      */
     private Long actorUserId;
+
+    /** 確認主体区分。 */
+    private String actorType;
+
+    /** 確認チャネル区分。 */
+    private String confirmationSource;
+
+    /** 人間確認時のユーザーID。actorUserIdとは同じ値を保持する。 */
+    private Long humanUserId;
 
     /**
      * 貸与先区分: ENGINEER, USER
@@ -81,6 +96,12 @@ public class AssetEvent implements Serializable {
      * 追加メタデータJSON (PII/Secret非含有)
      */
     private String detailsJson;
+
+    /** 要求と確認を結ぶ相関ID。 */
+    private String correlationId;
+
+    /** 冪等性キー（外部アカウント確認イベントの場合）。 */
+    private String idempotencyKey;
 
     /**
      * 作成日時

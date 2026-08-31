@@ -2,6 +2,10 @@ package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.audit.ActorType;
+import com.ses.common.audit.ActorAttribution;
+import com.ses.common.audit.ConfirmationSource;
+import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AuditLog;
 import com.ses.mapper.AuditLogMapper;
 import com.ses.service.AuditLogService;
@@ -34,6 +38,7 @@ public class AuditLogServiceImpl implements AuditLogService {
             entry.setStatus(status);
             entry.setApplicationCode(applicationCode);
             entry.setSuccessFlag(successFlag);
+            applyRequestAttribution(entry);
             entry.setCreatedAt(LocalDateTime.now());
             auditLogMapper.insert(entry);
         } catch (Exception e) {
@@ -52,9 +57,42 @@ public class AuditLogServiceImpl implements AuditLogService {
         entry.setStatus(status);
         entry.setApplicationCode(applicationCode);
         entry.setSuccessFlag(successFlag);
+        applyRequestAttribution(entry);
         entry.setCreatedAt(LocalDateTime.now());
         if (auditLogMapper.insert(entry) != 1) {
             throw new IllegalStateException("重要security監査を永続化できません");
+        }
+    }
+
+    @Override
+    public void recordDomainEventRequired(AuditLog entry) {
+        if (entry == null || entry.getActorType() == null || entry.getConfirmationSource() == null) {
+            throw new IllegalArgumentException("ドメイン監査には主体とチャネルが必要です");
+        }
+        try {
+            new ActorAttribution(
+                    ActorType.valueOf(entry.getActorType()),
+                    ConfirmationSource.valueOf(entry.getConfirmationSource()),
+                    entry.getHumanUserId(), entry.getCorrelationId(), entry.getIdempotencyKey());
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("ドメイン監査の主体/チャネルが不正です", ex);
+        }
+        entry.setCreatedAt(entry.getCreatedAt() != null ? entry.getCreatedAt() : LocalDateTime.now());
+        if (auditLogMapper.insert(entry) != 1) {
+            throw new IllegalStateException("ドメイン監査を永続化できません");
+        }
+    }
+
+    private void applyRequestAttribution(AuditLog entry) {
+        Long userId = SecurityUtils.currentUserId();
+        if (userId != null && userId > 0) {
+            entry.setActorType(ActorType.HUMAN.name());
+            entry.setConfirmationSource(ConfirmationSource.MANUAL_API.name());
+            entry.setHumanUserId(userId);
+        } else {
+            entry.setActorType(ActorType.LEGACY_UNRESOLVED.name());
+            entry.setConfirmationSource(ConfirmationSource.LEGACY_UNRESOLVED.name());
+            entry.setHumanUserId(null);
         }
     }
 

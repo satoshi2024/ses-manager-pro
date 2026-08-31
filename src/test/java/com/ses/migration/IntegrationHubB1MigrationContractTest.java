@@ -12,7 +12,7 @@ class IntegrationHubB1MigrationContractTest {
     @Test
     void V132はV129を上書きせずscopeとreplay監査だけを追加する() throws IOException {
         String sql;
-        try (var stream = getClass().getResourceAsStream("/db/migration/V137__integration_hub_public_api_b1.sql")) {
+        try (var stream = getClass().getResourceAsStream("/db/migration/V138__integration_hub_public_api_b1.sql")) {
             if (stream == null) throw new IOException("missing V132 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }
@@ -33,7 +33,7 @@ class IntegrationHubB1MigrationContractTest {
     void V133はdeliveryとauditのretentionおよびFK削除動作を分離する() throws IOException {
         String sql;
         try (var stream = getClass().getResourceAsStream(
-                "/db/migration/V138__integration_hub_public_api_b1_replay_retention.sql")) {
+                "/db/migration/V139__integration_hub_public_api_b1_replay_retention.sql")) {
             if (stream == null) throw new IOException("missing V133 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }
@@ -50,7 +50,7 @@ class IntegrationHubB1MigrationContractTest {
     void V134は一次resourceをdeliveryへbindしsecondaryを同一resourceIdへ束ねない() throws IOException {
         String sql;
         try (var stream = getClass().getResourceAsStream(
-                "/db/migration/V139__integration_hub_b1_primary_resource_binding.sql")) {
+                "/db/migration/V140__integration_hub_b1_primary_resource_binding.sql")) {
             if (stream == null) throw new IOException("missing V134 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }

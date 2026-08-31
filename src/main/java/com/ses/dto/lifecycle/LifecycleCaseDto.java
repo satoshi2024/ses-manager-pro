@@ -54,4 +54,9 @@ public class LifecycleCaseDto {
      * 配下のタスク一覧
      */
     private List<LifecycleTaskDto> tasks;
+
+    /**
+     * 不変イベント台帳。主体/チャネルは常に解決済みenum値で返す。
+     */
+    private List<LifecycleEventDto> events;
 }
