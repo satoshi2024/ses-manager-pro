@@ -45,4 +45,20 @@ class IntegrationHubB1MigrationContractTest {
         assertTrue(sql.contains("audit_metadata_1y"));
         assertTrue(sql.contains("idx_api_delivery_replay_expiry"));
     }
+
+    @Test
+    void V134は一次resourceをdeliveryへbindしsecondaryを同一resourceIdへ束ねない() throws IOException {
+        String sql;
+        try (var stream = getClass().getResourceAsStream(
+                "/db/migration/V134__integration_hub_b1_primary_resource_binding.sql")) {
+            if (stream == null) throw new IOException("missing V134 migration");
+            sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
+        }
+        assertTrue(sql.contains("primary_resource_type"));
+        assertTrue(sql.contains("primary_resource_id"));
+        assertTrue(sql.contains("chk_api_delivery_primary_resource"));
+        assertTrue(sql.contains("idx_api_delivery_primary_resource"));
+        assertTrue(sql.contains("publicresourceid"));
+        assertTrue(sql.contains("secondary dimension"));
+    }
 }

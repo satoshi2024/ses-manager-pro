@@ -27,6 +27,8 @@ public class ApiDelivery {
     private String scopeCode;
     private String tenantId;
     private String scopeDigest;
+    private String primaryResourceType;
+    private Long primaryResourceId;
     private String eventType;
     private String schemaVersion;
     private String correlationId;

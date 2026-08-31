@@ -57,6 +57,8 @@ public class IntegrationHubWebhookDeliveryReplayServiceImpl
                 .scopeCode(original.getScopeCode())
                 .tenantId(original.getTenantId())
                 .scopeDigest(original.getScopeDigest())
+                .primaryResourceType(original.getPrimaryResourceType())
+                .primaryResourceId(original.getPrimaryResourceId())
                 .eventType(original.getEventType())
                 .schemaVersion(original.getSchemaVersion())
                 .correlationId(original.getCorrelationId())

@@ -135,7 +135,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
         }
 
         ApiDelivery enqueued = deliveryService.enqueue("f1-delivery-cas", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-f1-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-f1-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-cas", "correlation-f1-000001")), NOW);
         ApiDelivery claimed = deliveryService.claim(enqueued.getId(), "lease-1", NOW, NOW.plusMinutes(5));
         assertEquals("CLAIMED", claimed.getStatus());
@@ -174,7 +174,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
         }
 
         ApiDelivery timeout = deliveryService.enqueue("f1-delivery-timeout", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-timeout-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-timeout-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-timeout", "correlation-timeout-000001")), NOW);
         ApiDelivery timeoutClaimed = deliveryService.claim(timeout.getId(), "lease-timeout", NOW,
                 NOW.plusMinutes(5));
@@ -185,7 +185,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
         assertEquals("RETRYABLE", deliveryMapper.selectById(timeout.getId()).getStatus());
 
         ApiDelivery fiveHundred = deliveryService.enqueue("f1-delivery-5xx", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-5xx-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-5xx-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-5xx", "correlation-5xx-000001")), NOW);
         ApiDelivery fiveHundredClaimed = deliveryService.claim(fiveHundred.getId(), "lease-5xx", NOW,
                 NOW.plusMinutes(5));
@@ -196,7 +196,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
         assertEquals("HTTP_5XX", deliveryMapper.selectById(fiveHundred.getId()).getLastErrorCode());
 
         ApiDelivery attemptEight = deliveryService.enqueue("f1-delivery-attempt-8", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-attempt-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-attempt-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-attempt-8", "correlation-attempt-000001")), NOW);
         ApiDelivery attemptEightClaimed = deliveryService.claim(attemptEight.getId(), "lease-attempt-8", NOW,
                 NOW.plusMinutes(5));
@@ -213,7 +213,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
         assertEquals("DLQ", deliveryMapper.selectById(attemptEight.getId()).getStatus());
 
         ApiDelivery providerAccepted = deliveryService.enqueue("f1-delivery-provider-crash", subscriptionId, 1,
-                CLIENT_ID, SCOPE, TENANT_ID, "resource.changed", "v1", "correlation-crash-000001",
+                CLIENT_ID, SCOPE, TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-crash-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-provider-crash", "correlation-crash-000001")), NOW);
         ApiDelivery providerClaimed = deliveryService.claim(providerAccepted.getId(), "lease-provider-crash", NOW,
                 NOW.plusMinutes(5));
@@ -238,7 +238,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
             subscriptionId = insertSubscription(connection);
         }
         ApiDelivery delivery = deliveryService.enqueue("f1-delivery-claim-race", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-claim-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-claim-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-claim-race", "correlation-claim-000001")), NOW);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -404,7 +404,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
             subscriptionId = insertSubscription(connection);
         }
         ApiDelivery delivery = deliveryService.enqueue("f1-delivery-lease", subscriptionId, 1, CLIENT_ID, SCOPE,
-                TENANT_ID, "resource.changed", "v1", "correlation-lease-000001",
+                TENANT_ID, "project", 1L, "resource.changed", "v1", "correlation-lease-000001",
                 ExternalDtoSnapshot.of(outboundSnapshot("f1-delivery-lease", "correlation-lease-000001")), NOW);
         try (Connection connection = MYSQL.createConnection("");
              PreparedStatement statement = connection.prepareStatement(

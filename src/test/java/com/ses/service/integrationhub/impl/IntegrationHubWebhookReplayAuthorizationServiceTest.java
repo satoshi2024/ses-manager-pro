@@ -5,6 +5,7 @@ import com.ses.config.LoginUser;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
+import com.ses.dto.integrationhub.ExternalApiResourceMembership;
 import com.ses.entity.SysUser;
 import com.ses.entity.integrationhub.ApiClient;
 import com.ses.entity.integrationhub.ApiClientScope;
@@ -13,6 +14,7 @@ import com.ses.entity.integrationhub.WebhookSubscription;
 import com.ses.mapper.ApiClientMapper;
 import com.ses.mapper.ApiClientScopeMapper;
 import com.ses.mapper.WebhookSubscriptionMapper;
+import com.ses.mapper.IntegrationHubWebhookResourceScopeMapper;
 import com.ses.service.integrationhub.IntegrationHubDigest;
 import com.ses.service.integrationhub.IntegrationHubWebhookReplayAuthorizationService;
 import com.ses.service.integrationhub.IntegrationHubWebhookScopeDigest;
@@ -40,6 +42,7 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
     private ApiClientMapper clientMapper;
     private ApiClientScopeMapper clientScopeMapper;
     private WebhookSubscriptionMapper subscriptionMapper;
+    private IntegrationHubWebhookResourceScopeMapper resourceScopeMapper;
     private ExternalApiPublicIdCodec publicIdCodec;
     private AuthorizationService internalAuthorizationService;
     private Authentication adminAuthentication;
@@ -51,13 +54,14 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
         clientMapper = mock(ApiClientMapper.class);
         clientScopeMapper = mock(ApiClientScopeMapper.class);
         subscriptionMapper = mock(WebhookSubscriptionMapper.class);
+        resourceScopeMapper = mock(IntegrationHubWebhookResourceScopeMapper.class);
         IntegrationHubExternalApiProperties properties = new IntegrationHubExternalApiProperties();
         properties.getPublicApi().setPublicIdKey("test-integration-hub-public-id-key-at-least-32-bytes");
         publicIdCodec = new ExternalApiPublicIdCodec(properties);
         internalAuthorizationService = mock(AuthorizationService.class);
         adminAuthentication = authentication("管理者", "ROLE_管理者", 42L);
         service = new IntegrationHubWebhookReplayAuthorizationServiceImpl(clientMapper, clientScopeMapper,
-                subscriptionMapper, new ObjectMapper(), publicIdCodec, internalAuthorizationService);
+                subscriptionMapper, resourceScopeMapper, new ObjectMapper(), publicIdCodec, internalAuthorizationService);
         delivery = delivery();
         when(internalAuthorizationService.isAllowed(adminAuthentication,
                 IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION)).thenReturn(true);
@@ -65,6 +69,8 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
         when(clientScopeMapper.selectActiveForUpdate(11L, "resource.read",
                 IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION)).thenReturn(permission());
         when(subscriptionMapper.selectActiveByIdForUpdate(7L)).thenReturn(subscription());
+        when(resourceScopeMapper.selectCurrentMemberships("project", 1L))
+                .thenReturn(List.of(membership(1L, 10L, null, null)));
     }
 
     @Test
@@ -74,6 +80,58 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
                         adminAuthentication, NOW));
 
         assertEquals("sys-user:42", authorization.operatorRef());
+    }
+
+    @Test
+    void projectのprimaryとcustomerのsecondaryを別々のopaqueIdで現行relationへbindする() {
+        String scope = "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"],\"customerIds\":[\"10\"]}";
+        arrangeScope(scope);
+        String projectId = publicId("project", 1L, scope);
+        String customerId = publicId("customer", 10L, scope);
+        ApiDelivery projectDelivery = deliveryWithSnapshot("project", 1L,
+                "{\"eventId\":\"event-1\",\"eventType\":\"resource.changed\","
+                        + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-31T12:00:00Z\","
+                        + "\"publicResourceId\":\"" + projectId + "\",\"correlationId\":\"correlation-000001\","
+                        + "\"payload\":{\"publicProjectId\":\"" + projectId
+                        + "\",\"publicCustomerId\":\"" + customerId + "\"}}");
+        when(resourceScopeMapper.selectCurrentMemberships("project", 1L))
+                .thenReturn(List.of(membership(1L, 10L, null, null)));
+
+        assertDoesNotThrow(() -> service.authorize(projectDelivery, projectDelivery.getScopeDigest(),
+                adminAuthentication, NOW));
+
+        when(resourceScopeMapper.selectCurrentMemberships("project", 1L))
+                .thenReturn(List.of(membership(1L, 11L, null, null)));
+        assertThrows(SecurityException.class,
+                () -> service.authorize(projectDelivery, projectDelivery.getScopeDigest(), adminAuthentication, NOW));
+    }
+
+    @Test
+    void invoiceのprimary_customer_contractを各専用opaqueIdと現行invoice明細へbindする() {
+        String scope = "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"invoiceIds\":[\"20\"],\"customerIds\":[\"10\"],\"contractIds\":[\"30\"]}";
+        arrangeScope(scope);
+        String invoiceId = publicId("invoice-status", 20L, scope);
+        String customerId = publicId("customer", 10L, scope);
+        String contractId = publicId("contract-status", 30L, scope);
+        ApiDelivery invoiceDelivery = deliveryWithSnapshot("invoice-status", 20L,
+                "{\"eventId\":\"event-1\",\"eventType\":\"resource.changed\","
+                        + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-31T12:00:00Z\","
+                        + "\"publicResourceId\":\"" + invoiceId + "\",\"correlationId\":\"correlation-000001\","
+                        + "\"payload\":{\"publicInvoiceId\":\"" + invoiceId + "\",\"publicCustomerId\":\""
+                        + customerId + "\",\"publicContractId\":\"" + contractId + "\"}}");
+        when(resourceScopeMapper.selectCurrentMemberships("invoice-status", 20L))
+                .thenReturn(List.of(membership(20L, 10L, 1L, 30L)));
+
+        assertDoesNotThrow(() -> service.authorize(invoiceDelivery, invoiceDelivery.getScopeDigest(),
+                adminAuthentication, NOW));
+
+        // scopeを変えなくても、current invoice itemが別contractへ付け替えられたら拒否する。
+        when(resourceScopeMapper.selectCurrentMemberships("invoice-status", 20L))
+                .thenReturn(List.of(membership(20L, 10L, 1L, 31L)));
+        assertThrows(SecurityException.class,
+                () -> service.authorize(invoiceDelivery, invoiceDelivery.getScopeDigest(), adminAuthentication, NOW));
     }
 
     @Test
@@ -163,25 +221,36 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
     }
 
     private ApiClient client() {
+        return clientWithScope("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}");
+    }
+
+    private ApiClient clientWithScope(String scope) {
         return ApiClient.builder().id(11L).clientId("client-a").tenantId("tenant-a").legalEntityId(9L)
-                .dataScopeJson("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
-                        + "\"projectIds\":[\"1\"]}")
+                .dataScopeJson(scope)
                 .status("ACTIVE").build();
     }
 
     private ApiClientScope permission() {
+        return permissionWithScope("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}");
+    }
+
+    private ApiClientScope permissionWithScope(String scope) {
         return ApiClientScope.builder().apiClientId(11L).scopeCode("resource.read")
                 .operationCode(IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION)
-                .dataScopeJson("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
-                        + "\"projectIds\":[\"1\"]}")
+                .dataScopeJson(scope)
                 .status("ACTIVE").build();
     }
 
     private WebhookSubscription subscription() {
+        return subscriptionWithScope("{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}");
+    }
+
+    private WebhookSubscription subscriptionWithScope(String scope) {
         return WebhookSubscription.builder().id(7L).clientId("client-a").direction("OUTBOUND")
-                .eventType("resource.changed").dataScopeJson(
-                        "{\"tenantIds\":[\"tenant-a\"],\"legalEntityIds\":[\"9\"],"
-                                + "\"projectIds\":[\"1\"]}")
+                .eventType("resource.changed").dataScopeJson(scope)
                 .status("ACTIVE").build();
     }
 
@@ -190,6 +259,7 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
         return ApiDelivery.builder().id(9L).eventId("event-1").subscriptionId(7L).deliveryGeneration(1)
                 .clientId("client-a").scopeCode("resource.read").tenantId("tenant-a")
                 .scopeDigest(IntegrationHubWebhookScopeDigest.of("client-a", "resource.read", "tenant-a"))
+                .primaryResourceType("project").primaryResourceId(1L)
                 .eventType("resource.changed").schemaVersion("v1").correlationId("correlation-000001")
                 .providerIdempotencyKey(IntegrationHubDigest.sha256Hex("event-1|7|1"))
                 .externalDtoSnapshot(snapshot).payloadHash(IntegrationHubDigest.sha256Hex(snapshot))
@@ -205,6 +275,39 @@ class IntegrationHubWebhookReplayAuthorizationServiceTest {
                 + "\"createdAt\":\"2026-08-31T12:00:00Z\",\"publicResourceId\":\"" + publicProjectId + "\","
                 + "\"correlationId\":\"correlation-000001\",\"payload\":{\"publicProjectId\":\""
                 + publicProjectId + "\"}}";
+    }
+
+    private void arrangeScope(String scope) {
+        when(clientMapper.selectByClientIdForUpdate("client-a")).thenReturn(clientWithScope(scope));
+        when(clientScopeMapper.selectActiveForUpdate(11L, "resource.read",
+                IntegrationHubWebhookReplayAuthorizationService.REPLAY_OPERATION))
+                .thenReturn(permissionWithScope(scope));
+        when(subscriptionMapper.selectActiveByIdForUpdate(7L)).thenReturn(subscriptionWithScope(scope));
+    }
+
+    private String publicId(String resourceType, long id, String scope) {
+        return publicIdCodec.encode(new ExternalApiPrincipal("client-a", 11L, "tenant-a", 9L, scope,
+                1, "replay", "STANDARD"), resourceType, id);
+    }
+
+    private ApiDelivery deliveryWithSnapshot(String primaryType, long primaryId, String json) {
+        return ApiDelivery.builder().id(9L).eventId("event-1").subscriptionId(7L).deliveryGeneration(1)
+                .clientId("client-a").scopeCode("resource.read").tenantId("tenant-a")
+                .scopeDigest(IntegrationHubWebhookScopeDigest.of("client-a", "resource.read", "tenant-a"))
+                .primaryResourceType(primaryType).primaryResourceId(primaryId)
+                .eventType("resource.changed").schemaVersion("v1").correlationId("correlation-000001")
+                .providerIdempotencyKey(IntegrationHubDigest.sha256Hex("event-1|7|1"))
+                .externalDtoSnapshot(json).payloadHash(IntegrationHubDigest.sha256Hex(json)).createdAt(NOW).build();
+    }
+
+    private ExternalApiResourceMembership membership(Long primaryId, Long customerId, Long projectId,
+                                                       Long contractId) {
+        ExternalApiResourceMembership membership = new ExternalApiResourceMembership();
+        membership.setPrimaryResourceId(primaryId);
+        membership.setCustomerId(customerId);
+        membership.setProjectId(projectId);
+        membership.setContractId(contractId);
+        return membership;
     }
 
     private Authentication authentication(String role, String authority, long userId) {

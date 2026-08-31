@@ -24,12 +24,16 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApiDelivery enqueue(String eventId, Long subscriptionId, int generation, String clientId, String scopeCode,
-                               String tenantId, String eventType, String schemaVersion, String correlationId,
+                               String tenantId, String primaryResourceType, Long primaryResourceId,
+                               String eventType, String schemaVersion, String correlationId,
                                ExternalDtoSnapshot snapshot, LocalDateTime now) {
         requireText(eventId, 128, "eventId");
         requireText(clientId, 100, "clientId");
         requireText(scopeCode, 100, "scopeCode");
         requireText(tenantId, 64, "tenantId");
+        if (!isPrimaryResourceType(primaryResourceType) || primaryResourceId == null || primaryResourceId < 1) {
+            throw new IllegalArgumentException("invalid primary resource binding");
+        }
         requireText(eventType, 100, "eventType");
         requireText(schemaVersion, 32, "schemaVersion");
         if (subscriptionId == null || generation <= 0 || now == null || snapshot == null) {
@@ -39,7 +43,9 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
         ExternalDtoSnapshot.requireOutboundEnvelope(snapshot, eventId, eventType, schemaVersion, correlationId, now);
         ApiDelivery existing = mapper.selectByEventGeneration(eventId, subscriptionId, generation);
         if (existing != null) {
-            if (!snapshot.payloadHash().equalsIgnoreCase(existing.getPayloadHash())) {
+            if (!snapshot.payloadHash().equalsIgnoreCase(existing.getPayloadHash())
+                    || !primaryResourceType.equals(existing.getPrimaryResourceType())
+                    || !primaryResourceId.equals(existing.getPrimaryResourceId())) {
                 throw new IllegalArgumentException("delivery payload conflicts with existing generation");
             }
             return existing;
@@ -52,6 +58,8 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
                 .scopeCode(scopeCode)
                 .tenantId(tenantId)
                 .scopeDigest(IntegrationHubWebhookScopeDigest.of(clientId, scopeCode, tenantId))
+                .primaryResourceType(primaryResourceType)
+                .primaryResourceId(primaryResourceId)
                 .eventType(eventType)
                 .schemaVersion(schemaVersion)
                 .correlationId(correlationId)
@@ -168,5 +176,10 @@ public class ApiDeliveryServiceImpl implements ApiDeliveryService {
         if (value == null || value.isBlank() || value.length() > maxLength) {
             throw new IllegalArgumentException("invalid " + field);
         }
+    }
+
+    private boolean isPrimaryResourceType(String value) {
+        return "engineer-availability".equals(value) || "project".equals(value)
+                || "contract-status".equals(value) || "invoice-status".equals(value);
     }
 }

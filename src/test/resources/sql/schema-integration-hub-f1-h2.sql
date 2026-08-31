@@ -121,6 +121,8 @@ CREATE TABLE t_api_delivery (
     scope_code VARCHAR(100) NOT NULL,
     tenant_id VARCHAR(64) NOT NULL,
     scope_digest CHAR(64) NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+    primary_resource_type VARCHAR(64),
+    primary_resource_id BIGINT,
     event_type VARCHAR(100) NOT NULL,
     schema_version VARCHAR(32) NOT NULL,
     correlation_id VARCHAR(128),
@@ -143,6 +145,10 @@ CREATE TABLE t_api_delivery (
     version INT NOT NULL DEFAULT 0,
     CONSTRAINT uk_api_delivery_event_generation UNIQUE (event_id, subscription_id, delivery_generation),
     CONSTRAINT fk_api_delivery_subscription FOREIGN KEY (subscription_id) REFERENCES m_webhook_subscription (id),
+    CONSTRAINT chk_api_delivery_primary_resource CHECK (
+        (primary_resource_type IS NULL AND primary_resource_id IS NULL)
+        OR (primary_resource_type IN ('engineer-availability', 'project', 'contract-status', 'invoice-status')
+            AND primary_resource_id IS NOT NULL AND primary_resource_id > 0)),
     CONSTRAINT chk_api_delivery_status CHECK (status IN ('PENDING', 'CLAIMED', 'RETRYABLE', 'SUCCEEDED', 'FAILED', 'DLQ')),
     CONSTRAINT chk_api_delivery_retention CHECK (retention_class IS NULL OR retention_class IN ('SUCCEEDED_PAYLOAD_30D', 'FAILED_DLQ_PAYLOAD_90D'))
 );
@@ -242,6 +248,7 @@ CREATE INDEX idx_credential_active ON t_credential_version (api_client_id, statu
 CREATE INDEX idx_idempotency_expiry ON t_api_idempotency_record (status, retention_expires_at, id);
 CREATE INDEX idx_api_delivery_due ON t_api_delivery (status, next_attempt_at, lease_expires_at, id);
 CREATE INDEX idx_api_delivery_expiry ON t_api_delivery (status, retention_expires_at, id);
+CREATE INDEX idx_api_delivery_primary_resource ON t_api_delivery (primary_resource_type, primary_resource_id, status, id);
 CREATE INDEX idx_inbound_expiry ON t_inbound_event (status, retention_expires_at, id);
 CREATE INDEX idx_api_nonce_expiry ON t_api_nonce_replay (expires_at, id);
 CREATE INDEX idx_retention_hold_status ON t_api_retention_hold (record_kind, status, record_id);

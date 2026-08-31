@@ -41,6 +41,8 @@ class ApiDeliveryServiceTest {
             assertEquals(8, row.getMaxAttempts());
             assertEquals("client-a", row.getClientId());
             assertEquals("tenant-a", row.getTenantId());
+            assertEquals("project", row.getPrimaryResourceType());
+            assertEquals(1L, row.getPrimaryResourceId());
             assertEquals(IntegrationHubDigest.sha256Hex("event-1|7|1"), row.getProviderIdempotencyKey());
             assertEquals(snapshotJson(), row.getExternalDtoSnapshot());
             return 1;
@@ -48,7 +50,7 @@ class ApiDeliveryServiceTest {
         ExternalDtoSnapshot snapshot = ExternalDtoSnapshot.of(snapshotJson());
 
         ApiDelivery row = service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
-                "event.type", "v1", "correlation-000001", snapshot, now);
+                "project", 1L, "event.type", "v1", "correlation-000001", snapshot, now);
 
         assertEquals("PENDING", row.getStatus());
         verify(mapper).insert(any(ApiDelivery.class));
@@ -109,7 +111,7 @@ class ApiDeliveryServiceTest {
                 "{\"payload\":{\"publicProjectId\":\"project-1\",\"status\":\"ACTIVE\",\"startDate\":\"2026-08-30\"}}"));
         assertThrows(IllegalArgumentException.class,
                 () -> service.enqueue("event-1", 7L, 1, "client-a", "scope", "tenant-a",
-                        "event.type", "v1", "correlation-000001",
+                        "project", 1L, "event.type", "v1", "correlation-000001",
                         ExternalDtoSnapshot.of("{\"code\":\"not-an-outbound-field\"}"), now));
     }
 

@@ -179,7 +179,7 @@ class IntegrationHubF1RetentionH2Test {
         assertThrows(RollbackMarker.class, () -> template.executeWithoutResult(status -> {
             long subscriptionId = insertSubscription("atomic-enqueue-client", "https://example.invalid/atomic");
             ApiDelivery delivery = deliveryService.enqueue("delivery-atomic-rollback", subscriptionId, 1,
-                    "atomic-enqueue-client", "scope", "tenant-a", "event.type", "v1",
+                    "atomic-enqueue-client", "scope", "tenant-a", "project", 1L, "event.type", "v1",
                     "correlation-atomic-000001", ExternalDtoSnapshot.of(
                             "{\"eventId\":\"delivery-atomic-rollback\",\"eventType\":\"event.type\","
                                     + "\"schemaVersion\":\"v1\",\"createdAt\":\"2026-08-30T12:00:00Z\","

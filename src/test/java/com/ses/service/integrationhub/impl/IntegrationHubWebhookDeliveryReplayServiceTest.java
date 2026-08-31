@@ -92,6 +92,7 @@ class IntegrationHubWebhookDeliveryReplayServiceTest {
     private ApiDelivery original() {
         return ApiDelivery.builder().id(9L).eventId("event-1").subscriptionId(7L).deliveryGeneration(1)
                 .clientId("client-a").scopeCode("resource.read").tenantId("tenant-a").scopeDigest(scopeDigest)
+                .primaryResourceType("project").primaryResourceId(1L)
                 .eventType("resource.changed").schemaVersion("v1").providerIdempotencyKey(
                         IntegrationHubDigest.sha256Hex("event-1|7|1"))
                 .externalDtoSnapshot(snapshotJson())

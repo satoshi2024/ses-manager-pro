@@ -7,7 +7,8 @@ import java.time.LocalDateTime;
 /** NF-05 dedicated delivery ledger service。外部HTTPはこのservice transaction外のworkerで行う。 */
 public interface ApiDeliveryService {
     ApiDelivery enqueue(String eventId, Long subscriptionId, int generation, String clientId, String scopeCode,
-                        String tenantId, String eventType, String schemaVersion, String correlationId,
+                        String tenantId, String primaryResourceType, Long primaryResourceId,
+                        String eventType, String schemaVersion, String correlationId,
                         ExternalDtoSnapshot snapshot, LocalDateTime now);
 
     ApiDelivery claim(Long id, String leaseToken, LocalDateTime now, LocalDateTime leaseExpiresAt);
