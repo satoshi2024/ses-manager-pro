@@ -1,4 +1,4 @@
-# NF-05 完了対応表（scope expansion承認済み・F2/A1/B1 PASS・B2再Review待ち）
+# NF-05 完了対応表（B2 IMPLEMENTATION PASS・M 実装完了・独立 Review 待ち）
 
 ## Task対応
 
@@ -25,9 +25,9 @@
 | B1 Review remediation | `IntegrationHubWebhookSigner`、replay authorization、V133、worker/CAS、H2/MySQL evidence | 署名/envelope binding、現行scope再認可、audit/payload retention分離、fresh clock、attempt 8/DLQ、stale/CAS/claim/rollback/replay purge | SPEC_ADDRESSED（独立再Review待ち） | `30199db8` → `2684ff8f` |
 | B1 latest re-review remediation | replay service boundary、opaque ID codec、V134、resource membership mapper、replay/migration tests | authenticated internal admin principal、`integration.webhook.replay` permission、operatorRef入力排除、primary binding、secondary専用opaque ID照合、current deleted/parent relation、scope据置のsoft-delete/reparent/contract付替え fail-closed | SPEC_ADDRESSED（独立再Review待ち） | `2684ff8f1303b6d0cc6550882601405d3d78f3b2` → code `5c94367c` → `0618d983` |
 | B1 initial-delivery binding remediation | `IntegrationHubWebhookDeliveryBindingValidator`、ApiDelivery enqueue/worker、snapshot binding、DuplicateKey path、B1 tests | enqueue保存前とworker外部HTTP前のHMAC opaque primary binding、envelope/primary DTO一致、payload hash＋primary type＋primary IDの同時比較、fail-closed送信拒否 | SPEC_ADDRESSED（独立再Review待ち） | code `c2cbfb99133d0df3f8d5eee285be340163747e31` → docs commit（最終Headは外部handoff） |
-| B2 inbound/DLQ/admin UI | tasks/design/requirements/inventory、V135/V136、inbound/controller/admin/replay classes、B2 tests | client/provider/event unique、strict parser、raw hash/allow-list snapshot、duplicate/conflict、claim/CAS、DLQ、admin replay、current scope再検証、safe UI、独立metadata retention、stable external error boundary | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f` → `251461f1` → `e564f400`、focused/H2/MySQL証跡。Linux connector再Review待ち、production受信enablementなし |
-| B2 implementation handoff | `ExternalApiInboundWebhookController`、`InboundEventService`、`InboundEventAdminServiceImpl`、`ExternalApiResponseBoundaryFilter`、V135/V136、H2 schema、admin UI、B2 tests | response-boundary 2/2、route 1/1、parser 3/3、usage 6/6、既存B2 H2/MySQL証跡、Windows connectorはloopback接続前error、`git diff --check` | IMPLEMENTATION_REVIEW_PENDING | fixed review Head `7757bfa4` → code remediation `e564f400` → docs trace commit（Linux connector 202/200/409/403/400再確認待ち、最終remote Headは外部handoffで固定） |
-| M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
+| B2 inbound/DLQ/admin UI | tasks/design/requirements/inventory、V135/V136、inbound/controller/admin/replay classes、B2 tests | client/provider/event unique、strict parser、raw hash/allow-list snapshot、duplicate/conflict、claim/CAS、DLQ、admin replay、current scope再検証、safe UI、独立metadata retention、stable external error boundary | IMPLEMENTATION_PASS | initial `122c7c3b` → remediation `251461f1` → `e564f400`、Linux connector 5/5、audit/ledger 証跡、focused 20/20 |
+| B2 stable-error remediation | `ExternalApiResponseBoundaryFilter`、B2 tests | security wrapper 409 復元、generic 500 収束 | CLOSED_BY_REVIEW | `e564f400`、fixed Head `cd822b99` |
+| M verification | tasks/design/evidence-index、M tests、runbook | penetration、failure drill、rate boundary、rotation/revoke、secret scan、runbook | IMPLEMENTATION_REVIEW_PENDING | M test suite + `ops/security/runbooks/integration-hub-public-api.md` |
 
 ## B2 review remediation completion
 

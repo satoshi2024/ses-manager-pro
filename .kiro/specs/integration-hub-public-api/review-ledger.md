@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F2/A1/B1 PASS・B2再Review待ち）
+# NF-05 Review Ledger（B2 IMPLEMENTATION PASS・M 実装完了・独立 Review 待ち）
 
 ## Approval gate
 
@@ -24,8 +24,8 @@
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。development/test mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head系列 `122c7c3b` → `cc468e4f` → `251461f1` → `e564f400`。inbound/DLQ/admin UI、stable error boundary、H2/MySQL証跡を確認済み。Linux connector再Review待ち、production受信enablementなし |
-| M | APPROVED_SEQUENCED | B2 Review後。最終security/recovery/performance/scan/runbook Review |
+| B2 | IMPLEMENTATION_PASS | fixed Head `cd822b99`、Linux connector 5/5、audit/ledger、focused 20/20、P0/P1/P2=0/0/0 |
+| M | IMPLEMENTATION_REVIEW_PENDING | M test suite 11/11 PASS、runbook、evidence-index。独立 Review 待ち |
 
 scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
 OwnerRef=PROJECT_OWNER、OwnerType=ROLE、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、

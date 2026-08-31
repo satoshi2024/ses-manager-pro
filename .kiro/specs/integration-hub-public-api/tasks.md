@@ -237,8 +237,11 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task M: penetration / recovery / performance
 
-- [ ] Objective: security review、負荷、障害訓練、key rotation、scan、runbookを完了し、Headを固定する。
+- [x] Objective: security review、負荷、障害訓練、key rotation、scan、runbookを完了し、Headを固定する。
 - Preconditions: F1-B2完了、各wave Review PASS、development/test mock/loopback config、observability、rollback plan。
 - Test requirements: penetration、rate/IP boundary、DB/worker/provider停止、restore、stale lease、rotation/revoke、
   secret/PII scan、metrics cardinality、payload retention/purge、負荷SLA、alert。
 - Demo: evidence index、runbook、review PLAN/IMPLEMENTATION PASS、remote/local fixed Headを独立Reviewへ渡す。
+- Evidence: `IntegrationHubMPenetrationTest`、`IntegrationHubMFailureDrillTest`、`IntegrationHubMPerformanceBoundaryTest`、
+  `IntegrationHubKeyRotationRecoveryDrillTest`、`IntegrationHubSecretLogScanTest`、
+  `ops/security/runbooks/integration-hub-public-api.md`、`.kiro/specs/integration-hub-public-api/evidence-index.md`
