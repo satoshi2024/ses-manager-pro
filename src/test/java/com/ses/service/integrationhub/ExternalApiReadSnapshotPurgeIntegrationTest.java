@@ -43,12 +43,12 @@ class ExternalApiReadSnapshotPurgeIntegrationTest {
         insertExpiredSnapshot("purge-expired-c");
 
         assertEquals(2, purgeService.purgeExpiredBatch(NOW, 2));
-        assertEquals(1, countSnapshots());
-        assertEquals(1, countItems());
+        assertEquals(1, countTestSnapshots());
+        assertEquals(1, countTestItems());
 
         assertEquals(1, purgeService.purgeExpiredBatch(NOW, 2));
-        assertEquals(0, countSnapshots());
-        assertEquals(0, countItems());
+        assertEquals(0, countTestSnapshots());
+        assertEquals(0, countTestItems());
 
         assertEquals(0, purgeService.purgeExpiredBatch(NOW, 2));
     }
@@ -80,8 +80,9 @@ class ExternalApiReadSnapshotPurgeIntegrationTest {
     }
 
     private void insertExpiredSnapshot(String snapshotId) {
-        LocalDateTime asOf = LocalDateTime.ofInstant(NOW.minusSeconds(600), ZoneOffset.UTC);
-        LocalDateTime expiresAt = LocalDateTime.ofInstant(NOW.minusSeconds(1), ZoneOffset.UTC);
+        // 共有H2上の他fixtureより先にpurge batchへ入るよう最古のexpires_atを使う（CHK: expires_at > as_of）
+        LocalDateTime asOf = LocalDateTime.ofInstant(Instant.EPOCH, ZoneOffset.UTC);
+        LocalDateTime expiresAt = LocalDateTime.ofInstant(Instant.EPOCH.plusSeconds(1), ZoneOffset.UTC);
         jdbcTemplate.update("""
                 INSERT INTO t_api_read_snapshot
                     (snapshot_id, client_id, tenant_id, legal_entity_id, route_template, scope_digest,
@@ -93,6 +94,20 @@ class ExternalApiReadSnapshotPurgeIntegrationTest {
                 INSERT INTO t_api_read_snapshot_item (snapshot_id, resource_id, payload_json, created_at)
                 VALUES (?, ?, ?, ?)
                 """, snapshotId, Math.abs((long) snapshotId.hashCode()) + 1000L, "{}", asOf);
+    }
+
+    private int countTestSnapshots() {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_read_snapshot WHERE snapshot_id LIKE 'purge-%'", Integer.class);
+    }
+
+    private int countTestItems() {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_api_read_snapshot_item i
+                JOIN t_api_read_snapshot s ON s.snapshot_id = i.snapshot_id
+                WHERE s.snapshot_id LIKE 'purge-%'
+                """, Integer.class);
     }
 
     private int countSnapshots() {

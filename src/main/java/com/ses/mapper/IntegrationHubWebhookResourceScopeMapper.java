@@ -33,17 +33,20 @@ public interface IntegrationHubWebhookResourceScopeMapper {
             WHERE c.id = #{primaryResourceId} AND c.deleted_flag = 0
           </when>
           <when test="resourceType == 'invoice-status'">
-            SELECT DISTINCT i.id AS primaryResourceId, i.customer_id AS customerId,
-                            c.project_id AS projectId, c.id AS contractId
-            FROM t_invoice i
-            INNER JOIN m_customer customer ON customer.id = i.customer_id AND customer.deleted_flag = 0
-            INNER JOIN t_invoice_item item ON item.invoice_id = i.id
-            INNER JOIN t_work_record wr ON wr.id = item.work_record_id
-            INNER JOIN t_contract c ON c.id = wr.contract_id AND c.deleted_flag = 0
-                                                   AND c.customer_id = i.customer_id
-            INNER JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
-                                              AND p.customer_id = c.customer_id
-            WHERE i.id = #{primaryResourceId} AND i.deleted_flag = 0
+            SELECT membership.primaryResourceId, membership.customerId, membership.projectId, membership.contractId
+            FROM (
+              SELECT DISTINCT i.id AS primaryResourceId, i.customer_id AS customerId,
+                              c.project_id AS projectId, c.id AS contractId
+              FROM t_invoice i
+              INNER JOIN m_customer customer ON customer.id = i.customer_id AND customer.deleted_flag = 0
+              INNER JOIN t_invoice_item item ON item.invoice_id = i.id
+              INNER JOIN t_work_record wr ON wr.id = item.work_record_id
+              INNER JOIN t_contract c ON c.id = wr.contract_id AND c.deleted_flag = 0
+                                                     AND c.customer_id = i.customer_id
+              INNER JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+                                                AND p.customer_id = c.customer_id
+              WHERE i.id = #{primaryResourceId} AND i.deleted_flag = 0
+            ) membership
           </when>
           <otherwise>
             SELECT NULL AS primaryResourceId, NULL AS customerId, NULL AS projectId, NULL AS contractId

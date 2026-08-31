@@ -39,7 +39,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("133", latestVersion, "最新マイグレーションバージョンは133であること");
+            assertEquals("142", latestVersion, "最新マイグレーションバージョンは142であること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",

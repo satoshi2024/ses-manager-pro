@@ -44,7 +44,7 @@ public class InboundEventBindingValidator {
     private final ObjectMapper objectMapper;
 
     /** INSERTより前に、active subscriptionとscope、必要ならcurrent resourceを確定する。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Binding validateForReceipt(String clientId, String providerName, String eventType,
                                      ExternalDtoSnapshot snapshot, LocalDateTime now) {
         ClientBinding binding = loadBinding(clientId, providerName, eventType, now, true);
@@ -54,7 +54,7 @@ public class InboundEventBindingValidator {
     }
 
     /** replay直前に同じactive bindingとcurrent DB membershipを再評価する。 */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void validateCurrent(InboundEvent event, LocalDateTime now) {
         if (event == null || event.getClientId() == null || event.getProviderName() == null
                 || event.getParsedFieldsSnapshot() == null

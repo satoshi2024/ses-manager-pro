@@ -47,7 +47,7 @@ public class IntegrationHubWebhookReplayAuthorizationServiceImpl
     private final AuthorizationService internalAuthorizationService;
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public IntegrationHubWebhookReplayAuthorizationService.ReplayAuthorization authorize(
             ApiDelivery delivery, String revalidatedScopeDigest, Authentication authentication, LocalDateTime now) {
         if (delivery == null || delivery.getClientId() == null || delivery.getScopeCode() == null

@@ -47,7 +47,7 @@ public class ExternalApiReadService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiEngineerAvailability> listEngineerAvailability(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> engineerIds = requiredIds(scope, "engineerIds");
@@ -64,7 +64,7 @@ public class ExternalApiReadService {
                 .findFirst().map(row -> toEngineer(principal, row)).orElse(null);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiProject> listProjects(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> projectIds = requiredIds(scope, "projectIds");
@@ -89,7 +89,7 @@ public class ExternalApiReadService {
                 clock.instant());
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiContractStatus> listContractStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> contractIds = requiredIds(scope, "contractIds");
@@ -114,7 +114,7 @@ public class ExternalApiReadService {
                 clock.instant());
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiInvoiceStatus> listInvoiceStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
         List<Long> invoiceIds = requiredIds(scope, "invoiceIds");

@@ -515,7 +515,7 @@ class AssetMySqlIntegrationTest {
         String latest = jdbcTemplate.queryForObject(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1",
                 String.class);
-        assertEquals("133", latest);
+        assertEquals("142", latest);
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_case_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_task_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND index_name = 'uk_asset_offboarding_waiver_request'"));
