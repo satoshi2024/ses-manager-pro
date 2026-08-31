@@ -156,7 +156,10 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw e;
         } catch (IOException | RuntimeException e) {
             deleteQuietly(quarantine);
-            log.error("ファイル保存またはscanに失敗しました: {}", storedName, e);
+            log.error("ファイル保存またはscanに失敗しました: storedName={} exceptionClass={} detail={}",
+                    storedName,
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             throw BusinessException.of("error.file.scanRejected");
         }
     }
