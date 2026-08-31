@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>Integration Hub inboundイベント</title>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="h3 mb-1 text-light"><i class="bi bi-shield-lock me-2 text-info"></i>Inboundイベント / DLQ</h2>
+            <p class="text-muted small mb-0">raw body・snapshotは表示しません。Replayは管理者権限と理由コードが必要です。</p>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-4">
+        <div class="card-body">
+            <form id="searchForm" onsubmit="event.preventDefault(); loadInboundEvents(1);" class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label text-muted small" for="statusFilter">状態</label>
+                    <select id="statusFilter" class="form-select bg-dark border-secondary text-light">
+                        <option value="">すべて</option>
+                        <option value="RECEIVED">RECEIVED</option>
+                        <option value="PROCESSING">PROCESSING</option>
+                        <option value="PROCESSED">PROCESSED</option>
+                        <option value="DUPLICATE">DUPLICATE</option>
+                        <option value="CONFLICT">CONFLICT</option>
+                        <option value="DLQ">DLQ</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label text-muted small" for="providerFilter">Provider</label>
+                    <input id="providerFilter" class="form-control bg-dark border-secondary text-light"
+                           maxlength="100" pattern="[A-Za-z0-9._~-]{1,100}">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search me-1"></i>検索</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0">
+                    <thead>
+                    <tr class="text-muted small">
+                        <th class="ps-4">受信日時</th>
+                        <th>Client</th>
+                        <th>Provider / Event ID</th>
+                        <th>状態</th>
+                        <th>結果</th>
+                        <th>Replay</th>
+                    </tr>
+                    </thead>
+                    <tbody id="inbound-event-table-body">
+                    <tr><td colspan="6" class="text-center text-muted py-4">読み込み中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div id="inbound-event-pagination" class="card-footer bg-transparent border-dark d-flex justify-content-between align-items-center py-3"></div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/integration-hub-inbound-events.js}"></script>
+</th:block>
+</body>
+</html>

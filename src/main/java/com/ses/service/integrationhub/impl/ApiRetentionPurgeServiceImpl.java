@@ -7,12 +7,14 @@ import com.ses.entity.integrationhub.ApiIdempotencyRecord;
 import com.ses.entity.integrationhub.ApiPurgeCheckpoint;
 import com.ses.entity.integrationhub.ApiRetentionHold;
 import com.ses.entity.integrationhub.InboundEvent;
+import com.ses.entity.integrationhub.InboundEventReplayRequest;
 import com.ses.mapper.ApiDeliveryMapper;
 import com.ses.mapper.ApiDeliveryReplayAuditMapper;
 import com.ses.mapper.ApiIdempotencyRecordMapper;
 import com.ses.mapper.ApiPurgeCheckpointMapper;
 import com.ses.mapper.ApiRetentionHoldMapper;
 import com.ses.mapper.InboundEventMapper;
+import com.ses.mapper.InboundEventReplayRequestMapper;
 import com.ses.service.integrationhub.ApiRetentionPurgeService;
 import com.ses.service.integrationhub.IntegrationHubStates;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
     private final ApiDeliveryMapper deliveryMapper;
     private final ApiDeliveryReplayAuditMapper replayAuditMapper;
     private final InboundEventMapper inboundMapper;
+    private final InboundEventReplayRequestMapper inboundReplayMapper;
     private final ApiPurgeCheckpointMapper checkpointMapper;
 
     @Override
@@ -190,6 +193,27 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
                     purged++;
                 }
             }
+        } else if ("INBOUND_REPLAY".equals(recordKind)) {
+            QueryWrapper<InboundEventReplayRequest> query = new QueryWrapper<InboundEventReplayRequest>()
+                    .select("id", "retention_expires_at")
+                    .eq("retention_class", retentionClass).le("retention_expires_at", now)
+                    .in("status", "PROCESSED", "REJECTED", "DLQ")
+                    .notExists("SELECT 1 FROM t_api_retention_hold h WHERE h.record_kind = 'INBOUND_REPLAY' "
+                            + "AND h.record_id = t_inbound_event_replay.id AND h.status = 'ACTIVE'")
+                    .orderByAsc("retention_expires_at", "id");
+            applyCheckpoint(query, checkpointExpiresAt, checkpointRecordId);
+            List<InboundEventReplayRequest> candidates = inboundReplayMapper.selectList(query.last("LIMIT " + limit));
+            fullBatch = candidates.size() == limit;
+            for (InboundEventReplayRequest candidate : candidates) {
+                inspected++;
+                lastExpiresAt = candidate.getRetentionExpiresAt();
+                lastRecordId = candidate.getId();
+                if (!lockAndDeleteInboundReplay(candidate.getId(), retentionClass, now)) {
+                    held++;
+                } else {
+                    purged++;
+                }
+            }
         } else if ("AUDIT".equals(recordKind)) {
             QueryWrapper<ApiDeliveryReplayAudit> query = new QueryWrapper<ApiDeliveryReplayAudit>()
                     .select("id", "retention_expires_at")
@@ -272,6 +296,15 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
         return inboundMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 
+    private boolean lockAndDeleteInboundReplay(Long id, String retentionClass, LocalDateTime now) {
+        InboundEventReplayRequest row = inboundReplayMapper.selectForUpdate(id);
+        if (row == null || !retentionClass.equals(row.getRetentionClass())
+                || hasActiveHold("INBOUND_REPLAY", id)) {
+            return false;
+        }
+        return inboundReplayMapper.deleteExpired(id, row.getVersion(), now) == 1;
+    }
+
     private boolean lockAndDeleteAudit(Long id, String retentionClass, LocalDateTime now) {
         ApiDeliveryReplayAudit row = replayAuditMapper.selectForUpdate(id);
         if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("AUDIT", id)) {
@@ -320,6 +353,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             case "IDEMPOTENCY" -> idempotencyMapper.selectByIdForUpdate(recordId) != null;
             case "DELIVERY" -> deliveryMapper.selectForUpdate(recordId) != null;
             case "INBOUND" -> inboundMapper.selectForUpdate(recordId) != null;
+            case "INBOUND_REPLAY" -> inboundReplayMapper.selectForUpdate(recordId) != null;
             case "AUDIT" -> replayAuditMapper.selectForUpdate(recordId) != null;
             default -> false;
         };
@@ -337,6 +371,10 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
             }
             case "INBOUND" -> {
                 InboundEvent row = inboundMapper.selectById(recordId);
+                yield row == null ? null : row.getRetentionClass();
+            }
+            case "INBOUND_REPLAY" -> {
+                InboundEventReplayRequest row = inboundReplayMapper.selectById(recordId);
                 yield row == null ? null : row.getRetentionClass();
             }
             case "AUDIT" -> {
@@ -366,7 +404,7 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
 
     private void validateKind(String kind) {
         if (!"IDEMPOTENCY".equals(kind) && !"DELIVERY".equals(kind)
-                && !"INBOUND".equals(kind) && !"AUDIT".equals(kind)) {
+                && !"INBOUND".equals(kind) && !"INBOUND_REPLAY".equals(kind) && !"AUDIT".equals(kind)) {
             throw new IllegalArgumentException("invalid retention record kind");
         }
     }

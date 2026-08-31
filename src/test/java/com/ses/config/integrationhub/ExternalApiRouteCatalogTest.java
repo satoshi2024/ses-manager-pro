@@ -16,6 +16,9 @@ class ExternalApiRouteCatalogTest {
         assertNull(ExternalApiRouteCatalog.resolve("POST", "/external-api/v1/projects"));
         assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/projects/p-1/extra"));
         assertNull(ExternalApiRouteCatalog.resolve("GET", "/external-api/v1/engineer-availability/count"));
+        assertEquals("/external-api/v1/webhooks/{provider}",
+                ExternalApiRouteCatalog.resolve("POST", "/external-api/v1/webhooks/provider-a").template());
+        assertNull(ExternalApiRouteCatalog.resolve("POST", "/external-api/v1/webhooks/provider-a/extra"));
         assertTrue(ExternalApiRouteCatalog.isExternalApiPath("/external-api/v1"));
         assertTrue(ExternalApiRouteCatalog.isExternalApiPath("/external-api/v1/unknown"));
     }

@@ -25,7 +25,8 @@ public class ExternalApiMetricsRecorder {
             "/external-api/v1/contract-statuses/{publicContractId}",
             "/external-api/v1/invoice-statuses",
             "/external-api/v1/invoice-statuses/count",
-            "/external-api/v1/invoice-statuses/{publicInvoiceId}");
+            "/external-api/v1/invoice-statuses/{publicInvoiceId}",
+            "/external-api/v1/webhooks/{provider}");
     private final ObjectProvider<MeterRegistry> meterRegistryProvider;
 
     public void record(String routeTemplate, String method, int status, String decision, String clientTier) {

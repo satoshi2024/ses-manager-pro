@@ -91,6 +91,7 @@ public class ExternalApiSecurityConfig {
                 .addFilterAfter(responseBoundaryFilter, ExternalApiAuthorizationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, ExternalApiRouteCatalog.SECURITY_MATCHERS).authenticated()
+                        .requestMatchers(HttpMethod.POST, ExternalApiRouteCatalog.INBOUND_SECURITY_MATCHERS).authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(entryPoint)

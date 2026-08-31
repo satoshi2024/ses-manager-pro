@@ -38,4 +38,9 @@ public class ExternalApiSecurityException extends RuntimeException {
     public static ExternalApiSecurityException invalid(String decision) {
         return new ExternalApiSecurityException(HttpStatus.BAD_REQUEST, "REQUEST_INVALID", decision);
     }
+
+    public static ExternalApiSecurityException inboundConflict() {
+        return new ExternalApiSecurityException(HttpStatus.CONFLICT, "INBOUND_PAYLOAD_CONFLICT",
+                "INBOUND_PAYLOAD_CONFLICT");
+    }
 }

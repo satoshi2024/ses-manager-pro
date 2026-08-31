@@ -72,7 +72,9 @@ public class ExternalApiAuthorizationFilter extends OncePerRequestFilter {
             request.setAttribute(ExternalApiErrorWriter.DECISION_ATTRIBUTE, "SCOPE_ALLOWED");
             ExternalApiAuditTrail.mark(request, "scope", "ALLOWED");
             ExternalApiAuditTrail.mark(request, "dataScope", "INTERSECTION_ALLOWED");
-            ExternalApiAuditTrail.mark(request, "command", "READ_ALLOWED");
+            ExternalApiAuditTrail.mark(request, "command", route.resourceType()
+                    == ExternalApiRouteCatalog.ResourceType.INBOUND_WEBHOOK
+                    ? "INBOUND_RECEIVE_ALLOWED" : "READ_ALLOWED");
             ApiUsageBucketService.RateDecision rate = usageBucketService.consume(principal.clientId(),
                     route.scopeCode(), principal.tenantId(), route.template());
             if (!rate.allowed()) {

@@ -4,6 +4,8 @@ import java.util.List;
 
 /** 承認済みGET-only routeの有限catalog。raw pathや任意のcontroller mappingを認可根拠にしない。 */
 public final class ExternalApiRouteCatalog {
+    public static final String INBOUND_WEBHOOK_SCOPE = "integration.webhook.receive";
+    public static final String INBOUND_WEBHOOK_PERMISSION = "integration.webhook.receive";
     public static final String ENGINEER_AVAILABILITY_SCOPE = "integration.availability.read";
     public static final String ENGINEER_AVAILABILITY_PERMISSION = "integration.engineer-availability.read";
     public static final String PROJECT_SCOPE = "integration.project.read";
@@ -29,6 +31,11 @@ public final class ExternalApiRouteCatalog {
             "/external-api/v1/invoice-statuses/count"
     };
 
+    /** provider受信はGET-only read contractとは分離した、承認済みinbound route。 */
+    public static final String[] INBOUND_SECURITY_MATCHERS = {
+            "/external-api/v1/webhooks/*"
+    };
+
     private ExternalApiRouteCatalog() {
     }
 
@@ -41,7 +48,8 @@ public final class ExternalApiRouteCatalog {
         ENGINEER_AVAILABILITY("engineerIds"),
         PROJECT("projectIds"),
         CONTRACT_STATUS("contractIds"),
-        INVOICE_STATUS("invoiceIds");
+        INVOICE_STATUS("invoiceIds"),
+        INBOUND_WEBHOOK("tenantIds");
 
         private final String dataScopeDimension;
 
@@ -58,7 +66,14 @@ public final class ExternalApiRouteCatalog {
     }
 
     public static Route resolve(String method, String path) {
-        if (!"GET".equals(method) || path == null || path.contains("//")) {
+        if (path == null || path.contains("//")) {
+            return null;
+        }
+        if ("POST".equals(method) && oneSegmentDetail(path, "/external-api/v1/webhooks/")) {
+            return new Route("/external-api/v1/webhooks/{provider}", INBOUND_WEBHOOK_SCOPE,
+                    INBOUND_WEBHOOK_PERMISSION, ResourceType.INBOUND_WEBHOOK);
+        }
+        if (!"GET".equals(method)) {
             return null;
         }
         if ("/external-api/v1/engineer-availability".equals(path)) {

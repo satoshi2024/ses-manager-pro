@@ -53,6 +53,7 @@ public final class ExternalApiErrorWriter {
             case 401 -> "AUTHENTICATION_FAILED";
             case 403 -> "FORBIDDEN_SCOPE";
             case 404 -> "RESOURCE_NOT_FOUND";
+            case 409 -> "INBOUND_PAYLOAD_CONFLICT";
             case 429 -> "RATE_LIMITED";
             default -> "INTERNAL_ERROR";
         };
@@ -64,6 +65,7 @@ public final class ExternalApiErrorWriter {
             case "FORBIDDEN_SCOPE" -> "Forbidden";
             case "RESOURCE_NOT_FOUND" -> "Resource not found";
             case "RATE_LIMITED" -> "Rate limit exceeded";
+            case "INBOUND_PAYLOAD_CONFLICT" -> "Inbound payload conflict";
             case "REQUEST_INVALID", "CURSOR_INVALID" -> "Invalid request";
             default -> "Request failed";
         };

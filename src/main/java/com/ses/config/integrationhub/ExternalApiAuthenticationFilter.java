@@ -34,6 +34,7 @@ import java.util.Enumeration;
 @Component
 @RequiredArgsConstructor
 public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
+    public static final String SIGNED_TIMESTAMP_ATTRIBUTE = "external.signed-timestamp";
     private static final int MAX_HEADER_BYTES = 16_384;
     private static final int MAX_HEADER_FIELDS = 32;
     private static final int MAX_HEADER_VALUE_BYTES = 256;
@@ -135,6 +136,7 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             if (!nonceReplayService.accept(clientId, credentialVersion, rawNonce, signedAt, now)) {
                 throw ExternalApiSecurityException.authentication("NONCE_REPLAY");
             }
+            request.setAttribute(SIGNED_TIMESTAMP_ATTRIBUTE, signedAt);
             ExternalApiPrincipal principal = new ExternalApiPrincipal(client.getClientId(), client.getId(),
                     client.getTenantId(), client.getLegalEntityId(), client.getDataScopeJson(),
                     credentialVersion, keyId, client.getClientTier());
