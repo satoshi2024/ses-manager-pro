@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -122,9 +123,10 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         assertAttribution(callbackResult, ActorType.PROVIDER, ConfirmationSource.PROVIDER_CALLBACK);
         assertAttribution(pollResult, ActorType.SYSTEM, ConfirmationSource.SCHEDULER_POLL);
 
+        Set<Long> referenceIds = Set.of(sync.getId(), callback.getId(), poll.getId());
         List<AssetEvent> events = assetEventMapper.selectList(null).stream()
                 .filter(event -> event.getReferenceId() != null)
-                .filter(event -> List.of(sync.getId(), callback.getId(), poll.getId()).contains(event.getReferenceId()))
+                .filter(event -> referenceIds.contains(event.getReferenceId()))
                 .toList();
         assertThat(events).hasSize(3);
         assertThat(events).allSatisfy(event -> {
@@ -137,7 +139,8 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         });
 
         List<AuditLog> audits = auditLogMapper.selectList(null).stream()
-                .filter(log -> List.of(sync.getId(), callback.getId(), poll.getId()).contains(log.getReferenceId()))
+                .filter(log -> log.getReferenceId() != null)
+                .filter(log -> referenceIds.contains(log.getReferenceId()))
                 .toList();
         assertThat(audits).hasSize(3);
         assertThat(audits).allSatisfy(log -> {

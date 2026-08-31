@@ -426,7 +426,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         AssetAssignment assignment = assetAssignmentService.createAssignment(
                 asset.getId(), "ENGINEER", 5201L, LocalDate.now(), LocalDate.now().plusDays(30), null, "並行検証", 1L);
         ApprovalRequest waiverApproval = ApprovalRequest.builder()
-                .requestNo("AR-RETURN-WAIVE-" + System.nanoTime())
+                .requestNo("AR-RW-" + (System.nanoTime() % 1_000_000_000L))
                 .requestType("LIFECYCLE_EXCEPTION")
                 .targetType("ASSET_ASSIGNMENT")
                 .targetId(assignment.getId())
@@ -739,9 +739,24 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 6: 営業・要員 Fail-Closed Scope 検証（担当外要員・別法人は拒否）")
     void testOrganizationScopeAndMultiCorporationIsolation() {
+        String suffix = Long.toString(System.nanoTime());
+
+        Engineer engineerA = Engineer.builder()
+                .fullName("Scope Eng A-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        Engineer engineerB = Engineer.builder()
+                .fullName("Scope Eng B-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+
         // 1. 法人A資産と法人B資産を作成
         Asset assetA = Asset.builder()
-                .assetTag("AST-SCOPE-A-001")
+                .assetTag("AST-SCOPE-A-" + suffix)
                 .assetName("Corp A MacBook Pro")
                 .category("PC")
                 .ownerCompanyId(100L)
@@ -750,7 +765,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assetService.createAsset(assetA, 1L);
 
         Asset assetB = Asset.builder()
-                .assetTag("AST-SCOPE-B-001")
+                .assetTag("AST-SCOPE-B-" + suffix)
                 .assetName("Corp B ThinkPad")
                 .category("PC")
                 .ownerCompanyId(200L)
@@ -766,26 +781,26 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         // 3. 要員Aに資産Aを貸与し、要員Aユーザーと要員Bユーザーを登録
         AssetAssignment asA = assetAssignmentService.createAssignment(
-                assetA.getId(), "ENGINEER", 8801L,
+                assetA.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
 
         SysUser userEngA = SysUser.builder()
-                .username("eng-scope-8801")
+                .username("eng-scope-a-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngA);
-        engineerAccountLinkService.link(8801L, userEngA.getId(), 1L);
+        engineerAccountLinkService.link(engineerA.getId(), userEngA.getId(), 1L);
 
         SysUser userEngB = SysUser.builder()
-                .username("eng-scope-8802")
+                .username("eng-scope-b-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngB);
-        engineerAccountLinkService.link(8802L, userEngB.getId(), 1L);
+        engineerAccountLinkService.link(engineerB.getId(), userEngB.getId(), 1L);
 
         // 4. 要員スコープ: 自己 ACTIVE 貸与資産のみ可視、他要員への貸与・未貸与・別法人資産は不可視
         assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
