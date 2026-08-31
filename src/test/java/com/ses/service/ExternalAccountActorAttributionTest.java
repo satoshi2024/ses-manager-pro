@@ -222,15 +222,23 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
                 "SYSTEM", "SCHEDULER_POLL", "SCHEDULER_POLL");
         assertConstraintViolation(externalInsert, ref.getSystemId(), "provider-manual", null,
                 "PROVIDER", "MANUAL_API", "MANUAL_API");
+        assertConstraintViolation(externalInsert, ref.getSystemId(), "partial-attribution", null,
+                "SYSTEM", null, null);
         assertConstraintViolation(externalInsert, ref.getSystemId(), "arbitrary-actor", null,
                 "OPERATOR", "MANUAL_API", "MANUAL_API");
 
         assertConstraintViolation("INSERT INTO t_asset_event "
                         + "(event_type, event_summary, actor_type, confirmation_source, human_user_id) "
                         + "VALUES ('TEST', 'test', 'SYSTEM', 'SCHEDULER_POLL', 1)");
+        assertConstraintViolation("INSERT INTO t_asset_event "
+                        + "(event_type, event_summary, actor_type) "
+                        + "VALUES ('TEST', 'test', 'SYSTEM')");
         assertConstraintViolation("INSERT INTO t_audit_log "
                         + "(method, uri, status, actor_type, confirmation_source, human_user_id) "
                         + "VALUES ('POST', '/test', 200, 'PROVIDER', 'MANUAL_API', NULL)");
+        assertConstraintViolation("INSERT INTO t_audit_log "
+                        + "(method, uri, status, actor_type) "
+                        + "VALUES ('POST', '/test', 200, 'SYSTEM')");
     }
 
     @Test

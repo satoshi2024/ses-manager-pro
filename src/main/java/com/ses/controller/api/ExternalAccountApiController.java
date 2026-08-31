@@ -106,12 +106,13 @@ public class ExternalAccountApiController {
                 assetScopeService.getAccessibleEngineerIds(SecurityUtils.currentRole(), SecurityUtils.currentUserId()));
         StringBuilder csv = new StringBuilder(CsvUtils.UTF8_BOM);
         CsvUtils.appendLine(csv, "id", "system_id", "account_identifier", "status", "revoke_requested_by",
-                "actor_type", "confirmation_source", "human_user_id");
+                "actor_type", "confirmation_source", "actor_type_display", "confirmation_source_display", "human_user_id");
         for (ExternalAccountReference reference : result.getRecords()) {
             ExternalAccountReferenceDto dto = ExternalAccountReferenceDto.from(reference);
             CsvUtils.appendLine(csv,
                     String.valueOf(dto.getId()), String.valueOf(dto.getSystemId()), dto.getAccountIdentifier(),
                     dto.getStatus(), dto.getRevokeRequestedBy() == null ? "" : String.valueOf(dto.getRevokeRequestedBy()),
+                    dto.getActorType(), dto.getConfirmationSource(),
                     dto.getActorTypeDisplay(), dto.getConfirmationSourceDisplay(),
                     dto.getHumanUserId() == null ? "" : String.valueOf(dto.getHumanUserId()));
         }
