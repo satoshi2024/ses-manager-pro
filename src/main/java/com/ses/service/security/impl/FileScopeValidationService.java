@@ -54,6 +54,10 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
+    /** サービスリクエスト添付（SERVICE_REQUEST link）のscope解決用。テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.ServiceRequestMapper serviceRequestMapper;
+
     public void assertDownloadAllowed(String storedName) {
         assertDownloadAllowed(storedName, null, null);
     }
@@ -230,6 +234,15 @@ public class FileScopeValidationService {
                                             : salesOrderMapper.selectById(targetId);
                                     if (salesOrder != null) {
                                         dataScopeService.assertAllowedCustomer(salesOrder.getCustomerId());
+                                        anyAllowed = true;
+                                        break;
+                                    }
+                                } else if ("SERVICE_REQUEST".equals(type)) {
+                                    // サービスリクエスト添付はリクエストの顧客DataScopeで見せる (P1-03)
+                                    com.ses.entity.ServiceRequest sr = serviceRequestMapper == null ? null
+                                            : serviceRequestMapper.selectById(targetId);
+                                    if (sr != null) {
+                                        dataScopeService.assertAllowedCustomer(sr.getCustomerId());
                                         anyAllowed = true;
                                         break;
                                     }

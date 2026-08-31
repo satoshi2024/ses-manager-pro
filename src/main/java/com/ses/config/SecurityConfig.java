@@ -170,7 +170,11 @@ public class SecurityConfig {
                     "/api/audit-logs/**",
                     "/integration-hub/**",
                     "/api/integration-hub/**",
-                    "/api/autocomplete/users"
+                    "/api/autocomplete/users",
+                    "/api/customer-success/health/snapshots",
+                    "/api/customer-success/health/snapshots/**",
+                    "/api/service-desk/health/snapshots",
+                    "/api/service-desk/health/snapshots/**"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",
                         "/api/management-reports/schedules/*/disable")
@@ -178,6 +182,13 @@ public class SecurityConfig {
                 // 定期管理レポートは管理者・マネージャーのみ。section/scopeの再検証はserviceで行う。
                 .requestMatchers("/management-reports/**", "/api/management-reports/**")
                 .hasAnyRole("管理者", "マネージャー")
+                // サービスデスク・顧客ヘルス機能は管理者・営業・マネージャーのみ（HR・要員は拒否）
+                .requestMatchers(
+                    "/service-desk/**",
+                    "/api/service-desk/**",
+                    "/customer-success/**",
+                    "/api/customer-success/**"
+                ).hasAnyRole("管理者", "営業", "マネージャー")
                 // 資格・学習・skill gapの管理導線。本人申請はA2の /api/my/** へ分離する。
                 .requestMatchers("/certification-learning-skill-gap/**", "/api/certification-learning-gap/**")
                 .hasAnyRole("管理者", "HR", "マネージャー")

@@ -64,7 +64,18 @@ public final class NotificationLinks {
     /** サーベイ（/my/surveys）— キャンペーン配信通知の遷移先。 */
     public static final String MY_SURVEYS = "/my/surveys";
 
+    /** サービスデスク問い合わせ一覧（/service-desk/requests） */
+    public static final String SERVICE_DESK_REQUESTS = "/service-desk/requests";
+
     private NotificationLinks() {
+    }
+
+    /** サービスリクエスト詳細への遷移リンク（/service-desk/requests/{id}） */
+    public static String serviceDeskDetail(Long id) {
+        if (id == null) {
+            return SERVICE_DESK_REQUESTS;
+        }
+        return "/service-desk/requests/" + id;
     }
 
     /** 要員詳細への遷移リンク（/engineer/detail?id={id}） */
