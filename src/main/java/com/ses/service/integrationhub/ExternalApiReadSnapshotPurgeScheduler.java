@@ -30,7 +30,7 @@ public class ExternalApiReadSnapshotPurgeScheduler {
                 log.debug("[integration-hub read snapshot] purge完了: count={}", purged);
             }
         } catch (RuntimeException e) {
-            log.warn("[integration-hub read snapshot] purge失敗: error={}", e.getMessage());
+            log.warn("[integration-hub read snapshot] purge失敗: errorType={}", e.getClass().getSimpleName());
         }
     }
 }
