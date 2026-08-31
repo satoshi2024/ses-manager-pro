@@ -10,7 +10,8 @@ F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementatio
 `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1は初回Review FAILを
 `30199db8`でremediateした。再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2を
   `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007（一次/secondary resource bindingと
-  現行DB membership再検証）が残ったため、追加remediationを実施し、独立Implementation再Review待ちである。production implementationの
+  現行DB membership再検証）が残ったため追加remediationを実施し、さらにNF05-IMPL-B1-008の初回送信前primary bindingを
+  `c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateして、独立Implementation再Review待ちである。production implementationの
 public endpoint enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -206,6 +207,10 @@ numeric current scopeからHMAC opaque IDを再計算してpayload membershipを
     invoice item/work recordを含むparent relationを同一projectionへ収束させる。client/permission/subscriptionのintersection、tenant/legal entity
     singleton、current DB membershipを一つのimmutable effective populationとして再評価し、scope据置のsoft-delete、同一tenant reparent、invoice itemの
     contract付替え、scope narrowing、relation不一致はfail-closedとする。H2 service/mapper/replay testとMySQL migration/schema gateで正常系と境界を固定する。
+18. B1 deliveryのprimary bindingは初回送信前にも検証する。enqueue保存前にclient bindingからprimary type/内部IDのHMAC opaque IDを再計算し、
+    envelope `publicResourceId`と対応するprimary DTO fieldの双方へ同一値を要求する。workerはclaim後・外部HTTP前に同じ検証を再実行し、
+    不一致rowを送信せずfail-closedにする。`DuplicateKeyException`収束もpayload hash、primary type、primary IDを同一判定へ含め、primary type/ID不一致、
+    同一payload・別primaryの同時enqueueを拒否する。内部ID、任意文字列public ID、secret、raw bodyをbinding証跡へ保存・出力しない。
 
 ## IH-R3 Inbound / outbound webhook
 

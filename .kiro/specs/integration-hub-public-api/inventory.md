@@ -35,7 +35,7 @@
 | F2 | IMPLEMENTATION_PASS。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8`後の再Review P1=2を`2684ff8f`でremediateし、残存P1-007へV134/現行membership再検証を追加。focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
+| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8`後の再Review P1=2を`2684ff8f`でremediateし、P1-007へV134/現行membership再検証、NF05-IMPL-B1-008へ初回送信前primary bindingを追加。focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |
 | M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
 | 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
@@ -79,6 +79,7 @@ fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）
 | B1-005 failure/concurrency evidence | timeout、5xx、attempt 8/DLQ、stale recovery、同時claim、atomic rollback、replay後purgeを実DB経路で検証 | H2 retention、MySQL `IntegrationHubF1MySqlConcurrencyTest`、worker tests | SPEC_ADDRESSED（`30199db8`、独立再Review待ち） |
 | B1-006 replay operator authorization | 呼出側operatorRefを受け取らず、認証済み内部`LoginUser`、`ROLE_管理者`、`integration.webhook.replay`をservice boundaryで検証し、導出referenceだけをauditへ渡す | `IntegrationHubWebhookReplayAuthorizationServiceImpl`、未認証/非admin/permission拒否/derived operator tests | SPEC_ADDRESSED（`2684ff8f`、独立再Review待ち） |
 | B1-007 replay opaque resource binding | primary resource type/内部IDをdeliveryへbindし、`publicResourceId`はprimaryだけへ要求。secondaryは各専用public ID、current DBのdeleted/tenant/legal/parent predicateで再検証 | `ExternalApiPublicIdCodec`、V134、`IntegrationHubWebhookResourceScopeMapper`、project×customer・invoice×customer×contract・soft-delete/reparent/contract付替え tests | SPEC_ADDRESSED（`2684ff8f`残存P1-007を追加remediation、独立再Review待ち） |
+| B1-008 initial delivery primary binding | enqueue保存前とworker外部HTTP前にclient bindingからprimary type/内部IDのHMAC opaque IDを再計算し、envelope `publicResourceId`とprimary DTO fieldを一致させる。DuplicateKey収束もpayload hash・primary type・primary IDを同時比較 | `IntegrationHubWebhookDeliveryBindingValidator`、`ExternalDtoSnapshot.requirePrimaryResourceBinding`、`ApiDeliveryServiceImpl`、`IntegrationHubWebhookDeliveryWorker`、type/ID mismatch・同時enqueue・送信前reject tests | SPEC_ADDRESSED（`c2cbfb99133d0df3f8d5eee285be340163747e31`、独立再Review待ち） |
 
 ## 3. Filter chain inventory
 
@@ -122,7 +123,7 @@ configは起動拒否する。disabled時もdeny-only chainを残し、controlle
 socket peerも検証する。
 | 自動登録抑止 | FilterRegistrationBeanで内部filterをdisable | SecurityConfig.java:65-106 | 外部filter全件もFilterRegistrationBeanでdisableし、SecurityFilterChainへの明示登録と二重登録試験を実施 |
 
-F2実装証跡は専用packageとF2 testsに限定し、production enablementと実顧客/provider接続は未実施である。A1 controllerは`69f857d3`で独立Implementation Review PASS済み、B1 development/test transportとworkerは`971c17d7`で実装し、初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007をcode `5c94367c`でremediate済み・独立再Review待ちである。
+F2実装証跡は専用packageとF2 testsに限定し、production enablementと実顧客/provider接続は未実施である。A1 controllerは`69f857d3`で独立Implementation Review PASS済み、B1 development/test transportとworkerは`971c17d7`で実装し、初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007を`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediate済み・独立再Review待ちである。
 
 ### 3.3 F2 Implementation Review remediation inventory（fixed Head `d022e600`でPASS）
 
@@ -257,7 +258,7 @@ NF-05は互換性のないretention、scope、lease、replay世代を持つた�
 
 | 種別 | direction | field allow-list | scope/permission | 状態 |
 |---|---|---|---|---|
-| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId（primary）、changedFieldNames（allow-list）, payload（primary/secondary各専用public ID）、correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver + current primary/secondary membership | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING（B1、`30199db8` → `2684ff8f` → P1-007追加remediation、独立再Review待ち） |
+| resource.changed | outbound | eventId, eventType, schemaVersion, createdAt, publicResourceId（primary）、changedFieldNames（allow-list）, payload（primary/secondary各専用public ID）、correlationId, timestamp, signature, keyVersion | subscription scope + integration.webhook.deliver + current primary/secondary membership | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING（B1、`30199db8` → `2684ff8f` → P1-007追加remediation → NF05-IMPL-B1-008 `c2cbfb99`、独立再Review待ち） |
 | provider event | inbound | providerEventId, provider, eventType, receivedAt, rawBodyHash, canonicalPayload, signatureResult, processingStatus, resultCode | client binding + integration.webhook.receive | APPROVED_SEQUENCED（B2） |
 | DLQ replay | admin command | eventId, replayGeneration, reason（入力）、resultCode | integration.webhook.replay + target scope | APPROVED_SEQUENCED（B2 admin UI） |
 
@@ -290,5 +291,5 @@ F1実装後の証跡更新:
 - H2 F1 targeted suiteは31 tests、MySQL `IntegrationHubF1MySqlConcurrencyTest`は5 testsで、いずれもfailure/error/skipなし。
 - 独立Reviewの固定Head `f4e3bf7f0c0a8c85d0ca22294471546313e5df1f`ではP1-FU-001のみ残り、FU-002〜004はクローズ済みだった。`96d6801c`後の
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
-- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007をcode `5c94367c`でremediate済み・独立再Review待ちであり、B2/Mは各wave Review後に順次実装する。
+- F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007を`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediate済み・独立再Review待ちであり、B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。

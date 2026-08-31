@@ -21,9 +21,10 @@
 | F2 Implementation Review remediation | F2専用chain、V130、H2 schema、F2 tests | raw request-target供給、client×route scope intersection、audit一request一record、strict IP、metrics cardinality、namespace root | CLOSED_BY_REVIEW | fixed FAIL Head `220ac86f` → `e47025b5`（6件）、fixed FAIL Head `f57df6d2` → `a16cdcba`（2件）。19追加tests PASS |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate、A1 production/test classes、V131/H2 snapshot schema、purge scheduler/tests | GET-only 11 paths、external DTO allow-list、invoice customer predicate、multi-contract非偽装、snapshot-bound cursor、canonical Base64URL、scope-bound list/detail/count、独立bounded purge、秒精度asOf、UTC E2E fixture | IMPLEMENTATION_PASS | remediation series後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Review PASS（P0/P1/P2=0/0/0）。focused/integration 24/24 PASS |
 | A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
-| B1 outbound webhook | tasks/design/requirements/inventory、V132/V133/V134、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event/envelope binding、provider idempotency key、retry/DLQ/replay authorization、primary/secondary opaque ID、current DB membership、独立retention purge、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | 初回FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediateし、残存P1-007を今回のV134/mapper追加で対応。focused/H2/MySQL証跡PASS、独立再Review待ち |
+| B1 outbound webhook | tasks/design/requirements/inventory、V132/V133/V134、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event/envelope binding、provider idempotency key、retry/DLQ/replay authorization、primary/secondary opaque ID、current DB membership、初回送信前binding、独立retention purge、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | 初回FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、NF05-IMPL-B1-008をcode `c2cbfb99`でremediate。focused/H2/MySQL証跡PASS、独立再Review待ち |
 | B1 Review remediation | `IntegrationHubWebhookSigner`、replay authorization、V133、worker/CAS、H2/MySQL evidence | 署名/envelope binding、現行scope再認可、audit/payload retention分離、fresh clock、attempt 8/DLQ、stale/CAS/claim/rollback/replay purge | SPEC_ADDRESSED（独立再Review待ち） | `30199db8` → `2684ff8f` |
-| B1 latest re-review remediation | replay service boundary、opaque ID codec、V134、resource membership mapper、replay/migration tests | authenticated internal admin principal、`integration.webhook.replay` permission、operatorRef入力排除、primary binding、secondary専用opaque ID照合、current deleted/parent relation、scope据置のsoft-delete/reparent/contract付替え fail-closed | SPEC_ADDRESSED（独立再Review待ち） | `2684ff8f1303b6d0cc6550882601405d3d78f3b2` → code `5c94367c` → `0618d983` → docs commit（最終Headは外部handoff） |
+| B1 latest re-review remediation | replay service boundary、opaque ID codec、V134、resource membership mapper、replay/migration tests | authenticated internal admin principal、`integration.webhook.replay` permission、operatorRef入力排除、primary binding、secondary専用opaque ID照合、current deleted/parent relation、scope据置のsoft-delete/reparent/contract付替え fail-closed | SPEC_ADDRESSED（独立再Review待ち） | `2684ff8f1303b6d0cc6550882601405d3d78f3b2` → code `5c94367c` → `0618d983` |
+| B1 initial-delivery binding remediation | `IntegrationHubWebhookDeliveryBindingValidator`、ApiDelivery enqueue/worker、snapshot binding、DuplicateKey path、B1 tests | enqueue保存前とworker外部HTTP前のHMAC opaque primary binding、envelope/primary DTO一致、payload hash＋primary type＋primary IDの同時比較、fail-closed送信拒否 | SPEC_ADDRESSED（独立再Review待ち） | code `c2cbfb99133d0df3f8d5eee285be340163747e31` → docs commit（最終Headは外部handoff） |
 | B2 inbound/DLQ/admin UI | tasks/design/requirements | B1 Review後。production受信enablementなし | APPROVED_SEQUENCED | — |
 | M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
 
@@ -38,6 +39,14 @@ invoice×customer×contract等のsecondaryは各専用opaque IDで検証し、�
 |---|---|---|
 | NF05-IMPL-B1-007-R | V134、primary/secondary別HMAC binding、current membership mapper、soft-delete/reparent/contract付替えのH2/service/mapper証跡 | SPEC_ADDRESSED（独立再Review待ち） |
 
+## B1 NF05-IMPL-B1-008追加remediation
+
+初回送信前primary bindingの独立Review findingを、`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateした。client bindingからprimary type/内部IDのopaque IDを再計算し、envelopeの`publicResourceId`とprimary DTO fieldの双方を一致検証する共通validatorをenqueue保存前とworker外部HTTP前へ配置した。DuplicateKey収束でもpayload hash、primary type、primary IDを同時比較し、不一致を拒否する。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| NF05-IMPL-B1-008 | 初回enqueue、worker送信前、DuplicateKey再読込のidentity bindingを共通化し、primary ID/type不一致、同payload・別primary、transport未実行をtest | SPEC_ADDRESSED（独立再Review待ち） |
+
 ## Review handoff
 
 R-NF05の固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecはPLAN FAIL（P0=0、P1=4）、そのremediation後の
@@ -51,7 +60,7 @@ scope expansionのPlan delta Reviewは既存R-NF05へ固定remote Headを渡す�
 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL（P0=0、P1=4、P2=2）、
 固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13もPLAN FAIL（P0=0、P1=3、P2=0）であり、
 NF05-PLAN-EXP-007〜009のspec/architecture remediationだけを同じbranchへcommit/pushする。
-Plan deltaはca27f455でPASS済み、F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS。B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ち。A2はN/Aで全体完了をblockしない。
+Plan deltaはca27f455でPASS済み、F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS。B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`、再Review P1-006/P1-007を`2684ff8f`、追加remediationを`5c94367c` → `0618d983` → `c2cbfb99`で実施済み・独立再Review待ち。A2はN/Aで全体完了をblockしない。
 PLAN/IMPLEMENTATION双方PASS前のPR作成は禁止し、production enablement、実顧客credential、実provider送信、
 merge、auto-mergeも禁止する。
 
@@ -85,7 +94,7 @@ DLQ replay audit、V132を追加し、`30199db8`で署名/envelope binding、rep
 failure/concurrency証跡を追加した。`2684ff8f`ではauthenticated internal admin principal/action permission、operatorRef入力排除、numeric scopeからの
 opaque ID再計算照合、resource membership fail-closedを追加した。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。外部I/OはDB transaction外であり、
 実顧客credential、実provider、production enablementは未実施。B1独立再Review後までB2を開始しない。
-B1 remediation commits: `30199db8` → `2684ff8f`（独立再Review待ち）。docs trace commitと最終remote Headは外部handoff通知で固定する。
+B1 remediation commits: `30199db8` → `2684ff8f` → code `5c94367c` → `0618d983` → `c2cbfb99133d0df3f8d5eee285be340163747e31`（独立再Review待ち）。docs trace commitと最終remote Headは外部handoff通知で固定する。
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）
 
 ## F1実装証跡

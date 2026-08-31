@@ -13,7 +13,9 @@ F2は独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/
 fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立Implementation PASSを受領した。B1は`971c17d7`の初回実装に対する
 独立Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。
 再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2（operator permission、scopeとopaque IDの直接比較）を
-  `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施し、独立再Reviewへ提出する。
+  `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施した。
+さらにNF05-IMPL-B1-008（初回送信前primary binding未検証）を共通binding validator、enqueue/worker/DuplicateKey検証で
+`c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、独立再Reviewへ提出する。
 B1再Review PASS後にB2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
@@ -32,7 +34,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f` → code `5c94367c` → `0618d983`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership、初回送信前identity binding | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f` → `5c94367c` → `0618d983` → code `c2cbfb99`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
@@ -61,7 +63,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
    peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
-5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediateし、再Review P1-006/P1-007を`2684ff8f`でremediateした。残存P1-007へcode `5c94367c`でprimary/secondary bindingと現行DB membership再検証を追加し、独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
+5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediateし、再Review P1-006/P1-007を`2684ff8f`でremediateした。残存P1-007へcode `5c94367c` → `0618d983`でprimary/secondary bindingと現行DB membership再検証を追加し、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`で追加remediateした。独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
 
 6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
    前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
@@ -122,6 +124,14 @@ MySQL concurrency/retentionを追加し、focused unit/H2/MySQL suiteはfailure/
 primary内部IDから再計算する。project×customer、invoice×customer×contract等のsecondaryは各専用public IDを検証し、
 `IntegrationHubWebhookResourceScopeMapper`で現行`deleted_flag`、active parent/customer/project/contract、invoice item/work record relationを
 再照会する。scope据置のsoft-delete、同一tenant reparent、invoice itemのcontract付替えはfail-closedとし、legacy bindingなしrowはreplay不可とする。
+
+## B1 NF05-IMPL-B1-008追加remediation
+
+初回送信前primary binding未検証のP1を、`c2cbfb99133d0df3f8d5eee285be340163747e31`で対応した。enqueue保存前はclient bindingを
+短い同一DB transactionで取得し、primary type/内部IDから`ExternalApiPublicIdCodec`でopaque IDを再計算する。workerはclaim後・外部HTTP前に
+同じvalidatorを実行し、envelope `publicResourceId`とprimary DTO fieldの一致を確認して、不一致rowを送信せずFAILEDへ収束させる。
+`DuplicateKeyException`収束もpayload hashだけでなくprimary type/IDを比較する。type/ID不一致、同時enqueueの同一payload・別primary、初回送信前不一致の
+negative testと、client DB rowを使うH2/MySQL enqueue証跡を追加した。状態は独立B1再Review待ちであり、B2開始条件を満たしたとは扱わない。
 
 ## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）
 
@@ -186,7 +196,7 @@ follow-up remediationの実装境界:
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
 F2はIMPLEMENTATION_PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でIMPLEMENTATION_PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`で
-remediate済み・独立再Review待ちである。B1再Review PASS後にB2→Mを順次開始する。A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportは
+remediateし、P1-007追加remediation `5c94367c` → `0618d983`、NF05-IMPL-B1-008 `c2cbfb99133d0df3f8d5eee285be340163747e31`を経て独立再Review待ちである。B1再Review PASS後にB2→Mを順次開始する。A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportは
 default denyのままとする。production enablement、実顧客credential、実providerへの外部送信は引き続き禁止する。
 
 F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSし、A1の独立Implementation Reviewも

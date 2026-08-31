@@ -147,7 +147,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
+外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、追加P1-007を`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99`でremediate済み・独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -170,7 +170,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
 F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1はfixed Head
-`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ちである。A2/command/exportは
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、追加remediationを`5c94367c` → `0618d983` → `c2cbfb99`で実施済み・独立再Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -286,3 +286,16 @@ FAIL（P0=0、P1=1、P2=0）を返した。F1/F2/A1、P1-006、Owner Gate、Plan
 | evidence | project×customer、invoice×customer×contract正常系、同一tenant reparent、soft-delete、invoice item contract付替え、legacy binding拒否、実H2 mapper/service/replay test、migration/H2/MySQL gateを追加 | SPEC_ADDRESSED（独立再Review待ち） |
 
 code remediation `5c94367c` → `0618d983`をpush済み。実装検証はfocused/H2 44/44、MySQL 8/8、failure/error/skipなし、`git diff --check` PASS。docs trace commit後に最終remote Headを外部handoffで固定する。独立再Review受領まではB1 PASSへ昇格せず、B2/M/production enablement、実顧客credential、実provider送信、PR/mergeは行わない。
+
+## B1追加P1-008 remediation（初回送信前primary binding、code `c2cbfb99`）
+
+B1独立Implementation Reviewは、初回enqueue時およびworkerの外部HTTP直前に、delivery ledgerのprimary type/内部IDとsnapshotのopaque public IDを結合検証していないとしてFAIL（P0=0、P1=1、P2=0）を返した。F1/F2/A1、P1-006、P1-007は再オープンしない。以下はapproved B1 scope内で実装可能なremediationであり、状態は独立再ReviewまでSPEC_ADDRESSEDとする。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| 初回enqueueのprimary identity binding不足 | `IntegrationHubWebhookDeliveryBindingValidator`がclient bindingからprimary type/内部IDのHMAC opaque IDを再計算し、snapshot envelopeの`publicResourceId`とprimary DTO fieldの双方を検証する。`ApiDeliveryServiceImpl.enqueue`は保存前に検証し、任意文字列のpublic IDやtype/ID不一致を拒否する | SPEC_ADDRESSED（独立再Review待ち） |
+| worker送信前のfail-closed不足 | `IntegrationHubWebhookDeliveryWorker`がsnapshot/envelope検証後、署名計算・外部HTTP前に同じvalidatorでledger/client bindingを再検証し、不一致を`PRIMARY_BINDING_INVALID`でFAILEDへ収束させ、transportを呼び出さない | SPEC_ADDRESSED（独立再Review待ち） |
+| DuplicateKey収束時のidentity比較不足 | `DuplicateKeyException`再読込経路でpayload hashだけでなくprimary resource typeとprimary内部IDを同時比較し、同payload・別primaryおよびtype/ID不一致を拒否する | SPEC_ADDRESSED（独立再Review待ち） |
+| evidence | `ApiDeliveryServiceTest` 7/7、`IntegrationHubWebhookDeliveryWorkerTest` 10/10、F1 retention H2 7/7、B1 focused/H2 failure/error/skipなし、MySQL 8/8。primary ID/type不一致、同payload別primary、worker transport未実行を追加検証 | SPEC_ADDRESSED（独立再Review待ち） |
+
+code `c2cbfb99133d0df3f8d5eee285be340163747e31`をpush済み。docs trace commit後の固定remote Headを同じR-NF05へ独立再Implementation Reviewとしてhandoffする。B1 PASS受領までB2/M、production enablement、実顧客credential、実provider送信、PR/mergeは行わない。

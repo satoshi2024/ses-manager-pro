@@ -537,6 +537,20 @@ project×customerおよびinvoice×customer×contractの正常系では、各sec
 secondary IDの再計算が一致しない、tenant/legal entity singletonが崩れる、またはprimary bindingがscopeから消えた場合はreplayを拒否する。
 H2 mapper integrationとservice、replay、migration testsで、正常系、同一tenant reparent、soft-delete、複数secondary、legacy nullable bindingを固定する。
 
+### 7.5 NF05-IMPL-B1-008 初回送信前primary binding契約
+
+enqueueは保存前に`m_api_client`のserver-side bindingを短い同一DB transactionで取得し、deliveryのprimary type/内部IDから
+`ExternalApiPublicIdCodec`のclient/tenant/resource-bound HMAC opaque IDを再計算する。`ExternalDtoSnapshot`の共通検証は
+envelope `publicResourceId`とresource typeに対応するpayload primary fieldがその再計算値と完全一致することを要求し、任意文字列を許可しない。
+
+workerはclaim transactionをcommitした後、外部HTTPを開始する前に同じbinding validatorを再実行する。clientがmissing、inactive、expired、revoked、
+tenant/legal binding不備、primary type/ID不一致、snapshot envelope/primary field不一致の場合はtransportへ到達させず、boundedな
+`PRIMARY_BINDING_INVALID`でFAILEDへ収束する。署名生成や外部HTTPのDB transaction内実行は行わない。
+
+enqueueのunique競合収束はpayload hashだけを信頼せず、入力primary typeとprimary IDも同時に比較する。既存rowまたは同時insert rowが
+別primary、別type、missing bindingの場合はconflictとして拒否し、同一payload・同一primaryだけを同一結果へ収束させる。H2/MySQLで正しいopaque ID、
+任意ID拒否、primary type/ID mismatch、同一payload・別primaryの同時enqueue、送信前不一致のtransport未実行を固定する。
+
 ## 8. トランザクション・運用
 
 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitする。業務commit後に
@@ -616,7 +630,7 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
 - Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head
-  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ちであり、再Review PASS後にB2→Mを順次開始する。
+  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、P1-007追加remediationを`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediate済み・独立再Review待ちであり、再Review PASS後にB2→Mを順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

@@ -8,7 +8,8 @@
   B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を
   `30199db8`でremediateした。続く再Review（fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`、P0=0/P1=2/P2=0）の
   operator/admin permissionとnumeric scope→opaque public ID指摘を`2684ff8f`でremediateしたが、さらにP1-007（primary/secondary binding・
-  current DB membership再検証）が残ったため追加remediation済みで、同じR-NF05へ再Reviewをhandoffする段階である。
+  current DB membership再検証）が残ったため追加remediation済みで、NF05-IMPL-B1-008（初回送信前primary binding未検証）も
+  `c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateした。同じR-NF05へ再Reviewをhandoffする段階である。
   B2/Mは順次承認、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -48,7 +49,7 @@ PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
 （P0/P1/P2=0/0/0）を受領した。A1は`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-B1を`971c17d7`で実装し、独立Review FAILを`30199db8`、再ReviewのP1-006/P1-007を`2684ff8f`でremediateした。残存P1-007へcode `5c94367c`でprimary/secondary bindingと現行DB membership再検証を追加した。独立B1再Review PASS後にB2→Mを順次実装する。
+B1を`971c17d7`で実装し、独立Review FAILを`30199db8`、再ReviewのP1-006/P1-007を`2684ff8f`でremediateした。残存P1-007へcode `5c94367c` → `0618d983`でprimary/secondary bindingと現行DB membership再検証を追加し、NF05-IMPL-B1-008をcode `c2cbfb99133d0df3f8d5eee285be340163747e31`で追加remediateした。独立B1再Review PASS後にB2→Mを順次実装する。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -122,6 +123,10 @@ transport retryへ変換せずlease recoveryへ委ねる。focused unit/H2/MySQL
 resource type/内部IDをbindし、`publicResourceId`はprimaryだけへ適用、project×customer・invoice×customer×contractのsecondaryは各専用
 opaque IDで照合する。現行`deleted_flag`、active parent/customer/project/contract、invoice item/work record relationはmapperで再照会し、
 scope据置のsoft-delete/reparent/contract付替えをfail-closedとする。実顧客credential、実provider送信、production enablementは行わない。
+
+NF05-IMPL-B1-008では、enqueue保存前とworker外部HTTP前に共通binding validatorを実行し、client bindingからprimary opaque IDをHMAC再計算して
+envelopeとprimary DTO fieldの一致を要求する。DuplicateKey収束でもpayload hash・primary type・primary IDを同時比較し、type/ID不一致と同時enqueueの
+別primaryをfail-closedとする。code commitは`c2cbfb99133d0df3f8d5eee285be340163747e31`、独立再Review待ちである。
 
 ## 既知の重要差分
 
