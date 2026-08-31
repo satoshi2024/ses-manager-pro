@@ -1,16 +1,24 @@
 # NF-05 Integration Hub・公開API・Inbound/Outbound Webhook
 
+## 現在のゲート（2026-08-31）
+
+F1/F2/A1/B1の独立Implementation Review PASSを維持する。B1は固定Head
+`f897d748cb93ade26c41d6ba4cb1a88efb29a29d`でP0/P1/P2=0/0/0のPASSを受領した。
+B2は実装commit `122c7c3bb5653eb788d58040c6defc816ff67013`をremoteへpush済みで、独立Implementation Review待ちである。
+最終trace commit後のremote Headを既存R-NF05へhandoffし、Reviewが完了するまでB2 PASSへ自己昇格させない。
+production enablement、実顧客credential、実provider送信、PR、merge、force pushは行わない。
+
 ## 状態
 
 - 中央台帳の状態: APPROVED
-- 本specの状態: F1/F2/A1独立Implementation Review PASSを維持。A1は固定Head
+- 本specの状態: F1/F2/A1/B1独立Implementation Review PASSを維持。A1は固定Head
   `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
   B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を
   `30199db8`でremediateした。続く再Review（fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`、P0=0/P1=2/P2=0）の
   operator/admin permissionとnumeric scope→opaque public ID指摘を`2684ff8f`でremediateしたが、さらにP1-007（primary/secondary binding・
   current DB membership再検証）が残ったため追加remediation済みで、NF05-IMPL-B1-008（初回送信前primary binding未検証）も
-  `c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateした。同じR-NF05へ再Reviewをhandoffする段階である。
-  B2/Mは順次承認、A2は現DecisionでN/A、production enablementは未完了
+  `c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateした。B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
+  B2は固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ち、MはB2 Review後、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）

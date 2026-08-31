@@ -35,8 +35,8 @@
 | F2 | IMPLEMENTATION_PASS。fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8`後の再Review P1=2を`2684ff8f`でremediateし、P1-007へV134/現行membership再検証、NF05-IMPL-B1-008へ初回送信前primary bindingを追加。focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
-| B2 | APPROVED_SEQUENCED。B1 Review後、production受信enablementなし |
+| B1 | IMPLEMENTATION_PASS。独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
+| B2 | IMPLEMENTATION_REVIEW_PENDING。fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`、inbound/DLQ/admin UIを実装。production受信enablementなし |
 | M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
 | 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
 
@@ -80,6 +80,18 @@ fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`でFAIL（P0=0/P1=4/P2=1）
 | B1-006 replay operator authorization | 呼出側operatorRefを受け取らず、認証済み内部`LoginUser`、`ROLE_管理者`、`integration.webhook.replay`をservice boundaryで検証し、導出referenceだけをauditへ渡す | `IntegrationHubWebhookReplayAuthorizationServiceImpl`、未認証/非admin/permission拒否/derived operator tests | SPEC_ADDRESSED（`2684ff8f`、独立再Review待ち） |
 | B1-007 replay opaque resource binding | primary resource type/内部IDをdeliveryへbindし、`publicResourceId`はprimaryだけへ要求。secondaryは各専用public ID、current DBのdeleted/tenant/legal/parent predicateで再検証 | `ExternalApiPublicIdCodec`、V134、`IntegrationHubWebhookResourceScopeMapper`、project×customer・invoice×customer×contract・soft-delete/reparent/contract付替え tests | SPEC_ADDRESSED（`2684ff8f`残存P1-007を追加remediation、独立再Review待ち） |
 | B1-008 initial delivery primary binding | enqueue保存前とworker外部HTTP前にclient bindingからprimary type/内部IDのHMAC opaque IDを再計算し、envelope `publicResourceId`とprimary DTO fieldを一致させる。DuplicateKey収束もpayload hash・primary type・primary IDを同時比較 | `IntegrationHubWebhookDeliveryBindingValidator`、`ExternalDtoSnapshot.requirePrimaryResourceBinding`、`ApiDeliveryServiceImpl`、`IntegrationHubWebhookDeliveryWorker`、type/ID mismatch・同時enqueue・送信前reject tests | SPEC_ADDRESSED（`c2cbfb99133d0df3f8d5eee285be340163747e31`、独立再Review待ち） |
+
+### 2.5 B2 inbound / DLQ / admin UI implementation inventory
+
+| 対象 | 実装正本 | 固定した契約・証跡 | status |
+|---|---|---|---|
+| inbound route | `ExternalApiInboundWebhookController`、`ExternalApiRouteCatalog`、既存external chain | `POST /external-api/v1/webhooks/{provider}`、HMAC/timestamp/nonce/CIDR/scope通過後のみcontroller、unknown route/method deny | IMPLEMENTATION_REVIEW_PENDING |
+| inbound parser | `ExternalApiInboundWebhookParser` | strict JSON、top-level/field allow-list、provider/event ID一致、raw bytesは検証中memoryのみ、DBはhashとparsed snapshotのみ | IMPLEMENTATION_REVIEW_PENDING |
+| duplicate/conflict | `InboundEventService`、`t_inbound_event` | client×provider×provider event ID unique、同hash duplicate、別hash `409 INBOUND_PAYLOAD_CONFLICT`、terminal逆遷移なし | IMPLEMENTATION_REVIEW_PENDING |
+| processing/DLQ | `InboundEventService`、`NoopInboundEventProcessor` | claim/terminal CAS分離、B2は外部HTTP・business commandなし、processor失敗のみDLQ | IMPLEMENTATION_REVIEW_PENDING |
+| admin replay | `InboundEventAdminServiceImpl`、`t_inbound_event_replay`、admin API/page | `ROLE_管理者`＋`integration.webhook.replay`、derived operator ref、generation、current binding再検証、元eventを逆遷移しない | IMPLEMENTATION_REVIEW_PENDING |
+| retention | V135、`ApiRetentionPurgeServiceImpl` | replay metadata `AUDIT_METADATA_1Y`、元event purgeをFKで阻害しない、terminal bounded purge、safe projection only | IMPLEMENTATION_REVIEW_PENDING |
+| evidence | `IntegrationHubB2InboundH2Test`、`ExternalApiInboundConnectorE2ETest`、`IntegrationHubB2MigrationContractTest`、`FlywayMigrationSmokeTest` | H2/connector/MySQL migrationのfailure/error/skipなし | IMPLEMENTATION_REVIEW_PENDING |
 
 ## 3. Filter chain inventory
 

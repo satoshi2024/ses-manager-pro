@@ -1,11 +1,13 @@
-# NF-05 Review Remediation（Task 0R / B1 remediation）
+# NF-05 Review Remediation（Task 0R / B1 closed / B2 Review待ち）
 
 ## 判定の扱い
 
-この文書はReview指摘のうち、実装AIがdocs/architectureで解消可能な範囲を追跡する。
+この文書はReview指摘のうち、実装AIがdocs/architecture/code/testで解消可能な範囲を追跡する。
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
 scope expansion DecisionはF2/A1/B1/B2/Mの開発を承認しているが、Plan ReviewのPLAN PASSと各実装Reviewは
-別ゲートである。production enablement、実顧客credential、実provider送信は常に禁止する。
+別ゲートである。production enablement、実顧客credential、実provider送信は常に禁止する。B1は固定Head
+`f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B2は固定Head
+`122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
 最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
 Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正した結果、
@@ -299,3 +301,24 @@ B1独立Implementation Reviewは、初回enqueue時およびworkerの外部HTTP�
 | evidence | `ApiDeliveryServiceTest` 7/7、`IntegrationHubWebhookDeliveryWorkerTest` 10/10、F1 retention H2 7/7、B1 focused/H2 failure/error/skipなし、MySQL 8/8。primary ID/type不一致、同payload別primary、worker transport未実行を追加検証 | SPEC_ADDRESSED（独立再Review待ち） |
 
 code `c2cbfb99133d0df3f8d5eee285be340163747e31`をpush済み。docs trace commit後の固定remote Headを同じR-NF05へ独立再Implementation Reviewとしてhandoffする。B1 PASS受領までB2/M、production enablement、実顧客credential、実provider送信、PR/mergeは行わない。
+
+## B1 independent Implementation Review closure
+
+| Finding | Review result | Evidence |
+|---|---|---|
+| NF05-IMPL-B1-001〜008 | CLOSED_BY_REVIEW | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。署名/envelope、admin replay authorization、primary/secondary/current membership、初回送信前binding、retention、fresh clock/CAS、実DB証跡を確認 |
+
+## B2 implementation evidence（独立Implementation Review待ち）
+
+固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`でB2 approved scopeを実装した。これは独立ReviewのPASSを意味しない。
+
+| Finding / contract | 対応 | Status |
+|---|---|---|
+| inbound authentication boundary | `POST /external-api/v1/webhooks/{provider}`をexisting HMAC chainへ接続し、provider/event ID、content type、strict JSON、allow-listを検証。raw bodyはmemoryのみ | SPEC_ADDRESSED（Review待ち） |
+| duplicate / conflict / processing | client×provider×event ID unique、same hash duplicate、hash違い409、RECEIVED→PROCESSING→PROCESSED/DLQのclaim/terminal CAS、B2 local no-op | SPEC_ADDRESSED（Review待ち） |
+| DLQ / replay authorization | ROLE_管理者＋`integration.webhook.replay`、derived operator ref、generation/reason、current client/subscription/permission/scope/membership再検証。元DLQを逆遷移しない | SPEC_ADDRESSED（Review待ち） |
+| retention / safe admin UI | V135の独立replay metadata、FK `ON DELETE SET NULL`、AUDIT_METADATA_1Y bounded purge、safe projection/page。raw body/hash、snapshot、secret、PII非表示 | SPEC_ADDRESSED（Review待ち） |
+| evidence | parser/route/migration contract、H2 real mapper、Linux Tomcat connector E2E、MySQL 8 Flyway smoke | SPEC_ADDRESSED（Review待ち） |
+
+今回のB2実装でproduction receive enablement、実credential、実provider送信、business command/export、PR/mergeは行っていない。独立B2
+Implementation Reviewの判定を受領するまで、B2をPASSへ昇格しない。

@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `c2cbfb99133d0df3f8d5eee285be340163747e31`（B1 NF05-IMPL-B1-008追加code remediation固定済み。docs commit後の最終remote Headは外部handoffで固定） |
+| Current implementation Head | `122c7c3bb5653eb788d58040c6defc816ff67013`（B2実装commit。docs trace commit後の最終remote Headは外部handoffで固定） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -56,8 +56,8 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | F2 | IMPLEMENTATION_PASS | 独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`の初回remediation後、`29d749bb`再Review P1-006/P1-007を`2684ff8f`でremediateし、残存P1-007へV134 primary/secondary binding・現行DB membership再検証、NF05-IMPL-B1-008へenqueue/worker/DuplicateKey binding検証を追加。focused証跡PASS、独立再Review待ち。mock/stub/loopbackのみ、実provider送信なし |
-| B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、実外部受信のenablementなし |
+| B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。実provider送信なし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound HMAC受信、duplicate/conflict、DLQ、admin replay UI、V135、H2/MySQL/connector証跡を実装。production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
 
 ## Approved contract and security values

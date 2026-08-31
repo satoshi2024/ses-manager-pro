@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（scope expansion承認済み・F2/A1 PASS・B1追加remediation再Review待ち）
+# NF-05 Public API 実装計画（scope expansion承認済み・F2/A1/B1 PASS・B2 Review待ち）
 
 ## 現在のゲート
 
@@ -15,8 +15,8 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立I
 再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2（operator permission、scopeとopaque IDの直接比較）を
   `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施した。
 さらにNF05-IMPL-B1-008（初回送信前primary binding未検証）を共通binding validator、enqueue/worker/DuplicateKey検証で
-`c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、独立再Reviewへ提出する。
-B1再Review PASS後にB2→Mを順次実装する。A2はapproved command=0件のためN/A、
+`c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
+B2は`122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -34,8 +34,8 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership、初回送信前identity binding | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f` → `5c94367c` → `0618d983` → code `c2cbfb99`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
-| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership、初回送信前identity binding | IMPLEMENTATION_PASS。fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
+| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | IMPLEMENTATION_REVIEW_PENDING。fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`、H2/MySQL/connector証跡PASS、独立Review待ち |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
 ## R-NF05 P1 remediationの完了条件

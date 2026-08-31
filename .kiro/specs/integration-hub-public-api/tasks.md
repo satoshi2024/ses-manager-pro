@@ -1,12 +1,12 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1 PASS・B1再Review待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1/B1 PASS・B2 Review待ち）
 
 ## 実行停止規則
 
 F1は独立PLAN/IMPLEMENTATION PASS済みで再オープンしない。scope expansion Plan deltaは固定Head
 ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでP0=0、P1=0、P2=0のPASSを受領したため、F2を実施する。
 F2の独立Implementation Reviewはfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でPASSした。A1もfixed Head
-`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領した。B1を実装済みで独立Reviewへ提出し、
-B1 Review PASS後はB2→Mを順次実施し、各waveの独立Reviewと
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領した。B1は固定Head
+`f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASSを受領した。B2を実装済みで独立Reviewへ提出し、B2 Review PASS後はMを実施し、各waveの独立Reviewと
 commit/pushを行う。A2はapproved command=0件のためN/Aとし、command/exportはdefault denyのままとする。
 development/testのmock/stub providerとloopback test serverは許可するが、production enablement、実顧客credential、
 実provider送信、force push、main変更、PR、merge、auto-mergeは行わない。
@@ -166,7 +166,7 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task B1: outbound webhook
 
-- [ ] Status: IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。初回FAIL（fixed Head `0f1a9297`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。再Review fixed Head `29d749bb`のP1-006/P1-007を`2684ff8f`でremediateしたが、P1-007残存（primary/secondary bindingと現行DB membership再検証）、NF05-IMPL-B1-008（初回送信前primary binding未検証）を追加修正済みで、独立再Review待ち。
+- [x] Status: IMPLEMENTATION_PASS。独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。初回FAIL（fixed Head `0f1a9297`、P0=0/P1=4/P2=1）と後続findingはremediate済み。
 - [x] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
 - Preconditions: A1 Implementation Review PASS（fixed Head `69f857d3`）、scope expansion Decision。production enablement、実顧客credential、
   実provider送信なし。development/testのMOCK/STUB/LOOPBACKのみ。
@@ -194,11 +194,20 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task B2: inbound webhook / DLQ / admin UI
 
-- [ ] Objective: provider event unique/hash、processing state、duplicate/conflict、DLQ、内部admin replay UIを実装する。
-- Preconditions: B1 Implementation Review PASS、scope expansion Decision。APPROVED_SEQUENCED、production受信enablementなし。
-- Test requirements: signature/timestamp/replay/duplicate、raw hash conflict、transaction rollback、replay safety、
-  audit、PII/secret masking、raw bytes非永続化、期限purge、backup/restore後purge。
-- Demo: 同一provider eventは副作用一度、hash違いはconflict/DLQとなる。
+- [x] Objective: provider event unique/hash、processing state、duplicate/conflict、DLQ、内部admin replay UIを実装する。
+- Preconditions: B1 Implementation Review PASS（fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`）、scope expansion Decision。
+  production受信enablementなし、実provider送信なし。
+- Implementation: `POST /external-api/v1/webhooks/{provider}`を既存HMAC専用chainへ接続し、raw bytesは検証中のmemoryだけで使用する。
+  inbound eventはclient/provider/event ID unique、raw hash duplicate/conflict、RECEIVED→PROCESSING→PROCESSED/DLQのCASとする。
+  B2 processorはlocal no-opで外部HTTP・business commandを実行しない。DLQ replayはadmin action permission、derived operator reference、
+  generation、reason、現行client/subscription/permission/scope/membership再検証を要求し、独立metadata rowへ保存する。
+- Implementation: V135とH2 schemaを追加し、replay metadataをpayload rowから分離、FK `ON DELETE SET NULL`、AUDIT_METADATA_1Y bounded purgeを固定。
+  admin API/pageはsafe projectionのみを表示し、raw body/hash、snapshot、internal ID、secret、PIIを表示しない。
+- Test requirements: H2実mapperで同hashduplicate、別hashconflict、terminal保持、non-admin、replay後scope縮小REJECTED、metadata purgeを検証する。
+  parserのunknown/duplicate/mismatch拒否、11 GET＋inbound route catalog、MySQL 8 Flyway V135、実Tomcat connector E2Eの初回202/duplicate200/conflict409を確認する。
+- Demo: 同一provider eventのprocessor副作用は一度だけ、hash違いは`409 INBOUND_PAYLOAD_CONFLICT`、admin replayは元DLQを変更せず
+  `PROCESSED/REJECTED/DLQ`の独立metadataへ収束する。実装commit `122c7c3bb5653eb788d58040c6defc816ff67013`、focused/H2/connector/MySQL証跡は
+  failure/error/skipなし。状態は独立Implementation Review待ちであり、PASSへ自己昇格しない。
 
 ## Task M: penetration / recovery / performance
 

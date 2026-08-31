@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F2/A1 PASS・B1再Review待ち）
+# NF-05 Review Ledger（scope expansion承認・F2/A1/B1 PASS・B2 Review待ち）
 
 ## Approval gate
 
@@ -23,8 +23,8 @@
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`後の再Review P1=2を`2684ff8f`でremediateし、P1-007とNF05-IMPL-B1-008へprimary/secondary binding・現行DB membership・初回送信前binding再検証を追加。focused/H2/MySQL証跡PASS、独立再Review待ち。development/test mock/stub/loopbackのみ |
-| B2 | APPROVED_SEQUENCED | B1 Review後。production受信enablementなし |
+| B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。development/test mock/stub/loopbackのみ |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、V135、H2/MySQL/connector証跡を確認済み。production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。最終security/recovery/performance/scan/runbook Review |
 
 scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
@@ -293,6 +293,19 @@ deliveryのprimary bindingとsecondary専用ID検証へ分離し、同じR-NF05�
   mock/stub/loopback以外の外部送信、production enablement、実顧客credentialは引き続き禁止する。
 
 ## Current scope expansion evidence
+
+## B2 implementation handoff（独立Implementation Review待ち）
+
+| 項目 | 証跡 |
+|---|---|
+| B1 gate | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、独立Implementation Review PASS、P0/P1/P2=0/0/0 |
+| B2 implementation commit | `122c7c3bb5653eb788d58040c6defc816ff67013` |
+| inbound | `POST /external-api/v1/webhooks/{provider}`、既存HMAC専用chain、strict parser、raw hash/allow-listed snapshotのみ永続化 |
+| duplicate/conflict | client/provider/provider event ID unique、same hash duplicate、different hash `409 INBOUND_PAYLOAD_CONFLICT` |
+| DLQ/replay | claim/terminal CAS、no-op processor、admin action permission、derived operator、current scope revalidation、independent generation metadata |
+| retention/admin | V135、FK `ON DELETE SET NULL`、AUDIT_METADATA_1Y purge、safe projection/page。raw body/hash/snapshot/secret/PII非表示 |
+| verification | focused B2/H2 PASS、Linux connector E2E 2/2 PASS、MySQL 8 Flyway smoke PASS、`git diff --check` PASS |
+| review state | IMPLEMENTATION_REVIEW_PENDING。Review前のB2 PASS自己宣言、production enablement、実provider送信、PR/mergeなし |
 
 - DecisionId DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 はOwnerRef PROJECT_OWNER、OwnerType ROLE、
   Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head

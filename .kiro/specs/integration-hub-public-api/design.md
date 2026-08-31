@@ -1,10 +1,11 @@
-# NF-05 Public API 設計（scope expansion承認済み・Plan delta Review対象）
+# NF-05 Public API 設計（scope expansion承認済み・B1 PASS・B2 Review待ち）
 
 ## 1. 適用範囲と境界
 
 この設計はDG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02で承認された
 NF-05実装入力である。F1は独立PLAN/IMPLEMENTATION PASS済みで、F2以降はscope expansionのPlan delta PASS後に
-順次開始する。公開機械クライアントは内部管理chain、
+順次開始する。B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASSを受領し、B2は
+固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。公開機械クライアントは内部管理chain、
 portal chain、既存のanonymous webhook例外へ混ぜず、/external-api/v1/** を専用chainで処理する。
 公開clientを内部roleへ変換せず、client principalにtenant、legal entity、client scope、data scope、
 command permission、credential version、correlation IDを束ねる。
@@ -550,6 +551,37 @@ tenant/legal binding不備、primary type/ID不一致、snapshot envelope/primar
 enqueueのunique競合収束はpayload hashだけを信頼せず、入力primary typeとprimary IDも同時に比較する。既存rowまたは同時insert rowが
 別primary、別type、missing bindingの場合はconflictとして拒否し、同一payload・同一primaryだけを同一結果へ収束させる。H2/MySQLで正しいopaque ID、
 任意ID拒否、primary type/ID mismatch、同一payload・別primaryの同時enqueue、送信前不一致のtransport未実行を固定する。
+
+### 7.6 B2 inbound webhook / DLQ / admin UI
+
+B2の外部入口は`POST /external-api/v1/webhooks/{provider}`だけとし、既存のexternal専用security chainで認証・CIDR・nonce・
+scope・rateを通過したrequestだけをcontrollerへ渡す。connectorが供給した署名済みraw body bytesをparserが一度だけstrict JSONとして
+検証し、provider path、`X-Provider-Event-ID`、bodyの`providerEventId`、eventType、canonicalPayloadをallow-listへ縮約する。
+raw bytesは署名検証とhash計算中のmemoryだけに存在し、DBにはSHA-256 hashとallow-listed snapshotだけを保存する。
+
+`InboundEventService`は`client_id + provider_name + provider_event_id`のunique keyでRECEIVED rowを原子的に作る。同一hashの再送は
+existing terminal stateを返してprocessorを呼ばず、hash違いは既存rowを逆遷移させず`INBOUND_PAYLOAD_CONFLICT`へ収束する。新規rowは
+短いclaim transactionでPROCESSINGへCASし、commit後にB2のlocal `NoopInboundEventProcessor`を呼び、外部HTTPと未承認business commandを
+実行しない。processor成功後は別のterminal CASでPROCESSED、失敗時だけDLQへ遷移する。terminal CAS失敗は他workerの結果を上書きせず、
+processor failureとは別の内部整合性errorとする。
+
+DLQ admin API/pageは`ROLE_管理者`と`integration.webhook.replay` action permissionをservice boundaryで検証する。operatorRefはrequest
+bodyから受け取らず、認証済みinternal principalのuser IDから`sys-user:<id>`へ導出する。replay要求は元eventをDLQのまま保持して独立した
+`t_inbound_event_replay` metadata row（generation、reason、operator、safe hash、retention expiry）を作り、次の短いtransactionでclaimする。
+claim後にactive client、receive permission、inbound subscription、tenant/legal entity、current resource membershipを再取得し、
+不一致はREJECTED、local processor failureはDLQ、成功はPROCESSEDへCASする。replay rowは元eventのpayloadを複製せず、元event purgeを
+FK `ON DELETE SET NULL`で阻害しない。
+
+V135はこのreplay metadata table、generation unique、status/retention check、expiry/event index、hold/checkpointの
+`INBOUND_REPLAY` kindを追加する。元eventのpayload retention（成功30日／失敗・DLQ 90日）とreplay metadata/audit 1年を独立purgeし、
+legal hold中は停止する。admin projectionと画面はstatus、provider、provider event ID、signature result、safe result code、timestamps
+だけを表示し、raw body/hash、snapshot、internal ID、secret、PIIは表示しない。
+
+### 7.7 B2 implementation boundary
+
+B2のproduction provider接続とproduction受信enablementは未実施であり、processorはlocal no-op、outbound transportはfalseのままとする。
+H2 schema/init、MySQL Flyway V135、実Tomcat connector E2E、duplicate/conflict、replay permission/scope、retention purgeを同じ契約で
+検証し、独立Implementation Reviewが完了するまでB2をPASSへ昇格しない。
 
 ## 8. トランザクション・運用
 

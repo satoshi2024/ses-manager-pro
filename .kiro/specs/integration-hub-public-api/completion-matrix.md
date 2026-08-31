@@ -1,4 +1,4 @@
-# NF-05 完了対応表（scope expansion承認済み・F2/A1 PASS・B1再Review待ち）
+# NF-05 完了対応表（scope expansion承認済み・F2/A1/B1 PASS・B2 Review待ち）
 
 ## Task対応
 
@@ -21,11 +21,12 @@
 | F2 Implementation Review remediation | F2専用chain、V130、H2 schema、F2 tests | raw request-target供給、client×route scope intersection、audit一request一record、strict IP、metrics cardinality、namespace root | CLOSED_BY_REVIEW | fixed FAIL Head `220ac86f` → `e47025b5`（6件）、fixed FAIL Head `f57df6d2` → `a16cdcba`（2件）。19追加tests PASS |
 | A1 read/OpenAPI | tasks/design/requirements/openapi-candidate、A1 production/test classes、V131/H2 snapshot schema、purge scheduler/tests | GET-only 11 paths、external DTO allow-list、invoice customer predicate、multi-contract非偽装、snapshot-bound cursor、canonical Base64URL、scope-bound list/detail/count、独立bounded purge、秒精度asOf、UTC E2E fixture | IMPLEMENTATION_PASS | remediation series後のfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Review PASS（P0/P1/P2=0/0/0）。focused/integration 24/24 PASS |
 | A2 commands | tasks/design/requirements | approved command=0件、command/exportはdefault deny | NOT_APPLICABLE_UNDER_CURRENT_DECISION | — |
-| B1 outbound webhook | tasks/design/requirements/inventory、V132/V133/V134、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event/envelope binding、provider idempotency key、retry/DLQ/replay authorization、primary/secondary opaque ID、current DB membership、初回送信前binding、独立retention purge、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | 初回FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、NF05-IMPL-B1-008をcode `c2cbfb99`でremediate。focused/H2/MySQL証跡PASS、独立再Review待ち |
+| B1 outbound webhook | tasks/design/requirements/inventory、V132/V133/V134、delivery/transport/replay classes、B1 tests | atomic `t_api_delivery` enqueue、claim/lease、transaction外HTTP、HMAC signed event/envelope binding、provider idempotency key、retry/DLQ/replay authorization、primary/secondary opaque ID、current DB membership、初回送信前binding、独立retention purge、MOCK/STUB/LOOPBACK boundary | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。初回FAIL/後続finding remediationとfocused/H2/MySQL証跡を独立Reviewが確認 |
 | B1 Review remediation | `IntegrationHubWebhookSigner`、replay authorization、V133、worker/CAS、H2/MySQL evidence | 署名/envelope binding、現行scope再認可、audit/payload retention分離、fresh clock、attempt 8/DLQ、stale/CAS/claim/rollback/replay purge | SPEC_ADDRESSED（独立再Review待ち） | `30199db8` → `2684ff8f` |
 | B1 latest re-review remediation | replay service boundary、opaque ID codec、V134、resource membership mapper、replay/migration tests | authenticated internal admin principal、`integration.webhook.replay` permission、operatorRef入力排除、primary binding、secondary専用opaque ID照合、current deleted/parent relation、scope据置のsoft-delete/reparent/contract付替え fail-closed | SPEC_ADDRESSED（独立再Review待ち） | `2684ff8f1303b6d0cc6550882601405d3d78f3b2` → code `5c94367c` → `0618d983` |
 | B1 initial-delivery binding remediation | `IntegrationHubWebhookDeliveryBindingValidator`、ApiDelivery enqueue/worker、snapshot binding、DuplicateKey path、B1 tests | enqueue保存前とworker外部HTTP前のHMAC opaque primary binding、envelope/primary DTO一致、payload hash＋primary type＋primary IDの同時比較、fail-closed送信拒否 | SPEC_ADDRESSED（独立再Review待ち） | code `c2cbfb99133d0df3f8d5eee285be340163747e31` → docs commit（最終Headは外部handoff） |
-| B2 inbound/DLQ/admin UI | tasks/design/requirements | B1 Review後。production受信enablementなし | APPROVED_SEQUENCED | — |
+| B2 inbound/DLQ/admin UI | tasks/design/requirements/inventory、V135、inbound/controller/admin/replay classes、B2 tests | client/provider/event unique、strict parser、raw hash/allow-list snapshot、duplicate/conflict、claim/CAS、DLQ、admin replay、current scope再検証、safe UI、独立metadata retention | IMPLEMENTATION_REVIEW_PENDING | implementation `122c7c3bb5653eb788d58040c6defc816ff67013`、focused/H2/connector/MySQL証跡PASS。独立Review待ち、production受信enablementなし |
+| B2 implementation handoff | `ExternalApiInboundWebhookController`、`InboundEventService`、`InboundEventAdminServiceImpl`、V135/H2 schema、admin UI、B2 tests | H2実mapper、Linux connector E2E 2/2、MySQL 8 Flyway smoke、`git diff --check` | IMPLEMENTATION_REVIEW_PENDING | code commit `122c7c3bb5653eb788d58040c6defc816ff67013` → docs trace commit（最終remote Headは外部handoffで固定） |
 | M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
 
 ## B1 P1-007追加remediation
@@ -96,6 +97,17 @@ opaque ID再計算照合、resource membership fail-closedを追加した。focu
 実顧客credential、実provider、production enablementは未実施。B1独立再Review後までB2を開始しない。
 B1 remediation commits: `30199db8` → `2684ff8f` → code `5c94367c` → `0618d983` → `c2cbfb99133d0df3f8d5eee285be340163747e31`（独立再Review待ち）。docs trace commitと最終remote Headは外部handoff通知で固定する。
 Final remote Head: 外部handoff通知で固定（この行を含むcommit自身のhashは自己参照しない）
+
+## 現在のB2 handoff
+
+| 項目 | 値 |
+|---|---|
+| B1 independent Review | PASS、fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
+| B2 implementation commit | `122c7c3bb5653eb788d58040c6defc816ff67013` |
+| B2 state | IMPLEMENTATION_REVIEW_PENDING |
+| B2 tests | B2 focused/H2 PASS、Linux connector E2E 2/2 PASS、MySQL 8 Flyway smoke PASS、`git diff --check` PASS |
+| remaining gate | 独立B2 Implementation Review。production enablement、実credential、実provider、PR/mergeは禁止 |
+| final Head | このdocs trace commit後にremote Headを外部handoffで固定。自己参照hashは記録しない |
 
 ## F1実装証跡
 

@@ -1,5 +1,12 @@
 # Requirements — NF-05 Integration Hub・公開API・Inbound/Outbound Webhook
 
+## 0.1 現在の実装ゲート
+
+B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
+B2は固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`へ実装・test・migrationをpush済みで、独立Implementation Review待ちである。
+以下のB2契約は実装済み証跡とReview対象を分離して記録し、Review完了前に公開許可へ昇格しない。production enablement、実顧客credential、
+実provider送信、PR、mergeは引き続き禁止する。
+
 ## 0. 状態と適用範囲
 
 本書はDG-05-F1-APPROVAL-20260830-01とDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02でOwner承認された
@@ -36,8 +43,8 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`後の再Review P1=2を`2684ff8f`でremediate、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
-| B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
+| B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
 ## IH-R1 Client / credential / security
@@ -241,6 +248,24 @@ numeric current scopeからHMAC opaque IDを再計算してpayload membershipを
    resource dimension不在、tenant/legal entity不一致、reparent、削除、scope縮小、ID不一致は拒否する。
 9. inbound handlerの業務適用はclaim処理とtransaction境界を分離し、外部応答を待つ間に内部DB
    transactionを保持しない。
+
+10. inbound公開入口は`POST /external-api/v1/webhooks/{provider}`だけを受け付け、既存のHMAC専用chainで
+    service-account、timestamp、nonce、client CIDR、tenant/legal entity、`integration.webhook.receive` scopeを
+    検証する。未認証、unknown provider、content-type/header重複、provider/event ID不一致、未知top-level field、
+    JSON duplicate key、canonical payload不正はstable errorへfail-closedにする。
+11. inbound raw bytesは署名検証中のmemoryでのみ扱う。永続化するのはraw body hash、provider event ID、signed timestamp、
+    allow-listed parsed snapshot、signature result、status、safe result codeだけとし、raw body、secret、PII、provider raw response、
+    stack/SQLを保存・応答しない。snapshotとresponseはinternal entityをserializeせずexternal allow-list DTOだけを使用する。
+12. `(client_id, provider_name, provider_event_id)`をinbound eventのatomic unique keyとし、同一hash再送は副作用なしduplicate、
+    別hashは`409 INBOUND_PAYLOAD_CONFLICT`へ収束する。受信eventの状態はRECEIVED→PROCESSING→PROCESSEDまたはDLQをCASで遷移し、
+    B2のprocessorは外部HTTPも未承認business commandも実行しない。
+13. DLQ replayは内部adminの`integration.webhook.replay` action permissionをservice boundaryで検証し、認証principalから導出した
+    operator referenceだけをmetadataへ保存する。元eventを逆遷移させず、replay generationごとの独立metadata rowを作り、replay直前に
+    active client/subscription/permission、tenant/legal entity、resource membershipを再照会する。scope縮小、revoke、expiry、削除、
+    reparent、source purgeはREJECTEDへ収束し、同一replayの同時claimは一度だけ処理する。
+14. replay metadataはpayload rowと分離し、元inbound eventの90日purgeをFKで阻害しない。replay metadataはAUDIT_METADATA_1Yとして
+    terminal rowだけをbounded purgeし、`ON DELETE SET NULL`とする。admin UI/APIはstatus/provider/event ID/timestamps/result codeだけを
+    safe projectionで表示し、raw hash、snapshot、internal DB ID、secret、payload本文を表示しない。
 
 ## IH-R4 Data scope / command permission
 

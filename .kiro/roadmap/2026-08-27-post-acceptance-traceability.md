@@ -147,6 +147,21 @@
 - scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13はPLAN FAILだったが、remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 - scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。Plan PASS後、F2を実装し、FAIL remediation `e47025b5`と追加remediation `a16cdcba`を経て独立Review PASSを受領した。A1初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）はremediateし、fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領した。B1初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1-006/P1-007を`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、P1-007残存へprimary/secondary binding、current DB membership、soft-delete/reparent/contract付替え検証を`5c94367c499bb019ca459659b43580817419a2f1` → `0618d983e397de4526b265f96565991110b11299`で追加した。さらにNF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateし、docs trace commit後に同じR-NF05へ独立再Reviewとしてhandoffする。
 
+### DG-05 NF-05 current implementation checkpoint（2026-08-31）
+
+| Wave | 状態 | Fixed Head / evidence |
+|---|---|---|
+| F1 | IMPLEMENTATION_PASS | existing approved F1 Review PASSを維持、再オープンなし |
+| F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
+| B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | implementation commit `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、V135、H2/MySQL/connector証跡をpush済み |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件、command/exportはdefault deny |
+| M | APPROVED_SEQUENCED | B2独立Review後。security、負荷、障害訓練、rotation、scan、runbook、最終Head固定が未完 |
+
+production enablement、実顧客credential、実provider送信、main変更、force push、PR、merge、auto-mergeは禁止する。B2の独立Implementation Reviewは
+既存R-NF05へdocs trace commit後の固定remote Headをhandoffし、PASS前にB2を公開可能と扱わない。
+
 ### DG-06 NF-06
 
 - 最初に対応するentityと旧システムschema。
