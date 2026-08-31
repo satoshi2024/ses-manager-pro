@@ -14,6 +14,8 @@ import com.ses.mapper.AssetEventMapper;
 import com.ses.mapper.AuditLogMapper;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
+import com.ses.service.provider.ExternalAccountProviderClient;
+import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -61,6 +63,9 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ExternalAccountProviderClient providerClient;
 
     @AfterEach
     void resetAuditMapper() {
@@ -188,11 +193,10 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
     @DisplayName("NF-09: 二重schedulerと手動/poll競合はCASで確認証跡を一件に収束させる")
     void concurrentSchedulersAndManualPollProduceOneConfirmation() throws Exception {
         ExternalAccountReference doublePoll = newReference("double-poll");
+        setPendingProviderStatus(doublePoll);
         int pollSuccesses = runConcurrently(
-                () -> externalAccountService.confirmRevokeFromSchedulerPoll(
-                        doublePoll.getId(), "double-poll-a", "double-poll-a"),
-                () -> externalAccountService.confirmRevokeFromSchedulerPoll(
-                        doublePoll.getId(), "double-poll-b", "double-poll-b"));
+                () -> externalAccountService.processPendingRevokePollJob(),
+                () -> externalAccountService.processPendingRevokePollJob());
         assertThat(pollSuccesses).isGreaterThanOrEqualTo(1);
         assertSingleConfirmation(doublePoll.getId());
 
@@ -266,6 +270,15 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
         return externalAccountService.registerAccountReference(
                 system.getId(), suffix + "@ses-test.jp", "ENGINEER", 1L, "MEMBER", 1L);
+    }
+
+    private void setPendingProviderStatus(ExternalAccountReference reference) {
+        MockExternalAccountProviderClientImpl mockClient = (MockExternalAccountProviderClientImpl) providerClient;
+        mockClient.setMockStatus(reference.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
+        externalAccountService.requestRevokeWithIdempotency(
+                reference.getId(), "poll-test-key-" + reference.getId(), 1L);
+        // 初回確認を未確定にしてから、2つのpoll workerを同時に起動する。
+        mockClient.setMockStatus(reference.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
     }
 
     private void assertAttribution(ExternalAccountReference reference,

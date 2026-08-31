@@ -28,7 +28,10 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 UPDATE t_external_account_reference
 SET actor_type = CASE
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) IN ('MANUAL', 'MANUAL_API')
-           AND revoke_confirmed_by > 0 THEN 'HUMAN'
+           AND revoke_confirmed_by > 0
+           AND EXISTS (SELECT 1 FROM sys_user u
+                       WHERE u.id = t_external_account_reference.revoke_confirmed_by
+                         AND u.deleted_flag = 0) THEN 'HUMAN'
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) = 'SYSTEM'
            AND revoke_confirmed_by IS NULL THEN 'SYSTEM'
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK')
@@ -38,7 +41,10 @@ SET actor_type = CASE
     END,
     confirmation_source = CASE
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) IN ('MANUAL', 'MANUAL_API')
-           AND revoke_confirmed_by > 0 THEN 'MANUAL_API'
+           AND revoke_confirmed_by > 0
+           AND EXISTS (SELECT 1 FROM sys_user u
+                       WHERE u.id = t_external_account_reference.revoke_confirmed_by
+                         AND u.deleted_flag = 0) THEN 'MANUAL_API'
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) = 'SYSTEM'
            AND revoke_confirmed_by IS NULL THEN 'SCHEDULER_POLL'
       WHEN UPPER(TRIM(COALESCE(revoke_confirmed_source, ''))) IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK')
