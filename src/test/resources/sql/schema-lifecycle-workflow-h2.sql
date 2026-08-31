@@ -131,12 +131,23 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_event (
     case_id BIGINT NOT NULL,
     task_id BIGINT NULL,
     event_type VARCHAR(50) NOT NULL,
-    actor_user_id BIGINT NOT NULL,
+    actor_user_id BIGINT,
     actor_role_snapshot VARCHAR(30) NOT NULL,
+    actor_type VARCHAR(32),
+    confirmation_source VARCHAR(32),
     before_state VARCHAR(30) NULL,
     after_state VARCHAR(30) NULL,
     details_json CLOB NULL,
-    occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_lifecycle_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_lifecycle_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_lifecycle_event_actor_pair CHECK (
+        actor_type IS NULL AND confirmation_source IS NULL
+        OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND actor_user_id IS NOT NULL AND actor_user_id > 0
+        OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND actor_user_id IS NULL
+        OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND actor_user_id IS NULL
+        OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND actor_user_id IS NULL
+    )
 );
 
 -- メニューseed
@@ -183,4 +194,3 @@ WHERE g.tenant_id = 'default'
       SELECT 1 FROM t_permission_group_action pga
       WHERE pga.tenant_id = 'default' AND pga.group_id = g.id AND pga.action_key = a.action_key
   );
-

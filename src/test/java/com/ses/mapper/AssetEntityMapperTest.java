@@ -165,7 +165,7 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
     }
 
     @Test
-    @DisplayName("ExternalAccountReference confirm revoke CAS")
+    @DisplayName("ExternalAccountReference confirm revoke CAS (Manual & System)")
     void testExternalAccountConfirmRevoke() {
         ExternalAccountReference ref = ExternalAccountReference.builder()
                 .systemId(1L)
@@ -177,12 +177,33 @@ class AssetEntityMapperTest extends BaseIntegrationTest {
         externalAccountReferenceMapper.insert(ref);
 
         int updated = externalAccountReferenceMapper.confirmRevokeWithCas(
-                ref.getId(), LocalDateTime.now(), 1L, 0);
+                ref.getId(), LocalDateTime.now(), 1L, "MANUAL", 0);
         assertThat(updated).isEqualTo(1);
 
         ExternalAccountReference current = externalAccountReferenceMapper.selectById(ref.getId());
         assertThat(current.getStatus()).isEqualTo("REVOKED");
         assertThat(current.getRevokeConfirmedAt()).isNotNull();
         assertThat(current.getRevokeConfirmedBy()).isEqualTo(1L);
+        assertThat(current.getRevokeConfirmedSource()).isEqualTo("MANUAL_API");
+
+        // システム実行（ポーリング）時のCAS更新（confirmedBy = null, source = SYSTEM）
+        ExternalAccountReference sysRef = ExternalAccountReference.builder()
+                .systemId(1L)
+                .accountIdentifier("sys-user@ses-test.jp")
+                .assigneeType("ENGINEER")
+                .assigneeId(202L)
+                .status("ACTIVE")
+                .build();
+        externalAccountReferenceMapper.insert(sysRef);
+
+        int sysUpdated = externalAccountReferenceMapper.confirmRevokeWithCas(
+                sysRef.getId(), LocalDateTime.now(), null, "SYSTEM", 0);
+        assertThat(sysUpdated).isEqualTo(1);
+
+        ExternalAccountReference sysCurrent = externalAccountReferenceMapper.selectById(sysRef.getId());
+        assertThat(sysCurrent.getStatus()).isEqualTo("REVOKED");
+        assertThat(sysCurrent.getRevokeConfirmedAt()).isNotNull();
+        assertThat(sysCurrent.getRevokeConfirmedBy()).isNull();
+        assertThat(sysCurrent.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
     }
 }

@@ -2996,14 +2996,25 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_event (
     case_id BIGINT NOT NULL,
     task_id BIGINT NULL,
     event_type VARCHAR(50) NOT NULL COMMENT 'CASE_CREATED, CASE_ACTIVATED, TASK_STARTED, TASK_COMPLETED, TASK_WAIVED, EXCEPTION_APPLIED, RESIGNATION_GATE_CHECKED, CASE_COMPLETED, CASE_CANCELLED',
-    actor_user_id BIGINT NOT NULL,
+    actor_user_id BIGINT NULL,
     actor_role_snapshot VARCHAR(30) NOT NULL,
+    actor_type VARCHAR(32) NULL COMMENT 'HUMAN, SYSTEM, PROVIDER, LEGACY_UNRESOLVED',
+    confirmation_source VARCHAR(32) NULL COMMENT 'MANUAL_API, SCHEDULER_POLL, PROVIDER_SYNC, PROVIDER_CALLBACK, LEGACY_UNRESOLVED',
     before_state VARCHAR(30) NULL,
     after_state VARCHAR(30) NULL,
     details_json LONGTEXT NULL,
     occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_lifecycle_event_case (case_id, occurred_at),
-    INDEX idx_lifecycle_event_task (task_id, occurred_at)
+    INDEX idx_lifecycle_event_task (task_id, occurred_at),
+    CONSTRAINT ck_lifecycle_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_lifecycle_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_lifecycle_event_actor_pair CHECK (
+        actor_type IS NULL AND confirmation_source IS NULL
+        OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND actor_user_id IS NOT NULL AND actor_user_id > 0
+        OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND actor_user_id IS NULL
+        OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND actor_user_id IS NULL
+        OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND actor_user_id IS NULL
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ライフサイクルイベント台帳';
 
 -- ============================================================
@@ -3057,10 +3068,15 @@ CREATE TABLE IF NOT EXISTS t_asset_assignment (
 
 CREATE TABLE IF NOT EXISTS t_asset_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    asset_id BIGINT NOT NULL COMMENT '資産ID',
+    asset_id BIGINT NULL COMMENT '資産ID (外部アカウント参照イベントではNULL)',
+    reference_type VARCHAR(64) NULL COMMENT '対象種別',
+    reference_id BIGINT NULL COMMENT '対象参照ID',
     event_type VARCHAR(64) NOT NULL COMMENT 'CREATED, ASSIGNED, RETURNED, TRANSFERRED, REPAIRED, REPORTED_LOST, REMOTE_WIPED, DISPOSED, INVENTORIED',
     event_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'イベント発生日時',
     actor_user_id BIGINT COMMENT '操作者ユーザーID',
+    actor_type VARCHAR(32) NULL COMMENT 'HUMAN, SYSTEM, PROVIDER, LEGACY_UNRESOLVED',
+    confirmation_source VARCHAR(32) NULL COMMENT 'MANUAL_API, SCHEDULER_POLL, PROVIDER_SYNC, PROVIDER_CALLBACK, LEGACY_UNRESOLVED',
+    human_user_id BIGINT NULL COMMENT '人間確認時のsys_user.id',
     assignee_type VARCHAR(32) COMMENT '貸与先区分',
     assignee_id BIGINT COMMENT '貸与先ID',
     from_status VARCHAR(32) COMMENT '変更前ステータス',
@@ -3068,9 +3084,21 @@ CREATE TABLE IF NOT EXISTS t_asset_event (
     evidence_doc_id BIGINT COMMENT '関連証跡文書ID',
     event_summary VARCHAR(255) NOT NULL COMMENT 'イベント要約',
     details_json TEXT COMMENT '追加メタデータJSON (PII/Secret非含有)',
+    correlation_id VARCHAR(128) NULL COMMENT '相関ID',
+    idempotency_key VARCHAR(128) NULL COMMENT '冪等性キー',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_event_asset (asset_id, event_time),
-    INDEX idx_event_type (event_type)
+    INDEX idx_event_type (event_type),
+    INDEX idx_event_reference (reference_type, reference_id),
+    CONSTRAINT ck_asset_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_asset_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_asset_event_actor_pair CHECK (
+        actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
+        OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0 AND actor_user_id IS NOT NULL AND actor_user_id = human_user_id
+        OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL AND actor_user_id IS NULL
+        OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL AND actor_user_id IS NULL
+        OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL AND actor_user_id IS NULL
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='資産不変イベント台帳';
 
 CREATE TABLE IF NOT EXISTS t_asset_inventory_run (
@@ -3136,8 +3164,12 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     next_retry_at DATETIME COMMENT '次回ポーリング予定日時',
     last_error_message VARCHAR(500) COMMENT '直近エラー要約 (秘密値非含有)',
     revoke_requested_at DATETIME COMMENT '失効要求送信日時',
+    revoke_requested_by BIGINT NULL COMMENT '失効要求の起票者ユーザーID（確認主体とは別）',
     revoke_confirmed_at DATETIME COMMENT '失効完了確認日時 (NULL=失効未確認)',
     revoke_confirmed_by BIGINT COMMENT '失効確認者ユーザーID',
+    actor_type VARCHAR(32) NULL COMMENT '確認主体: HUMAN, SYSTEM, PROVIDER, LEGACY_UNRESOLVED',
+    confirmation_source VARCHAR(32) NULL COMMENT '確認チャネル: MANUAL_API, SCHEDULER_POLL, PROVIDER_SYNC, PROVIDER_CALLBACK, LEGACY_UNRESOLVED',
+    revoke_confirmed_source VARCHAR(32) NULL COMMENT '旧クライアント互換。正本はconfirmation_source',
     external_sync_status VARCHAR(32) DEFAULT 'NONE' COMMENT 'NONE, SYNC_PENDING, SYNC_SUCCESS, SYNC_FAILED, TIMEOUT',
     sync_error_message VARCHAR(500) COMMENT '外部連携エラー要約 (秘密値非含有)',
     version INT NOT NULL DEFAULT 0,
@@ -3148,7 +3180,21 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     INDEX idx_ext_acc_target (assignee_type, assignee_id),
     INDEX idx_ext_acc_system (system_id, status),
     INDEX idx_ext_acc_status (status, revoke_confirmed_at),
-    INDEX idx_ext_acc_retry (status, next_retry_at)
+    INDEX idx_ext_acc_revoke_confirmed (revoke_confirmed_at, confirmation_source),
+    INDEX idx_ext_acc_revoke_confirmed_legacy (revoke_confirmed_at, revoke_confirmed_source),
+    INDEX idx_ext_acc_retry (status, next_retry_at),
+    CONSTRAINT ck_ext_revoke_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_ext_revoke_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_ext_revoke_attribution CHECK (
+        revoke_confirmed_at IS NULL AND actor_type IS NULL AND confirmation_source IS NULL AND revoke_confirmed_by IS NULL AND revoke_confirmed_source IS NULL
+        OR revoke_confirmed_at IS NOT NULL AND (
+            actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND revoke_confirmed_by IS NOT NULL AND revoke_confirmed_by > 0
+            OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND revoke_confirmed_by IS NULL
+            OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND revoke_confirmed_by IS NULL
+            OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND revoke_confirmed_by IS NULL
+        ) AND revoke_confirmed_source = confirmation_source
+    ),
+    CONSTRAINT ck_ext_revoke_status_attribution CHECK (status <> 'REVOKED' OR (revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部アカウント参照台帳 (秘密非保存)';
 
 CREATE TABLE IF NOT EXISTS m_license_plan (

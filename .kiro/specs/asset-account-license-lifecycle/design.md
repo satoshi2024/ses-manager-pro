@@ -257,8 +257,12 @@ CREATE TABLE t_external_account_reference (
     next_retry_at DATETIME COMMENT '次回ポーリング予定日時',
     last_error_message VARCHAR(500) COMMENT '直近エラー要約 (秘密値非含有)',
     revoke_requested_at DATETIME COMMENT '失効要求送信日時',
+    revoke_requested_by BIGINT COMMENT '失効要求の起票者ユーザーID（確認主体とは別）',
     revoke_confirmed_at DATETIME COMMENT '失効完了確認日時 (NULL=失効未確認)',
-    revoke_confirmed_by BIGINT COMMENT '失効確認者ユーザーID',
+    revoke_confirmed_by BIGINT COMMENT '失効確認者ユーザーID (HUMAN時のみ記録)',
+    actor_type VARCHAR(32) COMMENT 'HUMAN, SYSTEM, PROVIDER, LEGACY_UNRESOLVED',
+    confirmation_source VARCHAR(32) COMMENT 'MANUAL_API, SCHEDULER_POLL, PROVIDER_SYNC, PROVIDER_CALLBACK, LEGACY_UNRESOLVED',
+    revoke_confirmed_source VARCHAR(32) COMMENT '旧クライアント互換。正本はconfirmation_source',
     external_sync_status VARCHAR(32) DEFAULT 'NONE' COMMENT 'NONE, SYNC_PENDING, SYNC_SUCCESS, SYNC_FAILED, TIMEOUT',
     sync_error_message VARCHAR(500) COMMENT '外部連携エラー要約 (秘密値非含有)',
     version INT NOT NULL DEFAULT 0,
@@ -267,7 +271,9 @@ CREATE TABLE t_external_account_reference (
     deleted_flag INT NOT NULL DEFAULT 0,
     INDEX idx_ext_acc_target (assignee_type, assignee_id),
     INDEX idx_ext_acc_system (system_id, status),
-    INDEX idx_ext_acc_status (status, revoke_confirmed_at)
+    INDEX idx_ext_acc_status (status, revoke_confirmed_at),
+    INDEX idx_ext_acc_revoke_confirmed (revoke_confirmed_at, confirmation_source),
+    INDEX idx_ext_acc_revoke_confirmed_legacy (revoke_confirmed_at, revoke_confirmed_source)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部アカウント参照台帳 (秘密非保存)';
 ```
 

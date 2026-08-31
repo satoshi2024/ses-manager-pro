@@ -541,18 +541,73 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             mockClient.setMockStatus(ref.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
             mockClient.setMockStatus(unknownRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
 
-            // ポーリングジョブ実行 -> 自動で REVOKED へ
+            // ポーリングジョブ実行 -> 自動で REVOKED へ (SYSTEM主体として記録され、ユーザーID 1に偽装されないこと)
             int processed = externalAccountService.processPendingRevokePollJob();
             assertThat(processed).isGreaterThanOrEqualTo(2);
 
             ExternalAccountReference confirmedRef = externalAccountReferenceMapper.selectById(ref.getId());
             assertThat(confirmedRef.getStatus()).isEqualTo("REVOKED");
             assertThat(confirmedRef.getRevokeConfirmedAt()).isNotNull();
+            assertThat(confirmedRef.getRevokeConfirmedBy()).isNull();
+            assertThat(confirmedRef.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
 
-            // 二重失効確認は安全に冪等処理されること
-            ExternalAccountReference duplicateRevoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
+            ExternalAccountReference confirmedUnknownRef = externalAccountReferenceMapper.selectById(unknownRef.getId());
+            assertThat(confirmedUnknownRef.getStatus()).isEqualTo("REVOKED");
+            assertThat(confirmedUnknownRef.getRevokeConfirmedBy()).isNull();
+            assertThat(confirmedUnknownRef.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
+
+            // 二重失効確認は安全に冪等処理されること (既にREVOKED済みの行は上書きされない)
+            ExternalAccountReference duplicateRevoked = externalAccountService.confirmRevokeFromSchedulerPoll(
+                    ref.getId(), "scheduler-poll:duplicate-" + ref.getId(), ref.getIdempotencyKey());
             assertThat(duplicateRevoked.getStatus()).isEqualTo("REVOKED");
-            assertThat(externalAccountReferenceMapper.selectById(unknownRef.getId()).getStatus()).isEqualTo("REVOKED");
+            assertThat(duplicateRevoked.getRevokeConfirmedBy()).isNull();
+            assertThat(duplicateRevoked.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("NF-09 System vs Manual actor attribution: Provider poll logs SYSTEM without spoofing user 1")
+    void testSystemVsManualActorAttribution() {
+        if (providerClient instanceof MockExternalAccountProviderClientImpl) {
+            MockExternalAccountProviderClientImpl mockClient = (MockExternalAccountProviderClientImpl) providerClient;
+
+            ExternalAccountSystem system = ExternalAccountSystem.builder()
+                    .systemCode("SYS_MANUAL_ATTR_" + System.nanoTime())
+                    .systemName("System vs Manual Attribution System")
+                    .systemType("IDP")
+                    .build();
+            externalAccountService.saveSystem(system);
+
+            // 1. 手動失効確認: 実ユーザーIDが記録され、source = MANUAL
+            ExternalAccountReference manualRef = externalAccountService.createAccountReference(
+                    system.getId(), "manual-actor@ses-test.jp", "ENGINEER", 7701L, "DEVELOPER", 9901L);
+            assertThat(manualRef.getStatus()).isEqualTo("ACTIVE");
+
+            // H2のseed済みadmin(sys_user.id=1)を実在する確認主体として使う。
+            Long humanUserId = 1L;
+            ExternalAccountReference manualRevoked = externalAccountService.confirmRevoke(manualRef.getId(), humanUserId);
+            assertThat(manualRevoked.getStatus()).isEqualTo("REVOKED");
+            assertThat(manualRevoked.getRevokeConfirmedAt()).isNotNull();
+            assertThat(manualRevoked.getRevokeConfirmedBy()).isEqualTo(humanUserId);
+            assertThat(manualRevoked.getRevokeConfirmedSource()).isEqualTo("MANUAL_API");
+
+            // 2. 自動ポーリング失効確認: confirmedBy は NULL（主キー1の偽装禁止）、source = SYSTEM
+            ExternalAccountReference autoRef = externalAccountService.createAccountReference(
+                    system.getId(), "auto-poll-actor@ses-test.jp", "ENGINEER", 7702L, "MEMBER", 9901L);
+            mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
+            externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "auto-key-" + autoRef.getId(), 9901L);
+
+            mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+
+            int polled = externalAccountService.processPendingRevokePollJob();
+            assertThat(polled).isGreaterThanOrEqualTo(1);
+
+            ExternalAccountReference autoRevoked = externalAccountReferenceMapper.selectById(autoRef.getId());
+            assertThat(autoRevoked.getStatus()).isEqualTo("REVOKED");
+            assertThat(autoRevoked.getRevokeConfirmedAt()).isNotNull();
+            assertThat(autoRevoked.getRevokeConfirmedBy()).isNull();
+            assertThat(autoRevoked.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
         }
     }
 

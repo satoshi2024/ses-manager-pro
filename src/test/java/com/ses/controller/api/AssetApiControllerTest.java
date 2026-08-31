@@ -10,6 +10,7 @@ import com.ses.entity.LicensePlan;
 import com.ses.entity.SysUser;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSalesMapper;
+import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AssetAssignmentService;
 import com.ses.service.AssetService;
@@ -26,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -59,6 +61,9 @@ class AssetApiControllerTest extends BaseIntegrationTest {
 
     @Autowired
     private ExternalAccountService externalAccountService;
+
+    @Autowired
+    private ExternalAccountReferenceMapper externalAccountReferenceMapper;
 
     @Autowired
     private LicenseService licenseService;
@@ -180,7 +185,44 @@ class AssetApiControllerTest extends BaseIntegrationTest {
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.status").value("REVOKED"));
+                .andExpect(jsonPath("$.data.status").value("REVOKED"))
+                .andExpect(jsonPath("$.data.actorType").value("HUMAN"))
+                .andExpect(jsonPath("$.data.confirmationSource").value("MANUAL_API"))
+                .andExpect(jsonPath("$.data.humanUserId").value(1));
+
+        mockMvc.perform(get("/api/external-accounts/export.csv"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.allOf(
+                                org.hamcrest.Matchers.containsString("actor_type"),
+                                org.hamcrest.Matchers.containsString("HUMAN"),
+                                org.hamcrest.Matchers.containsString("MANUAL_API"))));
+    }
+
+    @Test
+    @WithMockUser(username = "principal-does-not-exist", roles = {"管理者"})
+    @DisplayName("Manual revoke confirmation rejects a principal that cannot resolve to sys_user")
+    void testManualConfirmRejectsUnresolvedPrincipal() throws Exception {
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("UNRESOLVED_PRINCIPAL_" + System.nanoTime())
+                .systemName("Unresolved principal test")
+                .systemType("SAAS_MAIL")
+                .isActive(1)
+                .build();
+        externalAccountService.saveSystem(system);
+        var ref = externalAccountService.registerAccountReference(
+                system.getId(), "unresolved@ses-test.jp", "ENGINEER", 902L, "MEMBER", 1L);
+
+        mockMvc.perform(post("/api/external-accounts/" + ref.getId() + "/confirm-revoke")
+                        .with(csrf()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value(401));
+
+        assertThat(externalAccountReferenceStatus(ref.getId())).isEqualTo("ACTIVE");
+    }
+
+    private String externalAccountReferenceStatus(Long id) {
+        return externalAccountReferenceMapper.selectById(id).getStatus();
     }
 
     @Test
