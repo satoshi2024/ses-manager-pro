@@ -51,8 +51,10 @@ class IntegrationHubF1RetentionH2Test {
     @Test
     void expiredDeliveryはpurgeされactiveHold中は残り解除後に再実行できる() {
         long subscriptionId = insertSubscription("retention-client", "https://example.invalid/hook");
-        long deliveryId = insertDelivery(subscriptionId, "delivery-held", "FAILED_DLQ_PAYLOAD_90D");
-        long freeDeliveryId = insertDelivery(subscriptionId, "delivery-free", "FAILED_DLQ_PAYLOAD_90D");
+        long deliveryId = insertDelivery(subscriptionId, "retention-client", "delivery-held", "FAILED_DLQ_PAYLOAD_90D",
+                LocalDateTime.of(2026, 8, 29, 12, 0));
+        long freeDeliveryId = insertDelivery(subscriptionId, "retention-client", "delivery-free", "FAILED_DLQ_PAYLOAD_90D",
+                LocalDateTime.of(2026, 8, 29, 12, 0));
         LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
 
         assertTrue(retentionPurgeService.acquireHold("DELIVERY", deliveryId, "LEGAL_HOLD", now));
@@ -101,7 +103,8 @@ class IntegrationHubF1RetentionH2Test {
     @Test
     void activeLease中は削除せずlease期限後にversion条件付きで削除する() {
         long subscriptionId = insertSubscription("lease-client", "https://example.invalid/lease");
-        long deliveryId = insertDelivery(subscriptionId, "delivery-lease", "FAILED_DLQ_PAYLOAD_90D");
+        long deliveryId = insertDelivery(subscriptionId, "lease-client", "delivery-lease", "FAILED_DLQ_PAYLOAD_90D",
+                LocalDateTime.of(2026, 8, 29, 12, 0));
         LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
         jdbcTemplate.update("UPDATE t_api_delivery SET status = 'SUCCEEDED', lease_token = 'active-lease', "
                 + "lease_expires_at = ? WHERE id = ?", now.plusMinutes(1), deliveryId);
@@ -122,8 +125,10 @@ class IntegrationHubF1RetentionH2Test {
     @Test
     void activeLeaseでkeysetの先を通過しても次回走査で期限後rowを再評価する() {
         long subscriptionId = insertSubscription("lease-cursor-client", "https://example.invalid/lease-cursor");
-        long activeLeaseId = insertDelivery(subscriptionId, "delivery-cursor-active", "FAILED_DLQ_PAYLOAD_90D");
-        long freeDeliveryId = insertDelivery(subscriptionId, "delivery-cursor-free", "FAILED_DLQ_PAYLOAD_90D");
+        long activeLeaseId = insertDelivery(subscriptionId, "lease-cursor-client", "delivery-cursor-active",
+                "FAILED_DLQ_PAYLOAD_90D", LocalDateTime.of(2026, 8, 29, 12, 0));
+        long freeDeliveryId = insertDelivery(subscriptionId, "lease-cursor-client", "delivery-cursor-free",
+                "FAILED_DLQ_PAYLOAD_90D", LocalDateTime.of(2026, 8, 29, 12, 0));
         LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
         jdbcTemplate.update("UPDATE t_api_delivery SET status = 'SUCCEEDED', lease_token = 'active-lease', "
                 + "lease_expires_at = ? WHERE id = ?", now.plusMinutes(1), activeLeaseId);
@@ -149,8 +154,11 @@ class IntegrationHubF1RetentionH2Test {
 
     @Test
     void replay監査はdelivery削除を阻害せずaudit期限で独立purgeできる() {
-        long subscriptionId = insertSubscription("audit-retention-client", "https://example.invalid/audit");
-        long deliveryId = insertDelivery(subscriptionId, "delivery-audit-retention", "FAILED_DLQ_PAYLOAD_90D");
+        String clientId = "audit-retention-client";
+        long subscriptionId = insertSubscription(clientId, "https://example.invalid/audit");
+        LocalDateTime oldestExpiry = LocalDateTime.of(1970, 1, 1, 0, 0, 1);
+        long deliveryId = insertDelivery(subscriptionId, clientId, "delivery-audit-retention",
+                "FAILED_DLQ_PAYLOAD_90D", oldestExpiry);
         LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
         String hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         jdbcTemplate.update("INSERT INTO t_api_delivery_replay_audit "
@@ -161,6 +169,9 @@ class IntegrationHubF1RetentionH2Test {
 
         assertEquals(1, retentionPurgeService.purgeExpired(
                 "DELIVERY", "FAILED_DLQ_PAYLOAD_90D", now, 10).purged());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE event_id = ?", Integer.class,
+                "delivery-audit-retention"));
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_api_delivery_replay_audit WHERE event_id = ?", Integer.class,
                 "delivery-audit-retention"));
@@ -220,14 +231,15 @@ class IntegrationHubF1RetentionH2Test {
                 1, "delivery-binding", "INTERNAL_TEST"), "project", projectId);
     }
 
-    private long insertDelivery(long subscriptionId, String eventId, String retentionClass) {
+    private long insertDelivery(long subscriptionId, String clientId, String eventId, String retentionClass,
+                                LocalDateTime retentionExpiresAt) {
         String hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         jdbcTemplate.update("INSERT INTO t_api_delivery (event_id, subscription_id, delivery_generation, client_id, "
                 + "scope_code, tenant_id, event_type, schema_version, provider_idempotency_key, external_dto_snapshot, payload_hash, status, "
                 + "terminal_at, retention_class, retention_expires_at) VALUES "
-                + "(?, ?, 1, 'retention-client', 'scope', 'tenant-a', 'event.type', 'v1', 'provider-key', '{\"status\":\"failed\"}', ?, 'FAILED', ?, ?, ?)",
-                eventId, subscriptionId, hash, LocalDateTime.of(2026, 8, 1, 12, 0), retentionClass,
-                LocalDateTime.of(2026, 8, 29, 12, 0));
+                + "(?, ?, 1, ?, 'scope', 'tenant-a', 'event.type', 'v1', 'provider-key', '{\"status\":\"failed\"}', ?, 'FAILED', ?, ?, ?)",
+                eventId, subscriptionId, clientId, hash, LocalDateTime.of(2026, 8, 1, 12, 0), retentionClass,
+                retentionExpiresAt);
         return jdbcTemplate.queryForObject("SELECT id FROM t_api_delivery WHERE event_id = ?", Long.class, eventId);
     }
 

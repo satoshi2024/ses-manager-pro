@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -49,6 +50,7 @@ class IntegrationHubF1MySqlConcurrencyTest {
     private static final String SCOPE = "integration.project.read";
     private static final String TENANT_ID = "f1-tenant";
     private static final String ROUTE = "/external-api/v1/projects";
+    private static final String INBOUND_PROVIDER = "provider-a";
     private static final String HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 8, 30, 12, 0);
 
@@ -95,6 +97,8 @@ class IntegrationHubF1MySqlConcurrencyTest {
                 statement.executeUpdate("DELETE FROM m_webhook_subscription WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_usage_bucket WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_inbound_event WHERE client_id = '" + CLIENT_ID + "'");
+                statement.executeUpdate("DELETE FROM m_api_client_scope WHERE api_client_id IN "
+                        + "(SELECT id FROM m_api_client WHERE client_id = '" + CLIENT_ID + "')");
                 statement.executeUpdate("DELETE FROM m_api_client WHERE client_id = '" + CLIENT_ID + "'");
                 statement.executeUpdate("DELETE FROM t_api_retention_hold");
                 statement.executeUpdate("DELETE FROM t_api_purge_checkpoint");
@@ -452,6 +456,9 @@ class IntegrationHubF1MySqlConcurrencyTest {
 
     @Test
     void inboundDuplicateKeyのhash競合は実serviceでCONFLICTへ永続化する() throws Exception {
+        try (Connection connection = MYSQL.createConnection("")) {
+            insertInboundBinding(connection);
+        }
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -466,16 +473,62 @@ class IntegrationHubF1MySqlConcurrencyTest {
 
         assertTrue(firstReceipt.conflict() || secondReceipt.conflict());
         assertEquals("CONFLICT", inboundEventMapper.selectByProviderEvent(
-                CLIENT_ID, "provider-f1", "provider-event-race").getStatus());
+                CLIENT_ID, INBOUND_PROVIDER, "provider-event-race").getStatus());
+    }
+
+    private void insertInboundBinding(Connection connection) throws Exception {
+        String scope = "{\"tenantIds\":[\"" + TENANT_ID + "\"],\"legalEntityIds\":[\"9\"],"
+                + "\"projectIds\":[\"1\"]}";
+        try (PreparedStatement insertClient = connection.prepareStatement(
+                "INSERT INTO m_api_client (client_id, owner_ref, tenant_id, legal_entity_id, data_scope_json, "
+                        + "allowed_cidrs, client_tier, status) VALUES (?, 'PROJECT_OWNER', ?, 9, ?, '127.0.0.1/32', "
+                        + "'INTERNAL_TEST', 'ACTIVE')",
+                Statement.RETURN_GENERATED_KEYS)) {
+            insertClient.setString(1, CLIENT_ID);
+            insertClient.setString(2, TENANT_ID);
+            insertClient.setString(3, scope);
+            insertClient.executeUpdate();
+            try (ResultSet keys = insertClient.getGeneratedKeys()) {
+                keys.next();
+                clientDatabaseId = keys.getLong(1);
+            }
+        }
+        try (PreparedStatement insertScope = connection.prepareStatement(
+                "INSERT INTO m_api_client_scope (api_client_id, scope_code, operation_code, data_scope_json, status) "
+                        + "VALUES (?, 'integration.webhook.receive', 'integration.webhook.receive', ?, 'ACTIVE')")) {
+            insertScope.setLong(1, clientDatabaseId);
+            insertScope.setString(2, scope);
+            insertScope.executeUpdate();
+        }
+        try (PreparedStatement insertSubscription = connection.prepareStatement(
+                "INSERT INTO m_webhook_subscription (client_id, provider_name, direction, event_type, endpoint_url, "
+                        + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json, status) "
+                        + "VALUES (?, ?, 'INBOUND', 'health.ping', 'https://example.invalid/inbound', "
+                        + "'key-1', 'IHG1:v1:iv:cipher', 'v1', ?, 'ACTIVE')")) {
+            insertSubscription.setString(1, CLIENT_ID);
+            insertSubscription.setString(2, INBOUND_PROVIDER);
+            insertSubscription.setString(3, scope);
+            insertSubscription.executeUpdate();
+        }
     }
 
     private InboundEventService.Receipt recordInbound(String hash, CountDownLatch ready, CountDownLatch start)
             throws Exception {
         ready.countDown();
         assertTrue(start.await(10, TimeUnit.SECONDS));
-        return inboundEventService.recordReceived(CLIENT_ID, "provider-f1", "provider-event-race", hash,
-                NOW, ExternalDtoSnapshot.ofAllowList("{\"eventType\":\"resource.changed\"}",
-                        ExternalDtoSnapshot.INBOUND_FIELDS), true, NOW);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                return inboundEventService.recordReceived(CLIENT_ID, INBOUND_PROVIDER, "provider-event-race", hash,
+                        NOW, ExternalDtoSnapshot.ofAllowList("{\"eventType\":\"health.ping\"}",
+                                ExternalDtoSnapshot.INBOUND_FIELDS), true, NOW);
+            } catch (DeadlockLoserDataAccessException ex) {
+                if (attempt == 4) {
+                    throw ex;
+                }
+                Thread.sleep(50L * (attempt + 1));
+            }
+        }
+        throw new IllegalStateException("unreachable inbound record retry loop");
     }
 
     private long insertSubscription(Connection connection) throws Exception {
