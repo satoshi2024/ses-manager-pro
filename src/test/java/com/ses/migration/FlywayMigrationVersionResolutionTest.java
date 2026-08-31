@@ -37,9 +37,11 @@ class FlywayMigrationVersionResolutionTest {
             }
         }
 
-        // V134 (migration-dev), V135 (migration-dev), V144 (migration: digital_invoice_safe_diagnostics) がそれぞれ一意に解決されること
-        assertTrue(seenVersions.contains("134"), "V134 (migration-dev) が解決されること");
-        assertTrue(seenVersions.contains("135"), "V135 (migration-dev) が解決されること");
+        // V145 (migration-dev: seed_r3_current_modules),
+        // V146 (migration-dev: seed_r3_approval_route_extension),
+        // V144 (migration: digital_invoice_safe_diagnostics) がそれぞれ一意に解決されること
+        assertTrue(seenVersions.contains("145"), "V145 (migration-dev: seed_r3_current_modules) が解決されること");
+        assertTrue(seenVersions.contains("146"), "V146 (migration-dev: seed_r3_approval_route_extension) が解決されること");
         assertTrue(seenVersions.contains("144"), "V144 (digital_invoice_safe_diagnostics) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
