@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 
 @Slf4j
@@ -29,7 +30,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExternalAccountServiceImpl implements ExternalAccountService {
 
-    private static final long POLL_LEASE_MINUTES = 1L;
+    private static final Duration POLL_LEASE_BUFFER = Duration.ofSeconds(30);
+    private static final Duration DEFAULT_PROVIDER_CONFIRMATION_TIMEOUT = Duration.ofSeconds(30);
 
     private final ExternalAccountSystemMapper externalAccountSystemMapper;
     private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
@@ -276,7 +278,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         for (ExternalAccountReference ref : pendingList) {
             // 各レコードのclaim時点でleaseを開始する。job開始時刻を使い回すと、長いbatchでleaseが短くなる。
             LocalDateTime claimNow = LocalDateTime.now();
-            LocalDateTime leaseUntil = claimNow.plusMinutes(POLL_LEASE_MINUTES);
+            LocalDateTime leaseUntil = claimNow.plus(providerConfirmationLease());
             if (externalAccountReferenceMapper.claimRevokePoll(
                     ref.getId(), ref.getVersion(), claimNow, leaseUntil) != 1) {
                 // 別poll worker、手動確認、または要求送信が先にversionを進めた。
@@ -303,6 +305,14 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         }
         log.info("Pending revoke polling job processed: count={}, confirmed={}", pendingList.size(), processed);
         return processed;
+    }
+
+    private Duration providerConfirmationLease() {
+        Duration timeout = providerClient.revokeConfirmationTimeout();
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            timeout = DEFAULT_PROVIDER_CONFIRMATION_TIMEOUT;
+        }
+        return timeout.plus(POLL_LEASE_BUFFER);
     }
 
     private void persistConfirmationOutcome(ExternalAccountReference ref,
