@@ -59,6 +59,7 @@ spring:
         - classpath:sql/schema-lifecycle-workflow-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
+        # NF-09のactor_type/confirmation_sourceと相互制約はV1およびH2統合schemaで同期する。
         - classpath:sql/schema-asset-account-license-lifecycle-h2.sql
       data-locations:
         - classpath:sql/dummy.sql

@@ -28,5 +28,18 @@ public class AuditLog {
     private String applicationCode;
     private Boolean successFlag;
 
+    /** 対象種別・対象参照ID（ドメイン監査の場合）。 */
+    private String referenceType;
+    private Long referenceId;
+
+    /** 確認主体・確認チャネル。 */
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String beforeState;
+    private String afterState;
+    private String correlationId;
+    private String idempotencyKey;
+
     private LocalDateTime createdAt;
 }

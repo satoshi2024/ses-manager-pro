@@ -381,7 +381,9 @@ SES.lifecycle = {
         let html = '';
         events.forEach(e => {
             const time = e.occurredAt ? e.occurredAt.replace('T', ' ').substring(0, 19) : '-';
-            const actor = `${e.actorUserId ? 'User#' + e.actorUserId : 'SYSTEM'} (${SES.escapeHtml(e.actorRoleSnapshot || '-')})`;
+            const actorType = e.actorType || 'LEGACY_UNRESOLVED';
+            const confirmationSource = e.confirmationSource || 'LEGACY_UNRESOLVED';
+            const actor = `${SES.escapeHtml(actorType)} / ${SES.escapeHtml(confirmationSource)}${e.actorUserId ? ' (User#' + e.actorUserId + ')' : ''}`;
             const transition = (e.beforeState || e.afterState) ? `${e.beforeState || '-'} → <strong class="text-theme">${e.afterState || '-'}</strong>` : '-';
 
             html += `

@@ -265,6 +265,9 @@ class AssetOffboardingServiceTest extends BaseIntegrationTest {
             assertThat(failedAfter.getRetryCount()).isEqualTo(1);
             assertThat(failedAfter.getNextRetryAt()).isNotNull();
             assertThat(confirmedAfter.getStatus()).isEqualTo("REVOKED");
+            assertThat(confirmedAfter.getRevokeConfirmedAt()).isNotNull();
+            assertThat(confirmedAfter.getRevokeConfirmedBy()).isNull();
+            assertThat(confirmedAfter.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
         } finally {
             mockClient.clearConfirmationFailure(failed.getId());
         }

@@ -2,6 +2,8 @@ package com.ses.service.lifecycle.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ses.common.audit.ActorType;
+import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.lifecycle.CompleteLifecycleTaskCommand;
 import com.ses.dto.lifecycle.LifecycleTaskDto;
@@ -75,8 +77,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .caseId(task.getCaseId())
                 .taskId(taskId)
                 .eventType("TASK_STARTED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("IN_PROGRESS")
                 .occurredAt(LocalDateTime.now())
@@ -157,8 +161,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .caseId(task.getCaseId())
                 .taskId(taskId)
                 .eventType("TASK_COMPLETED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("COMPLETED")
                 .detailsJson(cmd != null && cmd.getCompletionComment() != null ? "{\"comment\":\"" + cmd.getCompletionComment().replace("\"", "\\\"") + "\"}" : null)
@@ -213,8 +219,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .caseId(task.getCaseId())
                 .taskId(taskId)
                 .eventType("TASK_WAIVED")
-                .actorUserId(userId)
+                .actorUserId(eventActorUserId(userId, user))
                 .actorRoleSnapshot(user != null && user.getRole() != null ? user.getRole() : "SYSTEM")
+                .actorType(eventActorType(userId, user))
+                .confirmationSource(eventConfirmationSource(userId, user))
                 .beforeState(before)
                 .afterState("WAIVED")
                 .detailsJson("{\"approvalRequestId\":" + approvalRequestId + ",\"reason\":\"" + (reason != null ? reason.replace("\"", "\\\"") : "") + "\"}")
@@ -263,8 +271,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .caseId(task.getCaseId())
                 .taskId(taskId)
                 .eventType("TASK_REASSIGNED")
-                .actorUserId(actorUserId)
+                .actorUserId(eventActorUserId(actorUserId, actor))
                 .actorRoleSnapshot(actor != null && actor.getRole() != null ? actor.getRole() : "SYSTEM")
+                .actorType(eventActorType(actorUserId, actor))
+                .confirmationSource(eventConfirmationSource(actorUserId, actor))
                 .beforeState(String.valueOf(oldAssigneeId))
                 .afterState(String.valueOf(newAssigneeUserId))
                 .detailsJson("{\"reason\":\"" + (reason != null ? reason : "") + "\"}")
@@ -443,8 +453,10 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 .caseId(task.getCaseId())
                 .taskId(taskId)
                 .eventType("TASK_CORRECTION")
-                .actorUserId(actorUserId != null ? actorUserId : 0L)
+                .actorUserId(eventActorUserId(actorUserId, actor))
                 .actorRoleSnapshot(actor != null && actor.getRole() != null ? actor.getRole() : "SYSTEM")
+                .actorType(eventActorType(actorUserId, actor))
+                .confirmationSource(eventConfirmationSource(actorUserId, actor))
                 .beforeState(task.getStatus())
                 .afterState(task.getStatus()) // ステータスは変更なし
                 .detailsJson("{\"correctionNote\":\"" + noteEscaped + "\"}")
@@ -490,14 +502,14 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                     succ.setUpdatedBy(actorUserId);
                     taskMapper.updateById(succ);
 
-                    SysUser actor = actorUserId != null ? sysUserMapper.selectById(actorUserId) : null;
-                    String actorRole = actor != null && actor.getRole() != null ? actor.getRole() : "SYSTEM";
                     eventMapper.insert(LifecycleEvent.builder()
                             .caseId(caseId)
                             .taskId(succId)
                             .eventType("TASK_STARTED")
-                            .actorUserId(actorUserId != null ? actorUserId : 1L)
-                            .actorRoleSnapshot(actorRole)
+                            .actorUserId(null)
+                            .actorRoleSnapshot("SYSTEM")
+                            .actorType(ActorType.SYSTEM.name())
+                            .confirmationSource(ConfirmationSource.SCHEDULER_POLL.name())
                             .beforeState("PENDING")
                             .afterState("IN_PROGRESS")
                             .detailsJson("{\"autoPromoted\":true}")
@@ -506,5 +518,19 @@ public class LifecycleTaskServiceImpl extends ServiceImpl<LifecycleTaskMapper, L
                 }
             }
         }
+    }
+
+    private String eventActorType(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null
+                ? ActorType.HUMAN.name() : ActorType.LEGACY_UNRESOLVED.name();
+    }
+
+    private Long eventActorUserId(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null ? actorUserId : null;
+    }
+
+    private String eventConfirmationSource(Long actorUserId, SysUser actor) {
+        return actorUserId != null && actor != null
+                ? ConfirmationSource.MANUAL_API.name() : ConfirmationSource.LEGACY_UNRESOLVED.name();
     }
 }

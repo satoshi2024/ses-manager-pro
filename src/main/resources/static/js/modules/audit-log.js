@@ -38,12 +38,14 @@ function renderAuditLogs(records) {
     tbody.empty();
 
     if (!records || records.length === 0) {
-        tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
+        tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">' + SES.i18n.t('common.msg.noData') + '</td></tr>');
         return;
     }
 
     records.forEach(log => {
         const statusClass = log.status >= 200 && log.status < 300 ? 'text-accent-green' : 'text-danger';
+        const actorType = log.actorType || 'LEGACY_UNRESOLVED';
+        const confirmationSource = log.confirmationSource || 'LEGACY_UNRESOLVED';
         const tr = `
             <tr>
                 <td class="ps-4 py-2 text-muted small">${SES.escapeHtml(log.createdAt || '-')}</td>
@@ -51,6 +53,8 @@ function renderAuditLogs(records) {
                 <td class="py-2"><span class="badge bg-secondary">${SES.escapeHtml(log.method)}</span></td>
                 <td class="py-2 font-monospace small">${SES.escapeHtml(log.uri)}</td>
                 <td class="py-2 ${statusClass} fw-bold">${log.status}</td>
+                <td class="py-2"><span class="badge bg-secondary">${SES.escapeHtml(actorType)}</span></td>
+                <td class="py-2"><span class="badge bg-dark">${SES.escapeHtml(confirmationSource)}</span></td>
             </tr>
         `;
         tbody.append(tr);

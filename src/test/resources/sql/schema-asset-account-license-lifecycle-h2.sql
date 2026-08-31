@@ -77,10 +77,15 @@ CREATE TABLE IF NOT EXISTS t_asset_lost_incident (
 
 CREATE TABLE IF NOT EXISTS t_asset_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    asset_id BIGINT NOT NULL,
+    asset_id BIGINT,
+    reference_type VARCHAR(64),
+    reference_id BIGINT,
     event_type VARCHAR(64) NOT NULL,
     event_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actor_user_id BIGINT,
+    actor_type VARCHAR(32),
+    confirmation_source VARCHAR(32),
+    human_user_id BIGINT,
     assignee_type VARCHAR(32),
     assignee_id BIGINT,
     from_status VARCHAR(32),
@@ -88,7 +93,22 @@ CREATE TABLE IF NOT EXISTS t_asset_event (
     evidence_doc_id BIGINT,
     event_summary VARCHAR(255) NOT NULL,
     details_json TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    correlation_id VARCHAR(128),
+    idempotency_key VARCHAR(128),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_asset_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_asset_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_asset_event_actor_pair CHECK (
+        actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
+        OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0 AND actor_user_id IS NOT NULL AND actor_user_id = human_user_id
+            OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL AND actor_user_id IS NULL
+            OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL AND actor_user_id IS NULL
+            OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL AND actor_user_id IS NULL
+        )
+    ),
+    INDEX idx_event_asset (asset_id, event_time),
+    INDEX idx_event_reference (reference_type, reference_id)
 );
 
 CREATE TABLE IF NOT EXISTS t_asset_inventory_run (
@@ -153,14 +173,30 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     next_retry_at TIMESTAMP,
     last_error_message VARCHAR(500),
     revoke_requested_at TIMESTAMP,
+    revoke_requested_by BIGINT,
     revoke_confirmed_at TIMESTAMP,
     revoke_confirmed_by BIGINT,
+    actor_type VARCHAR(32),
+    confirmation_source VARCHAR(32),
+    revoke_confirmed_source VARCHAR(32),
     external_sync_status VARCHAR(32) DEFAULT 'NONE',
     sync_error_message VARCHAR(500),
     version INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_flag INT NOT NULL DEFAULT 0
+    deleted_flag INT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_ext_revoke_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_ext_revoke_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+    CONSTRAINT ck_ext_revoke_attribution CHECK (
+        revoke_confirmed_at IS NULL AND actor_type IS NULL AND confirmation_source IS NULL AND revoke_confirmed_by IS NULL AND revoke_confirmed_source IS NULL
+        OR revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND revoke_confirmed_by IS NOT NULL AND revoke_confirmed_by > 0
+            OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND revoke_confirmed_by IS NULL
+            OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND revoke_confirmed_by IS NULL
+            OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND revoke_confirmed_by IS NULL
+        ) AND revoke_confirmed_source IS NOT NULL AND revoke_confirmed_source = confirmation_source
+    ),
+    CONSTRAINT ck_ext_revoke_status_attribution CHECK (status IS NOT NULL AND (status <> 'REVOKED' OR (revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL)))
 );
 
 CREATE TABLE IF NOT EXISTS m_license_plan (

@@ -43,6 +43,12 @@ public class LifecycleEvent implements Serializable {
      */
     private Long actorUserId;
 
+    /** 操作主体区分。自動処理はSYSTEMを明示し、ユーザーIDを代入しない。 */
+    private String actorType;
+
+    /** 確認チャネル。 */
+    private String confirmationSource;
+
     /**
      * 操作実行者ロールスナップショット
      */
