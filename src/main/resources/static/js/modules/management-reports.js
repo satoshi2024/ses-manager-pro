@@ -60,10 +60,9 @@ function loadRunHistory() {
                 <td>${SES.escapeHtml(run.periodFrom || '')}～${SES.escapeHtml(run.periodTo || '')}</td>
                 <td>${SES.escapeHtml(run.cutoffKind || '')}</td>
                 <td><span class="badge ${run.status === 'SUCCEEDED' ? 'bg-success' : 'bg-warning text-dark'}">${SES.escapeHtml(run.status || '')}</span></td>
-                <td class="d-flex flex-wrap gap-1">
-                    <button class="btn btn-outline-light btn-sm" onclick="viewRun(${run.id})">表示</button>
+                <td><div class="d-flex flex-wrap gap-1"><button class="btn btn-outline-light btn-sm" onclick="viewRun(${run.id})">表示</button>
                     ${run.status === 'SUCCEEDED' ? `<button class="btn btn-outline-success btn-sm" onclick="deliverRun(${run.id})">配布</button>` : ''}
-                </td>
+                </div></td>
             </tr>`).join(''));
     });
 }

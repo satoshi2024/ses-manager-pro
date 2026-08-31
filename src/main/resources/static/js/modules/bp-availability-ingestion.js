@@ -43,9 +43,10 @@
                     <td><span class="badge ${badgeClass}">${SES.escapeHtml(row.status)}</span></td>
                     <td>${row.createdAt ? row.createdAt.substring(0, 16) : '-'}</td>
                     <td class="text-end pe-4">
-                        ${row.status === '要確認' ? `<a href="/bp-availability-ingestion/review/${row.id}" class="btn btn-sm btn-primary">レビュー</a>` : ''}
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${row.status === '要確認' ? `<a href="/bp-availability-ingestion/review/${row.id}" class="btn btn-sm btn-primary">レビュー</a>` : ''}
                         ${row.status === '失敗' ? `<button class="btn btn-sm btn-outline-warning" onclick="reparseJob(${row.id})">再解析</button>` : ''}
-                    </td>
+                    </div>
+</td>
                 </tr>
             `);
         });

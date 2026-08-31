@@ -22,13 +22,19 @@ function loadSalesUsers() {
             opt.textContent = SES.i18n.t('my.oneOnOne.noCounterpart', '担当営業が未設定です');
             sel.appendChild(opt);
         }
-    }).catch(() => {});
+    }).catch(error => {
+        console.error(error);
+        console.error(error.message || '担当営業の取得に失敗しました');
+    });
 }
 
 function load() {
     SES.api.get('/api/my/one-on-ones', { current: 1, size: 50 })
         .then(data => render(data.records || []))
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            console.error(error.message || '1on1一覧の取得に失敗しました');
+        });
 }
 
 function render(rows) {
@@ -53,7 +59,10 @@ async function cancel(id) {
     try {
         await SES.api.post('/api/my/one-on-ones/' + id + '/cancel', {});
         load();
-    } catch (e) { /* toasts */ }
+    } catch (e) {
+        console.error(e);
+        console.error(e.message || '1on1の取消に失敗しました');
+    }
 }
 
 async function create() {
@@ -68,5 +77,8 @@ async function create() {
         load();
         const modal = bootstrap.Modal.getInstance(document.getElementById('oneOnOneModal'));
         if (modal) modal.hide();
-    } catch (e) { /* toasts */ }
+    } catch (e) {
+        console.error(e);
+        console.error(e.message || '1on1の申請に失敗しました');
+    }
 }

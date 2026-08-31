@@ -37,11 +37,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     ,"app.security.oidc.client-secret=test-secret"
     ,"app.digital-invoice.provider=none"
     ,"app.batch.token-secret=test-batch-token-hmac-secret"
-    // prod 単独起動時は compliance gate の fail-fast を満たすテスト鍵が必要（test 併用時はスキップされていた）
+    // prod 単独起動時は compliance gate と certification crypto の fail-fast を満たすテスト鍵が必要
     ,"compliance.gate.credential-crypto.current-key-version=v1"
     ,"compliance.gate.credential-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
     ,"compliance.gate.fingerprint-keys.default.current-key-version=v1"
     ,"compliance.gate.fingerprint-keys.default.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
+    ,"certification.number-crypto.current-key-version=v1"
+    ,"certification.number-crypto.keys.v1=MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("prod")

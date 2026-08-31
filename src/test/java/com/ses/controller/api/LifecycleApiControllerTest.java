@@ -274,6 +274,26 @@ class LifecycleApiControllerTest {
     }
 
     @Test
+    @DisplayName("A1-3: 案件が空の場合も一覧APIが空配列を返すこと")
+    @WithMockUser(username = "admin_api_test", roles = {"管理者"})
+    void 案件が空の場合も一覧APIが空配列を返す() throws Exception {
+        mockMvc.perform(get("/api/lifecycle/cases").param("engineerId", "999999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        mockMvc.perform(get("/api/lifecycle/cases").param("status", "存在しない状態"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        mockMvc.perform(get("/api/lifecycle/cases"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data", hasSize(0)));
+    }
+
+    @Test
     @DisplayName("A1-3: 案件の保留・再開・中止 API テスト")
     @WithMockUser(username = "admin_api_test", roles = {"管理者"})
     void testHoldResumeCancelFlow() throws Exception {

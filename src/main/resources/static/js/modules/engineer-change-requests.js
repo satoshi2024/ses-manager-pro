@@ -18,7 +18,10 @@ function load(page) {
     };
     SES.api.get('/api/engineer-change-requests', params)
         .then(data => { crPage = { current: data.current, size: data.size, total: data.total }; render(data.records || []); })
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            console.error(error.message || '変更申請一覧の取得に失敗しました');
+        });
 }
 
 function render(rows) {
@@ -67,7 +70,10 @@ function loadDetail(id) {
             }
             document.getElementById('detail-body').innerHTML = html;
         })
-        .catch(() => {});
+        .catch(error => {
+            console.error(error);
+            console.error(error.message || '変更申請詳細の取得に失敗しました');
+        });
 }
 
 function parseJson(s) {

@@ -18,6 +18,11 @@ import java.util.List;
 @Mapper
 public interface EngineerSalesMapper extends BaseMapper<EngineerSales> {
 
+    /** 指定営業の現任担当要員ID。released_atで履歴と現任を分離する。 */
+    @Select("SELECT engineer_id FROM t_engineer_sales "
+            + "WHERE sales_user_id = #{salesUserId} AND released_at IS NULL AND deleted_flag = 0")
+    List<Long> selectActiveEngineerIdsBySalesUserId(@Param("salesUserId") Long salesUserId);
+
     /** 要員の現任担当営業一覧（営業名付き、主担当が先頭） */
     @Select("""
         SELECT es.id, es.engineer_id AS engineerId, es.sales_user_id AS salesUserId,

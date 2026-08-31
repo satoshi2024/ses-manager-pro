@@ -154,6 +154,9 @@ const SES = {
                 
             } catch (error) {
                 console.error('API Error:', error);
+                if (error instanceof TypeError) {
+                    SES.toast.error('通信エラーが発生しました。ネットワーク接続を確認してください。');
+                }
                 throw error;
             }
         }
@@ -368,18 +371,29 @@ const SES = {
 
             // ナビリンクをタップしたら自動で閉じる（モバイル/タブレット）
             if (sidebar) {
+                const sidebarMenu = sidebar.querySelector('.sidebar-menu');
+                const sidebarScrollKey = 'ses_sidebar_scroll';
+
+                const saveDesktopScroll = () => {
+                    if (sidebarMenu && window.innerWidth >= 992) {
+                        sessionStorage.setItem(sidebarScrollKey, String(sidebarMenu.scrollTop));
+                    }
+                };
+
                 sidebar.querySelectorAll('.nav-link').forEach(link => {
                     link.addEventListener('click', () => {
+                        saveDesktopScroll();
                         if (window.innerWidth < 992) closeSidebar();
                     });
                 });
 
-                // アクティブなメニュー項目を自動的にスクロール位置まで移動させる
-                const activeLink = sidebar.querySelector('.nav-link.active');
-                if (activeLink) {
-                    setTimeout(() => {
-                        activeLink.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-                    }, 50);
+                // デスクトップのスクロール位置はページ遷移をまたいで復元する。初期描画後の遅延スクロールは行わない。
+                if (sidebarMenu && window.innerWidth >= 992) {
+                    const savedScroll = sessionStorage.getItem(sidebarScrollKey);
+                    if (savedScroll !== null && Number.isFinite(Number(savedScroll))) {
+                        sidebarMenu.scrollTop = Number(savedScroll);
+                    }
+                    sidebarMenu.addEventListener('scroll', saveDesktopScroll, { passive: true });
                 }
             }
         }

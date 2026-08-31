@@ -121,12 +121,13 @@ function renderCandidates(records) {
                 <td>${SES.escapeHtml(c.source || '-')}</td>
                 <td>${nextActionHtml}</td>
                 <td class="text-end pe-4">
-                    <div class="btn-group btn-group-sm" role="group">
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><div class="btn-group btn-group-sm" role="group">
                         <a href="/candidate/detail?id=${c.id}" class="btn btn-outline-secondary text-light border-secondary"><i class="bi bi-eye"></i></a>
                         <button type="button" class="btn btn-outline-primary text-primary border-primary ms-1" onclick="editCandidate(${c.id})"><i class="bi bi-pencil"></i></button>
                         <button type="button" class="btn btn-outline-danger text-danger border-danger ms-1" onclick="deleteCandidate(${c.id})"><i class="bi bi-trash"></i></button>
                     </div>
-                </td>
+                </div>
+</td>
             </tr>
         `;
         tbody.append(tr);

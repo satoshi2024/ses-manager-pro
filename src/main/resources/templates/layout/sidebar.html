@@ -19,7 +19,7 @@
         <div class="sidebar-menu flex-grow-1 overflow-auto mt-3 px-2">
             <ul class="nav flex-column gap-1">
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('dashboard')}">
-                    <a th:href="@{/dashboard}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentUri == '/dashboard' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/dashboard}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/dashboard' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-speedometer2 me-2"></i>
                         <span th:text="#{menu.dashboard}">ダッシュボード</span>
                     </a>
@@ -30,133 +30,144 @@
                 </li>
                 
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
-                    <a th:href="@{/my/timesheet}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/timesheet}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/timesheet' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-workspace me-2"></i>
                         <span th:text="#{menu.myTimesheet}">マイ勤怠</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-timesheet')}">
-                    <a th:href="@{/my/attendance}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.myAttendance}">雇用勤怠入力</a>
+                    <a th:href="@{/my/attendance}" class="nav-link px-4 py-1 small" th:classappend="${currentNavKey == '/my/attendance' ? 'active bg-tertiary text-white' : 'text-secondary'}" th:text="#{menu.myAttendance}">雇用勤怠入力</a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myLeave')}">
-                    <a th:href="@{/my/leave}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.myLeave}">休暇申請</a>
+                    <a th:href="@{/my/leave}" class="nav-link px-4 py-1 small" th:classappend="${currentNavKey == '/my/leave' ? 'active bg-tertiary text-white' : 'text-secondary'}" th:text="#{menu.myLeave}">休暇申請</a>
                 </li>
                 <li class="nav-item mt-3 mb-1 px-3" sec:authorize="hasRole('要員')">
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.my}">マイポータル</span>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myDashboard')}">
-                    <a th:href="@{/my/dashboard}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/dashboard') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/dashboard}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/dashboard' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-speedometer2 me-2"></i><span th:text="#{menu.myDashboard}">マイダッシュボード</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myProfile')}">
-                    <a th:href="@{/my/profile}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/profile') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/profile}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/profile' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-badge me-2"></i><span th:text="#{menu.myProfile}">プロフィール・スキル</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myPayroll')}">
-                    <a th:href="@{/my/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/payroll') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/payroll' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cash-stack me-2"></i><span th:text="#{menu.myPayroll}">給与明細</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myExpenses')}">
-                    <a th:href="@{/my/expenses}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/expenses') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/expenses}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/expenses' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-receipt me-2"></i><span th:text="#{menu.myExpenses}">経費申請</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myCertificationLearningGap')}">
-                    <a th:href="@{/my/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/certification-learning-skill-gap') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-mortarboard me-2"></i><span>資格・学習計画</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myOneOnOnes')}">
-                    <a th:href="@{/my/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/one-on-ones') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/one-on-ones' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-chat-dots me-2"></i><span th:text="#{menu.myOneOnOnes}">1on1</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('mySurveys')}">
-                    <a th:href="@{/my/surveys}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/surveys') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/surveys}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/surveys' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-ui-checks me-2"></i><span th:text="#{menu.mySurveys}">サーベイ</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('myLifecycle')}">
-                    <a th:href="@{/my/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/lifecycle') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/my/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/my/lifecycle' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-arrow-repeat me-2"></i><span th:text="#{menu.myLifecycle}">マイライフサイクル</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('要員')" th:if="${allowedMenus != null and allowedMenus.contains('my-assets')}">
+                    <a th:href="@{/my/assets}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/my/assets') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-laptop me-2"></i><span>貸与資産・アカウント</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineer')}">
-                    <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/engineer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/engineer' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-people me-2"></i>
                         <span th:text="#{menu.engineer}">要員管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('lifecycle')}">
-                    <a th:href="@{/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/lifecycle') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/lifecycle}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/lifecycle' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-arrow-repeat me-2"></i>
                         <span th:text="#{menu.lifecycle}">ライフサイクル管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('asset-management')}">
+                    <a th:href="@{/asset/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/asset') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-laptop me-2"></i>
+                        <span>資産・アカウント管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('certification-learning-skill-gap')}">
-                    <a th:href="@{/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/certification-learning-skill-gap') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/certification-learning-skill-gap}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/certification-learning-skill-gap' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-mortarboard me-2"></i>
                         <span>資格・学習・スキルギャップ</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('customer')}">
-                    <a th:href="@{/customer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/customer') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/customer/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/customer' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-building me-2"></i>
                         <span th:text="#{menu.customer}">顧客管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('crm-lead')}">
-                    <a th:href="@{/crm/leads}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/crm/leads') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/crm/leads}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/crm/leads' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-vcard me-2"></i><span th:text="#{menu.crm.lead}">リード管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('crm-opportunity')}">
-                    <a th:href="@{/crm/opportunities}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/crm/opportunities') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/crm/opportunities}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/crm/opportunities' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-kanban me-2"></i><span th:text="#{menu.crm.opportunity}">商機管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
-                    <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project') and !#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/project' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-briefcase me-2"></i>
                         <span th:text="#{menu.project}">案件管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project-ingestion')}">
-                    <a th:href="@{/project-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/project-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/project-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/project-ingestion' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-envelope-open me-2"></i>
                         <span th:text="#{menu.projectIngestion}">案件メール取込</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('candidate')}">
-                    <a th:href="@{/candidate/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/candidate') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/candidate/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/candidate' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-plus me-2"></i>
                         <span th:text="#{menu.candidate}">候補者管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('resume-ingestion')}">
-                    <a th:href="@{/resume-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/resume-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/resume-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/resume-ingestion' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-person me-2"></i>
                         <span th:text="#{menu.resumeIngestion}">スキルシート取込</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('bp-availability')}">
-                    <a th:href="@{/bp-availability/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/bp-availability') and !#strings.startsWith(currentUri, '/bp-availability-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/bp-availability/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/bp-availability' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-lines-fill me-2"></i>
                         <span th:text="#{menu.bpAvailability}">外部要員在庫</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('bp-availability-ingestion')}">
-                    <a th:href="@{/bp-availability-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/bp-availability-ingestion') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/bp-availability-ingestion}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/bp-availability-ingestion' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-envelope-check me-2"></i>
                         <span th:text="#{menu.bpAvailabilityIngestion}">要員空き状況取込</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('bp-company')}">
-                    <a th:href="@{/bp-company/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/bp-company') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/bp-company/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/bp-company' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-building-gear me-2"></i>
                         <span th:text="#{menu.bpCompany}">BP会社管理</span>
                     </a>
@@ -167,107 +178,107 @@
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('proposal')}">
-                    <a th:href="@{/proposal/kanban}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/proposal') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/proposal/kanban}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/proposal' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-kanban me-2"></i>
                         <span th:text="#{menu.proposal}">提案管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('quotation')}">
-                    <a th:href="@{/quotation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/quotation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/quotation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/quotation' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-ruled me-2"></i>
                         <span th:text="#{menu.quotation}">見積管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('sales-order')}">
-                    <a th:href="@{/sales-order}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/sales-order') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/sales-order}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/sales-order' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bag-check me-2"></i>
                         <span th:text="#{menu.salesOrder}">注文管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('acceptance')}">
-                    <a th:href="@{/acceptance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/acceptance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/acceptance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/acceptance' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-patch-check me-2"></i>
                         <span th:text="#{menu.acceptance}">月次検収</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract')}">
-                    <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/contract/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/contract' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-text me-2"></i>
                         <span th:text="#{menu.contract}">契約管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('contract-document')}">
-                    <a th:href="@{/contract-document}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/contract-document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/contract-document}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/contract-document' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-check me-2"></i><span th:text="#{menu.contractDocument}">契約書・電子署名</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('document-archive')}">
-                    <a th:href="@{/document/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/document') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/document/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/document' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-archive me-2"></i>
                         <span th:text="#{menu.documentArchive}">法定文書台帳</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('work-record')}">
-                    <a th:href="@{/work-record}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/work-record') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/work-record}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/work-record' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-clock-history me-2"></i>
                         <span th:text="#{menu.workRecord}">勤怠・請求</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasAnyRole('管理者','HR','マネージャー')" th:if="${allowedMenus != null and allowedMenus.contains('work-record')}">
-                    <a th:href="@{/work-record/attendance}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.attendanceManagement}">雇用勤怠管理</a>
+                    <a th:href="@{/work-record/attendance}" class="nav-link px-4 py-1 small" th:classappend="${currentNavKey == '/work-record/attendance' ? 'active bg-tertiary text-white' : 'text-secondary'}" th:text="#{menu.attendanceManagement}">雇用勤怠管理</a>
                 </li>
                 <li class="nav-item" sec:authorize="hasAnyRole('管理者','HR','マネージャー')" th:if="${allowedMenus != null and allowedMenus.contains('leaveManagement')}">
-                    <a th:href="@{/leave}" class="nav-link px-4 py-1 small text-secondary" th:text="#{menu.leaveManagement}">休暇管理</a>
+                    <a th:href="@{/leave}" class="nav-link px-4 py-1 small" th:classappend="${currentNavKey == '/leave' ? 'active bg-tertiary text-white' : 'text-secondary'}" th:text="#{menu.leaveManagement}">休暇管理</a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('approval')}">
-                    <a th:href="@{/approval/inbox}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/approval') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/approval/inbox}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/approval' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-inbox me-2"></i>
                         <span th:text="#{menu.approval}">承認ワークフロー</span>
                     </a>
                 </li>
                 <li class="nav-item" sec:authorize="hasRole('管理者')" th:if="${allowedMenus != null and allowedMenus.contains('approval')}">
-                    <a th:href="@{/approval/routes}" class="nav-link px-4 py-1 small text-secondary">
+                    <a th:href="@{/approval/routes}" class="nav-link px-4 py-1 small" th:classappend="${currentNavKey == '/approval/routes' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-diagram-3 me-2"></i><span th:text="#{approval.routes.title}">承認route・代理管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('engineerChangeRequests')}">
-                    <a th:href="@{/engineer-change-requests}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/engineer-change-requests') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/engineer-change-requests}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/engineer-change-requests' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-gear me-2"></i>
                         <span th:text="#{menu.engineerChangeRequests}">変更申請管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('expenseManagement')}">
-                    <a th:href="@{/expenses}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/expenses') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/expenses}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/expenses' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-receipt-cutoff me-2"></i>
                         <span th:text="#{menu.expenseManagement}">経費管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('oneOnOneManagement')}">
-                    <a th:href="@{/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/one-on-ones') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/one-on-ones}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/one-on-ones' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-chat-dots me-2"></i>
                         <span th:text="#{menu.oneOnOneManagement}">1on1管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('surveyManagement')}">
-                    <a th:href="@{/surveys}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/surveys') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/surveys}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/surveys' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-ui-checks me-2"></i>
                         <span th:text="#{menu.surveyManagement}">サーベイ管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('invoice')}">
-                    <a th:href="@{/invoice}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/invoice') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/invoice}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/invoice' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-receipt me-2"></i>
                         <span th:text="#{menu.invoice}">請求・支払</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('reconciliation')}">
-                    <a th:href="@{/reconciliation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/reconciliation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/reconciliation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/reconciliation' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cash-coin me-2"></i>
                         <span th:text="#{menu.reconciliation}">入金消込</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('payroll')}">
-                    <a th:href="@{/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/payroll') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/payroll}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/payroll' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cash-stack me-2"></i>
                         <span th:text="#{menu.payroll}">給与</span>
                     </a>
@@ -278,49 +289,49 @@
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('analytics')}">
-                    <a th:href="@{/analytics}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/analytics') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/analytics}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/analytics' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-graph-up me-2"></i>
                         <span th:text="#{menu.analytics}">分析ダッシュボード</span>
                     </a>
                 </li>
                 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('sales-performance')}">
-                    <a th:href="@{/sales-performance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/sales-performance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/sales-performance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/sales-performance' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-award me-2"></i>
                         <span th:text="#{menu.salesPerformance}">営業成績</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('management-report')}">
-                    <a th:href="@{/management-reports}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/management-reports') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/management-reports}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/management-reports' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-file-earmark-bar-graph me-2"></i>
                         <span th:text="#{menu.managementReport}">定期管理レポート</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('monthly-closing')}">
-                    <a th:href="@{/monthly-closing}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/monthly-closing') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/monthly-closing}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/monthly-closing' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-calendar-check me-2"></i>
                         <span th:text="#{menu.monthlyClosing}">月次締め</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('compliance')}">
-                    <a th:href="@{/compliance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/compliance') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/compliance}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/compliance' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-shield-exclamation me-2"></i>
                         <span th:text="#{menu.compliance}">コンプライアンス</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('todo')}">
-                    <a th:href="@{/todo}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/todo') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/todo}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/todo' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bell me-2"></i>
                         <span th:text="#{menu.todo}">ToDo・通知</span>
                     </a>
                 </li>
 
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('ai')}">
-                    <a th:href="@{/ai/matching}" class="nav-link px-3 py-2 rounded-md d-flex justify-content-between align-items-center" th:classappend="${#strings.startsWith(currentUri, '/ai/matching') or currentUri == '/ai' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/ai/matching}" class="nav-link px-3 py-2 rounded-md d-flex justify-content-between align-items-center" th:classappend="${currentNavKey == '/ai/matching' or currentNavKey == '/ai' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <div>
                             <i class="bi bi-robot me-2 text-accent-purple"></i>
                             <span th:text="#{menu.ai}">AI機能</span>
@@ -329,13 +340,13 @@
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('ai-evaluation')}">
-                    <a th:href="@{/ai/evaluation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/ai/evaluation') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/ai/evaluation}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/ai/evaluation' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-graph-up-arrow me-2 text-accent-purple"></i>
                         <span th:text="#{menu.ai.evaluation}">AI評価</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('email')}">
-                    <a th:href="@{/email/template/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/email') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/email/template/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/email/template' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-envelope-paper me-2"></i>
                         <span th:text="#{menu.email.template}">メールテンプレート</span>
                     </a>
@@ -345,37 +356,49 @@
                     <span class="text-muted small fw-bold text-uppercase" th:text="#{menu.section.system}">システム管理</span>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('organization')}">
-                    <a th:href="@{/organization}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/organization') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/organization}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/organization' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-diagram-3 me-2"></i>
                         <span th:text="#{menu.organization}">組織管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('management-accounting')}">
-                    <a th:href="@{/management-accounting}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/management-accounting') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/management-accounting}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/management-accounting' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-bar-chart-line me-2"></i>
                         <span th:text="#{menu.management.accounting}">管理会計</span>
                     </a>
                 </li>
-                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('accounting')}">
-                    <a th:href="@{/accounting/integration}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/accounting') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('accounting-integration')}">
+                    <a th:href="@{/accounting/integration}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/accounting/integration' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-cloud-arrow-up me-2"></i>
                         <span th:text="#{menu.accounting}">会計・支払連携</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('compliance-gate')}">
+                    <a th:href="@{/compliance-gate}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/compliance-gate' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-shield-check me-2"></i>
+                        <span th:text="#{compliance.gate.title}">派遣コンプライアンスG2</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('portal-admin')}">
+                    <a th:href="@{/portal-admin}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/portal-admin' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-window-sidebar me-2"></i>
+                        <span th:text="#{portalAdmin.title}">ポータル管理</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('user')}">
-                    <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/user') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/user/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/user' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-person-gear me-2"></i>
                         <span th:text="#{menu.user}">ユーザー管理</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('system-config')}">
-                    <a th:href="@{/system-config}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/system-config') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/system-config}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/system-config' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-sliders me-2"></i>
                         <span th:text="#{menu.system.config}">システム設定</span>
                     </a>
                 </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('audit-log')}">
-                    <a th:href="@{/audit-log}" class="nav-link px-3 py-2 rounded-md" th:classappend="${#strings.startsWith(currentUri, '/audit-log') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                    <a th:href="@{/audit-log}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/audit-log' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-shield-check me-2"></i>
                         <span th:text="#{menu.auditLog}">監査ログ</span>
                     </a>

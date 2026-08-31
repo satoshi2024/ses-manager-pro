@@ -19,12 +19,14 @@ import com.ses.service.WorkRecordService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.pwa.PwaClientMutationLedgerService;
+import com.ses.service.pwa.PwaMutationTransactionService;
 import com.ses.service.pwa.PwaUserContextService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Map;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.when;
 class PwaMutationApiControllerTest {
 
     @Mock private PwaClientMutationLedgerService ledger;
+    @Spy private PwaMutationTransactionService transactionService = new PwaMutationTransactionService();
     @Mock private PwaUserContextService userContextService;
     @Mock private ObjectMapper objectMapper;
     @Mock private AttendanceService attendanceService;

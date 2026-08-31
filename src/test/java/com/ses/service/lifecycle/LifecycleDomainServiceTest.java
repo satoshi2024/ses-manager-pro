@@ -21,7 +21,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:lifecycle-domain-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL")
 @ActiveProfiles("test")
 @Transactional
 class LifecycleDomainServiceTest {
@@ -69,6 +69,12 @@ class LifecycleDomainServiceTest {
     private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Autowired
+    private com.ses.mapper.ApprovalActionMapper approvalActionMapper;
+
+    @Autowired
+    private com.ses.mapper.AssetOffboardingWaiverMapper assetOffboardingWaiverMapper;
+
+    @Autowired
     private com.ses.mapper.DocumentMapper documentMapper;
 
     @Autowired
@@ -83,10 +89,11 @@ class LifecycleDomainServiceTest {
 
     @BeforeEach
     void setUp() {
+        long suffix = System.nanoTime();
         // テスト用組織
         testOrg = OrganizationUnit.builder()
-                .code("ORG-TECH-01")
-                .name("開発第1部")
+                .code("ORG-TECH-" + suffix)
+                .name("開発第1部-" + suffix)
                 .type("DEPARTMENT")
                 .status("ACTIVE")
                 .validFrom(LocalDate.now().minusYears(1))
@@ -95,7 +102,7 @@ class LifecycleDomainServiceTest {
 
         // テスト用ユーザー
         adminUser = SysUser.builder()
-                .username("admin_test_01")
+                .username("admin_test_" + suffix)
                 .password("pass")
                 .realName("管理者一郎")
                 .role("管理者")
@@ -104,7 +111,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(adminUser);
 
         hrUser = SysUser.builder()
-                .username("hr_test_01")
+                .username("hr_test_" + suffix)
                 .password("pass")
                 .realName("人事花子")
                 .role("HR")
@@ -113,7 +120,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(hrUser);
 
         salesUser = SysUser.builder()
-                .username("sales_test_01")
+                .username("sales_test_" + suffix)
                 .password("pass")
                 .realName("営業次郎")
                 .role("営業")
@@ -122,7 +129,7 @@ class LifecycleDomainServiceTest {
         sysUserMapper.insert(salesUser);
 
         engineerUser = SysUser.builder()
-                .username("eng_test_01")
+                .username("eng_test_" + suffix)
                 .password("pass")
                 .realName("要員三郎")
                 .role("要員")
@@ -142,14 +149,13 @@ class LifecycleDomainServiceTest {
 
         // テスト用エンジニア
         testEngineer = Engineer.builder()
-                .fullName("要員三郎")
+                .fullName("要員三郎-" + suffix)
                 .status("稼動中")
                 .employmentType("正社員")
                 .build();
         testEngineer.setOrganizationId(testOrg.getId());
         engineerMapper.insert(testEngineer);
 
-        // 要員アカウントリンク
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(testEngineer.getId());
         link.setSysUserId(engineerUser.getId());
@@ -219,6 +225,16 @@ class LifecycleDomainServiceTest {
         assertNotNull(created.getId());
         assertEquals(1, created.getVersionNo());
 
+        // Assert that taskCount is set in listTemplates
+        List<LifecycleTemplateDto> allTpls = templateService.listTemplates("JOIN", "ACTIVE");
+        assertTrue(allTpls.stream().anyMatch(t -> t.getId().equals(created.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list");
+
+        // Assert invalidDateOrder for createTemplate
+        LifecycleTemplateDto invalidTpl = LifecycleTemplateDto.builder()
+                .templateType("JOIN").name("Bad").validFrom(LocalDate.now().plusDays(10)).validTo(LocalDate.now())
+                .tasks(List.of(LifecycleTemplateTaskDto.builder().taskCode("B").taskName("B").assigneeRule("HR").sortOrder(10).build())).build();
+        assertThrows(BusinessException.class, () -> templateService.createTemplate(invalidTpl, adminUser.getId()));
+
         // 案件を起票 (v1で起票される)
         CreateLifecycleCaseCommand cmd = CreateLifecycleCaseCommand.builder()
                 .engineerId(testEngineer.getId())
@@ -235,9 +251,25 @@ class LifecycleDomainServiceTest {
         LifecycleTemplateDto v2 = templateService.updateTemplate(created.getId(), tpl, adminUser.getId());
         assertEquals(2, v2.getVersionNo());
 
+        // Check validFrom overlap adjustment logic
+        LifecycleTemplate oldTpl = templateService.getById(created.getId());
+        assertTrue(oldTpl.getValidTo().isBefore(v2.getValidFrom()), "Old version must end before new version begins");
+
+        // Assert taskCount for v2
+        List<LifecycleTemplateDto> allTplsV2 = templateService.listTemplates("JOIN", "ACTIVE");
+        assertTrue(allTplsV2.stream().anyMatch(t -> t.getId().equals(v2.getId()) && t.getTaskCount() == 2), "taskCount must be correctly populated in list for v2");
+
         // 既存案件のバージョンが保護されていることを確認
         LifecycleCase lcCase = caseMapper.selectById(caseDto.getId());
         assertEquals(1, lcCase.getTemplateVersion(), "進行中案件のテンプレート版番号は改定によって変更されてはならない");
+
+        // [P2] 過去版拒否の回帰テスト
+        // v2が作成された状態で、過去版となったv1を改定しようとするとエラーになることを検証
+        BusinessException notLatestEx = assertThrows(BusinessException.class, () -> {
+            templateService.updateTemplate(created.getId(), tpl, adminUser.getId());
+        });
+        assertEquals(400, notLatestEx.getCode());
+        assertEquals("error.lifecycle.notLatestVersion", notLatestEx.getMessageKey());
     }
 
     @Test
@@ -491,12 +523,29 @@ class LifecycleDomainServiceTest {
                 .build();
         approvalRequestMapper.insert(req);
 
+        approvalActionMapper.insert(ApprovalAction.builder()
+                .requestId(req.getId())
+                .roundNo(1)
+                .stepNo(1)
+                .slotIndex(0)
+                .approverUserId(adminUser.getId())
+                .approverSlotUserId(adminUser.getId())
+                .action("APPROVE")
+                .comment("承認")
+                .actedAt(java.time.LocalDateTime.now())
+                .build());
+
         approvalAdapter.applyApproved(req);
 
         LifecycleTask waivedTask = taskMapper.selectById(task.getId());
         assertEquals("WAIVED", waivedTask.getStatus());
         assertEquals(req.getId(), waivedTask.getApprovalRequestId());
         assertTrue(waivedTask.getCompletionComment().contains("私物なし確認済み"));
+        AssetOffboardingWaiver waiver = assetOffboardingWaiverMapper.selectByApprovalRequestId(req.getId());
+        assertNotNull(waiver);
+        assertEquals(adminUser.getId(), waiver.getApprovedBy(), "申請者ではなく実承認者をapproved_byへ保存すること");
+        assertEquals(caseDto.getId(), waiver.getLifecycleCaseId());
+        assertEquals(task.getId(), waiver.getLifecycleTaskId());
     }
 
     @Test

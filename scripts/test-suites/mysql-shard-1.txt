@@ -16,3 +16,4 @@ LeaveOverlapConcurrentTest
 SalesOrderConcurrentCreateTest
 AiFeedbackLearningSchemaTest
 LifecycleMySqlIntegrationTest
+AssetMySqlIntegrationTest

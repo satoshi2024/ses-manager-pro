@@ -151,7 +151,7 @@
     <!-- Custom JS -->
     <script th:src="@{/js/i18n.js(lang=${#locale.toLanguageTag()},v=${#dates.createNow().getTime()})}"></script>
     <script th:src="@{/js/common.js}"></script>
-    <script th:src="@{/js/pwa-queue.js}"></script>
+    <script sec:authorize="hasRole('要員')" th:src="@{/js/pwa-queue.js}"></script>
     <script th:src="@{/js/profile.js}"></script>
     
     <!-- Additional JS from specific pages -->

@@ -43,7 +43,9 @@ class PwaAssetContractTest {
         assertThat(Files.exists(STATIC_ROOT.resolve("offline.html"))).isTrue();
         String layout = Files.readString(Path.of("src/main/resources/templates/layout/base.html"), StandardCharsets.UTF_8);
         assertThat(layout).contains("rel=\"manifest\"");
-        assertThat(layout).contains("/js/pwa-queue.js", "id=\"pwa-queue-panel\"");
+        assertThat(layout).contains(
+                "<div sec:authorize=\"hasRole('要員')\" id=\"pwa-queue-panel\"",
+                "<script sec:authorize=\"hasRole('要員')\" th:src=\"@{/js/pwa-queue.js}\"></script>");
     }
 
     @Test

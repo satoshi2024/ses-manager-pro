@@ -27,6 +27,7 @@ import com.ses.service.changerequest.EngineerChangeRequestService;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.pwa.PwaClientMutationLedgerService;
 import com.ses.service.pwa.PwaMutationCommand;
+import com.ses.service.pwa.PwaMutationTransactionService;
 import com.ses.service.pwa.PwaUserContextService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +39,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -59,9 +59,9 @@ import java.util.function.Function;
 @RestController
 @RequestMapping("/api/my/pwa")
 @RequiredArgsConstructor
-@Transactional(rollbackFor = Exception.class)
 public class PwaMutationApiController {
     private final PwaClientMutationLedgerService ledger;
+    private final PwaMutationTransactionService transactionService;
     private final ObjectMapper objectMapper;
     private final AttendanceService attendanceService;
     private final WorkRecordService workRecordService;
@@ -194,6 +194,14 @@ public class PwaMutationApiController {
                                   String clientRequestId, String payloadHash, Integer baseVersion,
                                   Long clientCreatedAt, String userScope,
                                   Function<PwaUserContextService.CurrentContext, Object> action) {
+        return transactionService.execute(() -> runInTransaction(body, expectedScreen, clientRequestId,
+                payloadHash, baseVersion, clientCreatedAt, userScope, action));
+    }
+
+    private ApiResult<Object> runInTransaction(PwaMutationCommandBody body, String expectedScreen,
+                                               String clientRequestId, String payloadHash, Integer baseVersion,
+                                               Long clientCreatedAt, String userScope,
+                                               Function<PwaUserContextService.CurrentContext, Object> action) {
         if (body == null || body.payload() == null || !expectedScreen.equals(body.screen())) {
             throw BusinessException.of(400, "error.pwa.commandInvalid");
         }

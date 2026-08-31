@@ -10,11 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** B2 migrationのforward-only、metadata-only、retention独立性を固定する。 */
 class IntegrationHubB2MigrationContractTest {
     @Test
-    void V135はinboundReplayをpayloadと独立したmetadataledgerへする() throws IOException {
+    void V140はinboundReplayをpayloadと独立したmetadataledgerへする() throws IOException {
         String sql;
         try (var stream = getClass().getResourceAsStream(
-                "/db/migration/V135__integration_hub_public_api_b2_inbound_replay.sql")) {
-            if (stream == null) throw new IOException("missing V135 migration");
+                "/db/migration/V140__integration_hub_public_api_b2_inbound_replay.sql")) {
+            if (stream == null) throw new IOException("missing V140 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }
         assertTrue(sql.contains("create table if not exists t_inbound_event_replay"));
@@ -29,11 +29,11 @@ class IntegrationHubB2MigrationContractTest {
     }
 
     @Test
-    void V136はproviderとresourceとopaque管理referenceを固定する() throws IOException {
+    void V141はproviderとresourceとopaque管理referenceを固定する() throws IOException {
         String sql;
         try (var stream = getClass().getResourceAsStream(
-                "/db/migration/V136__integration_hub_public_api_b2_binding_refs.sql")) {
-            if (stream == null) throw new IOException("missing V136 migration");
+                "/db/migration/V141__integration_hub_public_api_b2_binding_refs.sql")) {
+            if (stream == null) throw new IOException("missing V141 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }
         assertTrue(sql.contains("provider_name"));
@@ -47,11 +47,11 @@ class IntegrationHubB2MigrationContractTest {
     }
 
     @Test
-    void V137はinboundProcessingLease列とstaleRecovery索引を追加する() throws IOException {
+    void V142はinboundProcessingLease列とstaleRecovery索引を追加する() throws IOException {
         String sql;
         try (var stream = getClass().getResourceAsStream(
-                "/db/migration/V137__integration_hub_inbound_processing_lease.sql")) {
-            if (stream == null) throw new IOException("missing V137 migration");
+                "/db/migration/V142__integration_hub_inbound_processing_lease.sql")) {
+            if (stream == null) throw new IOException("missing V142 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }
         assertTrue(sql.contains("lease_token"));

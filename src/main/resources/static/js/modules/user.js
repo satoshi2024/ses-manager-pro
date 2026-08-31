@@ -106,12 +106,13 @@ function renderUsers(records) {
                 <td>${SES.escapeHtml(user.email || '-')}</td>
                 <td>${statusBadge}</td>
                 <td class="text-end pe-4">
-                    <div class="btn-group btn-group-sm" role="group">
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><div class="btn-group btn-group-sm" role="group">
                         <button type="button" class="btn btn-outline-info text-info border-info" onclick="editUser(${user.id})"><i class="bi bi-pencil"></i></button>
                         <button type="button" class="btn btn-outline-warning text-warning border-warning" onclick="toggleUserStatus(${user.id}, ${user.status})"><i class="bi bi-power"></i></button>
                         <button type="button" class="btn btn-outline-danger text-danger border-danger" onclick="deleteUser(${user.id})"><i class="bi bi-trash"></i></button>
                     </div>
-                </td>
+                </div>
+</td>
             </tr>
         `;
         tbody.append(tr);

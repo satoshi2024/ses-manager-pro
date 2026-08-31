@@ -10,6 +10,15 @@
     const hideError = () => document.getElementById('my-cert-error').classList.add('d-none');
     const today = () => { const date = new Date(); return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0'); };
 
+    // これはSES.apiではなくmultipart fetchのレスポンスラッパーを検証する。
+    async function uploadCertificationEvidence(recordId, file) {
+        const form = new FormData();
+        form.append('file', file);
+        const response = await fetch(base + '/certifications/' + encodeURIComponent(recordId) + '/evidence', { method: 'POST', body: form, headers: { 'X-XSRF-TOKEN': SES.csrf.token() }, credentials: 'same-origin', cache: 'no-store' });
+        const result = await response.json();
+        if (!response.ok || result.code !== 200) throw new Error(result.message || '証憑アップロードに失敗しました');
+    }
+
     async function load() {
         hideError();
         try {
@@ -79,9 +88,7 @@
         const file = input.files && input.files[0];
         if (!file || !uploadRecordId) return;
         try {
-            const form = new FormData(); form.append('file', file);
-            const response = await fetch(base + '/certifications/' + encodeURIComponent(uploadRecordId) + '/evidence', { method: 'POST', body: form, headers: { 'X-XSRF-TOKEN': SES.csrf.token() }, credentials: 'same-origin', cache: 'no-store' });
-            const result = await response.json(); if (!response.ok || result.code !== 200) throw new Error(result.message || '証憑アップロードに失敗しました');
+            await uploadCertificationEvidence(uploadRecordId, file);
             SES.toast.success('証憑を登録しました'); await load();
         } catch (e) { showError(e); } finally { input.value = ''; uploadRecordId = null; }
     };

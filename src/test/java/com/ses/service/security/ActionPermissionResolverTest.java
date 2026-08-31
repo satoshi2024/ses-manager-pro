@@ -105,6 +105,14 @@ class ActionPermissionResolverTest {
     }
 
     @Test
+    void 資産証跡Documentのdetailとdownloadは本人向けactionへ正規化する() {
+        assertEquals("my.asset.view",
+                ActionPermissionResolver.resolve("GET", "/api/documents/10"));
+        assertEquals("my.asset.view",
+                ActionPermissionResolver.resolve("GET", "/api/documents/10/versions/2/download"));
+    }
+
+    @Test
     void 注文請発行_download_検収uploadをmethodと実URLで分離する() {
         assertEquals("sales-order.edit", ActionPermissionResolver.resolve(
                 "POST", "/api/sales-orders/10/acknowledgement-pdf"));

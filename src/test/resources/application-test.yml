@@ -59,6 +59,7 @@ spring:
         - classpath:sql/schema-lifecycle-workflow-h2.sql
         - classpath:sql/schema-scheduled-management-reporting-h2.sql
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
+        - classpath:sql/schema-asset-account-license-lifecycle-h2.sql
         - classpath:sql/schema-integration-hub-f1-h2.sql
         - classpath:sql/schema-integration-hub-f2-h2.sql
         - classpath:sql/schema-integration-hub-a1-h2.sql

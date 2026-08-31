@@ -37,10 +37,11 @@
                     <td>${row.availableFrom || '-'}</td>
                     <td><span class="badge ${badgeClass}">${SES.escapeHtml(row.status)}</span></td>
                     <td class="text-end pe-4">
-                        <button class="btn btn-sm btn-outline-info me-1" onclick="editBpa(${row.id})">編集</button>
+<div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="editBpa(${row.id})">編集</button>
                         ${row.status === '提案可能' ? `<button class="btn btn-sm btn-outline-success" onclick="promoteBpa(${row.id})">要員化</button>` : ''}
-                        ${row.status === '要員化済' && row.promotedEngineerId ? `<a href="/engineer/detail/${row.promotedEngineerId}" class="btn btn-sm btn-outline-secondary">要員詳細</a>` : ''}
-                    </td>
+                        ${row.status === '要員化済' && row.promotedEngineerId ? `<a href="/engineer/detail?id=${encodeURIComponent(row.promotedEngineerId)}" class="btn btn-sm btn-outline-secondary">要員詳細</a>` : ''}
+                    </div>
+</td>
                 </tr>
             `);
         });
@@ -162,7 +163,7 @@
                         if (res.code === 200) {
                             Swal.fire('要員化完了', '自社要員として登録されました。要員詳細へ移動しますか？', 'success')
                                 .then(() => {
-                                    location.href = '/engineer/detail/' + res.data.id;
+                                    location.href = '/engineer/detail?id=' + encodeURIComponent(res.data.id);
                                 });
                         } else {
                             Toast.error(res.message || '要員化に失敗しました。');

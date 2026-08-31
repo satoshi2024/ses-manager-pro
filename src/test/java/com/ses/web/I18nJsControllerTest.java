@@ -32,7 +32,7 @@ public class I18nJsControllerTest extends BaseIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("application/javascript")))
                 .andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("charset=UTF-8")))
-                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("max-age")));
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")));
     }
 
     @Test

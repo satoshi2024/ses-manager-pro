@@ -202,10 +202,10 @@ $(function () {
                         '  <td>' + SES.escapeHtml(name) + '</td>' +
                         '  <td>' + (a.allocationPercent != null ? a.allocationPercent : '') + '</td>' +
                         '  <td>' + (a.startDate || '—') + ' 〜 ' + (a.endDate || '—') + '</td>' +
-                        '  <td class="text-end">' +
-                        '    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 saa-edit" data-id="' + a.id + '" data-engineer="' + a.engineerId + '" data-position="' + (a.positionId || '') + '" data-project="' + (a.projectId || '') + '" data-from="' + (a.startDate || '') + '" data-to="' + (a.endDate || '') + '" data-percent="' + (a.allocationPercent != null ? a.allocationPercent : 100) + '" title="' + t('staffing.timeline.edit', '編集') + '"><i class="bi bi-pencil"></i></button>' +
-                        '    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 saa-delete" data-id="' + a.id + '" title="' + t('staffing.timeline.discard', '削除') + '"><i class="bi bi-trash"></i></button>' +
-                        '  </td>' +
+                        '  <td class="text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">' +
+                        '    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 saa-edit" data-id="' + a.id + '" data-engineer="' + a.engineerId + '" data-position="' + (a.positionId || '') + '" data-project="' + (a.projectId || '') + '" data-from="' + (a.startDate || '') + '" data-to="' + (a.endDate || '') + '" data-percent="' + (a.allocationPercent != null ? a.allocationPercent : 100) + '" title="' + t('staffing.timeline.edit', '編集') + '" aria-label="' + t('staffing.timeline.edit', '編集') + '"><i class="bi bi-pencil" aria-hidden="true"></i></button>' +
+                        '    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 saa-delete" data-id="' + a.id + '" title="' + t('staffing.timeline.discard', '削除') + '" aria-label="' + t('staffing.timeline.discard', '削除') + '"><i class="bi bi-trash" aria-hidden="true"></i></button>' +
+                        '  </div></td>' +
                         '</tr>'
                     );
                 });

@@ -3,32 +3,34 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadInboundInvoices(page = 1) {
-    SES.api.get(`/api/inbound-invoices?current=${page}&size=10`).then(res => {
-        if (res.code === 200) {
+    SES.api.get(`/api/inbound-invoices?current=${page}&size=10`).then(pageData => {
+        if (pageData) {
             const tbody = document.querySelector('#inboundInvoiceTable tbody');
             tbody.innerHTML = '';
             
             if (SES.pagination) {
-                SES.pagination.render('pagination', res.data.current, res.data.pages, p => loadInboundInvoices(p));
+                SES.pagination.render('pagination', pageData.current, pageData.pages, p => loadInboundInvoices(p));
             }
             
-            res.data.records.forEach(inv => {
+            pageData.records.forEach(inv => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${SES.escapeHtml(inv.messageId)}</td>
                     <td>${SES.escapeHtml(inv.providerMessageId || '-')}</td>
                     <td>${inv.receivedAt || '-'}</td>
                     <td><span class="badge bg-${getStatusColor(inv.status)}">${SES.escapeHtml(inv.status)}</span></td>
-                    <td>
-                        ${inv.status === 'PENDING_REVIEW' ? `
-                            <button class="btn btn-sm btn-success" onclick="reviewInvoice(${inv.id}, 'ACCEPT')">承認</button>
-                            <button class="btn btn-sm btn-danger" onclick="reviewInvoice(${inv.id}, 'REJECT')">差戻し</button>
+                    <td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${inv.status === 'PENDING_REVIEW' ? `
+                            <button type="button" class="btn btn-sm btn-success" onclick="reviewInvoice(${inv.id}, 'ACCEPT')" title="インボイスを承認" aria-label="インボイスを承認">承認</button>
+                            <button type="button" class="btn btn-sm btn-danger" onclick="reviewInvoice(${inv.id}, 'REJECT')" title="インボイスを差し戻す" aria-label="インボイスを差し戻す">差戻し</button>
                         ` : ''}
-                    </td>
+                    </div></td>
                 `;
                 tbody.appendChild(tr);
             });
         }
+    }).catch(error => {
+        console.error(error);
+        console.error(error.message || '受信請求書の取得に失敗しました');
     });
 }
 
@@ -54,13 +56,12 @@ function reviewInvoice(id, action) {
         ... (SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {})
     }).then(result => {
         if (result.isConfirmed) {
-            SES.api.post(`/api/inbound-invoices/${id}/review?action=${action}`).then(res => {
-                if (res.code === 200) {
-                    SES.toast.success(`${actionText}しました`);
-                    loadInboundInvoices(1);
-                } else {
-                    Swal.fire({ icon: 'error', title: 'エラー', text: res.message, ...(SES.swal && typeof SES.swal.themeConfig === 'function' ? SES.swal.themeConfig() : {}) });
-                }
+            SES.api.post(`/api/inbound-invoices/${encodeURIComponent(id)}/review?action=${encodeURIComponent(action)}`).then(() => {
+                SES.toast.success(`${actionText}しました`);
+                return loadInboundInvoices(1);
+            }).catch(error => {
+                console.error(error);
+                console.error(error.message || `${actionText}に失敗しました`);
             });
         }
     });

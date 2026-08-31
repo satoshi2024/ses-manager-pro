@@ -16,18 +16,23 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    function reportError(error, fallback) {
+        console.error(error);
+        Toast.error(error && error.message ? error.message : fallback);
+    }
+
     let selectedOrgId = null;
 
     // ===== 組織 =====
     function loadOrgs() {
-        SES.api.get('/api/portal-admin/orgs?current=1&size=100').done(function (res) {
-            const rows = (res.data.records || []).map(function (org) {
+        SES.api.get('/api/portal-admin/orgs?current=1&size=100').then(function (data) {
+            const rows = (data.records || []).map(function (org) {
                 const typeLabel = org.type === 'BP' ? 'BP' : '顧客';
-                const actions = '<button class="btn btn-sm btn-outline-info" data-org-id="' + org.id + '">'
+                const actions = '<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">'
+                    + '<button type="button" class="btn btn-sm btn-outline-info" data-org-id="' + org.id + '" title="ユーザー一覧を表示" aria-label="ユーザー一覧を表示">'
                     + t('portalAdmin.orgs.users') + '</button>'
-                    + '<button class="btn btn-sm btn-outline-warning" data-org-status="' + org.id + '">'
-                    + (org.status === 'ACTIVE' ? t('portalAdmin.orgs.suspend') : t('portalAdmin.orgs.resume'))
-                    + '</button>';
+                    + '<button type="button" class="btn btn-sm btn-outline-warning" data-org-status="' + org.id + '" title="組織の状態を変更" aria-label="組織の状態を変更">'
+                    + (org.status === 'ACTIVE' ? t('portalAdmin.orgs.suspend') : t('portalAdmin.orgs.resume')) + '</button></div>';
                 return '<tr><td>' + org.id + '</td><td>' + typeLabel + '</td><td>' + esc(org.status)
                     + '</td><td>' + esc(org.customerId || org.bpCompanyId || '') + '</td><td>' + actions + '</td></tr>';
             }).join('');
@@ -49,30 +54,33 @@
                         return;
                     }
                     // 現在の状態を取得して反転
-                    const row = $(this);
-                    SES.api.get('/api/portal-admin/orgs?current=1&size=100').done(function (res2) {
-                        const org = (res2.data.records || []).find(function (o) { return o.id === orgId; });
+                    SES.api.get('/api/portal-admin/orgs?current=1&size=100').then(function (data2) {
+                        const org = (data2.records || []).find(function (o) { return o.id === orgId; });
                         const next = org && org.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-                        SES.api.put('/api/portal-admin/orgs/' + orgId + '/status',
-                            JSON.stringify({status: next})).done(function () {
+                        return SES.api.put('/api/portal-admin/orgs/' + orgId + '/status', { status: next });
+                    }).then(function () {
                             Toast.success(t('common.msg.saved'));
                             loadOrgs();
-                        });
+                    }).catch(function (error) {
+                        reportError(error, t('common.msg.saveFail'));
                     });
                 });
             });
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     function loadUsers(orgId) {
-        SES.api.get('/api/portal-admin/orgs/' + orgId + '/users?current=1&size=100').done(function (res) {
-            const rows = (res.data.records || []).map(function (user) {
+        SES.api.get('/api/portal-admin/orgs/' + orgId + '/users?current=1&size=100').then(function (data) {
+            const rows = (data.records || []).map(function (user) {
                 const mfa = user.mfaEnabledAt ? '有効' : '未設定';
-                const actions = '<button class="btn btn-sm btn-outline-warning" data-user-status="' + user.id + '">'
+                const actions = '<div class="d-flex flex-wrap justify-content-end align-items-center gap-1">'
+                    + '<button type="button" class="btn btn-sm btn-outline-warning" data-user-status="' + user.id + '" title="ユーザーの状態を変更" aria-label="ユーザーの状態を変更">'
                     + (user.status === 'ACTIVE' ? t('portalAdmin.users.suspend') : t('portalAdmin.users.resume'))
                     + '</button>'
-                    + '<button class="btn btn-sm btn-outline-danger" data-user-mfa="' + user.id + '">'
-                    + t('portalAdmin.users.mfaReset') + '</button>';
+                    + '<button type="button" class="btn btn-sm btn-outline-danger" data-user-mfa="' + user.id + '" title="MFAをリセット" aria-label="MFAをリセット">'
+                    + t('portalAdmin.users.mfaReset') + '</button></div>';
                 return '<tr><td>' + user.id + '</td><td>' + esc(user.email) + '</td><td>' + esc(user.status)
                     + '</td><td>' + mfa + '</td><td>' + esc(user.lastLoginAt || '') + '</td><td>' + actions + '</td></tr>';
             }).join('');
@@ -80,14 +88,15 @@
                 + t('portalAdmin.empty') + '</td></tr>');
             $('[data-user-status]').on('click', function () {
                 const userId = $(this).data('user-status');
-                SES.api.get('/api/portal-admin/orgs/' + orgId + '/users?current=1&size=100').done(function (res2) {
-                    const user = (res2.data.records || []).find(function (u) { return u.id === userId; });
+                SES.api.get('/api/portal-admin/orgs/' + orgId + '/users?current=1&size=100').then(function (data2) {
+                    const user = (data2.records || []).find(function (u) { return u.id === userId; });
                     const next = user && user.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-                    SES.api.put('/api/portal-admin/users/' + userId + '/status',
-                        JSON.stringify({status: next})).done(function () {
+                    return SES.api.put('/api/portal-admin/users/' + userId + '/status', { status: next });
+                }).then(function () {
                         Toast.success(t('common.msg.saved'));
                         loadUsers(orgId);
-                    });
+                }).catch(function (error) {
+                    reportError(error, t('common.msg.saveFail'));
                 });
             });
             $('[data-user-mfa]').on('click', function () {
@@ -101,70 +110,69 @@
                     if (!result.isConfirmed) {
                         return;
                     }
-                    SES.api.post('/api/portal-admin/users/' + userId + '/mfa-reset').done(function () {
+                    SES.api.post('/api/portal-admin/users/' + userId + '/mfa-reset').then(function () {
                         Toast.success(t('common.msg.saved'));
                         loadUsers(orgId);
+                    }).catch(function (error) {
+                        reportError(error, t('common.msg.saveFail'));
                     });
                 });
             });
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     // ===== 招待 =====
     function loadInvitations() {
-        SES.api.get('/api/portal-admin/invitations?current=1&size=100').done(function (res) {
-            const rows = (res.data.records || []).map(function (inv) {
+        SES.api.get('/api/portal-admin/invitations?current=1&size=100').then(function (data) {
+            const rows = (data.records || []).map(function (inv) {
                 return '<tr><td>' + esc(inv.email) + '</td><td>' + esc(inv.role)
                     + '</td><td>' + esc(inv.expiresAt) + '</td><td>' + (inv.usedAt ? t('portalAdmin.invitations.usedYes')
                         : t('portalAdmin.invitations.usedNo')) + '</td></tr>';
             }).join('');
             $('#invitationTableBody').html(rows || '<tr><td colspan="4" class="text-center text-muted">'
                 + t('portalAdmin.empty') + '</td></tr>');
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     function loadOrgOptions() {
-        SES.api.get('/api/portal-admin/orgs?current=1&size=100').done(function (res) {
-            const options = (res.data.records || []).map(function (org) {
+        SES.api.get('/api/portal-admin/orgs?current=1&size=100').then(function (data) {
+            const options = (data.records || []).map(function (org) {
                 return '<option value="' + org.id + '">' + org.id + ' (' + org.type + ') '
                     + esc(org.customerId || org.bpCompanyId || '') + '</option>';
             }).join('');
             $('#invitationOrgId').html('<option value="">' + t('portalAdmin.invitations.org') + '</option>' + options);
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     /** portalユーザー選択肢。session照会でID直打ちにしない。 */
-    function loadSessionUserOptions() {
-        $.get('/api/portal-admin/orgs', { current: 1, size: 100 }, function (res) {
-            if (!res || res.code !== 200) {
-                return;
-            }
-            const orgs = (res.data && res.data.records) || [];
-            if (!orgs.length) {
-                return;
-            }
-            const requests = orgs.map(function (org) {
-                return $.get('/api/portal-admin/orgs/' + org.id + '/users', { current: 1, size: 100 });
-            });
-            $.when.apply($, requests).done(function () {
-                const responses = requests.length === 1 ? [arguments[0]] : Array.prototype.map.call(arguments, function (a) { return a[0]; });
-                const seen = {};
-                let options = '<option value="">' + esc(t('portalAdmin.sessions.selectUser')) + '</option>';
-                responses.forEach(function (userRes) {
-                    if (!userRes || userRes.code !== 200) {
-                        return;
-                    }
-                    ((userRes.data && userRes.data.records) || []).forEach(function (user) {
-                        if (seen[user.id]) {
-                            return;
-                        }
-                        seen[user.id] = true;
-                        options += '<option value="' + user.id + '">' + esc(user.email || ('#' + user.id)) + '</option>';
-                    });
+    async function loadSessionUserOptions() {
+        try {
+            const orgData = await SES.api.get('/api/portal-admin/orgs', { current: 1, size: 100 });
+            const orgs = orgData.records || [];
+            if (!orgs.length) return;
+
+            const responses = await Promise.all(orgs.map(function (org) {
+                return SES.api.get('/api/portal-admin/orgs/' + org.id + '/users', { current: 1, size: 100 });
+            }));
+            const seen = {};
+            let options = '<option value="">' + esc(t('portalAdmin.sessions.selectUser')) + '</option>';
+            responses.forEach(function (userData) {
+                (userData.records || []).forEach(function (user) {
+                    if (seen[user.id]) return;
+                    seen[user.id] = true;
+                    options += '<option value="' + user.id + '">' + esc(user.email || ('#' + user.id)) + '</option>';
                 });
-                $('#sessionUserId').html(options);
             });
-        });
+            $('#sessionUserId').html(options);
+        } catch (error) {
+            reportError(error, t('common.msg.fetchFail'));
+        }
     }
 
     // ===== session =====
@@ -173,42 +181,51 @@
         if (!userId) {
             return;
         }
-        SES.api.get('/api/portal-admin/users/' + userId + '/sessions').done(function (res) {
-            const rows = (res.data || []).map(function (s) {
+        SES.api.get('/api/portal-admin/users/' + userId + '/sessions').then(function (data) {
+            const rows = (data || []).map(function (s) {
                 return '<tr><td>' + s.id + '</td><td>' + esc(s.issuedAt) + '</td><td>' + esc(s.lastSeenAt)
                     + '</td><td>' + esc(s.expiresAt) + '</td><td>' + esc(s.userAgent || '') + '</td>'
-                    + '<td><button class="btn btn-sm btn-outline-danger" data-session-revoke="' + s.id
-                    + '">' + t('portalAdmin.sessions.revoke') + '</button></td></tr>';
+                    + '<td><button type="button" class="btn btn-sm btn-outline-danger" data-session-revoke="' + s.id
+                    + '" title="セッションを失効" aria-label="セッションを失効">'
+                    + t('portalAdmin.sessions.revoke') + '</button></td></tr>';
             }).join('');
             $('#sessionTableBody').html(rows || '<tr><td colspan="6" class="text-center text-muted">'
                 + t('portalAdmin.empty') + '</td></tr>');
             $('[data-session-revoke]').on('click', function () {
                 SES.api.post('/api/portal-admin/users/' + userId + '/sessions/revoke',
-                    JSON.stringify({sessionId: $(this).data('session-revoke')})).done(function () {
+                    { sessionId: $(this).data('session-revoke') }).then(function () {
                     Toast.success(t('common.msg.saved'));
                     loadSessions();
+                }).catch(function (error) {
+                    reportError(error, t('common.msg.saveFail'));
                 });
             });
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     // ===== アクセスログ =====
     function loadLogs() {
-        SES.api.get('/api/portal-admin/access-logs?current=1&size=100').done(function (res) {
-            const rows = (res.data.records || []).map(function (log) {
+        SES.api.get('/api/portal-admin/access-logs?current=1&size=100').then(function (data) {
+            const rows = (data.records || []).map(function (log) {
                 return '<tr><td>' + esc(log.createdAt) + '</td><td>' + esc(log.email)
                     + '</td><td>' + esc(log.orgType) + '</td><td>' + esc(log.action)
                     + '</td><td>' + esc((log.targetType || '') + ':' + (log.targetId || '')) + '</td></tr>';
             }).join('');
             $('#logTableBody').html(rows || '<tr><td colspan="5" class="text-center text-muted">'
                 + t('portalAdmin.empty') + '</td></tr>');
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
     // ===== 利用規約 =====
     function loadTerms() {
-        SES.api.get('/api/portal-admin/terms').done(function (res) {
-            $('#termsCurrent').text(t('portalAdmin.terms.current') + ': ' + res.data.version);
+        SES.api.get('/api/portal-admin/terms').then(function (data) {
+            $('#termsCurrent').text(t('portalAdmin.terms.current') + ': ' + (data.version || ''));
+        }).catch(function (error) {
+            reportError(error, t('common.msg.fetchFail'));
         });
     }
 
@@ -237,10 +254,12 @@
                 const body = type === 'BP'
                     ? {type: type, bpCompanyId: Number(target)}
                     : {type: type, customerId: Number(target)};
-                SES.api.post('/api/portal-admin/orgs', JSON.stringify(body)).done(function () {
+                SES.api.post('/api/portal-admin/orgs', body).then(function () {
                     Toast.success(t('common.msg.saved'));
                     loadOrgs();
                     loadOrgOptions();
+                }).catch(function (error) {
+                    reportError(error, t('common.msg.saveFail'));
                 });
             });
         });
@@ -248,13 +267,15 @@
         $('#invitationForm').on('submit', function (event) {
             event.preventDefault();
             SES.api.post('/api/portal-admin/orgs/' + $('#invitationOrgId').val() + '/invitations',
-                JSON.stringify({
+                {
                     email: $('#invitationEmail').val().trim(),
                     role: $('#invitationRole').val()
-                })).done(function () {
+                }).then(function () {
                 Toast.success(t('common.msg.saved'));
                 $('#invitationEmail').val('');
                 loadInvitations();
+            }).catch(function (error) {
+                reportError(error, t('common.msg.saveFail'));
             });
         });
 
@@ -262,10 +283,12 @@
 
         $('#termsPublishButton').on('click', function () {
             SES.api.put('/api/portal-admin/terms',
-                JSON.stringify({version: $('#termsVersion').val()})).done(function () {
+                { version: $('#termsVersion').val() }).then(function () {
                 Toast.success(t('common.msg.saved'));
                 $('#termsVersion').val('');
                 loadTerms();
+            }).catch(function (error) {
+                reportError(error, t('common.msg.saveFail'));
             });
         });
 

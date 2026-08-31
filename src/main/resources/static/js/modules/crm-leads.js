@@ -14,7 +14,7 @@ function loadLeads(page = 1) {
     leadPage = page;
     $.get('/api/crm/leads', { status: $('#lead-status-filter').val(), companyName: $('#lead-company-filter').val(), current: page, size: 20 }, function (res) {
         const payload = res.data || {}, rows = payload.records || payload;
-        const html = (rows || []).map(lead => `<tr><td>${SES.escapeHtml(lead.companyName || '')}</td><td>${SES.escapeHtml(lead.contactName || '-')}</td><td>${SES.escapeHtml(lead.source || '-')}</td><td><span class="badge bg-secondary">${SES.escapeHtml(lead.status || '')}</span></td><td class="text-end">${lead.status === '転換済' ? '<span class="text-muted">転換済</span>' : `<button class="btn btn-sm btn-outline-info me-1" onclick="editLead(${lead.id})">編集</button><button class="btn btn-sm btn-info" onclick="convertLead(${lead.id}, ${lead.version || 1})">顧客・商機へ転換</button>`}</td></tr>`).join('');
+        const html = (rows || []).map(lead => `<tr><td>${SES.escapeHtml(lead.companyName || '')}</td><td>${SES.escapeHtml(lead.contactName || '-')}</td><td>${SES.escapeHtml(lead.source || '-')}</td><td><span class="badge bg-secondary">${SES.escapeHtml(lead.status || '')}</span></td><td class="text-end"><div class="d-flex flex-wrap justify-content-end align-items-center gap-1">${lead.status === '転換済' ? '<span class="text-muted">転換済</span>' : `<button class="btn btn-sm btn-outline-info" onclick="editLead(${lead.id})">編集</button><button class="btn btn-sm btn-info" onclick="convertLead(${lead.id}, ${lead.version || 1})">顧客・商機へ転換</button>`}</div></td></tr>`).join('');
         $('#lead-table-body').html(html || '<tr><td colspan="5" class="text-center text-muted py-4">該当するリードはありません</td></tr>');
         renderLeadPagination(payload);
     }).fail(() => Toast.error('リード一覧の取得に失敗しました'));

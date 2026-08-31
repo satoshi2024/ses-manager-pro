@@ -226,6 +226,11 @@ public class SecurityConfig {
                 //   /api/notifications   ← 通知ベル
                 .requestMatchers("/", "/api/profile/**").authenticated()
                 .requestMatchers("/api/notifications", "/api/notifications/**").authenticated()
+                // 資産貸与証跡のdetail/downloadはDocumentServiceのDocumentLink認可を通す。
+                // 一覧/exportは要員へ開放せず、本人証跡の対象IDだけをserviceで再検証する。
+                .requestMatchers(HttpMethod.GET, "/api/documents/*",
+                        "/api/documents/*/versions/*/download")
+                .hasAnyRole("管理者", "営業", "HR", "マネージャー", "要員")
                 // MFA/session管理は認証後の共通セキュリティ経路（管理者resetはmethod securityで制限）
                 .requestMatchers("/mfa/**", "/api/security/**").authenticated()
                 // それ以外のリクエストは要員以外のロール（管理者、営業、HR、マネージャー）のみ許可する

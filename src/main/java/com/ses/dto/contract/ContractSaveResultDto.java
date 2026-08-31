@@ -9,6 +9,8 @@ import java.util.List;
 @Data
 public class ContractSaveResultDto {
     private Long id;
+    /** 保存後の契約行version。次回更新で同じ版を送れるよう画面へ返す。 */
+    private Integer version;
     private boolean negativeProfit;
     private List<ComplianceFinding> complianceFindings;
 }

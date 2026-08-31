@@ -348,6 +348,15 @@ class EngineerSelfServiceBrowserMTest {
 
             // ---- 5. console error 0件 ----
             List<JsonNode> console = browser.consoleEvents();
+
+            // ---- 7. 証跡（console） ----
+            StringBuilder consoleLog = new StringBuilder();
+            for (var event : console) {
+                consoleLog.append(event.toString()).append('\n');
+            }
+            Files.writeString(evidenceDir.resolve(viewport + "-console.txt"), consoleLog.toString());
+            summary.put(viewport + "-consoleCount", console.size());
+
             long consoleErrors = console.stream()
                     .filter(e -> "Runtime.consoleAPICalled".equals(e.path("method").asText())
                             && "error".equals(e.path("params").path("type").asText()))
@@ -366,13 +375,7 @@ class EngineerSelfServiceBrowserMTest {
                     "[" + viewport + "] network response 4xx/5xxが存在する: " + badResponses);
             assertions.add(viewport + ": network 4xx/5xx 0件");
 
-            // ---- 7. 証跡（console） ----
-            StringBuilder consoleLog = new StringBuilder();
-            for (var event : console) {
-                consoleLog.append(event.toString()).append('\n');
-            }
-            Files.writeString(evidenceDir.resolve(viewport + "-console.txt"), consoleLog.toString());
-            summary.put(viewport + "-consoleCount", console.size());
+
         } finally {
             deleteRecursively(profile);
         }

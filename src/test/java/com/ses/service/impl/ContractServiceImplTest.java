@@ -374,6 +374,46 @@ class ContractServiceImplTest {
                 () -> contractService.updateWithBusinessRules(newContract));
     }
 
+    @Test
+    void updateWithBusinessRules_version不一致は409で更新しない() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setVersion(2);
+        old.setStatus("準備中");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setVersion(1);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.updateWithBusinessRules(update));
+
+        assertEquals(409, ex.getCode());
+        assertEquals("error.common.optimisticLock", ex.getMessage());
+        verify(contractMapper, never()).updateById(any(Contract.class));
+    }
+
+    @Test
+    void updateWithBusinessRules_version付き更新の更新件数0は409() {
+        Contract old = new Contract();
+        old.setId(1L);
+        old.setVersion(2);
+        old.setStatus("準備中");
+        when(contractMapper.selectByIdForUpdate(1L)).thenReturn(old);
+
+        Contract update = new Contract();
+        update.setId(1L);
+        update.setVersion(2);
+        when(contractMapper.updateById(update)).thenReturn(0);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> contractService.updateWithBusinessRules(update));
+
+        assertEquals(409, ex.getCode());
+        verify(contractMapper).updateById(update);
+    }
+
     // ===== R2: 解約日つき状態遷移 =====
 
     private Contract activeContract(Long id, LocalDate startDate, LocalDate endDate) {

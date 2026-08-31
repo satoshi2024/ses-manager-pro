@@ -12,7 +12,7 @@ class IntegrationHubF2MigrationContractTest {
     @Test
     void V130はboundedDecisionAuditを作りraw情報を作らない() throws IOException {
         String sql;
-        try (var stream = getClass().getResourceAsStream("/db/migration/V130__integration_hub_external_api_audit.sql")) {
+        try (var stream = getClass().getResourceAsStream("/db/migration/V135__integration_hub_external_api_audit.sql")) {
             if (stream == null) throw new IOException("missing V130 migration");
             sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
         }

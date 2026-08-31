@@ -151,6 +151,8 @@ public class NotificationServiceImpl implements NotificationService {
             case "EXPENSE_ACCOUNTING_SENT", "EXPENSE_PAID" -> "myExpenses";
             case "SURVEY_CAMPAIGN" -> "mySurveys";
             case "CERTIFICATION_EXPIRY" -> "engineer";
+            case "ASSET_OVERDUE", "ASSET_RETURN_REMINDER", "ASSET_LEASE_EXPIRING",
+                    "ASSET_LOST_INCIDENT" -> "asset-management";
             default -> null;
         };
     }

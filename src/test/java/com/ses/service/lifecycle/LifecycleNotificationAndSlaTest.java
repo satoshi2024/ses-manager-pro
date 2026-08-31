@@ -67,6 +67,9 @@ class LifecycleNotificationAndSlaTest {
     private com.ses.mapper.ApprovalRequestMapper approvalRequestMapper;
 
     @Autowired
+    private com.ses.mapper.ApprovalActionMapper approvalActionMapper;
+
+    @Autowired
     private LifecycleCaseMapper caseMapper;
 
     @Autowired
@@ -223,6 +226,18 @@ class LifecycleNotificationAndSlaTest {
                 .payloadJson("{\"reason\":\"役員承認による免除\",\"riskOwner\":\"役員\",\"remedyDeadline\":\"" + LocalDate.now().plusMonths(1) + "\"}")
                 .build();
         approvalRequestMapper.insert(approvalReq);
+
+        approvalActionMapper.insert(ApprovalAction.builder()
+                .requestId(approvalReq.getId())
+                .roundNo(1)
+                .stepNo(1)
+                .slotIndex(0)
+                .approverUserId(adminUser.getId())
+                .approverSlotUserId(adminUser.getId())
+                .action("APPROVE")
+                .comment("承認")
+                .actedAt(java.time.LocalDateTime.now())
+                .build());
 
         // 承認確定実行
         approvalAdapter.applyApproved(approvalReq);

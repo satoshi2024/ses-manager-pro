@@ -77,8 +77,21 @@ case_failing_backup_command_is_nonzero() {
   assert_not_contains "$out" "SUCCESS" "失敗時に SUCCESS を出さない"
 }
 
+# 4) integration evidence はホスト取得に必要な範囲だけを実行ユーザーへ開き、
+#    作業ディレクトリ全体や evidence を全員書き込みにはしない。
+case_integration_runner_keeps_work_private() {
+  local runner content
+  runner="$ROOT/ops/backup/tests/run-integration.sh"
+  content=$(cat "$runner")
+  assert_contains "$content" "umask 077" "integration runner が機密ファイルを初期化時から非公開にする"
+  assert_not_contains "$content" 'chmod -R 777 "$WORK"' "作業ディレクトリ全体を 777 にしない"
+  assert_not_contains "$content" "chmod -R a+rwX" "全員書き込みの evidence 権限を使わない"
+  assert_contains "$content" "normalize_work_permissions" "終了時に root 作成ファイルを安全に掃除できる"
+}
+
 run_case case_dependency_skip_is_nonzero
 run_case case_setup_error_is_nonzero
 run_case case_failing_backup_command_is_nonzero
+run_case case_integration_runner_keeps_work_private
 
 test_summary "ACC-OPS-P2 harness self-tests"

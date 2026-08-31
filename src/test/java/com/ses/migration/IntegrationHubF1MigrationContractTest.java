@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** NF-05 F1 migrationの静的contract。実MySQL適用はFlywayMigrationSmokeTestで検証する。 */
 class IntegrationHubF1MigrationContractTest {
-    private static final String RESOURCE = "/db/migration/V129__integration_hub_public_api_f1.sql";
+    private static final String RESOURCE = "/db/migration/V134__integration_hub_public_api_f1.sql";
     private static final List<String> TABLES = List.of(
             "m_api_client", "m_api_client_scope", "t_credential_version", "t_api_idempotency_record",
             "m_webhook_subscription", "t_api_delivery", "t_inbound_event", "t_api_usage_bucket",
