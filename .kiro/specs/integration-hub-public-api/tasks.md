@@ -166,7 +166,7 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 
 ## Task B1: outbound webhook
 
-- [ ] Status: IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。初回FAIL（fixed Head `0f1a9297`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。再Review fixed Head `29d749bb`のP1=2を`2684ff8f`でremediateし、独立再Review待ち。
+- [ ] Status: IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。初回FAIL（fixed Head `0f1a9297`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。再Review fixed Head `29d749bb`のP1-006/P1-007を`2684ff8f`でremediateしたが、P1-007残存（primary/secondary bindingと現行DB membership再検証）を追加修正済みで、独立再Review待ち。
 - [x] Objective: signed event、subscription scope、delivery claim/lease、retry/backoff、DLQを実装する。
 - Preconditions: A1 Implementation Review PASS（fixed Head `69f857d3`）、scope expansion Decision。production enablement、実顧客credential、
   実provider送信なし。development/testのMOCK/STUB/LOOPBACKのみ。
@@ -175,12 +175,16 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   provider idempotency keyを含め、outbound event envelopeとledger値を送信前に一致検証する。credential version/key ID、
   correlation、8回上限の指数backoff+jitter、429/5xx/timeout retry、その他4xx no-retry、DLQ、新generation manual replay auditを含む。
   LOOPBACKはstrict literal IP、allow-list port、peer検証、redirect/proxy/DNSなしとする。manual replayは呼出側operatorRefを受け取らず、
-  認証済み内部admin principalと`integration.webhook.replay` permissionをservice boundaryで検証し、current numeric scopeからHMAC opaque IDを
-  再計算してenvelope/payload membershipを照合する。resource dimension不在、reparent、削除、scope縮小、不一致はfail-closedとする。
+  認証済み内部admin principalと`integration.webhook.replay` permissionをservice boundaryで検証し、deliveryのprimary resource type/内部IDを
+  V134で必須bindする。envelopeの`publicResourceId`とpayloadのprimary fieldだけをprimary内部IDからHMAC opaque IDへ再計算して照合し、project×customer、
+  invoice×customer×contract等のsecondaryは各専用public field/codecで検証する。`IntegrationHubWebhookResourceScopeMapper`が`deleted_flag=0`と
+  active customer/project/contract、invoice item/work recordの現行parent relationを再照会し、client/permission/subscription intersectionと
+  tenant/legal entity singletonへbindしたimmutable effective populationと一致しないreparent、soft-delete、scope縮小、relation不一致はfail-closedとする。
 - Test requirements: signature/timestamp/key overlap、各署名field改ざん、envelope/ledger不一致、duplicate、claim競合、timeout、429/5xx、4xx no-retry、
   backoff、attempt 8/DLQ、provider成功直後CAS障害、stale recovery、slow transport、manual replayのpermission/current scope再検証、
-  replay後payload/audit purge、atomic rollback、provider/correlation ID、snapshot purge、実loopback server、idempotency header、設定fail-closed。
-- Remediation evidence: `30199db8`、`2684ff8f`、V133、H2 retention、MySQL 8 concurrency/retentionを追加。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASS。
+  replay後payload/audit purge、atomic rollback、provider/correlation ID、snapshot purge、実loopback server、idempotency header、設定fail-closed、
+  primary/secondary別opaque ID、project×customer、invoice×customer×contract、scope据置のsoft-delete・同一tenant reparent・invoice item contract付替え。
+- Remediation evidence: `30199db8`、`2684ff8f`、V133、V134、`IntegrationHubWebhookResourceScopeMapper`、H2 retention/schema/replay/mapper、MySQL 8 concurrency/retentionを追加。focused/H2 44/44、MySQL 8/8はfailure/error/skipなしでPASS。
 - Demo: 外部HTTPがDB transaction外で、replayが監査・replay generation付きで実行される。独立再Review受領まではB1 PASSと扱わず、
   remote/local Head一致を再確認してR-NF05へ渡す。
 

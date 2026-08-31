@@ -273,3 +273,16 @@ approved B1 scope内で実装・テスト可能な修正である。状態は独
 
 `2684ff8f1303b6d0cc6550882601405d3d78f3b2`で実装をpushした。focused B1対象はreplay authorization 10、replay generation 2、signer 2、worker 8、public-ID 1をfailure/error/skipなしでPASSした。
 独立再Review、B2、M、production enablement、実顧客credential、実provider送信、PR/mergeは未完了・禁止である。
+
+## B1 P1-007残存指摘の追加remediation（fixed Head `1c3efc30` → code `5c94367c` → `0618d983` → docs trace）
+
+独立再Reviewは、`publicResourceId`を全resource dimensionへ誤適用し、scope JSONだけでは現行のsoft-delete/reparentを検出できないとして
+FAIL（P0=0、P1=1、P2=0）を返した。F1/F2/A1、P1-006、Owner Gate、Plan PASSは再オープンしない。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| primary/secondary opaque binding | V134で`t_api_delivery`へ`primary_resource_type/id`を追加し、新enqueue/replayをprimaryへbind。`publicResourceId`とpayload primary fieldはprimary内部IDからHMAC再計算し、project/customer、invoice/customer/contract等のsecondaryは各専用public field/codecで独立照合 | SPEC_ADDRESSED（独立再Review待ち） |
+| current relation revalidation | `IntegrationHubWebhookResourceScopeMapper`が一次resourceを`deleted_flag=0`、active customer/project/contract、invoice item/work recordの現行parent relation付きで再照会。client/permission/subscription intersection、tenant/legal singleton、numeric scope、current membershipをimmutable populationとして再評価し、scope据置のsoft-delete/reparent/contract付替えを拒否 | SPEC_ADDRESSED（独立再Review待ち） |
+| evidence | project×customer、invoice×customer×contract正常系、同一tenant reparent、soft-delete、invoice item contract付替え、legacy binding拒否、実H2 mapper/service/replay test、migration/H2/MySQL gateを追加 | SPEC_ADDRESSED（独立再Review待ち） |
+
+code remediation `5c94367c` → `0618d983`をpush済み。実装検証はfocused/H2 44/44、MySQL 8/8、failure/error/skipなし、`git diff --check` PASS。docs trace commit後に最終remote Headを外部handoffで固定する。独立再Review受領まではB1 PASSへ昇格せず、B2/M/production enablement、実顧客credential、実provider送信、PR/mergeは行わない。

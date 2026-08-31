@@ -101,7 +101,7 @@ F1で実装する責務は次のとおり。DDLのmigration番号とMySQL/H2具�
 | t_credential_version | credential世代、hashまたはsecret reference、暗号文、key version、発行/expiry/revoke、overlap | 原文再表示なし、fail-closed |
 | t_api_idempotency_record | client、endpoint、idempotency key、request digest、状態、response reference、expiry | 同一payloadは同結果、別payloadはconflict |
 | m_webhook_subscription | client、direction、event allow-list、endpoint、signing key世代、状態 | subscription scopeとdata scopeを分離 |
-| t_api_delivery | NF-05専用event snapshot、payload hash、claim lease、attempt、backoff、DLQ、replay generation | notification outboxとは分離したdelivery ledger。deliveryのCAS正本 |
+| t_api_delivery | NF-05専用event snapshot、payload hash、一次resource種別/内部ID、claim lease、attempt、backoff、DLQ、replay generation | notification outboxとは分離したdelivery ledger。deliveryのCAS正本。一次resource bindingがないlegacy rowはreplay不可 |
 | t_inbound_event | client/provider、provider event ID、timestamp、raw hash、canonical payload、processing state、retention expiry | duplicate/conflict/replayの正本 |
 | t_api_usage_bucket | client×scope×tenant×route template、minute/day window state、burst token state | 承認済み4次元だけをDB uniqueで固定し、multi-node atomicityを保証 |
 | t_api_nonce_replay | client、credential version、nonce hash、accepted/expiry時刻 | client×nonce hashのatomic uniqueとTTL purgeで署名replayを拒否 |
@@ -513,6 +513,29 @@ intersectionし、tenant/legal entityをauthoritative singletonとして検証�
 opaque public IDと比較する。event envelopeの`publicResourceId`はresource fieldと一致し、resource dimensionがintersectionから消えた場合、
 resource削除・scope縮小・tenant reparent・不正ID・opaque ID不一致は拒否する。resource dimensionを持たないscopeをtenantだけで許可しない。
 replay auditには導出済みoperator referenceだけを保存し、operatorRef、internal ID、scope値、secret、raw payload/bodyを外部契約へ返さない。
+
+### 7.4 B1再Review P1-007残存指摘のremediation契約
+
+固定Head `1c3efc30eefe1f4b7bba2cafa20fa996d7a08a91`の独立再Reviewで、P1-007として一次resourceとsecondary
+dimensionを同じ`publicResourceId`へ比較してしまう問題、およびscope JSONだけではsoft-delete/reparentを検出できない問題が残った。
+このremediationでは、V134で`t_api_delivery.primary_resource_type`と`primary_resource_id`をnullable legacy互換で追加し、
+新しいenqueue経路には許可済みresource typeと正の内部IDを必須化する。一次bindingのないlegacy deliveryはreplayを拒否する。
+
+replay時はdeliveryの一次resource type/IDを正本とし、envelopeの`publicResourceId`とpayloadの一次public fieldだけを、
+client/tenant/resource-bound `ExternalApiPublicIdCodec`で同じ一次内部IDから再計算して照合する。secondary dimensionは一つの
+envelope IDへ束ねず、projectなら`publicCustomerId`、contractなら承認済みの`publicProjectId`、invoiceなら
+`publicCustomerId`と一意の場合のみ存在する`publicContractId`を、それぞれのresource typeと内部IDで独立検証する。
+DTOに存在しないsecondary fieldを新たに公開することはしない。
+
+`IntegrationHubWebhookResourceScopeMapper`は一次IDについて、現在のDB行を`deleted_flag = 0`で再照会し、project/contract/invoiceは
+active customer、project、invoice item、work record、contractの親relationをjoinしてmembership projectionを返す。serviceは
+client/permission/subscriptionのintersectionとtenant/legal entityのauthoritative singletonを維持したまま、現在のnumeric scopeと
+このprojectionのintersectionを一つのimmutable replay populationとして評価する。scope JSONを変更しなくても、同一tenant内のreparent、
+親または一次resourceのsoft-delete、invoice itemのcontract付替え、許可IDからの除外はfail-closedとなる。
+
+project×customerおよびinvoice×customer×contractの正常系では、各secondaryの専用opaque IDを要求する。current membershipが空、
+secondary IDの再計算が一致しない、tenant/legal entity singletonが崩れる、またはprimary bindingがscopeから消えた場合はreplayを拒否する。
+H2 mapper integrationとservice、replay、migration testsで、正常系、同一tenant reparent、soft-delete、複数secondary、legacy nullable bindingを固定する。
 
 ## 8. トランザクション・運用
 

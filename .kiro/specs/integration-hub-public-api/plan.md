@@ -1,4 +1,4 @@
-# NF-05 Public API 実装計画（scope expansion承認済み・F2/A1 PASS・B1再Review待ち）
+# NF-05 Public API 実装計画（scope expansion承認済み・F2/A1 PASS・B1追加remediation再Review待ち）
 
 ## 現在のゲート
 
@@ -13,7 +13,7 @@ F2は独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/
 fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立Implementation PASSを受領した。B1は`971c17d7`の初回実装に対する
 独立Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。
 再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2（operator permission、scopeとopaque IDの直接比較）を
-`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、独立再Reviewへ提出する。
+  `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施し、独立再Reviewへ提出する。
 B1再Review PASS後にB2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
@@ -32,7 +32,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f` → code `5c94367c` → `0618d983`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
@@ -61,7 +61,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
    peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
-5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediateし、再Review P1=2を`2684ff8f`でremediate済み・独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
+5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediateし、再Review P1-006/P1-007を`2684ff8f`でremediateした。残存P1-007へcode `5c94367c`でprimary/secondary bindingと現行DB membership再検証を追加し、独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
 
 6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
    前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
@@ -108,7 +108,7 @@ V133でreplay auditをdelivery payloadから分離し、audit metadataの期限�
 provider成功後のCAS障害をtransport retryへ変換せずstale lease recoveryへ委ねる。`IntegrationHubWebhookDeliveryWorkerTest`、H2 retention、
 MySQL concurrency/retentionを追加し、focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。独立再Review受領までB1 PASSとは扱わない。
 
-## B1再Review remediation（fixed Head `29d749bb` → `2684ff8f`）
+## B1再Review remediation（fixed Head `29d749bb` → `2684ff8f` → P1-007追加remediation）
 
 再ReviewはP1=2（呼出側operatorRefだけを形式検証、current numeric scopeとopaque public IDを直接比較）だった。
 `2684ff8f`でreplay serviceからoperatorRef入力を除去し、認証済み内部`LoginUser`の`ROLE_管理者`と
@@ -116,6 +116,12 @@ MySQL concurrency/retentionを追加し、focused unit/H2/MySQL suiteはfailure/
 さらにclient/permission/subscriptionのintersection後、許可されたnumeric内部resource IDごとに`ExternalApiPublicIdCodec`でHMAC opaque IDを
 再計算し、envelope/payload membershipを照合する。resource dimension不在、reparent、削除、scope縮小、ID不一致はfail-closedとする。
 未認証、非admin、permission拒否、operatorRef偽装のnegative testと、numeric scope＋実HMAC public ID、reparent/delete/scope narrowingのtestを追加した。
+
+その後の独立再Review（fixed Head `1c3efc30eefe1f4b7bba2cafa20fa996d7a08a91`）で、複数dimensionを単一`publicResourceId`へ比較していたP1-007が残った。
+追加remediationではV134の`t_api_delivery.primary_resource_type/id`を必須bindingとして扱い、`publicResourceId`とpayload primary fieldだけを
+primary内部IDから再計算する。project×customer、invoice×customer×contract等のsecondaryは各専用public IDを検証し、
+`IntegrationHubWebhookResourceScopeMapper`で現行`deleted_flag`、active parent/customer/project/contract、invoice item/work record relationを
+再照会する。scope据置のsoft-delete、同一tenant reparent、invoice itemのcontract付替えはfail-closedとし、legacy bindingなしrowはreplay不可とする。
 
 ## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）
 

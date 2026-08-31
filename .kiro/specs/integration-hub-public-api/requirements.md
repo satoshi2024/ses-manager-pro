@@ -9,7 +9,8 @@ F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementatio
 初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）をremediateし、固定Head
 `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1は初回Review FAILを
 `30199db8`でremediateした。再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2を
-`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、独立Implementation再Review待ちである。production implementationの
+  `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007（一次/secondary resource bindingと
+  現行DB membership再検証）が残ったため、追加remediationを実施し、独立Implementation再Review待ちである。production implementationの
 public endpoint enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -192,6 +193,19 @@ attempt 8・timeout・slow transport・同時claim・atomic rollback・replay後
 再ReviewのP1-006/P1-007に対し、`2684ff8f`でoperatorRef入力を廃止して認証済み内部admin principal/action permissionへbindし、
 numeric current scopeからHMAC opaque IDを再計算してpayload membershipを検証する境界を追加した。実顧客credential、実provider送信、production enablementは行わない。
 独立再Review受領まではB1 IMPLEMENTATION PASSとは扱わない。
+
+### B1 P1-007追加remediation contract
+
+15. B1 replay deliveryは`t_api_delivery.primary_resource_type`と`primary_resource_id`で一次resourceを明示的にbindする。
+    新規enqueueは許可済みtypeと正の内部IDを必須とし、bindingなしのlegacy rowはreplay不可とする。envelopeの`publicResourceId`と
+    payloadの一次public fieldだけを一次内部IDから`ExternalApiPublicIdCodec`で再計算して検証し、secondary dimensionを同じIDへ比較しない。
+16. secondary dimensionはresource typeごとの専用field/codecで検証する。projectはproject×customer、invoiceはinvoice×customer×contractを
+    各numeric scopeと各opaque public IDで照合し、contractは承認済みDTOにあるprojectだけをsecondaryとする。internal DB IDとopaque public IDの
+    直接文字列比較、internal entity serialization、未承認field追加は禁止する。
+17. replay認可は`IntegrationHubWebhookResourceScopeMapper`で一次resourceの現行rowを再照会し、`deleted_flag = 0`、active customer/project/contract、
+    invoice item/work recordを含むparent relationを同一projectionへ収束させる。client/permission/subscriptionのintersection、tenant/legal entity
+    singleton、current DB membershipを一つのimmutable effective populationとして再評価し、scope据置のsoft-delete、同一tenant reparent、invoice itemの
+    contract付替え、scope narrowing、relation不一致はfail-closedとする。H2 service/mapper/replay testとMySQL migration/schema gateで正常系と境界を固定する。
 
 ## IH-R3 Inbound / outbound webhook
 
