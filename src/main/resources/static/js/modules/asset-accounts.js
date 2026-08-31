@@ -196,8 +196,8 @@ $(function () {
             const statusBadge = acc.status === 'ACTIVE' ? '<span class="badge bg-success">ACTIVE</span>' : acc.status === 'REVOKED' ? '<span class="badge bg-danger">REVOKED</span>' : '<span class="badge bg-warning text-dark">SUSPENDED</span>';
             const sys = systemsCache.find(x => x.id === acc.systemId);
             const sysName = sys ? sys.systemName : `Sys #${acc.systemId}`;
-            const actorType = acc.actorType || 'LEGACY_UNRESOLVED';
-            const confirmationSource = acc.confirmationSource || 'LEGACY_UNRESOLVED';
+            const actorType = acc.actorTypeDisplay || acc.actorType || '未確認';
+            const confirmationSource = acc.confirmationSourceDisplay || acc.confirmationSource || '未確認';
 
             const tr = $(`
                 <tr>

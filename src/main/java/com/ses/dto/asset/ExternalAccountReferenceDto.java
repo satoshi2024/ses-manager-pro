@@ -29,6 +29,8 @@ public class ExternalAccountReferenceDto {
     private Long humanUserId;
     private String actorType;
     private String confirmationSource;
+    private String actorTypeDisplay;
+    private String confirmationSourceDisplay;
     private String externalSyncStatus;
     private String syncErrorMessage;
     private Integer version;
@@ -58,6 +60,13 @@ public class ExternalAccountReferenceDto {
 
         String rawSource = source.getConfirmationSource();
         if (rawSource == null || rawSource.isBlank()) rawSource = source.getRevokeConfirmedSource();
+        boolean confirmed = "REVOKED".equalsIgnoreCase(source.getStatus()) || source.getRevokeConfirmedAt() != null;
+        boolean hasAttribution = (source.getActorType() != null && !source.getActorType().isBlank())
+                || (rawSource != null && !rawSource.isBlank());
+        if (!confirmed && !hasAttribution) {
+            setDisplayValues(dto);
+            return dto;
+        }
         try {
             if ("MANUAL".equalsIgnoreCase(rawSource)) rawSource = ConfirmationSource.MANUAL_API.name();
             if ("SYSTEM".equalsIgnoreCase(rawSource)) rawSource = ConfirmationSource.SCHEDULER_POLL.name();
@@ -84,11 +93,19 @@ public class ExternalAccountReferenceDto {
                 throw new IllegalArgumentException("invalid actor/source pair");
             }
         } catch (IllegalArgumentException | NullPointerException ex) {
-            dto.actorType = ActorType.LEGACY_UNRESOLVED.name();
-            dto.confirmationSource = ConfirmationSource.LEGACY_UNRESOLVED.name();
+            if (confirmed || hasAttribution) {
+                dto.actorType = ActorType.LEGACY_UNRESOLVED.name();
+                dto.confirmationSource = ConfirmationSource.LEGACY_UNRESOLVED.name();
+            }
         }
-        if (dto.actorType == null) dto.actorType = ActorType.LEGACY_UNRESOLVED.name();
-        if (dto.confirmationSource == null) dto.confirmationSource = ConfirmationSource.LEGACY_UNRESOLVED.name();
+        if (confirmed && dto.actorType == null) dto.actorType = ActorType.LEGACY_UNRESOLVED.name();
+        if (confirmed && dto.confirmationSource == null) dto.confirmationSource = ConfirmationSource.LEGACY_UNRESOLVED.name();
+        setDisplayValues(dto);
         return dto;
+    }
+
+    private static void setDisplayValues(ExternalAccountReferenceDto dto) {
+        dto.actorTypeDisplay = dto.actorType == null ? "未確認" : dto.actorType;
+        dto.confirmationSourceDisplay = dto.confirmationSource == null ? "未確認" : dto.confirmationSource;
     }
 }

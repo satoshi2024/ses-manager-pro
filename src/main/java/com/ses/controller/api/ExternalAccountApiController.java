@@ -112,7 +112,7 @@ public class ExternalAccountApiController {
             CsvUtils.appendLine(csv,
                     String.valueOf(dto.getId()), String.valueOf(dto.getSystemId()), dto.getAccountIdentifier(),
                     dto.getStatus(), dto.getRevokeRequestedBy() == null ? "" : String.valueOf(dto.getRevokeRequestedBy()),
-                    dto.getActorType(), dto.getConfirmationSource(),
+                    dto.getActorTypeDisplay(), dto.getConfirmationSourceDisplay(),
                     dto.getHumanUserId() == null ? "" : String.valueOf(dto.getHumanUserId()));
         }
         return ResponseEntity.ok()

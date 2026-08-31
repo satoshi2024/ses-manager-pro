@@ -150,6 +150,20 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("NF-09: 未確認のアカウントをLEGACY_UNRESOLVEDへ誤分類しない")
+    void unconfirmedAccountIsNotMisclassifiedAsLegacy() {
+        ExternalAccountReference active = new ExternalAccountReference();
+        active.setStatus("ACTIVE");
+
+        ExternalAccountReferenceDto dto = ExternalAccountReferenceDto.from(active);
+
+        assertThat(dto.getActorType()).isNull();
+        assertThat(dto.getConfirmationSource()).isNull();
+        assertThat(dto.getActorTypeDisplay()).isEqualTo("未確認");
+        assertThat(dto.getConfirmationSourceDisplay()).isEqualTo("未確認");
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @DisplayName("NF-09: CAS後のイベント/監査の失敗は同一トランザクションで全体rollbackする")
     void auditFailureRollsBackCasAndEvent() {
@@ -230,6 +244,7 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
                 .contains("ELSE 'LEGACY_UNRESOLVED'")
                 .contains("SET revoke_confirmed_by = NULL")
                 .contains("revoke_confirmed_source = confirmation_source");
+        assertThat(migration).contains("COUNT(*) > 0 AND MAX(IS_NULLABLE = 'NO') = 1");
         assertThat(migration).doesNotContain("confirmed_by = 1 THEN 'SYSTEM'");
     }
 

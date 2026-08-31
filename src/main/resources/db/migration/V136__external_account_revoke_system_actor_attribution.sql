@@ -93,7 +93,7 @@ SET @sql = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_asset_event ADD COLUMN idempotency_key VARCHAR(128) NULL AFTER correlation_id',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_event' AND column_name = 'idempotency_key');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @sql = (SELECT IF(COUNT(*) = 0,
+SET @sql = (SELECT IF(COUNT(*) > 0 AND MAX(IS_NULLABLE = 'NO') = 1,
   'ALTER TABLE t_asset_event MODIFY COLUMN asset_id BIGINT NULL',
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_event' AND column_name = 'asset_id');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
