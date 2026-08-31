@@ -28,6 +28,7 @@ public interface IntegrationHubWebhookResourceScopeMapper {
             SELECT c.id AS primaryResourceId, c.customer_id AS customerId, c.project_id AS projectId, NULL AS contractId
             FROM t_contract c
             INNER JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+                                              AND p.customer_id = c.customer_id
             INNER JOIN m_customer customer ON customer.id = c.customer_id AND customer.deleted_flag = 0
             WHERE c.id = #{primaryResourceId} AND c.deleted_flag = 0
           </when>
@@ -39,7 +40,9 @@ public interface IntegrationHubWebhookResourceScopeMapper {
             INNER JOIN t_invoice_item item ON item.invoice_id = i.id
             INNER JOIN t_work_record wr ON wr.id = item.work_record_id
             INNER JOIN t_contract c ON c.id = wr.contract_id AND c.deleted_flag = 0
+                                                   AND c.customer_id = i.customer_id
             INNER JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+                                              AND p.customer_id = c.customer_id
             WHERE i.id = #{primaryResourceId} AND i.deleted_flag = 0
           </when>
           <otherwise>

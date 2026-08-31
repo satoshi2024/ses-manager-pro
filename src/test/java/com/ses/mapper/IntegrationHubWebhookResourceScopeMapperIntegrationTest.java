@@ -94,9 +94,7 @@ class IntegrationHubWebhookResourceScopeMapperIntegrationTest {
         assertEquals(CONTRACT, initial.get(0).getContractId());
 
         jdbcTemplate.update("UPDATE t_contract SET project_id = ? WHERE id = ?", PROJECT_B, CONTRACT);
-        List<ExternalApiResourceMembership> reparented = mapper.selectCurrentMemberships("invoice-status", INVOICE);
-        assertEquals(1, reparented.size());
-        assertEquals(PROJECT_B, reparented.get(0).getProjectId());
+        assertTrue(mapper.selectCurrentMemberships("invoice-status", INVOICE).isEmpty());
 
         jdbcTemplate.update("UPDATE t_contract SET deleted_flag = 1 WHERE id = ?", CONTRACT);
         assertTrue(mapper.selectCurrentMemberships("invoice-status", INVOICE).isEmpty());
