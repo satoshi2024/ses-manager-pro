@@ -15,13 +15,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -52,12 +53,12 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
     private EngineerAccountLinkService engineerAccountLinkService;
 
     @Test
-    @WithMockUser(username = "eng_portal_user", roles = {"要員"})
     @DisplayName("GET /api/my/assets and POST /api/my/assets/report-lost")
     void testMyAssetPortalFlow() throws Exception {
+        String username = "eng_portal_user_" + System.nanoTime();
         // 1. ユーザー & 要員作成 & 紐付け
         SysUser user = SysUser.builder()
-                .username("eng_portal_user")
+                .username(username)
                 .password("pass123")
                 .realName("山田 太郎")
                 .role("要員")
@@ -94,10 +95,11 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
 
         // 3. マイ資産一覧取得
         mockMvc.perform(get("/api/my/assets")
+                        .with(user(username).roles("要員"))
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.data.assets[0].assetTag").value("AST-MY-001"));
+                .andExpect(jsonPath("$.data.assets[*].assetTag").value(hasItem("AST-MY-001")));
 
         // 4. 紛失報告
         String lostPayload = objectMapper.writeValueAsString(Map.of(
@@ -106,6 +108,7 @@ class MyAssetApiControllerTest extends BaseIntegrationTest {
         ));
 
         mockMvc.perform(post("/api/my/assets/report-lost")
+                        .with(user(username).roles("要員"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(lostPayload))

@@ -248,6 +248,59 @@ class MenuPermissionFilterTest {
         return menu;
     }
 
+    /**
+     * R-NF05 P1-001 の回帰。
+     *
+     * <p>integration-hub が {@code ActionPermissionResolver.RESOURCE_NAMES} に無いと
+     * 管理者bypassより前の deny() で403になる（CRM-R2-P1-01と同型）。
+     */
+    @Test
+    void integrationHubInboundEventsApiは管理者でも403にならない() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("integration-hub.view")))
+                .thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/integration-hub/inbound-events");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq("integration-hub.view"));
+        verify(chain).doFilter(any(), any());
+    }
+
+    @Test
+    void integrationHubInboundReplayApiはintegration_webhook_replayとして解決される() throws Exception {
+        @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<AuthorizationService> authorizationProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<com.ses.service.AuditLogService> auditProvider = mock(ObjectProvider.class);
+        AuthorizationService authorizationService = mock(AuthorizationService.class);
+        when(authorizationProvider.getIfAvailable()).thenReturn(authorizationService);
+        when(authorizationService.isAllowed(any(), org.mockito.ArgumentMatchers.eq("integration.webhook.replay")))
+                .thenReturn(true);
+        MenuPermissionFilter filter = new MenuPermissionFilter(menuProvider, authorizationProvider, auditProvider);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                "1", null, java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST",
+                "/api/integration-hub/inbound-events/opaque-ref/replay");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        jakarta.servlet.FilterChain chain = mock(jakarta.servlet.FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        verify(authorizationService).isAllowed(any(), org.mockito.ArgumentMatchers.eq("integration.webhook.replay"));
+        verify(chain).doFilter(any(), any());
+    }
+
     @Test
     void portal実行層が未導入の間は管理者も直接到達できない() throws Exception {
         @SuppressWarnings("unchecked") ObjectProvider<MenuCacheService> menuProvider = mock(ObjectProvider.class);

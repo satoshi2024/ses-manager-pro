@@ -61,6 +61,10 @@ spring:
         - classpath:sql/schema-certification-learning-skill-gap-h2.sql
         # NF-09のactor_type/confirmation_sourceと相互制約はV1およびH2統合schemaで同期する。
         - classpath:sql/schema-asset-account-license-lifecycle-h2.sql
+        - classpath:sql/schema-integration-hub-f1-h2.sql
+        - classpath:sql/schema-integration-hub-f2-h2.sql
+        - classpath:sql/schema-integration-hub-a1-h2.sql
+        - classpath:sql/schema-integration-hub-b2-h2.sql
       data-locations:
         - classpath:sql/dummy.sql
 
@@ -72,6 +76,25 @@ spring:
   # MySQL向けのFlywayマイグレーションは適用しない(二重適用を防止)。
   flyway:
     enabled: false
+
+integration:
+  hub:
+    public-api:
+      enabled: false
+      public-id-key: test-integration-hub-public-id-key-at-least-32-bytes
+      cursor-ttl-seconds: 300
+    external-transport:
+      enabled: false
+      batch-size: 32
+      lease-seconds: 60
+      fixed-delay-ms: 1000
+      connect-timeout-ms: 3000
+      read-timeout-ms: 3000
+    provider:
+      mode: MOCK
+      approved-inbound-providers:
+        - provider-a
+        - provider-b2
 
 organization:
   scope:

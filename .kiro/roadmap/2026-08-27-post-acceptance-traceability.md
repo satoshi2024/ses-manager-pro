@@ -26,7 +26,7 @@
 | NF-02 | `customer-success-service-desk` | CANDIDATE | 未定 | SLA、CSAT、更新率 | customer contact、portal、renewal、notification | 未決定 | 未定 |
 | NF-03 | `certification-learning-skill-gap` | APPROVED | `PROJECT_OWNER` | 資格期限、skill不足、研修成果 | engineer skill、staffing、approval、document、NF-01 lifecycle | `DG-03-SCOPE-APPROVAL-20260828-01`（2026-08-28）。Base `origin/main@76e45340`。経費締めA、PII AES-256-GCM、as-of event、AI候補のみ。詳細: `.kiro/specs/certification-learning-skill-gap/approval-decision.md` | 実装・独立Review完了後 |
 | NF-04 | `mobile-pwa-self-service` | APPROVED | 管理者（プロジェクト責任者） | mobile完了率、二重登録0 | `/my/**`、attendance、expense、notification | 2026-08-28承認。Base=`origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`、branch=`codex/mobile-pwa-self-service`、worktree=`C:\\work\\ses-mobile-pwa-self-service`。Chrome/Edge/Safari現行版・直前版、Android Chrome/iOS Safariを対象。install任意、pushなし。承認済みoffline/cache、idempotency、version/CAS、logout/user switch、30日保持、409差分UXをNF-04専用specへ固定する | 2026-08-28 |
-| NF-05 | `integration-hub-public-api` | CANDIDATE | 未定 | API成功率、DLQ滞留 | identity、outbox、audit、data scope | 未決定 | 未定 |
+| NF-05 | `integration-hub-public-api` | APPROVED | `PROJECT_OWNER` | API成功率、DLQ滞留、p95、rate境界 | identity、outbox、audit、data scope | DG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（2026-08-30）。OwnerRef=PROJECT_OWNER、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd。F1/F2 PLAN/IMPLEMENTATION PASS、A1 IMPLEMENTATION PASS（fixed Head 69f857d3ac7d513b66265b02871688b28d2e7e5d、P0/P1/P2=0/0/0）。B1初回Review FAIL（fixed Head 0f1a92974ea914d16de07ccf5a586fac215283f0、P0/P1/P2=0/4/1）を`30199db8`でremediateし、再Review fixed Head 29d749bbのP1-006/P1-007を`2684ff8f`でremediateした。P1-007追加remediation後のNF05-IMPL-B1-008（初回送信前primary binding）をcode `c2cbfb99133d0df3f8d5eee285be340163747e31`で対応し、独立再Review待ち。B2/M APPROVED_SEQUENCED、A2 NOT_APPLICABLE_UNDER_CURRENT_DECISION。production enablement、実顧客credential、実provider送信、PR/mergeは禁止。詳細: .kiro/specs/integration-hub-public-api/approval-decision.md | B1再Review後にB2→Mを順次実装・独立Review |
 | NF-06 | `data-migration-import-center` | CANDIDATE | 未定 | reconciliation差異0 | customer/project/contract、CSV、document | 未決定 | 未定 |
 | NF-07 | `privacy-retention-dsar` | CANDIDATE | 未定 | retention未設定0、誤削除0 | document retention、audit、AI allow-list、全migration/entity/provider coverage | 承認済みscope/Privacy owner/Base branch/SHAのdecision evidence未提供。DG-07、外部専門家、社内責任者、backup/recovery、identity、recruiting、AI G10 gate未完。0/D0（inventory/no-write dry-run/spec）のみ許可し、F1-M/処分/外部provider/PRは停止。Review verdictは実装branchに記録せず、外部Review証跡でbindする | 承認証跡受領後 |
 | NF-08 | `ai-management-copilot` | CANDIDATE | 未定 | 根拠link率、scope漏えい0 | AI gateway、全集計service、NF-07 | 未決定 | 未定 |
@@ -122,10 +122,45 @@
 
 ### DG-05 NF-05
 
-- API利用者、契約SLA、公開resource/command。
-- OAuth provider、client secret保管/rotation、IP制限。
-- version廃止期間、rate limit、課金/利用量制限。
-- webhook署名、retry上限、dead-letter retention。
+- DecisionId=DG-05-F1-APPROVAL-20260830-01、Decision date=2026-08-30、OwnerRef=PROJECT_OWNER、OwnerType=ROLE。
+- Approved Baseはorigin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、実装branchはcodex/integration-hub-public-api。
+- F1のclient/credential/scope/idempotency/usage bucket/webhook persistence contractと最小crypto/config abstractionを承認する。
+- HMAC-SHA256 signed service account、AES-256-GCM envelope、±5分、nonce replay拒否、rotation overlap 24時間、revoke即時、90日expiryを固定する。
+- client CIDR default deny、trusted proxy限定、60 req/min、burst 20、日次50,000、SLA月間99.9%/p95 500ms、v1廃止予告180日を固定する。
+- GET-only 11 pathsとinventory allow-listを承認する。F1 Decision時点ではcommand/export、public endpoint、外部送信、A1/A2/B1/B2、production enablementを保留した。scope expansion DecisionでF2、A1、B1、B2、Mの開発を承認し、A2はN/Aとする。
+- webhookはHMAC-SHA256、timestamp±5分、最大8回の指数backoff+jitter、4xx no-retry、DLQ/manual replayを固定する。
+- retentionはsucceeded 30日、failed/DLQ 90日、audit metadata 1年、legal hold中purge停止。脅威モデル11項目を受入対象とする。
+- Plan ReviewのPLAN PASSをF1開始条件とし、force push、main変更、PR、merge、auto-mergeは禁止する。
+
+#### DG-05 scope expansion
+
+- DecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、OwnerRef=PROJECT_OWNER、OwnerType=ROLE。
+- Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、Implementation branch=codex/integration-hub-public-api、scope expansion approval reviewed Head=7e50bf1360ea8d7271acc0667593635451300268（承認時点の履歴値）。
+- F1はPLAN PASS / IMPLEMENTATION PASS（P0/P1/P2=0）を維持し再オープンしない。scope expansion Plan deltaはca27f455でPASS、F2=fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION_PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でIMPLEMENTATION_PASS、B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediateした。P1-007追加remediation後のNF05-IMPL-B1-008（初回送信前primary binding）を`c2cbfb99133d0df3f8d5eee285be340163747e31`で対応し、focused/H2/MySQL証跡を追加して同じR-NF05へ独立再Review待ち、B2/M=APPROVED_SEQUENCED。
+- A2=NOT_APPLICABLE_UNDER_CURRENT_DECISION（approved command=0件）であり、command/exportはdefault deny、全体完了をblockしない。
+- scope expansion Plan delta PASS後はF2→A1→B1→B2→Mを各waveの独立Review後に順次実装する。development/testのmock/stub providerとloopback test serverのみを許可する。
+- production enablement、実顧客credential、実providerへの外部送信、force push、main変更、PR、merge、auto-mergeは禁止する。
+- scope expansion Plan deltaの固定Head 1547871caed049ba14d1e5e4a25ad50fa19771fcはPLAN FAIL
+  （P0=0、P1=4、P2=2）。dedicated chain、HMAC canonical bytes、production fail-closed、
+  mock/loopback destination、A2 N/A、旧traceをdocs-onlyで補正後、同じR-NF05へ再Reviewする。
+- scope expansion Plan delta remediationは8d25215b9b651e99433becf50d13498da3699d2aへpush済み。
+- scope expansion Plan delta re-Reviewの固定Head 9cca2deec9ab1bd5417aaba98f859ed14210da13はPLAN FAILだったが、remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
+- scope expansion Plan delta residual remediationはe18f0d589b63223bf864bb33c6910b56a59d940eへpush済み。Plan PASS後、F2を実装し、FAIL remediation `e47025b5`と追加remediation `a16cdcba`を経て独立Review PASSを受領した。A1初回FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）はremediateし、fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASSを受領した。B1初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1-006/P1-007を`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、P1-007残存へprimary/secondary binding、current DB membership、soft-delete/reparent/contract付替え検証を`5c94367c499bb019ca459659b43580817419a2f1` → `0618d983e397de4526b265f96565991110b11299`で追加した。さらにNF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateし、docs trace commit後に同じR-NF05へ独立再Reviewとしてhandoffする。
+
+### DG-05 NF-05 current implementation checkpoint（2026-08-31）
+
+| Wave | 状態 | Fixed Head / evidence |
+|---|---|---|
+| F1 | IMPLEMENTATION_PASS | existing approved F1 Review PASSを維持、再オープンなし |
+| F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
+| A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
+| B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f` → `251461f1` → `e564f400`。provider/resource/admin/content-type/quota/stable-error境界を補正。Linux connector再Review待ち |
+| A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件、command/exportはdefault deny |
+| M | APPROVED_SEQUENCED | B2独立Review後。security、負荷、障害訓練、rotation、scan、runbook、最終Head固定が未完 |
+
+production enablement、実顧客credential、実provider送信、main変更、force push、PR、merge、auto-mergeは禁止する。B2の独立Implementation Reviewは
+既存R-NF05へdocs trace commit後の固定remote Headをhandoffし、PASS前にB2を公開可能と扱わない。
 
 ### DG-06 NF-06
 
@@ -243,3 +278,28 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 - [ ] Review前またはFAIL/CONDITIONAL PASS時にready PRを作成していない。
 - [ ] PRの自動merge/branch削除を行っていない。
 - [ ] 外部契約/法務/セキュリティgate完了。
+
+## NF-05 B2 remediation handoff
+
+独立B2 Implementation Reviewの固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` はP0=0、P1=4、P2=1でFAILだった。
+`cc468e4f`でapproved provider/subscriptionの受信前検証、resource primary/secondary opaque bindingと現行membership再評価、
+LoginUser/admin permission、opaque admin reference、strict Content-Typeを実装修正した。B2 focused/H2 15 testsとMySQL 8
+Flyway V136 smoke 2 testsはPASS、Windows connectorはloopback接続エラーで未検証とする。
+
+同じR-NF05へdocs trace後の固定remote Headを独立再Implementation Reviewとしてhandoffする。B2 PASS受領までM開始、
+production receive enablement、実credential、実provider送信、PR/mergeは禁止し、F1/F2/A1/B1のPASSは再オープンしない。
+
+## NF-05 B2 quota/error follow-up
+
+R-NF05の固定Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` で、inbound routeがquota allow-listにないP1と、unknown providerの
+test/spec status-code不一致P2が示された。`251461f1`でroute catalogの`QUOTA_ROUTE_TEMPLATES`をquotaの単一正本化し、
+`/external-api/v1/webhooks/{provider}`を追加した。未承認providerは403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`へ同期した。
+
+Windows connectorはloopback接続確立前に5件errorだったためPASSに算入しない。Linux connector 5/5を同じR-NF05へ独立再Reviewとしてhandoffし、
+B2はその判定までIMPLEMENTATION_REVIEW_PENDING、M・production enablement・実provider送信・PR/mergeは禁止とする。
+
+## NF-05 B2 stable-error boundary follow-up
+
+R-NF05 fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1（controller由来stable errorがwrapper経由で500化）を、
+`e564f400`でremediateした。`ExternalApiResponseBoundaryFilter`は厳密なsecurity exception causeだけをunwrapし、その他は500へ収束する。
+Linux実Tomcatで202/200/409/403/400、専用audit、拒否時ledger非作成を同じR-NF05へ独立再Reviewとしてhandoffする。
