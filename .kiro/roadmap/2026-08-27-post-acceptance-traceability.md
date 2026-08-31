@@ -155,7 +155,7 @@
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | implementation commit `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、V135、H2/MySQL/connector証跡をpush済み |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`。provider/resource/admin/content-type境界を補正。Windows connectorはloopback接続前errorで未検証 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件、command/exportはdefault deny |
 | M | APPROVED_SEQUENCED | B2独立Review後。security、負荷、障害訓練、rotation、scan、runbook、最終Head固定が未完 |
 
@@ -247,3 +247,13 @@ NF-07の承認証跡は現在提供されていない。`<APPROVED_SCOPE>`、`<O
 - [ ] Review前またはFAIL/CONDITIONAL PASS時にready PRを作成していない。
 - [ ] PRの自動merge/branch削除を行っていない。
 - [ ] 外部契約/法務/セキュリティgate完了。
+
+## NF-05 B2 remediation handoff
+
+独立B2 Implementation Reviewの固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` はP0=0、P1=4、P2=1でFAILだった。
+`cc468e4f`でapproved provider/subscriptionの受信前検証、resource primary/secondary opaque bindingと現行membership再評価、
+LoginUser/admin permission、opaque admin reference、strict Content-Typeを実装修正した。B2 focused/H2 15 testsとMySQL 8
+Flyway V136 smoke 2 testsはPASS、Windows connectorはloopback接続エラーで未検証とする。
+
+同じR-NF05へdocs trace後の固定remote Headを独立再Implementation Reviewとしてhandoffする。B2 PASS受領までM開始、
+production receive enablement、実credential、実provider送信、PR/mergeは禁止し、F1/F2/A1/B1のPASSは再オープンしない。

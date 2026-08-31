@@ -1,4 +1,4 @@
-# NF-05 Review Remediation（Task 0R / B1 closed / B2 Review待ち）
+# NF-05 Review Remediation（Task 0R / B1 closed / B2再Review待ち）
 
 ## 判定の扱い
 
@@ -6,8 +6,8 @@
 SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装PASS、security PASS、公開許可を意味しない。
 scope expansion DecisionはF2/A1/B1/B2/Mの開発を承認しているが、Plan ReviewのPLAN PASSと各実装Reviewは
 別ゲートである。production enablement、実顧客credential、実provider送信は常に禁止する。B1は固定Head
-`f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B2は固定Head
-`122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。
+`f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B2は初回実装
+`122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ちである。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
 最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
 Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正した結果、
@@ -322,3 +322,20 @@ code `c2cbfb99133d0df3f8d5eee285be340163747e31`をpush済み。docs trace commit
 
 今回のB2実装でproduction receive enablement、実credential、実provider送信、business command/export、PR/mergeは行っていない。独立B2
 Implementation Reviewの判定を受領するまで、B2をPASSへ昇格しない。
+
+## B2 implementation review remediation
+
+独立Reviewの固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` はP0=0、P1=4、P2=1でFAILだった。実装修正を
+`cc468e4f`へ固定した。
+
+| Finding | remediation evidence | Status |
+|---|---|---|
+| unknown provider / subscription外event | `IntegrationHubInboundProviderCatalog`、provider-aware active subscription query、receive permission/scope検証をINSERT前へ配置 | SPEC_ADDRESSED（独立再Review待ち） |
+| replay current resource membership | `InboundEventBindingValidator`とresource scope mapperでopaque primary/secondary ID、tenant/legal、deleted/reparent、scope intersectionをreceipt/replay時に再検証 | SPEC_ADDRESSED（独立再Review待ち） |
+| replay subject | 有効・非ロック`LoginUser`、ROLE_管理者、`integration.webhook.replay`を必須化し、operator referenceをprincipalから導出 | SPEC_ADDRESSED（独立再Review待ち） |
+| internal DB ID | admin DTO、DOM、replay URLをopaque admin referenceへ置換 | SPEC_ADDRESSED（独立再Review待ち） |
+| Content-Type prefix | strict parserで`application/json`と許可charsetだけを許可し、jsonp/combined/malformedを拒否 | SPEC_ADDRESSED（独立再Review待ち） |
+
+検証はH2 focused 15 tests、MySQL 8 Flyway V136 smoke 2 tests。Windowsの実Tomcat connectorはOS loopback接続確立前に
+errorとなったため、成功証跡へ算入しない。Linux実connectorで手動attributeなしのHTTP経路を独立再ReviewするまでB2は
+IMPLEMENTATION_REVIEW_PENDINGとする。production receive enablement、実credential、実provider送信、PR/mergeは禁止する。

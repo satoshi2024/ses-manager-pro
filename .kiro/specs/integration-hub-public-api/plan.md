@@ -16,7 +16,7 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立I
   `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施した。
 さらにNF05-IMPL-B1-008（初回送信前primary binding未検証）を共通binding validator、enqueue/worker/DuplicateKey検証で
 `c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
-B2は`122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。A2はapproved command=0件のためN/A、
+B2は初回実装`122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ちである。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -208,3 +208,13 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でPASSした。B1の独立
 force pushは行わない。明示されたReview remediationのdocs-only commit/pushはレビュー証跡固定のために行う。
 最終remote Head、commit一覧、plan/spec/tasks、completion matrix、evidence indexを
 独立Reviewへ渡す。ReviewのPLAN/IMPLEMENTATION双方がPASSになるまでPRは作成しない。
+
+## B2 implementation remediation checkpoint
+
+固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` のB2独立ReviewはP0=0、P1=4、P2=1でFAILだった。code commit
+`cc468e4f`でprovider/subscription binding、resource current-membership再検証、LoginUser/admin permission、opaque admin reference、
+strict Content-Typeを実装・検証した。H2 focused 15 testsとMySQL V136 smoke 2 testsはPASS。Windows connector E2Eはloopback接続
+エラーでHTTP到達前に停止したため未検証とし、Linux実connectorを独立再Reviewで確認する。
+
+B2は独立再Review受領までIMPLEMENTATION_REVIEW_PENDING。M開始、production receive enablement、実credential、実provider送信、
+PR/mergeは禁止する。F1/F2/A1/B1の既存PASSは再オープンしない。

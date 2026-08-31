@@ -5,7 +5,7 @@
 この設計はDG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02で承認された
 NF-05実装入力である。F1は独立PLAN/IMPLEMENTATION PASS済みで、F2以降はscope expansionのPlan delta PASS後に
 順次開始する。B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASSを受領し、B2は
-固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ちである。公開機械クライアントは内部管理chain、
+初回実装 `122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ちである。公開機械クライアントは内部管理chain、
 portal chain、既存のanonymous webhook例外へ混ぜず、/external-api/v1/** を専用chainで処理する。
 公開clientを内部roleへ変換せず、client principalにtenant、legal entity、client scope、data scope、
 command permission、credential version、correlation IDを束ねる。
@@ -668,3 +668,39 @@ MOCKの無接続をtestし、SSRF経路を残さない。
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。
 - Mではsecurity review、負荷、障害訓練、key rotation/revoke、secret/PII scan、runbook、remote/local Head固定を完了し、
   最終PLAN/IMPLEMENTATION PASS後までPRを作成しない。
+
+## 8.3 B2 inbound binding remediation
+
+## 受信前のprovider/subscription境界
+
+`IntegrationHubInboundProviderCatalog`は承認済みproviderだけを有限allow-listとして保持し、parserの形式検証後かつ
+ledger INSERT前にcatalog、active client、client×provider×eventTypeのactive inbound subscription、
+`integration.webhook.receive` permission、tenant/legal entity/data-scope intersectionを検証する。unknown provider、
+inactive/missing subscription、未承認eventTypeは永続化もprocessor起動も行わず、stable forbidden errorへ収束する。
+
+## resource bindingとreplay再認可
+
+`InboundEventBindingValidator`はreceipt時にprimary resource type/内部IDをserver-side正本として確定し、resourceごとの専用HMAC
+opaque IDをprimary/secondary fieldへ結合する。replay直前には対象client/subscription/permissionをlockまたはversion CASで再取得し、
+現行DBのtenant/legal entity singleton、client scope intersection、`deleted_flag=0`、project/customer/contract/invoiceの
+parent relationを再評価する。保存時bindingと現行membershipのいずれかが不一致ならreplayせず、元DLQのterminal stateを逆遷移させない。
+primaryはenvelopeの`publicResourceId`とprimary DTO fieldの双方を検証し、customer/project/contract等のsecondaryは各専用opaque IDで
+独立検証する。
+
+## admin principalとsafe reference
+
+replay service boundaryは有効・非ロックの`LoginUser`、内部user ID、ROLE_管理者、`integration.webhook.replay` action permissionを
+要求する。operator referenceはそのprincipalからserver-side導出し、requestの文字列を信用しない。admin DTO、DOM、replay URLは
+`InboundEventAdminReferenceCodec`のclient-bound opaque referenceのみを使用し、numeric DB ID、raw body/hash、secret、PIIを出力しない。
+
+## strict media type
+
+inbound controllerはContent-Typeを単一のmedia typeとしてparseし、base typeが厳密に`application/json`、parameterが許可された
+UTF-8 charsetだけであることを確認する。`application/jsonp`、combined value、malformed value、未許可charset/parameterは拒否し、
+raw bytesは署名検証・parse中のmemoryに限定する。
+
+## B2 remediation verification
+
+H2 focused testsはprovider/subscription/event binding、resource primary/secondary、scope narrowing、soft-delete/reparent、
+admin principal/reference、strict content typeを検証する。V136のMySQL Flyway smokeを実行する。Windows connector E2EがOSの
+loopback接続確立前に失敗した場合はPASSと扱わず、Linux実Tomcat connectorで手動attributeなしの受信前提を再確認する。

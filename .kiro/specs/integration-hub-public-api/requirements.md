@@ -3,7 +3,8 @@
 ## 0.1 現在の実装ゲート
 
 B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-B2は固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`へ実装・test・migrationをpush済みで、独立Implementation Review待ちである。
+B2は初回実装 `122c7c3b`後、独立Review fixed Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c`のP1/P2指摘を
+`cc468e4f`でremediateし、独立再Implementation Review待ちである。
 以下のB2契約は実装済み証跡とReview対象を分離して記録し、Review完了前に公開許可へ昇格しない。production enablement、実顧客credential、
 実provider送信、PR、mergeは引き続き禁止する。
 
@@ -365,3 +366,20 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを
   fail-closed、inbound duplicate raceが、deadlockなくcanonical stateへ収束すること。
 - idempotency/delivery/inboundのcanonical enum全値が一つの遷移表とretention class/起算点へ漏れなく分類され、
   alias状態、terminal逆遷移、期限境界、各CAS失敗を許可しないこと。
+
+## B2 remediation acceptance contract
+
+独立B2 ReviewのP1/P2を閉じる実装受入条件を以下へ固定する。
+
+- inbound receiptは形式検証だけで受理せず、approved provider、active client×provider×eventType subscription、receive permission、
+  tenant/legal entity/data-scopeのintersectionをINSERT前に検証する。unknown provider、inactive/missing subscription、未承認eventTypeは
+  ledger/processorへ到達させない。
+- resource eventはprimary type/内部IDをserver-side bindingとして保存し、primary/secondaryそれぞれのopaque public ID、現行DBの
+  tenant/legal entity、deleted flag、parent relation、client/subscription/permission scopeを受信時とreplay直前に再検証する。
+  soft-delete、reparent、scope narrowing、relation変更はfail-closedとする。
+- replayは有効・非ロックの`LoginUser`と内部user ID、ROLE_管理者、`integration.webhook.replay`をservice boundaryで要求する。
+  operator referenceをrequest入力から受け取らず、認証済みprincipalから導出する。
+- admin API/pageはinternal DB IDを返さず、client-bound opaque referenceのみをJSON、DOM、URLへ出力する。raw body/hash、secret、PIIも
+  admin projectionへ含めない。
+- inbound Content-Typeは厳密なmedia type parserで`application/json`と許可charsetだけを受け入れ、jsonp、combined、malformed、
+  未許可parameterを拒否する。

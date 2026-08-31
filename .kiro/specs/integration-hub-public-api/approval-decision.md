@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `122c7c3bb5653eb788d58040c6defc816ff67013`（B2実装commit。docs trace commit後の最終remote Headは外部handoffで固定） |
+| Current implementation Head | `cc468e4f`（B2 remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -57,7 +57,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。実provider送信なし |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound HMAC受信、duplicate/conflict、DLQ、admin replay UI、V135、H2/MySQL/connector証跡を実装。production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | `cc468e4f`で独立Review指摘をremediate済み。provider/subscription、resource binding、admin principal、opaque reference、strict content typeを追加検証。production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
 
 ## Approved contract and security values
@@ -117,3 +117,16 @@ NF05-IMPL-B1-008（初回送信前primary binding未検証）の追加remediatio
 `c2cbfb99133d0df3f8d5eee285be340163747e31`で固定した。enqueue保存前とworker外部HTTP前に同一validatorでclient bindingからHMAC opaque IDを再計算し、
 envelopeとprimary DTO fieldの一致を要求する。DuplicateKey収束でもpayload hash・primary type・primary IDを同時比較し、同時enqueueの別primary、type/ID不一致を拒否する。
 同じR-NF05へdocs trace commit後の固定Headを独立再Implementation Reviewとして提出する。
+
+## B2 implementation remediation checkpoint
+
+固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` の独立B2 Implementation Reviewで示されたP1=4/P2=1を、code commit
+`cc468e4f`でremediateした。受信前にapproved providerとactive client×provider×eventType subscription、receive permission、
+tenant/legal entity/data-scope intersectionを検証し、resource eventはprimary/secondaryのopaque IDと現行DB membership、
+deleted/reparent状態を再確認する。replayは有効・非ロックの`LoginUser`、内部user ID、ROLE_管理者、
+`integration.webhook.replay` permissionをservice boundaryで要求し、operator referenceはprincipalからのみ導出する。
+admin projectionとreplay URLはopaque referenceだけを使い、Content-Typeは`application/json`と許可charsetだけに限定する。
+
+独立再ReviewまでB2はIMPLEMENTATION_REVIEW_PENDINGとし、B2 PASSへ自己昇格しない。Windows connector E2EはTomcatのloopback
+接続エラーでHTTP到達前に実行不能だったためPASS証拠に数えず、Linux実connector E2Eで再確認する。production受信enablement、
+実credential、実provider送信、PR、mergeは引き続き禁止する。

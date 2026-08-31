@@ -1,4 +1,4 @@
-# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1/B1 PASS・B2 Review待ち）
+# NF-05 Public API Tasks（scope expansion承認済み・F1/F2/A1/B1 PASS・B2再Review待ち）
 
 ## 実行停止規則
 
@@ -206,8 +206,19 @@ development/testのmock/stub providerとloopback test serverは許可するが�
 - Test requirements: H2実mapperで同hashduplicate、別hashconflict、terminal保持、non-admin、replay後scope縮小REJECTED、metadata purgeを検証する。
   parserのunknown/duplicate/mismatch拒否、11 GET＋inbound route catalog、MySQL 8 Flyway V135、実Tomcat connector E2Eの初回202/duplicate200/conflict409を確認する。
 - Demo: 同一provider eventのprocessor副作用は一度だけ、hash違いは`409 INBOUND_PAYLOAD_CONFLICT`、admin replayは元DLQを変更せず
-  `PROCESSED/REJECTED/DLQ`の独立metadataへ収束する。実装commit `122c7c3bb5653eb788d58040c6defc816ff67013`、focused/H2/connector/MySQL証跡は
-  failure/error/skipなし。状態は独立Implementation Review待ちであり、PASSへ自己昇格しない。
+  `PROCESSED/REJECTED/DLQ`の独立metadataへ収束する。初回実装 `122c7c3b`後、B2 Review P1/P2をcode commit
+  `cc468e4f`でremediateした。focused/H2 15 tests、MySQL Flyway V136 2 testsはPASS、Windows connector E2Eは
+  Tomcat loopback接続エラーでHTTP到達前に実行不能のためPASSに数えない。状態は独立Implementation Review待ちであり、PASSへ自己昇格しない。
+
+## Task B2-R: independent Review remediation
+
+- [x] Objective: B2 Reviewのprovider/subscription、resource membership、admin principal、opaque reference、strict content typeのP1/P2を実装修正する。
+- [x] Implementation: `IntegrationHubInboundProviderCatalog`とactive subscription bindingをINSERT前へ配置し、`InboundEventBindingValidator`で
+  primary/secondary opaque ID、tenant/legal entity、deleted/reparent、scope intersectionをreceipt/replay時に再検証する。
+  replayは有効・非ロック`LoginUser`とadmin action permissionを必須化し、admin referenceはopaque化、Content-Typeは厳密parseとする。
+- [x] Test: unknown/inactive/unapproved provider/event、resource soft-delete/reparent/scope narrowing、non-admin/forged operator、opaque admin projection、
+  jsonp/combined/malformed content typeをH2で検証し、V136 MySQL Flyway smokeを実行する。
+- Demo: code `cc468e4f`の独立Implementation ReviewをR-NF05へhandoffする。Windows connector E2Eは未検証扱いとし、Linux実connectorで再確認する。
 
 ## Task M: penetration / recovery / performance
 

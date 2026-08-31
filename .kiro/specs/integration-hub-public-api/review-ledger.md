@@ -1,4 +1,4 @@
-# NF-05 Review Ledger（scope expansion承認・F2/A1/B1 PASS・B2 Review待ち）
+# NF-05 Review Ledger（scope expansion承認・F2/A1/B1 PASS・B2再Review待ち）
 
 ## Approval gate
 
@@ -299,13 +299,13 @@ deliveryのprimary bindingとsecondary専用ID検証へ分離し、同じR-NF05�
 | 項目 | 証跡 |
 |---|---|
 | B1 gate | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、独立Implementation Review PASS、P0/P1/P2=0/0/0 |
-| B2 implementation commit | `122c7c3bb5653eb788d58040c6defc816ff67013` |
+| B2 implementation/remediation | initial `122c7c3b` → code `cc468e4f` |
 | inbound | `POST /external-api/v1/webhooks/{provider}`、既存HMAC専用chain、strict parser、raw hash/allow-listed snapshotのみ永続化 |
 | duplicate/conflict | client/provider/provider event ID unique、same hash duplicate、different hash `409 INBOUND_PAYLOAD_CONFLICT` |
 | DLQ/replay | claim/terminal CAS、no-op processor、admin action permission、derived operator、current scope revalidation、independent generation metadata |
 | retention/admin | V135、FK `ON DELETE SET NULL`、AUDIT_METADATA_1Y purge、safe projection/page。raw body/hash/snapshot/secret/PII非表示 |
-| verification | focused B2/H2 PASS、Linux connector E2E 2/2 PASS、MySQL 8 Flyway smoke PASS、`git diff --check` PASS |
-| review state | IMPLEMENTATION_REVIEW_PENDING。Review前のB2 PASS自己宣言、production enablement、実provider送信、PR/mergeなし |
+| verification | H2 focused 15/15 PASS、MySQL 8 Flyway V136 smoke 2/2 PASS、Windows connectorはloopback接続前errorで未検証、`git diff --check` PASS |
+| review state | IMPLEMENTATION_REVIEW_PENDING。独立再Review待ち。B2 PASS自己宣言、production enablement、実provider送信、PR/mergeなし |
 
 - DecisionId DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02 はOwnerRef PROJECT_OWNER、OwnerType ROLE、
   Base origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、scope expansion approval reviewed Head
@@ -322,3 +322,20 @@ deliveryのprimary bindingとsecondary専用ID検証へ分離し、同じR-NF05�
 3. 実装commit `a7654b44`、remediation commit `a184c1f4`、generation correction `d476614e`、follow-up remediation
    `5a2a0231`、typed snapshot correction `96d6801c`を許可されたbranchへpush済み。F1対象suiteはfailure/error/skipなし、全fast suiteのF1対象外failure/errorは
    全体PASSへ昇格させない。
+
+## B2 independent Implementation Review remediation
+
+固定Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` の判定はP0=0、P1=4、P2=1でFAILだった。以下をcode commit
+`cc468e4f`で対応し、独立再Reviewへ提出する。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| NF05-IMPL-B2-001 provider/subscription外event | approved provider catalog、active client×provider×eventType subscription、receive permission、scope intersectionをINSERT前に検証 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B2-002 replay current membership | receipt/replayでprimary/secondary opaque ID、tenant/legal、deleted flag、parent relation、現行client/subscription scopeを再検証。lock/CAS境界を使用 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B2-003 replay LoginUser | 有効・非ロック`LoginUser`、内部user ID、ROLE_管理者、`integration.webhook.replay`をservice boundaryで要求。operator referenceはprincipalから導出 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B2-004 internal DB ID | admin DTO、DOM、replay URLをclient-bound opaque referenceへ置換 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B2-005 Content-Type prefix | strict single media type parserで`application/json`と許可charsetだけを受理 | SPEC_ADDRESSED（独立再Review待ち） |
+
+H2 focused 15 tests、MySQL 8 Flyway V136 smoke 2 testsはfailure/error/skipなし。Windows connector E2EはTomcat loopback
+接続エラーでHTTP到達前に実行不能のためPASS証拠に数えず、Linux実connector再確認を独立Reviewへ依頼する。F1/F2/A1/B1のPASS状態は
+再オープンしない。B2は独立再ReviewまでPASSへ昇格せず、M、production enablement、実provider送信、PR/mergeは禁止する。

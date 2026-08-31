@@ -36,7 +36,7 @@
 | A1 | IMPLEMENTATION_PASS。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | IMPLEMENTATION_PASS。独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING。fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`、inbound/DLQ/admin UIを実装。production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING。initial `122c7c3b`、remediation `cc468e4f`。provider/resource/admin/content-type境界を補正。production受信enablementなし |
 | M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
 | 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
 
@@ -305,3 +305,15 @@ F1実装後の証跡更新:
   固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`は独立Implementation Review PASS（P0/P1/P2=0）である。
 - F1 persistence基盤はImplementation PASS済み。Plan deltaはca27f455でPASSし、F2はfixed Head `d022e600`で独立Implementation Review PASS済み。A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`、残存P1-007を`5c94367c` → `0618d983`、NF05-IMPL-B1-008を`c2cbfb99133d0df3f8d5eee285be340163747e31`でremediate済み・独立再Review待ちであり、B2/Mは各wave Review後に順次実装する。
   A2はN/A、production enablement、実顧客credential、実provider送信は引き続き禁止する。
+
+## B2 implementation remediation inventory
+
+| 境界 | server-side正本 | allow-list / deny-list | 証跡 |
+|---|---|---|---|
+| provider/subscription | approved provider catalog、active client×provider×eventType subscription、receive permission、scope intersection | unknown provider、inactive/missing subscription、未承認eventTypeを拒否 | `IntegrationHubInboundProviderCatalog`、`InboundEventBindingValidator` |
+| resource binding | primary type/内部ID、resource別opaque ID、現行tenant/legal/parent membership | soft-delete、reparent、scope narrowing、relation不一致を拒否 | `IntegrationHubInboundEventResourceScopeMapper`、H2 test |
+| replay principal | 有効・非ロック`LoginUser`、内部user ID、ROLE_管理者、`integration.webhook.replay` | request supplied operator reference、anonymous、non-adminを拒否 | `InboundEventAdminServiceImpl` |
+| admin reference | client-bound opaque event/replay reference | numeric `t_inbound_event.id`、raw body/hash、secret、PIIを非公開 | `InboundEventAdminReferenceCodec`、DTO/DOM/URL test |
+| content type | single `application/json`、許可charsetのみ | jsonp、combined、malformed、未許可parameterを拒否 | controller parser/E2E contract |
+
+B2 remediation codeは`cc468e4f`。独立Review受領まではIMPLEMENTATION_REVIEW_PENDINGであり、production受信enablementは行わない。

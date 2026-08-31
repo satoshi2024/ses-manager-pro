@@ -4,7 +4,7 @@
 
 F1/F2/A1/B1の独立Implementation Review PASSを維持する。B1は固定Head
 `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`でP0/P1/P2=0/0/0のPASSを受領した。
-B2は実装commit `122c7c3bb5653eb788d58040c6defc816ff67013`をremoteへpush済みで、独立Implementation Review待ちである。
+B2は初回実装 `122c7c3b`後、独立Review指摘を`cc468e4f`でremediate済み・独立再Implementation Review待ちである。
 最終trace commit後のremote Headを既存R-NF05へhandoffし、Reviewが完了するまでB2 PASSへ自己昇格させない。
 production enablement、実顧客credential、実provider送信、PR、merge、force pushは行わない。
 
@@ -18,7 +18,7 @@ production enablement、実顧客credential、実provider送信、PR、merge、f
   operator/admin permissionとnumeric scope→opaque public ID指摘を`2684ff8f`でremediateしたが、さらにP1-007（primary/secondary binding・
   current DB membership再検証）が残ったため追加remediation済みで、NF05-IMPL-B1-008（初回送信前primary binding未検証）も
   `c2cbfb99133d0df3f8d5eee285be340163747e31`でremediateした。B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
-  B2は固定Head `122c7c3bb5653eb788d58040c6defc816ff67013`で実装済み・独立Implementation Review待ち、MはB2 Review後、A2は現DecisionでN/A、production enablementは未完了
+  B2は初回実装`122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ち、MはB2 Review後、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
 - Owner: PROJECT_OWNER（OwnerType=ROLE）
@@ -161,3 +161,13 @@ envelopeとprimary DTO fieldの一致を要求する。DuplicateKey収束でもp
 commit/pushを行う。実装対話ではPRを作らず、最後にremote Head、Base、全gate、未検証、rollback、
 対応表を独立Reviewへ渡す。独立ReviewのPLAN PASSとIMPLEMENTATION PASSの双方が記録されるまで
 PRは作成しない。force push、merge、auto-merge、branch削除は行わない。
+
+## B2 implementation remediation handoff
+
+独立Review fixed Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` のP1=4/P2=1を、code commit `cc468e4f`でremediateした。
+受信前のapproved provider/subscription/scope検証、resource primary/secondaryのopaque bindingと現行membership再検証、
+有効な内部`LoginUser`とadmin action permission、opaque admin reference、strict `application/json`判定を固定した。
+
+H2 focused 15/15、MySQL 8 Flyway V136 2/2はPASS。Windowsの実connectorはTomcat loopback接続エラーでHTTP到達前に
+実行不能だったためPASSへ数えず、独立ReviewでLinux実connector証跡を再確認する。B2はIMPLEMENTATION_REVIEW_PENDINGであり、
+M、production受信enablement、実credential、実provider送信、PR/mergeは行わない。
