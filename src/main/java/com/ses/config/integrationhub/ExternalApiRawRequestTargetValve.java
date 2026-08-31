@@ -26,6 +26,10 @@ public final class ExternalApiRawRequestTargetValve extends ValveBase {
         if (rawTarget != null) {
             request.setAttribute(ExternalApiCanonicalRequest.RAW_TARGET_ATTRIBUTE, rawTarget);
         }
+        String connectorPeer = request.getRemoteAddr();
+        if (connectorPeer != null && !connectorPeer.isBlank()) {
+            request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, connectorPeer);
+        }
         Valve next = getNext();
         if (next == null) {
             throw new IllegalStateException("external raw request-target valve has no next valve");

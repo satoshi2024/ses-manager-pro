@@ -21,6 +21,7 @@ info:
     '401': [AUTHENTICATION_FAILED]
     '403': [FORBIDDEN_SCOPE]
     '404': [RESOURCE_NOT_FOUND]
+    '409': [INBOUND_PAYLOAD_CONFLICT]
     '429': [RATE_LIMITED]
     '500': [INTERNAL_ERROR]
   x-non-enumeration-rule: >
@@ -404,6 +405,75 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '500':
           $ref: '#/components/responses/ServerError'
+  /external-api/v1/webhooks/{provider}:
+    post:
+      tags: [inbound-webhook]
+      operationId: receiveInboundWebhook
+      summary: Receive an approved inbound provider webhook event
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.webhook.receive
+      x-data-scope: tenant + legal entity + approved inbound provider binding
+      x-command-permission: integration.webhook.receive
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._~-]{1,100}$'
+        - name: X-Provider-Event-ID
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [eventType]
+              properties:
+                eventType:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+      responses:
+        '200':
+          description: Duplicate delivery of an already terminal inbound event
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundWebhookResponse'
+        '202':
+          description: Accepted or still processing inbound event
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundWebhookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InboundConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
 components:
   securitySchemes:
     publicClientAuthentication:
@@ -517,6 +587,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ForbiddenError'
+    InboundConflict:
+      description: Stable inbound payload hash conflict for the same provider event ID
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InboundConflictError'
     NotFound:
       description: Stable non-enumerating resource error for nonexistent or scope-excluded targets
       headers:
@@ -772,6 +851,23 @@ components:
         asOf:
           type: string
           format: date-time
+    InboundWebhookResponse:
+      type: object
+      additionalProperties: false
+      required: [status, duplicate, conflict, resultCode]
+      x-allow-list-fields: [status, duplicate, conflict, resultCode]
+      x-deny-fields: [internalId, rawBodyHash, parsedFieldsSnapshot, clientId, secret, token, apiKey, pii]
+      properties:
+        status:
+          type: string
+          enum: [RECEIVED, PROCESSING, PROCESSED, DUPLICATE, CONFLICT, DLQ]
+        duplicate:
+          type: boolean
+        conflict:
+          type: boolean
+        resultCode:
+          type: string
+          maxLength: 64
     BadRequestError:
       type: object
       additionalProperties: false
@@ -840,6 +936,27 @@ components:
         code:
           type: string
           enum: [FORBIDDEN_SCOPE]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    InboundConflictError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 409
+      x-allowed-error-codes: [INBOUND_PAYLOAD_CONFLICT]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [INBOUND_PAYLOAD_CONFLICT]
         message:
           type: string
           maxLength: 256

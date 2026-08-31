@@ -10,10 +10,16 @@ public interface InboundEventService {
                            LocalDateTime signedTimestamp, ExternalDtoSnapshot parsedFieldsSnapshot,
                            boolean signatureValid, LocalDateTime receivedAt);
 
-    InboundEvent claim(Long id, LocalDateTime now);
+    InboundEvent claim(Long id, String leaseToken, LocalDateTime now, LocalDateTime leaseExpiresAt);
 
-    boolean complete(Long id, Integer version, String status, String resultCode, LocalDateTime terminalAt);
+    boolean complete(Long id, Integer version, String leaseToken, String status, String resultCode,
+                     LocalDateTime terminalAt);
 
-    record Receipt(InboundEvent event, boolean duplicate, boolean conflict) {
+    int recoverExpiredLeases(LocalDateTime now);
+
+    record Receipt(InboundEvent event, boolean duplicate, boolean conflict, boolean inProgress) {
+        public Receipt(InboundEvent event, boolean duplicate, boolean conflict) {
+            this(event, duplicate, conflict, false);
+        }
     }
 }

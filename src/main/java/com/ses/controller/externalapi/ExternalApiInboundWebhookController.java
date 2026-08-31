@@ -4,6 +4,7 @@ import com.ses.config.integrationhub.ExternalApiCanonicalRequest;
 import com.ses.config.integrationhub.ExternalApiErrorWriter;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.config.integrationhub.ExternalApiSecurityException;
+import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import com.ses.dto.integrationhub.ExternalApiInboundWebhookResponse;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.service.integrationhub.ExternalApiInboundWebhookParser;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
+import java.util.UUID;
 
 /** B2 inbound provider event endpoint。既存HMAC専用chainの認証済みbodyだけを受け取る。 */
 @RestController
@@ -35,6 +37,7 @@ public class ExternalApiInboundWebhookController {
     private final ExternalApiInboundWebhookParser parser;
     private final InboundEventService inboundEventService;
     private final InboundEventProcessor inboundEventProcessor;
+    private final IntegrationHubExternalApiProperties properties;
     private final Clock clock;
 
     @PostMapping(value = "/webhooks/{provider}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -61,25 +64,30 @@ public class ExternalApiInboundWebhookController {
         if (receipt.conflict()) {
             throw ExternalApiSecurityException.inboundConflict();
         }
+        if (receipt.inProgress()) {
+            return response(receipt.event(), false, false, IntegrationHubStates.INBOUND_PROCESSING, 202);
+        }
         if (receipt.duplicate()) {
             return response(receipt.event(), true, false, receipt.event().getStatus(), 200);
         }
 
-        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), receivedAt);
+        String leaseToken = UUID.randomUUID().toString();
+        LocalDateTime leaseExpiresAt = receivedAt.plusSeconds(properties.getExternalTransport().getLeaseSeconds());
+        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), leaseToken, receivedAt, leaseExpiresAt);
         if (claimed == null) {
-            return response(receipt.event(), true, false, IntegrationHubStates.INBOUND_PROCESSING, 202);
+            return response(receipt.event(), false, false, IntegrationHubStates.INBOUND_PROCESSING, 202);
         }
         try {
             // claimとterminal CASは別transaction。processorはB2ではlocal no-opのみ。
             inboundEventProcessor.process(claimed);
         } catch (RuntimeException e) {
-            if (!inboundEventService.complete(claimed.getId(), claimed.getVersion(),
+            if (!inboundEventService.complete(claimed.getId(), claimed.getVersion(), leaseToken,
                     IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", nowUtc())) {
                 throw new IllegalStateException("inbound DLQ terminal CAS failed", e);
             }
             return response(claimed, false, false, IntegrationHubStates.INBOUND_DLQ, 202);
         }
-        if (!inboundEventService.complete(claimed.getId(), claimed.getVersion(),
+        if (!inboundEventService.complete(claimed.getId(), claimed.getVersion(), leaseToken,
                 IntegrationHubStates.INBOUND_PROCESSED, "INBOUND_ACCEPTED", receivedAt)) {
             // CAS競合は別workerの終端結果を上書きしてはいけない。これはprocessor失敗とは異なる
             // 内部整合性エラーとして安全なJSON error boundaryへ渡す。

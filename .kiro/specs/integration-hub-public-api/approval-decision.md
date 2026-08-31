@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `e564f400`（B2 stable-error boundary remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
+| Current implementation Head | remediation commit 後に外部 handoff で固定（R-NF05 対象 Head は `374617da`） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。

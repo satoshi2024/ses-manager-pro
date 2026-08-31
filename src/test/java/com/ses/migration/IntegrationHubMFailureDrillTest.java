@@ -3,9 +3,12 @@ package com.ses.migration;
 import com.ses.config.integrationhub.ExternalApiPrincipal;
 import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.entity.integrationhub.ApiDelivery;
+import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.service.integrationhub.ApiDeliveryService;
 import com.ses.service.integrationhub.ApiRetentionPurgeService;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
+import com.ses.service.integrationhub.InboundEventService;
+import com.ses.service.integrationhub.IntegrationHubStates;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,6 +37,8 @@ class IntegrationHubMFailureDrillTest {
     @Autowired
     private ApiDeliveryService deliveryService;
     @Autowired
+    private InboundEventService inboundEventService;
+    @Autowired
     private ApiRetentionPurgeService retentionPurgeService;
     @Autowired
     private ExternalApiPublicIdCodec publicIdCodec;
@@ -53,6 +58,25 @@ class IntegrationHubMFailureDrillTest {
         String status = jdbcTemplate.queryForObject(
                 "SELECT status FROM t_api_delivery WHERE id = ?", String.class, enqueued.getId());
         assertEquals("RETRYABLE", status);
+    }
+
+    @Test
+    void inboundClaim後crashのstaleLeaseはrecoverExpiredLeasesでRECEIVEDへ復帰する() {
+        long clientDbId = insertInboundClient();
+        insertInboundSubscription(clientDbId);
+        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
+                CLIENT_ID, "provider-b2", "inbound-failure-event", hash("inbound-failure"),
+                NOW, inboundSnapshot(), true, NOW);
+        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), "inbound-stale-lease",
+                NOW, NOW.plusMinutes(5));
+        assertEquals(IntegrationHubStates.INBOUND_PROCESSING, claimed.getStatus());
+
+        assertEquals(0, inboundEventService.recoverExpiredLeases(NOW.plusMinutes(4)));
+        assertEquals(1, inboundEventService.recoverExpiredLeases(NOW.plusMinutes(6)));
+
+        String status = jdbcTemplate.queryForObject(
+                "SELECT status FROM t_inbound_event WHERE id = ?", String.class, receipt.event().getId());
+        assertEquals(IntegrationHubStates.INBOUND_RECEIVED, status);
     }
 
     @Test
@@ -127,5 +151,47 @@ class IntegrationHubMFailureDrillTest {
                 "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\"" + LEGAL_ENTITY + "\"],"
                         + "\"projectIds\":[\"" + PROJECT_ID + "\"]}",
                 1, "delivery-binding", "INTERNAL_TEST");
+    }
+
+    private long insertInboundClient() {
+        jdbcTemplate.update("DELETE FROM t_inbound_event_replay WHERE client_id = ?", CLIENT_ID);
+        jdbcTemplate.update("DELETE FROM t_inbound_event WHERE client_id = ?", CLIENT_ID);
+        jdbcTemplate.update("DELETE FROM m_webhook_subscription WHERE client_id = ? AND direction = 'INBOUND'", CLIENT_ID);
+        jdbcTemplate.update("DELETE FROM m_api_client_scope WHERE api_client_id IN "
+                + "(SELECT id FROM m_api_client WHERE client_id = ?)", CLIENT_ID);
+        jdbcTemplate.update("DELETE FROM m_api_client WHERE client_id = ?", CLIENT_ID);
+        String scope = "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\"" + LEGAL_ENTITY + "\"],"
+                + "\"projectIds\":[\"" + PROJECT_ID + "\"]}";
+        jdbcTemplate.update("""
+                INSERT INTO m_api_client (id, client_id, owner_ref, tenant_id, legal_entity_id,
+                                          data_scope_json, allowed_cidrs, client_tier, status, version)
+                VALUES (9910101, ?, 'PROJECT_OWNER', ?, ?, ?, '127.0.0.1/32', 'INTERNAL_TEST', 'ACTIVE', 0)
+                """, CLIENT_ID, TENANT, LEGAL_ENTITY, scope);
+        jdbcTemplate.update("""
+                INSERT INTO m_api_client_scope (api_client_id, scope_code, operation_code, data_scope_json, status, version)
+                VALUES (9910101, 'integration.webhook.receive', 'integration.webhook.receive', ?, 'ACTIVE', 0)
+                """, scope);
+        return 9910101L;
+    }
+
+    private void insertInboundSubscription(long clientDbId) {
+        String scope = "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\"" + LEGAL_ENTITY + "\"],"
+                + "\"projectIds\":[\"" + PROJECT_ID + "\"]}";
+        jdbcTemplate.update("""
+                INSERT INTO m_webhook_subscription (client_id, provider_name, direction, event_type,
+                                                      endpoint_url, key_id, encrypted_signing_secret,
+                                                      crypto_key_version, data_scope_json, status, version)
+                VALUES (?, 'provider-b2', 'INBOUND', 'health.ping', 'https://example.invalid/inbound',
+                        'm-key', 'IHG1:v1:iv:cipher', 'v1', ?, 'ACTIVE', 0)
+                """, CLIENT_ID, scope);
+    }
+
+    private ExternalDtoSnapshot inboundSnapshot() {
+        return ExternalDtoSnapshot.ofAllowList("{\"eventType\":\"health.ping\"}",
+                ExternalDtoSnapshot.INBOUND_FIELDS);
+    }
+
+    private String hash(String seed) {
+        return com.ses.service.integrationhub.IntegrationHubDigest.sha256Hex(seed.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

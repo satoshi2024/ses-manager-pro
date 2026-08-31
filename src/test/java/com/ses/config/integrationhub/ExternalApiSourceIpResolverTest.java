@@ -62,6 +62,20 @@ class ExternalApiSourceIpResolverTest {
         assertFalse(ExternalApiCidrMatcher.matchesAny("203.0.113.10", "::ffff:203.0.113.0/125"));
     }
 
+    @Test
+    void rewrittenRemoteAddrWithoutTrustedProxyUsesConnectorPeer() {
+        MockHttpServletRequest request = request("203.0.113.10");
+        request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, "198.51.100.1");
+        assertEquals("198.51.100.1", resolver.resolve(request, List.of()));
+    }
+
+    @Test
+    void trustedProxyWithoutHeadersUsesRewrittenServletAddr() {
+        MockHttpServletRequest request = request("203.0.113.10");
+        request.setAttribute(ExternalApiSourceIpResolver.CONNECTOR_PEER_ATTRIBUTE, "10.0.0.1");
+        assertEquals("203.0.113.10", resolver.resolve(request, List.of("10.0.0.1/32")));
+    }
+
     private MockHttpServletRequest request(String remoteAddr) {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr(remoteAddr);

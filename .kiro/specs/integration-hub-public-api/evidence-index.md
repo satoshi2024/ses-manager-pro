@@ -1,7 +1,7 @@
 # NF-05 M verification evidence index
 
-B2 独立 Implementation Review PASS（P0/P1/P2=0/0/0、Linux connector 5/5）後の M フェーズ証跡。
-production enablement、実 credential、PR/merge は Review PASS 前禁止。
+R-NF05 独立 Review（Head `374617da`）で IMPLEMENTATION FAIL（P1=4）後、P1 remediation を実装。
+B2/M の独立 Implementation Review PASS 前は production enablement、実 credential、PR/merge 禁止。
 
 ## Wave status
 
@@ -11,15 +11,15 @@ production enablement、実 credential、PR/merge は Review PASS 前禁止。
 | F2 | IMPLEMENTATION PASS | security chain integration（既存） |
 | A1 | IMPLEMENTATION PASS | DTO contract + read mapper（既存） |
 | B1 | IMPLEMENTATION PASS | worker/signer/replay（既存） |
-| B2 | IMPLEMENTATION PASS | inbound H2 + Linux connector E2E 5/5 |
-| M | IMPLEMENTATION_REVIEW_PENDING | 本 index |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | inbound H2 + Linux connector E2E（R-NF05 P1 remediation 後に再 Review） |
+| M | IMPLEMENTATION_REVIEW_PENDING | 本 index + M test suite |
 
 ## M test matrix
 
 | 領域 | テスト | 要件 |
 |---|---|---|
 | penetration / scope | `IntegrationHubMPenetrationTest` | IH-R4 client A/B、count/list/detail 非観測、存在秘匿 |
-| failure drill | `IntegrationHubMFailureDrillTest` | stale lease recovery、restore epoch、attempt 8 DLQ |
+| failure drill | `IntegrationHubMFailureDrillTest` | stale lease recovery（outbound + inbound）、restore epoch、attempt 8 DLQ |
 | performance boundary | `IntegrationHubMPerformanceBoundaryTest` | minute=60 exact、burst=20 拒否、Retry-After |
 | key rotation / revoke | `IntegrationHubKeyRotationRecoveryDrillTest` | 24h overlap、revoke、usable 失効 |
 | secret / PII scan | `IntegrationHubSecretLogScanTest` | log への plaintextSecret/rawBody/decrypt 禁止 |
@@ -32,6 +32,7 @@ production enablement、実 credential、PR/merge は Review PASS 前禁止。
 | read E2E | `ExternalApiEnabledConnectorE2ETest`（既存） | enabled chain 到達 |
 | MySQL concurrency | `IntegrationHubF1MySqlConcurrencyTest`（既存） | usage/delivery CAS、stale lease |
 | DTO allow-list | `ExternalApiDtoContractTest`（既存） | entity serialization 禁止 |
+| R-NF05 P1 remediation | `MenuPermissionFilterTest`、`ExternalApiSourceIpResolverTest`、`IntegrationHubOpenApiContractTest`、`IntegrationHubB2InboundH2Test` | admin API 到達、XFF spoof、OpenAPI/inbound 一致、inbound lease |
 | metrics cardinality | `ExternalApiMetricsRecorderTest`（既存） | 有限 label 集合 |
 
 ## Operations artifacts

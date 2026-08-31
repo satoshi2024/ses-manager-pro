@@ -2,6 +2,7 @@ package com.ses.service.integrationhub.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.integrationhub.IntegrationHubExternalApiProperties;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.mapper.InboundEventMapper;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
@@ -24,6 +25,8 @@ public class InboundEventServiceImpl implements InboundEventService {
     private final InboundEventBindingValidator bindingValidator;
     private final InboundEventAdminReferenceCodec referenceCodec;
     private final ObjectMapper objectMapper;
+    private final IntegrationHubExternalApiProperties properties;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Receipt recordReceived(String clientId, String providerName, String providerEventId, String rawBodyHash,
@@ -36,13 +39,20 @@ public class InboundEventServiceImpl implements InboundEventService {
         if (signedTimestamp == null || receivedAt == null || parsedFieldsSnapshot == null) {
             throw new IllegalArgumentException("invalid inbound event");
         }
+        recoverExpiredLeases(receivedAt);
         ExternalDtoSnapshot.requireAllowList(parsedFieldsSnapshot, ExternalDtoSnapshot.INBOUND_FIELDS);
         InboundEventBindingValidator.Binding binding = bindingValidator.validateForReceipt(
                 clientId, providerName, eventType(parsedFieldsSnapshot), parsedFieldsSnapshot, receivedAt);
         InboundEvent existing = mapper.selectByProviderEvent(clientId, providerName, providerEventId);
         if (existing != null) {
             if (rawBodyHash.equalsIgnoreCase(existing.getRawBodyHash())) {
-                return new Receipt(existing, true, false);
+                if (IntegrationHubStates.INBOUND_PROCESSING.equals(existing.getStatus())
+                        && leaseActive(existing, receivedAt)) {
+                    return new Receipt(existing, false, false, true);
+                }
+                if (isTerminalDuplicate(existing.getStatus())) {
+                    return new Receipt(existing, true, false);
+                }
             }
             if (existing.getVersion() != null) {
                 mapper.transitionConflict(existing.getId(), existing.getVersion(), rawBodyHash,
@@ -76,6 +86,15 @@ public class InboundEventServiceImpl implements InboundEventService {
             if (concurrent == null) {
                 throw e;
             }
+            if (rawBodyHash.equalsIgnoreCase(concurrent.getRawBodyHash())) {
+                if (IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus())
+                        && leaseActive(concurrent, receivedAt)) {
+                    return new Receipt(concurrent, false, false, true);
+                }
+                if (isTerminalDuplicate(concurrent.getStatus())) {
+                    return new Receipt(concurrent, true, false);
+                }
+            }
             boolean conflict = !rawBodyHash.equalsIgnoreCase(concurrent.getRawBodyHash());
             if (conflict && (IntegrationHubStates.INBOUND_RECEIVED.equals(concurrent.getStatus())
                     || IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus()))) {
@@ -89,15 +108,26 @@ public class InboundEventServiceImpl implements InboundEventService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public InboundEvent claim(Long id, LocalDateTime now) {
-        if (id == null || now == null) {
+    public InboundEvent claim(Long id, String leaseToken, LocalDateTime now, LocalDateTime leaseExpiresAt) {
+        if (id == null || leaseToken == null || leaseToken.isBlank() || now == null
+                || leaseExpiresAt == null || !leaseExpiresAt.isAfter(now)) {
             throw new IllegalArgumentException("invalid inbound claim");
         }
+        recoverExpiredLeases(now);
         InboundEvent row = mapper.selectForUpdate(id);
-        if (row == null || !IntegrationHubStates.INBOUND_RECEIVED.equals(row.getStatus())) {
+        if (row == null) {
             return null;
         }
-        if (mapper.claim(id, row.getVersion(), now) != 1) {
+        if (IntegrationHubStates.INBOUND_RECEIVED.equals(row.getStatus())) {
+            if (mapper.claim(id, row.getVersion(), leaseToken, leaseExpiresAt, now) != 1) {
+                return null;
+            }
+        } else if (IntegrationHubStates.INBOUND_PROCESSING.equals(row.getStatus())
+                && row.getLeaseExpiresAt() != null && !row.getLeaseExpiresAt().isAfter(now)) {
+            if (mapper.reclaimExpired(id, row.getVersion(), leaseToken, leaseExpiresAt, now) != 1) {
+                return null;
+            }
+        } else {
             return null;
         }
         return mapper.selectById(id);
@@ -105,8 +135,10 @@ public class InboundEventServiceImpl implements InboundEventService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public boolean complete(Long id, Integer version, String status, String resultCode, LocalDateTime terminalAt) {
-        if (id == null || version == null || resultCode == null || resultCode.isBlank()
+    public boolean complete(Long id, Integer version, String leaseToken, String status, String resultCode,
+                            LocalDateTime terminalAt) {
+        if (id == null || version == null || leaseToken == null || leaseToken.isBlank()
+                || resultCode == null || resultCode.isBlank()
                 || resultCode.length() > 64 || terminalAt == null) {
             throw new IllegalArgumentException("invalid inbound result");
         }
@@ -119,8 +151,28 @@ public class InboundEventServiceImpl implements InboundEventService {
                 && !IntegrationHubStates.INBOUND_DLQ.equals(status)) {
             throw new IllegalArgumentException("invalid inbound terminal status");
         }
-        return mapper.transitionTerminal(id, version, status, resultCode, retention,
+        return mapper.transitionTerminal(id, version, leaseToken, status, resultCode, retention,
                 terminalAt, terminalAt.plusDays(retention.equals(IntegrationHubStates.RETENTION_SUCCEEDED_30D) ? 30 : 90)) == 1;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int recoverExpiredLeases(LocalDateTime now) {
+        if (now == null) {
+            throw new IllegalArgumentException("now is required");
+        }
+        return mapper.recoverExpiredLeases(now);
+    }
+
+    private boolean leaseActive(InboundEvent event, LocalDateTime now) {
+        return event.getLeaseExpiresAt() != null && event.getLeaseExpiresAt().isAfter(now);
+    }
+
+    private boolean isTerminalDuplicate(String status) {
+        return IntegrationHubStates.INBOUND_PROCESSED.equals(status)
+                || IntegrationHubStates.INBOUND_DUPLICATE.equals(status)
+                || IntegrationHubStates.INBOUND_CONFLICT.equals(status)
+                || IntegrationHubStates.INBOUND_DLQ.equals(status);
     }
 
     private void requireText(String value, int maxLength, String field) {

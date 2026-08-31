@@ -1,4 +1,21 @@
-# NF-05 Review Ledger（B2 IMPLEMENTATION PASS・M 実装完了・独立 Review 待ち）
+# NF-05 Review Ledger（R-NF05 IMPLEMENTATION FAIL remediation 後・独立再 Review 待ち）
+
+## R-NF05 independent Review（Head `374617da`）
+
+| Gate | 判定 |
+|---|---|
+| Stage A Plan Review | PLAN PASS |
+| Stage B Implementation | FAIL（P0=0、P1=4、P2=5） |
+| 公開可否 | 不可（PR 未作成） |
+
+| Finding ID | Severity | 対応 | Status |
+|---|---|---|---|
+| NF05-REV-P1-001 | P1 | `integration-hub` を action inventory 登録、`integration.webhook.replay` 解決、MenuPermissionFilter 回帰 test | REMEDIATED（再 Review 待ち） |
+| NF05-REV-P1-002 | P1 | connector peer 捕捉 + trusted-proxy 判定の単一正本化、XFF spoof 回帰 test | REMEDIATED（再 Review 待ち） |
+| NF05-REV-P1-003 | P1 | OpenAPI candidate に inbound/409 同期、`IntegrationHubOpenApiContractTest` | REMEDIATED（再 Review 待ち） |
+| NF05-REV-P1-004 | P1 | V137 inbound lease/recover、PROCESSING 中 duplicate→202、stale lease 回帰 test | REMEDIATED（再 Review 待ち） |
+
+P2（docs 自己昇格、disabled bean、admin DTO 拡張、静的 log scan、list 512）は本 remediation では未着手。
 
 ## Approval gate
 
@@ -24,8 +41,8 @@
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。development/test mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_PASS | fixed Head `cd822b99`、Linux connector 5/5、audit/ledger、focused 20/20、P0/P1/P2=0/0/0 |
-| M | IMPLEMENTATION_REVIEW_PENDING | M test suite 11/11 PASS、runbook、evidence-index。独立 Review 待ち |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | R-NF05 Head `374617da` で FAIL（P1=4）。remediation 後に再 Review |
+| M | IMPLEMENTATION_REVIEW_PENDING | M test suite + runbook 実装済。B2 再 Review PASS 後に M 判定 |
 
 scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
 OwnerRef=PROJECT_OWNER、OwnerType=ROLE、Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd、

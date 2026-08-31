@@ -38,7 +38,8 @@ class InboundEventServiceTest {
                 .thenReturn(new InboundEventBindingValidator.Binding(null, null));
         when(referenceCodec.eventReference(any(), any(), any())).thenReturn("event-reference");
         service = new InboundEventServiceImpl(mapper, bindingValidator, referenceCodec,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                new com.ses.config.integrationhub.IntegrationHubExternalApiProperties());
     }
 
     @Test

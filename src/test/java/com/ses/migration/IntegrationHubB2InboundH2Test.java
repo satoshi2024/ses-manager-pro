@@ -44,6 +44,7 @@ class IntegrationHubB2InboundH2Test {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 8, 31, 12, 0);
     private static final String HASH_1 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private static final String HASH_2 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    private static final String LEASE_TOKEN = "b2-h2-lease";
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -84,9 +85,8 @@ class IntegrationHubB2InboundH2Test {
         ExternalDtoSnapshot snapshot = snapshot();
         InboundEventService.Receipt first = inboundEventService.recordReceived(
                 CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot, true, NOW);
-        InboundEvent claimed = inboundEventService.claim(first.event().getId(), NOW);
-        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
-                IntegrationHubStates.INBOUND_PROCESSED, "INBOUND_ACCEPTED", NOW));
+        InboundEvent claimed = claimEvent(first.event().getId());
+        assertTrue(completeEvent(claimed, IntegrationHubStates.INBOUND_PROCESSED, "INBOUND_ACCEPTED"));
 
         InboundEventService.Receipt duplicate = inboundEventService.recordReceived(
                 CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot, true, NOW);
@@ -97,6 +97,41 @@ class IntegrationHubB2InboundH2Test {
                 CLIENT_ID, PROVIDER, EVENT_ID, HASH_2, NOW, snapshot, true, NOW);
         assertTrue(conflict.conflict());
         assertEquals(IntegrationHubStates.INBOUND_PROCESSED, conflict.event().getStatus());
+    }
+
+    @Test
+    void processing中の同hash再送はinProgressとなりterminal偽duplicateを返さない() {
+        insertBinding();
+        ExternalDtoSnapshot snapshot = snapshot();
+        InboundEventService.Receipt first = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot, true, NOW);
+        assertTrue(claimEvent(first.event().getId()) != null);
+
+        InboundEventService.Receipt inProgress = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot, true, NOW);
+
+        assertTrue(inProgress.inProgress());
+        assertFalse(inProgress.duplicate());
+        assertEquals(IntegrationHubStates.INBOUND_PROCESSING, inProgress.event().getStatus());
+    }
+
+    @Test
+    void claim後crashのstaleLeaseはrecoverExpiredLeasesでRECEIVEDへ復帰し再claimできる() {
+        insertBinding();
+        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, "event-b2-lease", HASH_1, NOW, snapshot(), true, NOW);
+        assertTrue(claimEvent(receipt.event().getId()) != null);
+
+        assertEquals(0, inboundEventService.recoverExpiredLeases(NOW.plusMinutes(4)));
+        assertEquals(1, inboundEventService.recoverExpiredLeases(NOW.plusMinutes(6)));
+        assertEquals("RECEIVED", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_inbound_event WHERE id = ?", String.class, receipt.event().getId()));
+
+        InboundEvent reclaimed = inboundEventService.claim(receipt.event().getId(), "b2-recover-lease",
+                NOW, NOW.plusMinutes(5));
+        assertEquals(IntegrationHubStates.INBOUND_PROCESSING, reclaimed.getStatus());
+        assertTrue(inboundEventService.complete(reclaimed.getId(), reclaimed.getVersion(), "b2-recover-lease",
+                IntegrationHubStates.INBOUND_PROCESSED, "INBOUND_ACCEPTED", NOW));
     }
 
     @Test
@@ -198,9 +233,8 @@ class IntegrationHubB2InboundH2Test {
 
         assertEquals("project", receipt.event().getPrimaryResourceType());
         assertEquals(RESOURCE_PROJECT_ID, receipt.event().getPrimaryResourceId());
-        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
-        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
-                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        InboundEvent claimed = claimEvent(receipt.event().getId());
+        assertTrue(completeEvent(claimed, IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED"));
         String eventReference = receipt.event().getAdminReference();
         Authentication admin = adminAuthentication();
         SecurityContextHolder.getContext().setAuthentication(admin);
@@ -230,9 +264,8 @@ class IntegrationHubB2InboundH2Test {
         InboundEventService.Receipt receipt = inboundEventService.recordReceived(
                 CLIENT_ID, PROVIDER, eventId, HASH_2, NOW,
                 ExternalDtoSnapshot.ofAllowList(json, ExternalDtoSnapshot.INBOUND_FIELDS), true, NOW);
-        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
-        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
-                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        InboundEvent claimed = claimEvent(receipt.event().getId());
+        assertTrue(completeEvent(claimed, IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED"));
         Authentication admin = adminAuthentication();
         SecurityContextHolder.getContext().setAuthentication(admin);
         var replay = inboundEventAdminService.replay(receipt.event().getAdminReference(),
@@ -281,6 +314,15 @@ class IntegrationHubB2InboundH2Test {
         return insertBinding("health.ping");
     }
 
+    private InboundEvent claimEvent(Long id) {
+        return inboundEventService.claim(id, LEASE_TOKEN, NOW, NOW.plusMinutes(5));
+    }
+
+    private boolean completeEvent(InboundEvent claimed, String status, String resultCode) {
+        return inboundEventService.complete(claimed.getId(), claimed.getVersion(), LEASE_TOKEN,
+                status, resultCode, NOW);
+    }
+
     private long insertBinding(String eventType) {
         String scope = "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\""
                 + LEGAL_ENTITY + "\"],\"projectIds\":[\"" + RESOURCE_PROJECT_ID
@@ -304,9 +346,8 @@ class IntegrationHubB2InboundH2Test {
     private InboundEvent insertDlqEvent() {
         InboundEventService.Receipt receipt = inboundEventService.recordReceived(
                 CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot(), true, NOW);
-        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
-        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
-                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        InboundEvent claimed = claimEvent(receipt.event().getId());
+        assertTrue(completeEvent(claimed, IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED"));
         return InboundEvent.builder().id(claimed.getId()).status(IntegrationHubStates.INBOUND_DLQ).build();
     }
 

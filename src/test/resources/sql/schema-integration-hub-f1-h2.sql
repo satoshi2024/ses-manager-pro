@@ -173,6 +173,8 @@ CREATE TABLE t_inbound_event (
     terminal_at TIMESTAMP,
     retention_class VARCHAR(32),
     retention_expires_at TIMESTAMP,
+    lease_token VARCHAR(128),
+    lease_expires_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
@@ -258,6 +260,7 @@ CREATE INDEX idx_api_delivery_due ON t_api_delivery (status, next_attempt_at, le
 CREATE INDEX idx_api_delivery_expiry ON t_api_delivery (status, retention_expires_at, id);
 CREATE INDEX idx_api_delivery_primary_resource ON t_api_delivery (primary_resource_type, primary_resource_id, status, id);
 CREATE INDEX idx_inbound_expiry ON t_inbound_event (status, retention_expires_at, id);
+CREATE INDEX idx_inbound_processing_lease ON t_inbound_event (status, lease_expires_at, id);
 CREATE UNIQUE INDEX uk_inbound_admin_reference ON t_inbound_event (admin_reference);
 CREATE INDEX idx_inbound_primary_resource ON t_inbound_event (primary_resource_type, primary_resource_id, status, id);
 CREATE INDEX idx_api_nonce_expiry ON t_api_nonce_replay (expires_at, id);

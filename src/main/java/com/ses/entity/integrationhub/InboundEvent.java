@@ -37,6 +37,8 @@ public class InboundEvent {
     private LocalDateTime terminalAt;
     private String retentionClass;
     private LocalDateTime retentionExpiresAt;
+    private String leaseToken;
+    private LocalDateTime leaseExpiresAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     @Version

@@ -62,9 +62,23 @@ public interface InboundEventMapper extends BaseMapper<InboundEvent> {
     @Select("SELECT * FROM t_inbound_event WHERE admin_reference = #{adminReference} FOR UPDATE")
     InboundEvent selectByAdminReferenceForUpdate(@Param("adminReference") String adminReference);
 
-    @Update("UPDATE t_inbound_event SET status = 'PROCESSING', version = version + 1, updated_at = #{now} "
+    @Update("UPDATE t_inbound_event SET status = 'PROCESSING', lease_token = #{leaseToken}, "
+            + "lease_expires_at = #{leaseExpiresAt}, version = version + 1, updated_at = #{now} "
             + "WHERE id = #{id} AND version = #{version} AND status = 'RECEIVED'")
-    int claim(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);
+    int claim(@Param("id") Long id, @Param("version") Integer version, @Param("leaseToken") String leaseToken,
+              @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE t_inbound_event SET status = 'PROCESSING', lease_token = #{leaseToken}, "
+            + "lease_expires_at = #{leaseExpiresAt}, version = version + 1, updated_at = #{now} "
+            + "WHERE id = #{id} AND version = #{version} AND status = 'PROCESSING' "
+            + "AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now}")
+    int reclaimExpired(@Param("id") Long id, @Param("version") Integer version, @Param("leaseToken") String leaseToken,
+                       @Param("leaseExpiresAt") LocalDateTime leaseExpiresAt, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE t_inbound_event SET status = 'RECEIVED', lease_token = NULL, lease_expires_at = NULL, "
+            + "version = version + 1, updated_at = #{now} "
+            + "WHERE status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now}")
+    int recoverExpiredLeases(@Param("now") LocalDateTime now);
 
     @Update("UPDATE t_inbound_event SET status = 'CONFLICT', result_code = 'PAYLOAD_HASH_CONFLICT', "
             + "processed_at = #{now}, terminal_at = #{now}, retention_class = 'FAILED_DLQ_PAYLOAD_90D', "
@@ -77,10 +91,13 @@ public interface InboundEventMapper extends BaseMapper<InboundEvent> {
 
     @Update("UPDATE t_inbound_event SET status = #{status}, result_code = #{resultCode}, "
             + "processed_at = #{terminalAt}, terminal_at = #{terminalAt}, retention_class = #{retentionClass}, "
-            + "retention_expires_at = #{retentionExpiresAt}, version = version + 1, updated_at = #{terminalAt} "
+            + "retention_expires_at = #{retentionExpiresAt}, lease_token = NULL, lease_expires_at = NULL, "
+            + "version = version + 1, updated_at = #{terminalAt} "
             + "WHERE id = #{id} AND version = #{version} AND status = 'PROCESSING' "
+            + "AND lease_token = #{leaseToken} "
             + "AND #{status} IN ('PROCESSED', 'DUPLICATE', 'CONFLICT', 'DLQ')")
     int transitionTerminal(@Param("id") Long id, @Param("version") Integer version,
+                           @Param("leaseToken") String leaseToken,
                            @Param("status") String status, @Param("resultCode") String resultCode,
                            @Param("retentionClass") String retentionClass,
                            @Param("terminalAt") LocalDateTime terminalAt,

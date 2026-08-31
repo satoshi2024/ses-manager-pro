@@ -45,4 +45,19 @@ class IntegrationHubB2MigrationContractTest {
         assertTrue(sql.contains("uk_inbound_replay_reference"));
         assertTrue(sql.contains("chk_inbound_primary_resource"));
     }
+
+    @Test
+    void V137はinboundProcessingLease列とstaleRecovery索引を追加する() throws IOException {
+        String sql;
+        try (var stream = getClass().getResourceAsStream(
+                "/db/migration/V137__integration_hub_inbound_processing_lease.sql")) {
+            if (stream == null) throw new IOException("missing V137 migration");
+            sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
+        }
+        assertTrue(sql.contains("lease_token"));
+        assertTrue(sql.contains("lease_expires_at"));
+        assertTrue(sql.contains("idx_inbound_processing_lease"));
+        assertTrue(sql.contains("t_inbound_event"));
+        assertTrue(sql.contains("rollback evidence"));
+    }
 }

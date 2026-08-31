@@ -8,20 +8,31 @@ import java.util.List;
 /** trusted proxyを通過した一段の転送元だけを許可する厳格なsource IP解決。 */
 @Component
 public class ExternalApiSourceIpResolver {
+    /** Tomcat connector境界で捕捉したTCP peer。ForwardedHeaderFilterのrewrite前に設定される。 */
+    public static final String CONNECTOR_PEER_ATTRIBUTE =
+            ExternalApiSourceIpResolver.class.getName() + ".CONNECTOR_PEER";
+
     public String resolve(HttpServletRequest request, List<String> trustedProxies) {
         if (request == null) {
             throw ExternalApiSecurityException.authentication("SOURCE_IP_MISSING");
         }
-        String peer = ExternalApiCidrMatcher.normalizeIp(request.getRemoteAddr());
-        if (peer == null) {
+        String connectorPeer = connectorPeer(request);
+        if (connectorPeer == null) {
+            throw ExternalApiSecurityException.authentication("SOURCE_IP_INVALID");
+        }
+        String servletAddr = ExternalApiCidrMatcher.normalizeIp(request.getRemoteAddr());
+        if (servletAddr == null) {
             throw ExternalApiSecurityException.authentication("SOURCE_IP_INVALID");
         }
         String forwarded = singleHeader(request, "Forwarded");
         String xForwarded = singleHeader(request, "X-Forwarded-For");
         if (forwarded == null && xForwarded == null) {
-            return peer;
+            if (ExternalApiCidrMatcher.matchesAny(connectorPeer, trustedProxies)) {
+                return servletAddr;
+            }
+            return connectorPeer;
         }
-        if (!ExternalApiCidrMatcher.matchesAny(peer, trustedProxies)
+        if (!ExternalApiCidrMatcher.matchesAny(connectorPeer, trustedProxies)
                 || (forwarded != null && xForwarded != null)) {
             throw ExternalApiSecurityException.authentication("UNTRUSTED_PROXY");
         }
@@ -30,6 +41,14 @@ public class ExternalApiSourceIpResolver {
             throw ExternalApiSecurityException.authentication("INVALID_PROXY_HEADER");
         }
         return resolved;
+    }
+
+    private String connectorPeer(HttpServletRequest request) {
+        Object attribute = request.getAttribute(CONNECTOR_PEER_ATTRIBUTE);
+        if (attribute instanceof String value && !value.isBlank()) {
+            return ExternalApiCidrMatcher.normalizeIp(value);
+        }
+        return ExternalApiCidrMatcher.normalizeIp(request.getRemoteAddr());
     }
 
     private String singleHeader(HttpServletRequest request, String name) {
