@@ -31,26 +31,36 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
      */
     @Update("UPDATE t_integration_job " +
             "SET status = 'SUCCEEDED', external_id = #{externalId}, provider_request_id = #{providerRequestId}, " +
-            "    sent_at = #{sentAt}, error_code = NULL, error_message_safe = NULL, " +
+            "    sent_at = #{sentAt}, provider_operation_id = #{providerOperationId}, error_code = NULL, error_category = NULL, error_message_safe = NULL, " +
             "    version = version + 1, updated_at = NOW() " +
             "WHERE id = #{id} AND version = #{version} AND status = 'RUNNING' AND deleted_flag = 0")
     int transitionToSucceeded(@Param("id") Long id,
                               @Param("version") int version,
                               @Param("externalId") String externalId,
                               @Param("providerRequestId") String providerRequestId,
+                              @Param("providerOperationId") String providerOperationId,
                               @Param("sentAt") LocalDateTime sentAt);
+
+    /** プロバイダ応答をローカル状態更新より先に記録し、照合可能にする。 */
+    @Update("UPDATE t_integration_job SET external_id = #{externalId}, provider_request_id = #{providerRequestId}, " +
+            "provider_operation_id = #{providerOperationId}, updated_at = NOW() WHERE id = #{id} AND deleted_flag = 0")
+    int updateProviderMetadata(@Param("id") Long id,
+                               @Param("externalId") String externalId,
+                               @Param("providerRequestId") String providerRequestId,
+                               @Param("providerOperationId") String providerOperationId);
 
     /**
      * バージョン CAS で RUNNING → RETRYABLE ステータスと次回試行時刻を設定する。
      * 戻り値 1=成功、0=CAS 競合。
      */
     @Update("UPDATE t_integration_job " +
-            "SET status = 'RETRYABLE', error_code = #{errorCode}, error_message_safe = #{safeMessage}, " +
+            "SET status = 'RETRYABLE', error_code = #{errorCode}, error_category = #{errorCategory}, error_message_safe = #{safeMessage}, " +
             "    next_retry_at = #{nextRetryAt}, version = version + 1, updated_at = NOW() " +
             "WHERE id = #{id} AND version = #{version} AND status = 'RUNNING' AND deleted_flag = 0")
     int updateStatusToRetryable(@Param("id") Long id,
                                 @Param("version") int version,
                                 @Param("errorCode") String errorCode,
+                                @Param("errorCategory") String errorCategory,
                                 @Param("safeMessage") String safeMessage,
                                 @Param("nextRetryAt") LocalDateTime nextRetryAt);
 
@@ -59,20 +69,21 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
      * 戻り値 1=成功、0=CAS 競合。
      */
     @Update("UPDATE t_integration_job " +
-            "SET status = 'FAILED', error_code = #{errorCode}, error_message_safe = #{safeMessage}, " +
+            "SET status = 'FAILED', error_code = #{errorCode}, error_category = #{errorCategory}, error_message_safe = #{safeMessage}, " +
             "    version = version + 1, updated_at = NOW() " +
             "WHERE id = #{id} AND version = #{version} AND status = #{fromStatus} AND deleted_flag = 0")
     int transitionToFailed(@Param("id") Long id,
                            @Param("version") int version,
                            @Param("fromStatus") String fromStatus,
                            @Param("errorCode") String errorCode,
+                           @Param("errorCategory") String errorCategory,
                            @Param("safeMessage") String safeMessage);
 
     /**
      * PENDING, RETRYABLE, または RUNNING から CANCELLED へのバージョン CAS 遷移。
      */
     @Update("UPDATE t_integration_job " +
-            "SET status = 'CANCELLED', error_code = 'USER_CANCELLED', error_message_safe = #{reason}, " +
+            "SET status = 'CANCELLED', error_code = 'USER_CANCELLED', error_category = 'BUSINESS', error_message_safe = #{reason}, " +
             "    version = version + 1, updated_at = NOW() " +
             "WHERE id = #{id} AND version = #{version} AND status IN ('PENDING', 'RETRYABLE', 'RUNNING') AND deleted_flag = 0")
     int transitionToCancelled(@Param("id") Long id,
@@ -83,7 +94,7 @@ public interface IntegrationJobMapper extends BaseMapper<IntegrationJob> {
      * RETRYABLE または FAILED から PENDING への手動リセット (バージョン CAS)。
      */
     @Update("UPDATE t_integration_job " +
-            "SET status = 'PENDING', next_retry_at = NULL, error_code = NULL, error_message_safe = NULL, " +
+            "SET status = 'PENDING', next_retry_at = NULL, error_code = NULL, error_category = NULL, error_message_safe = NULL, " +
             "    version = version + 1, updated_at = NOW() " +
             "WHERE id = #{id} AND version = #{version} AND status IN ('RETRYABLE', 'FAILED') AND deleted_flag = 0")
     int transitionToManualRetry(@Param("id") Long id,

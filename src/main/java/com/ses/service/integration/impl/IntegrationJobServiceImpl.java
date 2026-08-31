@@ -3,6 +3,8 @@ package com.ses.service.integration.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.exception.SafeErrorPolicy;
+import com.ses.common.util.CorrelationContext;
 import com.ses.entity.IntegrationJob;
 import com.ses.entity.IntegrationJobEvent;
 import com.ses.mapper.IntegrationJobEventMapper;
@@ -40,10 +42,10 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         IntegrationJob existing = getByIdempotencyKey(idempotencyKey);
         if (existing != null) {
             if (payloadHash != null && existing.getPayloadHash() != null && !payloadHash.equals(existing.getPayloadHash())) {
-                throw new BusinessException(409, "同一の冪等性キーに対して異なるペイロードでの再送は拒否されます (key=" + idempotencyKey + ")");
+                throw new BusinessException(409, "同一の冪等性キーに対して異なるペイロードでの再送は拒否されます");
             }
-            log.info("Job already exists for idempotencyKey={}, returning existing (id={})",
-                    idempotencyKey, existing.getId());
+            log.info("連携ジョブの再送を既存ジョブへ統合: jobId={} correlationId={}",
+                    existing.getId(), safeCorrelation());
             return existing;
         }
 
@@ -62,18 +64,19 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
                 .attemptCount(0)
                 .maxAttempts(5)
                 .version(0)
+                .correlationId(safeCorrelation())
                 .build();
 
         try {
             save(job);
-            recordEvent(job.getId(), null, "PENDING", "ジョブ登録完了 (idempotencyKey=" + idempotencyKey + ")");
+            recordEvent(job.getId(), null, "PENDING", "ジョブ登録完了");
             return job;
         } catch (DuplicateKeyException e) {
-            log.warn("Concurrent duplicate job creation for idempotencyKey={}, returning existing", idempotencyKey);
+            log.warn("連携ジョブの同時重複登録を既存ジョブへ統合: correlationId={}", safeCorrelation());
             IntegrationJob created = getByIdempotencyKey(idempotencyKey);
             if (created != null) {
                 if (payloadHash != null && created.getPayloadHash() != null && !payloadHash.equals(created.getPayloadHash())) {
-                    throw new BusinessException(409, "同一の冪等性キーに対して異なるペイロードでの再送は拒否されます (key=" + idempotencyKey + ")");
+                    throw new BusinessException(409, "同一の冪等性キーに対して異なるペイロードでの再送は拒否されます");
                 }
                 return created;
             }
@@ -108,7 +111,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         LocalDateTime now = LocalDateTime.now();
         int updated = baseMapper.claimJobCas(jobId, job.getVersion(), now);
         if (updated == 1) {
-            recordEvent(jobId, fromStatus, "RUNNING", "ワーカーによるジョブ実行開始 (試行回数: " + (job.getAttemptCount() + 1) + ")");
+            recordEvent(jobId, fromStatus, "RUNNING", "ワーカーによるジョブ実行開始");
             return getById(jobId);
         }
         return null;
@@ -117,22 +120,40 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void markSucceeded(Long jobId, String externalId, String providerRequestId, String safeDetail) {
+        markSucceededWithProviderMetadata(jobId, externalId, providerRequestId, null, safeDetail);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markSucceededWithProviderMetadata(Long jobId, String externalId, String providerRequestId,
+                                                  String providerOperationId, String safeDetail) {
         IntegrationJob job = getById(jobId);
         if (job == null) return;
         if (!"RUNNING".equals(job.getStatus())) {
-            log.warn("markSucceeded: jobId={} is in state {} (expected RUNNING), skipping", jobId, job.getStatus());
+            log.warn("連携ジョブ成功遷移をスキップ: jobId={} status={}", jobId, job.getStatus());
             return;
         }
 
         String fromStatus = job.getStatus();
+        String safeExternalId = safeIdentifier(externalId);
+        String safeProviderRequestId = safeIdentifier(providerRequestId);
+        String safeProviderOperationId = safeIdentifier(providerOperationId);
         int updated = baseMapper.transitionToSucceeded(
-                jobId, job.getVersion(), externalId, providerRequestId, LocalDateTime.now());
+                jobId, job.getVersion(), safeExternalId, safeProviderRequestId, safeProviderOperationId, LocalDateTime.now());
         if (updated == 0) {
-            log.warn("markSucceeded CAS 失敗: jobId={}, 競合更新が発生しました", jobId);
+            log.warn("連携ジョブ成功遷移のCASに失敗: jobId={}", jobId);
             return;
         }
 
-        recordEvent(jobId, fromStatus, "SUCCEEDED", safeDetail != null ? safeDetail : "外部連携成功");
+        recordEvent(jobId, fromStatus, "SUCCEEDED", SafeErrorPolicy.safeJobMessage("SUCCESS", safeDetail));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void recordProviderMetadata(Long jobId, String externalId, String providerRequestId,
+                                       String providerOperationId) {
+        baseMapper.updateProviderMetadata(jobId, safeIdentifier(externalId), safeIdentifier(providerRequestId),
+                safeIdentifier(providerOperationId));
     }
 
     @Override
@@ -141,26 +162,27 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         IntegrationJob job = getById(jobId);
         if (job == null) return;
         if (!"RUNNING".equals(job.getStatus())) {
-            log.warn("markRetryable: jobId={} is in state {} (expected RUNNING), skipping", jobId, job.getStatus());
+            log.warn("連携ジョブ再試行遷移をスキップ: jobId={} status={}", jobId, job.getStatus());
             return;
         }
 
         if (job.getAttemptCount() >= job.getMaxAttempts()) {
-            markFailed(jobId, errorCode, "最大試行回数(" + job.getMaxAttempts() + ")を超過しました: " + errorMessageSafe);
+            markFailed(jobId, "MAX_ATTEMPTS_EXCEEDED", "error.integration.maxAttemptsExceeded");
             return;
         }
 
         String fromStatus = job.getStatus();
         LocalDateTime nextRetry = LocalDateTime.now().plusSeconds(Math.max(1, backoffSeconds));
         int updated = baseMapper.updateStatusToRetryable(
-                jobId, job.getVersion(), errorCode, errorMessageSafe, nextRetry);
+                jobId, job.getVersion(), SafeErrorPolicy.safeErrorCode(errorCode),
+                SafeErrorPolicy.errorCategory(errorCode), SafeErrorPolicy.safeJobMessage(errorCode, errorMessageSafe), nextRetry);
         if (updated == 0) {
-            log.warn("markRetryable CAS 失敗: jobId={}", jobId);
+            log.warn("連携ジョブ再試行遷移のCASに失敗: jobId={}", jobId);
             return;
         }
 
         recordEvent(jobId, fromStatus, "RETRYABLE",
-                String.format("[%s] %s (次回試行: %d 秒後)", errorCode, errorMessageSafe, backoffSeconds));
+                SafeErrorPolicy.safeJobMessage(errorCode, errorMessageSafe));
     }
 
     @Override
@@ -169,18 +191,20 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         IntegrationJob job = getById(jobId);
         if (job == null) return;
         if ("SUCCEEDED".equals(job.getStatus()) || "FAILED".equals(job.getStatus()) || "CANCELLED".equals(job.getStatus())) {
-            log.warn("markFailed: jobId={} is already terminal (status={}), skipping", jobId, job.getStatus());
+            log.warn("連携ジョブ失敗遷移をスキップ: jobId={} status={}", jobId, job.getStatus());
             return;
         }
 
         String fromStatus = job.getStatus();
-        int updated = baseMapper.transitionToFailed(jobId, job.getVersion(), fromStatus, errorCode, safeMessage);
+        int updated = baseMapper.transitionToFailed(jobId, job.getVersion(), fromStatus,
+                SafeErrorPolicy.safeErrorCode(errorCode), SafeErrorPolicy.errorCategory(errorCode),
+                SafeErrorPolicy.safeJobMessage(errorCode, safeMessage));
         if (updated == 0) {
-            log.warn("markFailed CAS 失敗: jobId={}", jobId);
+            log.warn("連携ジョブ失敗遷移のCASに失敗: jobId={}", jobId);
             return;
         }
 
-        recordEvent(jobId, fromStatus, "FAILED", String.format("[%s] %s", errorCode, safeMessage));
+        recordEvent(jobId, fromStatus, "FAILED", SafeErrorPolicy.safeJobMessage(errorCode, safeMessage));
     }
 
     @Override
@@ -188,7 +212,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     public void cancelJob(Long jobId, String reason) {
         IntegrationJob job = getById(jobId);
         if (job == null) {
-            throw new BusinessException(404, "ジョブが見つかりません (id=" + jobId + ")");
+            throw new BusinessException(404, "ジョブが見つかりません");
         }
         // 1. SALES_INVOICE_CANCEL は全状態で取消不可 (400)
         if ("SALES_INVOICE_CANCEL".equals(job.getJobType())) {
@@ -211,12 +235,13 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
         }
 
         String fromStatus = job.getStatus();
-        int updated = baseMapper.transitionToCancelled(jobId, job.getVersion(), reason);
+        String safeReason = SafeErrorPolicy.safeJobMessage("USER_CANCELLED", reason);
+        int updated = baseMapper.transitionToCancelled(jobId, job.getVersion(), safeReason);
         if (updated == 0) {
             throw new BusinessException(409, "ジョブの状態が変更されました。再試行してください。");
         }
 
-        recordEvent(jobId, fromStatus, "CANCELLED", "キャンセル: " + reason);
+        recordEvent(jobId, fromStatus, "CANCELLED", SafeErrorPolicy.safeJobMessage("USER_CANCELLED", reason));
     }
 
     @Override
@@ -224,7 +249,7 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
     public void resetForManualRetry(Long jobId) {
         IntegrationJob job = getById(jobId);
         if (job == null) {
-            throw new BusinessException(404, "ジョブが見つかりません (id=" + jobId + ")");
+            throw new BusinessException(404, "ジョブが見つかりません");
         }
         if (!"RETRYABLE".equals(job.getStatus()) && !"FAILED".equals(job.getStatus())) {
             throw new BusinessException(400, "再試行可能なステータス(RETRYABLE / FAILED)ではありません (現在: " + job.getStatus() + ")");
@@ -288,18 +313,31 @@ public class IntegrationJobServiceImpl extends ServiceImpl<IntegrationJobMapper,
 
     @Override
     public void recordJobEvent(Long jobId, String eventType, String detail, String reasonCode) {
-        String msg = (reasonCode != null && !reasonCode.isBlank()) ? "[" + reasonCode + "] " + detail : detail;
+        String msg = reasonCode != null && !reasonCode.isBlank()
+                ? SafeErrorPolicy.safeJobMessage(reasonCode, reasonCode)
+                : SafeErrorPolicy.safeJobMessage(eventType, detail);
         recordEvent(jobId, null, eventType, msg);
     }
 
     private void recordEvent(Long jobId, String fromStatus, String toStatus, String safeDetail) {
+        IntegrationJob job = getById(jobId);
         IntegrationJobEvent event = IntegrationJobEvent.builder()
                 .jobId(jobId)
+                .correlationId(job != null && job.getCorrelationId() != null ? job.getCorrelationId() : safeCorrelation())
                 .fromStatus(fromStatus)
                 .toStatus(toStatus)
                 .occurredAt(LocalDateTime.now())
-                .safeDetail(safeDetail)
+                .safeDetail(SafeErrorPolicy.safeJobMessage(toStatus, safeDetail))
                 .build();
         jobEventMapper.insert(event);
+    }
+
+    private String safeCorrelation() {
+        String current = CorrelationContext.current();
+        return current != null ? current : "job-corr-" + java.util.UUID.randomUUID();
+    }
+
+    private String safeIdentifier(String value) {
+        return CorrelationContext.safeIdentifier(value);
     }
 }

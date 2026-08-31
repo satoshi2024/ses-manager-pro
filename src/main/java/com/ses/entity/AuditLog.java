@@ -28,5 +28,13 @@ public class AuditLog {
     private String applicationCode;
     private Boolean successFlag;
 
+    private String correlationId;
+    private String invoiceId;
+    private String digitalInvoiceId;
+    private String jobId;
+    private String providerOperationId;
+    private String errorCode;
+    private String errorCategory;
+
     private LocalDateTime createdAt;
 }

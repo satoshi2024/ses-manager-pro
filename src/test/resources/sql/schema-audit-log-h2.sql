@@ -10,5 +10,20 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
   status     INT          NOT NULL,
   application_code VARCHAR(64),
   success_flag BOOLEAN NOT NULL DEFAULT TRUE,
+  correlation_id VARCHAR(100),
+  invoice_id VARCHAR(100),
+  digital_invoice_id VARCHAR(100),
+  job_id VARCHAR(100),
+  provider_operation_id VARCHAR(128),
+  error_code VARCHAR(64),
+  error_category VARCHAR(32),
   created_at DATETIME     DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS invoice_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS digital_invoice_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS job_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS provider_operation_id VARCHAR(128);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS error_code VARCHAR(64);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS error_category VARCHAR(32);

@@ -12,6 +12,12 @@ public interface DigitalInvoiceProvider {
      */
     String sendInvoice(String xml, String specificationVersion, String messageId);
 
+    /** 本文を保持せず、照合に必要なプロバイダ識別子だけを返す。 */
+    default DigitalInvoiceProviderResponse sendInvoiceWithMetadata(String xml, String specificationVersion,
+                                                                    String messageId) {
+        return DigitalInvoiceProviderResponse.success(sendInvoice(xml, specificationVersion, messageId));
+    }
+
     /**
      * Webhookの署名が正しいか検証する。(raw bodyを用いる)
      * @param rawBody Webhookの生リクエストボディ
@@ -20,4 +26,3 @@ public interface DigitalInvoiceProvider {
      */
     boolean verifyWebhookSignature(String rawBody, String signatureHeader);
 }
-

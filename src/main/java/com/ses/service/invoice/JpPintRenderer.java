@@ -221,7 +221,11 @@ public class JpPintRenderer {
             return writer.toString();
 
         } catch (Exception e) {
-            log.error("XMLの生成に失敗しました。", e); throw new BusinessException("XMLの生成に失敗しました。");
+            log.error("XMLの生成に失敗しました: invoiceNo={} correlationId={} exceptionClass={} detail={}",
+                    invoice != null ? invoice.getInvoiceNumber() : null,
+                    com.ses.common.util.CorrelationContext.current(), e.getClass().getName(),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
+            throw new BusinessException("XMLの生成に失敗しました。");
         }
     }
 
@@ -295,7 +299,12 @@ public class JpPintRenderer {
             transformer.transform(new DOMSource(doc), new StreamResult(writer));
             return writer.toString();
         } catch (Exception e) {
-            log.error("CreditNote XMLの生成に失敗しました。", e);
+            log.error("CreditNote XMLの生成に失敗しました: creditNoteId={} billingRef={} correlationId={} exceptionClass={} detail={}",
+                    com.ses.common.util.CorrelationContext.safeIdentifier(creditNoteId),
+                    com.ses.common.util.CorrelationContext.safeIdentifier(billingReferenceId),
+                    com.ses.common.util.CorrelationContext.current(),
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             throw new BusinessException("CreditNote XMLの生成に失敗しました。");
         }
     }
@@ -309,7 +318,4 @@ public class JpPintRenderer {
         return builder.parse(is);
     }
 }
-
-
-
 

@@ -1,11 +1,12 @@
 package com.ses.common.exception;
 
 import com.ses.common.result.ApiResult;
+import com.ses.common.util.CorrelationContext;
+import com.ses.common.util.LogRedaction;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.validation.BindingResult;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -15,7 +16,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import java.util.stream.Collectors;
 
 /**
  * グローバル例外ハンドラー
@@ -40,20 +40,34 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResult<Void>> handleBusinessException(BusinessException e) {
-        String message = e.getMessage();
-        if (e.getMessageKey() != null) {
-            message = messageSource.getMessage(e.getMessageKey(), e.getArgs(), e.getMessageKey(), LocaleContextHolder.getLocale());
-        }
-        log.warn("業務例外が発生しました: code={}, message={}", e.getCode(), message);
-        return ResponseEntity.status(toHttpStatus(e.getCode())).body(ApiResult.<Void>error(e.getCode(), message));
+        int code = SafeErrorPolicy.safeHttpCode(e == null ? 500 : e.getCode());
+        String message = SafeErrorPolicy.resolveBusinessMessage(e, messageSource, LocaleContextHolder.getLocale());
+        // 相関IDのない単体呼出しでは、前回処理のMDC値を引き継がない。
+        boolean requestContext = CorrelationContext.get(CorrelationContext.CORRELATION_ID) != null;
+        String existingErrorCode = requestContext
+                ? CorrelationContext.get(CorrelationContext.ERROR_CODE) : null;
+        String errorCode = existingErrorCode == null
+                ? "BUSINESS_EXCEPTION"
+                : SafeErrorPolicy.safeErrorCode(existingErrorCode);
+        String existingCategory = requestContext
+                ? CorrelationContext.get(CorrelationContext.ERROR_CATEGORY) : null;
+        String category = code >= 500 || "SYSTEM".equals(existingCategory) ? "SYSTEM" : "BUSINESS";
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, errorCode);
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, category);
+        log.warn("業務例外: httpCode={} category={} errorCode={} exceptionClass={} {}",
+                code, category, errorCode, LogRedaction.exceptionType(e), contextFields());
+        return ResponseEntity.status(toHttpStatus(code)).body(ApiResult.<Void>error(code, message));
     }
 
     /** PWAの競合はclient/server差分をdataへ返し、クライアントがlast-write-winsを選べないようにする。 */
     @ExceptionHandler(PwaConflictException.class)
     public ResponseEntity<ApiResult<Object>> handlePwaConflict(PwaConflictException e) {
-        log.warn("PWA command競合: {}", e.getMessage());
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "OPTIMISTIC_LOCK_CONFLICT");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("PWA command競合: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(new ApiResult<>(409, e.getMessage(), e.getData()));
+                .body(new ApiResult<>(409, "他の操作と競合しました。再読み込みして再試行してください。", e.getData()));
     }
 
     /**
@@ -66,18 +80,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResult<Void>> handleValidationException(MethodArgumentNotValidException e) {
         BindingResult bindingResult = e.getBindingResult();
-        String errorMessage = bindingResult.getFieldErrors().stream()
-                .map(FieldError::getDefaultMessage)
-                .collect(Collectors.joining("、"));
-
-        log.warn("入力バリデーションエラー: {}", errorMessage);
-        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "入力内容に誤りがあります：" + errorMessage));
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "VALIDATION_FAILED");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("入力バリデーションエラー: fieldCount={} {}",
+                bindingResult == null ? 0 : bindingResult.getErrorCount(), contextFields());
+        String message = bindingResult == null ? "入力内容に誤りがあります。"
+                : bindingResult.getAllErrors().stream()
+                .map(org.springframework.validation.ObjectError::getDefaultMessage)
+                .filter(SafeErrorPolicy::isAllowedFixedMessage)
+                .findFirst()
+                .orElse("入力内容に誤りがあります。");
+        return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, message));
     }
 
     @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
     public ResponseEntity<ApiResult<Void>> handleAccessDeniedException(org.springframework.security.access.AccessDeniedException e) {
-        String message = messageSource.getMessage("error.accessDenied", null, "アクセス権限がありません", LocaleContextHolder.getLocale());
-        log.warn("アクセス拒否エラー: {}", e.getMessage());
+        String message = SafeErrorPolicy.resolveMessageKey("error.accessDenied", messageSource, LocaleContextHolder.getLocale());
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "ACCESS_DENIED");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("アクセス拒否エラー: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResult.<Void>error(403, message));
     }
 
@@ -90,12 +112,19 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResult<Void>> handleException(Exception e) {
-        log.error("システムエラーが発生しました", e);
-        return ResponseEntity.internalServerError().body(ApiResult.<Void>error("システムエラーが発生しました"));
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "SYSTEM_UNEXPECTED");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "SYSTEM");
+        log.error("システムエラー: category=SYSTEM exceptionClass={} detail={} {}",
+                LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e), contextFields());
+        return ResponseEntity.internalServerError().body(ApiResult.<Void>error(500, SafeErrorPolicy.DEFAULT_SYSTEM_MESSAGE));
     }
 
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class, java.time.format.DateTimeParseException.class})
     public ResponseEntity<ApiResult<Void>> handleRequestParameterException(Exception e) {
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "INVALID_REQUEST_PARAMETER");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("リクエストパラメータ不正: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエストパラメータが不正です"));
     }
 
@@ -108,8 +137,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResult<Void>> handleUnreadableBody(
             org.springframework.http.converter.HttpMessageNotReadableException e) {
-        log.warn("リクエストボディを解釈できませんでした: {}", e.getMostSpecificCause().getMessage());
+        CorrelationContext.put(CorrelationContext.ERROR_CODE, "INVALID_REQUEST_BODY");
+        CorrelationContext.put(CorrelationContext.ERROR_CATEGORY, "BUSINESS");
+        log.warn("リクエストボディを解釈できませんでした: category=BUSINESS exceptionClass={} {}",
+                LogRedaction.exceptionType(e), contextFields());
         return ResponseEntity.badRequest().body(ApiResult.<Void>error(400, "リクエスト内容が不正です"));
+    }
+
+    private String contextFields() {
+        return "correlationId=" + safeContext(CorrelationContext.CORRELATION_ID)
+                + " invoiceId=" + safeContext(CorrelationContext.INVOICE_ID)
+                + " digitalInvoiceId=" + safeContext(CorrelationContext.DIGITAL_INVOICE_ID)
+                + " jobId=" + safeContext(CorrelationContext.JOB_ID)
+                + " providerOperationId=" + safeContext(CorrelationContext.PROVIDER_OPERATION_ID)
+                + " errorCode=" + safeContext(CorrelationContext.ERROR_CODE)
+                + " errorCategory=" + safeContext(CorrelationContext.ERROR_CATEGORY);
+    }
+
+    private String safeContext(String key) {
+        String value = CorrelationContext.get(key);
+        return value == null ? "-" : value;
     }
 
     private HttpStatus toHttpStatus(int code) {

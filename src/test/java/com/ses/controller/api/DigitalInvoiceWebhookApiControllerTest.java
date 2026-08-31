@@ -46,7 +46,7 @@ class DigitalInvoiceWebhookApiControllerTest {
     private com.ses.service.DocumentService documentService;
 
     @Test
-    void testReceiveWebhook_Success_ValidSignature() throws Exception {
+    void 有効な署名のWebhookを受け付ける() throws Exception {
         DigitalInvoice di = new DigitalInvoice();
         di.setInvoiceId(100L);
         di.setDirection("SEND");
@@ -78,7 +78,7 @@ class DigitalInvoiceWebhookApiControllerTest {
     }
 
     @Test
-    void testReceiveWebhook_InvalidSignature_DoesNotChangeStatus() throws Exception {
+    void 無効な署名のWebhookは状態を変更しない() throws Exception {
         DigitalInvoice di = new DigitalInvoice();
         di.setInvoiceId(101L);
         di.setDirection("SEND");
@@ -99,7 +99,7 @@ class DigitalInvoiceWebhookApiControllerTest {
                 .content(json))
                 .andExpect(status().isUnauthorized())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
-                        .string("Invalid signature"));
+                        .string("署名が不正です。"));
 
         DigitalInvoice updated = digitalInvoiceService.getById(di.getId());
         assertEquals("SENT", updated.getStatus()); // ステータスは変わらない
@@ -111,7 +111,7 @@ class DigitalInvoiceWebhookApiControllerTest {
     }
 
     @Test
-    void testReceiveWebhook_MagicValidSigHeader_DoesNotBypassWhenProviderRejects() throws Exception {
+    void マジック署名文字列を受け付けない() throws Exception {
         DigitalInvoice di = new DigitalInvoice();
         di.setInvoiceId(102L);
         di.setDirection("SEND");
@@ -140,7 +140,7 @@ class DigitalInvoiceWebhookApiControllerTest {
     }
 
     @Test
-    void testReceiveInboundInvoice() throws Exception {
+    void 受信電子請求書Webhookを登録する() throws Exception {
         when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
         com.ses.entity.Document archived = new com.ses.entity.Document();
         archived.setId(9001L);
@@ -185,7 +185,7 @@ class DigitalInvoiceWebhookApiControllerTest {
     }
 
     @Test
-    void testReceiveInboundInvoice_DuplicateMessageId() throws Exception {
+    void 受信電子請求書の重複メッセージを冪等に処理する() throws Exception {
         when(provider.verifyWebhookSignature(any(), any())).thenReturn(true);
         com.ses.entity.Document archived = new com.ses.entity.Document();
         archived.setId(9002L);
@@ -217,5 +217,3 @@ class DigitalInvoiceWebhookApiControllerTest {
         assertEquals(1, count, "Should not create duplicate DigitalInvoice on duplicate webhook");
     }
 }
-
-
