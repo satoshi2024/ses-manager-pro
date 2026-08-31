@@ -285,6 +285,8 @@ public class ApiRetentionPurgeServiceImpl implements ApiRetentionPurgeService {
         if (row == null || !retentionClass.equals(row.getRetentionClass()) || hasActiveHold("DELIVERY", id)) {
             return false;
         }
+        // audit行はdelivery削除後も独立retentionで残す。H2はON DELETE SET NULLが効かない場合があるため明示的に外す。
+        replayAuditMapper.clearDeliveryReference(id);
         return deliveryMapper.deleteExpired(id, row.getVersion(), now) == 1;
     }
 

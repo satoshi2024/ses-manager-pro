@@ -18,6 +18,10 @@ public interface ApiDeliveryReplayAuditMapper extends BaseMapper<ApiDeliveryRepl
     @Select("SELECT * FROM t_api_delivery_replay_audit WHERE id = #{id} FOR UPDATE")
     ApiDeliveryReplayAudit selectForUpdate(@Param("id") Long id);
 
+    /** delivery削除前に参照を外し、audit行を独立retentionで残す（H2でもON DELETE SET NULLに依存しない）。 */
+    @org.apache.ibatis.annotations.Update("UPDATE t_api_delivery_replay_audit SET delivery_id = NULL WHERE delivery_id = #{deliveryId}")
+    int clearDeliveryReference(@Param("deliveryId") Long deliveryId);
+
     @Delete("DELETE FROM t_api_delivery_replay_audit WHERE id = #{id} AND retention_expires_at IS NOT NULL "
             + "AND retention_expires_at <= #{now}")
     int deleteExpired(@Param("id") Long id, @Param("now") java.time.LocalDateTime now);
