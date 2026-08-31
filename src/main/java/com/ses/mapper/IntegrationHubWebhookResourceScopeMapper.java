@@ -50,6 +50,7 @@ public interface IntegrationHubWebhookResourceScopeMapper {
             WHERE 1 = 0
           </otherwise>
         </choose>
+        FOR UPDATE
         </script>
         """)
     List<ExternalApiResourceMembership> selectCurrentMemberships(

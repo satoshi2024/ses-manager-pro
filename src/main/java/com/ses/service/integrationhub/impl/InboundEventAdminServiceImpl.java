@@ -1,29 +1,19 @@
 package com.ses.service.integrationhub.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.util.PageUtils;
-import com.ses.common.util.SecurityUtils;
 import com.ses.config.LoginUser;
-import com.ses.config.integrationhub.ExternalApiDataScope;
 import com.ses.dto.integrationhub.InboundEventAdminDto;
 import com.ses.dto.integrationhub.InboundEventAdminPage;
 import com.ses.dto.integrationhub.InboundEventAdminRow;
 import com.ses.dto.integrationhub.InboundEventReplayResponse;
-import com.ses.entity.integrationhub.ApiClient;
-import com.ses.entity.integrationhub.ApiClientScope;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.entity.integrationhub.InboundEventReplayRequest;
-import com.ses.entity.integrationhub.WebhookSubscription;
-import com.ses.mapper.ApiClientMapper;
-import com.ses.mapper.ApiClientScopeMapper;
 import com.ses.mapper.InboundEventMapper;
 import com.ses.mapper.InboundEventReplayRequestMapper;
-import com.ses.mapper.WebhookSubscriptionMapper;
-import com.ses.service.integrationhub.ExternalDtoSnapshot;
 import com.ses.service.integrationhub.InboundEventAdminService;
+import com.ses.service.integrationhub.InboundEventAdminReferenceCodec;
+import com.ses.service.integrationhub.InboundEventBindingValidator;
 import com.ses.service.integrationhub.InboundEventProcessor;
-import com.ses.service.integrationhub.InboundEventService;
 import com.ses.service.integrationhub.IntegrationHubStates;
 import com.ses.service.security.AuthorizationService;
 import lombok.RequiredArgsConstructor;
@@ -53,19 +43,15 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
             IntegrationHubStates.INBOUND_CONFLICT, IntegrationHubStates.INBOUND_DLQ);
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("[A-Za-z0-9._~-]{1,100}");
     private static final Pattern REASON_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
-    private static final String RECEIVE_SCOPE = "integration.webhook.receive";
-    private static final String RECEIVE_OPERATION = "integration.webhook.receive";
     private static final String REPLAY_OPERATION = "integration.webhook.replay";
     private static final int MAX_PAGE_NUMBER = 1_000_000;
 
     private final InboundEventMapper inboundEventMapper;
     private final InboundEventReplayRequestMapper replayMapper;
-    private final ApiClientMapper clientMapper;
-    private final ApiClientScopeMapper clientScopeMapper;
-    private final WebhookSubscriptionMapper subscriptionMapper;
     private final AuthorizationService authorizationService;
     private final InboundEventProcessor inboundEventProcessor;
-    private final ObjectMapper objectMapper;
+    private final InboundEventBindingValidator bindingValidator;
+    private final InboundEventAdminReferenceCodec referenceCodec;
 
     @Override
     public InboundEventAdminPage page(long current, long size, String status, String providerName) {
@@ -83,19 +69,23 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public InboundEventReplayResponse replay(Long inboundEventId, String reasonCode,
+    public InboundEventReplayResponse replay(String inboundEventReference, String reasonCode,
                                               Authentication authentication, LocalDateTime now) {
-        requireAdmin(authentication);
+        requireAdmin(authentication, now);
         requireReason(reasonCode);
-        if (inboundEventId == null || now == null) {
+        if (inboundEventReference == null || inboundEventReference.isBlank() || now == null) {
             throw new IllegalArgumentException("invalid inbound replay request");
         }
-        InboundEvent event = inboundEventMapper.selectForUpdate(inboundEventId);
+        InboundEvent event = inboundEventMapper.selectByAdminReferenceForUpdate(inboundEventReference);
         if (event == null || !IntegrationHubStates.INBOUND_DLQ.equals(event.getStatus())) {
             throw new IllegalStateException("only inbound DLQ can be replayed");
         }
-        validateCurrentBinding(event, now);
-        Integer previous = replayMapper.selectMaxGeneration(inboundEventId);
+        if (!referenceCodec.matchesEvent(inboundEventReference, event.getClientId(), event.getProviderName(),
+                event.getProviderEventId())) {
+            throw new SecurityException("inbound admin reference is invalid");
+        }
+        bindingValidator.validateCurrent(event, now);
+        Integer previous = replayMapper.selectMaxGeneration(event.getId());
         int generation = previous == null ? 1 : previous + 1;
         if (generation <= 0) {
             throw new IllegalStateException("inbound replay generation overflow");
@@ -103,6 +93,7 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
         String operatorRef = operatorRef(authentication);
         InboundEventReplayRequest request = InboundEventReplayRequest.builder()
                 .inboundEventId(event.getId())
+                .replayReference(referenceCodec.replayReference(inboundEventReference, generation))
                 .clientId(event.getClientId())
                 .providerName(event.getProviderName())
                 .providerEventId(event.getProviderEventId())
@@ -125,18 +116,18 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
 
         // request ledgerのcommitとreplay処理を同じtransactionへ混ぜないため、
         // このserviceはREQUESTEDを返し、controllerが別呼出しのprocess boundaryを実行する。
-        return new InboundEventReplayResponse(request.getId(), generation, request.getStatus(), "REPLAY_REQUESTED");
+        return new InboundEventReplayResponse(request.getReplayReference(), generation, request.getStatus(), "REPLAY_REQUESTED");
     }
 
     /** request後に別transactionで1回だけlocal processorを実行する。 */
     @Transactional(rollbackFor = Exception.class)
-    public InboundEventReplayResponse processReplay(Long requestId, Authentication authentication,
+    public InboundEventReplayResponse processReplay(String replayReference, Authentication authentication,
                                                     LocalDateTime now) {
-        requireAdmin(authentication);
-        if (requestId == null || now == null) {
+        requireAdmin(authentication, now);
+        if (replayReference == null || replayReference.isBlank() || now == null) {
             throw new IllegalArgumentException("invalid inbound replay process request");
         }
-        InboundEventReplayRequest request = replayMapper.selectForUpdate(requestId);
+        InboundEventReplayRequest request = replayMapper.selectByReplayReferenceForUpdate(replayReference);
         if (request == null) {
             throw new IllegalStateException("inbound replay request not found");
         }
@@ -144,31 +135,31 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
             return replayResponse(request);
         }
         if (replayMapper.claim(request.getId(), request.getVersion(), now) != 1) {
-            return replayResponse(replayMapper.selectForUpdate(requestId));
+            return replayResponse(replayMapper.selectByReplayReferenceForUpdate(replayReference));
         }
-        InboundEventReplayRequest claimed = replayMapper.selectForUpdate(requestId);
+        InboundEventReplayRequest claimed = replayMapper.selectForUpdate(request.getId());
         InboundEvent source = claimed.getInboundEventId() == null
                 ? null : inboundEventMapper.selectForUpdate(claimed.getInboundEventId());
         if (source == null || !IntegrationHubStates.INBOUND_DLQ.equals(source.getStatus())) {
             completeReplay(claimed, "REJECTED", "SOURCE_EXPIRED_OR_NOT_DLQ", now);
-            return replayResponse(replayMapper.selectForUpdate(requestId));
+            return replayResponse(replayMapper.selectByReplayReferenceForUpdate(replayReference));
         }
         try {
-            validateCurrentBinding(source, now);
+            bindingValidator.validateCurrent(source, now);
         } catch (RuntimeException e) {
             // 現行subscription/scopeの不一致は再試行しても安全にならないため、
             // processorへ渡さず独立したREJECTED監査結果に固定する。
             completeReplay(claimed, "REJECTED", "CURRENT_SCOPE_INVALID", now);
-            return replayResponse(replayMapper.selectForUpdate(requestId));
+            return replayResponse(replayMapper.selectByReplayReferenceForUpdate(replayReference));
         }
         try {
             inboundEventProcessor.process(source);
         } catch (RuntimeException e) {
             completeReplay(claimed, "DLQ", "REPLAY_PROCESSING_FAILED", now);
-            return replayResponse(replayMapper.selectForUpdate(requestId));
+            return replayResponse(replayMapper.selectByReplayReferenceForUpdate(replayReference));
         }
         completeReplay(claimed, "PROCESSED", "REPLAY_ACCEPTED", now);
-        return replayResponse(replayMapper.selectForUpdate(requestId));
+        return replayResponse(replayMapper.selectByReplayReferenceForUpdate(replayReference));
     }
 
     private void completeReplay(InboundEventReplayRequest request, String status,
@@ -182,66 +173,17 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
         if (request == null) {
             throw new IllegalStateException("inbound replay state disappeared");
         }
-        return new InboundEventReplayResponse(request.getId(), request.getReplayGeneration(),
+        return new InboundEventReplayResponse(request.getReplayReference(), request.getReplayGeneration(),
                 request.getStatus(), request.getResultCode());
     }
-
-    private void validateCurrentBinding(InboundEvent event, LocalDateTime now) {
-        if (event.getClientId() == null || event.getProviderName() == null || event.getRawBodyHash() == null
-                || event.getParsedFieldsSnapshot() == null) {
-            throw new SecurityException("inbound event binding is incomplete");
-        }
-        ApiClient client = clientMapper.selectByClientIdForUpdate(event.getClientId());
-        if (client == null || client.getId() == null || !"ACTIVE".equals(client.getStatus())
-                || client.getRevokedAt() != null || (client.getExpiresAt() != null && !client.getExpiresAt().isAfter(now))
-                || client.getTenantId() == null || client.getLegalEntityId() == null) {
-            throw new SecurityException("inbound client is not active");
-        }
-        ExternalDtoSnapshot snapshot = ExternalDtoSnapshot.ofAllowList(
-                event.getParsedFieldsSnapshot(), ExternalDtoSnapshot.INBOUND_FIELDS);
-        String eventType = eventType(snapshot);
-        WebhookSubscription subscription = subscriptionMapper.selectActiveInboundByClientAndEvent(
-                event.getClientId(), eventType);
-        if (subscription == null || !"INBOUND".equals(subscription.getDirection())) {
-            throw new SecurityException("inbound subscription is not active");
-        }
-        ApiClientScope permission = clientScopeMapper.selectActive(
-                client.getId(), RECEIVE_SCOPE, RECEIVE_OPERATION);
-        if (permission == null) {
-            throw new SecurityException("inbound permission is not active");
-        }
-        ExternalApiDataScope clientScope = ExternalApiDataScope.parse(client.getDataScopeJson(), objectMapper);
-        ExternalApiDataScope permissionScope = ExternalApiDataScope.parse(permission.getDataScopeJson(), objectMapper);
-        ExternalApiDataScope subscriptionScope = ExternalApiDataScope.parse(subscription.getDataScopeJson(), objectMapper);
-        requireExactBinding(clientScope, client.getTenantId(), client.getLegalEntityId());
-        requireExactBinding(permissionScope, client.getTenantId(), client.getLegalEntityId());
-        requireExactBinding(subscriptionScope, client.getTenantId(), client.getLegalEntityId());
-        ExternalApiDataScope effective = clientScope.intersect(permissionScope).intersect(subscriptionScope);
-        requireExactBinding(effective, client.getTenantId(), client.getLegalEntityId());
-    }
-
-    private String eventType(ExternalDtoSnapshot snapshot) {
-        try {
-            JsonNode node = objectMapper.readTree(snapshot.json()).get("eventType");
-            if (node == null || !node.isTextual() || !node.textValue().matches("[A-Za-z][A-Za-z0-9._:-]{0,99}")) {
-                throw new IllegalArgumentException("inbound event type is invalid");
-            }
-            return node.textValue();
-        } catch (Exception e) {
-            throw new IllegalArgumentException("inbound event type is invalid", e);
-        }
-    }
-
-    private void requireExactBinding(ExternalApiDataScope scope, String tenantId, Long legalEntityId) {
-        if (scope == null || !Set.of(tenantId).equals(scope.values().get("tenantIds"))
-                || !Set.of(Long.toString(legalEntityId)).equals(scope.values().get("legalEntityIds"))) {
-            throw new SecurityException("inbound scope binding is invalid");
-        }
-    }
-
-    private void requireAdmin(Authentication authentication) {
+    private void requireAdmin(Authentication authentication, LocalDateTime now) {
         if (authentication == null || authentication instanceof AnonymousAuthenticationToken
                 || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof LoginUser loginUser)
+                || loginUser.getSysUser() == null || loginUser.getSysUser().getId() == null
+                || loginUser.getSysUser().getStatus() == null || loginUser.getSysUser().getStatus() != 1
+                || (loginUser.getSysUser().getLockedUntil() != null
+                && (now == null || loginUser.getSysUser().getLockedUntil().isAfter(now)))
                 || authentication.getAuthorities().stream().noneMatch(a -> "ROLE_管理者".equals(a.getAuthority()))) {
             throw new AccessDeniedException("admin permission required");
         }
@@ -249,17 +191,9 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
     }
 
     private String operatorRef(Authentication authentication) {
-        Long userId = null;
-        if (authentication.getPrincipal() instanceof LoginUser loginUser
-                && loginUser.getSysUser() != null) {
-            userId = loginUser.getSysUser().getId();
-        }
-        if (userId == null) {
-            userId = SecurityUtils.currentUserId();
-        }
-        if (userId == null || userId <= 0) {
-            throw new AccessDeniedException("authenticated internal operator is missing");
-        }
+        LoginUser loginUser = (LoginUser) authentication.getPrincipal();
+        Long userId = loginUser.getSysUser().getId();
+        if (userId == null || userId <= 0) throw new AccessDeniedException("authenticated internal operator is missing");
         return "sys-user:" + userId;
     }
 
@@ -282,7 +216,7 @@ public class InboundEventAdminServiceImpl implements InboundEventAdminService {
     }
 
     private InboundEventAdminDto toDto(InboundEventAdminRow row) {
-        return new InboundEventAdminDto(row.getId(), row.getClientId(), row.getProviderName(),
+        return new InboundEventAdminDto(row.getReference(), row.getClientId(), row.getProviderName(),
                 row.getProviderEventId(), row.getSignatureValid(), row.getStatus(), row.getResultCode(),
                 row.getReceivedAt(), row.getProcessedAt(), row.getRetentionExpiresAt());
     }

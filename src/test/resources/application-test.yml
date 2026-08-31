@@ -90,6 +90,9 @@ integration:
       read-timeout-ms: 3000
     provider:
       mode: MOCK
+      approved-inbound-providers:
+        - provider-a
+        - provider-b2
 
 organization:
   scope:

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,7 +18,8 @@ class ExternalApiInboundWebhookParserTest {
 
     @BeforeEach
     void setUp() {
-        parser = new ExternalApiInboundWebhookParser(new ObjectMapper());
+        parser = new ExternalApiInboundWebhookParser(new ObjectMapper(),
+                new com.ses.config.integrationhub.IntegrationHubInboundProviderCatalog(Set.of("provider-a")));
     }
 
     @Test

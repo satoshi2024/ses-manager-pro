@@ -1,8 +1,12 @@
 package com.ses.service.integrationhub.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.mapper.InboundEventMapper;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
+import com.ses.service.integrationhub.InboundEventAdminReferenceCodec;
+import com.ses.service.integrationhub.InboundEventBindingValidator;
 import com.ses.service.integrationhub.InboundEventService;
 import com.ses.service.integrationhub.IntegrationHubStates;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,9 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class InboundEventServiceImpl implements InboundEventService {
     private final InboundEventMapper mapper;
+    private final InboundEventBindingValidator bindingValidator;
+    private final InboundEventAdminReferenceCodec referenceCodec;
+    private final ObjectMapper objectMapper;
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Receipt recordReceived(String clientId, String providerName, String providerEventId, String rawBodyHash,
@@ -30,6 +37,8 @@ public class InboundEventServiceImpl implements InboundEventService {
             throw new IllegalArgumentException("invalid inbound event");
         }
         ExternalDtoSnapshot.requireAllowList(parsedFieldsSnapshot, ExternalDtoSnapshot.INBOUND_FIELDS);
+        InboundEventBindingValidator.Binding binding = bindingValidator.validateForReceipt(
+                clientId, providerName, eventType(parsedFieldsSnapshot), parsedFieldsSnapshot, receivedAt);
         InboundEvent existing = mapper.selectByProviderEvent(clientId, providerName, providerEventId);
         if (existing != null) {
             if (rawBodyHash.equalsIgnoreCase(existing.getRawBodyHash())) {
@@ -46,6 +55,9 @@ public class InboundEventServiceImpl implements InboundEventService {
                 .clientId(clientId)
                 .providerName(providerName)
                 .providerEventId(providerEventId)
+                .adminReference(referenceCodec.eventReference(clientId, providerName, providerEventId))
+                .primaryResourceType(binding.primaryResourceType())
+                .primaryResourceId(binding.primaryResourceId())
                 .rawBodyHash(rawBodyHash.toLowerCase())
                 .signedTimestamp(signedTimestamp)
                 .parsedFieldsSnapshot(parsedFieldsSnapshot.json())
@@ -120,6 +132,18 @@ public class InboundEventServiceImpl implements InboundEventService {
     private void requireHash(String value) {
         if (value == null || !value.matches("[0-9a-fA-F]{64}")) {
             throw new IllegalArgumentException("invalid raw body hash");
+        }
+    }
+
+    private String eventType(ExternalDtoSnapshot snapshot) {
+        try {
+            JsonNode value = objectMapper.readTree(snapshot.json()).get("eventType");
+            if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+                throw new IllegalArgumentException("invalid inbound event type");
+            }
+            return value.textValue();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid inbound event type", e);
         }
     }
 }

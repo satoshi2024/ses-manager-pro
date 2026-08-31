@@ -32,6 +32,11 @@ public class IntegrationHubExternalApiProperties {
                 || publicApi.publicIdKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
             throw new IllegalStateException("public-api.enabled=trueには32 byte以上のpublic-id-keyが必要です");
         }
+        if (provider.approvedInboundProviders == null
+                || provider.approvedInboundProviders.stream().anyMatch(value -> value == null
+                || !value.matches("[A-Za-z0-9._~-]{1,100}"))) {
+            throw new IllegalStateException("approved inbound providerが不正です");
+        }
         if (environment != null && environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))
                 && (publicApi.enabled || externalTransport.enabled || provider.mode != ProviderMode.MOCK)) {
             throw new IllegalStateException("productionの公開APIと外部transportはoff、provider.modeはMOCK固定です");
@@ -94,6 +99,8 @@ public class IntegrationHubExternalApiProperties {
     @Data
     public static class Provider {
         private ProviderMode mode;
+        /** Ownerが承認したinbound providerだけを受け付ける。空はdefault deny。 */
+        private List<String> approvedInboundProviders = new ArrayList<>();
     }
 
     public enum ProviderMode {

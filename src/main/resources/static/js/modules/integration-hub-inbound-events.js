@@ -36,7 +36,7 @@ function renderInboundEvents(records) {
     records.forEach(function(event) {
         const dlq = event.status === 'DLQ';
         const replay = dlq
-            ? `<button class="btn btn-sm btn-outline-warning" onclick="replayInboundEvent(${Number(event.id)})">Replay</button>`
+            ? `<button class="btn btn-sm btn-outline-warning js-replay-inbound" data-reference="${SES.escapeHtml(event.reference || '')}">Replay</button>`
             : '<span class="text-muted small">-</span>';
         const statusClass = dlq || event.status === 'CONFLICT' ? 'text-danger' : 'text-info';
         tbody.append(`<tr>
@@ -48,9 +48,12 @@ function renderInboundEvents(records) {
             <td>${replay}</td>
         </tr>`);
     });
+    tbody.find('.js-replay-inbound').on('click', function() {
+        replayInboundEvent($(this).attr('data-reference') || '');
+    });
 }
 
-function replayInboundEvent(id) {
+function replayInboundEvent(reference) {
     Swal.fire({
         title: 'DLQをReplayしますか？',
         text: '元イベントは変更されず、現在のscopeを再検証します。',
@@ -65,7 +68,7 @@ function replayInboundEvent(id) {
     }).then(function(result) {
         if (!result.isConfirmed) return;
         $.ajax({
-            url: '/api/integration-hub/inbound-events/' + encodeURIComponent(id) + '/replay',
+             url: '/api/integration-hub/inbound-events/' + encodeURIComponent(reference) + '/replay',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify({reasonCode: result.value}),

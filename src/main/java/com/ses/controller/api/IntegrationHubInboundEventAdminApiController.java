@@ -39,14 +39,14 @@ public class IntegrationHubInboundEventAdminApiController {
         return ApiResult.success(service.page(current, size, status, providerName));
     }
 
-    @PostMapping("/{id}/replay")
+    @PostMapping("/{reference}/replay")
     public ApiResult<InboundEventReplayResponse> replay(
-            @PathVariable Long id,
+            @PathVariable("reference") String reference,
             @Valid @RequestBody InboundEventReplayRequestDto request,
             Authentication authentication) {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-        InboundEventReplayResponse created = service.replay(id, request.reasonCode(), authentication, now);
-        InboundEventReplayResponse processed = service.processReplay(created.requestId(), authentication, now);
+        InboundEventReplayResponse created = service.replay(reference, request.reasonCode(), authentication, now);
+        InboundEventReplayResponse processed = service.processReplay(created.replayReference(), authentication, now);
         return ApiResult.success(processed);
     }
 }

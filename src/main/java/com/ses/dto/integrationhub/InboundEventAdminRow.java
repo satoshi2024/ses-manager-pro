@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class InboundEventAdminRow {
-    private Long id;
+    private String reference;
     private String clientId;
     private String providerName;
     private String providerEventId;

@@ -4,7 +4,7 @@ import java.time.LocalDateTime;
 
 /** inbound event管理画面のallow-list DTO。raw hash/snapshot/secretは表示しない。 */
 public record InboundEventAdminDto(
-        Long id,
+        String reference,
         String clientId,
         String providerName,
         String providerEventId,

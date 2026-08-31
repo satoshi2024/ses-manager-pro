@@ -17,7 +17,7 @@ import java.util.List;
 public interface InboundEventMapper extends BaseMapper<InboundEvent> {
     @Select("""
         <script>
-        SELECT id, client_id, provider_name, provider_event_id, signature_valid, status, result_code,
+        SELECT admin_reference AS reference, client_id, provider_name, provider_event_id, signature_valid, status, result_code,
                received_at, processed_at, retention_expires_at
         FROM t_inbound_event
         <where>
@@ -58,6 +58,9 @@ public interface InboundEventMapper extends BaseMapper<InboundEvent> {
 
     @Select("SELECT * FROM t_inbound_event WHERE id = #{id} FOR UPDATE")
     InboundEvent selectForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM t_inbound_event WHERE admin_reference = #{adminReference} FOR UPDATE")
+    InboundEvent selectByAdminReferenceForUpdate(@Param("adminReference") String adminReference);
 
     @Update("UPDATE t_inbound_event SET status = 'PROCESSING', version = version + 1, updated_at = #{now} "
             + "WHERE id = #{id} AND version = #{version} AND status = 'RECEIVED'")

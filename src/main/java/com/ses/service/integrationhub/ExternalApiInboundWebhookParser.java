@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.ses.config.integrationhub.IntegrationHubInboundProviderCatalog;
 import com.ses.config.integrationhub.ExternalApiSecurityException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -29,9 +30,11 @@ public class ExternalApiInboundWebhookParser {
             "providerEventId", "provider", "eventType", "canonicalPayload");
 
     private final ObjectMapper objectMapper;
+    private final IntegrationHubInboundProviderCatalog providerCatalog;
 
     public Parsed parse(String provider, String headerEventId, byte[] rawBody, LocalDateTime receivedAt) {
         if (provider == null || !PROVIDER_PATTERN.matcher(provider).matches()
+                || !providerCatalog.isApproved(provider)
                 || headerEventId == null || !EVENT_ID_PATTERN.matcher(headerEventId).matches()
                 || rawBody == null || rawBody.length == 0
                 || rawBody.length > com.ses.service.integrationhub.IntegrationHubWebhookRequest.MAX_BODY_BYTES

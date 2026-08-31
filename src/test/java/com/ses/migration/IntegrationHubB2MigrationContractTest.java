@@ -27,4 +27,22 @@ class IntegrationHubB2MigrationContractTest {
         assertTrue(!sql.contains("parsed_fields_snapshot") && !sql.contains("raw_body "));
         assertTrue(sql.contains("rollback evidence"));
     }
+
+    @Test
+    void V136はproviderとresourceとopaque管理referenceを固定する() throws IOException {
+        String sql;
+        try (var stream = getClass().getResourceAsStream(
+                "/db/migration/V136__integration_hub_public_api_b2_binding_refs.sql")) {
+            if (stream == null) throw new IOException("missing V136 migration");
+            sql = new String(stream.readAllBytes(), StandardCharsets.UTF_8).toLowerCase();
+        }
+        assertTrue(sql.contains("provider_name"));
+        assertTrue(sql.contains("admin_reference"));
+        assertTrue(sql.contains("primary_resource_type"));
+        assertTrue(sql.contains("primary_resource_id"));
+        assertTrue(sql.contains("replay_reference"));
+        assertTrue(sql.contains("uk_inbound_admin_reference"));
+        assertTrue(sql.contains("uk_inbound_replay_reference"));
+        assertTrue(sql.contains("chk_inbound_primary_resource"));
+    }
 }

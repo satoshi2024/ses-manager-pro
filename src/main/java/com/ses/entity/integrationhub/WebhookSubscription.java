@@ -21,6 +21,7 @@ public class WebhookSubscription {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String clientId;
+    private String providerName;
     private String direction;
     private String eventType;
     private String endpointUrl;

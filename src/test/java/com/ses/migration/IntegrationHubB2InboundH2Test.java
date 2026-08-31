@@ -1,6 +1,8 @@
 package com.ses.migration;
 
 import com.ses.config.LoginUser;
+import com.ses.config.integrationhub.ExternalApiPrincipal;
+import com.ses.config.integrationhub.ExternalApiPublicIdCodec;
 import com.ses.entity.SysUser;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.service.integrationhub.ApiRetentionPurgeService;
@@ -25,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +53,12 @@ class IntegrationHubB2InboundH2Test {
     private InboundEventAdminService inboundEventAdminService;
     @Autowired
     private ApiRetentionPurgeService retentionPurgeService;
+    @Autowired
+    private ExternalApiPublicIdCodec publicIdCodec;
+
+    private static final long RESOURCE_CUSTOMER_ID = 9900201L;
+    private static final long RESOURCE_REPARENT_CUSTOMER_ID = 9900202L;
+    private static final long RESOURCE_PROJECT_ID = 9900203L;
 
     @BeforeEach
     void clean() {
@@ -59,6 +68,9 @@ class IntegrationHubB2InboundH2Test {
         jdbcTemplate.update("DELETE FROM m_api_client_scope WHERE api_client_id IN "
                 + "(SELECT id FROM m_api_client WHERE client_id = ?)", CLIENT_ID);
         jdbcTemplate.update("DELETE FROM m_api_client WHERE client_id = ?", CLIENT_ID);
+        jdbcTemplate.update("DELETE FROM t_project WHERE id = ?", RESOURCE_PROJECT_ID);
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id IN (?, ?)", RESOURCE_CUSTOMER_ID,
+                RESOURCE_REPARENT_CUSTOMER_ID);
     }
 
     @AfterEach
@@ -68,6 +80,7 @@ class IntegrationHubB2InboundH2Test {
 
     @Test
     void 同一eventの同hashはduplicateで別hashはconflictになりterminalを逆遷移させない() {
+        insertBinding();
         ExternalDtoSnapshot snapshot = snapshot();
         InboundEventService.Receipt first = inboundEventService.recordReceived(
                 CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot, true, NOW);
@@ -93,20 +106,24 @@ class IntegrationHubB2InboundH2Test {
         Authentication admin = adminAuthentication();
         SecurityContextHolder.getContext().setAuthentication(admin);
 
-        var replay = inboundEventAdminService.replay(event.getId(), "INCIDENT_RECOVERY", admin, NOW);
-        var processed = inboundEventAdminService.processReplay(replay.requestId(), admin, NOW);
+        String eventReference = jdbcTemplate.queryForObject(
+                "SELECT admin_reference FROM t_inbound_event WHERE id = ?", String.class, event.getId());
+        var replay = inboundEventAdminService.replay(eventReference, "INCIDENT_RECOVERY", admin, NOW);
+        var processed = inboundEventAdminService.processReplay(replay.replayReference(), admin, NOW);
 
         assertEquals("PROCESSED", processed.status());
         assertEquals(1, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_inbound_event WHERE id = ? AND status = 'DLQ'", Integer.class, event.getId()));
         assertEquals("sys-user:7001", jdbcTemplate.queryForObject(
-                "SELECT operator_ref FROM t_inbound_event_replay WHERE id = ?", String.class, replay.requestId()));
-        jdbcTemplate.update("UPDATE t_inbound_event_replay SET retention_expires_at = ? WHERE id = ?",
-                NOW.minusSeconds(1), replay.requestId());
+                "SELECT operator_ref FROM t_inbound_event_replay WHERE replay_reference = ?", String.class,
+                replay.replayReference()));
+        jdbcTemplate.update("UPDATE t_inbound_event_replay SET retention_expires_at = ? WHERE replay_reference = ?",
+                NOW.minusSeconds(1), replay.replayReference());
         assertEquals(1, retentionPurgeService.purgeExpired(
                 "INBOUND_REPLAY", IntegrationHubStates.RETENTION_AUDIT_1Y, NOW, 10).purged());
         assertEquals(0, jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_inbound_event_replay WHERE id = ?", Integer.class, replay.requestId()));
+                "SELECT COUNT(*) FROM t_inbound_event_replay WHERE replay_reference = ?", Integer.class,
+                replay.replayReference()));
         // client DB id is only used to ensure the fixture was really bound; it is never returned by the service.
         assertTrue(clientDbId > 0);
     }
@@ -119,8 +136,10 @@ class IntegrationHubB2InboundH2Test {
                 "7002", "N/A", List.of(new SimpleGrantedAuthority("ROLE_営業")));
         SecurityContextHolder.getContext().setAuthentication(sales);
 
+        String eventReference = jdbcTemplate.queryForObject(
+                "SELECT admin_reference FROM t_inbound_event WHERE id = ?", String.class, event.getId());
         assertThrows(org.springframework.security.access.AccessDeniedException.class,
-                () -> inboundEventAdminService.replay(event.getId(), "INCIDENT_RECOVERY", sales, NOW));
+                () -> inboundEventAdminService.replay(eventReference, "INCIDENT_RECOVERY", sales, NOW));
     }
 
     @Test
@@ -132,8 +151,10 @@ class IntegrationHubB2InboundH2Test {
         jdbcTemplate.update("UPDATE m_api_client_scope SET data_scope_json = ? WHERE api_client_id = ?",
                 "{\"tenantIds\":[\"tenant-b2\"],\"legalEntityIds\":[\"999\"]}", clientDbId);
 
+        String eventReference = jdbcTemplate.queryForObject(
+                "SELECT admin_reference FROM t_inbound_event WHERE id = ?", String.class, event.getId());
         assertThrows(SecurityException.class,
-                () -> inboundEventAdminService.replay(event.getId(), "INCIDENT_RECOVERY", admin, NOW));
+                () -> inboundEventAdminService.replay(eventReference, "INCIDENT_RECOVERY", admin, NOW));
     }
 
     @Test
@@ -143,11 +164,13 @@ class IntegrationHubB2InboundH2Test {
         Authentication admin = adminAuthentication();
         SecurityContextHolder.getContext().setAuthentication(admin);
 
-        var replay = inboundEventAdminService.replay(event.getId(), "INCIDENT_RECOVERY", admin, NOW);
+        String eventReference = jdbcTemplate.queryForObject(
+                "SELECT admin_reference FROM t_inbound_event WHERE id = ?", String.class, event.getId());
+        var replay = inboundEventAdminService.replay(eventReference, "INCIDENT_RECOVERY", admin, NOW);
         jdbcTemplate.update("UPDATE m_api_client_scope SET data_scope_json = ? WHERE api_client_id = ?",
                 "{\"tenantIds\":[\"tenant-b2\"],\"legalEntityIds\":[\"999\"]}", clientDbId);
 
-        var result = inboundEventAdminService.processReplay(replay.requestId(), admin, NOW);
+        var result = inboundEventAdminService.processReplay(replay.replayReference(), admin, NOW);
 
         assertEquals("REJECTED", result.status());
         assertEquals("CURRENT_SCOPE_INVALID", result.resultCode());
@@ -155,43 +178,136 @@ class IntegrationHubB2InboundH2Test {
                 "SELECT COUNT(*) FROM t_inbound_event WHERE id = ? AND status = 'DLQ'", Integer.class, event.getId()));
     }
 
+    @Test
+    void resourceBindingはprimaryとsecondaryをopaque再計算しreparent後のreplayを拒否する() {
+        insertResourceFixtures();
+        insertBinding("project.changed");
+        ExternalApiPrincipal principal = new ExternalApiPrincipal(CLIENT_ID, clientDbId(), TENANT,
+                LEGAL_ENTITY, null, 1, "inbound", "INTERNAL_TEST");
+        String projectPublicId = publicIdCodec.encode(principal, "project", RESOURCE_PROJECT_ID);
+        String customerPublicId = publicIdCodec.encode(principal, "customer", RESOURCE_CUSTOMER_ID);
+        String eventId = "project-resource-event";
+        String json = "{\"providerEventId\":\"" + eventId + "\",\"provider\":\"" + PROVIDER
+                + "\",\"eventType\":\"project.changed\",\"signatureResult\":\"VALID\","
+                + "\"canonicalPayload\":{\"publicProjectId\":\"" + projectPublicId
+                + "\",\"publicCustomerId\":\"" + customerPublicId + "\",\"status\":\"ACTIVE\"}}";
+        ExternalDtoSnapshot resourceSnapshot = ExternalDtoSnapshot.ofAllowList(
+                json, ExternalDtoSnapshot.INBOUND_FIELDS);
+        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, eventId, HASH_1, NOW, resourceSnapshot, true, NOW);
+
+        assertEquals("project", receipt.event().getPrimaryResourceType());
+        assertEquals(RESOURCE_PROJECT_ID, receipt.event().getPrimaryResourceId());
+        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
+        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
+                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        String eventReference = receipt.event().getAdminReference();
+        Authentication admin = adminAuthentication();
+        SecurityContextHolder.getContext().setAuthentication(admin);
+        var replay = inboundEventAdminService.replay(eventReference, "INCIDENT_RECOVERY", admin, NOW);
+
+        jdbcTemplate.update("UPDATE t_project SET customer_id = ? WHERE id = ?",
+                RESOURCE_REPARENT_CUSTOMER_ID, RESOURCE_PROJECT_ID);
+        var result = inboundEventAdminService.processReplay(replay.replayReference(), admin, NOW);
+
+        assertEquals("REJECTED", result.status());
+        assertEquals("CURRENT_SCOPE_INVALID", result.resultCode());
+    }
+
+    @Test
+    void resourceBindingはprimaryのsoftDelete後のreplayを拒否する() {
+        insertResourceFixtures();
+        insertBinding("project.changed");
+        ExternalApiPrincipal principal = new ExternalApiPrincipal(CLIENT_ID, clientDbId(), TENANT,
+                LEGAL_ENTITY, null, 1, "inbound", "INTERNAL_TEST");
+        String projectPublicId = publicIdCodec.encode(principal, "project", RESOURCE_PROJECT_ID);
+        String customerPublicId = publicIdCodec.encode(principal, "customer", RESOURCE_CUSTOMER_ID);
+        String eventId = "project-soft-delete-event";
+        String json = "{\"providerEventId\":\"" + eventId + "\",\"provider\":\"" + PROVIDER
+                + "\",\"eventType\":\"project.changed\",\"signatureResult\":\"VALID\","
+                + "\"canonicalPayload\":{\"publicProjectId\":\"" + projectPublicId
+                + "\",\"publicCustomerId\":\"" + customerPublicId + "\",\"status\":\"ACTIVE\"}}";
+        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, eventId, HASH_2, NOW,
+                ExternalDtoSnapshot.ofAllowList(json, ExternalDtoSnapshot.INBOUND_FIELDS), true, NOW);
+        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
+        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
+                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        Authentication admin = adminAuthentication();
+        SecurityContextHolder.getContext().setAuthentication(admin);
+        var replay = inboundEventAdminService.replay(receipt.event().getAdminReference(),
+                "INCIDENT_RECOVERY", admin, NOW);
+
+        jdbcTemplate.update("UPDATE t_project SET deleted_flag = 1 WHERE id = ?", RESOURCE_PROJECT_ID);
+        var result = inboundEventAdminService.processReplay(replay.replayReference(), admin, NOW);
+
+        assertEquals("REJECTED", result.status());
+        assertEquals("CURRENT_SCOPE_INVALID", result.resultCode());
+    }
+
+    @Test
+    void adminProjectionはopaqueReferenceだけを返し内部IDを返さない() {
+        insertBinding();
+        InboundEvent event = insertDlqEvent();
+
+        var page = inboundEventAdminService.page(1, 25, "DLQ", PROVIDER);
+        var dto = page.records().stream().filter(row -> row.providerEventId().equals(EVENT_ID)).findFirst().orElseThrow();
+
+        assertTrue(dto.reference().matches("[A-Za-z0-9_-]{43}"));
+        assertFalse(dto.reference().equals(Long.toString(event.getId())));
+    }
+
+    private void insertResourceFixtures() {
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, deleted_flag) VALUES (?, ?, 0)",
+                RESOURCE_CUSTOMER_ID, "b2-resource-customer");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, deleted_flag) VALUES (?, ?, 0)",
+                RESOURCE_REPARENT_CUSTOMER_ID, "b2-reparent-customer");
+        jdbcTemplate.update("INSERT INTO t_project (id, project_name, customer_id, status, deleted_flag) "
+                + "VALUES (?, ?, ?, '募集中', 0)", RESOURCE_PROJECT_ID, "b2-resource-project", RESOURCE_CUSTOMER_ID);
+    }
+
+    private long clientDbId() {
+        return jdbcTemplate.queryForObject("SELECT id FROM m_api_client WHERE client_id = ?", Long.class, CLIENT_ID);
+    }
+
     private ExternalDtoSnapshot snapshot() {
         return ExternalDtoSnapshot.ofAllowList(
                 "{\"providerEventId\":\"" + EVENT_ID + "\",\"provider\":\"" + PROVIDER
-                        + "\",\"eventType\":\"resource.changed\",\"signatureResult\":\"VALID\"}",
+                        + "\",\"eventType\":\"health.ping\",\"signatureResult\":\"VALID\"}",
                 ExternalDtoSnapshot.INBOUND_FIELDS);
     }
 
     private long insertBinding() {
+        return insertBinding("health.ping");
+    }
+
+    private long insertBinding(String eventType) {
         String scope = "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\""
-                + LEGAL_ENTITY + "\"],\"projectIds\":[\"101\"]}";
+                + LEGAL_ENTITY + "\"],\"projectIds\":[\"" + RESOURCE_PROJECT_ID
+                + "\"],\"customerIds\":[\"" + RESOURCE_CUSTOMER_ID + "\"]}";
         jdbcTemplate.update("INSERT INTO m_api_client (client_id, owner_ref, tenant_id, legal_entity_id, "
                         + "data_scope_json, allowed_cidrs, client_tier, status, version) VALUES "
                         + "(?, 'PROJECT_OWNER', ?, ?, ?, '127.0.0.1/32', 'INTERNAL_TEST', 'ACTIVE', 0)",
                 CLIENT_ID, TENANT, LEGAL_ENTITY, scope);
         long id = jdbcTemplate.queryForObject("SELECT id FROM m_api_client WHERE client_id = ?", Long.class, CLIENT_ID);
-        String receiveScope = "{\"tenantIds\":[\"" + TENANT + "\"],\"legalEntityIds\":[\""
-                + LEGAL_ENTITY + "\"]}";
+        String receiveScope = scope;
         jdbcTemplate.update("INSERT INTO m_api_client_scope (api_client_id, scope_code, operation_code, "
                         + "data_scope_json, status, version) VALUES (?, 'integration.webhook.receive', "
                         + "'integration.webhook.receive', ?, 'ACTIVE', 0)", id, receiveScope);
-        jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, "
+        jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, provider_name, direction, event_type, endpoint_url, "
                         + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json, status, version) "
-                        + "VALUES (?, 'INBOUND', 'resource.changed', 'https://unused.invalid/inbound', 'key-b2', "
-                        + "'IHG1:v1:iv:cipher', 'v1', ?, 'ACTIVE', 0)", CLIENT_ID, receiveScope);
+                        + "VALUES (?, 'provider-b2', 'INBOUND', ?, 'https://unused.invalid/inbound', 'key-b2', "
+                        + "'IHG1:v1:iv:cipher', 'v1', ?, 'ACTIVE', 0)", CLIENT_ID, eventType, receiveScope);
         return id;
     }
 
     private InboundEvent insertDlqEvent() {
-        jdbcTemplate.update("INSERT INTO t_inbound_event (client_id, provider_name, provider_event_id, "
-                        + "raw_body_hash, signed_timestamp, parsed_fields_snapshot, signature_valid, status, "
-                        + "result_code, received_at, processed_at, terminal_at, retention_class, retention_expires_at, version) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, TRUE, 'DLQ', 'INBOUND_PROCESSING_FAILED', ?, ?, ?, ?, ?, 0)",
-                CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot().json(), NOW, NOW, NOW,
-                IntegrationHubStates.RETENTION_FAILED_90D, NOW.plusDays(90));
-        Long id = jdbcTemplate.queryForObject("SELECT id FROM t_inbound_event WHERE client_id = ? "
-                + "AND provider_event_id = ?", Long.class, CLIENT_ID, EVENT_ID);
-        return InboundEvent.builder().id(id).status(IntegrationHubStates.INBOUND_DLQ).build();
+        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, EVENT_ID, HASH_1, NOW, snapshot(), true, NOW);
+        InboundEvent claimed = inboundEventService.claim(receipt.event().getId(), NOW);
+        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(),
+                IntegrationHubStates.INBOUND_DLQ, "INBOUND_PROCESSING_FAILED", NOW));
+        return InboundEvent.builder().id(claimed.getId()).status(IntegrationHubStates.INBOUND_DLQ).build();
     }
 
     private Authentication adminAuthentication() {

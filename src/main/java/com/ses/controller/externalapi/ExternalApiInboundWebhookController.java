@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 
 /** B2 inbound provider event endpoint。既存HMAC専用chainの認証済みbodyだけを受け取る。 */
@@ -47,9 +48,16 @@ public class ExternalApiInboundWebhookController {
         ExternalApiPrincipal principal = principal(request);
         ExternalApiInboundWebhookParser.Parsed parsed = parser.parse(
                 provider, requiredSingleHeader(request, "X-Provider-Event-ID"), signedRequest.rawBody(), receivedAt);
-        InboundEventService.Receipt receipt = inboundEventService.recordReceived(
-                principal.clientId(), parsed.providerName(), parsed.providerEventId(),
-                IntegrationHubDigest.sha256Hex(signedRequest.rawBody()), signedAt, parsed.snapshot(), true, receivedAt);
+        InboundEventService.Receipt receipt;
+        try {
+            receipt = inboundEventService.recordReceived(
+                    principal.clientId(), parsed.providerName(), parsed.providerEventId(),
+                    IntegrationHubDigest.sha256Hex(signedRequest.rawBody()), signedAt, parsed.snapshot(), true, receivedAt);
+        } catch (SecurityException e) {
+            // subscription/scope binding failure is an external authorization result; do not leak
+            // mapper/provider details or let it fall through to the internal error page.
+            throw ExternalApiSecurityException.forbidden("FORBIDDEN_SCOPE");
+        }
         if (receipt.conflict()) {
             throw ExternalApiSecurityException.inboundConflict();
         }
@@ -121,8 +129,19 @@ public class ExternalApiInboundWebhookController {
             throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
         }
         String value = values.nextElement();
-        if (values.hasMoreElements() || value == null
-                || !value.toLowerCase(java.util.Locale.ROOT).startsWith(MediaType.APPLICATION_JSON_VALUE)) {
+        if (values.hasMoreElements() || value == null) {
+            throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
+        }
+        try {
+            MediaType mediaType = MediaType.parseMediaType(value);
+            if (!MediaType.APPLICATION_JSON_VALUE.equalsIgnoreCase(mediaType.getType() + "/" + mediaType.getSubtype())
+                    || mediaType.getParameters().keySet().stream()
+                    .anyMatch(parameter -> !"charset".equalsIgnoreCase(parameter))
+                    || (mediaType.getCharset() != null
+                    && !StandardCharsets.UTF_8.equals(mediaType.getCharset()))) {
+                throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
+            }
+        } catch (org.springframework.http.InvalidMediaTypeException e) {
             throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
         }
     }

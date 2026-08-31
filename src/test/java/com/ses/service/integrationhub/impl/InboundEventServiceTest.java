@@ -3,6 +3,8 @@ package com.ses.service.integrationhub.impl;
 import com.ses.entity.integrationhub.InboundEvent;
 import com.ses.mapper.InboundEventMapper;
 import com.ses.service.integrationhub.ExternalDtoSnapshot;
+import com.ses.service.integrationhub.InboundEventAdminReferenceCodec;
+import com.ses.service.integrationhub.InboundEventBindingValidator;
 import com.ses.service.integrationhub.InboundEventService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,8 @@ import static org.mockito.Mockito.when;
 class InboundEventServiceTest {
     private InboundEventMapper mapper;
     private InboundEventServiceImpl service;
+    private InboundEventBindingValidator bindingValidator;
+    private InboundEventAdminReferenceCodec referenceCodec;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
     private final String firstHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     private final String secondHash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
@@ -28,7 +32,13 @@ class InboundEventServiceTest {
     @BeforeEach
     void setUp() {
         mapper = mock(InboundEventMapper.class);
-        service = new InboundEventServiceImpl(mapper);
+        bindingValidator = mock(InboundEventBindingValidator.class);
+        referenceCodec = mock(InboundEventAdminReferenceCodec.class);
+        when(bindingValidator.validateForReceipt(any(), any(), any(), any(), any()))
+                .thenReturn(new InboundEventBindingValidator.Binding(null, null));
+        when(referenceCodec.eventReference(any(), any(), any())).thenReturn("event-reference");
+        service = new InboundEventServiceImpl(mapper, bindingValidator, referenceCodec,
+                new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test

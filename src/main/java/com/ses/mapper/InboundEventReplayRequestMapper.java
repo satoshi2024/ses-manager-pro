@@ -20,6 +20,9 @@ public interface InboundEventReplayRequestMapper extends BaseMapper<InboundEvent
     @Select("SELECT * FROM t_inbound_event_replay WHERE id = #{id} FOR UPDATE")
     InboundEventReplayRequest selectForUpdate(@Param("id") Long id);
 
+    @Select("SELECT * FROM t_inbound_event_replay WHERE replay_reference = #{replayReference} FOR UPDATE")
+    InboundEventReplayRequest selectByReplayReferenceForUpdate(@Param("replayReference") String replayReference);
+
     @Update("UPDATE t_inbound_event_replay SET status = 'PROCESSING', version = version + 1, "
             + "updated_at = #{now} WHERE id = #{id} AND version = #{version} AND status = 'REQUESTED'")
     int claim(@Param("id") Long id, @Param("version") Integer version, @Param("now") LocalDateTime now);

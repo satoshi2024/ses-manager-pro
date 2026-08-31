@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "integration.hub.public-api.public-id-key=test-integration-hub-public-id-key-at-least-32-bytes",
                 "integration.hub.external-transport.enabled=false",
                 "integration.hub.provider.mode=MOCK",
+                "integration.hub.provider.approved-inbound-providers=provider-b2",
                 "integration.hub.crypto.current-key-version=test-key-v1",
                 "integration.hub.crypto.keys.test-key-v1=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
@@ -49,7 +50,7 @@ class ExternalApiInboundConnectorE2ETest {
     private static final String TARGET = "/external-api/v1/webhooks/provider-b2";
     private static final String EVENT_ID = "b2-e2e-event-1";
     private static final String BODY = "{\"providerEventId\":\"b2-e2e-event-1\","
-            + "\"eventType\":\"resource.changed\",\"canonicalPayload\":{\"status\":\"ACTIVE\"}}";
+            + "\"eventType\":\"health.ping\",\"canonicalPayload\":{\"status\":\"ACTIVE\"}}";
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -69,9 +70,9 @@ class ExternalApiInboundConnectorE2ETest {
         jdbcTemplate.update("INSERT INTO m_api_client_scope (id, api_client_id, scope_code, operation_code, "
                         + "data_scope_json, status, version) VALUES (?, ?, 'integration.webhook.receive', "
                         + "'integration.webhook.receive', ?, 'ACTIVE', 0)", SCOPE_DB_ID, CLIENT_DB_ID, scope);
-        jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, direction, event_type, endpoint_url, "
+        jdbcTemplate.update("INSERT INTO m_webhook_subscription (client_id, provider_name, direction, event_type, endpoint_url, "
                         + "key_id, encrypted_signing_secret, crypto_key_version, data_scope_json, status, version) "
-                        + "VALUES (?, 'INBOUND', 'resource.changed', 'https://unused.invalid/inbound-b2', 'b2-key', "
+                        + "VALUES (?, 'provider-b2', 'INBOUND', 'health.ping', 'https://unused.invalid/inbound-b2', 'b2-key', "
                         + "'IHG1:v1:iv:cipher', 'v1', ?, 'ACTIVE', 0)", CLIENT_ID, scope);
         Instant now = Instant.now();
         String encryptedSecret = cryptoService.encrypt(CLIENT_ID, 1, "credential", CLIENT_SECRET);
@@ -102,26 +103,90 @@ class ExternalApiInboundConnectorE2ETest {
                 CLIENT_ID, EVENT_ID));
     }
 
+    @Test
+    void unknownProviderはsubscription確認前に拒否しinboundLedgerを作らない() throws Exception {
+        String eventId = "b2-unknown-provider-event";
+        String body = body(eventId, "health.ping");
+        ResponseEntity<String> response = send("/external-api/v1/webhooks/provider-unknown", body, eventId);
+
+        assertEquals(400, response.getStatusCode().value());
+        assertTrue(response.getBody() != null && response.getBody().contains("REQUEST_INVALID"));
+        assertEquals(0, inboundCount(eventId));
+    }
+
+    @Test
+    void subscription外eventTypeは永続化とprocessorを実行しない() throws Exception {
+        String eventId = "b2-unapproved-event-type";
+        String body = body(eventId, "resource.changed");
+        ResponseEntity<String> response = send(TARGET, body, eventId);
+
+        assertEquals(403, response.getStatusCode().value());
+        assertTrue(response.getBody() != null && response.getBody().contains("FORBIDDEN_SCOPE"));
+        assertEquals(0, inboundCount(eventId));
+    }
+
+    @Test
+    void inactiveSubscriptionは永続化とprocessorを実行しない() throws Exception {
+        jdbcTemplate.update("UPDATE m_webhook_subscription SET status = 'REVOKED' WHERE client_id = ?",
+                CLIENT_ID);
+        String eventId = "b2-inactive-subscription";
+        ResponseEntity<String> response = send(TARGET, body(eventId, "health.ping"), eventId);
+
+        assertEquals(403, response.getStatusCode().value());
+        assertTrue(response.getBody() != null && response.getBody().contains("FORBIDDEN_SCOPE"));
+        assertEquals(0, inboundCount(eventId));
+    }
+
+    @Test
+    void 類似ContentTypeは厳密なmediaType境界で拒否する() throws Exception {
+        String eventId = "b2-invalid-content-type";
+        ResponseEntity<String> response = send(TARGET, body(eventId, "health.ping"), eventId,
+                "application/jsonp");
+
+        assertEquals(400, response.getStatusCode().value());
+        assertTrue(response.getBody() != null && response.getBody().contains("REQUEST_INVALID"));
+        assertEquals(0, inboundCount(eventId));
+    }
+
+    private int inboundCount(String eventId) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM t_inbound_event "
+                + "WHERE client_id = ? AND provider_event_id = ?", Integer.class, CLIENT_ID, eventId);
+    }
+
+    private String body(String eventId, String eventType) {
+        return "{\"providerEventId\":\"" + eventId + "\",\"eventType\":\""
+                + eventType + "\",\"canonicalPayload\":{\"status\":\"ACTIVE\"}}";
+    }
+
     private ResponseEntity<String> send(String body) throws Exception {
+        return send(TARGET, body, EVENT_ID, "application/json");
+    }
+
+    private ResponseEntity<String> send(String target, String body, String eventId) throws Exception {
+        return send(target, body, eventId, "application/json");
+    }
+
+    private ResponseEntity<String> send(String target, String body, String eventId, String contentType)
+            throws Exception {
         String timestamp = Long.toString(Instant.now().getEpochSecond());
         String nonce = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 UUID.randomUUID().toString().replace("-", "").getBytes(StandardCharsets.UTF_8));
         String bodyHash = IntegrationHubDigest.sha256Hex(body.getBytes(StandardCharsets.UTF_8));
         byte[] signed = ExternalApiCanonicalRequest.signedBytes(CLIENT_ID, "1", KEY_ID, timestamp, nonce,
-                "POST", TARGET, bodyHash);
+                "POST", target, bodyHash);
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(CLIENT_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         String signature = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(signed));
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        headers.set(HttpHeaders.CONTENT_TYPE, contentType);
         headers.set("X-Client-ID", CLIENT_ID);
         headers.set("X-Credential-Version", "1");
         headers.set("X-Key-ID", KEY_ID);
         headers.set("X-Timestamp", timestamp);
         headers.set("X-Nonce", nonce);
         headers.set("X-Client-Signature", signature);
-        headers.set("X-Provider-Event-ID", EVENT_ID);
-        return restTemplate.exchange(TARGET, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+        headers.set("X-Provider-Event-ID", eventId);
+        return restTemplate.exchange(target, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
     }
 
     private void deleteFixture() {

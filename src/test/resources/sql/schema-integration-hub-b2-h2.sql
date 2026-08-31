@@ -11,6 +11,7 @@ ALTER TABLE t_api_purge_checkpoint ADD CONSTRAINT chk_api_purge_checkpoint_kind
 CREATE TABLE t_inbound_event_replay (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     inbound_event_id BIGINT,
+    replay_reference VARCHAR(64),
     client_id VARCHAR(100) NOT NULL,
     provider_name VARCHAR(100) NOT NULL,
     provider_event_id VARCHAR(160) NOT NULL,
@@ -27,6 +28,7 @@ CREATE TABLE t_inbound_event_replay (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version INT NOT NULL DEFAULT 0,
     CONSTRAINT uk_inbound_event_replay_generation UNIQUE (inbound_event_id, replay_generation),
+    CONSTRAINT uk_inbound_replay_reference UNIQUE (replay_reference),
     CONSTRAINT fk_inbound_event_replay_event FOREIGN KEY (inbound_event_id)
         REFERENCES t_inbound_event(id) ON DELETE SET NULL,
     CONSTRAINT chk_inbound_event_replay_status

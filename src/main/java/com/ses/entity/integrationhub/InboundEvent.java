@@ -23,6 +23,9 @@ public class InboundEvent {
     private String clientId;
     private String providerName;
     private String providerEventId;
+    private String adminReference;
+    private String primaryResourceType;
+    private Long primaryResourceId;
     private String rawBodyHash;
     private LocalDateTime signedTimestamp;
     private String parsedFieldsSnapshot;

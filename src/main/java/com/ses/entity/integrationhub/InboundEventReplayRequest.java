@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 public class InboundEventReplayRequest {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String replayReference;
     private Long inboundEventId;
     private String clientId;
     private String providerName;

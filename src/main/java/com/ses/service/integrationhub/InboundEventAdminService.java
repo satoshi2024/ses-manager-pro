@@ -10,9 +10,9 @@ import java.time.LocalDateTime;
 public interface InboundEventAdminService {
     InboundEventAdminPage page(long current, long size, String status, String providerName);
 
-    InboundEventReplayResponse replay(Long inboundEventId, String reasonCode,
+    InboundEventReplayResponse replay(String inboundEventReference, String reasonCode,
                                       Authentication authentication, LocalDateTime now);
 
-    InboundEventReplayResponse processReplay(Long requestId, Authentication authentication,
+    InboundEventReplayResponse processReplay(String replayReference, Authentication authentication,
                                               LocalDateTime now);
 }

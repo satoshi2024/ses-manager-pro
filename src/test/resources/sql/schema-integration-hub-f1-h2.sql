@@ -95,6 +95,7 @@ CREATE TABLE t_api_idempotency_record (
 CREATE TABLE m_webhook_subscription (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     client_id VARCHAR(100) NOT NULL,
+    provider_name VARCHAR(100) NOT NULL DEFAULT '__UNBOUND__',
     direction VARCHAR(16) NOT NULL DEFAULT 'OUTBOUND',
     event_type VARCHAR(100) NOT NULL,
     endpoint_url VARCHAR(512) NOT NULL,
@@ -158,6 +159,9 @@ CREATE TABLE t_inbound_event (
     client_id VARCHAR(100) NOT NULL,
     provider_name VARCHAR(100) NOT NULL,
     provider_event_id VARCHAR(160) NOT NULL,
+    admin_reference VARCHAR(64),
+    primary_resource_type VARCHAR(64),
+    primary_resource_id BIGINT,
     raw_body_hash CHAR(64) NOT NULL,
     signed_timestamp TIMESTAMP NOT NULL,
     parsed_fields_snapshot TEXT,
@@ -174,6 +178,10 @@ CREATE TABLE t_inbound_event (
     version INT NOT NULL DEFAULT 0,
     CONSTRAINT uk_inbound_provider_event UNIQUE (client_id, provider_name, provider_event_id),
     CONSTRAINT chk_inbound_status CHECK (status IN ('RECEIVED', 'PROCESSING', 'PROCESSED', 'DUPLICATE', 'CONFLICT', 'DLQ')),
+    CONSTRAINT chk_inbound_primary_resource CHECK (
+        (primary_resource_type IS NULL AND primary_resource_id IS NULL)
+        OR (primary_resource_type IN ('engineer-availability', 'project', 'contract-status', 'invoice-status')
+            AND primary_resource_id IS NOT NULL AND primary_resource_id > 0)),
     CONSTRAINT chk_inbound_retention CHECK (retention_class IS NULL OR retention_class IN ('SUCCEEDED_PAYLOAD_30D', 'FAILED_DLQ_PAYLOAD_90D'))
 );
 
@@ -250,6 +258,8 @@ CREATE INDEX idx_api_delivery_due ON t_api_delivery (status, next_attempt_at, le
 CREATE INDEX idx_api_delivery_expiry ON t_api_delivery (status, retention_expires_at, id);
 CREATE INDEX idx_api_delivery_primary_resource ON t_api_delivery (primary_resource_type, primary_resource_id, status, id);
 CREATE INDEX idx_inbound_expiry ON t_inbound_event (status, retention_expires_at, id);
+CREATE UNIQUE INDEX uk_inbound_admin_reference ON t_inbound_event (admin_reference);
+CREATE INDEX idx_inbound_primary_resource ON t_inbound_event (primary_resource_type, primary_resource_id, status, id);
 CREATE INDEX idx_api_nonce_expiry ON t_api_nonce_replay (expires_at, id);
 CREATE INDEX idx_retention_hold_status ON t_api_retention_hold (record_kind, status, record_id);
 
