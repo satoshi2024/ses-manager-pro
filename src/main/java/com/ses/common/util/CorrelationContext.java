@@ -25,6 +25,10 @@ public final class CorrelationContext {
     private CorrelationContext() {
     }
 
+    public static String set(String requestedId) {
+        return begin(requestedId);
+    }
+
     public static String begin(String requestedId) {
         String id = safeIdentifier(requestedId);
         if (id == null) {

@@ -32,9 +32,31 @@ public final class LogRedaction {
     private static final Pattern JDBC_PATTERN = Pattern.compile("(?i)jdbc:[A-Za-z0-9:+._-]+://[^\\s,;'\\\"]+");
     private static final Pattern SQL_BINDING_PATTERN = Pattern.compile(
             "(?i)(\\b(?:sql\\s*)?(?:parameters?|bindings?)\\s*[:=]\\s*)([^\\r\\n;]+)");
-    private static final Pattern SQL_KEYWORD_PATTERN = Pattern.compile("(?i)\\b(?:select|insert|update|delete|drop|alter|truncate|merge)\\b");
+    private static final Pattern SQL_STATEMENT_PATTERN = Pattern.compile(
+            "(?i)\\b(?:"
+            + "SELECT\\s+[\\w\\s,.*`\"'\\[\\]()+-]+\\s+FROM\\s+[\\w.`\"\\[\\]]+"
+            + "|INSERT\\s+(?:INTO\\s+)?[\\w.`\"\\[\\]]+"
+            + "|UPDATE\\s+[\\w.`\"\\[\\]]+\\s+SET\\s+[\\w\\s,.*`\"'\\[\\]()=+-]+"
+            + "|DELETE\\s+FROM\\s+[\\w.`\"\\[\\]]+"
+            + "|DROP\\s+(?:TABLE|VIEW|INDEX|DATABASE|PROCEDURE)\\s+[\\w.`\"\\[\\]]+"
+            + "|ALTER\\s+(?:TABLE|VIEW|DATABASE)\\s+[\\w.`\"\\[\\]]+"
+            + "|TRUNCATE\\s+(?:TABLE\\s+)?[\\w.`\"\\[\\]]+"
+            + "|MERGE\\s+INTO\\s+[\\w.`\"\\[\\]]+"
+            + ")(?:\\s*[^\\r\\n;|\\s]+)*");
 
     private LogRedaction() {
+    }
+
+    /**
+     * JVM致命的エラー方針:
+     * VirtualMachineError (OutOfMemoryError, StackOverflowError 等) および ThreadDeath は
+     * JVMの整合性を損なうため再送出する。
+     * 一方、Throwable の各 getter (getMessage, getCause, getSuppressed, getStackTrace 等) が
+     * secret付きの AssertionError やカスタム例外/エラーを投げた場合は二次例外として外へ伝播させず、
+     * 固定フォールバックへ安全に変換する。
+     */
+    private static boolean isFatal(Throwable t) {
+        return t instanceof VirtualMachineError || t instanceof ThreadDeath;
     }
 
     /** 文字列の機密情報を秘匿する。脱敏器の異常時も固定文言を返す。 */
@@ -59,64 +81,18 @@ public final class LogRedaction {
             result = replace(result, JSON_SECRET_PATTERN, "$1$2***$2");
             result = EMAIL_PATTERN.matcher(result).replaceAll("***@***");
             result = SQL_BINDING_PATTERN.matcher(result).replaceAll("$1[REDACTED_BINDINGS]");
-            result = redactSql(result);
+            result = SQL_STATEMENT_PATTERN.matcher(result).replaceAll("[REDACTED_SQL]");
             return JDBC_PATTERN.matcher(result).replaceAll("jdbc:***");
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return FALLBACK;
         }
     }
 
     private static String replace(String value, Pattern pattern, String replacement) {
         return pattern.matcher(value).replaceAll(replacement);
-    }
-
-    /** SQL全体を大きな正規表現で探索せず、キーワード位置を一度だけ走査する。 */
-    private static String redactSql(String value) {
-        Matcher matcher = SQL_KEYWORD_PATTERN.matcher(value);
-        StringBuilder result = null;
-        int last = 0;
-        while (matcher.find()) {
-            int end = sqlSegmentEnd(value, matcher.start());
-            if (end <= matcher.start()) {
-                continue;
-            }
-            if (result == null) {
-                result = new StringBuilder(value.length());
-            }
-            result.append(value, last, matcher.start()).append("[REDACTED_SQL]");
-            last = end;
-            matcher.region(end, value.length());
-        }
-        if (result == null) {
-            return value;
-        }
-        result.append(value, last, value.length());
-        return result.toString();
-    }
-
-    private static int sqlSegmentEnd(String value, int start) {
-        int i = start;
-        boolean quoted = false;
-        char quote = 0;
-        while (i < value.length()) {
-            char c = value.charAt(i);
-            if (quoted) {
-                if (c == quote) {
-                    if (i + 1 < value.length() && value.charAt(i + 1) == quote) {
-                        i += 2;
-                        continue;
-                    }
-                    quoted = false;
-                }
-            } else if (c == '\'' || c == '"') {
-                quoted = true;
-                quote = c;
-            } else if (c == ';' || c == '\r' || c == '\n' || c == '|') {
-                break;
-            }
-            i++;
-        }
-        return i;
     }
 
     /** メールアドレスを局所マスクする。 */
@@ -146,8 +122,11 @@ public final class LogRedaction {
             StringBuilder out = new StringBuilder(256);
             appendSummary(e, 0, state, out);
             return out.toString();
-        } catch (RuntimeException ex) {
-            return "exceptionType=UNKNOWN; detail=" + FALLBACK;
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
+            return "exceptionType=" + exceptionType(e) + "; detail=" + FALLBACK;
         }
     }
 
@@ -207,8 +186,11 @@ public final class LogRedaction {
                 return null;
             }
             return createSanitizedCopy(e, new IdentityHashMap<>(), 0);
-        } catch (RuntimeException ex) {
-            return new SanitizedException("UNKNOWN", FALLBACK, null);
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
+            return new SanitizedException(exceptionType(e), FALLBACK, null);
         }
     }
 
@@ -237,7 +219,10 @@ public final class LogRedaction {
             if (copy != null && copy != sanitized) {
                 try {
                     sanitized.addSuppressed(copy);
-                } catch (RuntimeException ignored) {
+                } catch (Throwable ignored) {
+                    if (isFatal(ignored)) {
+                        throw (Error) ignored;
+                    }
                     // 例外グラフが不正でも脱敏処理は継続する。
                 }
             }
@@ -251,36 +236,61 @@ public final class LogRedaction {
         return bounded;
     }
 
-    private static String safeMessage(Throwable e) {
+    public static String safeMessage(Throwable e) {
+        if (e == null) {
+            return null;
+        }
         try {
             String message = e.getMessage();
             return message == null ? null : redact(message);
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return FALLBACK;
         }
     }
 
-    private static Throwable safeCause(Throwable e) {
+    public static Throwable safeCause(Throwable e) {
+        if (e == null) {
+            return null;
+        }
         try {
             return e.getCause();
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return null;
         }
     }
 
-    private static Throwable[] safeSuppressed(Throwable e) {
+    public static Throwable[] safeSuppressed(Throwable e) {
+        if (e == null) {
+            return new Throwable[0];
+        }
         try {
-            return e.getSuppressed() == null ? new Throwable[0] : e.getSuppressed();
-        } catch (RuntimeException ex) {
+            Throwable[] suppressed = e.getSuppressed();
+            return suppressed == null ? new Throwable[0] : suppressed;
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return new Throwable[0];
         }
     }
 
-    private static StackTraceElement[] safeStackTrace(Throwable e) {
+    public static StackTraceElement[] safeStackTrace(Throwable e) {
+        if (e == null) {
+            return new StackTraceElement[0];
+        }
         try {
             StackTraceElement[] frames = e.getStackTrace();
             return frames == null ? new StackTraceElement[0] : frames;
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return new StackTraceElement[0];
         }
     }
@@ -288,7 +298,10 @@ public final class LogRedaction {
     private static String safeClassName(Class<?> type) {
         try {
             return type == null ? "UNKNOWN" : type.getName();
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
+            if (isFatal(ex)) {
+                throw (Error) ex;
+            }
             return "UNKNOWN";
         }
     }

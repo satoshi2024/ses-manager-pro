@@ -725,6 +725,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         }
 
         return CanonicalInvoice.builder()
+                .invoiceId(invoice.getId())
                 .invoiceNumber(invoice.getInvoiceNo())
                 .issuedDate(invoice.getIssuedDate())
                 .dueDate(invoice.getDueDate())

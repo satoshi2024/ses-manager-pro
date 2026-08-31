@@ -169,4 +169,150 @@ class LogRedactionTest {
         assertNotNull(sanitized.getStackTrace());
         assertTrue(sanitized.getStackTrace().length > 0);
     }
+
+    @Test
+    @DisplayName("SQL脱敏判定: 通常の英単語(update/select/delete)が過度に脱敏されず安全な診断フィールドが残る")
+    void 通常の業務メッセージは過度に脱敏されず診断情報が保持される() {
+        assertEquals("Provider update failed requestId=req-1",
+                LogRedaction.redact("Provider update failed requestId=req-1"));
+        assertEquals("Service select completed recordCount=42 correlationId=corr-99",
+                LogRedaction.redact("Service select completed recordCount=42 correlationId=corr-99"));
+        assertEquals("User delete failed reason=not_found userId=u-123",
+                LogRedaction.redact("User delete failed reason=not_found userId=u-123"));
+
+        // 実SQL文が含まれる場合は安全に脱敏され、後続の診断識別子が残る
+        assertEquals("SQL error: [REDACTED_SQL]| requestId=req-1",
+                LogRedaction.redact("SQL error: UPDATE t_digital_invoice SET status = 'SENT' WHERE id = 1 | requestId=req-1"));
+        assertEquals("SQL error: [REDACTED_SQL]",
+                LogRedaction.redact("SQL error: UPDATE t_digital_invoice SET status = 'SENT' WHERE id = 1"));
+        assertEquals("[REDACTED_SQL]",
+                LogRedaction.redact("SELECT id, email, password FROM sys_user WHERE username = 'admin'"));
+        assertEquals("[REDACTED_SQL]",
+                LogRedaction.redact("INSERT INTO t_digital_invoice (id, status) VALUES (1, 'QUEUED')"));
+        assertEquals("[REDACTED_SQL]",
+                LogRedaction.redact("DELETE FROM sys_user WHERE id = 99"));
+    }
+
+    @Test
+    @DisplayName("Throwableの各getterがAssertionErrorを投げても二次例外を出さず固定fallbackへ安全に変換する")
+    void getterのAssertionErrorに対しても二次例外を出さず機密を秘匿する() {
+        // 1. getMessage が AssertionError を投げる場合
+        Throwable msgAdversary = new Throwable() {
+            @Override
+            public String getMessage() {
+                throw new AssertionError("db password=msg-secret-leak");
+            }
+        };
+        assertEquals("機密情報を含むため詳細を省略しました", LogRedaction.safeMessage(msgAdversary));
+        Throwable sanitized1 = LogRedaction.sanitizeThrowable(msgAdversary);
+        assertNotNull(sanitized1);
+        assertFalse(sanitized1.getMessage().contains("msg-secret-leak"));
+        String summary1 = LogRedaction.safeThrowableSummary(msgAdversary);
+        assertFalse(summary1.contains("msg-secret-leak"));
+
+        // 2. getCause が AssertionError を投げる場合
+        Throwable causeAdversary = new Throwable("safe message") {
+            @Override
+            public Throwable getCause() {
+                throw new AssertionError("Bearer cause-token-secret");
+            }
+        };
+        assertNull(LogRedaction.safeCause(causeAdversary));
+        Throwable sanitized2 = LogRedaction.sanitizeThrowable(causeAdversary);
+        assertNotNull(sanitized2);
+        assertNull(sanitized2.getCause());
+        String summary2 = LogRedaction.safeThrowableSummary(causeAdversary);
+        assertFalse(summary2.contains("cause-token-secret"));
+
+        // 3. getSuppressed / suppressed 例外の getMessage が AssertionError を投げる場合
+        assertEquals(0, LogRedaction.safeSuppressed(null).length);
+        Throwable suppressedAdversaryHolder = new Throwable("safe holder");
+        suppressedAdversaryHolder.addSuppressed(new Throwable() {
+            @Override
+            public String getMessage() {
+                throw new AssertionError("victim-suppressed@example.com");
+            }
+        });
+        assertEquals(1, LogRedaction.safeSuppressed(suppressedAdversaryHolder).length);
+        Throwable sanitized3 = LogRedaction.sanitizeThrowable(suppressedAdversaryHolder);
+        assertNotNull(sanitized3);
+        String summary3 = LogRedaction.safeThrowableSummary(suppressedAdversaryHolder);
+        assertFalse(summary3.contains("victim-suppressed@example.com"));
+
+        // 4. getStackTrace が AssertionError を投げる場合
+        Throwable stackAdversary = new Throwable("safe message") {
+            @Override
+            public StackTraceElement[] getStackTrace() {
+                throw new AssertionError("SELECT password FROM secret_table");
+            }
+        };
+        assertEquals(0, LogRedaction.safeStackTrace(stackAdversary).length);
+        Throwable sanitized4 = LogRedaction.sanitizeThrowable(stackAdversary);
+        assertNotNull(sanitized4);
+        assertEquals(0, sanitized4.getStackTrace().length);
+        String summary4 = LogRedaction.safeThrowableSummary(stackAdversary);
+        assertFalse(summary4.contains("secret_table"));
+
+        // 5. 非finalの全getterが不正なAssertionErrorを投げる複合対抗例外
+        Throwable fullAdversary = new Throwable() {
+            @Override
+            public String getMessage() {
+                throw new AssertionError("db password=all-secret-1");
+            }
+            @Override
+            public Throwable getCause() {
+                throw new AssertionError("Authorization: Bearer all-secret-2");
+            }
+            @Override
+            public StackTraceElement[] getStackTrace() {
+                throw new AssertionError("DELETE FROM accounts WHERE secret = 'leak'");
+            }
+        };
+        fullAdversary.addSuppressed(new Throwable() {
+            @Override
+            public String getMessage() {
+                throw new AssertionError("leak@corp.internal");
+            }
+        });
+        String fullSummary = LogRedaction.safeThrowableSummary(fullAdversary);
+        assertFalse(fullSummary.contains("all-secret"));
+        assertFalse(fullSummary.contains("corp.internal"));
+        assertFalse(fullSummary.contains("accounts"));
+
+        Throwable fullSanitized = LogRedaction.sanitizeThrowable(fullAdversary);
+        assertNotNull(fullSanitized);
+        assertFalse(fullSanitized.toString().contains("all-secret"));
+        assertFalse(fullSanitized.toString().contains("corp.internal"));
+    }
+
+    @Test
+    @DisplayName("JVM致命的エラー(VirtualMachineError)は方針に従って再送出される")
+    void 致命的エラーは再送出する() {
+        Throwable oomMsg = new Throwable() {
+            @Override
+            public String getMessage() {
+                throw new OutOfMemoryError("OOM message");
+            }
+        };
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.safeMessage(oomMsg));
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.sanitizeThrowable(oomMsg));
+
+        Throwable oomCause = new Throwable() {
+            @Override
+            public Throwable getCause() {
+                throw new OutOfMemoryError("OOM cause");
+            }
+        };
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.safeCause(oomCause));
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.safeThrowableSummary(oomCause));
+
+        Throwable oomStack = new Throwable() {
+            @Override
+            public StackTraceElement[] getStackTrace() {
+                throw new OutOfMemoryError("OOM stack");
+            }
+        };
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.safeStackTrace(oomStack));
+        assertThrows(OutOfMemoryError.class, () -> LogRedaction.safeThrowableSummary(oomStack));
+    }
 }

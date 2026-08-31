@@ -221,9 +221,11 @@ public class JpPintRenderer {
             return writer.toString();
 
         } catch (Exception e) {
-            log.error("XMLの生成に失敗しました: invoiceNo={} correlationId={} exceptionClass={} detail={}",
-                    invoice != null ? invoice.getInvoiceNumber() : null,
-                    com.ses.common.util.CorrelationContext.current(), e.getClass().getName(),
+            log.error("XMLの生成に失敗しました: invoiceId={} correlationId={} errorCode={} exceptionClass={} detail={}",
+                    invoice != null ? invoice.getInvoiceId() : null,
+                    com.ses.common.util.CorrelationContext.current(),
+                    "XML_RENDER_FAILED",
+                    com.ses.common.util.LogRedaction.exceptionType(e),
                     com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             throw new BusinessException("XMLの生成に失敗しました。");
         }
@@ -299,10 +301,10 @@ public class JpPintRenderer {
             transformer.transform(new DOMSource(doc), new StreamResult(writer));
             return writer.toString();
         } catch (Exception e) {
-            log.error("CreditNote XMLの生成に失敗しました: creditNoteId={} billingRef={} correlationId={} exceptionClass={} detail={}",
-                    com.ses.common.util.CorrelationContext.safeIdentifier(creditNoteId),
-                    com.ses.common.util.CorrelationContext.safeIdentifier(billingReferenceId),
+            log.error("CreditNote XMLの生成に失敗しました: invoiceId={} correlationId={} errorCode={} exceptionClass={} detail={}",
+                    original != null ? original.getInvoiceId() : null,
                     com.ses.common.util.CorrelationContext.current(),
+                    "CREDIT_NOTE_RENDER_FAILED",
                     com.ses.common.util.LogRedaction.exceptionType(e),
                     com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             throw new BusinessException("CreditNote XMLの生成に失敗しました。");
