@@ -200,6 +200,10 @@ class AssetMySqlIntegrationTest {
 
         ExternalAccountReference revoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
         assertEquals("REVOKED", revoked.getStatus());
+        assertEquals(1L, revoked.getRevokeConfirmedBy());
+        assertEquals("MANUAL_API", revoked.getRevokeConfirmedSource());
+        assertEquals("HUMAN", revoked.getActorType());
+        assertEquals("MANUAL_API", revoked.getConfirmationSource());
 
         LicensePlan plan = LicensePlan.builder()
                 .planCode("MYSQL-LIC-001")
@@ -214,6 +218,54 @@ class AssetMySqlIntegrationTest {
         assertEquals(1, updated);
         LicensePlan updatedPlan = licensePlanMapper.selectById(plan.getId());
         assertEquals(1, updatedPlan.getAllocatedCount());
+    }
+
+    @Test
+    @DisplayName("MySQL NF-09: System poll attributes to SYSTEM (null confirmedBy) vs manual real user on real MySQL")
+    void testSystemVsManualActorAttributionOnMySQL() {
+        assertTrue(providerClient instanceof MockExternalAccountProviderClientImpl);
+        MockExternalAccountProviderClientImpl mockClient = (MockExternalAccountProviderClientImpl) providerClient;
+
+        ExternalAccountSystem system = ExternalAccountSystem.builder()
+                .systemCode("MYSQL_ATTR_" + System.nanoTime())
+                .systemName("MySQL Actor Attribution System")
+                .systemType("SAAS_COLLAB")
+                .isActive(1)
+                .build();
+        externalAccountSystemMapper.insert(system);
+
+        // 1. 手動確認
+        ExternalAccountReference manualRef = externalAccountService.registerAccountReference(
+                system.getId(), "mysql.manual@ses-test.jp", "ENGINEER", 7010L, "MEMBER", 9001L);
+        ExternalAccountReference manualRevoked = externalAccountService.confirmRevoke(manualRef.getId(), 1L);
+        assertEquals("REVOKED", manualRevoked.getStatus());
+        assertEquals(1L, manualRevoked.getRevokeConfirmedBy());
+        assertEquals("MANUAL_API", manualRevoked.getRevokeConfirmedSource());
+
+        ExternalAccountReference dbManual = externalAccountReferenceMapper.selectById(manualRef.getId());
+        assertEquals("REVOKED", dbManual.getStatus());
+        assertEquals(1L, dbManual.getRevokeConfirmedBy());
+        assertEquals("MANUAL_API", dbManual.getRevokeConfirmedSource());
+
+        // 2. システム自動ポーリング (confirmedBy == null, source == SYSTEM, ユーザー1偽装禁止)
+        ExternalAccountReference autoRef = externalAccountService.registerAccountReference(
+                system.getId(), "mysql.poll@ses-test.jp", "ENGINEER", 7011L, "MEMBER", 9001L);
+        mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
+        externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "mysql-poll-key-" + autoRef.getId(), 9001L);
+        mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+
+        // 他テストが作成したpending行の件数には依存せず、このテスト自身の行がdueであることだけを確認する。
+        jdbcTemplate.update("UPDATE t_external_account_reference SET next_retry_at = CURRENT_TIMESTAMP WHERE id = ?",
+                autoRef.getId());
+        externalAccountService.processPendingRevokePollJob();
+
+        ExternalAccountReference dbAuto = externalAccountReferenceMapper.selectById(autoRef.getId());
+        assertEquals("REVOKED", dbAuto.getStatus());
+        assertNotNull(dbAuto.getRevokeConfirmedAt());
+        assertNull(dbAuto.getRevokeConfirmedBy(), "自動ポーリングによる失効確認者はNULLでなければならない (ユーザー1の偽装禁止)");
+        assertEquals("SCHEDULER_POLL", dbAuto.getRevokeConfirmedSource());
+        assertEquals("SYSTEM", dbAuto.getActorType());
+        assertEquals("SCHEDULER_POLL", dbAuto.getConfirmationSource());
     }
 
     @Test
@@ -510,12 +562,12 @@ class AssetMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("MySQL schema: V132/V133 waiver and lost incident scope, FK, unique key and append-only triggers")
+    @DisplayName("MySQL schema: V132/V133/V136 waiver, lost incident, attribution scope, FK, unique key and append-only triggers")
     void testV132AndV133SchemaAndAppendOnlyGuardsOnMySQL() {
         String latest = jdbcTemplate.queryForObject(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1",
                 String.class);
-        assertEquals("133", latest);
+        assertEquals("143", latest);
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_case_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND column_name = 'lifecycle_task_id'"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_offboarding_waiver' AND index_name = 'uk_asset_offboarding_waiver_request'"));
@@ -531,6 +583,17 @@ class AssetMySqlIntegrationTest {
         }
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_asset_lost_incident' AND index_name = 'uq_asset_lost_incident_asset' AND non_unique = 0"));
         assertEquals(1, count("SELECT COUNT(*) FROM information_schema.referential_constraints WHERE constraint_schema = DATABASE() AND constraint_name = 'fk_asset_lost_incident_asset'"));
+        // V136 external account revoke system actor attribution
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_external_account_reference' AND column_name = 'revoke_confirmed_source'"));
+        for (String column : new String[]{"revoke_requested_by", "actor_type", "confirmation_source"}) {
+            assertEquals(1, count("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_external_account_reference' AND column_name = '" + column + "'"));
+        }
+        assertEquals(1, count("SELECT COUNT(DISTINCT index_name) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 't_external_account_reference' AND index_name = 'idx_ext_acc_revoke_confirmed'"));
+        for (String constraint : new String[]{"ck_ext_revoke_actor_type", "ck_ext_revoke_confirmation_source", "ck_ext_revoke_attribution", "ck_ext_revoke_status_attribution"}) {
+            assertEquals(1, count("SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema = DATABASE() AND table_name = 't_external_account_reference' AND constraint_name = '" + constraint + "'"));
+        }
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema = DATABASE() AND table_name = 't_asset_event' AND constraint_name = 'ck_asset_event_actor_pair'"));
+        assertEquals(1, count("SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema = DATABASE() AND table_name = 't_audit_log' AND constraint_name = 'ck_audit_actor_pair'"));
     }
 
     private int count(String sql) {

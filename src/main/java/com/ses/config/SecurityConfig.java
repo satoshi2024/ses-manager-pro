@@ -168,6 +168,8 @@ public class SecurityConfig {
                     "/api/system-configs/**",
                     "/audit-log/**",
                     "/api/audit-logs/**",
+                    "/integration-hub/**",
+                    "/api/integration-hub/**",
                     "/api/autocomplete/users"
                 ).hasRole("管理者")
                 .requestMatchers("/api/management-reports/schedules/*/enable",

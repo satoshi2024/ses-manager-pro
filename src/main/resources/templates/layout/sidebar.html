@@ -403,6 +403,12 @@
                         <span th:text="#{menu.auditLog}">監査ログ</span>
                     </a>
                 </li>
+                <li class="nav-item" sec:authorize="hasRole('管理者')">
+                    <a th:href="@{/integration-hub/inbound-events}" class="nav-link px-3 py-2 rounded-md"
+                       th:classappend="${#strings.startsWith(currentUri, '/integration-hub/inbound-events') ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-shield-lock me-2"></i><span>Integration Hub inbound / DLQ</span>
+                    </a>
+                </li>
             </ul>
         </div>
         

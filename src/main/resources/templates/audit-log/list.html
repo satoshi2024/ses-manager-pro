@@ -8,7 +8,12 @@
 <body>
 <div layout:fragment="content" class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h3 mb-0 text-light"><i class="bi bi-shield-check me-2 text-info"></i><th:block th:text="#{auditLog.title}">監査ログ</th:block></h2>
+        <div class="d-flex align-items-center gap-3">
+            <h2 class="h3 mb-0 text-light"><i class="bi bi-shield-check me-2 text-info"></i><th:block th:text="#{auditLog.title}">監査ログ</th:block></h2>
+            <a class="btn btn-outline-light btn-sm" href="/api/audit-logs/export.csv">
+                <i class="bi bi-filetype-csv me-1"></i>CSV出力
+            </a>
+        </div>
     </div>
 
     <div class="card bg-card border-dark shadow-sm mb-4">
@@ -47,10 +52,12 @@
                             <th th:text="#{auditLog.table.method}">メソッド</th>
                             <th th:text="#{auditLog.table.uri}">URI</th>
                             <th th:text="#{auditLog.table.status}">ステータス</th>
+                            <th>主体</th>
+                            <th>確認チャネル</th>
                         </tr>
                     </thead>
                     <tbody id="audit-log-table-body">
-                        <tr><td colspan="5" class="text-center text-muted py-4"><th:block th:text="#{common.msg.loading}">読み込み中...</th:block></td></tr>
+                        <tr><td colspan="7" class="text-center text-muted py-4"><th:block th:text="#{common.msg.loading}">読み込み中...</th:block></td></tr>
                     </tbody>
                 </table>
             </div>

@@ -188,7 +188,7 @@ $(function () {
         tbody.empty();
 
         if (!records || records.length === 0) {
-            tbody.append('<tr><td colspan="8" class="text-center py-4 text-muted">該当する外部アカウント参照はありません</td></tr>');
+            tbody.append('<tr><td colspan="11" class="text-center py-4 text-muted">該当する外部アカウント参照はありません</td></tr>');
             return;
         }
 
@@ -196,6 +196,8 @@ $(function () {
             const statusBadge = acc.status === 'ACTIVE' ? '<span class="badge bg-success">ACTIVE</span>' : acc.status === 'REVOKED' ? '<span class="badge bg-danger">REVOKED</span>' : '<span class="badge bg-warning text-dark">SUSPENDED</span>';
             const sys = systemsCache.find(x => x.id === acc.systemId);
             const sysName = sys ? sys.systemName : `Sys #${acc.systemId}`;
+            const actorType = acc.actorTypeDisplay || acc.actorType || '未確認';
+            const confirmationSource = acc.confirmationSourceDisplay || acc.confirmationSource || '未確認';
 
             const tr = $(`
                 <tr>
@@ -205,7 +207,10 @@ $(function () {
                     <td><span class="badge bg-dark">${escapeHtml(acc.permissionLevel || 'MEMBER')}</span></td>
                     <td>${statusBadge}</td>
                     <td><small class="text-muted">${acc.provisionedAt ? acc.provisionedAt.substring(0, 10) : '-'}</small></td>
+                    <td><small class="text-muted">${acc.revokeRequestedBy ? 'User#' + acc.revokeRequestedBy : '-'}</small></td>
                     <td><small class="text-muted">${acc.revokeConfirmedAt ? acc.revokeConfirmedAt.replace('T', ' ').substring(0, 16) : '-'}</small></td>
+                    <td><span class="badge bg-secondary">${escapeHtml(actorType)}</span></td>
+                    <td><span class="badge bg-dark">${escapeHtml(confirmationSource)}</span></td>
                     <td class="text-end">
                         ${acc.status !== 'REVOKED' ? `<button class="btn btn-outline-danger btn-sm btn-confirm-revoke" data-id="${acc.id}" data-id-str="${escapeHtml(acc.accountIdentifier)}">失効確認</button>` : ''}
                     </td>

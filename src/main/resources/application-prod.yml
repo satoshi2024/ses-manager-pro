@@ -17,6 +17,23 @@ spring:
   flyway:
     locations: classpath:db/migration,classpath:db/migration-prod
 
+integration:
+  hub:
+    # production enablementは本Decisionで禁止。validatorもtrue/非MOCKを拒否する。
+    public-api:
+      enabled: false
+      public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
+      cursor-ttl-seconds: 300
+    external-transport:
+      enabled: false
+      batch-size: 32
+      lease-seconds: 60
+      fixed-delay-ms: 1000
+      connect-timeout-ms: 3000
+      read-timeout-ms: 3000
+    provider:
+      mode: MOCK
+
 # ===== ログ（本番はSQL・パラメータ・パスワードハッシュ等の機密情報を残さない） =====
 logging:
   level:

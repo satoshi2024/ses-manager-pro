@@ -74,7 +74,9 @@ class TestIsolationAuditTest {
             // ポータル連携の commit 可視性がクラスTXで潰れる
             "com.ses.web.EngineerSelfServicePortalMRegressionTest",
             // 添付ファイル公開メタデータがクラスTX内では download 経路から見えない
-            "com.ses.changerequest.EngineerChangeRequestAttachmentApiTest"
+            "com.ses.changerequest.EngineerChangeRequestAttachmentApiTest",
+            // jdbcTemplateで更新した直後にmapper再読込。クラスTX+MyBatis 1次キャッシュで古いmembershipが返る
+            "com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest"
     );
 
     @Test

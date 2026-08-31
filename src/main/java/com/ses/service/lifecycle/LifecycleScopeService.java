@@ -35,7 +35,9 @@ public class LifecycleScopeService {
      * 要員起票・参照権限チェック
      */
     public void assertCanAccessEngineer(SysUser currentUser, Engineer engineer) {
-        if (currentUser == null) return;
+        if (currentUser == null) {
+            throw BusinessException.of(401, "error.unauthorized");
+        }
         String role = currentUser.getRole();
         if ("管理者".equals(role) || "HR".equals(role)) {
             return;

@@ -18,6 +18,9 @@ public interface AuditLogService {
     void recordRequired(String username, String method, String uri, int status,
                         String applicationCode, boolean successFlag);
 
+    /** ドメイン状態変更と同一トランザクションで必須記録する。 */
+    void recordDomainEventRequired(AuditLog entry);
+
     /** 監査ログを条件検索する（username部分一致・method完全一致、created_at降順）。 */
     Page<AuditLog> page(long current, long size, String username, String method);
 }

@@ -1,0 +1,1031 @@
+openapi: 3.0.3
+info:
+  title: SES Manager Pro Integration Hub Public API
+  version: 1.0.0-candidate
+  description: >
+    DG-05承認済みのPlan Review用非公開candidate契約。F1 persistence基盤の入力として使用できるが、
+    この文書だけでproduction API endpointをenableしてはならない。
+    /external-api/v1/** はinternal管理chain、portal chain、anonymous webhook例外から分離された
+    dedicated machine-to-machine security boundaryである。匿名アクセス、internal role偽装、entity直列化、
+    command API、export APIは許可しない。
+  x-approval-status: APPROVED_FOR_PLAN_ONLY
+  x-security-boundary: dedicated-public-client-chain
+  x-default-deny-surfaces:
+    - command
+    - export
+  x-version-retirement-policy: >
+    retirementは後継versionとmigration planを添えて180日以上前に通知し、security review PASS後に行う。
+    月間99.9%、p95 500ms等の承認SLAを満たさないenablementは禁止する。
+  x-error-status-code-map:
+    '400': [REQUEST_INVALID, CURSOR_INVALID]
+    '401': [AUTHENTICATION_FAILED]
+    '403': [FORBIDDEN_SCOPE]
+    '404': [RESOURCE_NOT_FOUND]
+    '409': [INBOUND_PAYLOAD_CONFLICT]
+    '429': [RATE_LIMITED]
+    '500': [INTERNAL_ERROR]
+  x-non-enumeration-rule: >
+    Scope外のdetail targetは存在しないtargetと同じ404/RESOURCE_NOT_FOUNDへ収束させる。
+    list/countではscope外rowを母集団へ含めず、error、cursor、件数から存在を推測できないようにする。
+servers:
+  - url: https://api.example.invalid
+    description: Non-production example; public endpoint enablement is not approved by this scope.
+security:
+  - publicClientAuthentication: []
+paths:
+  /external-api/v1/engineer-availability:
+    get:
+      tags: [engineer-availability]
+      operationId: listEngineerAvailability
+      summary: List candidate engineer availability
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.availability.read
+      x-data-scope: tenant + legal entity + engineer allow-list
+      x-command-permission: integration.engineer-availability.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineerAvailabilityList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/engineer-availability/{publicEngineerId}:
+    get:
+      tags: [engineer-availability]
+      operationId: getEngineerAvailability
+      summary: Get candidate engineer availability
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.availability.read
+      x-data-scope: tenant + legal entity + engineer allow-list
+      x-command-permission: integration.engineer-availability.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/PublicEngineerId'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineerAvailability'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/projects:
+    get:
+      tags: [project]
+      operationId: listProjects
+      summary: List candidate projects
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.project.read
+      x-data-scope: tenant + legal entity + project/customer allow-list
+      x-command-permission: integration.project.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/projects/{publicProjectId}:
+    get:
+      tags: [project]
+      operationId: getProject
+      summary: Get candidate project
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.project.read
+      x-data-scope: tenant + legal entity + project/customer allow-list
+      x-command-permission: integration.project.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/PublicProjectId'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/projects/count:
+    get:
+      tags: [project]
+      operationId: countProjects
+      summary: Count candidate projects
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.project.read
+      x-data-scope: tenant + legal entity + project/customer allow-list
+      x-command-permission: integration.project.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/contract-statuses:
+    get:
+      tags: [contract-status]
+      operationId: listContractStatuses
+      summary: List candidate contract statuses
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.contract-status.read
+      x-data-scope: tenant + legal entity + contract/project allow-list
+      x-command-permission: integration.contract-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractStatusList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/contract-statuses/{publicContractId}:
+    get:
+      tags: [contract-status]
+      operationId: getContractStatus
+      summary: Get candidate contract status
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.contract-status.read
+      x-data-scope: tenant + legal entity + contract/project allow-list
+      x-command-permission: integration.contract-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/PublicContractId'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/contract-statuses/count:
+    get:
+      tags: [contract-status]
+      operationId: countContractStatuses
+      summary: Count candidate contract statuses
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.contract-status.read
+      x-data-scope: tenant + legal entity + contract/project allow-list
+      x-command-permission: integration.contract-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/invoice-statuses:
+    get:
+      tags: [invoice-status]
+      operationId: listInvoiceStatuses
+      summary: List candidate invoice statuses
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.invoice-status.read
+      x-data-scope: tenant + legal entity + invoice/customer allow-list
+      x-command-permission: integration.invoice-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceStatusList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/invoice-statuses/{publicInvoiceId}:
+    get:
+      tags: [invoice-status]
+      operationId: getInvoiceStatus
+      summary: Get candidate invoice status
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.invoice-status.read
+      x-data-scope: tenant + legal entity + invoice/customer allow-list
+      x-command-permission: integration.invoice-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/PublicInvoiceId'
+      responses:
+        '200':
+          description: Candidate allow-list response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/invoice-statuses/count:
+    get:
+      tags: [invoice-status]
+      operationId: countInvoiceStatuses
+      summary: Count candidate invoice statuses
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.invoice-status.read
+      x-data-scope: tenant + legal entity + invoice/customer allow-list
+      x-command-permission: integration.invoice-status.read
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Candidate count response
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /external-api/v1/webhooks/{provider}:
+    post:
+      tags: [inbound-webhook]
+      operationId: receiveInboundWebhook
+      summary: Receive an approved inbound provider webhook event
+      security:
+        - publicClientAuthentication: []
+      x-required-client-scope: integration.webhook.receive
+      x-data-scope: tenant + legal entity + approved inbound provider binding
+      x-command-permission: integration.webhook.receive
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._~-]{1,100}$'
+        - name: X-Provider-Event-ID
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 160
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [eventType]
+              properties:
+                eventType:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+      responses:
+        '200':
+          description: Duplicate delivery of an already terminal inbound event
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundWebhookResponse'
+        '202':
+          description: Accepted or still processing inbound event
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundWebhookResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InboundConflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  securitySchemes:
+    publicClientAuthentication:
+      type: apiKey
+      in: header
+      name: X-Client-Signature
+      description: >
+        HMAC-SHA256 signed service account authentication. The canonical bytes include clientId,
+        credentialVersion/keyId, timestamp, nonce, method, canonical path/query, and body SHA-256.
+        Timestamp tolerance is plus or minus five minutes, nonce replay is rejected, and OAuth fallback is disabled.
+      x-required-auth-headers: [X-Client-ID, X-Credential-Version, X-Key-ID, X-Timestamp, X-Nonce, X-Client-Signature]
+  parameters:
+    CorrelationId:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+      description: Client supplied correlation ID subject to validation; server generates one when omitted.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+      description: Candidate bounded page size within the approved SLA and payload limit.
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 2048
+      description: >
+        Opaque cursor bound server-side to client, granted scope, data scope, tenant, as-of, filter, stable sort,
+        and expiry. Database IDs and offset state are not public contract.
+    PublicEngineerId:
+      name: publicEngineerId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Opaque client-bound public identifier; never an internal database ID.
+    PublicProjectId:
+      name: publicProjectId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Opaque client-bound public identifier; never an internal database ID.
+    PublicContractId:
+      name: publicContractId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Opaque client-bound public identifier; never an internal database ID.
+    PublicInvoiceId:
+      name: publicInvoiceId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+      description: Opaque client-bound public identifier; never an internal database ID.
+  headers:
+    CorrelationId:
+      description: Server correlation ID for safe support tracing.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+  responses:
+    BadRequest:
+      description: Stable validation error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/BadRequestError'
+    Unauthorized:
+      description: Stable authentication error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnauthorizedError'
+    Forbidden:
+      description: Stable authorization error with non-enumeration policy
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ForbiddenError'
+    InboundConflict:
+      description: Stable inbound payload hash conflict for the same provider event ID
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InboundConflictError'
+    NotFound:
+      description: Stable non-enumerating resource error for nonexistent or scope-excluded targets
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NotFoundError'
+    RateLimited:
+      description: Stable rate limit error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+        Retry-After:
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitedError'
+    ServerError:
+      description: Stable safe server error
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServerError'
+  schemas:
+    EngineerAvailability:
+      type: object
+      additionalProperties: false
+      required: [publicEngineerId, availabilityStatus]
+      x-allow-list-fields: [publicEngineerId, availabilityStatus, availableFrom, availableTo, skillTagCode]
+      x-deny-fields:
+        - internalDatabaseId
+        - engineerName
+        - email
+        - phone
+        - cost
+        - grossProfit
+        - unitPrice
+        - password
+        - token
+        - apiKey
+      properties:
+        publicEngineerId:
+          type: string
+        availabilityStatus:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]
+        availableFrom:
+          type: string
+          format: date
+          nullable: true
+        availableTo:
+          type: string
+          format: date
+          nullable: true
+        skillTagCode:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 64
+    Project:
+      type: object
+      additionalProperties: false
+      required: [publicProjectId, status]
+      x-allow-list-fields: [publicProjectId, status, startDate, endDate, publicCustomerId]
+      x-deny-fields:
+        - internalDatabaseId
+        - customerName
+        - customerEmail
+        - engineerName
+        - documentBody
+        - cost
+        - grossProfit
+        - unitPrice
+        - providerRawBody
+      properties:
+        publicProjectId:
+          type: string
+        status:
+          type: string
+          maxLength: 64
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        publicCustomerId:
+          type: string
+          nullable: true
+    ContractStatus:
+      type: object
+      additionalProperties: false
+      required: [publicContractId, status]
+      x-allow-list-fields: [publicContractId, publicProjectId, status, startDate, endDate, renewalStatus]
+      x-deny-fields:
+        - internalDatabaseId
+        - contractAmount
+        - cost
+        - grossProfit
+        - unitPrice
+        - customerName
+        - providerRawBody
+        - stack
+        - sql
+      properties:
+        publicContractId:
+          type: string
+        publicProjectId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          maxLength: 64
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        renewalStatus:
+          type: string
+          maxLength: 64
+          nullable: true
+    InvoiceStatus:
+      type: object
+      additionalProperties: false
+      required: [publicInvoiceId, status]
+      x-allow-list-fields: [publicInvoiceId, publicContractId, status, issueDate, dueDate, paidAt, settlementStatus]
+      x-deny-fields:
+        - internalDatabaseId
+        - amount
+        - accountNumber
+        - customerName
+        - documentBody
+        - password
+        - token
+        - providerRawBody
+        - stack
+        - sql
+      properties:
+        publicInvoiceId:
+          type: string
+        publicContractId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          maxLength: 64
+        issueDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        settlementStatus:
+          type: string
+          maxLength: 64
+          nullable: true
+    EngineerAvailabilityList:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore, asOf]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EngineerAvailability'
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+        asOf:
+          type: string
+          format: date-time
+    ProjectList:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore, asOf]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+        asOf:
+          type: string
+          format: date-time
+    ContractStatusList:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore, asOf]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractStatus'
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+        asOf:
+          type: string
+          format: date-time
+    InvoiceStatusList:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore, asOf]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceStatus'
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+        asOf:
+          type: string
+          format: date-time
+    CountResponse:
+      type: object
+      additionalProperties: false
+      required: [count, asOf]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+        asOf:
+          type: string
+          format: date-time
+    InboundWebhookResponse:
+      type: object
+      additionalProperties: false
+      required: [status, duplicate, conflict, resultCode]
+      x-allow-list-fields: [status, duplicate, conflict, resultCode]
+      x-deny-fields: [internalId, rawBodyHash, parsedFieldsSnapshot, clientId, secret, token, apiKey, pii]
+      properties:
+        status:
+          type: string
+          enum: [RECEIVED, PROCESSING, PROCESSED, DUPLICATE, CONFLICT, DLQ]
+        duplicate:
+          type: boolean
+        conflict:
+          type: boolean
+        resultCode:
+          type: string
+          maxLength: 64
+    BadRequestError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 400
+      x-allowed-error-codes: [REQUEST_INVALID, CURSOR_INVALID]
+      x-allow-list-fields: [code, message, correlationId, retryable, fieldErrors]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [REQUEST_INVALID, CURSOR_INVALID]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+        fieldErrors:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [field, code]
+            properties:
+              field:
+                type: string
+                maxLength: 64
+              code:
+                type: string
+                maxLength: 64
+    UnauthorizedError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 401
+      x-allowed-error-codes: [AUTHENTICATION_FAILED]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [AUTHENTICATION_FAILED]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    ForbiddenError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 403
+      x-allowed-error-codes: [FORBIDDEN_SCOPE]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [FORBIDDEN_SCOPE]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    InboundConflictError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 409
+      x-allowed-error-codes: [INBOUND_PAYLOAD_CONFLICT]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [INBOUND_PAYLOAD_CONFLICT]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    NotFoundError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 404
+      x-allowed-error-codes: [RESOURCE_NOT_FOUND]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [RESOURCE_NOT_FOUND]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    RateLimitedError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 429
+      x-allowed-error-codes: [RATE_LIMITED]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [RATE_LIMITED]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean
+    ServerError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      x-status-code: 500
+      x-allowed-error-codes: [INTERNAL_ERROR]
+      x-allow-list-fields: [code, message, correlationId, retryable]
+      x-deny-fields: [stack, sql, internalId, providerRawBody, dlqInternalReason, secret, token, apiKey, pii]
+      properties:
+        code:
+          type: string
+          enum: [INTERNAL_ERROR]
+        message:
+          type: string
+          maxLength: 256
+        correlationId:
+          type: string
+          minLength: 16
+          maxLength: 128
+        retryable:
+          type: boolean

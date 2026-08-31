@@ -60,6 +60,9 @@ public final class ActionPermissionResolver {
             Map.entry("engineers", "engineer"),
             Map.entry("files", "file"),
             Map.entry("identity-providers", "identity-provider"),
+            // NF-05 B2 inbound DLQ admin API。未登録だと/api/integration-hub/**が
+            // 管理者bypassより前に403になる（CRM-R2-P1-01 / R-NF05 P1-001と同型）。
+            Map.entry("integration-hub", "integration-hub"),
             Map.entry("invoices", "invoice"),
             // attendance-leave-overtime-compliance(S11/T071)。未登録のままだと/api/leaveが
             // 管理者を含む全roleで403になる(CRM-R2-P1-01と同じ罠)。V98の権限seedと対にする。
@@ -233,6 +236,9 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/batch-operations")) {
             return action("batch-operation", method);
         }
+        if ("POST".equals(method) && uri.matches("/api/integration-hub/inbound-events/[^/]+/replay")) {
+            return "integration.webhook.replay";
+        }
         return action(resource, method);
     }
 
@@ -244,7 +250,8 @@ public final class ActionPermissionResolver {
         if (actionKey.equals("export.execute") || actionKey.equals("file.download")
                 || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
                 || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")
-                || actionKey.equals("mfa.reset") || actionKey.equals("sales-order.edit")) {
+                || actionKey.equals("mfa.reset") || actionKey.equals("sales-order.edit")
+                || actionKey.equals("integration.webhook.replay")) {
             return true;
         }
         int separator = actionKey.indexOf('.');

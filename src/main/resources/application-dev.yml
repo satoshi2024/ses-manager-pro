@@ -1,7 +1,23 @@
 # dev プロファイル専用設定。
-# R3_SCALE_300 シード（db/migration-dev/V100__seed_r3_scale_300.sql）を
+# R3_SCALE_300 シード（V100の基礎データ + V134/V135の現行module補助データ）を
 # 通常起動（spring.profiles.active=dev）でも自動適用する。
 # 他のプロファイル（test/prod）には影響しない。
 spring:
   flyway:
     locations: classpath:db/migration,classpath:db/migration-dev
+
+integration:
+  hub:
+    public-api:
+      enabled: false
+      public-id-key: ${INTEGRATION_HUB_PUBLIC_ID_KEY:}
+      cursor-ttl-seconds: 300
+    external-transport:
+      enabled: false
+      batch-size: 32
+      lease-seconds: 60
+      fixed-delay-ms: 1000
+      connect-timeout-ms: 3000
+      read-timeout-ms: 3000
+    provider:
+      mode: MOCK

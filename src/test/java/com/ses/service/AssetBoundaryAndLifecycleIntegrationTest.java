@@ -426,7 +426,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         AssetAssignment assignment = assetAssignmentService.createAssignment(
                 asset.getId(), "ENGINEER", 5201L, LocalDate.now(), LocalDate.now().plusDays(30), null, "並行検証", 1L);
         ApprovalRequest waiverApproval = ApprovalRequest.builder()
-                .requestNo("AR-RETURN-WAIVE-" + System.nanoTime())
+                .requestNo("AR-RW-" + (System.nanoTime() % 1_000_000_000L))
                 .requestType("LIFECYCLE_EXCEPTION")
                 .targetType("ASSET_ASSIGNMENT")
                 .targetId(assignment.getId())
@@ -541,18 +541,73 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
             mockClient.setMockStatus(ref.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
             mockClient.setMockStatus(unknownRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
 
-            // ポーリングジョブ実行 -> 自動で REVOKED へ
+            // ポーリングジョブ実行 -> 自動で REVOKED へ (SYSTEM主体として記録され、ユーザーID 1に偽装されないこと)
             int processed = externalAccountService.processPendingRevokePollJob();
             assertThat(processed).isGreaterThanOrEqualTo(2);
 
             ExternalAccountReference confirmedRef = externalAccountReferenceMapper.selectById(ref.getId());
             assertThat(confirmedRef.getStatus()).isEqualTo("REVOKED");
             assertThat(confirmedRef.getRevokeConfirmedAt()).isNotNull();
+            assertThat(confirmedRef.getRevokeConfirmedBy()).isNull();
+            assertThat(confirmedRef.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
 
-            // 二重失効確認は安全に冪等処理されること
-            ExternalAccountReference duplicateRevoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
+            ExternalAccountReference confirmedUnknownRef = externalAccountReferenceMapper.selectById(unknownRef.getId());
+            assertThat(confirmedUnknownRef.getStatus()).isEqualTo("REVOKED");
+            assertThat(confirmedUnknownRef.getRevokeConfirmedBy()).isNull();
+            assertThat(confirmedUnknownRef.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
+
+            // 二重失効確認は安全に冪等処理されること (既にREVOKED済みの行は上書きされない)
+            ExternalAccountReference duplicateRevoked = externalAccountService.confirmRevokeFromSchedulerPoll(
+                    ref.getId(), "scheduler-poll:duplicate-" + ref.getId(), ref.getIdempotencyKey());
             assertThat(duplicateRevoked.getStatus()).isEqualTo("REVOKED");
-            assertThat(externalAccountReferenceMapper.selectById(unknownRef.getId()).getStatus()).isEqualTo("REVOKED");
+            assertThat(duplicateRevoked.getRevokeConfirmedBy()).isNull();
+            assertThat(duplicateRevoked.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("NF-09 System vs Manual actor attribution: Provider poll logs SYSTEM without spoofing user 1")
+    void testSystemVsManualActorAttribution() {
+        if (providerClient instanceof MockExternalAccountProviderClientImpl) {
+            MockExternalAccountProviderClientImpl mockClient = (MockExternalAccountProviderClientImpl) providerClient;
+
+            ExternalAccountSystem system = ExternalAccountSystem.builder()
+                    .systemCode("SYS_MANUAL_ATTR_" + System.nanoTime())
+                    .systemName("System vs Manual Attribution System")
+                    .systemType("IDP")
+                    .build();
+            externalAccountService.saveSystem(system);
+
+            // 1. 手動失効確認: 実ユーザーIDが記録され、source = MANUAL
+            ExternalAccountReference manualRef = externalAccountService.createAccountReference(
+                    system.getId(), "manual-actor@ses-test.jp", "ENGINEER", 7701L, "DEVELOPER", 9901L);
+            assertThat(manualRef.getStatus()).isEqualTo("ACTIVE");
+
+            // H2のseed済みadmin(sys_user.id=1)を実在する確認主体として使う。
+            Long humanUserId = 1L;
+            ExternalAccountReference manualRevoked = externalAccountService.confirmRevoke(manualRef.getId(), humanUserId);
+            assertThat(manualRevoked.getStatus()).isEqualTo("REVOKED");
+            assertThat(manualRevoked.getRevokeConfirmedAt()).isNotNull();
+            assertThat(manualRevoked.getRevokeConfirmedBy()).isEqualTo(humanUserId);
+            assertThat(manualRevoked.getRevokeConfirmedSource()).isEqualTo("MANUAL_API");
+
+            // 2. 自動ポーリング失効確認: confirmedBy は NULL（主キー1の偽装禁止）、source = SYSTEM
+            ExternalAccountReference autoRef = externalAccountService.createAccountReference(
+                    system.getId(), "auto-poll-actor@ses-test.jp", "ENGINEER", 7702L, "MEMBER", 9901L);
+            mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT);
+            externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "auto-key-" + autoRef.getId(), 9901L);
+
+            mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
+
+            int polled = externalAccountService.processPendingRevokePollJob();
+            assertThat(polled).isGreaterThanOrEqualTo(1);
+
+            ExternalAccountReference autoRevoked = externalAccountReferenceMapper.selectById(autoRef.getId());
+            assertThat(autoRevoked.getStatus()).isEqualTo("REVOKED");
+            assertThat(autoRevoked.getRevokeConfirmedAt()).isNotNull();
+            assertThat(autoRevoked.getRevokeConfirmedBy()).isNull();
+            assertThat(autoRevoked.getRevokeConfirmedSource()).isEqualTo("SCHEDULER_POLL");
         }
     }
 
@@ -684,9 +739,23 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 6: 営業・要員 Fail-Closed Scope 検証（担当外要員・別法人は拒否）")
     void testOrganizationScopeAndMultiCorporationIsolation() {
+        String suffix = Long.toString(System.nanoTime());
+        Engineer engineerA = Engineer.builder()
+                .fullName("資産Scope要員A-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        Engineer engineerB = Engineer.builder()
+                .fullName("資産Scope要員B-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+
         // 1. 法人A資産と法人B資産を作成
         Asset assetA = Asset.builder()
-                .assetTag("AST-SCOPE-A-001")
+                .assetTag("AST-SCOPE-A-" + suffix)
                 .assetName("Corp A MacBook Pro")
                 .category("PC")
                 .ownerCompanyId(100L)
@@ -695,7 +764,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assetService.createAsset(assetA, 1L);
 
         Asset assetB = Asset.builder()
-                .assetTag("AST-SCOPE-B-001")
+                .assetTag("AST-SCOPE-B-" + suffix)
                 .assetName("Corp B ThinkPad")
                 .category("PC")
                 .ownerCompanyId(200L)
@@ -711,26 +780,26 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         // 3. 要員Aに資産Aを貸与し、要員Aユーザーと要員Bユーザーを登録
         AssetAssignment asA = assetAssignmentService.createAssignment(
-                assetA.getId(), "ENGINEER", 8801L,
+                assetA.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
 
         SysUser userEngA = SysUser.builder()
-                .username("eng-scope-8801")
+                .username("eng-scope-a-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngA);
-        engineerAccountLinkService.link(8801L, userEngA.getId(), 1L);
+        engineerAccountLinkService.link(engineerA.getId(), userEngA.getId(), 1L);
 
         SysUser userEngB = SysUser.builder()
-                .username("eng-scope-8802")
+                .username("eng-scope-b-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngB);
-        engineerAccountLinkService.link(8802L, userEngB.getId(), 1L);
+        engineerAccountLinkService.link(engineerB.getId(), userEngB.getId(), 1L);
 
         // 4. 要員スコープ: 自己 ACTIVE 貸与資産のみ可視、他要員への貸与・未貸与・別法人資産は不可視
         assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
@@ -865,9 +934,21 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 7: DocumentLink 登録と isAccessibleByDocumentLink でのスコープ導出・別要員拒否")
     void testDocumentEvidenceScopeRejection() throws Exception {
-        long engineerAId = 18801L;
-        long engineerBId = 18802L;
         String suffix = Long.toString(System.nanoTime());
+        Engineer engineerA = Engineer.builder()
+                .fullName("資産DocLink要員A-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        Engineer engineerB = Engineer.builder()
+                .fullName("資産DocLink要員B-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+        long engineerAId = engineerA.getId();
+        long engineerBId = engineerB.getId();
 
         // 1. 実在文書を登録し、資産を要員Aに貸与する
         Asset asset = Asset.builder()
@@ -980,6 +1061,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 8: 論理削除安全条件 (Soft Delete Invariants) — ACTIVE貸与・未失効アカウント・未解放ライセンスは論理削除不可")
     void testSoftDeleteInvariants() {
+        Engineer engineer = Engineer.builder()
+                .fullName("SoftDelete要員-" + System.nanoTime())
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineer);
+
         // 1. ACTIVE貸与中の資産は論理削除できない
         Asset asset = Asset.builder()
                 .assetTag("AST-SOFTDEL-001")
@@ -990,7 +1078,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assetService.createAsset(asset, 1L);
 
         assetAssignmentService.createAssignment(
-                asset.getId(), "ENGINEER", 8801L,
+                asset.getId(), "ENGINEER", engineer.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与", 1L);
 
         // ACTIVE貸与が存在する状態での論理削除は Business Exception で拒否される
@@ -1007,7 +1095,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = externalAccountService.createAccountReference(
-                system.getId(), "softdel@test.jp", "ENGINEER", 8801L, "MEMBER", 1L);
+                system.getId(), "softdel@test.jp", "ENGINEER", engineer.getId(), "MEMBER", 1L);
         assertThat(ref.getStatus()).isEqualTo("ACTIVE");
 
         // ACTIVE状態のアカウントは論理削除不可
@@ -1031,7 +1119,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .build();
         licenseService.savePlan(terminalPlan, 1L);
         LicenseAssignment releasedLicense = licenseService.assignLicense(
-                terminalPlan.getId(), "ENGINEER", 8801L, ref.getId(), LocalDate.now(), 1L);
+                terminalPlan.getId(), "ENGINEER", engineer.getId(), ref.getId(), LocalDate.now(), 1L);
         licenseService.releaseLicense(releasedLicense.getId(), LocalDate.now(), 1L);
         assertThatThrownBy(() -> licenseService.softDeleteAssignment(releasedLicense.getId()))
                 .isInstanceOf(BusinessException.class)

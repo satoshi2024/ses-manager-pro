@@ -3,12 +3,15 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.ses.common.audit.ActorAttribution;
+import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.ExternalAccountReference;
 import com.ses.entity.ExternalAccountSystem;
 import com.ses.mapper.ExternalAccountReferenceMapper;
 import com.ses.mapper.ExternalAccountSystemMapper;
 import com.ses.service.ExternalAccountService;
+import com.ses.service.ExternalAccountRevokeConfirmationService;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +22,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 
 @Slf4j
@@ -26,9 +30,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExternalAccountServiceImpl implements ExternalAccountService {
 
+    private static final Duration POLL_LEASE_BUFFER = Duration.ofSeconds(30);
+    private static final Duration DEFAULT_PROVIDER_CONFIRMATION_TIMEOUT = Duration.ofSeconds(30);
+
     private final ExternalAccountSystemMapper externalAccountSystemMapper;
     private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
     private final ExternalAccountProviderClient providerClient;
+    private final ExternalAccountRevokeConfirmationService revokeConfirmationService;
 
     private static String maskIdentifier(String id) {
         if (!StringUtils.hasText(id)) return "***";
@@ -103,27 +111,65 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public ExternalAccountReference confirmRevoke(Long id, Long actorUserId) {
-        ExternalAccountReference current = externalAccountReferenceMapper.selectById(id);
-        if (current == null) {
-            throw new BusinessException("指定されたアカウント参照が見つかりません。");
+    public ExternalAccountReference confirmRevoke(Long id, Long actorUserId, String source) {
+        if (!StringUtils.hasText(source)) {
+            throw new BusinessException("失効確認チャネルは必須です。自動処理は専用経路を使用してください。");
         }
-        if ("REVOKED".equals(current.getStatus())) {
-            return current;
+        ConfirmationSource confirmationSource;
+        try {
+            String normalized = source.trim().toUpperCase();
+            if ("MANUAL".equals(normalized)) normalized = ConfirmationSource.MANUAL_API.name();
+            if ("SYSTEM".equals(normalized)) normalized = ConfirmationSource.SCHEDULER_POLL.name();
+            confirmationSource = ConfirmationSource.valueOf(normalized);
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException("失効確認チャネルが不正です。");
         }
+        if (confirmationSource != ConfirmationSource.MANUAL_API && actorUserId != null) {
+            throw new BusinessException("自動/外部確認に人間ユーザーIDを指定することはできません。");
+        }
+        if (confirmationSource == ConfirmationSource.MANUAL_API && actorUserId == null) {
+            throw new BusinessException(401, "確認主体のユーザーを解決できないため、失効確認を拒否しました。");
+        }
+        ActorAttribution attribution = switch (confirmationSource) {
+            case MANUAL_API -> ActorAttribution.human(actorUserId, null, null);
+            case SCHEDULER_POLL -> ActorAttribution.schedulerPoll(null, null);
+            case PROVIDER_SYNC -> ActorAttribution.providerSync(null, null);
+            case PROVIDER_CALLBACK -> ActorAttribution.providerCallback(null, null);
+            case LEGACY_UNRESOLVED -> ActorAttribution.legacyUnresolved();
+        };
+        return revokeConfirmationService.confirm(id, attribution);
+    }
 
-        LocalDateTime confirmedAt = LocalDateTime.now();
-        int rows = externalAccountReferenceMapper.confirmRevokeWithCas(id, confirmedAt, actorUserId, current.getVersion());
-        if (rows == 0) {
-            throw new BusinessException("失効確認の排他更新に失敗しました。他の操作と競合した可能性があります。");
-        }
+    @Override
+    public ExternalAccountReference confirmRevoke(Long id, ActorAttribution attribution) {
+        return revokeConfirmationService.confirm(id, attribution);
+    }
 
-        current.setStatus("REVOKED");
-        current.setRevokeConfirmedAt(confirmedAt);
-        current.setRevokeConfirmedBy(actorUserId);
-        log.info("External account reference confirmed revoked: id={}, actorUserId={}", id, actorUserId);
-        return current;
+    @Override
+    public ExternalAccountReference confirmRevokeManually(Long id, Long actorUserId,
+                                                           String correlationId, String idempotencyKey) {
+        if (actorUserId == null) {
+            throw new BusinessException(401, "確認主体のユーザーを解決できないため、失効確認を拒否しました。");
+        }
+        return revokeConfirmationService.confirm(id, ActorAttribution.human(actorUserId, correlationId, idempotencyKey));
+    }
+
+    @Override
+    public ExternalAccountReference confirmRevokeFromProviderSync(Long id, String correlationId,
+                                                                   String idempotencyKey) {
+        return revokeConfirmationService.confirm(id, ActorAttribution.providerSync(correlationId, idempotencyKey));
+    }
+
+    @Override
+    public ExternalAccountReference confirmRevokeFromProviderCallback(Long id, String providerEventId,
+                                                                       String correlationId) {
+        return revokeConfirmationService.confirm(id, ActorAttribution.providerCallback(correlationId, providerEventId));
+    }
+
+    @Override
+    public ExternalAccountReference confirmRevokeFromSchedulerPoll(Long id, String correlationId,
+                                                                   String idempotencyKey) {
+        return revokeConfirmationService.confirm(id, ActorAttribution.schedulerPoll(correlationId, idempotencyKey));
     }
 
     @Override
@@ -157,7 +203,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
         LocalDateTime requestedAt = LocalDateTime.now();
         int claimed;
         try {
-            claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt);
+            claimed = externalAccountReferenceMapper.claimRevokeRequest(id, requestKey, requestedAt, actorUserId);
         } catch (DuplicateKeyException ex) {
             // 同一keyを別accountが先にclaimした場合はunique制約違反を500へ漏らさず、契約上409で返す。
             throw new BusinessException(409, "失効要求の冪等性キーが別のアカウントに割り当て済みです。");
@@ -193,7 +239,7 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
                 return externalAccountReferenceMapper.selectById(id);
             }
             if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
-                confirmRevoke(id, actorUserId);
+                confirmRevokeFromProviderSync(id, "provider-sync:" + id, requestKey);
             } else if (conf == ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN) {
                 current.setStatus("UNKNOWN");
                 current.setLastErrorMessage("Provider revoke response could not be classified");
@@ -230,50 +276,73 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
 
         int processed = 0;
         for (ExternalAccountReference ref : pendingList) {
+            // 各レコードのclaim時点でleaseを開始する。job開始時刻を使い回すと、長いbatchでleaseが短くなる。
+            LocalDateTime claimNow = LocalDateTime.now();
+            LocalDateTime leaseUntil = claimNow.plus(providerConfirmationLease());
+            if (externalAccountReferenceMapper.claimRevokePoll(
+                    ref.getId(), ref.getVersion(), claimNow, leaseUntil) != 1) {
+                // 別poll worker、手動確認、または要求送信が先にversionを進めた。
+                continue;
+            }
+            ExternalAccountReference claimed = externalAccountReferenceMapper.selectById(ref.getId());
+            if (claimed == null) {
+                continue;
+            }
             try {
                 ExternalAccountProviderClient.RevokeConfirmationStatus status =
-                        providerClient.checkRevokeConfirmation(ref);
+                        providerClient.checkRevokeConfirmation(claimed);
                 if (status == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
-                    confirmRevoke(ref.getId(), 1L);
+                    confirmRevokeFromSchedulerPoll(claimed.getId(), "scheduler-poll:" + claimed.getId(), claimed.getIdempotencyKey());
                     processed++;
                 } else {
-                    persistConfirmationOutcome(ref, status, now);
+                    persistConfirmationOutcome(claimed, status, LocalDateTime.now());
                 }
             } catch (RuntimeException ex) {
                 // 1件のprovider障害で後続アカウントのpollを止めない。状態はfail-closedでPENDINGへ戻す。
-                persistConfirmationFailure(ref, now);
-                log.warn("Provider revoke confirmation failed; retry will continue: refId={}", ref.getId());
+                persistConfirmationFailure(claimed, LocalDateTime.now());
+                log.warn("Provider revoke confirmation failed; retry will continue: refId={}", claimed.getId());
             }
         }
         log.info("Pending revoke polling job processed: count={}, confirmed={}", pendingList.size(), processed);
         return processed;
     }
 
+    private Duration providerConfirmationLease() {
+        Duration timeout = providerClient.revokeConfirmationTimeout();
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            timeout = DEFAULT_PROVIDER_CONFIRMATION_TIMEOUT;
+        }
+        return timeout.plus(POLL_LEASE_BUFFER);
+    }
+
     private void persistConfirmationOutcome(ExternalAccountReference ref,
                                             ExternalAccountProviderClient.RevokeConfirmationStatus status,
                                             LocalDateTime now) {
-        ExternalAccountReference latest = externalAccountReferenceMapper.selectById(ref.getId());
-        if (latest == null || "REVOKED".equals(latest.getStatus())) {
-            return;
-        }
-        int retries = latest.getRetryCount() != null ? latest.getRetryCount() + 1 : 1;
+        // claim後に別worker/手動処理がversionを進めていれば、古いworkerのbackoffで上書きしない。
+        int retries = ref.getRetryCount() != null ? ref.getRetryCount() + 1 : 1;
         long backoffMinutes = Math.min(1440, (long) Math.pow(2, Math.min(retries, 8)) * 5);
-        latest.setRetryCount(retries);
-        latest.setNextRetryAt(now.plusMinutes(backoffMinutes));
+        String nextStatus;
+        String nextSyncStatus;
+        String nextErrorMessage;
         if (status == ExternalAccountProviderClient.RevokeConfirmationStatus.UNKNOWN) {
-            latest.setStatus("UNKNOWN");
-            latest.setExternalSyncStatus("SYNC_FAILED");
-            latest.setLastErrorMessage("Provider revoke response could not be classified");
+            nextStatus = "UNKNOWN";
+            nextSyncStatus = "SYNC_FAILED";
+            nextErrorMessage = "Provider revoke response could not be classified";
         } else if (status == ExternalAccountProviderClient.RevokeConfirmationStatus.FAILED_OR_TIMEOUT) {
-            latest.setStatus("PENDING_CONFIRMATION");
-            latest.setExternalSyncStatus("TIMEOUT");
-            latest.setLastErrorMessage("Provider revoke confirmation timed out");
+            nextStatus = "PENDING_CONFIRMATION";
+            nextSyncStatus = "TIMEOUT";
+            nextErrorMessage = "Provider revoke confirmation timed out";
         } else {
-            latest.setStatus("PENDING_CONFIRMATION");
-            latest.setExternalSyncStatus("SYNC_PENDING");
-            latest.setLastErrorMessage("Provider revoke pending confirmation (retry=" + retries + ")");
+            nextStatus = "PENDING_CONFIRMATION";
+            nextSyncStatus = "SYNC_PENDING";
+            nextErrorMessage = "Provider revoke pending confirmation (retry=" + retries + ")";
         }
-        externalAccountReferenceMapper.updateById(latest);
+        int updated = externalAccountReferenceMapper.completeRevokePollWithCas(
+                ref.getId(), nextStatus, retries, now.plusMinutes(backoffMinutes),
+                nextSyncStatus, nextErrorMessage, ref.getVersion());
+        if (updated != 1) {
+            log.debug("Poll result discarded because claim is no longer current: refId={}", ref.getId());
+        }
     }
 
     private void persistConfirmationFailure(ExternalAccountReference ref, LocalDateTime now) {

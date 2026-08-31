@@ -349,6 +349,8 @@ class AssetServiceTest extends BaseIntegrationTest {
         ExternalAccountReference revoked = externalAccountService.confirmRevoke(ref.getId(), 1L);
         assertThat(revoked.getStatus()).isEqualTo("REVOKED");
         assertThat(revoked.getRevokeConfirmedAt()).isNotNull();
+        assertThat(revoked.getRevokeConfirmedBy()).isEqualTo(1L);
+        assertThat(revoked.getRevokeConfirmedSource()).isEqualTo("MANUAL_API");
     }
 
     @Test

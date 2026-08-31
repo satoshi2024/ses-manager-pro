@@ -694,8 +694,48 @@ CREATE TABLE t_audit_log (
   status     INT NOT NULL,
   application_code VARCHAR(64),
   success_flag BOOLEAN NOT NULL DEFAULT TRUE,
+  reference_type VARCHAR(64),
+  reference_id BIGINT,
+  actor_type VARCHAR(32),
+  confirmation_source VARCHAR(32),
+  human_user_id BIGINT,
+  before_state VARCHAR(255),
+  after_state VARCHAR(255),
+  correlation_id VARCHAR(128),
+  idempotency_key VARCHAR(128),
+  CONSTRAINT ck_engineer_audit_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
+  CONSTRAINT ck_engineer_audit_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
+  CONSTRAINT ck_engineer_audit_actor_pair CHECK (
+    actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
+    OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+      actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0
+      OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL
+      OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL
+      OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL
+    )
+  ),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_engineer_audit_reference ON t_audit_log(reference_type, reference_id);
+
+DROP TABLE IF EXISTS t_external_api_audit CASCADE;
+CREATE TABLE t_external_api_audit (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  pre_auth_principal VARCHAR(64) NOT NULL,
+  post_auth_principal VARCHAR(128) NOT NULL,
+  client_id VARCHAR(100), credential_version INT, key_id VARCHAR(100),
+  correlation_id VARCHAR(128) NOT NULL, method VARCHAR(16) NOT NULL,
+  route_template VARCHAR(200) NOT NULL,
+  authentication_decision VARCHAR(64) NOT NULL, scope_decision VARCHAR(64) NOT NULL,
+  data_scope_decision VARCHAR(64) NOT NULL, command_decision VARCHAR(64) NOT NULL,
+  rate_decision VARCHAR(64) NOT NULL, status SMALLINT NOT NULL,
+  result_code VARCHAR(64) NOT NULL, success_flag BOOLEAN NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_external_audit_principal CHECK (pre_auth_principal = 'UNAUTHENTICATED'),
+  CONSTRAINT chk_external_audit_status CHECK (status >= 100 AND status <= 599)
+);
+CREATE INDEX idx_external_audit_created ON t_external_api_audit (created_at, id);
+CREATE INDEX idx_external_audit_client ON t_external_api_audit (client_id, created_at, id);
 
 DROP TABLE IF EXISTS t_freee_connection CASCADE;
 CREATE TABLE t_freee_connection (
