@@ -37,17 +37,17 @@ class FlywayMigrationVersionResolutionTest {
             }
         }
 
-        // V134 (migration-dev), V135 (migration-dev), V136 (migration: digital_invoice_safe_diagnostics) がそれぞれ一意に解決されること
+        // V134 (migration-dev), V135 (migration-dev), V144 (migration: digital_invoice_safe_diagnostics) がそれぞれ一意に解決されること
         assertTrue(seenVersions.contains("134"), "V134 (migration-dev) が解決されること");
         assertTrue(seenVersions.contains("135"), "V135 (migration-dev) が解決されること");
-        assertTrue(seenVersions.contains("136"), "V136 (digital_invoice_safe_diagnostics) が解決されること");
+        assertTrue(seenVersions.contains("144"), "V144 (digital_invoice_safe_diagnostics) が解決されること");
 
-        // V136 のスクリプト名が digital_invoice_safe_diagnostics であること
-        List<MigrationInfo> v136Info = Arrays.stream(allMigrations)
-                .filter(m -> m.getVersion() != null && "136".equals(m.getVersion().getVersion()))
+        // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
+        List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "144".equals(m.getVersion().getVersion()))
                 .toList();
-        assertEquals(1, v136Info.size(), "V136 は1件のみ存在すること");
-        assertTrue(v136Info.get(0).getScript().contains("digital_invoice_safe_diagnostics"),
-                "V136 のスクリプト名は digital_invoice_safe_diagnostics であること: " + v136Info.get(0).getScript());
+        assertEquals(1, v144Info.size(), "V144 は1件のみ存在すること");
+        assertTrue(v144Info.get(0).getScript().contains("digital_invoice_safe_diagnostics"),
+                "V144 のスクリプト名は digital_invoice_safe_diagnostics であること: " + v144Info.get(0).getScript());
     }
 }
