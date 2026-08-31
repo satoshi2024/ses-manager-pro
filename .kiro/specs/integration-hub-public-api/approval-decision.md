@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `251461f1`（B2 quota/error contract remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
+| Current implementation Head | `e564f400`（B2 stable-error boundary remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -57,7 +57,7 @@ commit/push、独立Review remediationを承認する。開発・test環境のmo
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。実provider送信なし |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | `cc468e4f`で独立Review指摘をremediate済み。provider/subscription、resource binding、admin principal、opaque reference、strict content typeを追加検証。production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | `cc468e4f`、`251461f1`、`e564f400`で独立Review指摘をremediate済み。provider/subscription、resource binding、admin principal、opaque reference、strict content type、quota、stable error boundaryを追加検証。Linux connector再Review待ち、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。security、負荷、障害訓練、rotation、scan、runbook、固定Head |
 
 ## Approved contract and security values
@@ -140,3 +140,10 @@ admin projectionとreplay URLはopaque referenceだけを使い、Content-Type�
 subject keyへ渡す。unknown providerは403/`FORBIDDEN_SCOPE`へtestと実装を同期した。
 
 B2は独立再ReviewまでIMPLEMENTATION_REVIEW_PENDINGとし、Linux実Tomcat connector 5/5の再確認をPASS証拠として先取りしない。
+
+## B2 stable-error boundary remediation checkpoint
+
+独立Review fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1（controller由来stable errorが実Tomcatで500化）を、
+code commit `e564f400`で対応した。`ExternalApiResponseBoundaryFilter`はServlet/Spring wrapperのcause chainに
+`ExternalApiSecurityException`が厳密に含まれる場合だけ元の外部status/codeへ復元し、それ以外は詳細非公開の500へ収束する。
+Linux実connectorで202/200/409/403/400、監査status/result code、拒否時ledger非作成を独立確認するまでB2はPASSへ昇格しない。

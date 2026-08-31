@@ -25,8 +25,8 @@
 | B1 Review remediation | `IntegrationHubWebhookSigner`、replay authorization、V133、worker/CAS、H2/MySQL evidence | 署名/envelope binding、現行scope再認可、audit/payload retention分離、fresh clock、attempt 8/DLQ、stale/CAS/claim/rollback/replay purge | SPEC_ADDRESSED（独立再Review待ち） | `30199db8` → `2684ff8f` |
 | B1 latest re-review remediation | replay service boundary、opaque ID codec、V134、resource membership mapper、replay/migration tests | authenticated internal admin principal、`integration.webhook.replay` permission、operatorRef入力排除、primary binding、secondary専用opaque ID照合、current deleted/parent relation、scope据置のsoft-delete/reparent/contract付替え fail-closed | SPEC_ADDRESSED（独立再Review待ち） | `2684ff8f1303b6d0cc6550882601405d3d78f3b2` → code `5c94367c` → `0618d983` |
 | B1 initial-delivery binding remediation | `IntegrationHubWebhookDeliveryBindingValidator`、ApiDelivery enqueue/worker、snapshot binding、DuplicateKey path、B1 tests | enqueue保存前とworker外部HTTP前のHMAC opaque primary binding、envelope/primary DTO一致、payload hash＋primary type＋primary IDの同時比較、fail-closed送信拒否 | SPEC_ADDRESSED（独立再Review待ち） | code `c2cbfb99133d0df3f8d5eee285be340163747e31` → docs commit（最終Headは外部handoff） |
-| B2 inbound/DLQ/admin UI | tasks/design/requirements/inventory、V135/V136、inbound/controller/admin/replay classes、B2 tests | client/provider/event unique、strict parser、raw hash/allow-list snapshot、duplicate/conflict、claim/CAS、DLQ、admin replay、current scope再検証、safe UI、独立metadata retention | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`、follow-up `251461f1`、focused/H2/MySQL証跡。独立再Review待ち、production受信enablementなし |
-| B2 implementation handoff | `ExternalApiInboundWebhookController`、`InboundEventService`、`InboundEventAdminServiceImpl`、V135/V136、H2 schema、admin UI、B2 tests | H2 focused 15/15、MySQL 8 Flyway V136 2/2、Windows connectorはloopback接続前errorのため未検証、`git diff --check` | IMPLEMENTATION_REVIEW_PENDING | fixed review Head `0514e00a` → code remediation `cc468e4f` → docs trace commit（最終remote Headは外部handoffで固定） |
+| B2 inbound/DLQ/admin UI | tasks/design/requirements/inventory、V135/V136、inbound/controller/admin/replay classes、B2 tests | client/provider/event unique、strict parser、raw hash/allow-list snapshot、duplicate/conflict、claim/CAS、DLQ、admin replay、current scope再検証、safe UI、独立metadata retention、stable external error boundary | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f` → `251461f1` → `e564f400`、focused/H2/MySQL証跡。Linux connector再Review待ち、production受信enablementなし |
+| B2 implementation handoff | `ExternalApiInboundWebhookController`、`InboundEventService`、`InboundEventAdminServiceImpl`、`ExternalApiResponseBoundaryFilter`、V135/V136、H2 schema、admin UI、B2 tests | response-boundary 2/2、route 1/1、parser 3/3、usage 6/6、既存B2 H2/MySQL証跡、Windows connectorはloopback接続前error、`git diff --check` | IMPLEMENTATION_REVIEW_PENDING | fixed review Head `7757bfa4` → code remediation `e564f400` → docs trace commit（Linux connector 202/200/409/403/400再確認待ち、最終remote Headは外部handoffで固定） |
 | M verification | tasks/design | B2 Review後にsecurity/recovery/performance/scan/runbookを実施 | APPROVED_SEQUENCED | — |
 
 ## B2 review remediation completion
@@ -36,6 +36,8 @@
 | NF05-IMPL-B2-001〜005（P1×4/P2×1） | `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c` | `cc468e4f` | SPEC_ADDRESSED（独立再Review待ち） |
 
 | NF05-IMPL-B2-006〜007（P1×1/P2×1） | `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` | `251461f1` | SPEC_ADDRESSED（独立再Review待ち） |
+
+| NF05-IMPL-B2-008（P1×1） | `7757bfa49a4ece9aceddcedde2e835bc7466afe1` | `e564f400` | SPEC_ADDRESSED（独立再Review待ち） |
 
 docs trace commitのhashは自己参照を避けて本表へ埋め込まず、push後の最終remote Headを外部handoffで固定する。
 
@@ -113,7 +115,7 @@ Final remote Head: 外部handoff通知で固定（この行を含むcommit自身
 | 項目 | 値 |
 |---|---|
 | B1 independent Review | PASS、fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
-| B2 implementation commit | `122c7c3bb5653eb788d58040c6defc816ff67013` |
+| B2 implementation commit | `122c7c3bb5653eb788d58040c6defc816ff67013` → `e564f400db7753226ae5d54ade802197e67be1a3` |
 | B2 state | IMPLEMENTATION_REVIEW_PENDING |
 | B2 tests | B2 focused/H2 PASS、Linux connector E2E 2/2 PASS、MySQL 8 Flyway smoke PASS、`git diff --check` PASS |
 | remaining gate | 独立B2 Implementation Review。production enablement、実credential、実provider、PR/mergeは禁止 |

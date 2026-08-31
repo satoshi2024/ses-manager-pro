@@ -155,7 +155,7 @@
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0 |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`。provider/resource/admin/content-type境界を補正。Windows connectorはloopback接続前errorで未検証 |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f` → `251461f1` → `e564f400`。provider/resource/admin/content-type/quota/stable-error境界を補正。Linux connector再Review待ち |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件、command/exportはdefault deny |
 | M | APPROVED_SEQUENCED | B2独立Review後。security、負荷、障害訓練、rotation、scan、runbook、最終Head固定が未完 |
 
@@ -266,3 +266,9 @@ test/spec status-code不一致P2が示された。`251461f1`でroute catalogの`
 
 Windows connectorはloopback接続確立前に5件errorだったためPASSに算入しない。Linux connector 5/5を同じR-NF05へ独立再Reviewとしてhandoffし、
 B2はその判定までIMPLEMENTATION_REVIEW_PENDING、M・production enablement・実provider送信・PR/mergeは禁止とする。
+
+## NF-05 B2 stable-error boundary follow-up
+
+R-NF05 fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1（controller由来stable errorがwrapper経由で500化）を、
+`e564f400`でremediateした。`ExternalApiResponseBoundaryFilter`は厳密なsecurity exception causeだけをunwrapし、その他は500へ収束する。
+Linux実Tomcatで202/200/409/403/400、専用audit、拒否時ledger非作成を同じR-NF05へ独立再Reviewとしてhandoffする。

@@ -5,7 +5,7 @@
 この設計はDG-05-F1-APPROVAL-20260830-01およびDG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02で承認された
 NF-05実装入力である。F1は独立PLAN/IMPLEMENTATION PASS済みで、F2以降はscope expansionのPlan delta PASS後に
 順次開始する。B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASSを受領し、B2は
-初回実装 `122c7c3b`後、`cc468e4f`および`251461f1`でReview指摘をremediate済み・独立再Implementation Review待ちである。公開機械クライアントは内部管理chain、
+初回実装 `122c7c3b`後、`cc468e4f`、`251461f1`、`e564f400`でReview指摘をremediate済み・独立再Implementation Review待ちである。公開機械クライアントは内部管理chain、
 portal chain、既存のanonymous webhook例外へ混ぜず、/external-api/v1/** を専用chainで処理する。
 公開clientを内部roleへ変換せず、client principalにtenant、legal entity、client scope、data scope、
 command permission、credential version、correlation IDを束ねる。
@@ -715,3 +715,11 @@ quota subject keyは承認済みのclient×scope×tenant×route templateのま�
 provider pathが形式的にvalidでもcatalog未承認なら、parserは`FORBIDDEN_SCOPE`（HTTP 403）へ収束させる。これは認証後のprovider/data-scope
 境界であり、ledger INSERT、processor、controller payload処理へ進ませない。malformed providerの400/`REQUEST_INVALID`とは区別し、
 controller、error writer、connector E2Eの契約を同じstatus/codeへ固定する。
+### 8.5 B2 stable-error wrapper boundary
+
+`ExternalApiResponseBoundaryFilter`はexternal path内のcontroller/Dispatcher例外を安全な外部JSONへ収束させる。直接の
+`ExternalApiSecurityException`は元のstatus/codeを使い、Servlet/Spring wrapperはcause chainを最大8段だけ辿り、causeが厳密に
+`ExternalApiSecurityException`の場合に限り同じwriterでunwrapする。causeなし、別型、循環、深度超過、その他のRuntimeExceptionは
+内部詳細を捨てて500/`INTERNAL_ERROR`とする。これによりpayload conflict、未承認provider、subscription拒否、Content-Type拒否の
+controller由来status/codeと専用auditのresponse status/result codeが一致する。実Tomcatで初回202、duplicate200、conflict409、
+unknown/inactive/subscription外403、invalid content type400を検証し、reject ledgerなしを確認する。

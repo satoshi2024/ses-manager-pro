@@ -207,7 +207,7 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   parserのunknown/duplicate/mismatch拒否、11 GET＋inbound route catalog、MySQL 8 Flyway V135、実Tomcat connector E2Eの初回202/duplicate200/conflict409を確認する。
 - Demo: 同一provider eventのprocessor副作用は一度だけ、hash違いは`409 INBOUND_PAYLOAD_CONFLICT`、admin replayは元DLQを変更せず
   `PROCESSED/REJECTED/DLQ`の独立metadataへ収束する。初回実装 `122c7c3b`後、B2 Review P1/P2をcode commit
-  `cc468e4f`でremediateした。focused/H2 15 tests、MySQL Flyway V136 2 testsはPASS、Windows connector E2Eは
+  `cc468e4f`、`251461f1`、`e564f400`でremediateした。focused/H2/MySQL証跡はPASS、Windows connector E2Eは
   Tomcat loopback接続エラーでHTTP到達前に実行不能のためPASSに数えない。状態は独立Implementation Review待ちであり、PASSへ自己昇格しない。
 
 ## Task B2-R: independent Review remediation
@@ -227,6 +227,13 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   catalog setを参照する。provider catalog未承認は`FORBIDDEN_SCOPE`、形式不正は`REQUEST_INVALID`とする。
 - [x] Test: inbound templateのquota消費、raw provider path拒否、provider未承認403、正常202/duplicate200/conflict409/content-type400のE2Eケースを固定する。
 - Demo: code `251461f1`をR-NF05へ独立再Reviewとしてhandoffする。Windowsではloopback接続前errorのため、Linux connector 5/5を独立確認するまでB2 PASSにしない。
+
+## Task B2-R3: stable error wrapper remediation
+
+- [x] Objective: controller由来の`ExternalApiSecurityException`がServlet/Spring wrapperに包まれてもstable status/codeを保持する。
+- [x] Implementation: response boundaryでcause chainを最大8段・循環防止付きで確認し、厳密なsecurity exceptionだけをunwrapする。その他は500/`INTERNAL_ERROR`。
+- [x] Test: security wrapperの409復元とgeneric wrapperの500・詳細非表示をfilter unit testで固定する。
+- Demo: code `e564f400`をR-NF05へ独立再Reviewとしてhandoffし、Linux connectorの202/200/409/403/400、audit、ledger非作成を確認する。
 
 ## Task M: penetration / recovery / performance
 

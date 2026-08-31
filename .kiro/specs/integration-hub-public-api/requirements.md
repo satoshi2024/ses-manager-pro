@@ -3,8 +3,8 @@
 ## 0.1 現在の実装ゲート
 
 B1は固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-B2は初回実装 `122c7c3b`後、独立Review fixed Head `0514e00a1cd27fdedba8d15b5bc87d2fd02d706c`のP1/P2指摘を
-`cc468e4f`でremediateし、独立再Implementation Review待ちである。
+B2は初回実装 `122c7c3b`後、独立Review指摘を`cc468e4f`、`251461f1`、`e564f400`で段階的に
+remediateし、独立再Implementation Review待ちである。
 以下のB2契約は実装済み証跡とReview対象を分離して記録し、Review完了前に公開許可へ昇格しない。production enablement、実顧客credential、
 実provider送信、PR、mergeは引き続き禁止する。
 
@@ -45,7 +45,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`、follow-up `251461f1`。quota/error境界を補正、production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`、follow-up `251461f1`、stable-error boundary `e564f400`。production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
 ## IH-R1 Client / credential / security
@@ -392,3 +392,10 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを
   implementation、controller、connector E2E、contract testのstatus/codeを一致させる。
 - enabled実Tomcat connectorは正常初回202、同hash duplicate 200、別hash conflict 409、unknown provider 403、invalid Content-Type 400の
   5ケースをHTTP assertionまで実行し、quota拒否でcontroller到達前に止まらないことを確認する。
+
+## B2 stable error boundary acceptance
+
+- external response boundaryはServlet/Spring wrapperのcause chainに厳密な`ExternalApiSecurityException`がある場合だけ、元のstable
+  status/code（202/200/409/403/400）を保持して応答する。原因が別型、causeなし、循環、深度上限超過の場合は500/`INTERNAL_ERROR`とする。
+- 実Tomcat connectorでpayload conflict、unknown provider、subscription外/inactive、invalid Content-Typeがcontroller由来wrapperを経由しても、
+  それぞれ409、403/`FORBIDDEN_SCOPE`、403、400/`REQUEST_INVALID`となること、監査のHTTP status/result codeと拒否時ledger非作成が一致することを検証する。

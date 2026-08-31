@@ -16,7 +16,7 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立I
   `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施した。
 さらにNF05-IMPL-B1-008（初回送信前primary binding未検証）を共通binding validator、enqueue/worker/DuplicateKey検証で
 `c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
-B2は初回実装`122c7c3b`後、`cc468e4f`および`251461f1`でReview指摘をremediate済み・独立再Implementation Review待ちである。A2はapproved command=0件のためN/A、
+B2は初回実装`122c7c3b`後、`cc468e4f`、`251461f1`、`e564f400`でReview指摘をremediate済み・独立再Implementation Review待ちである。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -35,7 +35,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
 | B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ、primary/secondary scope binding、current DB membership、初回送信前identity binding | IMPLEMENTATION_PASS。fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
-| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | IMPLEMENTATION_REVIEW_PENDING。fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`、H2/MySQL/connector証跡PASS、独立Review待ち |
+| B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations、stable external error boundary | IMPLEMENTATION_REVIEW_PENDING。initial `122c7c3b` → `cc468e4f` → `251461f1` → `e564f400`、H2/MySQL証跡PASS、Linux connector再確認待ち |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
 ## R-NF05 P1 remediationの完了条件
@@ -224,3 +224,8 @@ PR/mergeは禁止する。F1/F2/A1/B1の既存PASSは再オープンしない。
 fixed Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` の追加P1/P2（inbound quota route漏れ、unknown provider status/code不一致）を
 code commit `251461f1`でremediateした。route catalogをquota templateの単一正本とし、inbound templateをsubject keyへ追加した。
 未承認providerは403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`へ固定した。Linux connector 5/5は未取得のため独立再Reviewで確認する。
+
+## B2 stable-error follow-up checkpoint
+
+fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のcontroller由来stable error wrapper問題を`e564f400`でremediateした。
+security exception causeだけを安全にunwrapし、その他は500へ収束する。Linux connector 5/5とaudit/ledger証跡は独立再Reviewで確認する。

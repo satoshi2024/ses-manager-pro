@@ -24,7 +24,7 @@
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault deny、全体完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | 独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。development/test mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、V135、H2/MySQL/connector証跡を確認済み。production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head系列 `122c7c3b` → `cc468e4f` → `251461f1` → `e564f400`。inbound/DLQ/admin UI、stable error boundary、H2/MySQL証跡を確認済み。Linux connector再Review待ち、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。最終security/recovery/performance/scan/runbook Review |
 
 scope expansionの正本値はDecisionId=DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02、Decision date=2026-08-30、
@@ -299,7 +299,7 @@ deliveryのprimary bindingとsecondary専用ID検証へ分離し、同じR-NF05�
 | 項目 | 証跡 |
 |---|---|
 | B1 gate | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、独立Implementation Review PASS、P0/P1/P2=0/0/0 |
-| B2 implementation/remediation | initial `122c7c3b` → code `cc468e4f` |
+| B2 implementation/remediation | initial `122c7c3b` → code `cc468e4f` → `251461f1` → `e564f400` |
 | inbound | `POST /external-api/v1/webhooks/{provider}`、既存HMAC専用chain、strict parser、raw hash/allow-listed snapshotのみ永続化 |
 | duplicate/conflict | client/provider/provider event ID unique、same hash duplicate、different hash `409 INBOUND_PAYLOAD_CONFLICT` |
 | DLQ/replay | claim/terminal CAS、no-op processor、admin action permission、derived operator、current scope revalidation、independent generation metadata |
@@ -350,3 +350,13 @@ H2 focused 15 tests、MySQL 8 Flyway V136 smoke 2 testsはfailure/error/skipな�
 | NF05-IMPL-B2-007 unknown provider status/code mismatch | approved provider未登録を403/`FORBIDDEN_SCOPE`へ統一し、connector E2E期待値を更新。malformed providerの400/`REQUEST_INVALID`とは分離 | SPEC_ADDRESSED（独立再Review待ち） |
 
 targeted route/parser/usage 10 testsはPASS。Windows connector 5 testsはloopback接続確立前errorのため未検証とし、Linux 5/5の独立再確認を要求する。
+
+## B2 stable-error boundary follow-up remediation
+
+独立Review fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1を、code commit `e564f400`で対応した。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| NF05-IMPL-B2-008 controller由来stable errorの500化 | response boundaryがServlet/Spring wrapperのcause chainから厳密な`ExternalApiSecurityException`だけをunwrapし、元のstatus/codeを保持。その他は500 | SPEC_ADDRESSED（独立再Review待ち） |
+
+unit filter 2 testsはPASS。Linux実connectorで202/200/409/403/400、audit status/result code、拒否時ledger非作成を再確認するまでB2 PASSへ昇格しない。

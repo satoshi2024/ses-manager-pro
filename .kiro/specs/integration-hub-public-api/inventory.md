@@ -36,7 +36,7 @@
 | A1 | IMPLEMENTATION_PASS。fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION。approved command=0件、command/exportはdefault deny |
 | B1 | IMPLEMENTATION_PASS。独立再Review fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING。initial `122c7c3b`、remediation `cc468e4f`。provider/resource/admin/content-type境界を補正。production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING。initial `122c7c3b`、remediation `cc468e4f` → `251461f1` → `e564f400`。provider/resource/admin/content-type/quota/stable-error境界を補正。Linux connector再Review待ち、production受信enablementなし |
 | M | APPROVED_SEQUENCED。B2 Review後にsecurity/回復/性能/scan/runbookを実施 |
 | 禁止 | production enablement、実顧客credential、実provider送信、force push、main変更、PR、merge |
 
@@ -316,7 +316,7 @@ F1実装後の証跡更新:
 | admin reference | client-bound opaque event/replay reference | numeric `t_inbound_event.id`、raw body/hash、secret、PIIを非公開 | `InboundEventAdminReferenceCodec`、DTO/DOM/URL test |
 | content type | single `application/json`、許可charsetのみ | jsonp、combined、malformed、未許可parameterを拒否 | controller parser/E2E contract |
 
-B2 remediation codeは`cc468e4f`。独立Review受領まではIMPLEMENTATION_REVIEW_PENDINGであり、production受信enablementは行わない。
+B2 remediation codeは`cc468e4f` → `251461f1` → `e564f400`。独立Review受領まではIMPLEMENTATION_REVIEW_PENDINGであり、production受信enablementは行わない。
 
 ## B2 quota/error remediation inventory
 
@@ -326,4 +326,14 @@ B2 remediation codeは`cc468e4f`。独立Review受領まではIMPLEMENTATION_REV
 | inbound provider error | provider catalog＋parser＋external error writer | malformed providerは400/`REQUEST_INVALID`、未承認providerは403/`FORBIDDEN_SCOPE`。ledger/processorへ進ませない | SPEC_ADDRESSED（独立再Review待ち） |
 | connector evidence | enabled real Tomcat route | initial 202、duplicate 200、conflict 409、unknown 403、content-type 400をHTTP assertionまで確認 | Linux 5/5 independent recheck pending |
 
-最新code remediationは`251461f1`。B2 remediation codeは`cc468e4f`から継続し、独立Review受領まではPASSへ昇格しない。
+最新code remediationは`e564f400`。B2 remediation codeは`cc468e4f`から`251461f1`を経て継続し、独立Review受領まではPASSへ昇格しない。
+
+## B2 stable error boundary inventory
+
+| 境界 | server-side処理 | fail-closed / 証跡 |
+|---|---|---|
+| controller exception | `ExternalApiResponseBoundaryFilter`が直接またはwrapper causeの厳密な`ExternalApiSecurityException`をstable writerへ渡す | 元の409/403/400を保持。別型・循環・深度超過は500 |
+| audit/error | response statusと`ExternalApiErrorWriter.codeForStatus`を専用auditへ記録 | status/result code、reject ledger非作成を実connectorで確認 |
+| E2E | enabled real Tomcat route | 202/200/409/403/400のLinux 5/5 independent recheck pending |
+
+最新code remediationは`e564f400`。B2は独立Review受領までIMPLEMENTATION_REVIEW_PENDINGとする。

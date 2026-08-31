@@ -7,7 +7,7 @@ SPEC_ADDRESSEDは仕様上の不足を補ったことを示すだけで、実装
 scope expansion DecisionはF2/A1/B1/B2/Mの開発を承認しているが、Plan ReviewのPLAN PASSと各実装Reviewは
 別ゲートである。production enablement、実顧客credential、実provider送信は常に禁止する。B1は固定Head
 `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B2は初回実装
-`122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ちである。
+`122c7c3b`後、`cc468e4f`、`251461f1`、`e564f400`でReview指摘をremediate済み・独立再Implementation Review待ちである。
 R-NF05は固定Head 257ffe60773d5c612c8b6ffcfeaf65ef30c2c5ecに対してPLAN FAIL（P0=0、P1=4）だった。
 最初のremediation後の固定Head 678eac3f09b7ed54419655fcf326e0b15c6d7d62でもPLAN FAIL（P0=0、P1=2）となった。
 Owner Gateは再オープンせず、残るburst/state mappingの2件をSPEC_ADDRESSEDへ補正した結果、
@@ -350,3 +350,9 @@ IMPLEMENTATION_REVIEW_PENDINGとする。production receive enablement、実cred
 | unknown providerのerror期待値不一致 | provider catalog未承認は403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`としてparser/controller/E2Eを同期 | SPEC_ADDRESSED（独立再Review待ち） |
 
 Linux connector 5/5は独立再Reviewで確認する。Windowsでの5件errorはTomcat loopback制約であり、PASSへ数えない。
+
+## B2 stable-error boundary follow-up
+
+fixed Head `7757bfa49a4ece9aceddcedde2e835bc7466afe1` のP1（controller exception wrapperの500化）を`e564f400`でremediateした。
+外部security exceptionのcauseだけを最大8段・循環防止付きでunwrapし、generic causeは500/`INTERNAL_ERROR`として詳細を出さない。
+Linux connector 5/5の独立再確認、専用audit status/result code、拒否時ledger非作成が残るReview gateである。
