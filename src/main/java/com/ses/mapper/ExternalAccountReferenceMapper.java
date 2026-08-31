@@ -106,6 +106,22 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
                         @Param("now") LocalDateTime now,
                         @Param("leaseUntil") LocalDateTime leaseUntil);
 
+    /** poll workerが取得したclaim versionを保持している場合だけ、結果とbackoffを保存する。 */
+    @Update("UPDATE t_external_account_reference SET status = #{status}, " +
+            "retry_count = #{retryCount}, next_retry_at = #{nextRetryAt}, " +
+            "external_sync_status = #{externalSyncStatus}, last_error_message = #{lastErrorMessage}, " +
+            "version = version + 1, updated_at = CURRENT_TIMESTAMP " +
+            "WHERE id = #{id} AND deleted_flag = 0 " +
+            "AND version = #{claimVersion} AND revoke_confirmed_at IS NULL " +
+            "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN')")
+    int completeRevokePollWithCas(@Param("id") Long id,
+                                  @Param("status") String status,
+                                  @Param("retryCount") Integer retryCount,
+                                  @Param("nextRetryAt") LocalDateTime nextRetryAt,
+                                  @Param("externalSyncStatus") String externalSyncStatus,
+                                  @Param("lastErrorMessage") String lastErrorMessage,
+                                  @Param("claimVersion") Integer claimVersion);
+
     default int claimRevokeRequest(Long id, String idempotencyKey, LocalDateTime requestedAt) {
         return claimRevokeRequest(id, idempotencyKey, requestedAt, null);
     }
