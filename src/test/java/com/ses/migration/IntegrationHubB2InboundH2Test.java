@@ -135,6 +135,32 @@ class IntegrationHubB2InboundH2Test {
     }
 
     @Test
+    void recover後の同hash再送はrecordReceived経由で409にならずclaimしてPROCESSEDへ収束する() {
+        insertBinding();
+        ExternalDtoSnapshot snapshot = snapshot();
+        String eventId = "event-b2-record-retry";
+        InboundEventService.Receipt first = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, eventId, HASH_1, NOW, snapshot, true, NOW);
+        assertTrue(claimEvent(first.event().getId()) != null);
+
+        LocalDateTime afterLeaseExpiry = NOW.plusMinutes(6);
+        assertEquals(1, inboundEventService.recoverExpiredLeases(afterLeaseExpiry));
+
+        InboundEventService.Receipt retry = inboundEventService.recordReceived(
+                CLIENT_ID, PROVIDER, eventId, HASH_1, afterLeaseExpiry, snapshot, true, afterLeaseExpiry);
+        assertFalse(retry.conflict());
+        assertFalse(retry.duplicate());
+        assertFalse(retry.inProgress());
+        assertEquals(IntegrationHubStates.INBOUND_RECEIVED, retry.event().getStatus());
+
+        InboundEvent claimed = inboundEventService.claim(retry.event().getId(), "b2-retry-lease",
+                afterLeaseExpiry, afterLeaseExpiry.plusMinutes(5));
+        assertEquals(IntegrationHubStates.INBOUND_PROCESSING, claimed.getStatus());
+        assertTrue(inboundEventService.complete(claimed.getId(), claimed.getVersion(), "b2-retry-lease",
+                IntegrationHubStates.INBOUND_PROCESSED, "INBOUND_ACCEPTED", afterLeaseExpiry));
+    }
+
+    @Test
     void adminReplayはderivedOperatorとcurrentBindingを使い元DLQを変更せずmetadataだけをpurgeする() {
         long clientDbId = insertBinding();
         InboundEvent event = insertDlqEvent();

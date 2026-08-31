@@ -46,15 +46,10 @@ public class InboundEventServiceImpl implements InboundEventService {
         InboundEvent existing = mapper.selectByProviderEvent(clientId, providerName, providerEventId);
         if (existing != null) {
             if (rawBodyHash.equalsIgnoreCase(existing.getRawBodyHash())) {
-                if (IntegrationHubStates.INBOUND_PROCESSING.equals(existing.getStatus())
-                        && leaseActive(existing, receivedAt)) {
-                    return new Receipt(existing, false, false, true);
-                }
-                if (isTerminalDuplicate(existing.getStatus())) {
-                    return new Receipt(existing, true, false);
-                }
+                return receiptForSameHash(existing, receivedAt);
             }
-            if (existing.getVersion() != null) {
+            if (IntegrationHubStates.INBOUND_RECEIVED.equals(existing.getStatus())
+                    || IntegrationHubStates.INBOUND_PROCESSING.equals(existing.getStatus())) {
                 mapper.transitionConflict(existing.getId(), existing.getVersion(), rawBodyHash,
                         receivedAt, receivedAt.plusDays(90));
                 existing = mapper.selectForUpdate(existing.getId());
@@ -87,23 +82,28 @@ public class InboundEventServiceImpl implements InboundEventService {
                 throw e;
             }
             if (rawBodyHash.equalsIgnoreCase(concurrent.getRawBodyHash())) {
-                if (IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus())
-                        && leaseActive(concurrent, receivedAt)) {
-                    return new Receipt(concurrent, false, false, true);
-                }
-                if (isTerminalDuplicate(concurrent.getStatus())) {
-                    return new Receipt(concurrent, true, false);
-                }
+                return receiptForSameHash(concurrent, receivedAt);
             }
-            boolean conflict = !rawBodyHash.equalsIgnoreCase(concurrent.getRawBodyHash());
-            if (conflict && (IntegrationHubStates.INBOUND_RECEIVED.equals(concurrent.getStatus())
-                    || IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus()))) {
+            if (IntegrationHubStates.INBOUND_RECEIVED.equals(concurrent.getStatus())
+                    || IntegrationHubStates.INBOUND_PROCESSING.equals(concurrent.getStatus())) {
                 mapper.transitionConflict(concurrent.getId(), concurrent.getVersion(), rawBodyHash,
                         receivedAt, receivedAt.plusDays(90));
                 concurrent = mapper.selectForUpdate(concurrent.getId());
             }
-            return new Receipt(concurrent, true, conflict);
+            return new Receipt(concurrent, true, true);
         }
+    }
+
+    /** 同一hash再送。terminalのみduplicate、有効lease中はinProgress、それ以外はclaim可能な非terminal再試行。 */
+    private Receipt receiptForSameHash(InboundEvent existing, LocalDateTime receivedAt) {
+        if (IntegrationHubStates.INBOUND_PROCESSING.equals(existing.getStatus())
+                && leaseActive(existing, receivedAt)) {
+            return new Receipt(existing, false, false, true);
+        }
+        if (isTerminalDuplicate(existing.getStatus())) {
+            return new Receipt(existing, true, false);
+        }
+        return new Receipt(existing, false, false);
     }
 
     @Override

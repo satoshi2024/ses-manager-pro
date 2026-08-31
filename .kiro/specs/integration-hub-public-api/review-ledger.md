@@ -1,4 +1,21 @@
-# NF-05 Review Ledger（R-NF05 IMPLEMENTATION FAIL remediation 後・独立再 Review 待ち）
+# NF-05 Review Ledger（R-NF05 REV2 remediation 後・独立再 Review 待ち）
+
+## R-NF05 再 Review（Head `7d956f78`）
+
+| Gate | 判定 |
+|---|---|
+| Stage A Plan Review | PLAN PASS |
+| Stage B Implementation | FAIL（P0=0、P1=1、P2=5） |
+| 公開可否 | 不可（PR 未作成） |
+
+| Finding ID | Severity | 対応 | Status |
+|---|---|---|---|
+| NF05-REV-P1-001 | P1 | action inventory / replay permission | CLOSED |
+| NF05-REV-P1-002 | P1 | connector peer CIDR | CLOSED（default `[]`） |
+| NF05-REV-P1-003 | P1 | OpenAPI inbound/409 | CLOSED |
+| NF05-REV2-P1-001 | P1 | `receiptForSameHash` で RECEIVED+同一 hash を claim 可能に。`recordReceived` 再送 test | REMEDIATED（再 Review 待ち） |
+
+P2（disabled bean、admin DTO、静的 log scan、list 512、trusted-proxies+strip）は未着手。
 
 ## R-NF05 independent Review（Head `374617da`）
 
