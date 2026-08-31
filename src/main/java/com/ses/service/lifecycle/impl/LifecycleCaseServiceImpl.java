@@ -407,6 +407,12 @@ public class LifecycleCaseServiceImpl extends ServiceImpl<LifecycleCaseMapper, L
                                          Map<Long, SysUser> eventActorMap) {
         ActorType actorType = parseActorType(event.getActorType());
         ConfirmationSource source = parseConfirmationSource(event.getConfirmationSource());
+        if (actorType == null && source == null
+                && event.getActorUserId() != null && event.getActorUserId() > 0
+                && eventActorMap.containsKey(event.getActorUserId())) {
+            actorType = ActorType.HUMAN;
+            source = ConfirmationSource.MANUAL_API;
+        }
         boolean valid = actorType != null && source != null
                 && ((actorType == ActorType.HUMAN && source == ConfirmationSource.MANUAL_API
                 && event.getActorUserId() != null && event.getActorUserId() > 0

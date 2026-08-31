@@ -164,6 +164,24 @@ SET @sql = (SELECT IF(COUNT(*) = 1,
   'SELECT 1') FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 't_lifecycle_event' AND column_name = 'actor_user_id');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- 旧ライフサイクルイベント: actor_user_id から主体を推測しない。有効ユーザーIDのみ HUMAN/MANUAL_API へ backfill する。
+-- actor_user_id=1 も sys_user が存在すれば HUMAN とする（SYSTEM への暗黙変換はしない）。
+UPDATE t_lifecycle_event e
+SET actor_type = 'HUMAN',
+    confirmation_source = 'MANUAL_API'
+WHERE (e.actor_type IS NULL OR e.confirmation_source IS NULL)
+  AND e.actor_user_id IS NOT NULL
+  AND e.actor_user_id > 0
+  AND EXISTS (SELECT 1 FROM sys_user u
+              WHERE u.id = e.actor_user_id
+                AND u.deleted_flag = 0);
+
+UPDATE t_lifecycle_event
+SET actor_type = 'LEGACY_UNRESOLVED',
+    confirmation_source = 'LEGACY_UNRESOLVED',
+    actor_user_id = NULL
+WHERE actor_type IS NULL OR confirmation_source IS NULL;
+
 -- V136自身は新しい列をcanonicalにする。制約名が既に存在する場合は再作成しない。
 SET @sql = (SELECT IF(COUNT(*) = 0,
   'ALTER TABLE t_external_account_reference ADD CONSTRAINT ck_ext_revoke_actor_type CHECK (actor_type IS NULL OR actor_type IN (''HUMAN'', ''SYSTEM'', ''PROVIDER'', ''LEGACY_UNRESOLVED''))',

@@ -243,6 +243,9 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         assertConstraintViolation("INSERT INTO t_audit_log "
                         + "(method, uri, status, actor_type) "
                         + "VALUES ('POST', '/test', 200, 'SYSTEM')");
+        assertConstraintViolation("INSERT INTO t_lifecycle_event "
+                        + "(case_id, event_type, actor_role_snapshot, actor_type, confirmation_source, actor_user_id, occurred_at) "
+                        + "VALUES (1, 'TASK_COMPLETED', 'HR', 'LEGACY_UNRESOLVED', 'LEGACY_UNRESOLVED', 1, CURRENT_TIMESTAMP)");
     }
 
     @Test
@@ -255,9 +258,13 @@ class ExternalAccountActorAttributionTest extends BaseIntegrationTest {
         assertThat(migration).contains("WHERE status = 'REVOKED'")
                 .contains("ELSE 'LEGACY_UNRESOLVED'")
                 .contains("SET revoke_confirmed_by = NULL")
-                .contains("revoke_confirmed_source = confirmation_source");
+                .contains("revoke_confirmed_source = confirmation_source")
+                .contains("UPDATE t_lifecycle_event e")
+                .contains("actor_user_id = NULL")
+                .contains("WHERE actor_type IS NULL OR confirmation_source IS NULL");
         assertThat(migration).contains("COUNT(*) > 0 AND MAX(IS_NULLABLE = 'NO') = 1");
         assertThat(migration).doesNotContain("confirmed_by = 1 THEN 'SYSTEM'");
+        assertThat(migration).doesNotContain("actor_user_id = 1 THEN 'SYSTEM'");
     }
 
     private ExternalAccountReference newReference(String suffix) {
