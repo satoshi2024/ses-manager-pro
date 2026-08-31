@@ -11,7 +11,9 @@ Base=origin/main@b9a3a77f0dd44640ea4850e6ee93b822dc5af0fdをapproval-decision.md
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2は独立再Review fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でP0/P1/P2=0/0/0のIMPLEMENTATION PASSを受領した。A1はremediation後、
 fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立Implementation PASSを受領した。B1は`971c17d7`の初回実装に対する
-独立Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateし、独立再Reviewへ提出する。
+独立Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を`30199db8`でremediateした。
+再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2（operator permission、scopeとopaque IDの直接比較）を
+`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、独立再Reviewへ提出する。
 B1再Review PASS後にB2→Mを順次実装する。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
@@ -30,7 +32,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 | F2 | dedicated security chain | client principal、scope/data scope/command permission、audit、rate/IP | IMPLEMENTATION_PASS。fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | v1 read APIs / OpenAPI | external DTO、cursor/count/error contract、customer scope、materialized cursor snapshot、bounded snapshot purge、contract tests | IMPLEMENTATION_PASS。fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | limited command APIs | permission、idempotency、CAS、audit | NOT_APPLICABLE_UNDER_CURRENT_DECISION。default deny |
-| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
+| B1 | outbound webhook | subscription、signed event、claim/lease/retry/DLQ | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING。`30199db8` → `2684ff8f`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | inbound webhook / DLQ / admin UI | event uniqueness、replay、safe admin operations | APPROVED_SEQUENCED。B1 Review後 |
 | M | penetration / recovery / performance | review evidence、load、failure drill、runbook、fixed head | APPROVED_SEQUENCED。B2 Review後 |
 
@@ -59,7 +61,7 @@ production enablementと実顧客/実providerは引き続き禁止する。
 4. MOCK/STUB/LOOPBACKの三値だけを許可し、MOCK/STUBは無接続、LOOPBACKはliteral loopback/port、
    peer/DNS、redirect/proxy、multi-address/rebinding拒否を
    config時とconnection直前の契約として固定する。
-5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediate済み・独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
+5. A2をN/Aへ統一し、Plan delta PASS（ca27f455）、F1 PASS維持、F2 fixed Head `d022e600`のIMPLEMENTATION PASS、A1 fixed Head `69f857d3`の独立Implementation Review PASS、B1初回Review FAILを`30199db8`でremediateし、再Review P1=2を`2684ff8f`でremediate済み・独立再Review pendingを全traceへ同期する。Owner/Base正本値も維持する。
 
 6. ExternalApiAuditBoundaryでGETを含む全decisionを監査し、trusted proxy/IP/CIDR確定をnonce commitより
    前に置く。401/403 stable JSON、CSRF/CORS、anonymous無効化、correlation headerを専用chainへ固定する。
@@ -105,6 +107,15 @@ manual replayでadmin permission、active subscription、current scope・tenant/
 V133でreplay auditをdelivery payloadから分離し、audit metadataの期限と独立purgeを追加した。workerのclaim/result clockを再取得し、
 provider成功後のCAS障害をtransport retryへ変換せずstale lease recoveryへ委ねる。`IntegrationHubWebhookDeliveryWorkerTest`、H2 retention、
 MySQL concurrency/retentionを追加し、focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。独立再Review受領までB1 PASSとは扱わない。
+
+## B1再Review remediation（fixed Head `29d749bb` → `2684ff8f`）
+
+再ReviewはP1=2（呼出側operatorRefだけを形式検証、current numeric scopeとopaque public IDを直接比較）だった。
+`2684ff8f`でreplay serviceからoperatorRef入力を除去し、認証済み内部`LoginUser`の`ROLE_管理者`と
+`integration.webhook.replay` action permissionをservice boundaryで検証する。auditへはprincipalから導出したsafe referenceだけを渡す。
+さらにclient/permission/subscriptionのintersection後、許可されたnumeric内部resource IDごとに`ExternalApiPublicIdCodec`でHMAC opaque IDを
+再計算し、envelope/payload membershipを照合する。resource dimension不在、reparent、削除、scope縮小、ID不一致はfail-closedとする。
+未認証、非admin、permission拒否、operatorRef偽装のnegative testと、numeric scope＋実HMAC public ID、reparent/delete/scope narrowingのtestを追加した。
 
 ## F2 Implementation Review remediation（固定Head 220ac86f → e47025b5）
 
@@ -168,7 +179,7 @@ follow-up remediationの実装境界:
 - retention hold/purgeのrow lock順序はcheckpoint→target→holdへ統一し、checkpoint初期化とquota subject初期化はgap-lockを避けるinsert/upsert-firstとする。
 - MySQL 8上で実service/mapperを複数connectionから呼び、usage unique初期化、delivery CAS、hold/purge、malformed lease、inbound duplicateを検証する。
 
-F2はIMPLEMENTATION_PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でIMPLEMENTATION_PASS、B1は初回Review FAILを`30199db8`で
+F2はIMPLEMENTATION_PASS、A1はfixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でIMPLEMENTATION_PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`で
 remediate済み・独立再Review待ちである。B1再Review PASS後にB2→Mを順次開始する。A2はNOT_APPLICABLE_UNDER_CURRENT_DECISIONで、command/exportは
 default denyのままとする。production enablement、実顧客credential、実providerへの外部送信は引き続き禁止する。
 

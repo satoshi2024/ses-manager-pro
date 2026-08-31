@@ -8,7 +8,8 @@ ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を�
 F2は固定Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。A1は
 初回Review FAIL（fixed Head `111f4baa37096a1419cc8aaddcb2fe8c71e0e229`、P0=0/P1=2/P2=2）をremediateし、固定Head
 `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。B1は初回Review FAILを
-`30199db8`でremediateし、独立Implementation再Review待ちである。production implementationの
+`30199db8`でremediateした。再Review fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`のP1=2を
+`2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateし、独立Implementation再Review待ちである。production implementationの
 public endpoint enablement、実顧客credential、実provider送信は禁止し、
 development/testのmock/stubとloopbackだけを許可する。
 T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
@@ -33,7 +34,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | F2 | IMPLEMENTATION_PASS | fixed Head `d022e600`、P0/P1/P2=0/0/0 |
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
-| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
+| B1 | IMPLEMENTATION_REMEDIATED_REVIEW_PENDING | `30199db8`後の再Review P1=2を`2684ff8f`でremediate、focused/H2/MySQL証跡PASS、独立再Review待ち。mock/stub/loopbackのみ |
 | B2 | APPROVED_SEQUENCED | B1 Review後。inbound/DLQ/admin UI、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
@@ -188,7 +189,9 @@ payload hash・generation・lease tokenを用いる結果CASを分離する。ti
 focused B1 suiteは28 tests、failure/error/skipなしでPASSした。初回ReviewのP1-001〜004/P2-005を`30199db8`でremediateし、
 署名canonical framing/envelope binding、replay current authorization、V133 audit/payload retention分離、fresh-clock/CAS recovery、
 attempt 8・timeout・slow transport・同時claim・atomic rollback・replay後purgeを追加した。focused unit/H2/MySQL suiteはfailure/error/skipなしでPASSした。
-実顧客credential、実provider送信、production enablementは行わない。独立再Review受領まではB1 IMPLEMENTATION PASSとは扱わない。
+再ReviewのP1-006/P1-007に対し、`2684ff8f`でoperatorRef入力を廃止して認証済み内部admin principal/action permissionへbindし、
+numeric current scopeからHMAC opaque IDを再計算してpayload membershipを検証する境界を追加した。実顧客credential、実provider送信、production enablementは行わない。
+独立再Review受領まではB1 IMPLEMENTATION PASSとは扱わない。
 
 ## IH-R3 Inbound / outbound webhook
 
@@ -213,6 +216,10 @@ attempt 8・timeout・slow transport・同時claim・atomic rollback・replay後
    retry状態、last safe error code、next attempt、attempt count、provider request IDを保存する。
 8. manual replayはadmin action permission、reason、元event snapshot hash、再生世代、scope再検証、
    auditを必須にし、同一eventを無制限に再送しない。
+   operatorは呼出側入力を受け付けず、認証済み内部`LoginUser`の有効な`ROLE_管理者`と
+   `integration.webhook.replay` permissionから改ざん不能なsafe referenceを導出する。current client/permission/subscription
+   scopeのintersectionに含まれるnumeric内部resource IDからHMAC opaque public IDを再計算し、envelope/payload membershipを検証する。
+   resource dimension不在、tenant/legal entity不一致、reparent、削除、scope縮小、ID不一致は拒否する。
 9. inbound handlerの業務適用はclaim処理とtransaction境界を分離し、外部応答を待つ間に内部DB
    transactionを保持しない。
 

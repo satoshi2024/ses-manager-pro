@@ -6,7 +6,8 @@
 - 本specの状態: F1/F2/A1独立Implementation Review PASSを維持。A1は固定Head
   `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
   B1は初回Review FAIL（fixed Head `0f1a92974ea914d16de07ccf5a586fac215283f0`、P0=0/P1=4/P2=1）を
-  `30199db8`でremediateし、同じR-NF05へ独立再Reviewをhandoffする段階である。
+  `30199db8`でremediateした。続く再Review（fixed Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`、P0=0/P1=2/P2=0）の
+  replay operator/admin permissionとnumeric scope→opaque public ID指摘を`2684ff8f`でremediateし、同じR-NF05へ再Reviewをhandoffする段階である。
   B2/Mは順次承認、A2は現DecisionでN/A、production enablementは未完了
 - Decision Gate: DG-05-F1-APPROVAL-20260830-01（F1）／DG-05-IMPLEMENTATION-SCOPE-EXPANSION-20260830-02（scope expansion）
 - Approved resources/commands: GET-only 11 paths、inventory allow-list。command/exportなし
@@ -46,7 +47,7 @@ PLAN FAIL（P0=0、P1=4、P2=2）、固定Head 9cca2deec9ab1bd5417aaba98f859ed14
 remediation後の固定Head ca27f45532bbf96d29da7b9ba87ca52b9cf96d8aでPLAN PASS（P0=0、P1=0、P2=0）を受領した。
 F2のImplementation Review FAILを受けたremediationを実施し、fixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立再Review PASS
 （P0/P1/P2=0/0/0）を受領した。A1は`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS（P0/P1/P2=0/0/0）を受領した。
-B1を`971c17d7`で実装し、独立Review FAILを`30199db8`でremediateした。独立B1再Review PASS後にB2→Mを順次実装する。
+B1を`971c17d7`で実装し、独立Review FAILを`30199db8`、再ReviewのP1-006/P1-007を`2684ff8f`でremediateした。独立B1再Review PASS後にB2→Mを順次実装する。
 A2はapproved command=0件のためN/Aとする。
 
 F1初回実装commitは `a7654b44`、Review remediation commitは `a184c1f4`、delivery CAS generation correctionは
@@ -114,6 +115,10 @@ properties/transport/worker/replay testを追加したが、実顧客credential�
 current data scope、tenant/legal entity、payload membershipをDBから再取得して再計算する。V133でreplay auditとdelivery payloadのlifecycleを
 分離し、delivery purgeはauditを阻害せず、audit metadataは独立1年purgeとする。workerはclaim直前・HTTP完了後にclockを再取得し、結果CAS障害は
 transport retryへ変換せずlease recoveryへ委ねる。focused unit/H2/MySQL証跡はPASS済みだが、独立再Review受領まではB1 IMPLEMENTATION PASSへ昇格しない。
+
+再ReviewのP1-006/P1-007は`2684ff8f`で、呼出側operatorRef入力の廃止、認証済み内部admin principalと
+`integration.webhook.replay` action permissionの検証、current numeric resource scopeからのHMAC opaque ID再計算照合、
+resource scope不在・reparent・削除・縮小時のfail-closedを追加した。実顧客credential、実provider送信、production enablementは行わない。
 
 ## 既知の重要差分
 

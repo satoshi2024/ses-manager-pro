@@ -499,6 +499,21 @@ workerはbatch scanの時刻をclaimへ使い回さず、recovery・claim直前�
 同じdelivery generationとprovider idempotency keyを再取得できる状態へ委ねる。attempt 8、timeout/5xx、slow transport、stale lease、同時claim、
 provider成功直後CAS障害、atomic enqueue rollback、replay後の独立payload/audit purgeをH2/MySQL実DB経路で検証する。
 
+### 7.3 B1再Review P1 remediationの固定契約
+
+固定Head `29d749bb6db1aad9ca98a9dd253b30d375dbba5c`の独立再Reviewで残ったP1-006/P1-007を、実装commit
+`2684ff8f1303b6d0cc6550882601405d3d78f3b2`で補正した。DLQ replay serviceは呼出側から`operatorRef`を受け取らず、
+Spring Securityの認証済み`LoginUser`内部principalからのみ`sys-user:<internal-id>`のsafe audit referenceを導出する。
+service boundaryで認証済み・有効・非ロックの`ROLE_管理者`と`integration.webhook.replay` action permissionを同時に要求し、
+未認証、非admin、permission拒否、偽装operator入力はfail-closedとする。
+
+replay payloadのresource membershipは文字列scopeとpublic IDを直接比較しない。client、permission、subscriptionの現行scopeを
+intersectionし、tenant/legal entityをauthoritative singletonとして検証した後、resource dimensionの値を正のnumeric内部IDとして
+解釈する。`ExternalApiPublicIdCodec`のclient/tenant/resource-bound HMAC-SHA256を許可された各内部IDへ再計算し、payloadの
+opaque public IDと比較する。event envelopeの`publicResourceId`はresource fieldと一致し、resource dimensionがintersectionから消えた場合、
+resource削除・scope縮小・tenant reparent・不正ID・opaque ID不一致は拒否する。resource dimensionを持たないscopeをtenantだけで許可しない。
+replay auditには導出済みoperator referenceだけを保存し、operatorRef、internal ID、scope値、secret、raw payload/bodyを外部契約へ返さない。
+
 ## 8. トランザクション・運用
 
 業務state変更とoutbox/event row insertは同一DB transaction内で原子的にcommitする。業務commit後に
@@ -578,7 +593,7 @@ MOCKの無接続をtestし、SSRF経路を残さない。
 - F1ではclient、credential、scope、idempotency、usage bucket、webhook persistence contractと最小crypto/config
   abstractionを実装済みとする。secret、raw body、PIIは保存しない。
 - Plan deltaはca27f455でPASS済み。F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`でIMPLEMENTATION PASS、A1はfixed Head
-  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ちであり、再Review PASS後にB2→Mを順次開始する。
+  `69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ちであり、再Review PASS後にB2→Mを順次開始する。
   A2はapproved command=0件のためNOT_APPLICABLE_UNDER_CURRENT_DECISIONとし、command/exportはdefault denyのままとする。
 - B1/B2のprovider接続はdevelopment/testのmock/stubおよびloopback test serverに限定する。production enablement、
   実顧客credential、実providerへの外部送信、main変更、force push、merge、auto-mergeは禁止する。

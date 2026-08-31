@@ -147,7 +147,7 @@ F1実装Review gateを通過した。M/security/load/recovery/scan/runbookとF2�
 
 今回のremediationでoutbox/CAS、candidate契約、metrics、retentionの仕様とF1実装境界を同期した。follow-upではsnapshot形状、
 lease fail-closed、lock順序、MySQL競合証跡を追加したが、public endpoint、
-外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
+外部送信、B2/Mは未着手であり（F2はPASS、A1はfixed Head `69f857d3`で独立Implementation Review PASS、B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ち、A2はN/A）、レビュー結果を自己PASSへ変更しない。
 
 ## Task 0R scope
 
@@ -170,7 +170,7 @@ Owner承認とR-NF05 PLAN PASSにより、F1 persistence基盤の実装条件は
 固定Head `0b52e3de7908d57c2dbac8b9ce1b0972c1be83c3`の独立Implementation Review PASSを受領した。F2/A1/B1/B2/Mは
 scope expansionで開発承認済みであり、Plan deltaは固定Head `ca27f45532bbf96d29da7b9ba87ca52b9cf96d8a`でPASSした。
 F2はfixed Head `d022e60039880dc5d4743f336661819cda7fc3f4`で独立Implementation Review PASS済み、A1はfixed Head
-`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`でremediate済み・独立再Review待ちである。A2/command/exportは
+`69f857d3ac7d513b66265b02871688b28d2e7e5d`で独立Implementation Review PASS済みである。B1は初回Review FAILを`30199db8`、再Review P1-006/P1-007を`2684ff8f`でremediate済み・独立再Review待ちである。A2/command/exportは
 NOT_APPLICABLE_UNDER_CURRENT_DECISIONで、production enablement、実顧客credential、実provider送信は禁止する。
 
 ## Handoff checkpoint
@@ -260,4 +260,16 @@ approved B1 scope内で実装・テスト可能な修正である。状態は独
 | NF05-IMPL-B1-005 | P2 | failure/concurrency/attempt 8の実DB証跡不足 | timeout/5xx、attempt 8/DLQ、provider成功直後CAS障害、stale recovery、同時claim、atomic rollback、replay後purgeをworker/H2/MySQLへ追加 | SPEC_ADDRESSED（独立再Review待ち） |
 
 実装commitは`30199db8`。focused unit、H2 retention/schema、MySQL 8 concurrency/retentionはfailure/error/skipなしでPASSした。
+独立再Review、B2、M、production enablement、実顧客credential、実provider送信、PR/mergeは未完了・禁止である。
+
+## B1再Review remediation（fixed Head `29d749bb` → `2684ff8f`）
+
+同一R-NF05の独立再ReviewはFAIL（P0=0、P1=2、P2=0）だった。F1/F2/A1のPASSと初回B1 remediationは再オープンしない。
+
+| ID | Severity | Finding | Remediation / evidence | Status |
+|---|---|---|---|---|
+| NF05-IMPL-B1-006 | P1 | replay操作主体のadmin permissionが未検証で、呼出側operatorRefを信頼し得る | `IntegrationHubWebhookDeliveryReplayService`からoperatorRef入力を除去し、`IntegrationHubWebhookReplayAuthorizationService`のservice boundaryで認証済み内部`LoginUser`、有効/非ロック、`ROLE_管理者`、`integration.webhook.replay` action permissionを検証。principalから導出した`sys-user:<id>`だけをauditへ渡す。未認証、非admin、permission拒否、偽装operator入力のnegative testを追加 | SPEC_ADDRESSED（`2684ff8f`、独立再Review待ち） |
+| NF05-IMPL-B1-007 | P1 | current numeric scopeとopaque public IDを直接比較し、実契約のID bindingが不足 | client/permission/subscriptionのcurrent intersectionを再計算し、正のnumeric内部resource IDごとに`ExternalApiPublicIdCodec`のclient/tenant/resource-bound HMACを再計算してenvelope/payloadのopaque IDを照合。resource dimension消失、tenant reparent、削除、scope縮小、実HMAC IDをtestし、resource scopeなしを拒否 | SPEC_ADDRESSED（`2684ff8f`、独立再Review待ち） |
+
+`2684ff8f1303b6d0cc6550882601405d3d78f3b2`で実装をpushした。focused B1対象はreplay authorization 10、replay generation 2、signer 2、worker 8、public-ID 1をfailure/error/skipなしでPASSした。
 独立再Review、B2、M、production enablement、実顧客credential、実provider送信、PR/mergeは未完了・禁止である。
