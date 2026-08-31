@@ -21,13 +21,15 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
   idempotency_key VARCHAR(128),
   CONSTRAINT ck_audit_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
   CONSTRAINT ck_audit_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
-  CONSTRAINT ck_audit_actor_pair CHECK (COALESCE((
+  CONSTRAINT ck_audit_actor_pair CHECK (
     actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
-    OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0
-    OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL
-    OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL
-    OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL
-  ), FALSE)),
+    OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+      actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0
+      OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL
+      OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL
+      OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL
+    )
+  ),
   created_at DATETIME     DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -51,10 +53,12 @@ ALTER TABLE t_audit_log ADD CONSTRAINT IF NOT EXISTS ck_audit_actor_type
     CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED'));
 ALTER TABLE t_audit_log ADD CONSTRAINT IF NOT EXISTS ck_audit_confirmation_source
     CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED'));
-ALTER TABLE t_audit_log ADD CONSTRAINT IF NOT EXISTS ck_audit_actor_pair CHECK (COALESCE((
+ALTER TABLE t_audit_log ADD CONSTRAINT IF NOT EXISTS ck_audit_actor_pair CHECK (
     actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
-    OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0
-    OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL
-    OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL
-    OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL
-), FALSE));
+    OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+      actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0
+      OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL
+      OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL
+      OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL
+    )
+);

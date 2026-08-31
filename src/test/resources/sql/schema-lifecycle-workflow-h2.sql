@@ -141,13 +141,15 @@ CREATE TABLE IF NOT EXISTS t_lifecycle_event (
     occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_lifecycle_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
     CONSTRAINT ck_lifecycle_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
-    CONSTRAINT ck_lifecycle_event_actor_pair CHECK (COALESCE((
+    CONSTRAINT ck_lifecycle_event_actor_pair CHECK (
         actor_type IS NULL AND confirmation_source IS NULL
-        OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND actor_user_id IS NOT NULL AND actor_user_id > 0
-        OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND actor_user_id IS NULL
-        OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND actor_user_id IS NULL
-        OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND actor_user_id IS NULL
-    ), FALSE))
+        OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND actor_user_id IS NOT NULL AND actor_user_id > 0
+            OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND actor_user_id IS NULL
+            OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND actor_user_id IS NULL
+            OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND actor_user_id IS NULL
+        )
+    )
 );
 
 -- メニューseed

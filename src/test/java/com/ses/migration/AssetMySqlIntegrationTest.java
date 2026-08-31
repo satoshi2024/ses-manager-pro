@@ -254,8 +254,10 @@ class AssetMySqlIntegrationTest {
         externalAccountService.requestRevokeWithIdempotency(autoRef.getId(), "mysql-poll-key-" + autoRef.getId(), 9001L);
         mockClient.setMockStatus(autoRef.getId(), ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED);
 
-        int polled = externalAccountService.processPendingRevokePollJob();
-        assertTrue(polled >= 1);
+        // 他テストが作成したpending行の件数には依存せず、このテスト自身の行がdueであることだけを確認する。
+        jdbcTemplate.update("UPDATE t_external_account_reference SET next_retry_at = CURRENT_TIMESTAMP WHERE id = ?",
+                autoRef.getId());
+        externalAccountService.processPendingRevokePollJob();
 
         ExternalAccountReference dbAuto = externalAccountReferenceMapper.selectById(autoRef.getId());
         assertEquals("REVOKED", dbAuto.getStatus());

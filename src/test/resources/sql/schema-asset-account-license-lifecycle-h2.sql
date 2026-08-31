@@ -98,13 +98,15 @@ CREATE TABLE IF NOT EXISTS t_asset_event (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_asset_event_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
     CONSTRAINT ck_asset_event_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
-    CONSTRAINT ck_asset_event_actor_pair CHECK (COALESCE((
+    CONSTRAINT ck_asset_event_actor_pair CHECK (
         actor_type IS NULL AND confirmation_source IS NULL AND human_user_id IS NULL
-        OR actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0 AND actor_user_id IS NOT NULL AND actor_user_id = human_user_id
-        OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL AND actor_user_id IS NULL
-        OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL AND actor_user_id IS NULL
-        OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL AND actor_user_id IS NULL
-    ), FALSE)),
+        OR actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
+            actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND human_user_id IS NOT NULL AND human_user_id > 0 AND actor_user_id IS NOT NULL AND actor_user_id = human_user_id
+            OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND human_user_id IS NULL AND actor_user_id IS NULL
+            OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND human_user_id IS NULL AND actor_user_id IS NULL
+            OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND human_user_id IS NULL AND actor_user_id IS NULL
+        )
+    ),
     INDEX idx_event_asset (asset_id, event_time),
     INDEX idx_event_reference (reference_type, reference_id)
 );
@@ -185,16 +187,16 @@ CREATE TABLE IF NOT EXISTS t_external_account_reference (
     deleted_flag INT NOT NULL DEFAULT 0,
     CONSTRAINT ck_ext_revoke_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
     CONSTRAINT ck_ext_revoke_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
-    CONSTRAINT ck_ext_revoke_attribution CHECK (COALESCE((
+    CONSTRAINT ck_ext_revoke_attribution CHECK (
         revoke_confirmed_at IS NULL AND actor_type IS NULL AND confirmation_source IS NULL AND revoke_confirmed_by IS NULL AND revoke_confirmed_source IS NULL
-        OR revoke_confirmed_at IS NOT NULL AND (
+        OR revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL AND (
             actor_type = 'HUMAN' AND confirmation_source = 'MANUAL_API' AND revoke_confirmed_by IS NOT NULL AND revoke_confirmed_by > 0
             OR actor_type = 'SYSTEM' AND confirmation_source = 'SCHEDULER_POLL' AND revoke_confirmed_by IS NULL
             OR actor_type = 'PROVIDER' AND confirmation_source IN ('PROVIDER_SYNC', 'PROVIDER_CALLBACK') AND revoke_confirmed_by IS NULL
             OR actor_type = 'LEGACY_UNRESOLVED' AND confirmation_source = 'LEGACY_UNRESOLVED' AND revoke_confirmed_by IS NULL
-        ) AND revoke_confirmed_source = confirmation_source
-    ), FALSE)),
-    CONSTRAINT ck_ext_revoke_status_attribution CHECK (COALESCE(status <> 'REVOKED' OR (revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL), FALSE))
+        ) AND revoke_confirmed_source IS NOT NULL AND revoke_confirmed_source = confirmation_source
+    ),
+    CONSTRAINT ck_ext_revoke_status_attribution CHECK (status IS NOT NULL AND (status <> 'REVOKED' OR (revoke_confirmed_at IS NOT NULL AND actor_type IS NOT NULL AND confirmation_source IS NOT NULL)))
 );
 
 CREATE TABLE IF NOT EXISTS m_license_plan (
