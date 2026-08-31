@@ -684,6 +684,20 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 6: 営業・要員 Fail-Closed Scope 検証（担当外要員・別法人は拒否）")
     void testOrganizationScopeAndMultiCorporationIsolation() {
+        String suffix = Long.toString(System.nanoTime());
+        Engineer engineerA = Engineer.builder()
+                .fullName("資産Scope要員A-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        Engineer engineerB = Engineer.builder()
+                .fullName("資産Scope要員B-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+
         // 1. 法人A資産と法人B資産を作成
         Asset assetA = Asset.builder()
                 .assetTag("AST-SCOPE-A-001")
@@ -711,26 +725,26 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         // 3. 要員Aに資産Aを貸与し、要員Aユーザーと要員Bユーザーを登録
         AssetAssignment asA = assetAssignmentService.createAssignment(
-                assetA.getId(), "ENGINEER", 8801L,
+                assetA.getId(), "ENGINEER", engineerA.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与A", 1L);
 
         SysUser userEngA = SysUser.builder()
-                .username("eng-scope-8801")
+                .username("eng-scope-a-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngA);
-        engineerAccountLinkService.link(8801L, userEngA.getId(), 1L);
+        engineerAccountLinkService.link(engineerA.getId(), userEngA.getId(), 1L);
 
         SysUser userEngB = SysUser.builder()
-                .username("eng-scope-8802")
+                .username("eng-scope-b-" + suffix)
                 .password("pass")
                 .role("要員")
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngB);
-        engineerAccountLinkService.link(8802L, userEngB.getId(), 1L);
+        engineerAccountLinkService.link(engineerB.getId(), userEngB.getId(), 1L);
 
         // 4. 要員スコープ: 自己 ACTIVE 貸与資産のみ可視、他要員への貸与・未貸与・別法人資産は不可視
         assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
@@ -865,9 +879,21 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 7: DocumentLink 登録と isAccessibleByDocumentLink でのスコープ導出・別要員拒否")
     void testDocumentEvidenceScopeRejection() throws Exception {
-        long engineerAId = 18801L;
-        long engineerBId = 18802L;
         String suffix = Long.toString(System.nanoTime());
+        Engineer engineerA = Engineer.builder()
+                .fullName("資産DocLink要員A-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        Engineer engineerB = Engineer.builder()
+                .fullName("資産DocLink要員B-" + suffix)
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineerA);
+        engineerMapper.insert(engineerB);
+        long engineerAId = engineerA.getId();
+        long engineerBId = engineerB.getId();
 
         // 1. 実在文書を登録し、資産を要員Aに貸与する
         Asset asset = Asset.builder()
@@ -980,6 +1006,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("Boundary 8: 論理削除安全条件 (Soft Delete Invariants) — ACTIVE貸与・未失効アカウント・未解放ライセンスは論理削除不可")
     void testSoftDeleteInvariants() {
+        Engineer engineer = Engineer.builder()
+                .fullName("SoftDelete要員-" + System.nanoTime())
+                .employmentType("正社員")
+                .status("稼動中")
+                .build();
+        engineerMapper.insert(engineer);
+
         // 1. ACTIVE貸与中の資産は論理削除できない
         Asset asset = Asset.builder()
                 .assetTag("AST-SOFTDEL-001")
@@ -990,7 +1023,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         assetService.createAsset(asset, 1L);
 
         assetAssignmentService.createAssignment(
-                asset.getId(), "ENGINEER", 8801L,
+                asset.getId(), "ENGINEER", engineer.getId(),
                 LocalDate.now(), LocalDate.now().plusMonths(1), null, "貸与", 1L);
 
         // ACTIVE貸与が存在する状態での論理削除は Business Exception で拒否される
@@ -1007,7 +1040,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         externalAccountSystemMapper.insert(system);
 
         ExternalAccountReference ref = externalAccountService.createAccountReference(
-                system.getId(), "softdel@test.jp", "ENGINEER", 8801L, "MEMBER", 1L);
+                system.getId(), "softdel@test.jp", "ENGINEER", engineer.getId(), "MEMBER", 1L);
         assertThat(ref.getStatus()).isEqualTo("ACTIVE");
 
         // ACTIVE状態のアカウントは論理削除不可
@@ -1031,7 +1064,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .build();
         licenseService.savePlan(terminalPlan, 1L);
         LicenseAssignment releasedLicense = licenseService.assignLicense(
-                terminalPlan.getId(), "ENGINEER", 8801L, ref.getId(), LocalDate.now(), 1L);
+                terminalPlan.getId(), "ENGINEER", engineer.getId(), ref.getId(), LocalDate.now(), 1L);
         licenseService.releaseLicense(releasedLicense.getId(), LocalDate.now(), 1L);
         assertThatThrownBy(() -> licenseService.softDeleteAssignment(releasedLicense.getId()))
                 .isInstanceOf(BusinessException.class)
