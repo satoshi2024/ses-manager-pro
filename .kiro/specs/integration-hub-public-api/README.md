@@ -4,7 +4,7 @@
 
 F1/F2/A1/B1の独立Implementation Review PASSを維持する。B1は固定Head
 `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`でP0/P1/P2=0/0/0のPASSを受領した。
-B2は初回実装 `122c7c3b`後、独立Review指摘を`cc468e4f`でremediate済み・独立再Implementation Review待ちである。
+B2は初回実装 `122c7c3b`後、独立Review指摘を`cc468e4f`および`251461f1`でremediate済み・独立再Implementation Review待ちである。
 最終trace commit後のremote Headを既存R-NF05へhandoffし、Reviewが完了するまでB2 PASSへ自己昇格させない。
 production enablement、実顧客credential、実provider送信、PR、merge、force pushは行わない。
 
@@ -171,3 +171,12 @@ PRは作成しない。force push、merge、auto-merge、branch削除は行わ�
 H2 focused 15/15、MySQL 8 Flyway V136 2/2はPASS。Windowsの実connectorはTomcat loopback接続エラーでHTTP到達前に
 実行不能だったためPASSへ数えず、独立ReviewでLinux実connector証跡を再確認する。B2はIMPLEMENTATION_REVIEW_PENDINGであり、
 M、production受信enablement、実credential、実provider送信、PR/mergeは行わない。
+
+## B2 quota/error follow-up handoff
+
+追加Review指摘（inbound routeのquota allow-list漏れ、unknown providerのstatus/code不一致）をcode commit `251461f1`で修正した。
+`ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES`をquotaの単一正本とし、inbound canonical templateを追加した。未承認providerは
+403/`FORBIDDEN_SCOPE`、malformed providerは400/`REQUEST_INVALID`へ統一した。
+
+route/parser/usage targeted testsはPASS。Windows connectorはloopback接続前errorのため未検証であり、Linux connector 5/5を
+既存R-NF05の独立再Reviewへ依頼する。B2 PASS前のM、production受信、実provider送信、PR/mergeは禁止する。

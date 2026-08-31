@@ -339,3 +339,14 @@ Implementation Reviewの判定を受領するまで、B2をPASSへ昇格しな�
 検証はH2 focused 15 tests、MySQL 8 Flyway V136 smoke 2 tests。Windowsの実Tomcat connectorはOS loopback接続確立前に
 errorとなったため、成功証跡へ算入しない。Linux実connectorで手動attributeなしのHTTP経路を独立再ReviewするまでB2は
 IMPLEMENTATION_REVIEW_PENDINGとする。production receive enablement、実credential、実provider送信、PR/mergeは禁止する。
+
+## B2 quota/error follow-up
+
+独立Review fixed Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` の追加finding P1/P2を`251461f1`でremediateした。
+
+| Finding | remediation | Status |
+|---|---|---|
+| inbound routeがquota allow-listにない | route catalogの`QUOTA_ROUTE_TEMPLATES`をquota serviceの単一正本にし、`/external-api/v1/webhooks/{provider}`を追加 | SPEC_ADDRESSED（独立再Review待ち） |
+| unknown providerのerror期待値不一致 | provider catalog未承認は403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`としてparser/controller/E2Eを同期 | SPEC_ADDRESSED（独立再Review待ち） |
+
+Linux connector 5/5は独立再Reviewで確認する。Windowsでの5件errorはTomcat loopback制約であり、PASSへ数えない。

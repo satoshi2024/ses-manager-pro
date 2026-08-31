@@ -16,7 +16,7 @@ fixed Head `69f857d3ac7d513b66265b02871688b28d2e7e5d`でP0/P1/P2=0/0/0の独立I
   `2684ff8f1303b6d0cc6550882601405d3d78f3b2`でremediateしたが、独立再ReviewでP1-007が残ったため、V134/現行membership mapperによる追加remediationを実施した。
 さらにNF05-IMPL-B1-008（初回送信前primary binding未検証）を共通binding validator、enqueue/worker/DuplicateKey検証で
 `c2cbfb99133d0df3f8d5eee285be340163747e31`へremediateし、固定Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`で独立再Review PASSを受領した。
-B2は初回実装`122c7c3b`後、`cc468e4f`でReview指摘をremediate済み・独立再Implementation Review待ちである。A2はapproved command=0件のためN/A、
+B2は初回実装`122c7c3b`後、`cc468e4f`および`251461f1`でReview指摘をremediate済み・独立再Implementation Review待ちである。A2はapproved command=0件のためN/A、
 production enablementと実顧客/実providerは引き続き禁止する。
 
 ## 推奨順序
@@ -218,3 +218,9 @@ strict Content-Typeを実装・検証した。H2 focused 15 testsとMySQL V136 s
 
 B2は独立再Review受領までIMPLEMENTATION_REVIEW_PENDING。M開始、production receive enablement、実credential、実provider送信、
 PR/mergeは禁止する。F1/F2/A1/B1の既存PASSは再オープンしない。
+
+## B2 quota/error follow-up checkpoint
+
+fixed Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` の追加P1/P2（inbound quota route漏れ、unknown provider status/code不一致）を
+code commit `251461f1`でremediateした。route catalogをquota templateの単一正本とし、inbound templateをsubject keyへ追加した。
+未承認providerは403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`へ固定した。Linux connector 5/5は未取得のため独立再Reviewで確認する。

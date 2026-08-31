@@ -317,3 +317,13 @@ F1実装後の証跡更新:
 | content type | single `application/json`、許可charsetのみ | jsonp、combined、malformed、未許可parameterを拒否 | controller parser/E2E contract |
 
 B2 remediation codeは`cc468e4f`。独立Review受領まではIMPLEMENTATION_REVIEW_PENDINGであり、production受信enablementは行わない。
+
+## B2 quota/error remediation inventory
+
+| 境界 | canonical source | 契約 | status |
+|---|---|---|---|
+| quota route | `ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES` | read 11 template＋`/external-api/v1/webhooks/{provider}`。raw provider path/queryは保存キーにしない | SPEC_ADDRESSED（独立再Review待ち） |
+| inbound provider error | provider catalog＋parser＋external error writer | malformed providerは400/`REQUEST_INVALID`、未承認providerは403/`FORBIDDEN_SCOPE`。ledger/processorへ進ませない | SPEC_ADDRESSED（独立再Review待ち） |
+| connector evidence | enabled real Tomcat route | initial 202、duplicate 200、conflict 409、unknown 403、content-type 400をHTTP assertionまで確認 | Linux 5/5 independent recheck pending |
+
+最新code remediationは`251461f1`。B2 remediation codeは`cc468e4f`から継続し、独立Review受領まではPASSへ昇格しない。

@@ -257,3 +257,12 @@ Flyway V136 smoke 2 testsはPASS、Windows connectorはloopback接続エラー�
 
 同じR-NF05へdocs trace後の固定remote Headを独立再Implementation Reviewとしてhandoffする。B2 PASS受領までM開始、
 production receive enablement、実credential、実provider送信、PR/mergeは禁止し、F1/F2/A1/B1のPASSは再オープンしない。
+
+## NF-05 B2 quota/error follow-up
+
+R-NF05の固定Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` で、inbound routeがquota allow-listにないP1と、unknown providerの
+test/spec status-code不一致P2が示された。`251461f1`でroute catalogの`QUOTA_ROUTE_TEMPLATES`をquotaの単一正本化し、
+`/external-api/v1/webhooks/{provider}`を追加した。未承認providerは403/`FORBIDDEN_SCOPE`、形式不正は400/`REQUEST_INVALID`へ同期した。
+
+Windows connectorはloopback接続確立前に5件errorだったためPASSに算入しない。Linux connector 5/5を同じR-NF05へ独立再Reviewとしてhandoffし、
+B2はその判定までIMPLEMENTATION_REVIEW_PENDING、M・production enablement・実provider送信・PR/mergeは禁止とする。

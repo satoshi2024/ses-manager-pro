@@ -339,3 +339,14 @@ deliveryのprimary bindingとsecondary専用ID検証へ分離し、同じR-NF05�
 H2 focused 15 tests、MySQL 8 Flyway V136 smoke 2 testsはfailure/error/skipなし。Windows connector E2EはTomcat loopback
 接続エラーでHTTP到達前に実行不能のためPASS証拠に数えず、Linux実connector再確認を独立Reviewへ依頼する。F1/F2/A1/B1のPASS状態は
 再オープンしない。B2は独立再ReviewまでPASSへ昇格せず、M、production enablement、実provider送信、PR/mergeは禁止する。
+
+## B2 quota/error follow-up remediation
+
+独立再Review fixed Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` のP1/P2を、code commit `251461f1`で対応した。
+
+| Finding | 対応 | Status |
+|---|---|---|
+| NF05-IMPL-B2-006 inbound route missing from quota allow-list | `ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES`を単一正本化し、inbound canonical templateを追加。usage bucketはraw pathでなくresolved templateを使用 | SPEC_ADDRESSED（独立再Review待ち） |
+| NF05-IMPL-B2-007 unknown provider status/code mismatch | approved provider未登録を403/`FORBIDDEN_SCOPE`へ統一し、connector E2E期待値を更新。malformed providerの400/`REQUEST_INVALID`とは分離 | SPEC_ADDRESSED（独立再Review待ち） |
+
+targeted route/parser/usage 10 testsはPASS。Windows connector 5 testsはloopback接続確立前errorのため未検証とし、Linux 5/5の独立再確認を要求する。

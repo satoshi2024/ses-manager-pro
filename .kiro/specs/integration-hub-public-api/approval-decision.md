@@ -14,7 +14,7 @@
 | Approved Base SHA | b9a3a77f0dd44640ea4850e6ee93b822dc5af0fd |
 | Implementation branch | codex/integration-hub-public-api |
 | Allowed remote push | origin/codex/integration-hub-public-api only |
-| Current implementation Head | `cc468e4f`（B2 remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
+| Current implementation Head | `251461f1`（B2 quota/error contract remediation code commit。docs trace commit後の最終remote Headは外部handoffで固定） |
 | Prohibited | force push、main変更、PR作成、merge、auto-merge |
 
 個人実名は記録しない。Ownerの責任主体はOwnerRef/OwnerTypeで表す。
@@ -130,3 +130,13 @@ admin projectionとreplay URLはopaque referenceだけを使い、Content-Type�
 独立再ReviewまでB2はIMPLEMENTATION_REVIEW_PENDINGとし、B2 PASSへ自己昇格しない。Windows connector E2EはTomcatのloopback
 接続エラーでHTTP到達前に実行不能だったためPASS証拠に数えず、Linux実connector E2Eで再確認する。production受信enablement、
 実credential、実provider送信、PR、mergeは引き続き禁止する。
+
+## B2 quota/error contract remediation checkpoint
+
+前回remediation後の独立Review fixed Head `7f16cc1d9aecf3ebd688d69f981f0610567d4d1` で、inbound routeがquota allow-listから
+漏れているP1と、unknown providerの期待status/codeがspecとtestで不一致のP2が示された。`251461f1`で
+`ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES`をcanonical route templateの単一正本とし、
+`/external-api/v1/webhooks/{provider}`を含めた。usage bucketはraw provider pathではなくこのtemplateをclient×scope×tenant×route templateの
+subject keyへ渡す。unknown providerは403/`FORBIDDEN_SCOPE`へtestと実装を同期した。
+
+B2は独立再ReviewまでIMPLEMENTATION_REVIEW_PENDINGとし、Linux実Tomcat connector 5/5の再確認をPASS証拠として先取りしない。

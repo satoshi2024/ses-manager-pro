@@ -45,7 +45,7 @@ T0/0R/0R-D以外のcheckboxを実装完了扱いにしない。
 | A1 | IMPLEMENTATION_PASS | fixed Head `69f857d3`、P0/P1/P2=0/0/0 |
 | A2 | NOT_APPLICABLE_UNDER_CURRENT_DECISION | approved command=0件。command/exportはdefault denyで完了をblockしない |
 | B1 | IMPLEMENTATION_PASS | fixed Head `f897d748cb93ade26c41d6ba4cb1a88efb29a29d`、P0/P1/P2=0/0/0。mock/stub/loopbackのみ |
-| B2 | IMPLEMENTATION_REVIEW_PENDING | fixed Head `122c7c3bb5653eb788d58040c6defc816ff67013`。inbound/DLQ/admin UI、production受信enablementなし |
+| B2 | IMPLEMENTATION_REVIEW_PENDING | initial `122c7c3b`、remediation `cc468e4f`、follow-up `251461f1`。quota/error境界を補正、production受信enablementなし |
 | M | APPROVED_SEQUENCED | B2 Review後。penetration/recovery/performance/scan/runbookと固定Head |
 
 ## IH-R1 Client / credential / security
@@ -383,3 +383,12 @@ IH-R5-4. public-api.enabledとexternal-transport.enabledは各profileへfalseを
   admin projectionへ含めない。
 - inbound Content-Typeは厳密なmedia type parserで`application/json`と許可charsetだけを受け入れ、jsonp、combined、malformed、
   未許可parameterを拒否する。
+
+## B2 quota/error remediation acceptance
+
+- route catalogは公開read routeとapproved inbound routeのcanonical templateを単一正本として保持し、quota allow-listは同じ正本を参照する。
+  inboundの`/external-api/v1/webhooks/{provider}`を含め、raw provider pathやqueryをquota subject keyへ保存しない。
+- unknown providerは認証済みexternal boundaryで403/`FORBIDDEN_SCOPE`へ収束し、subscription確認・ledger INSERT・processor起動を行わない。
+  implementation、controller、connector E2E、contract testのstatus/codeを一致させる。
+- enabled実Tomcat connectorは正常初回202、同hash duplicate 200、別hash conflict 409、unknown provider 403、invalid Content-Type 400の
+  5ケースをHTTP assertionまで実行し、quota拒否でcontroller到達前に止まらないことを確認する。

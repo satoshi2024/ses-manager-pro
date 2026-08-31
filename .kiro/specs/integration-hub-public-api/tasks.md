@@ -220,6 +220,14 @@ development/testのmock/stub providerとloopback test serverは許可するが�
   jsonp/combined/malformed content typeをH2で検証し、V136 MySQL Flyway smokeを実行する。
 - Demo: code `cc468e4f`の独立Implementation ReviewをR-NF05へhandoffする。Windows connector E2Eは未検証扱いとし、Linux実connectorで再確認する。
 
+## Task B2-R2: quota route and stable error remediation
+
+- [x] Objective: inbound canonical routeをquota allow-listへ追加し、route catalogとquotaのtemplate正本を統一する。unknown providerの403/`FORBIDDEN_SCOPE`契約をtestへ同期する。
+- [x] Implementation: `ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES`へ`/external-api/v1/webhooks/{provider}`を追加し、usage bucketは
+  catalog setを参照する。provider catalog未承認は`FORBIDDEN_SCOPE`、形式不正は`REQUEST_INVALID`とする。
+- [x] Test: inbound templateのquota消費、raw provider path拒否、provider未承認403、正常202/duplicate200/conflict409/content-type400のE2Eケースを固定する。
+- Demo: code `251461f1`をR-NF05へ独立再Reviewとしてhandoffする。Windowsではloopback接続前errorのため、Linux connector 5/5を独立確認するまでB2 PASSにしない。
+
 ## Task M: penetration / recovery / performance
 
 - [ ] Objective: security review、負荷、障害訓練、key rotation、scan、runbookを完了し、Headを固定する。
