@@ -94,6 +94,18 @@ public interface ExternalAccountReferenceMapper extends BaseMapper<ExternalAccou
                            @Param("requestedAt") LocalDateTime requestedAt,
                            @Param("requestedBy") Long requestedBy);
 
+    /** 同一pending行を複数poll workerが同時にproviderへ問い合わせないよう、短いleaseをCAS取得する。 */
+    @Update("UPDATE t_external_account_reference SET next_retry_at = #{leaseUntil}, " +
+            "version = version + 1, updated_at = CURRENT_TIMESTAMP " +
+            "WHERE id = #{id} AND deleted_flag = 0 " +
+            "AND version = #{expectedVersion} " +
+            "AND status IN ('PENDING_CONFIRMATION', 'SUSPENDED', 'UNKNOWN') " +
+            "AND (next_retry_at IS NULL OR next_retry_at <= #{now})")
+    int claimRevokePoll(@Param("id") Long id,
+                        @Param("expectedVersion") Integer expectedVersion,
+                        @Param("now") LocalDateTime now,
+                        @Param("leaseUntil") LocalDateTime leaseUntil);
+
     default int claimRevokeRequest(Long id, String idempotencyKey, LocalDateTime requestedAt) {
         return claimRevokeRequest(id, idempotencyKey, requestedAt, null);
     }

@@ -29,6 +29,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ExternalAccountServiceImpl implements ExternalAccountService {
 
+    private static final long POLL_LEASE_MINUTES = 1L;
+
     private final ExternalAccountSystemMapper externalAccountSystemMapper;
     private final ExternalAccountReferenceMapper externalAccountReferenceMapper;
     private final ExternalAccountProviderClient providerClient;
@@ -272,19 +274,29 @@ public class ExternalAccountServiceImpl implements ExternalAccountService {
 
         int processed = 0;
         for (ExternalAccountReference ref : pendingList) {
+            LocalDateTime leaseUntil = now.plusMinutes(POLL_LEASE_MINUTES);
+            if (externalAccountReferenceMapper.claimRevokePoll(
+                    ref.getId(), ref.getVersion(), now, leaseUntil) != 1) {
+                // 別poll worker、手動確認、または要求送信が先にversionを進めた。
+                continue;
+            }
+            ExternalAccountReference claimed = externalAccountReferenceMapper.selectById(ref.getId());
+            if (claimed == null) {
+                continue;
+            }
             try {
                 ExternalAccountProviderClient.RevokeConfirmationStatus status =
-                        providerClient.checkRevokeConfirmation(ref);
+                        providerClient.checkRevokeConfirmation(claimed);
                 if (status == ExternalAccountProviderClient.RevokeConfirmationStatus.CONFIRMED) {
-                    confirmRevokeFromSchedulerPoll(ref.getId(), "scheduler-poll:" + ref.getId(), ref.getIdempotencyKey());
+                    confirmRevokeFromSchedulerPoll(claimed.getId(), "scheduler-poll:" + claimed.getId(), claimed.getIdempotencyKey());
                     processed++;
                 } else {
-                    persistConfirmationOutcome(ref, status, now);
+                    persistConfirmationOutcome(claimed, status, now);
                 }
             } catch (RuntimeException ex) {
                 // 1件のprovider障害で後続アカウントのpollを止めない。状態はfail-closedでPENDINGへ戻す。
-                persistConfirmationFailure(ref, now);
-                log.warn("Provider revoke confirmation failed; retry will continue: refId={}", ref.getId());
+                persistConfirmationFailure(claimed, now);
+                log.warn("Provider revoke confirmation failed; retry will continue: refId={}", claimed.getId());
             }
         }
         log.info("Pending revoke polling job processed: count={}, confirmed={}", pendingList.size(), processed);
