@@ -1,6 +1,6 @@
 package com.ses.config.integrationhub;
 
-import java.util.List;
+import java.util.Set;
 
 /** 承認済みGET-only routeの有限catalog。raw pathや任意のcontroller mappingを認可根拠にしない。 */
 public final class ExternalApiRouteCatalog {
@@ -14,6 +14,21 @@ public final class ExternalApiRouteCatalog {
     public static final String CONTRACT_STATUS_PERMISSION = "integration.contract-status.read";
     public static final String INVOICE_STATUS_SCOPE = "integration.invoice-status.read";
     public static final String INVOICE_STATUS_PERMISSION = "integration.invoice-status.read";
+
+    /** 認可filterとquotaが共有する、raw pathを含まないcanonical route templateの正本。 */
+    public static final Set<String> QUOTA_ROUTE_TEMPLATES = Set.of(
+            "/external-api/v1/engineer-availability",
+            "/external-api/v1/engineer-availability/{publicEngineerId}",
+            "/external-api/v1/projects",
+            "/external-api/v1/projects/{publicProjectId}",
+            "/external-api/v1/projects/count",
+            "/external-api/v1/contract-statuses",
+            "/external-api/v1/contract-statuses/{publicContractId}",
+            "/external-api/v1/contract-statuses/count",
+            "/external-api/v1/invoice-statuses",
+            "/external-api/v1/invoice-statuses/{publicInvoiceId}",
+            "/external-api/v1/invoice-statuses/count",
+            "/external-api/v1/webhooks/{provider}");
 
     /** Spring matcher用のpath（detailのwildcardはcatalog側で1 segmentに再検証する）。 */
     public static final String[] SECURITY_MATCHERS = {

@@ -109,8 +109,8 @@ class ExternalApiInboundConnectorE2ETest {
         String body = body(eventId, "health.ping");
         ResponseEntity<String> response = send("/external-api/v1/webhooks/provider-unknown", body, eventId);
 
-        assertEquals(400, response.getStatusCode().value());
-        assertTrue(response.getBody() != null && response.getBody().contains("REQUEST_INVALID"));
+        assertEquals(403, response.getStatusCode().value());
+        assertTrue(response.getBody() != null && response.getBody().contains("FORBIDDEN_SCOPE"));
         assertEquals(0, inboundCount(eventId));
     }
 

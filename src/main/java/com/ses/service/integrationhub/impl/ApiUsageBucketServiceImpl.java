@@ -1,5 +1,6 @@
 package com.ses.service.integrationhub.impl;
 
+import com.ses.config.integrationhub.ExternalApiRouteCatalog;
 import com.ses.entity.integrationhub.ApiUsageBucket;
 import com.ses.mapper.ApiUsageBucketMapper;
 import com.ses.service.integrationhub.ApiUsageBucketService;
@@ -31,18 +32,8 @@ public class ApiUsageBucketServiceImpl implements ApiUsageBucketService {
     private static final int BURST_CAPACITY = 20;
     private static final int REFILL_SECONDS = 3;
     private static final int MAX_DEADLOCK_RETRIES = 3;
-    public static final Set<String> APPROVED_ROUTE_TEMPLATES = Set.of(
-            "/external-api/v1/engineer-availability",
-            "/external-api/v1/engineer-availability/{publicEngineerId}",
-            "/external-api/v1/projects",
-            "/external-api/v1/projects/{publicProjectId}",
-            "/external-api/v1/projects/count",
-            "/external-api/v1/contract-statuses",
-            "/external-api/v1/contract-statuses/{publicContractId}",
-            "/external-api/v1/contract-statuses/count",
-            "/external-api/v1/invoice-statuses",
-            "/external-api/v1/invoice-statuses/{publicInvoiceId}",
-            "/external-api/v1/invoice-statuses/count");
+    /** 後方互換の公開定数。route catalogを単一正本とする。 */
+    public static final Set<String> APPROVED_ROUTE_TEMPLATES = ExternalApiRouteCatalog.QUOTA_ROUTE_TEMPLATES;
 
     private final Clock clock;
     private final ApiUsageBucketMapper mapper;

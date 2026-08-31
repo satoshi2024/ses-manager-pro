@@ -34,12 +34,14 @@ public class ExternalApiInboundWebhookParser {
 
     public Parsed parse(String provider, String headerEventId, byte[] rawBody, LocalDateTime receivedAt) {
         if (provider == null || !PROVIDER_PATTERN.matcher(provider).matches()
-                || !providerCatalog.isApproved(provider)
                 || headerEventId == null || !EVENT_ID_PATTERN.matcher(headerEventId).matches()
                 || rawBody == null || rawBody.length == 0
                 || rawBody.length > com.ses.service.integrationhub.IntegrationHubWebhookRequest.MAX_BODY_BYTES
                 || receivedAt == null) {
             throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
+        }
+        if (!providerCatalog.isApproved(provider)) {
+            throw ExternalApiSecurityException.forbidden("FORBIDDEN_SCOPE");
         }
         try {
             ObjectMapper strictMapper = objectMapper.copy()

@@ -24,6 +24,7 @@ class ApiUsageBucketServiceTest {
     private ApiUsageBucketServiceImpl service;
     private final LocalDateTime now = LocalDateTime.of(2026, 8, 30, 0, 0, 30);
     private static final String ROUTE = "/external-api/v1/projects";
+    private static final String INBOUND_ROUTE = "/external-api/v1/webhooks/{provider}";
 
     @BeforeEach
     void setUp() {
@@ -103,6 +104,19 @@ class ApiUsageBucketServiceTest {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> service.consumeAt("client-a", "scope", "tenant-a",
                         "/external-api/v1/projects/123", now));
+    }
+
+    @Test
+    void inboundWebhookはrouteCatalogのcanonicalTemplateでquotaを消費する() {
+        when(mapper.selectSubjectForUpdate("client-a", "integration.webhook.receive", "tenant-a", INBOUND_ROUTE))
+                .thenReturn(null);
+        when(mapper.insert(any(ApiUsageBucket.class))).thenReturn(1);
+
+        ApiUsageBucketService.RateDecision result = service.consumeAt(
+                "client-a", "integration.webhook.receive", "tenant-a", INBOUND_ROUTE, now);
+
+        assertTrue(result.allowed());
+        verify(mapper).insert(any(ApiUsageBucket.class));
     }
 
     private ApiUsageBucket bucket(int minute, int day, int burst, LocalDateTime refillAt) {
