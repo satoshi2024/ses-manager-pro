@@ -2,7 +2,9 @@ package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.ai.CopilotQueryResult;
+import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.CopilotQueryService;
+import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
 import com.ses.service.ai.copilot.result.CopilotLimitInfo;
 import com.ses.service.ai.copilot.result.CopilotScopeInfo;
@@ -27,6 +29,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,6 +45,9 @@ class CopilotApiControllerTest {
     @MockBean
     private CopilotQueryService copilotQueryService;
 
+    @MockBean
+    private CitationAuthorizationService citationAuthorizationService;
+
     @Test
     void flagが無効なら503() throws Exception {
         when(copilotQueryService.query(anyString()))
@@ -55,7 +61,7 @@ class CopilotApiControllerTest {
     }
 
     @Test
-    void typedResultを返す() throws Exception {
+    void typedResultとcitationを返す() throws Exception {
         Instant now = Instant.now();
         TypedResultEnvelope envelope = new TypedResultEnvelope(
                 "dashboard.utilization-forecast",
@@ -82,6 +88,7 @@ class CopilotApiControllerTest {
                         "trace-1",
                         10L,
                         List.of("dashboard.utilization-forecast"),
+                        List.of(new ResolvedCitationDto("dashboard.utilization-forecast", "稼働率予測", "/dashboard", true)),
                         envelope));
 
         mockMvc.perform(post("/api/copilot/query")
@@ -90,6 +97,19 @@ class CopilotApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.queryId").value("dashboard.utilization-forecast"))
-                .andExpect(jsonPath("$.data.result.values[0].key").value("forecast.utilization.2026-09"));
+                .andExpect(jsonPath("$.data.result.values[0].key").value("forecast.utilization.2026-09"))
+                .andExpect(jsonPath("$.data.citations[0].available").value(true));
+    }
+
+    @Test
+    void citation再認可失敗はavailableFalse() throws Exception {
+        when(citationAuthorizationService.authorize("management-accounting.summary"))
+                .thenReturn(ResolvedCitationDto.unavailable("management-accounting.summary"));
+
+        mockMvc.perform(get("/api/copilot/citations")
+                        .param("key", "management-accounting.summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.available").value(false))
+                .andExpect(jsonPath("$.data.route").doesNotExist());
     }
 }

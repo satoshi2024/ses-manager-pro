@@ -80,7 +80,7 @@
 
 ### A1: Chat / answer / citation UI
 
-- [ ] **Objective**: typed resultを正本として表示するchat画面を追加し、summaryとcitationを安全に表示する。
+- [x] **Objective**: typed resultを正本として表示するchat画面を追加し、summaryとcitationを安全に表示する。
 - **Blocked until**: F2 PASS、citation route/menu/scope再認可契約（provisionalで可。human escalationはDG-08まで文言のみ）。
 - **開工対話**: [start-conversations.md §A1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-A1](review-conversations.md)（任意）

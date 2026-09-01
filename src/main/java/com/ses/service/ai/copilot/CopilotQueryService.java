@@ -3,8 +3,10 @@ package com.ses.service.ai.copilot;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
 import com.ses.dto.ai.CopilotQueryResult;
+import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
+import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
 import com.ses.service.ai.copilot.gateway.CatalogQueryGateway;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.parameter.TypedParameterBinder;
@@ -20,7 +22,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 /**
- * Intent → parameter → scope → 正本service → typed result のオーケストレーション（F2）。LLMは呼ばない。
+ * Intent → parameter → scope → 正本service → typed result → citation再認可（F2/A1）。LLMは呼ばない。
  */
 @Service
 @RequiredArgsConstructor
@@ -32,6 +34,7 @@ public class CopilotQueryService {
     private final CopilotScopeResolver scopeResolver;
     private final CatalogQueryGateway catalogQueryGateway;
     private final CopilotRunService copilotRunService;
+    private final CitationAuthorizationService citationAuthorizationService;
 
     public CopilotQueryResult query(String question) {
         assertCopilotEnabled();
@@ -49,6 +52,8 @@ public class CopilotQueryService {
         CopilotRunService.CopilotRunRecord run = copilotRunService.recordQueryRun(
                 entry, parameterHash, scope.scopeHash(), envelope.values().size());
 
+        List<ResolvedCitationDto> citations = citationAuthorizationService.authorizeAll(entry.citationKeys());
+
         return new CopilotQueryResult(
                 entry.queryId(),
                 entry.catalogVersion(),
@@ -58,6 +63,7 @@ public class CopilotQueryService {
                 run.traceId(),
                 run.runId(),
                 entry.citationKeys(),
+                citations,
                 envelope);
     }
 
@@ -70,6 +76,7 @@ public class CopilotQueryService {
                 messageFor(reasonCode),
                 null,
                 null,
+                List.of(),
                 List.of(),
                 null);
     }

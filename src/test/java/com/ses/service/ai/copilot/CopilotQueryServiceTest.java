@@ -2,7 +2,9 @@ package com.ses.service.ai.copilot;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
+import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
+import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
 import com.ses.service.ai.copilot.gateway.CatalogQueryGateway;
 import com.ses.service.ai.copilot.parameter.TypedParameterBinder;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
@@ -47,6 +49,8 @@ class CopilotQueryServiceTest {
     private CatalogQueryGateway catalogQueryGateway;
     @Mock
     private CopilotRunService copilotRunService;
+    @Mock
+    private CitationAuthorizationService citationAuthorizationService;
 
     @InjectMocks
     private CopilotQueryService copilotQueryService;
@@ -81,11 +85,14 @@ class CopilotQueryServiceTest {
         when(parameterBinder.parameterHash(any())).thenReturn("param");
         when(copilotRunService.recordQueryRun(any(), anyString(), anyString(), anyInt()))
                 .thenReturn(new CopilotRunService.CopilotRunRecord(1L, "trace-1", "dashboard.utilization-forecast", "nf08-provisional-1"));
+        when(citationAuthorizationService.authorizeAll(any())).thenReturn(List.of(
+                new ResolvedCitationDto("dashboard.utilization-forecast", "稼働率予測", "/dashboard", true)));
 
         var result = copilotQueryService.query("稼働率");
         assertEquals("SUCCEEDED", result.status());
         assertEquals("dashboard.utilization-forecast", result.queryId());
         assertEquals(1, result.result().values().size());
+        assertEquals(1, result.citations().size());
     }
 
     @Test
