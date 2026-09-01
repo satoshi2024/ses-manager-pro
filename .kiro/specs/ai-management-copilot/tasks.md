@@ -2,7 +2,7 @@
 
 ## 0. 開始gate
 
-**状態: Plan CONDITIONAL PASS（2026-09-01）。F1着手可。実装コードは未着手。**
+**状態: F1〜M 実装完了（2026-09-01）。独立 Review（R-NF08）待ち。本番外部AI・`management-copilot-enabled=true` は禁止。**
 
 中央traceabilityのNF-08は`CANDIDATE`である。Owner、approved catalog/roles/provider（`<APPROVED_SCOPE>`）、NF-07、DG-08、`GATE-S17-G10-PROD`は未確定だが、**provisional catalog** と **モデル非依存pipeline** の構築（F1〜M）は開始できる。本番外部AI・`management-copilot-enabled=true`（本番）は禁止。
 
@@ -128,7 +128,7 @@
 
 ### M: 統合・production gate・Review handoff
 
-- [ ] **Objective**: 画面/API/export/AIの同一指標とscopeを統合検証し、Reviewへremote Head、plan/spec/tasks、completion matrixを渡す。
+- [x] **Objective**: 画面/API/export/AIの同一指標とscopeを統合検証し、Reviewへremote Head、plan/spec/tasks、completion matrixを渡す。
 - **Blocked until**: F1、F2、A1、B1、B2の全PASS。NF-07、DG-08、`GATE-S17-G10-PROD`、approved owner/catalogは本番有効化gate（M完了でも未完ならCONDITIONAL PASS）。
 - **開工対話**: [start-conversations.md §M](start-conversations.md)
 - **最終Review対話**: [review-conversations.md §R-NF08](review-conversations.md)（必須。PR gate）

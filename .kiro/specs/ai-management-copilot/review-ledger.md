@@ -4,8 +4,8 @@
 
 | 項目 | 状態 |
 |---|---|
-| Review type | Plan **CONDITIONAL PASS**（2026-09-01）。F1実装可。最終PRは R-NF08 IMPLEMENTATION PASS 後 |
-| Implementation state | **B2 DONE / M 未着手** |
+| Review type | Plan **CONDITIONAL PASS**（2026-09-01）。実装 **CONDITIONAL PASS**（2026-09-01 M handoff） |
+| Implementation state | **M DONE — F1〜M 実装完了。独立 Review 待ち** |
 | Central NF-08 state | `CANDIDATE` |
 | 具体AIモデル | **未決定**（pipelineはモデル非依存。summary層のみ`AiTextService`で差し替え） |
 | Existing AI learning state | `CONDITIONAL PASS`（P2残、GATE-S17-G10-PROD保留） |
@@ -13,68 +13,57 @@
 | DG-08 | 未完・provider/DPA/越境/owner/role/retention/cost/escalation未確定 |
 | Provider allowed now | local mock/rule only |
 | External send | OFF。`ai.external-send-enabled=false`を維持 |
-| Feature flag | management copilot OFF |
-| PR | 作成しない（IMPLEMENTATION NOT READY） |
-| Base | `origin/main@fc58db66f82fc5889e4616cdf9ce5b015e476473`（merge後main） |
+| Feature flag | `ai.management-copilot-enabled=false`（本番ON不可） |
+| PR | **作成しない**（R-NF08 IMPLEMENTATION PASS 後に別主体） |
+| Base | `origin/main@4c93b558d57193c3d77e06cb54c0a6573c87a60b` |
+| Remote Head | `origin/codex/ai-management-copilot`（push 後 `git rev-parse` で確認） |
 | Working branch | `codex/ai-management-copilot` |
 | Working tree | `C:\work\ses-manager-pro-ai-management-copilot` |
 | Remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
 | 開工対話正本 | `start-conversations.md` |
-| Review対話正本 | `review-conversations.md` |
-| SNF01〜10横断Review | 中央§R-NF08は入口。詳細は本spec `review-conversations.md` §4〜§5 |
+| Review対話正本 | `review-conversations.md` §4 **R-NF08** |
+| SNF01〜10横断Review | `review-conversations.md` §5 |
 
 ## 1. 承認入力の未解決表
 
 | input | ユーザー提示値 | 実装開始に必要な証跡 | 状態 |
 |---|---|---|---|
-| approved query catalog / roles / provider | `<APPROVED_SCOPE>` | query ID、parameter schema、role、scope、provider、owner、version | 未解決 |
-| Owner | `<OWNER>` | catalog/gate/evaluationの責任者 | 未解決 |
-| Base branch | `<BASE_BRANCH>` | branch名とcommitの対応 | 未解決（実体はorigin/mainを検証） |
-| Base commit | `<BASE_COMMIT>` | immutable commit | placeholderだが実体は`0c122d33d4c90176601cf6dbdd9507c5c89ce5ee`として検証 |
-| NF-07 | 未指定 | PII inventory、allowlist、retention、purge、processor条件 | 未完 |
-| existing AI production gate | `GATE-S17-G10-PROD` | G10/DPA/越境/training opt-out/送信flag/production evidence | 保留 |
-| DG-08 | 未指定 | provider/owner/role/retention/cost/human escalationのDecision | 未完 |
+| approved query catalog / roles / provider | `<APPROVED_SCOPE>` | query ID、parameter schema、role、scope、provider、owner、version | **未解決**（provisional catalog で実装済み） |
+| Owner | `<OWNER>` | catalog/gate/evaluationの責任者 | **未解決** |
+| Base branch | `origin/main` | branch名とcommitの対応 | **確定** |
+| Base commit | `4c93b558d57193c3d77e06cb54c0a6573c87a60b` | immutable commit | **確定** |
+| NF-07 | 未指定 | PII inventory、allowlist、retention、purge、processor条件 | **未完** |
+| existing AI production gate | `GATE-S17-G10-PROD` | G10/DPA/越境/training opt-out/送信flag/production evidence | **保留** |
+| DG-08 | 未指定 | provider/owner/role/retention/cost/human escalationのDecision | **未完** |
 
-## 2. 完了対応表（Discovery handoff）
+## 2. 完了対応表（Discovery + Implementation）
 
 | ユーザー要求 | 対応文書/証跡 | 状態 |
 |---|---|---|
-| 専用worktree/branch、normal checkout保全 | 開始時git検証、`requirements.md` 0、`tasks.md` T000 | 完了（Discovery） |
-| 開始時root/branch/status/remote/base検証 | worktree root、branch、clean status、origin URL、HEAD/merge-base確認 | 完了 |
-| AGENTS.md全文 | 読了。日本語、Flyway、test、AI、scope、UI規約を反映 | 完了 |
-| NF-08/DG-08/受入後3文書 | requirements/design/start/review/traceabilityを読了し、gate未完を反映 | 完了（gateは未完） |
-| platform-invariants | `design.md`の時間/scope/state表と設計へ反映 | 完了（Discovery） |
-| ai-feedback-learning | existing gateway/run/feedback/evaluation、CONDITIONAL PASS、P2/G10保留を反映 | 完了（gateは未完） |
-| AI PII allow-list | allowlist、canary、raw prompt 0日、mock/rule限定を反映 | 完了（実装は未着手） |
-| canonical service | Dashboard/UtilizationForecast/ManagementAccounting/CashFlow/SalesPerformance/DataScopeの正本利用方針を反映 | 完了（実装は未着手） |
-| 固定pipeline | `requirements.md` R7、`design.md` §1 | 完了（設計） |
-| catalog外SQL/table/column禁止 | R3、設計§2 | 完了（設計） |
-| typed result・円/割合/期間/timezone/freshness/forecast | R6、設計§6 | 完了（設計） |
-| 画面/export/AI metric一致 | R10、F2、design§13 | 未実装・受入条件化 |
-| scope A/B | R5、design§4、F2 | 未実装・受入条件化 |
-| prompt injection / 0/NULL / 巨大result | R2/R6/R10、B2 | B2 adversarial fixture 検証済み |
-| provider 429/timeout/invalid JSON | R8、design§11、B1 | B1 mock検証済み（metrics維持） |
-| scope外ID/PII推測防止、citation再認可 | R5/R7、design§10 | 未実装・受入条件化 |
-| feedback/model/prompt/data version/cost/latency記録 | R9、design§9、F1/B1/B2 | 未実装・受入条件化 |
-| mock/ruleまで、外部AI無効 | R1/R8、design§7-8、Review state | 完了（設定変更なし） |
-| 完了後もgate未完ならCONDITIONAL PASS・flag OFF | R10、tasks M、ledger state | 確定 |
-| 開工対話集（F1〜M、モデル未決定） | `start-conversations.md` | 完了 |
-| Review対話集（Plan/Task/R-NF08/横断） | `review-conversations.md` | 完了 |
-| spec README（SNF横断入口） | `README.md` | 完了 |
-| モデル非依存 pipeline 分離 | README、design§7、start §2 | 設計確定 |
+| 専用worktree/branch、normal checkout保全 | worktree検証、F1〜M commits | **完了** |
+| 固定pipeline | F1〜B1 code、`CopilotQueryService` | **完了** |
+| catalog外SQL/table/column禁止 | `IntentParser`、`SemanticCatalogRegistry.isSqlOrSchemaProbe`、B2 fixture | **完了** |
+| typed result・円/割合/期間/timezone/freshness/forecast | F2 `TypedResultEnvelope`、`CopilotMetricContractTest` | **完了**（adapter単体。画面/export横断は Review で確認） |
+| scope A/B | `CopilotScopeResolverTest`、F2 gateway | **完了** |
+| prompt injection / adversarial | B2 fixture 12 cases | **完了** |
+| provider 429/timeout/invalid JSON | B1 `CopilotSummaryServiceTest` | **完了** |
+| scope外ID/PII推測防止、citation再認可 | A1 `CitationAuthorizationService`、B2 citation cases | **完了** |
+| feedback/model/prompt/data version/cost/latency記録 | F1 `CopilotRunService`、B2 evaluation metrics | **完了**（redacted run） |
+| mock/ruleまで、外部AI無効 | `application.yml`、`CopilotFeatureGateTest` | **完了** |
+| 画面/export/AI metric一致 | `CopilotMetricContractTest` | **部分**（dashboard summary。Review で横断確認） |
+| 完了後もgate未完ならCONDITIONAL PASS・flag OFF | 本 ledger §0 | **確定** |
 
 ## 3. Task completion
 
 | task | status | commit | evidence |
 |---|---|---|---|
-| T000 Discovery/gate/inventory | DONE | 作成commitで確定 | 文書読了、worktree検証、production code差分なし |
-| F1 catalog/run/feedback | **DONE** | feat(nf08-f1) | SemanticCatalogRegistry, IntentParser, CopilotRunService, V144, tests |
-| F2 intent/parameter/scope/service gateway | **DONE** | feat(nf08-f2) | CatalogQueryGateway, 5 adapters, TypedResultEnvelope, scope A/B tests |
-| A1 chat/citation UI | **DONE** | feat(nf08-a1) | chat.html, copilot.js, CitationAuthorizationService, V145 menu |
-| B1 summary provider | **DONE** | feat(nf08-b1) | CopilotSummaryService, MockAiResponses, validator, UI summary |
-| B1 provider/redaction/timeout/cost | **DONE** | feat(nf08-b1) | mock/rule only。外部providerは引き続きOFF |
-| B2 evaluation/adversarial | **DONE** | feat(nf08-b2) | fixture 12 cases、min segment、PII/scope/citation |
-| M integration/review handoff | **READY** | — | B2 PASS。次タスク |
+| T000 Discovery/gate/inventory | **DONE** | docs(nf08) | spec、worktree検証 |
+| F1 catalog/run/feedback | **DONE** | `0363a73a` | SemanticCatalogRegistry, CopilotRunService, V144 |
+| F2 intent/parameter/scope/service gateway | **DONE** | `e813cde6` | CatalogQueryGateway, TypedResultEnvelope, scope tests |
+| A1 chat/citation UI | **DONE** | `519db6b0` | chat.html, copilot.js, V145 menu |
+| B1 summary provider | **DONE** | `56616fba` | CopilotSummaryService, validator, mock TASK |
+| B2 evaluation/adversarial | **DONE** | `b39bfee4` | fixture 12 cases, evaluation API |
+| M integration/review handoff | **DONE** | `docs(nf08-m)` | 本 ledger、feature gate test、remote push |
 
 ## 4. Review handoff contract
 
@@ -82,37 +71,89 @@
 
 **判定（2026-09-01）: PLAN CONDITIONAL PASS**
 
+CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。
+
+### Implementation Review（M handoff 自己申告）
+
+**判定: IMPLEMENTATION CONDITIONAL PASS**
+
 | # | 観点 | 結果 |
 |---|---|---|
-| 1 | placeholder未推測・CANDIDATE停止 | PASS |
-| 2 | catalog外SQL/table/column禁止設計 | PASS |
-| 3 | pipeline / typed result / scope / citation | PASS |
-| 4 | PII / mock-rule / external OFF / gate保留 | PASS |
-| 5 | feedback / version / cost / retention 受入 | PASS（実装未） |
-| 6 | adversarial / metric contract test 計画 | PASS（実装未） |
-| 7 | start/review対話・SNF横断委譲 | PASS（本commit） |
+| 1 | F1〜M pipeline 完遂 | PASS |
+| 2 | catalog外/SQL/schema 拒否 | PASS |
+| 3 | typed result / scope / citation | PASS |
+| 4 | summary 層分離・mock/rule only | PASS |
+| 5 | adversarial / feature flag OFF | PASS |
+| 6 | NF-07 / DG-08 / G10-PROD gate | **BLOCKED**（本番AI不可） |
+| 7 | approved catalog / owner | **BLOCKED**（provisional のまま） |
 
-CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。F1は **provisional catalog** で着手可。本番外部AI・flag ONは不可。
+**本番 AI 有効化: 不可**（`management-copilot-enabled=false`、`external-send-enabled=false` 維持）
 
-詳細手順: `review-conversations.md` §2 R-Plan。再Reviewは §6。
+独立 Review は `review-conversations.md` §4 **R-NF08** を新規対話へコピーして実施。PASS 後のみ PR 作成。
 
-### Implementation Review
+## 5. Test evidence（M fast gate）
 
-実装後に `review-conversations.md` §4 R-NF08 を使用。増分は §3 R-F1〜R-B2（任意）。
-`PLAN PASS` + `IMPLEMENTATION PASS` + remote Head一致後のみ PR 作成。
+2026-09-01 実施（H2 fast suite、copilot 関連）:
 
-## 5. 次のhandoff
+```
+mvn test -Dtest=CopilotFeatureGateTest,CopilotApiControllerTest,CopilotQueryServiceTest,
+  CopilotMetricContractTest,CopilotScopeResolverTest,CatalogQueryGatewayTest,
+  IntentParserTest,TypedParameterBinderTest,CopilotSummaryServiceTest,
+  CopilotSummaryValidatorTest,CopilotAdversarialCaseRunnerTest,
+  CopilotAdversarialEvaluationTest,CopilotChatUiContractTest,
+  MockAiResponsesManagementCopilotTest,MigrationScriptIntegrityTest,
+  MessageBundleConsistencyTest
+```
 
-1. **実装対話**: `start-conversations.md` §2 S0 → §3 F1 から開始。
-2. **最終Review**: M完了後 `review-conversations.md` §4 R-NF08。
-3. **SNF01〜10横断**: `review-conversations.md` §5 を横断Review AIへ渡す。
+MySQL / performance / backup gate: **PR 前に `scripts/verify-like-ci.ps1` 必須**（本 handoff では未実行）。
 
-現段階: **PLAN CONDITIONAL PASS / B2 DONE / M READY**。本番AI有効化は不可。
+## 6. Query catalog coverage（provisional）
 
-## 6. モデル / provider 切替手順（B1）
+| queryId | enabled | contract test |
+|---|---|---|
+| dashboard.summary | yes | `CopilotMetricContractTest` |
+| dashboard.profit-analysis | yes | gateway adapter |
+| dashboard.utilization-forecast | yes | F2 gateway + intent |
+| management-accounting.summary | yes | gateway adapter |
+| cashflow.forecast | yes | gateway adapter |
+| sales-performance.monthly | **no** | disabled → 403（DataScope待ち） |
 
-1. **artifact登録**: `t_ai_artifact_version` に `use_case=MANAGEMENT_COPILOT` の candidate を追加（prompt/model/data version を固定）。
-2. **評価**: B2 adversarial suite で baseline と比較（min segment ≥ 5、自動 promotion 禁止）。
-3. **provider切替**: `application.yml` の `ai.provider` を変更する前に `ai.external-send-enabled=false` を維持し、DG-08 / `GATE-S17-G10-PROD` 承認後のみ `external-send-enabled=true`。
-4. **feature flag**: `ai.management-copilot-enabled=true` は M 統合 gate と scope/citation 受入後に限定。
-5. **rollback**: active artifact を shadow/retired へ戻し、`ai.provider=mock` + `external-send-enabled=false` + management copilot flag OFF。
+## 7. Commit 一覧（`origin/main`..HEAD）
+
+| commit | message |
+|---|---|
+| `64c51742` | docs: AI Management CopilotのDiscovery specを追加 |
+| `e27b17d7` | docs(nf08): add start/review conversations |
+| `0363a73a` | feat(nf08-f1): semantic catalogとMANAGEMENT_COPILOT run基盤 |
+| `e813cde6` | feat(nf08-f2): catalog gatewayと正本service typed result |
+| `519db6b0` | feat(nf08-a1): copilot chat UIとcitation再認可 |
+| `56616fba` | feat(nf08-b1): model-agnostic summary provider |
+| `b39bfee4` | feat(nf08-b2): copilot adversarial evaluation suite |
+| `docs(nf08-m)` | docs(nf08-m): review handoffとcompletion matrix |
+
+## 8. Rollback
+
+1. `ai.management-copilot-enabled=false`、`ai.external-send-enabled=false`、`ai.provider=mock`
+2. `m_ai_artifact_version` の MANAGEMENT_COPILOT active を retired へ CAS rollback
+3. V145 menu / permission seed は flag OFF のまま残しても安全（未到達）
+4. run/feedback 行は redacted のみ。purge は NF-07 承認後
+
+## 9. モデル / provider 切替手順（B1）
+
+1. **artifact登録**: `t_ai_artifact_version` に `use_case=MANAGEMENT_COPILOT` の candidate を追加。
+2. **評価**: B2 adversarial suite（`POST /api/copilot/evaluations/run`）で baseline 比較。
+3. **provider切替**: DG-08 / `GATE-S17-G10-PROD` 承認後のみ `external-send-enabled=true`。
+4. **feature flag**: R-NF08 IMPLEMENTATION PASS + scope/citation 受入後のみ `management-copilot-enabled=true`。
+5. **rollback**: artifact shadow/retired、flag OFF、mock provider へ復帰。
+
+## 10. 次の handoff（Review AI へ）
+
+**新規 Review 対話**に `review-conversations.md` §4 **R-NF08** をコピーし、以下を指定:
+
+- Base: `4c93b558d57193c3d77e06cb54c0a6573c87a60b`
+- Head: `origin/codex/ai-management-copilot` の push 後 SHA
+- Branch: `codex/ai-management-copilot`
+- Spec: `.kiro/specs/ai-management-copilot/`
+- 本 ledger + `tasks.md`（全 checkbox 完了）
+
+現段階: **PLAN CONDITIONAL PASS / IMPLEMENTATION CONDITIONAL PASS**。本番 AI 有効化は不可。

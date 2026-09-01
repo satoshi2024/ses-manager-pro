@@ -143,6 +143,7 @@ app:
 
 ai:
   enabled: false
+  management-copilot-enabled: false
   external-send-enabled: false
   retention:
     redacted-days: 730
