@@ -11,11 +11,15 @@
 | branch | `codex/ai-management-copilot` |
 | Base commit | `0c122d33d4c90176601cf6dbdd9507c5c89ce5ee` (`origin/main`) |
 | remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
-| Approved query catalog / roles / provider | `<APPROVED_SCOPE>`（未解決。推測で補完しない） |
+| 開工対話 | [start-conversations.md](start-conversations.md) |
+| Review対話 | [review-conversations.md](review-conversations.md) |
+| Approved query catalog / roles / provider | `<APPROVED_SCOPE>`（未解決。F1はprovisional catalog可） |
 | Owner | `<OWNER>`（未解決） |
 | Base branch | `<BASE_BRANCH>`（入力値未解決。実体は `origin/main` を検証済み） |
 
 NF-07のPII/retention、既存AI production gate（`GATE-S17-G10-PROD`）、DG-08（provider/DPA/越境/学習利用、catalog owner、role、retention、cost、human escalation）が未完了である。従って、本spec作成時点で許可するproviderはローカルのmock/rule評価だけとし、本番外部AI送信、実データの外部送信、feature flagの有効化を行わない。
+
+**具体AIモデル（Gemini/OpenAI/Claude等）は未決定**である。実装ではモデル名をハードコードせず、deterministic core（catalog→正本service→typed result）を先に構築し、summaryのみ`AiConfig`/`AiTextService`/`AiArtifactVersion.modelVersion`で差し替える。開工・Review手順は`start-conversations.md` / `review-conversations.md`を正とする。
 
 本specは、承認前にpipelineと受入条件を固定するためのものである。production code、Flyway migration、画面、設定、外部provider契約は、承認入力が埋まり、Plan ReviewがPASSになるまで変更しない。
 

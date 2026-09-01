@@ -4,20 +4,24 @@
 
 | 項目 | 状態 |
 |---|---|
-| Review type | 独立Review待ち。まずPLAN Review、実装後にIMPLEMENTATION Review |
-| Implementation state | **NOT STARTED / DISCOVERY ONLY** |
+| Review type | Plan **CONDITIONAL PASS**（2026-09-01）。F1実装可。最終PRは R-NF08 IMPLEMENTATION PASS 後 |
+| Implementation state | **NOT STARTED**（Discovery spec + 対話文書完了。F1未着手） |
 | Central NF-08 state | `CANDIDATE` |
+| 具体AIモデル | **未決定**（pipelineはモデル非依存。summary層のみ`AiTextService`で差し替え） |
 | Existing AI learning state | `CONDITIONAL PASS`（P2残、GATE-S17-G10-PROD保留） |
 | NF-07 | 未完・retention/PII inventory承認待ち |
 | DG-08 | 未完・provider/DPA/越境/owner/role/retention/cost/escalation未確定 |
 | Provider allowed now | local mock/rule only |
 | External send | OFF。`ai.external-send-enabled=false`を維持 |
 | Feature flag | management copilot OFF |
-| PR | 作成しない |
-| Base | `origin/main@0c122d33d4c90176601cf6dbdd9507c5c89ce5ee` |
+| PR | 作成しない（IMPLEMENTATION NOT READY） |
+| Base | `origin/main@fc58db66f82fc5889e4616cdf9ce5b015e476473`（merge後main） |
 | Working branch | `codex/ai-management-copilot` |
-| Working tree | `C:\work\ses-manager-pro-ai-management-copilot`、開始時cleanを検証 |
+| Working tree | `C:\work\ses-manager-pro-ai-management-copilot` |
 | Remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
+| 開工対話正本 | `start-conversations.md` |
+| Review対話正本 | `review-conversations.md` |
+| SNF01〜10横断Review | 中央§R-NF08は入口。詳細は本spec `review-conversations.md` §4〜§5 |
 
 ## 1. 承認入力の未解決表
 
@@ -54,13 +58,17 @@
 | feedback/model/prompt/data version/cost/latency記録 | R9、design§9、F1/B1/B2 | 未実装・受入条件化 |
 | mock/ruleまで、外部AI無効 | R1/R8、design§7-8、Review state | 完了（設定変更なし） |
 | 完了後もgate未完ならCONDITIONAL PASS・flag OFF | R10、tasks M、ledger state | 確定 |
+| 開工対話集（F1〜M、モデル未決定） | `start-conversations.md` | 完了 |
+| Review対話集（Plan/Task/R-NF08/横断） | `review-conversations.md` | 完了 |
+| spec README（SNF横断入口） | `README.md` | 完了 |
+| モデル非依存 pipeline 分離 | README、design§7、start §2 | 設計確定 |
 
 ## 3. Task completion
 
 | task | status | commit | evidence |
 |---|---|---|---|
 | T000 Discovery/gate/inventory | DONE | 作成commitで確定 | 文書読了、worktree検証、production code差分なし |
-| F1 catalog/run/feedback | BLOCKED | — | NF-07/DG-08/owner/approved scope/production gate待ち |
+| F1 catalog/run/feedback | **READY** | — | Plan CONDITIONAL PASS。provisional catalog可。`start-conversations.md` §F1 |
 | F2 intent/parameter/scope/service gateway | BLOCKED | — | F1、scope承認、SalesPerformance scoped adapter待ち |
 | A1 chat/answer/citation UI | BLOCKED | — | F2、citation/human escalation承認待ち |
 | B1 provider/redaction/timeout/cost | BLOCKED | — | gate/provider policy待ち。mock/rule以外禁止 |
@@ -71,21 +79,31 @@
 
 ### Plan Review
 
-Review担当は、次を最初に判定する。
+**判定（2026-09-01）: PLAN CONDITIONAL PASS**
 
-1. 未解決placeholderを推測せず、CANDIDATEとして停止できているか。
-2. catalog runtimeがSQL/table/column/任意beanを実行できない設計か。
-3. typed result、正本service、scope A/B、SalesPerformanceのscope gap、citation再認可が設計されているか。
-4. PII allowlist、raw prompt 0日、mock/rule、external flag OFF、NF-07/DG-08/既存gate保留が一貫しているか。
-5. feedback、model/prompt/data version、cost、latency、retention、human escalationの受入条件があるか。
-6. scope A/B、prompt injection、0/NULL、巨大result、429/timeout/invalid JSON/partial citation/PII canary、metric contractのtest計画があるか。
+| # | 観点 | 結果 |
+|---|---|---|
+| 1 | placeholder未推測・CANDIDATE停止 | PASS |
+| 2 | catalog外SQL/table/column禁止設計 | PASS |
+| 3 | pipeline / typed result / scope / citation | PASS |
+| 4 | PII / mock-rule / external OFF / gate保留 | PASS |
+| 5 | feedback / version / cost / retention 受入 | PASS（実装未） |
+| 6 | adversarial / metric contract test 計画 | PASS（実装未） |
+| 7 | start/review対話・SNF横断委譲 | PASS（本commit） |
 
-Plan ReviewがPASSになるまで、F1以降のproduction codeを開始しない。
+CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。F1は **provisional catalog** で着手可。本番外部AI・flag ONは不可。
+
+詳細手順: `review-conversations.md` §2 R-Plan。再Reviewは §6。
 
 ### Implementation Review
 
-実装後にのみ実施する。最終remote Head、task単位commit、test gate、flag/gate状態、migration、ログcanary、scope proof、contract test、rollbackを独立worktreeで再検証する。`PLAN PASS → IMPLEMENTATION PASS`の両方が揃うまでPRを作成しない。
+実装後に `review-conversations.md` §4 R-NF08 を使用。増分は §3 R-F1〜R-B2（任意）。
+`PLAN PASS` + `IMPLEMENTATION PASS` + remote Head一致後のみ PR 作成。
 
 ## 5. 次のhandoff
 
-このcommitをpushした後のremote Headと本ledger、`requirements.md`、`design.md`、`tasks.md`を独立Reviewへ渡す。現段階の判定は`PLAN REVIEW REQUESTED / IMPLEMENTATION NOT READY`であり、production実装完了やproduction approvalを意味しない。
+1. **実装対話**: `start-conversations.md` §2 S0 → §3 F1 から開始。
+2. **最終Review**: M完了後 `review-conversations.md` §4 R-NF08。
+3. **SNF01〜10横断**: `review-conversations.md` §5 を横断Review AIへ渡す。
+
+現段階: **PLAN CONDITIONAL PASS / IMPLEMENTATION NOT READY**。本番AI有効化は不可。

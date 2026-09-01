@@ -2,9 +2,17 @@
 
 ## 0. 開始gate
 
-**状態: Discoveryのみ。F1以降は承認待ちで未着手。**
+**状態: Plan CONDITIONAL PASS（2026-09-01）。F1着手可。実装コードは未着手。**
 
-中央traceabilityのNF-08は`CANDIDATE`であり、Owner、approved catalog/roles/provider、NF-07、DG-08、`GATE-S17-G10-PROD`が未確定である。以下の未完了taskは、これらを推測して実装を開始してはならない。
+中央traceabilityのNF-08は`CANDIDATE`である。Owner、approved catalog/roles/provider（`<APPROVED_SCOPE>`）、NF-07、DG-08、`GATE-S17-G10-PROD`は未確定だが、**provisional catalog** と **モデル非依存pipeline** の構築（F1〜M）は開始できる。本番外部AI・`management-copilot-enabled=true`（本番）は禁止。
+
+**対話の正本**
+
+| 用途 | ファイル |
+|---|---|
+| 開工（S0 / F1〜M） | [start-conversations.md](start-conversations.md) |
+| Review（Plan / Task / R-NF08 / SNF横断） | [review-conversations.md](review-conversations.md) |
+| 入口・横断Review時の読み方 | [README.md](README.md) |
 
 共通条件:
 
@@ -13,6 +21,7 @@
 - 外部provider、本番send、業務状態更新、LLM SQL、schema送信は禁止。
 - `mvn test`、MySQL gate、performance gateは承認後、変更範囲に応じて実行する。Docker不可をgreen扱いしない。
 - 各taskのDemoは日本語UI・API、scope、ログ/retention、feature flag OFFを確認する。
+- 各task開始時は `start-conversations.md` の該当節を実装対話へコピーする。完了後は必要に応じ `review-conversations.md` の増分Review（§3）を依頼できる。
 
 ## 1. Task一覧
 
@@ -31,8 +40,10 @@
 
 ### F1: Semantic catalog / run / feedback基盤
 
-- [ ] **Objective**: 承認済みcatalogを固定し、catalog外実行を型とruntimeで拒否し、management answer run/feedbackを既存AI ledgerへ安全に記録する。
-- **Blocked until**: Owner、`<APPROVED_SCOPE>`の実値、query/role/provider承認、NF-07、DG-08、既存production gateが明示され、Plan Review PASS。
+- [ ] **Objective**: provisional catalogを固定し、catalog外実行を型とruntimeで拒否し、management answer run/feedbackを既存AI ledgerへ安全に記録する。
+- **Blocked until**: Plan Review CONDITIONAL PASS（済）。`<APPROVED_SCOPE>`正式値は未決のため catalog は **provisional / 既定disabled** とする。本番外部送信・flag ONは不可。
+- **開工対話**: [start-conversations.md §F1](start-conversations.md)
+- **Review対話**: [review-conversations.md §R-F1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R1、R3、R7、R8、R9
 - **Implementation guidance**:
   - static immutable catalogを第一候補にし、各queryにparameter/schema/scope/adapter/result/citation/limit/versionを登録する。
@@ -50,7 +61,9 @@
 ### F2: Intent / typed parameter / scope / service gateway
 
 - [ ] **Objective**: 質問をtyped parameterへ変換し、DataScope/role/menu認可後にcanonical serviceだけを実行してtyped resultを返す。
-- **Blocked until**: F1 PASS、approved role/scope、Scope A/Bの受入fixture、canonical service adapter契約が承認済み。
+- **Blocked until**: F1 PASS、Scope A/Bの受入fixture、canonical service adapter契約（provisional catalogで可）。
+- **開工対話**: [start-conversations.md §F2](start-conversations.md)
+- **Review対話**: [review-conversations.md §R-F2](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R2、R4、R5、R6、R10
 - **Implementation guidance**:
   - parserはcandidate queryと不足parameterだけを返し、SQL、repository、table、column、raw filterを型へ入れない。
@@ -68,7 +81,9 @@
 ### A1: Chat / answer / citation UI
 
 - [ ] **Objective**: typed resultを正本として表示するchat画面を追加し、summaryとcitationを安全に表示する。
-- **Blocked until**: F2 PASS、citation route/menu/scope再認可契約、unanswerable UXとhuman escalation方針がDG-08で承認済み。
+- **Blocked until**: F2 PASS、citation route/menu/scope再認可契約（provisionalで可。human escalationはDG-08まで文言のみ）。
+- **開工対話**: [start-conversations.md §A1](start-conversations.md)
+- **Review対話**: [review-conversations.md §R-A1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R2、R6、R7、R10
 - **Implementation guidance**:
   - 既存Thymeleaf + jQuery/Bootstrapのmodule conventionを守る。
@@ -81,8 +96,10 @@
 
 ### B1: Provider / redaction / timeout / cost
 
-- [ ] **Objective**: mock/rule providerで評価可能なsummary gatewayと、PII redaction・canary・timeout・429・invalid JSON・cost上限を固定する。
-- **Blocked until**: A1またはAPI contractがPASS、NF-07/DG-08/既存production gateのprovider条件が明示されていること。外部providerの有効化は別承認。
+- [ ] **Objective**: mock/rule providerで評価可能なsummary gatewayと、PII redaction・canary・timeout・429・invalid JSON・cost上限を固定する。**具体モデル未決定でも`AiTextService`差し替え点を実装する。**
+- **Blocked until**: A1またはAPI contractがPASS。外部provider有効化は別承認（本taskでは不可）。
+- **開工対話**: [start-conversations.md §B1](start-conversations.md)
+- **Review対話**: [review-conversations.md §R-B1](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R1、R7、R8、R9
 - **Implementation guidance**:
   - `AiExecutionGateway`の既存mask/canary/untrusted data boundaryを使う。
@@ -96,7 +113,9 @@
 ### B2: Evaluation / adversarial suite
 
 - [ ] **Objective**: 固定匿名datasetとadversarial suiteでmetric、PII、scope、citation、provider failureを評価する。
-- **Blocked until**: B1 PASS、評価dataset/version/segment policy、cost/latency budget、human review ownerが承認済み。
+- **Blocked until**: B1 PASS、評価dataset/version/segment policy（provisional fixture可）。
+- **開工対話**: [start-conversations.md §B2](start-conversations.md)
+- **Review対話**: [review-conversations.md §R-B2](review-conversations.md)（任意）
 - **対象要件**: AI-MC-R8、R9、R10
 - **Implementation guidance**:
   - 既存`AiOfflineEvaluationService`、`AiEvaluationMetrics`、artifact version/status/CASを再利用する。
@@ -110,7 +129,9 @@
 ### M: 統合・production gate・Review handoff
 
 - [ ] **Objective**: 画面/API/export/AIの同一指標とscopeを統合検証し、Reviewへremote Head、plan/spec/tasks、completion matrixを渡す。
-- **Blocked until**: F1、F2、A1、B1、B2の全PASS、NF-07、DG-08、`GATE-S17-G10-PROD`、approved owner/catalog/roles/provider、cost/retention/human escalationの全PASS。
+- **Blocked until**: F1、F2、A1、B1、B2の全PASS。NF-07、DG-08、`GATE-S17-G10-PROD`、approved owner/catalogは本番有効化gate（M完了でも未完ならCONDITIONAL PASS）。
+- **開工対話**: [start-conversations.md §M](start-conversations.md)
+- **最終Review対話**: [review-conversations.md §R-NF08](review-conversations.md)（必須。PR gate）
 - **対象要件**: AI-MC-R1〜R10
 - **Implementation guidance**:
   - production flagはgateの全条件が揃うまでOFF。gate未完なら`CONDITIONAL PASS` handoffとする。
