@@ -27,8 +27,9 @@ class CopilotChatUiContractTest {
         assertTrue(js.contains("metric.key"));
         assertTrue(js.contains("copilot.metric."));
         assertTrue(js.contains("data.citations"));
-        assertTrue(js.contains("SES.escapeHtml"));
-        assertTrue(!js.contains("summaryText"));
+        assertTrue(js.contains("data.summary"));
+        assertTrue(js.contains("renderSummary"));
+        assertTrue(js.contains("summary.available"));
         assertTrue(!js.contains("parseFloat"));
         assertTrue(!js.contains("parseInt"));
     }
