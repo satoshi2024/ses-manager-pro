@@ -50,7 +50,7 @@
 | scope外ID/PII推測防止、citation再認可 | A1 `CitationAuthorizationService`、B2 citation cases | **完了** |
 | feedback/model/prompt/data version/cost/latency記録 | F1 `CopilotRunService`、B2 evaluation metrics | **完了**（redacted run） |
 | mock/ruleまで、外部AI無効 | `application.yml`、`CopilotFeatureGateTest` | **完了** |
-| 画面/export/AI metric一致 | `CopilotMetricContractTest` | **部分**（dashboard summary。Review で横断確認） |
+| 画面/export/AI metric一致 | `CopilotMetricContractTest`（5 adapters 全件） | **完了** |
 | 完了後もgate未完ならCONDITIONAL PASS・flag OFF | 本 ledger §0 | **確定** |
 
 ## 3. Task completion
@@ -91,9 +91,9 @@ CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。
 
 独立 Review は `review-conversations.md` §4 **R-NF08** を新規対話へコピーして実施。PASS 後のみ PR 作成。
 
-## 5. Test evidence（M fast gate）
+## 5. Test evidence
 
-2026-09-01 実施（H2 fast suite、copilot 関連）:
+### 5.1 NF-08 専用 fast gate（2026-09-01、**全 PASS**）
 
 ```
 mvn test -Dtest=CopilotFeatureGateTest,CopilotApiControllerTest,CopilotQueryServiceTest,
@@ -105,7 +105,25 @@ mvn test -Dtest=CopilotFeatureGateTest,CopilotApiControllerTest,CopilotQueryServ
   MessageBundleConsistencyTest
 ```
 
-MySQL / performance / backup gate: **PR 前に `scripts/verify-like-ci.ps1` 必須**（本 handoff では未実行）。
+`CopilotMetricContractTest`: dashboard.summary / utilization-forecast / profit-analysis / management-accounting / cashflow の 5 adapters を正本 service 出力と照合。
+
+### 5.2 verify-like-ci.ps1（2026-09-01）
+
+| Gate | 結果 | 備考 |
+|---|---|---|
+| fast (H2) | **FAIL** | 3408 tests、Failures 5、Errors 2。**NF-08/copilot 関連は全 PASS** |
+| mysql | 未実行 | fast gate 失敗で中断 |
+| performance | 未実行 | 同上 |
+| backup | 未実行 | 同上 |
+
+fast gate 失敗（NF-08 無関係）:
+- `IntegrationHubF1RetentionH2Test`
+- `TestIsolationAuditTest`
+- `TransactionalRollbackForAuditTest`
+- `MonthlyClosingUnacceptedTest`（2件）
+- `AssetBoundaryAndLifecycleIntegrationTest`（2 errors）
+
+**NF-08 スコープの copilot テストは fast suite 内でも全緑**（`CopilotMetricContractTest` 5/5 含む）。PR 前に上記 7 件の branch 回帰解消または main との差分確認を推奨。
 
 ## 6. Query catalog coverage（provisional）
 
@@ -130,6 +148,7 @@ MySQL / performance / backup gate: **PR 前に `scripts/verify-like-ci.ps1` 必�
 | `56616fba` | feat(nf08-b1): model-agnostic summary provider |
 | `b39bfee4` | feat(nf08-b2): copilot adversarial evaluation suite |
 | `docs(nf08-m)` | docs(nf08-m): review handoffとcompletion matrix |
+| `719987d9` | test(nf08): expand copilot metric contract coverage |
 
 ## 8. Rollback
 
