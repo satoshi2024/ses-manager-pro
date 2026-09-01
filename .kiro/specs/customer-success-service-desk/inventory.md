@@ -77,7 +77,7 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 | 項目 | 値 |
 |---|---|
 | origin/main の本機能直前latest | **V109**（`engineer-lifecycle-workflow`、NF-01 PASS / PR #85） |
-| 本機能の採番 | 現行統合migrationは **V136**。旧NF02のV110は既存開発DBのreset/repair fixtureとしてのみ扱い、通常のmigration番号へ戻さない |
+| 本機能の採番 | 現行統合migrationは **V147**。旧NF02のV110は既存開発DBのreset/repair fixtureとしてのみ扱い、通常のmigration番号へ戻さない。V144はdigital_invoice、V145/V146はmigration-dev |
 | H2 | `sql/schema-service-desk-h2.sql` を新設し `application-test.yml` の schema-locations へ追加。MySQL DDLをH2 replayに足さない |
 | V1 | 増分と重複ADDしない |
 | `engineer-schema-h2.sql` | 要員列を足さない限り必須ではない。service deskテーブルは専用H2へ |

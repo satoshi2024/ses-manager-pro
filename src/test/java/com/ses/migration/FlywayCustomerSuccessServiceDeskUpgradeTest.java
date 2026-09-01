@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-02 既存DB (V143) から V144 へのアップグレードテスト。
+ * NF-02: main 最新 production 版 (V144) の後に V147 を適用するアップグレードテスト。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -57,12 +57,12 @@ class FlywayCustomerSuccessServiceDeskUpgradeTest {
     }
 
     @Test
-    void freshV1からV144までのマイグレーションが成功する() throws Exception {
-        Flyway flyway = flywayAt("144");
+    void freshV1からV147までのマイグレーションが成功する() throws Exception {
+        Flyway flyway = flywayAt("147");
         flyway.migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            assertEquals("144", queryString(statement,
+            assertEquals("147", queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1 "
                             + "ORDER BY installed_rank DESC LIMIT 1"));
             assertEquals("type", queryString(statement,
@@ -75,33 +75,32 @@ class FlywayCustomerSuccessServiceDeskUpgradeTest {
     }
 
     @Test
-    void V143からV144への増分マイグレーションが成功する() throws Exception {
-        // 1. V143 まで適用
-        Flyway flywayV143 = flywayAt("143");
-        flywayV143.migrate();
-
-        // 既存データを挿入
-        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            statement.execute("INSERT INTO m_customer (id, company_name, created_at, updated_at) VALUES (5001, '既存テスト顧客', NOW(), NOW())");
-        }
-
-        // 2. V144 へアップグレード
+    void V144からV147への増分マイグレーションが成功する() throws Exception {
+        // 1. main 最新 production 版 (V144 digital_invoice) まで適用
         Flyway flywayV144 = flywayAt("144");
         flywayV144.migrate();
 
-        // 3. データと新テーブルの整合検証
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO m_customer (id, company_name, created_at, updated_at) VALUES (5001, '既存テスト顧客', NOW(), NOW())");
+            assertEquals("144", queryString(statement,
+                    "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1 "
+                            + "ORDER BY installed_rank DESC LIMIT 1"));
+        }
+
+        // 2. V147 へアップグレード
+        Flyway flywayV147 = flywayAt("147");
+        flywayV147.migrate();
+
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("144", latestVersion, "バージョン144にアップグレードされていること");
+            assertEquals("147", latestVersion, "バージョン147にアップグレードされていること");
 
-            // 既存顧客が保持されていること
             try (ResultSet rs = statement.executeQuery("SELECT company_name FROM m_customer WHERE id = 5001")) {
                 assertTrue(rs.next());
                 assertEquals("既存テスト顧客", rs.getString(1));
             }
 
-            // 新規テーブルにレコードが挿入可能であること
             statement.execute("INSERT INTO t_service_request (request_no, customer_id, category, priority, channel, subject, description, status, reopen_count, created_at, updated_at) " +
                     "VALUES ('REQ-UPGRADE-001', 5001, 'SYSTEM', 'P1', 'PORTAL', 'アップグレードテスト', '検証用リクエスト', 'RECEIVED', 0, NOW(), NOW())");
 
@@ -111,12 +110,11 @@ class FlywayCustomerSuccessServiceDeskUpgradeTest {
     }
 
     @Test
-    void 旧NF02V110をreset修復してから正規V110とV144へ移行できる() throws Exception {
+    void 旧NF02V110をreset修復してから正規V110とV147へ移行できる() throws Exception {
         Flyway flywayV109 = flywayAt("109");
         flywayV109.migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // 旧NF02 V110を適用済みとみなす最小fixture。実際の旧DDLと同じ名前と履歴衝突を再現する。
             statement.execute("CREATE TABLE m_service_sla_policy (id BIGINT PRIMARY KEY)");
             statement.execute("CREATE TABLE t_service_request (id BIGINT PRIMARY KEY)");
             statement.execute("CREATE TABLE t_service_sla_clock (id BIGINT PRIMARY KEY)");
@@ -139,9 +137,9 @@ class FlywayCustomerSuccessServiceDeskUpgradeTest {
                             + "AND script = 'V110__customer_success_service_desk.sql'"));
         }
 
-        flywayAt("144").migrate();
+        flywayAt("147").migrate();
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            assertEquals("144", queryString(statement,
+            assertEquals("147", queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL AND success = 1 "
                             + "ORDER BY installed_rank DESC LIMIT 1"));
             assertTrue(tableExists(statement, "t_service_request"));

@@ -15,6 +15,7 @@ import com.ses.dto.servicedesk.ServiceRequestDto;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.dto.servicedesk.ServiceRequestUpdateRequest;
 import com.ses.dto.servicedesk.ServiceSlaClockDto;
+import com.ses.entity.CostCenter;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.CustomerContact;
@@ -29,6 +30,7 @@ import com.ses.entity.ServiceSlaPolicy;
 import com.ses.entity.ServiceStateEvent;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
+import com.ses.mapper.CostCenterMapper;
 import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.CustomerCsatMapper;
 import com.ses.mapper.CustomerMapper;
@@ -77,6 +79,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     private final CustomerMapper customerMapper;
     private final CustomerContactMapper contactMapper;
     private final ContractMapper contractMapper;
+    private final CostCenterMapper costCenterMapper;
     private final ProjectMapper projectMapper;
     private final EngineerMapper engineerMapper;
     private final SysUserMapper sysUserMapper;
@@ -123,6 +126,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         requireExecutionContext(executionContext);
         validateLinkedEntities(req.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
+        executionContext = bindCalendarScope(executionContext, req.getCustomerId(), req.getContractId());
 
         LocalDateTime now = executionContext.occurredAt().atZone(executionContext.zoneId()).toLocalDateTime();
         String requestNo = generateRequestNo(now);
@@ -364,7 +368,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .build();
         }
         changeStatus(id, req, legacyContext(actorId, "PORTAL_USER".equals(actorType), actorId,
-                actorType, actorName, req.getOrganizationId(), req.getLegalEntityId()));
+                actorType, actorName, null, null));
     }
 
     @Override
@@ -379,6 +383,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (existing == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
+        // クライアント指定の法人は受理せず、顧客・契約から解決した法人既定カレンダーを使う。
+        executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
         if ("INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
             dataScopeService.assertAllowedCustomer(existing.getCustomerId());
         }
@@ -588,6 +594,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (existing == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
+        // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
+        executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
         if (!isPortal && "INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
             dataScopeService.assertAllowedCustomer(existing.getCustomerId());
         }
@@ -744,6 +752,71 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (context == null) {
             throw BusinessException.of(400, "サービスデスクの実行コンテキストが必要です");
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ServiceDeskExecutionContext bindCalendarScope(ServiceDeskExecutionContext base, Long customerId, Long contractId) {
+        requireExecutionContext(base);
+        Long resolvedLegalEntityId = resolveLegalEntityId(customerId, contractId);
+        if (base.legalEntityId() != null && resolvedLegalEntityId != null
+                && !Objects.equals(base.legalEntityId(), resolvedLegalEntityId)) {
+            throw BusinessException.of(403, "指定された法人は当該顧客・契約のカレンダー範囲と一致しません");
+        }
+        if (base.organizationId() != null) {
+            // 法人既定カレンダーのみを使う。組織スコープのクライアント指定は受け入れない。
+            throw BusinessException.of(403, "サービスデスクSLAは法人既定カレンダーのみを使用します");
+        }
+        Long legalEntityId = resolvedLegalEntityId != null ? resolvedLegalEntityId : base.legalEntityId();
+        return new ServiceDeskExecutionContext(
+                base.tenantId(),
+                base.zoneId(),
+                base.occurredAt(),
+                null,
+                legalEntityId,
+                base.actorId(),
+                base.actorType(),
+                base.actorName(),
+                base.source());
+    }
+
+    /**
+     * 契約の原価部門、なければ顧客の有効契約から法人IDを解決する。organizationは法人既定のため使わない。
+     */
+    private Long resolveLegalEntityId(Long customerId, Long contractId) {
+        if (contractId != null) {
+            Contract contract = contractMapper.selectById(contractId);
+            if (contract != null && (customerId == null || Objects.equals(contract.getCustomerId(), customerId))) {
+                Long fromContract = legalEntityFromCostCenter(contract.getCostCenterId());
+                if (fromContract != null) {
+                    return fromContract;
+                }
+            }
+        }
+        if (customerId == null) {
+            return null;
+        }
+        List<Contract> contracts = contractMapper.selectList(
+                new LambdaQueryWrapper<Contract>()
+                        .eq(Contract::getCustomerId, customerId)
+                        .isNotNull(Contract::getCostCenterId)
+                        .orderByDesc(Contract::getId)
+                        .last("LIMIT 10"));
+        for (Contract contract : contracts) {
+            Long legalEntityId = legalEntityFromCostCenter(contract.getCostCenterId());
+            if (legalEntityId != null) {
+                return legalEntityId;
+            }
+        }
+        return null;
+    }
+
+    private Long legalEntityFromCostCenter(Long costCenterId) {
+        if (costCenterId == null) {
+            return null;
+        }
+        CostCenter costCenter = costCenterMapper.selectById(costCenterId);
+        return costCenter != null ? costCenter.getLegalEntityId() : null;
     }
 
     private boolean isAllowedTransition(String fromStatus, String requestedStatus) {

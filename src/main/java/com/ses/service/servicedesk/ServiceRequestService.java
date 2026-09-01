@@ -72,4 +72,10 @@ public interface ServiceRequestService {
      * 顧客ポータルからのCSAT評価回答投稿（1回限り）
      */
     void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId);
+
+    /**
+     * 顧客・契約から法人既定カレンダー範囲を解決し、実行コンテキストへ束ねる。
+     * クライアントが他法人IDを指定した場合は拒否する。organizationIdは法人既定のため常にnull。
+     */
+    ServiceDeskExecutionContext bindCalendarScope(ServiceDeskExecutionContext base, Long customerId, Long contractId);
 }

@@ -5,7 +5,7 @@
 **承認状態**: traceability は CANDIDATE/DISCOVERY。Owner・Approved scope・DecisionId・DG-02 は未確定。本ブランチのhardening実装は承認取得を意味せず、本番release可否は別途Reviewする。
 
 - 親機能: NF-02 `customer-success-service-desk`
-- Migration: 現行mainで採番済みの **V136** をNF-02統合版とする。旧featureのV110は履歴衝突を起こすため再利用せず、専用reset/repair手順で整理する。
+- Migration: 現行main rebase後の統合版は **V147**（V144=digital_invoice、migration-dev V145/V146を保持）。旧featureのV110は履歴衝突を起こすため再利用せず、専用reset/repair手順で整理する。
 - 再利用: `Customer` / `CustomerContact` / `Contract` / `RenewalCalendarService` / `PortalAuthorizationService` / `DocumentService` / `NotificationService` / `DataScopeService` / 法人既定 `WorkCalendarDay`
 - 作らない: 新Customer master、新portal chain、第二outbox、`renewal_decision` writer
 

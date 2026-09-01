@@ -1,4 +1,4 @@
--- V136: カスタマーサクセス・問い合わせSLA・顧客ヘルス (NF-02)
+-- V147: カスタマーサクセス・問い合わせSLA・顧客ヘルス (NF-02)
 
 -- 1. SLAポリシーマスタ
 CREATE TABLE IF NOT EXISTS m_service_sla_policy (

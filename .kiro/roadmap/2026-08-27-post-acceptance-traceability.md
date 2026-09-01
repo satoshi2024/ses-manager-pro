@@ -62,7 +62,7 @@
 - **SLAの営業時間、休日calendar、停止時間、priority matrix**: 09:00-18:00、自組織/法人単位のカレンダー厳格分離（法人間カレンダー和集合の禁止）、`WAITING_CUSTOMER`でSLA停止、再開時延長。エスカレーション順序: ①リクエストOwner → ②契約担当営業 → ③顧客主担当営業 → ④アクティブ管理者全員（硬直ID 1フォールバック完全撤廃）。
 - **internal noteと顧客公開commentの分類・誤公開防止方式**: `t_service_comment.visibility`（`INTERNAL` / `PORTAL_VISIBLE`）とDTOレベルの完全除外。
 - **health scoreの要因、重み、表示対象、更新判断への使い方**: 100点満点減点モデル（未解決P0 -30点/件、未解決P1 -15点/件、SLA違反30d -10点/件、直近90日CSAT平均3.0未満 -15点・3.0以上4.0未満 -5点、AR延滞 -25点、60日QBRなし -10点）。更新カレンダー連携（参照のみ・自動判断なし）。スナップショットは管理者・固定actor/sourceのSYSTEM scheduler専用、同一月冪等・データ変更時はappend-only新版（version_noインクリメント）。as-of算定を持たない過去targetMonthは拒否する。
-- **Flyway & Integration**: rebase後の統合migrationはV144。詳細: `.kiro/specs/customer-success-service-desk/`
+- **Flyway & Integration**: rebase後の統合migrationはV147。詳細: `.kiro/specs/customer-success-service-desk/`
 
 ### DG-03 NF-03
 

@@ -185,9 +185,11 @@ public class PortalCustomerServiceDeskApiController {
                 .build();
 
         String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
-        ServiceRequest created = serviceRequestService.createRequest(internalReq, true, userId,
+        ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
-                        Instant.now(clock), null, null, userId, "PORTAL_USER", portalUserName(), "PORTAL_REQUEST"));
+                        Instant.now(clock), null, null, userId, "PORTAL_USER", portalUserName(), "PORTAL_REQUEST"),
+                custId, req.getContractId());
+        ServiceRequest created = serviceRequestService.createRequest(internalReq, true, userId, ctx);
         PortalServiceRequestDto dto = serviceRequestService.getPortalDetail(created.getId(), custId);
         return ApiResult.success(dto);
     }
@@ -208,10 +210,13 @@ public class PortalCustomerServiceDeskApiController {
                 .build();
 
         String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
-        ServiceCommentDto commentDto = serviceRequestService.addComment(id, internalReq, true,
+        // 顧客から法人既定を解決。addComment内で契約紐付きを再解決して自動再開にも使う。
+        ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
                         Instant.now(clock), null, null, portalUserId(), "PORTAL_USER", portalUserName(),
-                        "PORTAL_COMMENT"));
+                        "PORTAL_COMMENT"),
+                customerId(), null);
+        ServiceCommentDto commentDto = serviceRequestService.addComment(id, internalReq, true, ctx);
 
         PortalServiceCommentDto portalDto = PortalServiceCommentDto.builder()
                 .id(commentDto.getId())

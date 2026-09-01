@@ -81,9 +81,10 @@ public class ServiceRequestApiController {
     @PostMapping
     public ApiResult<ServiceRequest> create(@Valid @RequestBody ServiceRequestCreateRequest req) {
         Long userId = SecurityUtils.currentUserId();
-        ServiceRequest created = serviceRequestService.createRequest(req, false, null,
-                executionContext(userId, "INTERNAL_USER", usernameOrDefault(), "INTERNAL_REQUEST",
-                        req.getOrganizationId(), req.getLegalEntityId()));
+        ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
+                executionContext(userId, "INTERNAL_USER", usernameOrDefault(), "INTERNAL_REQUEST", null, null),
+                req.getCustomerId(), req.getContractId());
+        ServiceRequest created = serviceRequestService.createRequest(req, false, null, ctx);
         return ApiResult.success(created);
     }
 
@@ -103,9 +104,12 @@ public class ServiceRequestApiController {
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody ServiceRequestStatusChangeRequest req) {
         Long userId = SecurityUtils.currentUserId();
         String username = SecurityUtils.currentUsername();
-        serviceRequestService.changeStatus(id, req,
+        ServiceRequestDto detail = serviceRequestService.getInternalDetail(id);
+        ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 executionContext(userId, "INTERNAL_USER", username != null ? username : "内部管理者",
-                        "INTERNAL_STATUS", req.getOrganizationId(), req.getLegalEntityId()));
+                        "INTERNAL_STATUS", null, null),
+                detail.getCustomerId(), detail.getContractId());
+        serviceRequestService.changeStatus(id, req, ctx);
         return ApiResult.success(null);
     }
 
@@ -116,9 +120,12 @@ public class ServiceRequestApiController {
     public ApiResult<ServiceCommentDto> addComment(@PathVariable Long id, @Valid @RequestBody ServiceCommentCreateRequest req) {
         Long userId = SecurityUtils.currentUserId();
         String username = SecurityUtils.currentUsername();
-        ServiceCommentDto commentDto = serviceRequestService.addComment(id, req, false,
+        ServiceRequestDto detail = serviceRequestService.getInternalDetail(id);
+        ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 executionContext(userId, "INTERNAL_USER", username != null ? username : "内部ユーザー",
-                        "INTERNAL_COMMENT", null, null));
+                        "INTERNAL_COMMENT", null, null),
+                detail.getCustomerId(), detail.getContractId());
+        ServiceCommentDto commentDto = serviceRequestService.addComment(id, req, false, ctx);
         return ApiResult.success(commentDto);
     }
 

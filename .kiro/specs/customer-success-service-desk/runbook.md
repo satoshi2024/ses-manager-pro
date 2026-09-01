@@ -99,7 +99,7 @@ SES Manager Pro のカスタマーサクセス・サービスデスク機能 (NF
 
 ## 6. 未マージ開発DBにおける旧V110のReset / Repair手順 (Unmerged Dev DB Reset & Repair Guide)
 
-旧 NF02 feature ブランチ (`origin/codex/customer-success-service-desk`) の `V110__customer_success_service_desk.sql` を手元で適用してしまった開発環境データベースは、本番・メイン統合用のマイグレーション `V144__customer_success_service_desk.sql` と Flyway バージョン番号およびチェックサムが衝突します。
+旧 NF02 feature ブランチ (`origin/codex/customer-success-service-desk`) の `V110__customer_success_service_desk.sql` を手元で適用してしまった開発環境データベースは、本番・メイン統合用のマイグレーション `V147__customer_success_service_desk.sql` と Flyway バージョン番号およびチェックサムが衝突します。
 
 Flyway の既存チェックサムを直接書き換えることは禁止されています。以下のいずれかの手順でデータベースを正常化してください。
 
@@ -108,7 +108,7 @@ Flyway の既存チェックサムを直接書き換えることは禁止され�
 # 1. 既存の開発DBをドロップして再作成
 mysql -u root -p -e "DROP DATABASE IF EXISTS ses_manager_db; CREATE DATABASE ses_manager_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# 2. アプリケーションを起動（V1〜V144が自動適用されます）
+# 2. アプリケーションを起動（V1〜V147が自動適用されます）
 .\apache-maven-3.9.6\bin\mvn spring-boot:run
 ```
 
@@ -137,4 +137,4 @@ DELETE FROM m_menu WHERE menu_key = 'service-desk';
 DELETE FROM flyway_schema_history WHERE version = '110' AND script = 'V110__customer_success_service_desk.sql';
 ```
 
-その後、`mvn spring-boot:run` を実行すると、正規の `V144__customer_success_service_desk.sql` が適用されます。
+その後、`mvn spring-boot:run` を実行すると、正規の `V147__customer_success_service_desk.sql` が適用されます。
