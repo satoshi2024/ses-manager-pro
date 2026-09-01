@@ -5,7 +5,7 @@
 | 項目 | 状態 |
 |---|---|
 | Review type | Plan **CONDITIONAL PASS**（2026-09-01）。F1実装可。最終PRは R-NF08 IMPLEMENTATION PASS 後 |
-| Implementation state | **NOT STARTED**（Discovery spec + 対話文書完了。F1未着手） |
+| Implementation state | **F1 DONE / F2〜M 未着手** |
 | Central NF-08 state | `CANDIDATE` |
 | 具体AIモデル | **未決定**（pipelineはモデル非依存。summary層のみ`AiTextService`で差し替え） |
 | Existing AI learning state | `CONDITIONAL PASS`（P2残、GATE-S17-G10-PROD保留） |
@@ -68,8 +68,8 @@
 | task | status | commit | evidence |
 |---|---|---|---|
 | T000 Discovery/gate/inventory | DONE | 作成commitで確定 | 文書読了、worktree検証、production code差分なし |
-| F1 catalog/run/feedback | **READY** | — | Plan CONDITIONAL PASS。provisional catalog可。`start-conversations.md` §F1 |
-| F2 intent/parameter/scope/service gateway | BLOCKED | — | F1、scope承認、SalesPerformance scoped adapter待ち |
+| F1 catalog/run/feedback | **DONE** | feat(nf08-f1) | SemanticCatalogRegistry, IntentParser, CopilotRunService, V144, tests |
+| F2 intent/parameter/scope/service gateway | **READY** | — | F1 PASS。次タスク |
 | A1 chat/answer/citation UI | BLOCKED | — | F2、citation/human escalation承認待ち |
 | B1 provider/redaction/timeout/cost | BLOCKED | — | gate/provider policy待ち。mock/rule以外禁止 |
 | B2 evaluation/adversarial | BLOCKED | — | B1、dataset/segment/owner/budget承認待ち |

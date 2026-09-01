@@ -40,7 +40,7 @@
 
 ### F1: Semantic catalog / run / feedback基盤
 
-- [ ] **Objective**: provisional catalogを固定し、catalog外実行を型とruntimeで拒否し、management answer run/feedbackを既存AI ledgerへ安全に記録する。
+- [x] **Objective**: provisional catalogを固定し、catalog外実行を型とruntimeで拒否し、management answer run/feedbackを既存AI ledgerへ安全に記録する。
 - **Blocked until**: Plan Review CONDITIONAL PASS（済）。`<APPROVED_SCOPE>`正式値は未決のため catalog は **provisional / 既定disabled** とする。本番外部送信・flag ONは不可。
 - **開工対話**: [start-conversations.md §F1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-F1](review-conversations.md)（任意）
