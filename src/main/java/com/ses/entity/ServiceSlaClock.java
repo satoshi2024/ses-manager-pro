@@ -45,11 +45,22 @@ public class ServiceSlaClock {
     /** 初回応答超過フラグ */
     private Boolean responseBreached;
 
+    /** 初回応答warningを一度だけ発行したか。 */
+    private Boolean responseWarningSent;
+
+    /** 解決warningを一度だけ発行したか。 */
+    private Boolean resolveWarningSent;
+
     /** 実解決日時 */
     private LocalDateTime resolvedAt;
 
     /** 解決目標超過フラグ */
     private Boolean resolveBreached;
+
+    /** 継続breach通知の最終発行時刻。 */
+    private LocalDateTime lastResponseAlertAt;
+
+    private LocalDateTime lastResolveAlertAt;
 
     /** 顧客確認待ち等による累計停止時間 (分) */
     private Integer totalPauseMinutes;

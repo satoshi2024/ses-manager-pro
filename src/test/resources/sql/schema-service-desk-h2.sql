@@ -53,8 +53,12 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     resolve_deadline    DATETIME NOT NULL,
     first_responded_at  DATETIME NULL,
     response_breached   TINYINT(1) NOT NULL DEFAULT 0,
+    response_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     resolved_at         DATETIME NULL,
     resolve_breached    TINYINT(1) NOT NULL DEFAULT 0,
+    resolve_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
+    last_response_alert_at DATETIME NULL,
+    last_resolve_alert_at DATETIME NULL,
     total_pause_minutes INT NOT NULL DEFAULT 0,
     last_paused_at      DATETIME NULL,
     status              VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
@@ -62,6 +66,24 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (service_request_id, round_no)
+);
+
+CREATE TABLE IF NOT EXISTS t_service_sla_escalation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_request_id BIGINT NOT NULL,
+    sla_clock_id BIGINT NOT NULL,
+    round_no INT NOT NULL,
+    breach_type VARCHAR(20) NOT NULL,
+    stage VARCHAR(30) NOT NULL,
+    dedupe_key VARCHAR(255) NOT NULL UNIQUE,
+    recipient_count INT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(1000),
+    last_attempt_at DATETIME NULL,
+    next_retry_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS t_service_comment (
@@ -155,13 +177,14 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     missing_inputs_json         CLOB NULL,
     factors_explanation         CLOB NULL,
     snapshot_hash               VARCHAR(64) NOT NULL,
-    revision_reason             VARCHAR(255) NULL,
+    revision_reason             VARCHAR(255) NOT NULL,
     actor_type                  VARCHAR(20) NOT NULL DEFAULT 'SYSTEM',
     actor_id                    BIGINT NULL,
     actor_name                  VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
     is_current                  TINYINT(1) NOT NULL DEFAULT 1,
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (customer_id, snapshot_date, version_no)
+    UNIQUE (customer_id, snapshot_date, version_no),
+    CONSTRAINT chk_health_snapshot_revision_reason CHECK (CHAR_LENGTH(TRIM(revision_reason)) > 0)
 );
 
 -- 初期マスタデータ

@@ -69,8 +69,12 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     resolve_deadline    DATETIME NOT NULL COMMENT '解決目標期限',
     first_responded_at  DATETIME NULL COMMENT '実初回応答日時',
     response_breached   TINYINT(1) NOT NULL DEFAULT 0 COMMENT '初回応答超過フラグ',
+    response_warning_sent TINYINT(1) NOT NULL DEFAULT 0 COMMENT '初回応答warning発行済み',
     resolved_at         DATETIME NULL COMMENT '実解決日時',
     resolve_breached    TINYINT(1) NOT NULL DEFAULT 0 COMMENT '解決目標超過フラグ',
+    resolve_warning_sent TINYINT(1) NOT NULL DEFAULT 0 COMMENT '解決warning発行済み',
+    last_response_alert_at DATETIME NULL COMMENT '初回応答通知の最終発行日時',
+    last_resolve_alert_at DATETIME NULL COMMENT '解決通知の最終発行日時',
     total_pause_minutes INT NOT NULL DEFAULT 0 COMMENT '顧客確認待ち等の累計停止分数',
     last_paused_at      DATETIME NULL COMMENT '直近停止開始日時',
     status              VARCHAR(20) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING, PAUSED, COMPLETED',
@@ -81,6 +85,29 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     CONSTRAINT fk_sla_clock_request FOREIGN KEY (service_request_id) REFERENCES t_service_request(id) ON DELETE CASCADE,
     CONSTRAINT fk_sla_clock_policy FOREIGN KEY (policy_id) REFERENCES m_service_sla_policy(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SLA計時・ラウンド履歴';
+
+-- 受信者不在・配信失敗を捨てずに再試行する通知台帳（同一イベントはdedupe_keyで一意）。
+CREATE TABLE IF NOT EXISTS t_service_sla_escalation (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_request_id  BIGINT NOT NULL,
+    sla_clock_id        BIGINT NOT NULL,
+    round_no            INT NOT NULL,
+    breach_type         VARCHAR(20) NOT NULL,
+    stage               VARCHAR(30) NOT NULL,
+    dedupe_key          VARCHAR(255) NOT NULL,
+    recipient_count     INT NOT NULL DEFAULT 0,
+    status              VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    attempt_count       INT NOT NULL DEFAULT 0,
+    last_error          VARCHAR(1000) NULL,
+    last_attempt_at     DATETIME NULL,
+    next_retry_at       DATETIME NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_sla_escalation_dedupe (dedupe_key),
+    INDEX idx_sla_escalation_retry (status, next_retry_at),
+    CONSTRAINT fk_sla_escalation_request FOREIGN KEY (service_request_id) REFERENCES t_service_request(id) ON DELETE CASCADE,
+    CONSTRAINT fk_sla_escalation_clock FOREIGN KEY (sla_clock_id) REFERENCES t_service_sla_clock(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SLA通知エスカレーション台帳';
 
 -- 4. サービスリクエスト コメント・スレッド
 CREATE TABLE IF NOT EXISTS t_service_comment (
@@ -194,13 +221,14 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     missing_inputs_json         TEXT NULL COMMENT '欠損入力項目JSON',
     factors_explanation         TEXT NULL COMMENT 'スコア算出根拠説明',
     snapshot_hash               VARCHAR(64) NOT NULL COMMENT '計算結果ハッシュ',
-    revision_reason             VARCHAR(255) NULL COMMENT '改定・修正理由',
+    revision_reason             VARCHAR(255) NOT NULL COMMENT '改定・修正理由',
     actor_type                  VARCHAR(20) NOT NULL DEFAULT 'SYSTEM' COMMENT 'SYSTEM, INTERNAL_USER',
     actor_id                    BIGINT NULL COMMENT '実行者ID',
     actor_name                  VARCHAR(100) NOT NULL DEFAULT 'SYSTEM' COMMENT '実行者名',
     is_current                  TINYINT(1) NOT NULL DEFAULT 1 COMMENT '最新版フラグ',
     created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_health_customer_date_version (customer_id, snapshot_date, version_no),
+    CONSTRAINT chk_health_snapshot_revision_reason CHECK (CHAR_LENGTH(TRIM(revision_reason)) > 0),
     INDEX idx_health_customer_date_current (customer_id, snapshot_date, is_current),
     CONSTRAINT fk_health_customer FOREIGN KEY (customer_id) REFERENCES m_customer(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顧客ヘルススナップショット';
@@ -240,5 +268,16 @@ CROSS JOIN (
     SELECT 'service-desk.view' AS permission_key UNION ALL
     SELECT 'service-desk.create' AS permission_key
 ) p
-WHERE o.org_type = 'CUSTOMER'
+WHERE o.type = 'CUSTOMER'
   AND u.deleted_flag = 0;
+
+-- スナップショット履歴は追記専用。最新版はversion_no最大値で解決する。
+DROP TRIGGER IF EXISTS trg_customer_health_snapshot_no_update;
+CREATE TRIGGER trg_customer_health_snapshot_no_update
+BEFORE UPDATE ON t_customer_health_snapshot
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'customer health snapshots are append-only';
+
+DROP TRIGGER IF EXISTS trg_customer_health_snapshot_no_delete;
+CREATE TRIGGER trg_customer_health_snapshot_no_delete
+BEFORE DELETE ON t_customer_health_snapshot
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'customer health snapshots are append-only';

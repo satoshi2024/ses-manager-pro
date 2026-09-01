@@ -1,5 +1,6 @@
 package com.ses.service.scheduler;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.entity.Contract;
 import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
@@ -14,6 +15,7 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
+import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
@@ -36,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -55,6 +58,9 @@ class ServiceSlaSchedulerTest {
 
     @Autowired
     private ServiceSlaClockMapper clockMapper;
+
+    @Autowired
+    private ServiceSlaEscalationMapper escalationMapper;
 
     @Autowired
     private CustomerMapper customerMapper;
@@ -259,5 +265,102 @@ class ServiceSlaSchedulerTest {
         // admin1 および admin2 宛てに通知が送信されたこと
         verify(notificationService, atLeastOnce()).publishToUser(eq(admin1.getId()), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
         verify(notificationService, atLeastOnce()).publishToUser(eq(admin2.getId()), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("期限30分前warningと初回breach・継続breachが別段階で記録されること")
+    void testWarningFirstAndContinuingBreach() {
+        Customer customer = Customer.builder().companyName("warning顧客-" + UUID.randomUUID()).build();
+        customerMapper.insert(customer);
+        SysUser owner = activeUser("warning_owner");
+
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("warning test").description("warning")
+                .ownerUserId(owner.getId()).build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.plusMinutes(20)).resolveDeadline(base.plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        monitoringService.checkSlaBreaches(base);
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_WARNING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        ServiceSlaClock warningClock = clockMapper.selectById(clock.getId());
+        assertTrue(Boolean.TRUE.equals(warningClock.getResponseWarningSent()));
+
+        // 期限超過直後の初回通知
+        monitoringService.checkSlaBreaches(base.plusMinutes(21));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+
+        // 30分経過後は継続通知を1回だけ送る
+        monitoringService.checkSlaBreaches(base.plusMinutes(52));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH_CONTINUING"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals(3, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())));
+    }
+
+    @Test
+    @DisplayName("受信者なしescalationを永続化し、受信者出現後に同一dedupeで再送して重複しないこと")
+    void testNoRecipientEscalationIsPersistedAndRetriedIdempotently() {
+        userMapper.selectList(null).forEach(user -> {
+            user.setStatus(0);
+            userMapper.updateById(user);
+        });
+
+        Customer customer = Customer.builder().companyName("recipientなし顧客-" + UUID.randomUUID()).build();
+        customerMapper.insert(customer);
+        ServiceRequest req = ServiceRequest.builder()
+                .requestNo("REQ-" + UUID.randomUUID().toString().substring(0, 8))
+                .customerId(customer.getId()).status("IN_PROGRESS").priority("P0")
+                .category("SYSTEM").channel("INTERNAL").subject("recipient retry").description("retry")
+                .build();
+        requestMapper.insert(req);
+        LocalDateTime base = LocalDateTime.of(2026, 8, 31, 10, 0);
+        ServiceSlaClock clock = ServiceSlaClock.builder()
+                .serviceRequestId(req.getId()).roundNo(1).policyId(1L).status("RUNNING")
+                .responseDeadline(base.minusMinutes(1)).resolveDeadline(base.plusHours(2))
+                .responseBreached(false).resolveBreached(false).build();
+        clockMapper.insert(clock);
+
+        monitoringService.checkSlaBreaches(base);
+        assertEquals(0, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())
+                .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "SENT")));
+        assertEquals(1, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())
+                .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "RETRY")));
+        verify(notificationService, never()).publishToUser(any(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+
+        SysUser owner = activeUser("retry_owner");
+        req.setOwnerUserId(owner.getId());
+        requestMapper.updateById(req);
+
+        monitoringService.checkSlaBreaches(base.plusMinutes(6));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        monitoringService.checkSlaBreaches(base.plusMinutes(7));
+        verify(notificationService, times(1)).publishToUser(eq(owner.getId()), eq("SLA_BREACH"),
+                anyString(), anyString(), anyString(), anyString(), anyString());
+        assertEquals(1, escalationMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceSlaEscalation>()
+                .eq(com.ses.entity.ServiceSlaEscalation::getServiceRequestId, req.getId())
+                .eq(com.ses.entity.ServiceSlaEscalation::getStatus, "SENT")));
+    }
+
+    private SysUser activeUser(String prefix) {
+        SysUser user = new SysUser();
+        user.setUsername(prefix + "_" + UUID.randomUUID());
+        user.setPassword("pass123");
+        user.setRealName(prefix);
+        user.setRole("営業");
+        user.setStatus(1);
+        userMapper.insert(user);
+        return user;
     }
 }

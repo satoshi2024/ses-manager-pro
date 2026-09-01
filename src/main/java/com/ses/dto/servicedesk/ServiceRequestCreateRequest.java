@@ -44,4 +44,9 @@ public class ServiceRequestCreateRequest {
     private String description;
 
     private Long ownerUserId;
+
+    /** SLA営業日カレンダーを特定する組織・法人コンテキスト。 */
+    private Long organizationId;
+
+    private Long legalEntityId;
 }

@@ -55,7 +55,7 @@ public class CustomerHealthSnapshot {
     @com.baomidou.mybatisplus.annotation.TableField("sla_breach_count_30d")
     private Integer slaBreachCount30d;
 
-    /** 直近180日平均CSATスコア */
+    /** 直近90日平均CSATスコア */
     private BigDecimal avgCsatScore;
 
     /** 売掛金延滞フラグ */
@@ -82,7 +82,7 @@ public class CustomerHealthSnapshot {
     /** 実行者名 */
     private String actorName;
 
-    /** 最新版フラグ */
+    /** 互換表示用フラグ。最新版はversion_no最大値で判定し、履歴行は更新しない。 */
     private Boolean isCurrent;
 
     /** レコード作成日時 */

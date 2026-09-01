@@ -1,6 +1,7 @@
 package com.ses.service.scheduler;
 
 import com.ses.service.servicedesk.CustomerHealthService;
+import com.ses.service.servicedesk.SnapshotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -32,7 +33,8 @@ public class CustomerHealthScheduler {
      */
     public void processDailySnapshot(String targetMonth) {
         log.info("顧客ヘルス日次スナップショットバッチ実行開始: targetMonth={}", targetMonth);
-        customerHealthService.generateMonthlySnapshot(targetMonth, "日次定期バッチによるスナップショット更新");
+        customerHealthService.generateMonthlySnapshot(targetMonth, "日次定期バッチによるスナップショット更新",
+                SnapshotExecutionContext.systemScheduler());
         log.info("顧客ヘルス日次スナップショットバッチ実行完了: targetMonth={}", targetMonth);
     }
 }

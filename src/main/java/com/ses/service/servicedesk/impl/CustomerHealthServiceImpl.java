@@ -22,11 +22,15 @@ import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.servicedesk.CustomerHealthService;
+import com.ses.service.servicedesk.SnapshotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -142,7 +146,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime thirtyDaysAgo = now.minusDays(30);
-        LocalDateTime oneEightyDaysAgo = now.minusDays(180);
+        LocalDateTime ninetyDaysAgo = now.minusDays(90);
         LocalDate sixtyDaysAgoDate = now.toLocalDate().minusDays(60);
 
         // 1. 問い合わせデータ一括取得
@@ -169,11 +173,11 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             }
         }
 
-        // 3. CSAT回答一括取得 (直近180日)
+        // 3. CSAT回答一括取得 (直近90日)
         List<CustomerCsat> allCsats = csatMapper.selectList(
                 new LambdaQueryWrapper<CustomerCsat>()
                         .in(CustomerCsat::getCustomerId, customerIds)
-                        .ge(CustomerCsat::getAnsweredAt, oneEightyDaysAgo)
+                        .ge(CustomerCsat::getAnsweredAt, ninetyDaysAgo)
         );
         Map<Long, List<CustomerCsat>> csatByCustomer = allCsats.stream()
                 .collect(Collectors.groupingBy(CustomerCsat::getCustomerId));
@@ -338,13 +342,24 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void generateMonthlySnapshot(String targetMonth, String reason) {
-        // 1. 権限チェック: 管理者またはSYSTEMのみ
-        String role = SecurityUtils.currentRole();
-        if (role != null && !"管理者".equals(role)) {
-            throw BusinessException.of(403, "顧客ヘルススナップショットの生成は管理者またはシステムのみ実行可能です");
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean admin = authentication != null && authentication.isAuthenticated()
+                && authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+        if (!admin) {
+            throw BusinessException.of(403, "顧客ヘルススナップショットは認証済み管理者または許可されたschedulerのみ実行可能です");
         }
+        generateMonthlySnapshot(targetMonth, reason,
+                SnapshotExecutionContext.admin(SecurityUtils.currentUsername(), SecurityUtils.currentUserId()));
+    }
 
-        // 2. targetMonth 解決 & フォーマット検証
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void generateMonthlySnapshot(String targetMonth, String reason,
+                                        SnapshotExecutionContext executionContext) {
+        validateExecutionContext(executionContext);
+
+        // targetMonth 解決 & フォーマット検証
         String effectiveMonth = targetMonth;
         if (effectiveMonth == null || effectiveMonth.isBlank()) {
             effectiveMonth = YearMonth.now(clock.getZone()).toString();
@@ -361,14 +376,18 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             throw BusinessException.of(400, "対象月の形式が不正です (YYYY-MM形式で指定してください)");
         }
 
+        // 現行の算定器は現在時点のデータを読むため、過去月を現在値で上書きしない。
+        // as-of 算定を導入するまでは、対象月を現在月だけに限定する。
+        if (!YearMonth.now(clock.getZone()).equals(YearMonth.from(snapshotDate))) {
+            throw BusinessException.of(400, "過去または未来の対象月はas-of算定が未提供のため指定できません");
+        }
+
         log.info("顧客ヘルス月次スナップショット生成開始: month={}", effectiveMonth);
 
-        // 3. 実行者情報特定
-        String actorType = role != null ? "INTERNAL_USER" : "SYSTEM";
-        Long actorId = role != null ? SecurityUtils.currentUserId() : null;
-        String actorName = role != null
-                ? (SecurityUtils.currentUsername() != null ? SecurityUtils.currentUsername() : "管理者")
-                : "SYSTEM";
+        // 実行者情報は検証済みコンテキストからのみ採用する。
+        String actorType = executionContext.actorType();
+        Long actorId = executionContext.actorId();
+        String actorName = executionContext.actorName();
 
         List<Customer> allCustomers = customerMapper.selectList(
                 new LambdaQueryWrapper<Customer>().eq(Customer::getDeletedFlag, 0)
@@ -401,78 +420,83 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                     dto.getFactorsExplanation()
             );
 
-            // 最新スナップショット取得
-            List<CustomerHealthSnapshot> existingSnapshots = snapshotMapper.selectList(
-                    new LambdaQueryWrapper<CustomerHealthSnapshot>()
-                            .eq(CustomerHealthSnapshot::getCustomerId, dto.getCustomerId())
-                            .eq(CustomerHealthSnapshot::getSnapshotDate, snapshotDate)
-                            .orderByDesc(CustomerHealthSnapshot::getVersionNo)
-            );
+            persistSnapshotRevision(dto, snapshotDate, computedHash, missingJson,
+                    reason, actorType, actorId, actorName, now, effectiveMonth);
+        }
+        log.info("顧客ヘルス月次スナップショット生成完了: 件数={}", scoreMap.size());
+    }
 
-            if (existingSnapshots.isEmpty()) {
-                // 初回版作成 (v1)
-                CustomerHealthSnapshot snapshot = CustomerHealthSnapshot.builder()
-                        .customerId(dto.getCustomerId())
-                        .snapshotDate(snapshotDate)
-                        .versionNo(1)
-                        .totalScore(dto.getHealthScore())
-                        .healthStatus(dto.getHealthStatus())
-                        .openCriticalIssuesCount(dto.getOpenCriticalIssuesCount())
-                        .slaBreachCount30d(dto.getSlaBreachCount30d())
-                        .avgCsatScore(dto.getAvgCsatScore())
-                        .arOverdueFlag(dto.getArOverdueFlag())
-                        .missingInputsJson(missingJson)
-                        .factorsExplanation(dto.getFactorsExplanation())
-                        .snapshotHash(computedHash)
-                        .revisionReason(reason != null ? reason : "初回スナップショット生成")
-                        .actorType(actorType)
-                        .actorId(actorId)
-                        .actorName(actorName)
-                        .isCurrent(true)
-                        .createdAt(now)
-                        .build();
+    private void validateExecutionContext(SnapshotExecutionContext context) {
+        if (context == null) {
+            throw BusinessException.of(403, "スナップショット実行主体が必要です");
+        }
+        if ("SYSTEM".equals(context.actorType())) {
+            if (!SnapshotExecutionContext.SYSTEM_SCHEDULER.equals(context.source())
+                    || context.actorId() != null || !"SYSTEM".equals(context.actorName())) {
+                throw BusinessException.of(403, "SYSTEM実行は許可されたスケジューラからのみ可能です");
+            }
+            return;
+        }
+        if (!"INTERNAL_USER".equals(context.actorType())) {
+            throw BusinessException.of(403, "スナップショット実行主体の種別が不正です");
+        }
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        boolean admin = authentication != null && authentication.isAuthenticated()
+                && authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_管理者".equals(a.getAuthority()));
+        if (!admin || !SnapshotExecutionContext.ADMIN_HTTP.equals(context.source())) {
+            throw BusinessException.of(403, "管理者の明示的な実行主体が必要です");
+        }
+    }
+
+    private void persistSnapshotRevision(CustomerHealthScoreDto dto, LocalDate snapshotDate,
+                                         String computedHash, String missingJson, String reason,
+                                         String actorType, Long actorId, String actorName,
+                                         LocalDateTime now, String effectiveMonth) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            CustomerHealthSnapshot latest = snapshotMapper.selectLatestForUpdate(dto.getCustomerId(), snapshotDate);
+            if (latest != null && computedHash.equals(latest.getSnapshotHash())) {
+                log.debug("顧客ヘルススナップショット同一内容スキップ: customerId={}, month={}",
+                        dto.getCustomerId(), effectiveMonth);
+                return;
+            }
+            if (latest != null && !StringUtils.hasText(reason)) {
+                throw BusinessException.of(400, "既存スナップショットを修正する場合は修正理由が必須です");
+            }
+
+            int version = latest == null ? 1 : latest.getVersionNo() + 1;
+            CustomerHealthSnapshot snapshot = CustomerHealthSnapshot.builder()
+                    .customerId(dto.getCustomerId())
+                    .snapshotDate(snapshotDate)
+                    .versionNo(version)
+                    .totalScore(dto.getHealthScore())
+                    .healthStatus(dto.getHealthStatus())
+                    .openCriticalIssuesCount(dto.getOpenCriticalIssuesCount())
+                    .slaBreachCount30d(dto.getSlaBreachCount30d())
+                    .avgCsatScore(dto.getAvgCsatScore())
+                    .arOverdueFlag(dto.getArOverdueFlag())
+                    .missingInputsJson(missingJson)
+                    .factorsExplanation(dto.getFactorsExplanation())
+                    .snapshotHash(computedHash)
+                    .revisionReason(StringUtils.hasText(reason) ? reason.trim() : "初回スナップショット生成")
+                    .actorType(actorType)
+                    .actorId(actorId)
+                    .actorName(actorName)
+                    .isCurrent(true)
+                    .createdAt(now)
+                    .build();
+            try {
                 snapshotMapper.insert(snapshot);
-            } else {
-                CustomerHealthSnapshot latest = existingSnapshots.get(0);
-                if (computedHash.equals(latest.getSnapshotHash())) {
-                    // 内容同一: 冪等に何もしない（歴史を書き換えない）
-                    log.debug("顧客ヘルススナップショット同一内容スキップ: customerId={}, month={}", dto.getCustomerId(), effectiveMonth);
-                } else {
-                    // 内容変更あり: 過去版のis_currentをfalseに設定し、新改定版(v+1)を追記挿入
-                    for (CustomerHealthSnapshot prev : existingSnapshots) {
-                        if (Boolean.TRUE.equals(prev.getIsCurrent())) {
-                            prev.setIsCurrent(false);
-                            snapshotMapper.updateById(prev);
-                        }
-                    }
-
-                    CustomerHealthSnapshot revision = CustomerHealthSnapshot.builder()
-                            .customerId(dto.getCustomerId())
-                            .snapshotDate(snapshotDate)
-                            .versionNo(latest.getVersionNo() + 1)
-                            .totalScore(dto.getHealthScore())
-                            .healthStatus(dto.getHealthStatus())
-                            .openCriticalIssuesCount(dto.getOpenCriticalIssuesCount())
-                            .slaBreachCount30d(dto.getSlaBreachCount30d())
-                            .avgCsatScore(dto.getAvgCsatScore())
-                            .arOverdueFlag(dto.getArOverdueFlag())
-                            .missingInputsJson(missingJson)
-                            .factorsExplanation(dto.getFactorsExplanation())
-                            .snapshotHash(computedHash)
-                            .revisionReason(reason != null ? reason : "データ変動による修正版作成")
-                            .actorType(actorType)
-                            .actorId(actorId)
-                            .actorName(actorName)
-                            .isCurrent(true)
-                            .createdAt(now)
-                            .build();
-                    snapshotMapper.insert(revision);
-                    log.info("顧客ヘルススナップショット改定版作成: customerId={}, month={}, version={}",
-                            dto.getCustomerId(), effectiveMonth, revision.getVersionNo());
+                log.info("顧客ヘルススナップショット追記: customerId={}, month={}, version={}",
+                        dto.getCustomerId(), effectiveMonth, version);
+                return;
+            } catch (DuplicateKeyException duplicate) {
+                // 別トランザクションが同じ版を先に挿入した場合は再読込する。
+                if (attempt == 2) {
+                    throw BusinessException.of(409, "顧客ヘルススナップショットの同時更新が競合しました");
                 }
             }
         }
-        log.info("顧客ヘルス月次スナップショット生成完了: 件数={}", scoreMap.size());
     }
 
     private String calculateSnapshotHash(Integer score, String status, Integer openIssues,

@@ -1,7 +1,7 @@
 # 現行経路インベントリ台帳 — カスタマーサクセス・サービスデスク (NF-02 / DG-02)
 
 - 調査日: 2026-08-27
-- 調査対象: `origin/main` (`bd2bfca6aecab365f4fbbf4916ddb4f393614d27`) の現行境界。本branchの先行WIPは §8。
+- 調査対象: `origin/main` (`3c0190429b9113e1a7e7d91baafc57c76bb21de7`) の現行境界。本branchの先行WIPは §8。
 - 目的: 新Customer master / 新portal認証 / 第二通知基盤 / 独自file path / 契約更新の自動変更を作らず、既存正本へ接続する。
 
 ## 1. ドメイン境界（origin/main 正本）
@@ -77,7 +77,7 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 | 項目 | 値 |
 |---|---|
 | origin/main の本機能直前latest | **V109**（`engineer-lifecycle-workflow`、NF-01 PASS / PR #85） |
-| 本機能の採番（APPROVED後） | 着手時にmerge済み全locationを再確認し **当時latest+1**。V109が残っていれば **V110** |
+| 本機能の採番 | 現行統合migrationは **V136**。旧NF02のV110は既存開発DBのreset/repair fixtureとしてのみ扱い、通常のmigration番号へ戻さない |
 | H2 | `sql/schema-service-desk-h2.sql` を新設し `application-test.yml` の schema-locations へ追加。MySQL DDLをH2 replayに足さない |
 | V1 | 増分と重複ADDしない |
 | `engineer-schema-h2.sql` | 要員列を足さない限り必須ではない。service deskテーブルは専用H2へ |
@@ -130,11 +130,11 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 
 | 項目 | 提案 |
 |---|---|
-| モデル | 100点減点。factorは型付き列（未解決P0件数、未解決P1件数、30日SLA違反件数、平均CSAT、AR延滞flag、最終QBR日） |
+| モデル | 100点減点。未解決P0は-30点/件、P1は-15点/件、直近30日SLA違反は-10点/件、直近90日平均CSATは3.0未満-15点・3.0以上4.0未満-5点、AR延滞-25点、60日QBRなし-10点。factorは型付き列 |
 | 欠損 | CSAT未回答・QBR無し・請求データ無しは missing input。欠損を「普通点」で埋めない |
 | 表示 | 合計＋factor＋期間＋算定時刻＋missing |
 | 更新カレンダー | 読取専用バッジ。`RenewalCalendarService` は `Contract.renewal_decision` を変更しないことをtestで固定 |
-| snapshot | 日次は insert。同一customer+dateの再実行は補正event付きでのみ。delete→insertで履歴を消さない |
+| snapshot | customer+date+versionの一意なINSERTのみ。同一hashは冪等skip、内容変更は非空訂正理由付きの新版を追記し、最大versionを最新版として解決する。UPDATE/DELETEはDB triggerで拒否 |
 | 自動契約操作 | **禁止** |
 
 ステータス名は `HEALTHY` / `WARNING` / `CRITICAL`（80 / 50 境界）に統一する。WIPの `NEUTRAL`/`AT_RISK` や加点モデルは採用しない。
@@ -158,12 +158,12 @@ SLA計算機が土日のみを休日とし祝日カレンダーを読まない�
 
 ## 8. 本branchの先行WIPギャップ是正状況
 
-`codex/customer-success-service-desk` において、指摘事項（WIP-1〜11）に対する是正コードが反映された。
+`fix/nf02-main-integration-hardening` において、指摘事項（WIP-1〜11）に加えたP0/P1 hardeningの実装状況を記録する。
 
 | 項目 | 是正後の状況 |
 |---|---|
 | 1. SLA休日・Clock | `ServiceSlaCalculator` に `Clock` DI および法人既定カレンダー（`m_work_calendar` / `m_work_calendar_day`）の所定休日・法定休日判定を反映。`ServiceRequestServiceImpl` も `Clock` 連動。 |
-| 2. ヘルススコア | 100点減点モデル（未解決P0=-30, P1=-15, 30日SLA違反=-10, CSAT=-10〜-30, AR延滞=-25, QBR=-10）へ整合。`HEALTHY`/`WARNING`/`CRITICAL`。欠損項目を `missing_inputs` に記録し、非破壊更新を実装。N+1バッチ取得対応。 |
+| 2. ヘルススコア | 100点減点モデル（未解決P0=-30/件、P1=-15/件、30日SLA違反=-10/件、90日CSAT低評価=-15/-5、AR延滞=-25、60日QBRなし=-10）へ整合。`HEALTHY`/`WARNING`/`CRITICAL`。欠損項目を `missing_inputs` に記録し、snapshotはappend-only revisionで保存。N+1バッチ取得対応。 |
 | 3. 文書・添付 | `ServiceRequestFileReferenceProvider` 実装、`FileScopeValidationService` に `SERVICE_REQUEST` 登録、ポータル専用 download API 配線（自社スコープ・PORTAL_VISIBLE検証・RFC 5987 UTF-8 エンコード）。 |
 | 4. ポータル画面・権限 | `templates/portal/customer/service-desk/list.html` 作成、ポータル起票・返信 DTO の完全分離（`PortalServiceRequestCreateRequest`, `PortalServiceCommentCreateRequest`）、他社ID改ざん防止検証、ポータル権限 seed 追加。 |
 | 5. 通知リンク | `NotificationLinks.SERVICE_DESK_REQUESTS` / `serviceDeskDetail(id)` を定数化し、`NotificationLinkRouteTest` で検証。 |

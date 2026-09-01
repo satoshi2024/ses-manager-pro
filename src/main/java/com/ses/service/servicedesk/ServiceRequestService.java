@@ -21,6 +21,9 @@ public interface ServiceRequestService {
      */
     ServiceRequest createRequest(ServiceRequestCreateRequest req, Long actorUserId, boolean isPortal, Long portalUserId);
 
+    ServiceRequest createRequest(ServiceRequestCreateRequest req, boolean isPortal, Long portalUserId,
+                                 ServiceDeskExecutionContext executionContext);
+
     /**
      * 内部向けサービスリクエスト詳細取得
      */
@@ -51,10 +54,19 @@ public interface ServiceRequestService {
      */
     void changeStatus(Long id, ServiceRequestStatusChangeRequest req, Long actorId, String actorType, String actorName);
 
+    void changeStatus(Long id, ServiceRequestStatusChangeRequest req, ServiceDeskExecutionContext executionContext);
+
     /**
      * コメント・内部メモ投稿
      */
     ServiceCommentDto addComment(Long id, ServiceCommentCreateRequest req, Long actorId, String authorType, String authorName, boolean isPortal);
+
+    /**
+     * 実リクエストのコメント経路。作成時点のtenant・ZoneId・Instantを、WAITING_CUSTOMERからの
+     * 自動復帰を含む同一トランザクション全体へ引き渡す。
+     */
+    ServiceCommentDto addComment(Long id, ServiceCommentCreateRequest req, boolean isPortal,
+                                 ServiceDeskExecutionContext executionContext);
 
     /**
      * 顧客ポータルからのCSAT評価回答投稿（1回限り）

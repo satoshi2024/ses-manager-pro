@@ -117,8 +117,10 @@ public class ServiceSlaCalculator {
         }
 
         ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
+        // 停止時間は営業日・営業時間内だけを延長対象とする。ポリシー不在時に
+        // 壁時計の経過分を加算すると、夜間・休日の停止がSLAを延長してしまう。
         if (policy == null) {
-            return currentDeadline.plusSeconds((long) pauseMinutes * 60);
+            return currentDeadline;
         }
 
         LocalTime businessStart = policy.getBusinessHoursStart() != null ? policy.getBusinessHoursStart() : LocalTime.of(9, 0);
@@ -127,7 +129,7 @@ public class ServiceSlaCalculator {
 
         long dailyBusinessMinutes = ChronoUnit.MINUTES.between(businessStart, businessEnd);
         if (dailyBusinessMinutes <= 0) {
-            return currentDeadline.plusSeconds((long) pauseMinutes * 60);
+            return currentDeadline;
         }
 
         ZonedDateTime cursor = currentDeadline.atZone(effectiveZone);
@@ -164,6 +166,55 @@ public class ServiceSlaCalculator {
         Instant instant = currentDeadline.atZone(effectiveZone).toInstant();
         Instant extended = calculateExtendedDeadline(instant, pauseMinutes, policy, organizationId, legalEntityId, effectiveZone);
         return extended.atZone(effectiveZone).toLocalDateTime();
+    }
+
+    /**
+     * 停止区間から営業日・営業時間内の分数だけを算出する。
+     * 壁時計の経過分をそのまま加算すると、夜間・休日停止でSLAを不正に延長するため、
+     * WAITING_CUSTOMER の再開時はこのメソッドの結果だけを使用する。
+     */
+    public int businessMinutesBetween(LocalDateTime startAt, LocalDateTime endAt,
+                                      ServiceSlaPolicy policy, Long organizationId,
+                                      Long legalEntityId, ZoneId zoneId) {
+        if (startAt == null || endAt == null || !endAt.isAfter(startAt)) return 0;
+        ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
+        return businessMinutesBetween(startAt.atZone(effectiveZone).toInstant(),
+                endAt.atZone(effectiveZone).toInstant(), policy, organizationId, legalEntityId, effectiveZone);
+    }
+
+    public int businessMinutesBetween(Instant startAt, Instant endAt, ServiceSlaPolicy policy,
+                                      Long organizationId, Long legalEntityId, ZoneId zoneId) {
+        if (startAt == null || endAt == null || !endAt.isAfter(startAt)) return 0;
+        ZoneId effectiveZone = zoneId != null ? zoneId : DEFAULT_ZONE;
+        if (policy == null) {
+            return 0;
+        }
+        LocalTime businessStart = policy.getBusinessHoursStart() != null
+                ? policy.getBusinessHoursStart() : LocalTime.of(9, 0);
+        LocalTime businessEnd = policy.getBusinessHoursEnd() != null
+                ? policy.getBusinessHoursEnd() : LocalTime.of(18, 0);
+        if (!businessEnd.isAfter(businessStart)) {
+            return 0;
+        }
+
+        ZonedDateTime from = startAt.atZone(effectiveZone);
+        ZonedDateTime to = endAt.atZone(effectiveZone);
+        long minutes = 0;
+        LocalDate date = from.toLocalDate();
+        while (!date.isAfter(to.toLocalDate()) && minutes < Integer.MAX_VALUE) {
+            if (Boolean.TRUE.equals(policy.getIncludeHolidays())
+                    || !isNonWorkingDay(date, organizationId, legalEntityId)) {
+                ZonedDateTime dayStart = date.atTime(businessStart).atZone(effectiveZone);
+                ZonedDateTime dayEnd = date.atTime(businessEnd).atZone(effectiveZone);
+                ZonedDateTime clippedStart = from.isAfter(dayStart) ? from : dayStart;
+                ZonedDateTime clippedEnd = to.isBefore(dayEnd) ? to : dayEnd;
+                if (clippedEnd.isAfter(clippedStart)) {
+                    minutes += ChronoUnit.MINUTES.between(clippedStart, clippedEnd);
+                }
+            }
+            date = date.plusDays(1);
+        }
+        return (int) Math.min(Integer.MAX_VALUE, minutes);
     }
 
     /**

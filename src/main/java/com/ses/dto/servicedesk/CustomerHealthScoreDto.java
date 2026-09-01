@@ -34,7 +34,7 @@ public class CustomerHealthScoreDto {
     /** 直近30日SLA違反件数 */
     private Integer slaBreachCount30d;
 
-    /** 直近180日平均CSATスコア */
+    /** 直近90日平均CSATスコア */
     private BigDecimal avgCsatScore;
 
     /** 売掛金延滞有無フラグ */

@@ -187,4 +187,18 @@ class ServiceSlaCalculatorTest {
 
         assertEquals(LocalDateTime.of(2026, 8, 24, 16, 0), extended);
     }
+
+    @Test
+    @DisplayName("一時停止はポリシー不在時も壁時計時間を加算しない")
+    void testPauseWithoutPolicy_doesNotUseWallClockMinutes() {
+        Instant deadline = LocalDateTime.of(2026, 8, 24, 14, 0)
+                .atZone(ZoneId.of("Asia/Tokyo")).toInstant();
+        Instant resumed = LocalDateTime.of(2026, 8, 25, 14, 0)
+                .atZone(ZoneId.of("Asia/Tokyo")).toInstant();
+
+        assertEquals(deadline, calculator.calculateExtendedDeadline(deadline, 1_440, null,
+                null, null, ZoneId.of("Asia/Tokyo")));
+        assertEquals(0, calculator.businessMinutesBetween(deadline, resumed, null,
+                null, null, ZoneId.of("Asia/Tokyo")));
+    }
 }

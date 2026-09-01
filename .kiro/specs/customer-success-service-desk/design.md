@@ -2,10 +2,10 @@
 
 既定解は `customer-product-expansion-2026/platform-invariants.md`。ここには本spec固有の行と逸脱だけを書く。現行接続は `inventory.md`、要件は `requirements.md`。
 
-**承認状態**: DG-02は提案。APPROVED前にDDL/APIを本番へ入れてReviewしてはならない。
+**承認状態**: traceability は CANDIDATE/DISCOVERY。Owner・Approved scope・DecisionId・DG-02 は未確定。本ブランチのhardening実装は承認取得を意味せず、本番release可否は別途Reviewする。
 
 - 親機能: NF-02 `customer-success-service-desk`
-- Migration: APPROVED着手時の merge済み latest+1（V109残存時は **V110**）。番号は予約ではなく再確認する。
+- Migration: 現行mainで採番済みの **V136** をNF-02統合版とする。旧featureのV110は履歴衝突を起こすため再利用せず、専用reset/repair手順で整理する。
 - 再利用: `Customer` / `CustomerContact` / `Contract` / `RenewalCalendarService` / `PortalAuthorizationService` / `DocumentService` / `NotificationService` / `DataScopeService` / 法人既定 `WorkCalendarDay`
 - 作らない: 新Customer master、新portal chain、第二outbox、`renewal_decision` writer
 
@@ -42,12 +42,13 @@ portal userは DataScope/組織scope/menu を持たない。母集団は `portal
 | `m_service_sla_calendar_link` | policyまたはtenant→`m_work_calendar.id` | 任意。未設定は土日fallback |
 | `t_service_request` | 問い合わせ | customer_id必須。FK `m_customer` |
 | `t_service_sla_clock` | round別計時 | UNIQUE(request_id, round_no)。過去round不変 |
+| `t_service_sla_escalation` | SLA warning/breach通知台帳 | 受信者不在・部分失敗を永続化。dedupe_key一意、retry可能 |
 | `t_service_comment` | スレッド | visibility NOT NULL |
 | `t_service_attachment_link` | document_id + visibility | 実体は台帳 |
 | `t_service_state_event` | append-only遷移 | UPDATE/DELETE禁止（mapperで拒否） |
 | `t_customer_csat` | 1 request 1回答 | UNIQUE(service_request_id) |
 | `t_customer_qbr` / `t_customer_qbr_action` | 内部定例会 | portal非公開 |
-| `t_customer_health_snapshot` | 日次snapshot | UNIQUE(customer_id, snapshot_date)。訂正は新行またはcorrection event |
+| `t_customer_health_snapshot` | 日次snapshot | UNIQUE(customer_id, snapshot_date, version_no)。訂正は非空理由付きINSERT専用revision。DB triggerでもUPDATE/DELETEを拒否 |
 
 同期対象（F1 DoD）: 増分Flyway、V1（重複ADD禁止）、`sql/schema-service-desk-h2.sql`、`application-test.yml` schema-locations、entity、MySQL smoke。
 
@@ -63,7 +64,7 @@ portal userは DataScope/組織scope/menu を持たない。母集団は `portal
 3. pause延長は **pauseの営業分数** を deadline へ同じ算法で加算。壁時計Δtをそのまま足さない
 4. reopenは新clock insertのみ。旧clockの breached/first_responded_at/resolved_at はUPDATEしない
 
-Clockは注入する。`LocalDateTime.now()` 直呼びは禁止。
+Clockは注入する。`LocalDateTime.now()` 直呼びは禁止。production requestのcreate/resume/reopenはtenant、ZoneId、Instant、organization/legalEntityを持つexecution contextを明示的に渡す。
 
 ---
 
@@ -77,7 +78,7 @@ Clockは注入する。`LocalDateTime.now()` 直呼びは禁止。
 | 未解決P1 1件 | −15 | — |
 | 30日SLA違反（response or resolve、request単位で1カウント）1件 | −10 | clock無しはmissing |
 | AR延滞（既存Invoice overdue>0が1件以上） | −25 | 請求0件はmissing（減点しない） |
-| CSAT平均 <3.0 | −15、3.0–3.9は−5、≥4.0は0 | 回答0はmissing（減点しない） |
+| 直近90日CSAT平均 <3.0 | −15、3.0–3.9は−5、≥4.0は0 | 回答0はmissing（減点しない） |
 | 60日QBR/内部公開接触なし | −10 | QBR機能未使用期間はmissingとして表示し、運用開始前は減点しない |
 
 `score = max(0, min(100, 100 + Σ減点))`。
@@ -95,7 +96,7 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 | SLA clock | 最大round_no | 過去round行 | 各roundが不変 | 指定round、無指定は最新 | 未計時 |
 | breach | 当該roundのflag | 過去round | — | 当該round | 0=未超過（未評価ではない。未評価はstatus=RUNNINGかつnow<deadline） |
 | CSAT | 1行 | — | 回答時刻 | 現在 | **未回答**（回答可） |
-| health | 最新snapshot_date | 日次行 | snapshot | 指定日 | 未算定 |
+| health | 最新snapshot_date | 日次行 | snapshot | 指定日（as-of未実装の過去targetは拒否） | 未算定 |
 | QBR action | status列 | 監査 | — | 現在 | owner/due未設定 |
 | 休日 | 法人カレンダー当日 | カレンダー版 | — | asOf日付 | カレンダー未設定=土日fallback+missing |
 
@@ -117,13 +118,13 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 
 | 状態 | 許可遷移 | 防重 | competing writer | rollback |
 |---|---|---|---|---|
-| RECEIVED | IN_PROGRESS, WAITING_CUSTOMER, CLOSED | 状態CAS + version | 同時着手 | 409 |
+| RECEIVED | IN_PROGRESS, WAITING_CUSTOMER, CLOSED | 状態CAS + HTTP必須version | 同時着手 | 409 |
 | IN_PROGRESS | WAITING_CUSTOMER, RESOLVED, CLOSED | 同上 | 同時解決 | 409 |
 | WAITING_CUSTOMER | IN_PROGRESS, RESOLVED, CLOSED | CAS + pause/resume | portal返信と内部操作 | 先着1 |
 | RESOLVED | CLOSED, （コマンドREOPEN→IN_PROGRESS） | CAS + UNIQUE round | 顧客reopenと内部close | 先着1 |
 | CLOSED | コマンドREOPEN→IN_PROGRESS | CAS + UNIQUE round | 二重reopen | 2件目失敗 |
 | CSAT | 1回 | UNIQUE(request_id) | 二重POST | 409 |
-| SLA scheduler | breach flag 0→1 | 条件付きUPDATE flag=0 | 二重ノード | ShedLock + dedupe_key |
+| SLA scheduler | warning/breachをclock version CAS | 条件付きUPDATE（version/status）＋通知台帳dedupe | 二重ノード・配信失敗 | ShedLock + dedupe_key + retry |
 
 `COMPLETED` clockのdeadline/breachをpauseや再計算で書き換えない。
 
@@ -158,8 +159,8 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 
 - `ServiceSlaScheduler`: cron設定可、`@SchedulerLock`
 - テストから `processSlaMonitoring(asOf)` を直接呼ぶ（test profileはscheduling無効）
-- 通知type: `SERVICE_DESK_SLA_WARNING` / `SERVICE_DESK_SLA_BREACH`
-- 宛先: owner_user_id。未設定時は顧客の主担当営業（`EngineerSales`ではなく契約 `sales_user_id` または顧客DataScopeの営業）。宛先0なら管理者へescalationし、黙って捨てない
+- 通知type: `SLA_WARNING` / `SLA_BREACH` / `SLA_BREACH_CONTINUING`。warning、初回breach、継続breach、受信者不在/配信失敗retryを同一dedupe台帳で管理する。
+- 宛先: owner_user_id。未設定時は顧客の主担当営業（`EngineerSales`ではなく契約 `sales_user_id` または顧客DataScopeの営業）。宛先0または一部配信失敗でもescalation台帳へ永続化し、再試行で黙って捨てない。
 - `NotificationLinks.SERVICE_DESK_REQUEST` を追加し `NotificationLinkRouteTest` 対象にする
 
 ---
@@ -175,7 +176,7 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 ## 8. テスト最低セット
 
 - 金〜月の祝日跨ぎSLA、営業時間外align、pause営業分数、reopen旧round不変
-- scheduler二重起動（lock）とbreach通知dedupe、継続breachの別key
+- scheduler二重起動（lock）、warning/初回/継続breachのdedupe、受信者不在retry、MySQL実状態CAS競合、snapshot trigger/版番号
 - 二重CSAT 409、portal A→B の request/comment/csat/count/export/download 404
 - INTERNALがportal JSONに無い（フィールド名assert）
 - healthがrenewal_decisionを変えない
@@ -186,4 +187,4 @@ RenewalCalendarは読取。`updateRenewalDecision` を呼ばないcontract test�
 
 ## 9. 先行WIPとの差分（実装再開時の是正リスト）
 
-`inventory.md` §8。F1以降を完了扱いにする前に、計算機の休日/Clock、ヘルス減点モデル、添付provider、NotificationLinks、policy UNIQUE、portal listテンプレート、snapshot overwrite、配点の三文書一致を閉じる。
+`inventory.md` §8。計算機の休日/Clock、ヘルス減点モデル（P0 -30/P1 -15、CSAT 90日）、添付provider、NotificationLinks、policy UNIQUE、portal listテンプレート、snapshot append-only/版番号、状態CAS、SLA retry、配点の三文書一致を閉じる。

@@ -200,6 +200,7 @@ public class ServiceDeskEntityMapperTest {
                 .snapshotHash("dummy-hash-1234567890abcdef")
                 .isCurrent(true)
                 .actorType("SYSTEM")
+                .revisionReason("初回スナップショット")
                 .createdAt(LocalDateTime.now())
                 .build();
         healthSnapshotMapper.insert(health);

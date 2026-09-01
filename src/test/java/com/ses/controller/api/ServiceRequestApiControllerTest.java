@@ -147,6 +147,7 @@ public class ServiceRequestApiControllerTest {
         ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
                 .toStatus("IN_PROGRESS")
                 .reason("調査着手")
+                .version(testRequest.getVersion())
                 .build();
 
         mockMvc.perform(post("/api/service-desk/requests/" + testRequest.getId() + "/status")
@@ -160,6 +161,22 @@ public class ServiceRequestApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("IN_PROGRESS"))
                 .andExpect(jsonPath("$.data.firstResponseAt").exists());
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("HTTP状態変更はversionなしを拒否すること")
+    void testChangeStatus_requiresVersion() throws Exception {
+        ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
+                .toStatus("IN_PROGRESS")
+                .reason("調査着手")
+                .build();
+
+        mockMvc.perform(post("/api/service-desk/requests/" + testRequest.getId() + "/status")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(statusReq)))
+                .andExpect(jsonPath("$.code").value(400));
     }
 
     @Test

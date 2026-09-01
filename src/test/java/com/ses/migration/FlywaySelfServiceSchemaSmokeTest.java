@@ -55,7 +55,7 @@ class FlywaySelfServiceSchemaSmokeTest {
                 .migrate();
 
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
-            // ---- 最新version=143（repeatable migration（version=NULL）を除く） ----
+            // ---- 最新version=144（repeatable migration（version=NULL）を除く） ----
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
             assertEquals("144", latestVersion, "最新のマイグレーションバージョンは144であること");

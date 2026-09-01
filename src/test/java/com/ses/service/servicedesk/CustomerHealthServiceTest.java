@@ -23,11 +23,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 
@@ -121,7 +123,7 @@ class CustomerHealthServiceTest {
                 .build();
         customerMapper.insert(atRiskCustomer);
 
-        // 未解決 P0 リクエスト (減点: -20点)
+        // 未解決 P0 リクエスト (減点: -30点)
         ServiceRequestCreateRequest openReq = ServiceRequestCreateRequest.builder()
                 .customerId(atRiskCustomer.getId())
                 .category("SYSTEM")
@@ -203,6 +205,27 @@ class CustomerHealthServiceTest {
     }
 
     @Test
+    @DisplayName("SecurityContextなしのスナップショット直接呼出しはデフォルト拒否されること")
+    void testGenerateMonthlySnapshot_withoutSecurityContext_throws403() {
+        SecurityContextHolder.clearContext();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                customerHealthService.generateMonthlySnapshot(YearMonth.now().toString(), "未認証実行")
+        );
+
+        assertEquals(403, ex.getCode());
+    }
+
+    @Test
+    @DisplayName("明示されたscheduler実行主体だけがSecurityContextなしでスナップショットを実行できること")
+    void testGenerateMonthlySnapshot_controlledScheduler_isAllowed() {
+        SecurityContextHolder.clearContext();
+
+        customerHealthService.generateMonthlySnapshot(YearMonth.now().toString(), "定期実行",
+                SnapshotExecutionContext.systemScheduler());
+    }
+
+    @Test
     @DisplayName("不正なtargetMonth形式は400例外")
     @WithMockUser(username = "admin", roles = {"管理者"})
     void testGenerateMonthlySnapshot_invalidMonth_throws400() {
@@ -221,7 +244,7 @@ class CustomerHealthServiceTest {
     @DisplayName("同一月スナップショットの冪等性とデータ変更時の版数インクリメント(非破壊リビジョン)")
     @WithMockUser(username = "admin", roles = {"管理者"})
     void testMonthlySnapshot_idempotencyAndVersionIncrement() {
-        String targetMonth = "2026-08";
+        String targetMonth = YearMonth.now().toString();
         LocalDate snapshotDate = LocalDate.parse(targetMonth + "-01");
 
         // 1回目実行
@@ -254,7 +277,7 @@ class CustomerHealthServiceTest {
                 .build();
         serviceRequestService.createRequest(criticalReq, 100L, false, null);
 
-        // 3回目実行（データ変化あり） -> 非破壊で version 2 が作成され、旧版は is_current = false になる
+        // 3回目実行（データ変化あり） -> 非破壊で version 2 が追記され、旧版は更新されない
         customerHealthService.generateMonthlySnapshot(targetMonth, "障害発生に伴う修正スナップショット");
         List<CustomerHealthSnapshot> healthySnapshots = snapshotMapper.selectList(
                 new LambdaQueryWrapper<CustomerHealthSnapshot>()
@@ -267,7 +290,7 @@ class CustomerHealthServiceTest {
         CustomerHealthSnapshot v2 = healthySnapshots.get(1);
 
         assertEquals(1, v1.getVersionNo());
-        assertEquals(Boolean.FALSE, v1.getIsCurrent(), "旧版は current=false に更新されること");
+        assertEquals(Boolean.TRUE, v1.getIsCurrent(), "旧版が追記専用で保持されること");
 
         assertEquals(2, v2.getVersionNo());
         assertEquals(Boolean.TRUE, v2.getIsCurrent(), "新版は current=true であること");

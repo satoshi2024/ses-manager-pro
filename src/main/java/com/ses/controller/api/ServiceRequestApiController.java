@@ -15,6 +15,9 @@ import com.ses.entity.ServiceSlaPolicy;
 import com.ses.mapper.ServiceSlaPolicyMapper;
 import com.ses.service.servicedesk.ServiceRequestExportService;
 import com.ses.service.servicedesk.ServiceRequestService;
+import com.ses.service.servicedesk.ServiceDeskExecutionContext;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +32,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -42,6 +47,8 @@ public class ServiceRequestApiController {
     private final ServiceRequestService serviceRequestService;
     private final ServiceSlaPolicyMapper slaPolicyMapper;
     private final ServiceRequestExportService exportService;
+    private final AccountingTimezoneResolver timezoneResolver;
+    private final Clock clock;
 
     /**
      * 問い合わせ一覧検索（ページネーション・DataScope適用）
@@ -74,7 +81,9 @@ public class ServiceRequestApiController {
     @PostMapping
     public ApiResult<ServiceRequest> create(@Valid @RequestBody ServiceRequestCreateRequest req) {
         Long userId = SecurityUtils.currentUserId();
-        ServiceRequest created = serviceRequestService.createRequest(req, userId, false, null);
+        ServiceRequest created = serviceRequestService.createRequest(req, false, null,
+                executionContext(userId, "INTERNAL_USER", usernameOrDefault(), "INTERNAL_REQUEST",
+                        req.getOrganizationId(), req.getLegalEntityId()));
         return ApiResult.success(created);
     }
 
@@ -94,7 +103,9 @@ public class ServiceRequestApiController {
     public ApiResult<Void> changeStatus(@PathVariable Long id, @Valid @RequestBody ServiceRequestStatusChangeRequest req) {
         Long userId = SecurityUtils.currentUserId();
         String username = SecurityUtils.currentUsername();
-        serviceRequestService.changeStatus(id, req, userId, "INTERNAL_USER", username != null ? username : "内部管理者");
+        serviceRequestService.changeStatus(id, req,
+                executionContext(userId, "INTERNAL_USER", username != null ? username : "内部管理者",
+                        "INTERNAL_STATUS", req.getOrganizationId(), req.getLegalEntityId()));
         return ApiResult.success(null);
     }
 
@@ -105,9 +116,9 @@ public class ServiceRequestApiController {
     public ApiResult<ServiceCommentDto> addComment(@PathVariable Long id, @Valid @RequestBody ServiceCommentCreateRequest req) {
         Long userId = SecurityUtils.currentUserId();
         String username = SecurityUtils.currentUsername();
-        ServiceCommentDto commentDto = serviceRequestService.addComment(
-                id, req, userId, "INTERNAL_USER", username != null ? username : "内部ユーザー", false
-        );
+        ServiceCommentDto commentDto = serviceRequestService.addComment(id, req, false,
+                executionContext(userId, "INTERNAL_USER", username != null ? username : "内部ユーザー",
+                        "INTERNAL_COMMENT", null, null));
         return ApiResult.success(commentDto);
     }
 
@@ -137,5 +148,17 @@ public class ServiceRequestApiController {
         String filename = "service_requests_" + LocalDate.now() + ".csv";
         response.setHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
         exportService.exportRequestsToCsv(response.getOutputStream(), keyword, status, priority, category, customerId);
+    }
+
+    private String usernameOrDefault() {
+        String username = SecurityUtils.currentUsername();
+        return username != null ? username : "内部管理者";
+    }
+
+    private ServiceDeskExecutionContext executionContext(Long actorId, String actorType, String actorName,
+                                                         String source, Long organizationId, Long legalEntityId) {
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        return new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
+                Instant.now(clock), organizationId, legalEntityId, actorId, actorType, actorName, source);
     }
 }

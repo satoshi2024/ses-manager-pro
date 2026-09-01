@@ -14,24 +14,27 @@ import com.ses.dto.servicedesk.ServiceCommentDto;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.entity.Contract;
 import com.ses.entity.CustomerContact;
-import com.ses.entity.DocumentVersion;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerContactMapper;
-import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.portal.PortalLoginUser;
-import com.ses.service.FileStorageService;
+import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.portal.PortalAuthorizationService;
+import com.ses.service.security.impl.FileScopeValidationService;
+import com.ses.service.servicedesk.ServiceDeskExecutionContext;
 import com.ses.service.servicedesk.ServiceRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -45,6 +48,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URLConnection;
+import java.io.InputStream;
+import java.time.Clock;
+import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
@@ -62,12 +68,14 @@ public class PortalCustomerServiceDeskApiController {
     private final ServiceRequestService serviceRequestService;
     private final PortalAuthorizationService authorizationService;
     private final ServiceAttachmentLinkMapper attachmentLinkMapper;
-    private final DocumentVersionMapper documentVersionMapper;
-    private final FileStorageService fileStorageService;
+    private final DocumentService documentService;
+    private final FileScopeValidationService fileScopeValidationService;
     private final ContractMapper contractMapper;
     private final ProjectMapper projectMapper;
     private final CustomerContactMapper contactMapper;
     private final EngineerMapper engineerMapper;
+    private final AccountingTimezoneResolver timezoneResolver;
+    private final Clock clock;
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -176,7 +184,10 @@ public class PortalCustomerServiceDeskApiController {
                 .ownerUserId(null)
                 .build();
 
-        ServiceRequest created = serviceRequestService.createRequest(internalReq, null, true, userId);
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        ServiceRequest created = serviceRequestService.createRequest(internalReq, true, userId,
+                new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
+                        Instant.now(clock), null, null, userId, "PORTAL_USER", portalUserName(), "PORTAL_REQUEST"));
         PortalServiceRequestDto dto = serviceRequestService.getPortalDetail(created.getId(), custId);
         return ApiResult.success(dto);
     }
@@ -196,9 +207,11 @@ public class PortalCustomerServiceDeskApiController {
                 .visibility("PORTAL_VISIBLE")
                 .build();
 
-        ServiceCommentDto commentDto = serviceRequestService.addComment(
-                id, internalReq, portalUserId(), "PORTAL_USER", portalUserName(), true
-        );
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        ServiceCommentDto commentDto = serviceRequestService.addComment(id, internalReq, true,
+                new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
+                        Instant.now(clock), null, null, portalUserId(), "PORTAL_USER", portalUserName(),
+                        "PORTAL_COMMENT"));
 
         PortalServiceCommentDto portalDto = PortalServiceCommentDto.builder()
                 .id(commentDto.getId())
@@ -238,21 +251,15 @@ public class PortalCustomerServiceDeskApiController {
             throw BusinessException.of(404, "error.notFound");
         }
 
-        // 3. DocumentVersion 取得
-        DocumentVersion version = documentVersionMapper.selectOne(
-                new LambdaQueryWrapper<DocumentVersion>()
-                        .eq(DocumentVersion::getDocumentId, link.getDocumentId())
-                        .orderByDesc(DocumentVersion::getVersionNo)
-                        .last("LIMIT 1"));
-        if (version == null || version.getStorageKey() == null) {
+        // 3. DocumentService/FileScopeValidationService 経由で最新版・CLEAN・顧客scopeを検証
+        String storageKey = documentService.getVersionStorageKey(link.getDocumentId(), null);
+        if (storageKey == null) {
             throw BusinessException.of(404, "error.notFound");
         }
-
-        // 4. ストレージから読み込み
-        Resource resource = fileStorageService.load(version.getStorageKey());
-        if (resource == null || !resource.exists()) {
-            throw BusinessException.of(404, "error.notFound");
-        }
+        fileScopeValidationService.assertPortalServiceRequestDownloadAllowed(
+                storageKey, id, customerId(), link.getDocumentId());
+        InputStream stream = documentService.download(link.getDocumentId(), null);
+        Resource resource = new InputStreamResource(stream);
 
         // 5. Content-Type 判定
         String fileName = link.getFileName() != null ? link.getFileName() : "attachment";

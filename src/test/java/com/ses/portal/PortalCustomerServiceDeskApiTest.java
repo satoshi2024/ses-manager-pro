@@ -7,11 +7,16 @@ import com.ses.dto.portal.PortalServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
+import com.ses.entity.DocumentVersion;
 import com.ses.entity.Engineer;
 import com.ses.entity.PortalOrganization;
+import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ServiceAttachmentLinkMapper;
+import com.ses.service.DocumentService;
 import com.ses.service.servicedesk.ServiceRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,14 +28,19 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayInputStream;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -55,6 +65,15 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
 
     @Autowired
     protected ServiceRequestService serviceRequestService;
+
+    @Autowired
+    private DocumentVersionMapper documentVersionMapper;
+
+    @Autowired
+    private ServiceAttachmentLinkMapper attachmentLinkMapper;
+
+    @MockBean
+    private DocumentService documentService;
 
     @Override
     protected JdbcTemplate jdbcTemplate() {
@@ -285,5 +304,56 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                         .content(objectMapper.writeValueAsString(reqWithOtherEng)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("ポータル添付はDocumentServiceとCLEAN検証を通過した場合だけダウンロードできること")
+    void testAttachmentDownload_requiresCleanDocumentVersion() throws Exception {
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(9001L);
+        version.setVersionNo(1);
+        version.setStorageKey("service-desk-clean-" + unique());
+        version.setScanStatus("CLEAN");
+        version.setOriginalName("portal-report.pdf");
+        version.setSha256("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        version.setSourceType("MANUAL");
+        version.setBusinessKey("portal-service-desk-" + unique());
+        version.setVersionDiscriminator("v1");
+        version.setCreatedBy(1L);
+        documentVersionMapper.insert(version);
+
+        ServiceAttachmentLink link = ServiceAttachmentLink.builder()
+                .serviceRequestId(customerARequest.getId())
+                .documentId(version.getDocumentId())
+                .visibility("PORTAL_VISIBLE")
+                .fileName("portal-report.pdf")
+                .fileSize(3L)
+                .build();
+        attachmentLinkMapper.insert(link);
+
+        when(documentService.getVersionStorageKey(eq(version.getDocumentId()), eq(null)))
+                .thenReturn(version.getStorageKey());
+        when(documentService.download(eq(version.getDocumentId()), eq(null)))
+                .thenReturn(new ByteArrayInputStream("PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId()
+                        + "/attachments/" + link.getId() + "/download")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes("PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                                org.hamcrest.Matchers.containsString("portal-report.pdf")));
+
+        verify(documentService).getVersionStorageKey(version.getDocumentId(), null);
+        verify(documentService).download(version.getDocumentId(), null);
+
+        version.setScanStatus("PENDING");
+        documentVersionMapper.updateById(version);
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId()
+                        + "/attachments/" + link.getId() + "/download")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
     }
 }

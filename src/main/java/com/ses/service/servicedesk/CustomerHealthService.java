@@ -28,13 +28,16 @@ public interface CustomerHealthService {
 
     /**
      * 月次スナップショット生成実行（全顧客対象）
-     * 権限：管理者またはSYSTEMのみ
+     * 互換入口。認証済み管理者のHTTP実行に限定する。
      */
     void generateMonthlySnapshot(String targetMonth);
 
     /**
      * 月次スナップショット生成実行（理由指定・全顧客対象）
-     * 権限：管理者またはSYSTEMのみ
+     * 互換入口。認証済み管理者のHTTP実行に限定する。
      */
     void generateMonthlySnapshot(String targetMonth, String reason);
+
+    /** 実行主体を明示したスナップショット生成経路。 */
+    void generateMonthlySnapshot(String targetMonth, String reason, SnapshotExecutionContext executionContext);
 }

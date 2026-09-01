@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * NF-02 カスタマーサクセス・サービスデスクのMySQL smokeテスト。
- * V136のDDL shape・seed・FKを実MySQLで検証する。
+ * V144のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -30,7 +30,7 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
             .withPassword("ses");
 
     @Test
-    void V136のNF02_shapeがMySQLで成立する() throws Exception {
+    void V144のNF02_shapeがMySQLで成立する() throws Exception {
         Flyway.configure()
                 .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .locations("classpath:db/migration")
@@ -40,10 +40,11 @@ class FlywayCustomerSuccessServiceDeskSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("136", latestVersion, "最新マイグレーションバージョンは136であること");
+            assertEquals("144", latestVersion, "最新マイグレーションバージョンは144であること");
 
             for (String table : new String[]{
                     "m_service_sla_policy", "t_service_request", "t_service_sla_clock",
+                    "t_service_sla_escalation",
                     "t_service_attachment_link", "t_service_comment", "t_service_state_event",
                     "t_customer_csat", "t_customer_qbr", "t_customer_qbr_action",
                     "t_customer_health_snapshot"}) {

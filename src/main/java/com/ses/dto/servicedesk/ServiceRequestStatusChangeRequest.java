@@ -1,6 +1,7 @@
 package com.ses.dto.servicedesk;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,4 +21,12 @@ public class ServiceRequestStatusChangeRequest {
 
     /** 変更理由（解決・終了・差戻し等の理由） */
     private String reason;
+
+    /** 読み取り時点のサービスリクエストversion。HTTP状態変更では必須。 */
+    @NotNull(message = "サービスリクエストversionは必須です")
+    private Integer version;
+
+    private Long organizationId;
+
+    private Long legalEntityId;
 }

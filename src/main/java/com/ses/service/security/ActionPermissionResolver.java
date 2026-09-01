@@ -254,6 +254,10 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/customer-success/qbrs")) {
             return action("customer-qbr", method);
         }
+        // 顧客ヘルスは2つのURL aliasで公開しているため、snapshot/viewとも同一actionへ正規化する。
+        if (matchesPrefix(uri, "/api/service-desk/health")) {
+            return "customer-health.view";
+        }
         if (matchesPrefix(uri, "/api/service-desk/policies")) {
             return "service-desk.view";
         }

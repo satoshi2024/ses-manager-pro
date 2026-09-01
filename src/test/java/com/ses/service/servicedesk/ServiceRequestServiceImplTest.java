@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -177,6 +178,76 @@ class ServiceRequestServiceImplTest {
         assertNotNull(clockRound1);
         assertEquals("COMPLETED", clockRound1.getStatus());
         assertNotNull(clockRound1.getResolvedAt());
+    }
+
+    @Test
+    @DisplayName("許可されていない状態遷移とstale versionは409で拒否され、状態イベントを追加しないこと")
+    void testStatusTransitionMatrixAndCas() {
+        ServiceRequest created = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("状態競合テスト")
+                .description("状態機械とCASの検証")
+                .build(), 100L, false, null);
+
+        long initialEvents = stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId()));
+
+        BusinessException invalid = assertThrows(BusinessException.class, () ->
+                serviceRequestService.changeStatus(created.getId(),
+                        ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").version(0).build(),
+                        100L, "INTERNAL_USER", "管理者"));
+        assertEquals(409, invalid.getCode());
+        assertEquals(initialEvents, stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId())));
+
+        serviceRequestService.changeStatus(created.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").version(0).build(),
+                100L, "INTERNAL_USER", "管理者");
+        long afterWinnerEvents = stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId()));
+
+        BusinessException stale = assertThrows(BusinessException.class, () ->
+                serviceRequestService.changeStatus(created.getId(),
+                        ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").version(0).build(),
+                        100L, "INTERNAL_USER", "管理者"));
+        assertEquals(409, stale.getCode());
+        assertEquals(afterWinnerEvents, stateEventMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.ServiceStateEvent>()
+                .eq(com.ses.entity.ServiceStateEvent::getServiceRequestId, created.getId())));
+    }
+
+    @Test
+    @DisplayName("WAITING_CUSTOMERから直接解決しても停止区間を営業分で精算すること")
+    void testWaitingCustomerDirectResolveClosesPauseInterval() {
+        ServiceRequest created = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("停止区間精算テスト")
+                .description("解決遷移時のSLA停止精算")
+                .build(), 100L, false, null);
+
+        serviceRequestService.changeStatus(created.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                100L, "INTERNAL_USER", "管理者");
+        serviceRequestService.changeStatus(created.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("WAITING_CUSTOMER").build(),
+                100L, "INTERNAL_USER", "管理者");
+        ServiceSlaClock paused = slaClockMapper.selectOne(new LambdaQueryWrapper<ServiceSlaClock>()
+                .eq(ServiceSlaClock::getServiceRequestId, created.getId())
+                .eq(ServiceSlaClock::getRoundNo, 1));
+        assertEquals("PAUSED", paused.getStatus());
+        assertNotNull(paused.getLastPausedAt());
+
+        serviceRequestService.changeStatus(created.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").build(),
+                100L, "INTERNAL_USER", "管理者");
+
+        ServiceSlaClock completed = slaClockMapper.selectById(paused.getId());
+        assertEquals("COMPLETED", completed.getStatus());
+        assertNull(completed.getLastPausedAt());
+        assertNotNull(completed.getTotalPauseMinutes());
     }
 
     @Test

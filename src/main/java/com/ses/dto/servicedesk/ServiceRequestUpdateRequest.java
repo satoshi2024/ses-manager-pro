@@ -38,4 +38,7 @@ public class ServiceRequestUpdateRequest {
     private String description;
 
     private Long ownerUserId;
+
+    /** 読み取り時点のversion。 */
+    private Integer version;
 }
