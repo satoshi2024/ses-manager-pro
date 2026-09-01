@@ -8,6 +8,7 @@
 | Worktree | `C:\work\ses-fix-nf02-main-integration-hardening` |
 | Branch / remote | `fix/nf02-main-integration-hardening` / `origin/fix/nf02-main-integration-hardening` |
 | Base branch / commit | `origin/main` / `118a1046`（PR #95 後。旧 `4c93b558` / `6fc44e15` は置換） |
+| Head | `d721b76cc01f0cdf128a321e745611f40659fb1a` |
 | 公式Status | **DISCOVERY**（Owner未定、DG-02未APPROVED）。IMPLEMENTING/REVIEWINGではない |
 | Owner | 未定（開工プレースホルダ `<OWNER>` 未置換） |
 | Approved scope | 未指定（`<APPROVED_SCOPE>` 未置換） |
@@ -101,7 +102,7 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 - approved plan / spec / tasks: `.kiro/specs/customer-success-service-desk/`
 - requirements / design / tasks / inventory / 本ledger
 - 対応表: §4に記載。旧台帳の47件PASSは引き継がず、本branchで実測したテスト結果だけを証拠とする。
-- remote Head: rebase後commit（Base `origin/main@118a1046`、migration **V147**）。
+- remote Head: `d721b76cc01f0cdf128a321e745611f40659fb1a`（Base `origin/main@118a1046`、migration **V147**）。
 - 実装diff: V147 P0修正、snapshot fail-closed/append-only、execution context/CAS、SLA warning/breach/retry、customer/契約からの法人既定カレンダー解決、portal CLEAN scope、PR#95 digital_invoice/main衝突解消。
 
 ## 8. 本branchで実測したNF-02証拠（2026-09-01 rebase onto 118a1046）
