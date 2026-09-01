@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title th:text="#{menu.management.copilot}">経営コパイロット</title>
+    <style>
+        #copilot-thread {
+            min-height: 320px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        .copilot-metric-card {
+            border: 1px solid var(--bs-border-color, #2b3035);
+        }
+        .copilot-msg-user {
+            background: rgba(13, 110, 253, 0.15);
+        }
+        .copilot-msg-assistant {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        @media (max-width: 390px) {
+            .copilot-header h4 { font-size: 1.1rem; }
+            .copilot-input-row .btn-label { display: none; }
+            #copilot-question { font-size: .9rem; }
+            .copilot-metric-card .metric-value { font-size: 1rem; }
+        }
+    </style>
+</head>
+<body>
+<div layout:fragment="content" class="container-fluid py-4" id="copilot-page"
+     th:attr="data-enabled=${copilotEnabled}">
+    <div class="d-flex justify-content-between align-items-center mb-4 copilot-header">
+        <div>
+            <h4 class="text-white fw-bold mb-1">
+                <i class="bi bi-robot me-2 text-accent-blue"></i>
+                <span th:text="#{copilot.title}">経営コパイロット</span>
+            </h4>
+            <p class="text-muted small mb-0" th:text="#{copilot.subtitle}">経営指標を質問形式で参照します（数値はシステム正本から表示）</p>
+        </div>
+    </div>
+
+    <div th:if="${!copilotEnabled}" class="alert alert-warning border-warning-subtle" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        <span th:text="#{copilot.disabled}">経営コパイロットは現在無効化されています。</span>
+    </div>
+
+    <div class="card bg-card border-dark shadow-sm mb-3">
+        <div class="card-body p-0">
+            <div id="copilot-thread" class="p-3 d-flex flex-column gap-3">
+                <div class="text-muted small text-center py-4" id="copilot-empty" th:text="#{copilot.empty}">
+                    質問を入力して送信してください。
+                </div>
+            </div>
+        </div>
+        <div class="card-footer bg-secondary border-dark">
+            <form id="copilot-form" class="row g-2 align-items-end copilot-input-row" onsubmit="return false;">
+                <div class="col">
+                    <label for="copilot-question" class="form-label text-muted small mb-1" th:text="#{copilot.placeholder}">質問</label>
+                    <textarea id="copilot-question" class="form-control bg-dark border-secondary text-light" rows="2"
+                              maxlength="2000" th:placeholder="#{copilot.placeholder.example}"
+                              th:disabled="${!copilotEnabled}"></textarea>
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="copilot-send" class="btn btn-primary" th:disabled="${!copilotEnabled}">
+                        <i class="bi bi-send me-1"></i><span class="btn-label" th:text="#{copilot.send}">送信</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div layout:fragment="page-js">
+    <script th:src="@{/js/modules/copilot.js}"></script>
+</div>
+</body>
+</html>

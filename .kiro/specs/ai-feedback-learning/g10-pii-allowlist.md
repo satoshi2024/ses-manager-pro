@@ -38,6 +38,7 @@
 | `INGEST_PROJECT` | Project parse | 同上 | 対象外 |
 | `INGEST_BP_AVAILABILITY` | BP availability parse | 同上 | 対象外 |
 | `CHAT` | `POST /api/ai/chat` | ユーザー文は untrusted。コンテキストは本allowlistのみ | 対象外 |
+| `MANAGEMENT_COPILOT` | `POST /api/copilot/query` | **catalog→正本service→typed result**。summaryのみLLM。評価ループ対象外 | mock/ruleのみ。実providerはgate後 |
 
 ## 3. Outcome source（先行条件の確認）
 

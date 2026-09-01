@@ -339,6 +339,16 @@
       "runtimeAllowedWithoutGate": false
     }
   ],
+  "managementCopilot": {
+    "useCase": "MANAGEMENT_COPILOT",
+    "evaluationLoop": false,
+    "productionExternalSend": false,
+    "allowedRedactedFields": [
+      "catalog.queryId",
+      "catalog.catalogVersion",
+      "summary.claimKey"
+    ]
+  },
   "outcomes": {
     "winExistsNotCount": true,
     "winSources": ["t_proposal.status=成約", "t_opportunity.stage=受注"],

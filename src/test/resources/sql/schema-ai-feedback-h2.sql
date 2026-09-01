@@ -152,6 +152,19 @@ WHERE NOT EXISTS (
     WHERE use_case = 'CHAT' AND status = 'ACTIVE' AND deleted_flag = 0
 );
 
+INSERT INTO m_ai_artifact_version (
+    use_case, provider, model_name, prompt_version, rule_version, config_hash,
+    status, status_version, activated_at, deleted_flag
+)
+SELECT 'MANAGEMENT_COPILOT', 'mock', 'mock-management-copilot', 'nf08-f1', 'catalog-v1',
+       '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+       'ACTIVE', 0, CURRENT_TIMESTAMP, 0
+FROM DUAL
+WHERE NOT EXISTS (
+    SELECT 1 FROM m_ai_artifact_version
+    WHERE use_case = 'MANAGEMENT_COPILOT' AND status = 'ACTIVE' AND deleted_flag = 0
+);
+
 -- T112: 提案へ AI trace を保存。H2 は schema-locations 再実行のため IF NOT EXISTS。
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_trace_id VARCHAR(36);
 ALTER TABLE t_proposal ADD COLUMN IF NOT EXISTS ai_item_id BIGINT;

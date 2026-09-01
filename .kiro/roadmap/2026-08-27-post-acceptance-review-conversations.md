@@ -287,30 +287,26 @@ data lifecycle表、未確定法務gate、PASS/CONDITIONAL PASS/FAIL、本番処
 
 ## R-NF08 — `ai-management-copilot` Review
 
+> **詳細は spec 正本へ委譲**: `.kiro/specs/ai-management-copilot/review-conversations.md`
+> （R-Plan / R-F1〜B2 増分 / R-NF08 最終 / SNF横断 §5）。本節は PR フローと要約のみ。
+
 ```text
 これは `ai-management-copilot` の独立AI safety/data scope Reviewです。Base=<BASE_COMMIT>、Head=<HEAD_COMMIT>。
-file変更は禁止です。AGENTS.md、NF-08/DG-08、対象spec/ledger、AI allow-list/gateway/evaluation、
-semantic catalog、各正本集計service、data scope、provider契約gate、diffを読んでください。
+Review全文は `.kiro/specs/ai-management-copilot/review-conversations.md` §2（Plan）および §4（R-NF08最終）を
+新しいReview対話へコピーして使用してください。
 
-専用Review worktreeで`origin/codex/ai-management-copilot`の固定HeadをReviewします。通常checkout/実装worktreeは禁止です。
+file変更は禁止。AGENTS.md、NF-08/DG-08、対象spec（README/requirements/design/tasks/review-ledger/
+start-conversations/review-conversations）、AI allow-list/gateway/evaluation、semantic catalog、
+各正本集計service、DataScope、provider契約gate、diffを読んでください。
+
+専用Review worktreeで`origin/codex/ai-management-copilot`の固定HeadをReview。通常checkout/実装worktreeは禁止。
 Base branch=<BASE_BRANCH>。PASSかつremote Head一致時だけPRを`gh`で自動作成/更新し、mergeしません。
-最初にPlan Review（approved use case/Decision Gate/requirements/design/tasks/ledger）を行い、PLAN PASS後にAI/code Review、
-PLAN/IMPLEMENTATION双方PASS後だけPR作成へ進んでください。
+Stage A Plan Review → Stage B Implementation Review。双方PASS後のみPR。
 
-重点Review:
-- LLM生成SQL/table/column/service名の任意実行経路が存在しないか。
-- intent→catalog→typed parameter→scope→service→typed result→summary→citationの各境界。
-- 画面/export/AI値の口径、円/割合/期間/timezone/freshness/confirmed/forecast/NULL/0。
-- source linkと個票再認可、回答文/error/log/run/feedbackからscope外ID/PIIの推測。
-- prompt injection、DB本文のinstruction化、巨大result、token/cost limit、provider retention/越境gate。
-- model/prompt/catalog/data version、latency/cost、feedback/outcome、回答再現性。
-- AI回答が業務状態を自動更新せず、command候補が確認/承認境界を通るか。
-- mock/rule/real providerのfeature flagと本番gate。
+重点: catalog固定pipeline、正本service、scope A/B、metric contract、PII/provider gate、
+モデル未決定時の deterministic core / summary層分離、mock/rule/feature flag、本番gate。
 
-独立test:
-- tenant/scope A/B、catalog外質問、SQL injection風質問、文書内prompt injection。
-- 0/NULL/forecast、同じ指標の画面/export/AI contract一致。
-- 429/timeout/invalid JSON/partial citation、PII canary egress/log scan。
+SNF01〜10横断Review時は同spec `review-conversations.md` §5 を必読。
 
 P0/P1/P2、query catalog coverage、metric一致表、PII/provider gate、総合判定と本番AI有効化可否を出してください。
 ```

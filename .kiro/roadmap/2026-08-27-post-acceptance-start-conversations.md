@@ -308,34 +308,22 @@ A1 privacy dashboard/hold/approval→A2 DSAR case/export/redaction→B1 disposit
 
 ## S-NF08 — `ai-management-copilot`
 
+> **詳細は spec 正本へ委譲**: `.kiro/specs/ai-management-copilot/start-conversations.md`
+> （S0 総開工 + F1〜M task 別対話）。本節は SNF01〜10 一覧用の要約のみ。
+
 ```text
-あなたは `ai-management-copilot` の主実装AIです。これは開工対話です。
-Approved query catalog/roles/provider=<APPROVED_SCOPE>、Owner=<OWNER>、Base=<BASE_COMMIT>。
-NF-07のPII/retention、既存AI production gate、DG-08が未完ならmock/rule providerの評価までとし、本番外部AIを有効化しません。
+あなたは `ai-management-copilot` の主実装AIです。開工対話の全文は
+`.kiro/specs/ai-management-copilot/start-conversations.md` §2（S0）および §3（F1〜M）を
+新しい実装対話へコピーして使用してください。本節だけでは着手しない。
 
-専用Codex worktreeとbranch `codex/ai-management-copilot`を必須とし、通常checkoutを変更しません。
-Base branch=<BASE_BRANCH>。開始時にworktree/root/branch/status/remote/baseを検証し、完了Taskごとにcommit/pushします。
-最終remote Headを独立Reviewへ渡し、実装対話ではPRを作りません。
-approved plan/spec/tasksと完了対応表も渡し、ReviewのPLAN/IMPLEMENTATION双方PASS後だけPRを作成させます。
-
-AGENTS.md、受入後3文書（NF-08/DG-08）、platform-invariants、ai-feedback-learning、AI PII allow-list、
-Dashboard/UtilizationForecast/ManagementAccounting/CashFlow/SalesPerformance等の正本serviceとDataScopeServiceを完全に読んでください。
-
-`.kiro/specs/ai-management-copilot/`を作り、質問→catalog query→typed parameters→scope→service→typed result→
-summary→citationのpipelineを固定します。LLM生成SQL、repository schema説明の外部送信、業務状態自動更新は禁止です。
-
-推奨順: 0 use case/PII/metric/cost gate→F1 semantic catalog/run/feedback→F2 intent/parameter/scope/service gateway→
-A1 chat/answer/citation UI→B1 provider/redaction/timeout/cost→B2 evaluation/adversarial suite→M。
-
-必須条件:
-- catalog外SQL/table/columnを実行しない。
-- typed resultをLLMが再計算せず、円/割合/期間/timezone/freshness/予測を表示する。
-- 画面/export/AIの同じ指標が一致するcontract testを持つ。
-- scope A/B、prompt injection、0/NULL、巨大result、provider 429/timeout/invalid JSONをtestする。
-- answerからscope外ID/PIIを推測できず、source linkも再認可する。
-- feedback/model/prompt/data version/cost/latencyを記録する。
-
-M完了でもproduction gate未完ならCONDITIONAL PASS handoffとし、feature flag OFFを維持してください。
+要点:
+- 専用worktree `C:\work\ses-manager-pro-ai-management-copilot`、branch `codex/ai-management-copilot`
+- **具体AIモデルは未決定**。先に deterministic core（catalog→正本service→typed result）を構築し、
+  summary のみ `AiTextService`（`ai.provider` / `ai.model`）で差し替え可能にする
+- NF-07 / DG-08 / G10 gate 未完。mock/rule のみ。`ai.external-send-enabled=false` 維持
+- 順序: F1→F2→A1→B1→B2→M。task ごと commit/push。PR は作らない
+- Review: `.kiro/specs/ai-management-copilot/review-conversations.md`（別対話）
+- SNF横断Review時は同 spec の `README.md` と `review-conversations.md` §5 を正とする
 ```
 
 ## S-NF09 — `asset-account-license-lifecycle`

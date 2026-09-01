@@ -17,6 +17,7 @@ public class AiGatewayRequest {
     public static final String USE_INGEST_PROJECT = "INGEST_PROJECT";
     public static final String USE_INGEST_BP = "INGEST_BP_AVAILABILITY";
     public static final String USE_LEARNING_CANDIDATE = "LEARNING_CANDIDATE";
+    public static final String USE_COPILOT = "MANAGEMENT_COPILOT";
 
     public static final String CANARY = "SES-PII-CANARY-T109-7f2e9c1a";
 

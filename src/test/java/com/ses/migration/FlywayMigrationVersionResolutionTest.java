@@ -44,6 +44,8 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("146"), "V146 (migration-dev: seed_r3_approval_route_extension) が解決されること");
         assertTrue(seenVersions.contains("144"), "V144 (digital_invoice_safe_diagnostics) が解決されること");
         assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
+        assertTrue(seenVersions.contains("148"), "V148 (ai_management_copilot_f1_artifact) が解決されること");
+        assertTrue(seenVersions.contains("149"), "V149 (ai_management_copilot_a1_menu) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -59,5 +61,19 @@ class FlywayMigrationVersionResolutionTest {
         assertEquals(1, v147Info.size(), "V147 は1件のみ存在すること");
         assertTrue(v147Info.get(0).getScript().contains("customer_success_service_desk"),
                 "V147 のスクリプト名は customer_success_service_desk であること: " + v147Info.get(0).getScript());
+
+        List<MigrationInfo> v148Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "148".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v148Info.size(), "V148 は1件のみ存在すること");
+        assertTrue(v148Info.get(0).getScript().contains("ai_management_copilot_f1_artifact"),
+                "V148 のスクリプト名は ai_management_copilot_f1_artifact であること: " + v148Info.get(0).getScript());
+
+        List<MigrationInfo> v149Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "149".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v149Info.size(), "V149 は1件のみ存在すること");
+        assertTrue(v149Info.get(0).getScript().contains("ai_management_copilot_a1_menu"),
+                "V149 のスクリプト名は ai_management_copilot_a1_menu であること: " + v149Info.get(0).getScript());
     }
 }

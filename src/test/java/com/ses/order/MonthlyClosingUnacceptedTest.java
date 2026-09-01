@@ -21,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -95,7 +94,6 @@ class MonthlyClosingUnacceptedTest {
     @Test
     @DisplayName("R09-P1-06: 提出済の検収には「未提出」通知を生成しない（状態母集団は排他的）")
     void unsubmittedNotificationExcludesSubmitted() {
-        // 提出済（検収済でない）acceptanceを作る
         jdbcTemplate.update(
                 "INSERT INTO t_acceptance (contract_id, work_record_id, work_month, status, submitted_at)"
                         + " SELECT c.id, w.id, w.work_month, '提出済', CURRENT_TIMESTAMP"
