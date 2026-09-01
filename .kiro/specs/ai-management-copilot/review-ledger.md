@@ -16,7 +16,7 @@
 | Feature flag | `ai.management-copilot-enabled=false`（本番ON不可） |
 | PR | **作成しない**（R-NF08 IMPLEMENTATION PASS 後に別主体） |
 | Base | `origin/main@4c93b558d57193c3d77e06cb54c0a6573c87a60b` |
-| Remote Head | `b1cdc7bc` (`origin/codex/ai-management-copilot`) |
+| Remote Head | `99d00a42` (`origin/codex/ai-management-copilot`) |
 | Working branch | `codex/ai-management-copilot` |
 | Working tree | `C:\work\ses-manager-pro-ai-management-copilot` |
 | Remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
@@ -58,9 +58,9 @@
 | task | status | commit | evidence |
 |---|---|---|---|
 | T000 Discovery/gate/inventory | **DONE** | docs(nf08) | spec、worktree検証 |
-| F1 catalog/run/feedback | **DONE** | `0363a73a` | SemanticCatalogRegistry, CopilotRunService, V144 |
+| F1 catalog/run/feedback | **DONE** | `0363a73a` | SemanticCatalogRegistry, CopilotRunService, V148 |
 | F2 intent/parameter/scope/service gateway | **DONE** | `e813cde6` | CatalogQueryGateway, TypedResultEnvelope, scope tests |
-| A1 chat/citation UI | **DONE** | `519db6b0` | chat.html, copilot.js, V145 menu |
+| A1 chat/citation UI | **DONE** | `519db6b0` | chat.html, copilot.js, V149 menu |
 | B1 summary provider | **DONE** | `56616fba` | CopilotSummaryService, validator, mock TASK |
 | B2 evaluation/adversarial | **DONE** | `b39bfee4` | fixture 12 cases, evaluation API |
 | M integration/review handoff | **DONE** | `46332d94` | ledger、feature gate test、remote push |
