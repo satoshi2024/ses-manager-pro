@@ -112,7 +112,7 @@
 
 ### B2: Evaluation / adversarial suite
 
-- [ ] **Objective**: 固定匿名datasetとadversarial suiteでmetric、PII、scope、citation、provider failureを評価する。
+- [x] **Objective**: 固定匿名datasetとadversarial suiteでmetric、PII、scope、citation、provider failureを評価する。
 - **Blocked until**: B1 PASS、評価dataset/version/segment policy（provisional fixture可）。
 - **開工対話**: [start-conversations.md §B2](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-B2](review-conversations.md)（任意）

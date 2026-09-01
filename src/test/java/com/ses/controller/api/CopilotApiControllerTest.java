@@ -4,6 +4,7 @@ import com.ses.common.exception.BusinessException;
 import com.ses.dto.ai.CopilotSummaryView;
 import com.ses.dto.ai.CopilotQueryResult;
 import com.ses.dto.ai.ResolvedCitationDto;
+import com.ses.service.ai.AiOfflineEvaluationService;
 import com.ses.service.ai.copilot.CopilotQueryService;
 import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
@@ -48,6 +49,9 @@ class CopilotApiControllerTest {
 
     @MockBean
     private CitationAuthorizationService citationAuthorizationService;
+
+    @MockBean
+    private AiOfflineEvaluationService offlineEvaluationService;
 
     @Test
     void flagが無効なら503() throws Exception {
