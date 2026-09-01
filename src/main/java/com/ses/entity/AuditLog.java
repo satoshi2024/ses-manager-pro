@@ -41,5 +41,13 @@ public class AuditLog {
     private String correlationId;
     private String idempotencyKey;
 
+    /** 電子請求書・ジョブ診断フィールド（秘匿安全）。 */
+    private String invoiceId;
+    private String digitalInvoiceId;
+    private String jobId;
+    private String providerOperationId;
+    private String errorCode;
+    private String errorCategory;
+
     private LocalDateTime createdAt;
 }

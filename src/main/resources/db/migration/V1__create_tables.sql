@@ -2833,7 +2833,10 @@ CREATE TABLE IF NOT EXISTS t_integration_job (
     next_retry_at DATETIME NULL COMMENT '次回再試行予定日時',
     external_id VARCHAR(128) NULL COMMENT '外部取引/伝票ID',
     provider_request_id VARCHAR(128) NULL COMMENT '外部リクエストID (X-Freee-Request-ID等)',
+    correlation_id VARCHAR(100) NULL COMMENT 'API・ワーカー横断相関ID',
+    provider_operation_id VARCHAR(128) NULL COMMENT 'プロバイダ操作ID（照合用）',
     error_code VARCHAR(64) NULL COMMENT '分類エラーコード',
+    error_category VARCHAR(32) NULL COMMENT '業務/システムエラー分類',
     error_message_safe VARCHAR(500) NULL COMMENT '安全なエラー要約 (PII/Secret除外)',
     sent_at DATETIME NULL COMMENT '送信成功日時',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2852,6 +2855,7 @@ CREATE TABLE IF NOT EXISTS t_integration_job_event (
     to_status VARCHAR(32) NOT NULL COMMENT '遷移後状態',
     occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '発生日時',
     safe_detail VARCHAR(1000) NULL COMMENT '安全な詳細情報 (PII/Secret除外)',
+    correlation_id VARCHAR(100) NULL COMMENT '相関ID',
     INDEX idx_job_event_job_id (job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='連携ジョブ状態遷移履歴';
 

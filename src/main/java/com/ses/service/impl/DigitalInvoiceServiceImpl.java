@@ -3,6 +3,9 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.exception.SafeErrorPolicy;
+import com.ses.common.util.CorrelationContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.dto.invoice.CanonicalInvoice;
 import com.ses.dto.invoice.InboundPurchaseRequest;
 import com.ses.entity.Contract;
@@ -21,6 +24,8 @@ import com.ses.service.integration.IntegrationJobService;
 import com.ses.service.invoice.JpPintRenderer;
 import com.ses.service.invoice.JpPintValidator;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import com.ses.service.invoice.provider.DigitalInvoiceProviderException;
+import com.ses.service.invoice.provider.DigitalInvoiceProviderResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -62,7 +67,23 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void processProviderEvent(DigitalInvoiceEvent event) {
-        if (!event.getSignatureValid()) {
+        if (event == null || event.getDigitalInvoiceId() == null) {
+            throw new BusinessException(400, "error.invoice.webhookFailed");
+        }
+        String safeEventId = CorrelationContext.safeIdentifier(event.getProviderEventId());
+        String eventType = event.getEventType() == null ? null : event.getEventType().toUpperCase(java.util.Locale.ROOT);
+        if (safeEventId == null || eventType == null
+                || !Set.of("QUEUED", "SENT", "DELIVERED", "REJECTED", "RECEIVED", "CANCELLED", "REVOKED")
+                .contains(eventType)) {
+            throw new BusinessException(400, "error.invoice.webhookFailed");
+        }
+        event.setProviderEventId(safeEventId);
+        event.setEventType(eventType);
+        event.setEventAt(event.getEventAt() == null ? LocalDateTime.now() : event.getEventAt());
+        event.setPayloadHash(safePayloadHash(event.getPayloadHash()));
+        CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, event.getDigitalInvoiceId());
+        CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, safeEventId);
+        if (!Boolean.TRUE.equals(event.getSignatureValid())) {
             digitalInvoiceEventService.save(event);
             return;
         }
@@ -151,16 +172,18 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             return;
         }
 
+        CorrelationContext.beginJob(jobId, job.getCorrelationId());
+        DigitalInvoice di = null;
         try {
-            DigitalInvoice di = getById(job.getTargetId());
+            di = getById(job.getTargetId());
+            CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, job.getTargetId());
             if (di == null || !"QUEUED".equals(di.getStatus()) || !"SEND".equals(di.getDirection())) {
-                integrationJobService.markFailed(jobId, "INVALID_STATE", "DigitalInvoice not found or not QUEUED.");
+                integrationJobService.markFailed(jobId, "INVALID_STATE", "error.invoice.notFound");
                 return;
             }
             // R5-P0-01: CreditNote を請求送信ジョブで処理しない
             if (!PROFILE_STANDARD.equals(di.getProfile())) {
-                integrationJobService.markFailed(jobId, "WRONG_PROFILE",
-                        "DIGITAL_INVOICE_SEND は Standard 専用です。CreditNote は DIGITAL_INVOICE_CREDIT_NOTE を使用してください。");
+                integrationJobService.markFailed(jobId, "WRONG_PROFILE", "error.invoice.dispatchFailed");
                 return;
             }
 
@@ -178,24 +201,60 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 archiveOutboundXml(di, invoice.getInvoiceNo() + "_peppol.xml", xml, "DIGITAL_INVOICE_SEND:" + di.getId());
             }
 
-            String providerMessageId = di.getProviderMessageId();
+            String providerMessageId = CorrelationContext.safeIdentifier(di.getProviderMessageId());
             if (providerMessageId == null) {
-                providerMessageId = provider.sendInvoice(xml, di.getSpecificationVersion(), di.getMessageId());
+                providerMessageId = CorrelationContext.safeIdentifier(job.getExternalId());
+            }
+            String providerRequestId = job.getProviderRequestId();
+            String providerOperationId = job.getProviderOperationId();
+            if (providerMessageId == null) {
+                DigitalInvoiceProviderResponse response = sendToProvider(xml, di);
+                providerMessageId = response.providerMessageId();
+                providerRequestId = response.providerRequestId();
+                providerOperationId = response.providerOperationId();
+                CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, providerOperationId);
+                integrationJobService.recordProviderMetadata(jobId, providerMessageId, providerRequestId,
+                        providerOperationId);
+            }
+            if (!providerMessageId.equals(CorrelationContext.safeIdentifier(di.getProviderMessageId()))
+                    || !"SENT".equals(di.getStatus())) {
                 di.setProviderMessageId(providerMessageId);
                 di.setStatus("SENT");
                 di.setSentAt(LocalDateTime.now());
                 if (!updateById(di)) {
-                    throw new BusinessException("ステータス更新の競合が発生しました。");
+                    throw new BusinessException(500, "error.invoice.localStateUpdateFailed");
                 }
             }
 
-            integrationJobService.markSucceeded(jobId, String.valueOf(di.getId()), providerMessageId, "Invoice sent successfully.");
+            integrationJobService.markSucceededWithProviderMetadata(jobId, providerMessageId, providerRequestId,
+                    providerOperationId, "デジタルインボイスを送信しました。");
+        } catch (DigitalInvoiceProviderException e) {
+            // provider_message_idが得られていない障害ではexternal_idへ対象IDを代入しない。
+            // 対象IDを外部IDと誤認すると、次回リトライが送信済みと誤判定される。
+            integrationJobService.recordProviderMetadata(jobId, null,
+                    e.getProviderRequestId(), e.getProviderOperationId());
+            log.warn("電子請求書プロバイダ障害: jobId={} digitalInvoiceId={} category=SYSTEM errorCode={} httpStatus={} providerCode={} providerRequestId={} providerOperationId={} exceptionClass={}",
+                    jobId, job.getTargetId(), "PROVIDER_UNAVAILABLE", e.getHttpStatus(), e.getProviderCode(),
+                    e.getProviderRequestId(), e.getProviderOperationId(), LogRedaction.exceptionType(e));
+            integrationJobService.markRetryable(jobId, "PROVIDER_UNAVAILABLE", "error.invoice.dispatchFailed", 300);
         } catch (BusinessException e) {
-            log.warn("電子請求書送信ジョブの業務エラー jobId={}", jobId, e);
-            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
+            String errorCode = e.getCode() >= 500 ? "LOCAL_STATE_UPDATE_FAILED" : "VALIDATION_FAILED";
+            log.warn("電子請求書送信ジョブのエラー: jobId={} digitalInvoiceId={} invoiceId={} category={} errorCode={} exceptionClass={} detail={}",
+                    jobId, job.getTargetId(), (di != null ? di.getInvoiceId() : null),
+                    e.getCode() >= 500 ? "SYSTEM" : "BUSINESS", errorCode,
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            if (e.getCode() >= 500) {
+                integrationJobService.markRetryable(jobId, "LOCAL_STATE_UPDATE_FAILED", "error.invoice.localStateUpdateFailed", 300);
+            } else {
+                integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
+            }
         } catch (Exception e) {
-            log.warn("電子請求書送信ジョブのシステムエラー jobId={}", jobId, e);
+            log.warn("電子請求書送信ジョブのシステムエラー: jobId={} digitalInvoiceId={} invoiceId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
+                    jobId, job.getTargetId(), (di != null ? di.getInvoiceId() : null), "SEND_ERROR",
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
             integrationJobService.markRetryable(jobId, "SEND_ERROR", "error.invoice.dispatchFailed", 300);
+        } finally {
+            CorrelationContext.clear();
         }
     }
 
@@ -206,14 +265,17 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             return;
         }
 
+        CorrelationContext.beginJob(jobId, job.getCorrelationId());
+        DigitalInvoice cn = null;
         try {
-            DigitalInvoice cn = getById(job.getTargetId());
+            cn = getById(job.getTargetId());
+            CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, job.getTargetId());
             if (cn == null || !"QUEUED".equals(cn.getStatus()) || !"SEND".equals(cn.getDirection())) {
-                integrationJobService.markFailed(jobId, "INVALID_STATE", "CreditNote DigitalInvoice not found or not QUEUED.");
+                integrationJobService.markFailed(jobId, "INVALID_STATE", "error.invoice.notFound");
                 return;
             }
             if (!PROFILE_CREDIT_NOTE.equals(cn.getProfile())) {
-                integrationJobService.markFailed(jobId, "WRONG_PROFILE", "DIGITAL_INVOICE_CREDIT_NOTE は CreditNote 専用です。");
+                integrationJobService.markFailed(jobId, "WRONG_PROFILE", "error.invoice.dispatchFailed");
                 return;
             }
 
@@ -237,51 +299,122 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             CanonicalInvoice original = buildCanonicalFromInvoiceSnapshot(invoice);
             String xml = renderer.renderCreditNote(original, cn.getMessageId(), billingRef, cn.getSpecificationVersion());
             if (!xml.contains("<CreditNote") || xml.contains("<Invoice ")) {
-                throw new BusinessException("CreditNote XMLの生成に失敗しました（請求Invoiceルートが混入）。");
+                throw new BusinessException("CreditNote XMLの生成に失敗しました。");
             }
 
             if (cn.getXmlDocumentId() == null) {
                 archiveOutboundXml(cn, invoice.getInvoiceNo() + "_creditnote.xml", xml, "DIGITAL_INVOICE_CREDIT_NOTE:" + cn.getId());
             }
 
-            String providerMessageId = cn.getProviderMessageId();
+            String providerMessageId = CorrelationContext.safeIdentifier(cn.getProviderMessageId());
             if (providerMessageId == null) {
-                providerMessageId = provider.sendInvoice(xml, cn.getSpecificationVersion(), cn.getMessageId());
+                providerMessageId = CorrelationContext.safeIdentifier(job.getExternalId());
+            }
+            String providerRequestId = job.getProviderRequestId();
+            String providerOperationId = job.getProviderOperationId();
+            if (providerMessageId == null) {
+                DigitalInvoiceProviderResponse response = sendToProvider(xml, cn);
+                providerMessageId = response.providerMessageId();
+                providerRequestId = response.providerRequestId();
+                providerOperationId = response.providerOperationId();
+                CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, providerOperationId);
+                integrationJobService.recordProviderMetadata(jobId, providerMessageId, providerRequestId,
+                        providerOperationId);
+            }
+            if (!providerMessageId.equals(CorrelationContext.safeIdentifier(cn.getProviderMessageId()))
+                    || !"SENT".equals(cn.getStatus())) {
                 cn.setProviderMessageId(providerMessageId);
                 cn.setStatus("SENT");
                 cn.setSentAt(LocalDateTime.now());
                 if (!updateById(cn)) {
-                    throw new BusinessException("ステータス更新の競合が発生しました。");
+                    throw new BusinessException(500, "error.invoice.localStateUpdateFailed");
                 }
             }
 
-            integrationJobService.markSucceeded(jobId, String.valueOf(cn.getId()), providerMessageId, "Credit note sent successfully.");
+            integrationJobService.markSucceededWithProviderMetadata(jobId, providerMessageId, providerRequestId,
+                    providerOperationId, "打消し電文を送信しました。");
+        } catch (DigitalInvoiceProviderException e) {
+            // provider_message_idが得られていない障害ではexternal_idへ対象IDを代入しない。
+            integrationJobService.recordProviderMetadata(jobId, null,
+                    e.getProviderRequestId(), e.getProviderOperationId());
+            log.warn("CreditNoteプロバイダ障害: jobId={} digitalInvoiceId={} category=SYSTEM errorCode={} httpStatus={} providerCode={} providerRequestId={} providerOperationId={} exceptionClass={}",
+                    jobId, job.getTargetId(), "PROVIDER_UNAVAILABLE", e.getHttpStatus(), e.getProviderCode(),
+                    e.getProviderRequestId(), e.getProviderOperationId(), LogRedaction.exceptionType(e));
+            integrationJobService.markRetryable(jobId, "PROVIDER_UNAVAILABLE", "error.invoice.dispatchFailed", 300);
         } catch (BusinessException e) {
-            log.warn("CreditNote送信ジョブの業務エラー jobId={}", jobId, e);
-            integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
+            String errorCode = e.getCode() >= 500 ? "LOCAL_STATE_UPDATE_FAILED" : "VALIDATION_FAILED";
+            log.warn("CreditNote送信ジョブのエラー: jobId={} digitalInvoiceId={} invoiceId={} category={} errorCode={} exceptionClass={} detail={}",
+                    jobId, job.getTargetId(), (cn != null ? cn.getInvoiceId() : null),
+                    e.getCode() >= 500 ? "SYSTEM" : "BUSINESS", errorCode,
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            if (e.getCode() >= 500) {
+                integrationJobService.markRetryable(jobId, "LOCAL_STATE_UPDATE_FAILED", "error.invoice.localStateUpdateFailed", 300);
+            } else {
+                integrationJobService.markFailed(jobId, "VALIDATION_FAILED", safeJobErrorMessage(e));
+            }
         } catch (Exception e) {
-            log.warn("CreditNote送信ジョブのシステムエラー jobId={}", jobId, e);
+            log.warn("CreditNote送信ジョブのシステムエラー: jobId={} digitalInvoiceId={} invoiceId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
+                    jobId, job.getTargetId(), (cn != null ? cn.getInvoiceId() : null), "SEND_ERROR",
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
             integrationJobService.markRetryable(jobId, "SEND_ERROR", "error.invoice.dispatchFailed", 300);
+        } finally {
+            CorrelationContext.clear();
         }
     }
 
     /**
      * ジョブの errorMessage には i18n キーまたは固定の業務文言のみを残す。
-     * SQL/ドライバ/スタック原文など技術詳細は保存しない。
+     * パスワード/トークン/メール/SQL/ドライバ/スタック原文など技術詳細・機密は保存しない。
      */
-    static String safeJobErrorMessage(BusinessException e) {
-        String key = e.getMessageKey();
-        if (key != null && key.startsWith("error.")) {
-            return key;
+    private DigitalInvoiceProviderResponse sendToProvider(String xml, DigitalInvoice invoice) {
+        DigitalInvoiceProviderResponse response;
+        try {
+            response = provider.sendInvoiceWithMetadata(
+                    xml, invoice.getSpecificationVersion(), invoice.getMessageId());
+            if (response == null) {
+                response = DigitalInvoiceProviderResponse.success(
+                        provider.sendInvoice(xml, invoice.getSpecificationVersion(), invoice.getMessageId()));
+            }
+        } catch (DigitalInvoiceProviderException e) {
+            throw e;
+        } catch (BusinessException e) {
+            Integer httpStatus = e.getCode() >= 100 && e.getCode() <= 599 ? e.getCode() : null;
+            throw new DigitalInvoiceProviderException(httpStatus, null, null, null);
+        } catch (Exception e) {
+            throw new DigitalInvoiceProviderException(null, null, null, null);
         }
-        String message = e.getMessage();
-        if (message != null && message.startsWith("error.")) {
-            return message;
+        String providerMessageId = CorrelationContext.safeIdentifier(response.providerMessageId());
+        String providerRequestId = CorrelationContext.safeIdentifier(response.providerRequestId());
+        String providerOperationId = CorrelationContext.safeIdentifier(response.providerOperationId());
+        String providerCode = safeProviderCode(response.providerCode());
+        Integer httpStatus = response.httpStatus() != null && response.httpStatus() >= 100 && response.httpStatus() <= 599
+                ? response.httpStatus() : null;
+        log.info("電子請求書プロバイダ応答: digitalInvoiceId={} httpStatus={} providerCode={} providerRequestId={} providerOperationId={}",
+                invoice.getId(), httpStatus, providerCode, providerRequestId, providerOperationId);
+        if (providerMessageId == null) {
+            throw new DigitalInvoiceProviderException(httpStatus, providerCode, providerRequestId, providerOperationId);
         }
-        if (message != null && !message.isBlank()) {
-            return message;
+        return new DigitalInvoiceProviderResponse(providerMessageId, providerOperationId, providerRequestId,
+                httpStatus, providerCode);
+    }
+
+    private String safeProviderCode(String value) {
+        return value != null && value.length() <= 64
+                && value.matches("[A-Za-z0-9._:-]{1,64}") ? value : null;
+    }
+
+    private static String safePayloadHash(String value) {
+        if (value != null && value.matches("[0-9A-Fa-f]{64}")) {
+            return value.toLowerCase(java.util.Locale.ROOT);
         }
-        return "error.invoice.dispatchFailed";
+        if (value == null || value.length() > 8192) {
+            return DigestUtils.sha256Hex("invalid-payload-hash");
+        }
+        return DigestUtils.sha256Hex(value);
+    }
+
+    public static String safeJobErrorMessage(BusinessException e) {
+        return SafeErrorPolicy.safeBusinessJobMessage(e);
     }
 
     @Override
@@ -289,10 +422,10 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     public void cancelInvoice(Long digitalInvoiceId) {
         DigitalInvoice di = getById(digitalInvoiceId);
         if (di == null) {
-            throw new BusinessException("Invoice not found");
+            throw new BusinessException("対象のインボイスが見つかりません。");
         }
         if (!"SEND".equals(di.getDirection())) {
-            throw new BusinessException("Only SEND can be cancelled");
+            throw new BusinessException("error.invoice.cancelFailed");
         }
         if ("CANCELLED".equals(di.getStatus()) || "REVOKED".equals(di.getStatus())) {
             return;
@@ -301,14 +434,14 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         if ("QUEUED".equals(di.getStatus()) || "FAILED".equals(di.getStatus())) {
             di.setStatus("CANCELLED");
             if (!updateById(di)) {
-                throw new BusinessException("Concurrent modification");
+                throw new BusinessException("ステータス更新の競合が発生しました。");
             }
             return;
         }
 
         di.setStatus("REVOKED");
         if (!updateById(di)) {
-            throw new BusinessException("Concurrent modification");
+            throw new BusinessException("ステータス更新の競合が発生しました。");
         }
 
         long generation = countSendGenerations(di.getInvoiceId(), PROFILE_CREDIT_NOTE, di.getSpecificationVersion());
@@ -357,16 +490,23 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     @Override
     public void processInboundInvoice(String providerMessageId, String eventId, String xmlContent,
                                       String rawPayloadHash, LocalDateTime eventAt) {
-        if (lambdaQuery().eq(DigitalInvoice::getProviderMessageId, providerMessageId).count() > 0) {
+        String safeProviderMessageId = CorrelationContext.safeIdentifier(providerMessageId);
+        String safeEventId = CorrelationContext.safeIdentifier(eventId);
+        if (safeProviderMessageId == null || safeEventId == null) {
+            throw new BusinessException(400, "error.invoice.webhookFailed");
+        }
+        String safePayloadHash = safePayloadHash(rawPayloadHash);
+        CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, safeEventId);
+        if (lambdaQuery().eq(DigitalInvoice::getProviderMessageId, safeProviderMessageId).count() > 0) {
             return;
         }
-        if (digitalInvoiceEventService.lambdaQuery().eq(DigitalInvoiceEvent::getPayloadHash, rawPayloadHash).count() > 0) {
+        if (digitalInvoiceEventService.lambdaQuery().eq(DigitalInvoiceEvent::getPayloadHash, safePayloadHash).count() > 0) {
             return;
         }
 
         DigitalInvoice di = new DigitalInvoice();
         di.setDirection("RECEIVE");
-        di.setProviderMessageId(providerMessageId);
+        di.setProviderMessageId(safeProviderMessageId);
         di.setSpecificationVersion("1.1.3");
         di.setProfile(PROFILE_STANDARD);
 
@@ -375,17 +515,18 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                     .documentType("INVOICE")
                     .direction("INCOMING")
                     .sourceType("RECEIVED")
-                    .businessKey("DIGITAL_INVOICE:" + providerMessageId)
+                    .businessKey("DIGITAL_INVOICE:" + safeProviderMessageId)
                     .versionDiscriminator("1")
-                    .originalName(providerMessageId + ".xml")
+                    .originalName(safeProviderMessageId + ".xml")
                     .contentType("application/xml")
                     .build();
             com.ses.entity.Document docEntity = documentService.registerReceived(
                     req, new java.io.ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)));
             di.setXmlDocumentId(docEntity.getId());
         } catch (Exception e) {
-            log.error("Failed to archive inbound XML", e);
-            throw new BusinessException("XMLのアーカイブに失敗しました。");
+            log.error("受信XMLのアーカイブに失敗: providerMessageId={} eventId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
+                    safeProviderMessageId, safeEventId, "ARCHIVE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            throw new BusinessException(500, "XMLのアーカイブに失敗しました。");
         }
 
         di.setMessageId("MSG-" + UUID.randomUUID());
@@ -404,6 +545,8 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
             applyInboundMatch(di, doc);
         } catch (Exception e) {
+            log.warn("受信XMLのパース・照合に失敗: providerMessageId={} eventId={} category=BUSINESS errorCode={} exceptionClass={} detail={}",
+                    safeProviderMessageId, safeEventId, "INBOUND_PARSE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
             di.setStatus("REJECTED_AUTO");
             di.setMatchStatus("UNMATCHED");
         }
@@ -413,10 +556,10 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
         DigitalInvoiceEvent event = new DigitalInvoiceEvent();
         event.setDigitalInvoiceId(di.getId());
-        event.setProviderEventId(eventId);
+        event.setProviderEventId(safeEventId);
         event.setEventType("RECEIVED");
         event.setEventAt(eventAt != null ? eventAt : LocalDateTime.now());
-        event.setPayloadHash(rawPayloadHash);
+        event.setPayloadHash(safePayloadHash);
         event.setSignatureValid(true);
         digitalInvoiceEventService.save(event);
     }
@@ -441,7 +584,10 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 amount = parseDecimal(firstText(doc, "TaxInclusiveAmount"));
                 issueDate = parseDate(firstText(doc, "IssueDate"));
             } catch (Exception e) {
-                log.warn("ACCEPT時のXML再読取に失敗しました digitalInvoiceId={}", digitalInvoiceId);
+                log.warn("ACCEPT時のXML再読取に失敗: digitalInvoiceId={} xmlDocumentId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
+                        digitalInvoiceId, di.getXmlDocumentId(), "ACCEPT_XML_READ_FAILED",
+                        LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+                throw new BusinessException(500, "error.invoice.acceptFailed");
             }
         }
 
@@ -466,7 +612,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
     /** 仕入候補の受け渡し境界。支払確定ジョブは起動しない。 */
     void handoffInboundPurchaseCandidate(InboundPurchaseRequest request) {
-        log.info("Inbound purchase candidate handed to accounting canonical: digitalInvoiceId={}, supplierCompanyId={}, amount={}, issueDate={}, purchaseOrderId={}, contractId={}",
+        log.info("受信仕入候補を会計正規処理へ引き渡し: digitalInvoiceId={} supplierCompanyId={} amount={} issueDate={} purchaseOrderId={} contractId={}",
                 request.getDigitalInvoiceId(), request.getSupplierCompanyId(), request.getAmount(),
                 request.getIssueDate(), request.getPurchaseOrderId(), request.getContractId());
     }
@@ -579,6 +725,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         }
 
         return CanonicalInvoice.builder()
+                .invoiceId(invoice.getId())
                 .invoiceNumber(invoice.getInvoiceNo())
                 .issuedDate(invoice.getIssuedDate())
                 .dueDate(invoice.getDueDate())
@@ -621,8 +768,9 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Failed to archive outbound XML", e);
-            throw new BusinessException("XMLのアーカイブに失敗しました。");
+            log.error("送信XMLのアーカイブに失敗: digitalInvoiceId={} invoiceId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
+                    di.getId(), di.getInvoiceId(), "ARCHIVE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            throw new BusinessException(500, "XMLのアーカイブに失敗しました。");
         }
     }
 

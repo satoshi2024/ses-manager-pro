@@ -301,13 +301,13 @@ class AccountingIntegrationBrowserDemoTest {
                 .validFrom(LocalDate.of(2026, 1, 1)).build());
 
         IntegrationJob job2 = jobService.createJob(
-                conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", 202L, "INV-DEMO-002", "hash-demo-202");
+                conn.getId(), "SALES_INVOICE_SYNC", "INVOICE", 202L, "INV-DEMO-002", "hash-demo-202",
+                null, conn.getTenantId(), conn.getLegalEntityId(), orgX.getId());
         jobService.claimJob(job2.getId());
         jobService.markRetryable(job2.getId(), "TIMEOUT", "一時的タイムアウト", 300);
-        IntegrationJob managerJob = jobService.getById(job2.getId());
-        managerJob.setOrganizationId(orgX.getId());
-        jobService.updateById(managerJob);
         managerJobId = job2.getId();
+        assertEquals(orgX.getId(), jobService.getById(managerJobId).getOrganizationId(),
+                "マネージャー境界検証用ジョブに自組織が付与されていること");
 
         String baseUrl = "http://localhost:" + port;
         Path evidenceDir = Path.of("target", "browser-evidence", "accounting-payment-integration");

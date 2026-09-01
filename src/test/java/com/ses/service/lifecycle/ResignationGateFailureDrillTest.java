@@ -296,7 +296,7 @@ class ResignationGateFailureDrillTest {
         assertTrue(blockedAsset.getMessage().contains("blocker"));
 
         ApprovalRequest approval = ApprovalRequest.builder()
-                .requestNo("AR-GATE-BLOCKER-" + System.nanoTime())
+                .requestNo("AR-GB-" + System.nanoTime())
                 .requestType("LIFECYCLE_EXCEPTION").targetType("LIFECYCLE_TASK")
                 .targetId(assetTask.getId()).targetVersion(0L).applicantId(adminUser.getId())
                 .payloadJson("{\"reason\":\"経営承認済み\",\"riskOwner\":\"HR\",\"remedyDeadline\":\""

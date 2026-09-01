@@ -38,10 +38,10 @@ class FreeeCompanyBoundarySchemaH2Test {
     @Test
     void connection_statusのdefaultはCONNECTEDである() {
         jdbcTemplate.update("INSERT INTO t_freee_connection "
-                + "(company_id, company_name, access_token_encrypted) VALUES (123, 'テスト事業所', 'enc')");
+                + "(company_id, company_name, access_token_encrypted) VALUES (99123, 'テスト事業所', 'enc')");
         // 共有 H2 に他テストの connection が残っていても、本テストが挿入した行だけを見る
         String status = jdbcTemplate.queryForObject(
-                "SELECT connection_status FROM t_freee_connection WHERE company_id = 123", String.class);
+                "SELECT connection_status FROM t_freee_connection WHERE company_id = 99123", String.class);
         assertEquals("CONNECTED", status);
     }
 

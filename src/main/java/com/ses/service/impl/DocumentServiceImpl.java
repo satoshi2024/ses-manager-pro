@@ -166,7 +166,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return doc;
 
         } catch (Exception e) {
-            log.error("[文書台帳] DB保存失敗。storageKey={} error={}", storageKey, e.getMessage());
+            log.error("[文書台帳] DB保存失敗: storageKey={} exceptionClass={} detail={}",
+                    storageKey,
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             cleanupStorageAfterFailure(storageKey);
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
@@ -245,12 +248,15 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             return version;
 
         } catch (Exception e) {
-            log.error("[文書台帳] 版追加DB失敗。storageKey={} error={}", storageKey, e.getMessage());
+            log.error("[文書台帳] 版追加DB失敗: storageKey={} exceptionClass={} detail={}",
+                    storageKey,
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
             cleanupStorageAfterFailure(storageKey);
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new RuntimeException("文書版追加に失敗しました", e);
+            throw new RuntimeException("版追加に失敗しました", e);
         } finally {
             deleteTempFile(streamResult.tempPath());
         }
@@ -284,7 +290,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                     try {
                         documentStorage.delete(storageKey);
                     } catch (Exception e) {
-                        log.error("[文書台帳] rollback補償削除失敗: storageKey={}", storageKey, e);
+                        log.error("[文書台帳] rollback補償削除失敗: storageKey={} exceptionClass={} detail={}",
+                                storageKey,
+                                com.ses.common.util.LogRedaction.exceptionType(e),
+                                com.ses.common.util.LogRedaction.safeThrowableSummary(e));
                     }
                 }
             }
@@ -297,7 +306,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         try {
             documentStorage.delete(storageKey);
         } catch (Exception cleanupError) {
-            log.error("[文書台帳] 例外時のStorage補償削除失敗: storageKey={}", storageKey, cleanupError);
+            log.error("[文書台帳] 例外時のStorage補償削除失敗: storageKey={} exceptionClass={} detail={}",
+                    storageKey,
+                    com.ses.common.util.LogRedaction.exceptionType(cleanupError),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(cleanupError));
         }
     }
 
@@ -475,7 +487,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                         } catch (Exception e) {
                             allSuccess = false;
                             failedKeys.add(v.getStorageKey());
-                            log.error("[文書台帳] Storage削除失敗: key={} error={}", v.getStorageKey(), e.getMessage());
+                            log.error("[文書台帳] Storage削除失敗: key={} exceptionClass={} detail={}",
+                                    v.getStorageKey(),
+                                    com.ses.common.util.LogRedaction.exceptionType(e),
+                                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
                         }
                     }
                     if (!allSuccess) {
@@ -712,8 +727,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                     : com.ses.common.enums.FileKind.SKILL_SHEET;
             return scanner.scan(path, kind);
         } catch (Exception e) {
-            log.warn("[文書台帳] スキャン実行中例外: {}", e.getMessage());
-            return FileScanResult.unavailable(e.getMessage());
+            log.warn("[文書台帳] スキャン実行中例外: exceptionClass={} detail={}",
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
+            return FileScanResult.unavailable("scanner-execution-failed");
         }
     }
 
@@ -745,7 +762,10 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
             log.setOccurredAt(LocalDateTime.now());
             documentAccessLogMapper.insert(log);
         } catch (Exception e) {
-            log.warn("[文書台帳] アクセスログ記録失敗: documentId={} action={} error={}", documentId, action, e.getMessage());
+            log.warn("[文書台帳] アクセスログ記録失敗: documentId={} action={} exceptionClass={} detail={}",
+                    documentId, action,
+                    com.ses.common.util.LogRedaction.exceptionType(e),
+                    com.ses.common.util.LogRedaction.safeThrowableSummary(e));
         }
     }
 
