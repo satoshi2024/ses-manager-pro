@@ -38,6 +38,8 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
     private final SystemConfigService systemConfigService;
     private final DataScopeService dataScopeService;
     private final OrganizationScopeService organizationScopeService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.servicedesk.CustomerHealthService customerHealthService;
 
     @Override
     public RenewalCalendarResponseDto getCalendar(LocalDate from, LocalDate to) {
@@ -71,9 +73,25 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
 
         Map<Long, Boolean> hasConfirmedDraftByOriginalId = resolveDraftStates(candidates);
 
+        // 顧客ヘルススコア連携
+        Set<Long> customerIds = candidates.stream()
+                .map(RenewalCalendarItemDto::getCustomerId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, com.ses.dto.servicedesk.CustomerHealthScoreDto> healthMap = customerHealthService != null
+                ? customerHealthService.getHealthMapForCustomers(customerIds)
+                : Collections.emptyMap();
+
         for (RenewalCalendarItemDto item : candidates) {
             item.setRenewalDueDate(item.getEndDate().minusDays(leadDays));
             item.setRenewalState(deriveState(item, hasConfirmedDraftByOriginalId));
+            if (item.getCustomerId() != null && healthMap.containsKey(item.getCustomerId())) {
+                com.ses.dto.servicedesk.CustomerHealthScoreDto health = healthMap.get(item.getCustomerId());
+                item.setHealthStatus(health.getHealthStatus());
+                item.setHealthScore(health.getHealthScore());
+                item.setOpenCriticalIssuesCount(health.getOpenCriticalIssuesCount());
+                item.setAvgCsatScore(health.getAvgCsatScore());
+            }
         }
 
         response.setItems(candidates);

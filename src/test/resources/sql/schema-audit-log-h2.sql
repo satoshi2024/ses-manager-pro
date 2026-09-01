@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
   after_state VARCHAR(255),
   correlation_id VARCHAR(128),
   idempotency_key VARCHAR(128),
+  invoice_id VARCHAR(100),
+  digital_invoice_id VARCHAR(100),
+  job_id VARCHAR(100),
+  provider_operation_id VARCHAR(128),
+  error_code VARCHAR(64),
+  error_category VARCHAR(32),
   CONSTRAINT ck_audit_actor_type CHECK (actor_type IS NULL OR actor_type IN ('HUMAN', 'SYSTEM', 'PROVIDER', 'LEGACY_UNRESOLVED')),
   CONSTRAINT ck_audit_confirmation_source CHECK (confirmation_source IS NULL OR confirmation_source IN ('MANUAL_API', 'SCHEDULER_POLL', 'PROVIDER_SYNC', 'PROVIDER_CALLBACK', 'LEGACY_UNRESOLVED')),
   CONSTRAINT ck_audit_actor_pair CHECK (
@@ -34,7 +40,7 @@ CREATE TABLE IF NOT EXISTS t_audit_log (
 );
 
 -- 共有H2(DB_CLOSE_DELAY=-1)では、別のschema scriptが先に旧V11形を作る場合がある。
--- CREATE IF NOT EXISTSだけでは既存テーブルを拡張しないため、NF-09列も明示的に補完する。
+-- CREATE IF NOT EXISTSだけでは既存テーブルを拡張しないため、全列を明示的に補完する。
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS application_code VARCHAR(64);
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS success_flag BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS reference_type VARCHAR(64);
@@ -46,6 +52,12 @@ ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS before_state VARCHAR(255);
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS after_state VARCHAR(255);
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(128);
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(128);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS invoice_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS digital_invoice_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS job_id VARCHAR(100);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS provider_operation_id VARCHAR(128);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS error_code VARCHAR(64);
+ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS error_category VARCHAR(32);
 ALTER TABLE t_audit_log ADD COLUMN IF NOT EXISTS created_at DATETIME DEFAULT CURRENT_TIMESTAMP;
 
 CREATE INDEX IF NOT EXISTS idx_auditlog_reference ON t_audit_log(reference_type, reference_id);

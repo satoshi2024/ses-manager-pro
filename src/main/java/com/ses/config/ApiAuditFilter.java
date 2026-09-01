@@ -2,6 +2,7 @@ package com.ses.config;
 
 import com.ses.common.util.SecurityInfrastructureUtils;
 import com.ses.common.util.SecurityUtils;
+import com.ses.common.util.CorrelationContext;
 import com.ses.service.AuditLogService;
 import com.ses.service.security.BreakGlassService;
 import jakarta.servlet.FilterChain;
@@ -72,8 +73,12 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                     String method = request.getMethod();
                     String uri = request.getRequestURI();
                     int status = response.getStatus() >= 400 ? response.getStatus() : observedStatus;
-                    log.info("操作ログ user={} method={} uri={} status={}",
-                            username != null ? username : "-", method, uri, status);
+                    log.info("API操作監査: user={} method={} uri={} status={} correlationId={} invoiceId={} digitalInvoiceId={} jobId={} providerOperationId={} errorCode={} errorCategory={}",
+                            username != null ? username : "-", method, uri, status,
+                            context(CorrelationContext.CORRELATION_ID), context(CorrelationContext.INVOICE_ID),
+                            context(CorrelationContext.DIGITAL_INVOICE_ID), context(CorrelationContext.JOB_ID),
+                            context(CorrelationContext.PROVIDER_OPERATION_ID), context(CorrelationContext.ERROR_CODE),
+                            context(CorrelationContext.ERROR_CATEGORY));
                     if (auditLogService != null) {
                         String applicationCode = breakGlassRequest ? "BREAK_GLASS_ACCESS"
                                 : "GET".equals(method) && isDownloadUri(uri)
@@ -97,6 +102,11 @@ public class ApiAuditFilter extends OncePerRequestFilter {
                 || uri.matches("/api/acceptances/\\d+/document/download")
                 || uri.matches("/api/my/change-requests/\\d+/attachment")
                 || uri.matches("/api/engineer-change-requests/\\d+/attachment");
+    }
+
+    private static String context(String key) {
+        String value = CorrelationContext.get(key);
+        return value == null ? "-" : value;
     }
 
     /**

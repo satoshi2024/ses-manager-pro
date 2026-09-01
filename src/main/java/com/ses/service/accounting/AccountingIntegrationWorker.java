@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
+import com.ses.common.util.CorrelationContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import lombok.RequiredArgsConstructor;
@@ -55,18 +57,29 @@ public class AccountingIntegrationWorker {
     @Scheduled(fixedDelay = 5000)
     @SchedulerLock(name = "accountingProcessDueJobs", lockAtLeastFor = "PT1S", lockAtMostFor = "PT4M")
     public void processDueJobs() {
-        List<IntegrationJob> dueJobs = jobService.listDueJobs(10);
+        List<IntegrationJob> dueJobs;
+        try {
+            dueJobs = jobService.listDueJobs(10);
+        } catch (Exception e) {
+            log.error("連携ジョブ一覧の取得に失敗: category=SYSTEM errorCode=JOB_LIST_ERROR exceptionClass={} detail={}",
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            return;
+        }
         if (dueJobs.isEmpty()) {
             return;
         }
-        log.debug("Processing {} due accounting integration job(s)", dueJobs.size());
+        log.debug("処理対象の会計連携ジョブ: 件数={}", dueJobs.size());
         for (IntegrationJob job : dueJobs) {
+            String correlationId = CorrelationContext.begin(job.getCorrelationId());
+            CorrelationContext.put(CorrelationContext.JOB_ID, job.getId());
             try {
                 dispatchJob(job);
             } catch (Exception e) {
-                // R4.5: Worker最外層も raw throwable / stack trace をログへ出力しない (固定 error code + jobId のみ)
-                log.error("Unexpected error dispatching job: error_code=JOB_DISPATCH_ERROR, jobId={}, jobType={}",
-                        job.getId(), job.getJobType());
+                log.error("連携ジョブのディスパッチに失敗: category=SYSTEM error_code=JOB_DISPATCH_ERROR jobId={} jobType={} correlationId={} exceptionClass={} detail={}",
+                        job.getId(), job.getJobType(), correlationId, LogRedaction.exceptionType(e),
+                        LogRedaction.safeThrowableSummary(e));
+            } finally {
+                CorrelationContext.clear();
             }
         }
     }
@@ -78,37 +91,49 @@ public class AccountingIntegrationWorker {
     @Scheduled(fixedDelay = 60_000)
     @SchedulerLock(name = "accountingRecoverStaleRunning", lockAtLeastFor = "PT1S", lockAtMostFor = "PT2M")
     public void recoverStaleRunning() {
-        List<IntegrationJob> stale = jobService.listStaleRunningJobs(RUNNING_LEASE_MINUTES);
+        List<IntegrationJob> stale;
+        try {
+            stale = jobService.listStaleRunningJobs(RUNNING_LEASE_MINUTES);
+        } catch (Exception e) {
+            log.error("滞留連携ジョブ一覧の取得に失敗: category=SYSTEM errorCode=STALE_LIST_ERROR exceptionClass={} detail={}",
+                    LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            return;
+        }
         if (stale.isEmpty()) {
             return;
         }
         int succeeded = 0;
         int retryable = 0;
         for (IntegrationJob job : stale) {
+            CorrelationContext.beginJob(job.getId(), job.getCorrelationId());
             try {
                 Optional<String> existingDealId = findExistingDealIfCreateJob(job);
                 if (existingDealId.isPresent()) {
                     jobService.markSucceeded(job.getId(), existingDealId.get(), null,
-                            "stale lease recovery: deal already exists by ref_number");
+                            "外部取引の存在を照合して復旧しました。");
                     succeeded++;
                 } else {
                     jobService.markRetryable(job.getId(), "STALE_LEASE",
-                            "lease timeout recovered", 0);
+                            "error.integration.maxAttemptsExceeded", 0);
                     retryable++;
                 }
             } catch (Exception e) {
-                log.warn("Stale recovery failed for jobId={}, falling back to RETRYABLE: error_code=STALE_RECOVERY_ERROR",
-                        job.getId());
+                log.warn("滞留連携ジョブの復旧照合に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
+                        job.getId(), LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
                 try {
                     jobService.markRetryable(job.getId(), "STALE_LEASE",
-                            "lease timeout recovered (lookup failed)", 0);
+                            "error.integration.maxAttemptsExceeded", 0);
                     retryable++;
-                } catch (Exception ignored) {
-                    // 競合時は次周期へ
+                } catch (Exception retryException) {
+                    log.warn("滞留連携ジョブの再試行待ち遷移に失敗: jobId={} category=SYSTEM errorCode=STALE_RECOVERY_ERROR exceptionClass={} detail={}",
+                            job.getId(), LogRedaction.exceptionType(retryException),
+                            LogRedaction.safeThrowableSummary(retryException));
                 }
+            } finally {
+                CorrelationContext.clear();
             }
         }
-        log.warn("Recovered {} stale RUNNING job(s) (lease > {} minutes): succeeded={}, retryable={}",
+        log.warn("滞留連携ジョブを復旧: 件数={} lease={}分 成功={} 再試行待ち={}",
                 stale.size(), RUNNING_LEASE_MINUTES, succeeded, retryable);
     }
 
@@ -126,11 +151,11 @@ public class AccountingIntegrationWorker {
             case "EXPENSE_DEAL_SYNC"    -> purchaseIntegrationService.processExpenseJob(job.getId());
             case "PAYMENT_SYNC"         -> purchaseIntegrationService.processPaymentSyncJob(job.getId());
             default -> {
-                log.warn("Unknown job type: {}, marking FAILED (jobId={})", job.getJobType(), job.getId());
+                log.warn("未知の連携ジョブ種別を失敗扱いに変更: jobType={} jobId={}", job.getJobType(), job.getId());
                 IntegrationJob claimed = jobService.claimJob(job.getId());
                 if (claimed != null) {
                     jobService.markFailed(job.getId(), "UNKNOWN_JOB_TYPE",
-                            "未知のジョブ種別: " + job.getJobType());
+                            "error.system.unexpected");
                 }
             }
         }
@@ -172,7 +197,8 @@ public class AccountingIntegrationWorker {
                 return root.get("expenseNo").asText();
             }
         } catch (Exception e) {
-            log.warn("Failed to parse payloadSnapshot for jobId={}", job.getId());
+            log.warn("連携ジョブの送信スナップショットを解釈できない: jobId={} category=BUSINESS errorCode=INVALID_PAYLOAD",
+                    job.getId());
         }
         return null;
     }

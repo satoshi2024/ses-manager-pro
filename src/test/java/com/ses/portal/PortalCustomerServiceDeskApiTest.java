@@ -1,0 +1,359 @@
+package com.ses.portal;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.dto.portal.PortalCsatCreateRequest;
+import com.ses.dto.portal.PortalServiceCommentCreateRequest;
+import com.ses.dto.portal.PortalServiceRequestCreateRequest;
+import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
+import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
+import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
+import com.ses.entity.DocumentVersion;
+import com.ses.entity.Engineer;
+import com.ses.entity.PortalOrganization;
+import com.ses.entity.ServiceAttachmentLink;
+import com.ses.entity.ServiceRequest;
+import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.ServiceAttachmentLinkMapper;
+import com.ses.service.DocumentService;
+import com.ses.service.servicedesk.ServiceRequestService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.ByteArrayInputStream;
+import java.util.UUID;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+@Transactional
+class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
+
+    @Autowired
+    protected MockMvc mockMvc;
+
+    @Autowired
+    protected JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    protected ObjectMapper objectMapper;
+
+    @Autowired
+    protected CustomerMapper customerMapper;
+
+    @Autowired
+    protected EngineerMapper engineerMapper;
+
+    @Autowired
+    protected ServiceRequestService serviceRequestService;
+
+    @Autowired
+    private DocumentVersionMapper documentVersionMapper;
+
+    @Autowired
+    private ServiceAttachmentLinkMapper attachmentLinkMapper;
+
+    @MockBean
+    private DocumentService documentService;
+
+    @Override
+    protected JdbcTemplate jdbcTemplate() {
+        return jdbcTemplate;
+    }
+
+    private String unique() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    private UserFixture customerAUser;
+    private UserFixture customerBUser;
+    private PortalOrganization customerAOrg;
+    private PortalOrganization customerBOrg;
+    private ServiceRequest customerARequest;
+
+    @BeforeEach
+    void setUp() {
+        String uA = unique();
+        String uB = unique();
+        customerAOrg = createCustomerOrg("A-" + uA);
+        customerBOrg = createCustomerOrg("B-" + uB);
+
+        customerAUser = readyUser(customerAOrg, "userA-" + uA + "@customer.com");
+        customerBUser = readyUser(customerBOrg, "userB-" + uB + "@customer.com");
+
+        // サービスデスク権限を付与 (service-desk.view, service-desk.create)
+        grantServiceDeskPermissions(customerAUser.user().getId());
+        grantServiceDeskPermissions(customerBUser.user().getId());
+
+        // 顧客Aの問い合わせ作成
+        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+                .customerId(customerAOrg.getCustomerId())
+                .category("CONTRACT")
+                .priority("P2")
+                .subject("顧客Aの契約に関する問い合わせ")
+                .description("更新時期について確認したい")
+                .build();
+        customerARequest = serviceRequestService.createRequest(req, 100L, false, null);
+
+        // 内部メモと公開返信を追加
+        serviceRequestService.addComment(customerARequest.getId(),
+                ServiceCommentCreateRequest.builder().commentText("社内機密メモ: 顧客Aは契約延長の可能性高").visibility("INTERNAL").build(),
+                100L, "INTERNAL_USER", "営業マネージャー", false);
+        serviceRequestService.addComment(customerARequest.getId(),
+                ServiceCommentCreateRequest.builder().commentText("お問い合わせありがとうございます。担当よりご連絡します。").visibility("PORTAL_VISIBLE").build(),
+                100L, "INTERNAL_USER", "サポート担当", false);
+    }
+
+    private void grantServiceDeskPermissions(Long portalUserId) {
+        jdbcTemplate.update("INSERT INTO t_portal_user_permission (user_id, permission_key) VALUES (?, 'service-desk.view')", portalUserId);
+        jdbcTemplate.update("INSERT INTO t_portal_user_permission (user_id, permission_key) VALUES (?, 'service-desk.create')", portalUserId);
+    }
+
+    @Test
+    @DisplayName("サービスデスク権限を持たないポータルユーザーは403拒否されること")
+    void testPermissionDenied_withoutServiceDeskPermission() throws Exception {
+        String u = unique();
+        PortalOrganization org = createCustomerOrg("NoPerm-" + u);
+        UserFixture userWithoutPerm = readyUser(org, "noperm-" + u + "@customer.com");
+
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests")
+                        .cookie(userWithoutPerm.sessionCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+
+    @Test
+    @DisplayName("自社ポータルユーザーで自社の問い合わせ一覧が取得できること")
+    void testCustomerListRequests() throws Exception {
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.records").isArray())
+                .andExpect(jsonPath("$.data.records.length()").value(1))
+                .andExpect(jsonPath("$.data.records[0].subject").value("顧客Aの契約に関する問い合わせ"));
+    }
+
+    @Test
+    @DisplayName("自社ポータル詳細で内部メモが除外され公開コメントのみ返却されること (構造的情報漏洩防止)")
+    void testCustomerGetRequest_excludesInternalNotes() throws Exception {
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId())
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.id").value(customerARequest.getId()))
+                .andExpect(jsonPath("$.data.comments").isArray())
+                .andExpect(jsonPath("$.data.comments.length()").value(1))
+                .andExpect(jsonPath("$.data.comments[0].commentText").value("お問い合わせありがとうございます。担当よりご連絡します。"));
+    }
+
+    @Test
+    @DisplayName("顧客Bのポータルユーザーが顧客Aの問い合わせIDを指定した場合に404拒否されること (IDOR防止)")
+    void testOtherCustomerRequest_returns404() throws Exception {
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId())
+                        .cookie(customerBUser.sessionCookie()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
+    }
+
+    @Test
+    @DisplayName("ポータルからの新規起票が自社のcustomerIdで強制保存されること")
+    void testCreateRequest_fromPortal() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        PortalServiceRequestCreateRequest newReq = PortalServiceRequestCreateRequest.builder()
+                .category("BILLING")
+                .priority("P1")
+                .subject("請求書の宛名変更希望")
+                .description("経理部門の宛名に変更してください")
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(newReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.id").isNumber())
+                .andExpect(jsonPath("$.data.subject").value("請求書の宛名変更希望"));
+    }
+
+    @Test
+    @DisplayName("他社に属する契約IDを指定して起票した場合は400エラーで拒否されること")
+    void testCreateRequest_otherCompanyContractRejected() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        PortalServiceRequestCreateRequest invalidReq = PortalServiceRequestCreateRequest.builder()
+                .category("CONTRACT")
+                .priority("P2")
+                .subject("契約関連")
+                .description("詳細")
+                .contractId(99999L)
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("ポータルからの返信コメントがPORTAL_VISIBLEとして投稿され詳細に反映されること")
+    void testReplyComment_fromPortal() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        PortalServiceCommentCreateRequest replyReq = PortalServiceCommentCreateRequest.builder()
+                .commentText("追加の資料を送付しました。ご確認ください。")
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests/" + customerARequest.getId() + "/comments")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(replyReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.commentText").value("追加の資料を送付しました。ご確認ください。"));
+    }
+
+    @Test
+    @DisplayName("解決後のリクエストに対してCSAT評価を投稿でき、2回目の投稿は409拒否されること")
+    void testCsat_resolvedRequest() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        // 管理者がリクエストを解決済みにする
+        serviceRequestService.changeStatus(customerARequest.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("IN_PROGRESS").build(),
+                100L, "INTERNAL_USER", "管理者");
+        serviceRequestService.changeStatus(customerARequest.getId(),
+                ServiceRequestStatusChangeRequest.builder().toStatus("RESOLVED").reason("対応完了").build(),
+                100L, "INTERNAL_USER", "管理者");
+
+        PortalCsatCreateRequest csatReq = PortalCsatCreateRequest.builder()
+                .score(5)
+                .feedbackComment("非常に迅速で助かりました")
+                .build();
+
+        // 1回目のCSAT回答 -> 200 OK
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests/" + customerARequest.getId() + "/csat")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(csatReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        // 2回目のCSAT回答 -> 409 Conflict 拒否
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests/" + customerARequest.getId() + "/csat")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(csatReq)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409));
+    }
+
+    @Test
+    @DisplayName("自社契約に紐付かない他社要員IDを指定して起票した場合は400エラーで拒否されること")
+    void testCreateRequest_otherCompanyEngineerRejected() throws Exception {
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        // ダミー要員作成（契約なし）
+        Engineer otherEng = Engineer.builder()
+                .fullName("他社要員")
+                .status("稼動中")
+                .employmentType("正社員")
+                .build();
+        engineerMapper.insert(otherEng);
+
+        PortalServiceRequestCreateRequest reqWithOtherEng = PortalServiceRequestCreateRequest.builder()
+                .category("TECHNICAL")
+                .priority("P2")
+                .subject("他社要員の稼働について")
+                .description("問い合わせ内容")
+                .engineerId(otherEng.getId())
+                .build();
+
+        mockMvc.perform(post("/api/portal/customer/service-desk/requests")
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reqWithOtherEng)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("ポータル添付はDocumentServiceとCLEAN検証を通過した場合だけダウンロードできること")
+    void testAttachmentDownload_requiresCleanDocumentVersion() throws Exception {
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(9001L);
+        version.setVersionNo(1);
+        version.setStorageKey("service-desk-clean-" + unique());
+        version.setScanStatus("CLEAN");
+        version.setOriginalName("portal-report.pdf");
+        version.setSha256("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        version.setSourceType("MANUAL");
+        version.setBusinessKey("portal-service-desk-" + unique());
+        version.setVersionDiscriminator("v1");
+        version.setCreatedBy(1L);
+        documentVersionMapper.insert(version);
+
+        ServiceAttachmentLink link = ServiceAttachmentLink.builder()
+                .serviceRequestId(customerARequest.getId())
+                .documentId(version.getDocumentId())
+                .visibility("PORTAL_VISIBLE")
+                .fileName("portal-report.pdf")
+                .fileSize(3L)
+                .build();
+        attachmentLinkMapper.insert(link);
+
+        when(documentService.getVersionStorageKey(eq(version.getDocumentId()), eq(null)))
+                .thenReturn(version.getStorageKey());
+        when(documentService.download(eq(version.getDocumentId()), eq(null)))
+                .thenReturn(new ByteArrayInputStream("PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId()
+                        + "/attachments/" + link.getId() + "/download")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes("PDF".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                                org.hamcrest.Matchers.containsString("portal-report.pdf")));
+
+        verify(documentService).getVersionStorageKey(version.getDocumentId(), null);
+        verify(documentService).download(version.getDocumentId(), null);
+
+        version.setScanStatus("PENDING");
+        documentVersionMapper.updateById(version);
+        mockMvc.perform(get("/api/portal/customer/service-desk/requests/" + customerARequest.getId()
+                        + "/attachments/" + link.getId() + "/download")
+                        .cookie(customerAUser.sessionCookie()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+    }
+}

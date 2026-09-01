@@ -11,6 +11,7 @@ import com.ses.entity.EngineerCertification;
 import com.ses.entity.ProjectIngestion;
 import com.ses.entity.Proposal;
 import com.ses.entity.ResumeIngestion;
+import com.ses.entity.ServiceRequest;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
@@ -54,8 +55,36 @@ public class FileScopeValidationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
+    /** サービスリクエスト添付（SERVICE_REQUEST link）のscope解決用。テストスライス互換のため任意注入。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.mapper.ServiceRequestMapper serviceRequestMapper;
+
     public void assertDownloadAllowed(String storedName) {
         assertDownloadAllowed(storedName, null, null);
+    }
+
+    /**
+     * 顧客ポータルのサービスリクエスト添付専用scope。
+     * 内部メニュー権限へフォールバックせず、リクエスト顧客・文書ID・CLEAN版を同時に検証する。
+     */
+    public void assertPortalServiceRequestDownloadAllowed(String storedName, Long serviceRequestId,
+                                                           Long customerId, Long documentId) {
+        DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
+        DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
+                new QueryWrapper<DocumentVersion>().eq("storage_key", storedName).last("LIMIT 1"));
+        if (version == null || !java.util.Objects.equals(version.getDocumentId(), documentId)) {
+            throw BusinessException.of(404, "error.notFound");
+        }
+        if (!"CLEAN".equals(version.getScanStatus())) {
+            throw BusinessException.of(403, "error.file.scanNotReady");
+        }
+        if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
+            throw BusinessException.of(403, "error.forbidden");
+        }
+        ServiceRequest request = serviceRequestMapper.selectById(serviceRequestId);
+        if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)) {
+            throw BusinessException.of(404, "error.notFound");
+        }
     }
 
     /**
@@ -230,6 +259,15 @@ public class FileScopeValidationService {
                                             : salesOrderMapper.selectById(targetId);
                                     if (salesOrder != null) {
                                         dataScopeService.assertAllowedCustomer(salesOrder.getCustomerId());
+                                        anyAllowed = true;
+                                        break;
+                                    }
+                                } else if ("SERVICE_REQUEST".equals(type)) {
+                                    // サービスリクエスト添付はリクエストの顧客DataScopeで見せる (P1-03)
+                                    com.ses.entity.ServiceRequest sr = serviceRequestMapper == null ? null
+                                            : serviceRequestMapper.selectById(targetId);
+                                    if (sr != null) {
+                                        dataScopeService.assertAllowedCustomer(sr.getCustomerId());
                                         anyAllowed = true;
                                         break;
                                     }

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>サービスデスク・問い合わせ管理 - SES Manager Pro</title>
+</head>
+<body>
+<div layout:fragment="content">
+    <div class="container-fluid px-4 py-3">
+        <!-- Page Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1 class="h3 mb-0 text-white fw-bold">
+                    <i class="bi bi-headset me-2 text-accent-blue"></i>サービスデスク・問い合わせ管理
+                </h1>
+                <p class="text-secondary small mb-0">顧客からの問い合わせ・課題の一元管理とSLA監視</p>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" id="btnExportCsv">
+                    <i class="bi bi-download me-1"></i>CSVエクスポート
+                </button>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newRequestModal">
+                    <i class="bi bi-plus-lg me-1"></i>新規起票
+                </button>
+            </div>
+        </div>
+
+        <!-- Search & Filter Card -->
+        <div class="card bg-secondary border-0 mb-4 shadow-sm">
+            <div class="card-body">
+                <form id="searchForm" class="row g-3 align-items-center">
+                    <div class="col-md-3">
+                        <input type="text" class="form-control" id="keyword" placeholder="番号・件名・本文で検索">
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="statusFilter">
+                            <option value="">全てのステータス</option>
+                            <option value="RECEIVED">受付 (RECEIVED)</option>
+                            <option value="IN_PROGRESS">対応中 (IN_PROGRESS)</option>
+                            <option value="WAITING_CUSTOMER">顧客確認待ち (WAITING_CUSTOMER)</option>
+                            <option value="RESOLVED">解決 (RESOLVED)</option>
+                            <option value="CLOSED">終了 (CLOSED)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="priorityFilter">
+                            <option value="">全ての優先度</option>
+                            <option value="P0">緊急 (P0)</option>
+                            <option value="P1">高 (P1)</option>
+                            <option value="P2">中 (P2)</option>
+                            <option value="P3">低 (P3)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="categoryFilter">
+                            <option value="">全てのカテゴリ</option>
+                            <option value="CONTRACT">契約関連</option>
+                            <option value="BILLING">請求関連</option>
+                            <option value="ATTENDANCE">勤怠関連</option>
+                            <option value="QUALITY">品質・成果物</option>
+                            <option value="SYSTEM">システム障害</option>
+                            <option value="OTHER">その他</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex gap-2">
+                        <button type="submit" class="btn btn-accent-blue flex-grow-1">
+                            <i class="bi bi-search me-1"></i>検索
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" id="resetBtn">リセット</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Requests Table Card -->
+        <div class="card bg-secondary border-0 shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 text-white" id="requestsTable">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>リクエスト番号</th>
+                                <th>顧客名</th>
+                                <th>カテゴリ</th>
+                                <th>優先度</th>
+                                <th>件名</th>
+                                <th>担当者</th>
+                                <th>ステータス</th>
+                                <th>SLA解決期限</th>
+                                <th>登録日時</th>
+                                <th class="text-end">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="requestsTableBody">
+                            <tr>
+                                <td colspan="10" class="text-center py-4 text-secondary">
+                                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>読み込み中...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Pagination -->
+            <div class="card-footer bg-secondary border-0 d-flex justify-content-between align-items-center py-3">
+                <span class="small text-secondary" id="pageInfo">0 件中 0 - 0 件を表示</span>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Request Modal -->
+    <div class="modal fade" id="newRequestModal" tabindex="-1" aria-labelledby="newRequestModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-secondary text-white border-0 shadow">
+                <div class="modal-header border-bottom border-dark">
+                    <h5 class="modal-title fw-bold" id="newRequestModalLabel">
+                        <i class="bi bi-plus-circle me-2 text-accent-blue"></i>新規問い合わせ起票
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form id="newRequestForm">
+                    <div class="modal-body row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label required">顧客 <span class="text-danger">*</span></label>
+                            <select class="form-select" id="newCustomerId" required>
+                                <option value="">顧客を選択してください</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">受付チャネル</label>
+                            <select class="form-select" id="newChannel">
+                                <option value="PORTAL">ポータル</option>
+                                <option value="EMAIL" selected>メール</option>
+                                <option value="PHONE">電話</option>
+                                <option value="MEETING">定例会・対面</option>
+                                <option value="INTERNAL">社内起票</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required">カテゴリ <span class="text-danger">*</span></label>
+                            <select class="form-select" id="newCategory" required>
+                                <option value="CONTRACT">契約関連</option>
+                                <option value="BILLING">請求関連</option>
+                                <option value="ATTENDANCE">勤怠関連</option>
+                                <option value="QUALITY">品質・成果物</option>
+                                <option value="SYSTEM">システム障害</option>
+                                <option value="OTHER" selected>その他</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label required">優先度 (SLAポリシー) <span class="text-danger">*</span></label>
+                            <select class="form-select" id="newPriority" required>
+                                <option value="P0">緊急 (P0: 応答1h / 解決4h)</option>
+                                <option value="P1">高 (P1: 応答2h / 解決8h)</option>
+                                <option value="P2" selected>中 (P2: 応答4h / 解決24h)</option>
+                                <option value="P3">低 (P3: 応答8h / 解決48h)</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label required">件名 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="newSubject" placeholder="問い合わせの概要を入力" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label required">詳細内容 <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="newDescription" rows="4" placeholder="詳細な内容や背景を入力してください" required></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-top border-dark">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">キャンセル</button>
+                        <button type="submit" class="btn btn-primary" id="saveRequestBtn">
+                            <i class="bi bi-check-lg me-1"></i>起票する
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<th:block layout:fragment="page-js">
+    <script th:src="@{/js/modules/service-desk.js}"></script>
+</th:block>
+</body>
+</html>

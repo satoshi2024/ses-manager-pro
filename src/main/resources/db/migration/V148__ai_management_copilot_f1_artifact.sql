@@ -1,5 +1,5 @@
 -- ===================================================================
--- V144: NF-08 F1 management copilot artifact seed
+-- V148: NF-08 F1 management copilot artifact seed
 -- ===================================================================
 
 INSERT INTO m_ai_artifact_version (

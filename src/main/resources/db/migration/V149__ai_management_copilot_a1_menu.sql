@@ -1,4 +1,4 @@
--- NF-08 A1: 経営コパイロット chat 画面メニュー
+-- NF-08 A1 (V149): 経営コパイロット chat 画面メニュー
 INSERT INTO m_menu (menu_key, menu_name, path_prefix, api_prefix, sort_order)
 VALUES ('management-copilot', '経営コパイロット', '/copilot', '/api/copilot', 74);
 

@@ -70,7 +70,10 @@ CREATE TABLE t_integration_job (
     next_retry_at DATETIME,
     external_id VARCHAR(128),
     provider_request_id VARCHAR(128),
+    correlation_id VARCHAR(100),
+    provider_operation_id VARCHAR(128),
     error_code VARCHAR(64),
+    error_category VARCHAR(32),
     error_message_safe VARCHAR(500),
     sent_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -88,7 +91,8 @@ CREATE TABLE t_integration_job_event (
     from_status VARCHAR(32),
     to_status VARCHAR(32) NOT NULL,
     occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    safe_detail VARCHAR(1000)
+    safe_detail VARCHAR(1000),
+    correlation_id VARCHAR(100)
 );
 CREATE INDEX idx_job_event_job_id ON t_integration_job_event (job_id);
 

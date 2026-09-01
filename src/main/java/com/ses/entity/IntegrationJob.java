@@ -81,8 +81,17 @@ public class IntegrationJob {
     /** 外部リクエストID (X-Freee-Request-ID等) */
     private String providerRequestId;
 
+    /** API・ワーカーを横断する相関ID */
+    private String correlationId;
+
+    /** プロバイダが返した操作ID（照合用） */
+    private String providerOperationId;
+
     /** 分類エラーコード */
     private String errorCode;
+
+    /** 業務エラーかシステムエラーかの分類 */
+    private String errorCategory;
 
     /** 安全なエラー要約 (PII/Secret除外) */
     private String errorMessageSafe;

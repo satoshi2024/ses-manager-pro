@@ -11,6 +11,7 @@ import java.util.List;
 @Builder
 public class CanonicalInvoice {
     
+    private Long invoiceId;
     private String invoiceNumber;
     private LocalDate issuedDate;
     private LocalDate dueDate;

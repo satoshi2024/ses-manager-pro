@@ -7,6 +7,8 @@ import com.ses.common.audit.ActorAttribution;
 import com.ses.common.audit.ConfirmationSource;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AuditLog;
+import com.ses.common.util.CorrelationContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.mapper.AuditLogMapper;
 import com.ses.service.AuditLogService;
 import lombok.RequiredArgsConstructor;
@@ -39,11 +41,13 @@ public class AuditLogServiceImpl implements AuditLogService {
             entry.setApplicationCode(applicationCode);
             entry.setSuccessFlag(successFlag);
             applyRequestAttribution(entry);
+            applyContext(entry);
             entry.setCreatedAt(LocalDateTime.now());
             auditLogMapper.insert(entry);
         } catch (Exception e) {
             // 監査ログの永続化失敗は本来のAPI処理に影響させない
-            log.warn("監査ログの記録に失敗しました: user={} {} {}", username, method, uri, e);
+            log.warn("監査ログの記録に失敗: method={} status={} exceptionClass={} detail={}",
+                    method, status, LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
         }
     }
 
@@ -58,6 +62,7 @@ public class AuditLogServiceImpl implements AuditLogService {
         entry.setApplicationCode(applicationCode);
         entry.setSuccessFlag(successFlag);
         applyRequestAttribution(entry);
+        applyContext(entry);
         entry.setCreatedAt(LocalDateTime.now());
         if (auditLogMapper.insert(entry) != 1) {
             throw new IllegalStateException("重要security監査を永続化できません");
@@ -108,5 +113,15 @@ public class AuditLogServiceImpl implements AuditLogService {
         }
         qw.orderByDesc(AuditLog::getCreatedAt);
         return auditLogMapper.selectPage(page, qw);
+    }
+
+    private void applyContext(AuditLog entry) {
+        entry.setCorrelationId(CorrelationContext.get(CorrelationContext.CORRELATION_ID));
+        entry.setInvoiceId(CorrelationContext.get(CorrelationContext.INVOICE_ID));
+        entry.setDigitalInvoiceId(CorrelationContext.get(CorrelationContext.DIGITAL_INVOICE_ID));
+        entry.setJobId(CorrelationContext.get(CorrelationContext.JOB_ID));
+        entry.setProviderOperationId(CorrelationContext.get(CorrelationContext.PROVIDER_OPERATION_ID));
+        entry.setErrorCode(CorrelationContext.get(CorrelationContext.ERROR_CODE));
+        entry.setErrorCategory(CorrelationContext.get(CorrelationContext.ERROR_CATEGORY));
     }
 }

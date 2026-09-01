@@ -38,6 +38,7 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,7 +49,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PortalAuthServiceImpl implements PortalAuthService {
 
     private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
@@ -60,6 +60,7 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private final PortalOrganizationMapper organizationMapper;
     private final PortalInvitationMapper invitationMapper;
     private final PortalTermsConsentMapper termsConsentMapper;
+    private final com.ses.mapper.PortalUserPermissionMapper portalUserPermissionMapper;
     private final PortalMfaService mfaService;
     private final PortalSessionService sessionService;
     private final SystemConfigService systemConfigService;
@@ -68,6 +69,51 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private final ClientIpResolver clientIpResolver;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PortalAuthServiceImpl(
+            PortalUserMapper userMapper,
+            PortalOrganizationMapper organizationMapper,
+            PortalInvitationMapper invitationMapper,
+            PortalTermsConsentMapper termsConsentMapper,
+            com.ses.mapper.PortalUserPermissionMapper portalUserPermissionMapper,
+            PortalMfaService mfaService,
+            PortalSessionService sessionService,
+            SystemConfigService systemConfigService,
+            PortalRateLimiter rateLimiter,
+            PortalSecurityProperties portalSecurityProperties,
+            ClientIpResolver clientIpResolver,
+            Clock clock) {
+        this.userMapper = userMapper;
+        this.organizationMapper = organizationMapper;
+        this.invitationMapper = invitationMapper;
+        this.termsConsentMapper = termsConsentMapper;
+        this.portalUserPermissionMapper = portalUserPermissionMapper;
+        this.mfaService = mfaService;
+        this.sessionService = sessionService;
+        this.systemConfigService = systemConfigService;
+        this.rateLimiter = rateLimiter;
+        this.portalSecurityProperties = portalSecurityProperties;
+        this.clientIpResolver = clientIpResolver;
+        this.clock = clock;
+    }
+
+    public PortalAuthServiceImpl(
+            PortalUserMapper userMapper,
+            PortalOrganizationMapper organizationMapper,
+            PortalInvitationMapper invitationMapper,
+            PortalTermsConsentMapper termsConsentMapper,
+            PortalMfaService mfaService,
+            PortalSessionService sessionService,
+            SystemConfigService systemConfigService,
+            PortalRateLimiter rateLimiter,
+            PortalSecurityProperties portalSecurityProperties,
+            ClientIpResolver clientIpResolver,
+            Clock clock) {
+        this(userMapper, organizationMapper, invitationMapper, termsConsentMapper, null,
+                mfaService, sessionService, systemConfigService, rateLimiter,
+                portalSecurityProperties, clientIpResolver, clock);
+    }
 
     /** setup ticket hash → (userId, expiresAtEpochMs)。単一インスタンス運用向けインメモリ。 */
     private final Map<String, MfaSetupTicket> setupTickets = new ConcurrentHashMap<>();
@@ -253,6 +299,9 @@ public class PortalAuthServiceImpl implements PortalAuthService {
             user.setStatus("ACTIVE");
             user.setMfaPolicy("REQUIRED");
             userMapper.insert(user);
+
+            // 顧客組織の場合、初期権限として service-desk.view / service-desk.create を付与 (CS-IMPL-P1-01)
+            grantDefaultCustomerPermissions(user.getId(), invitation.getPortalOrgId());
             return user;
         }
         // 論理削除済み（過去に削除されたアカウント）はreactivate可能。statusは無関係（deleted行優先）
@@ -403,6 +452,23 @@ public class PortalAuthServiceImpl implements PortalAuthService {
     private void clearLoginFailures(String email) {
         if (email != null) {
             loginFailureGuards.remove(email);
+        }
+    }
+
+    private void grantDefaultCustomerPermissions(Long userId, Long portalOrgId) {
+        PortalOrganization org = organizationMapper.selectById(portalOrgId);
+        if (org != null && "CUSTOMER".equals(org.getType())) {
+            List<String> defaultKeys = List.of("service-desk.view", "service-desk.create");
+            for (String key : defaultKeys) {
+                com.ses.entity.PortalUserPermission perm = new com.ses.entity.PortalUserPermission();
+                perm.setUserId(userId);
+                perm.setPermissionKey(key);
+                try {
+                    portalUserPermissionMapper.insert(perm);
+                } catch (Exception e) {
+                    // ignore duplicate
+                }
+            }
         }
     }
 
