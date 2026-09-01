@@ -5,6 +5,7 @@ import com.ses.entity.SalesOrder;
 import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationGenerateService;
+import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +20,7 @@ import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 import java.util.Set;
 
@@ -40,14 +42,18 @@ class MonthlyClosingUnacceptedTest {
     @Autowired NotificationGenerateService notificationGenerateService;
     @Autowired SalesOrderMapper salesOrderMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired SystemConfigService systemConfigService;
 
     @MockBean DataScopeService dataScopeService;
 
     private long customerId;
     private long contractId;
+    private String workMonth;
 
     @BeforeEach
     void setUp() {
+        int offset = systemConfigService.getInt("acceptance.submission-target-month-offset", 1);
+        workMonth = YearMonth.from(LocalDate.now()).minusMonths(offset).toString();
         String suffix = "-" + System.nanoTime();
         jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "MC顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "MC顧客" + suffix);
@@ -63,8 +69,8 @@ class MonthlyClosingUnacceptedTest {
         contractId = jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "MC-C-" + suffix);
         jdbcTemplate.update(
                 "INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, status)"
-                        + " VALUES (?, '2026-07', 160.00, 600000, '確定')",
-                contractId);
+                        + " VALUES (?, ?, 160.00, 600000, '確定')",
+                contractId, workMonth);
     }
 
     @Test
@@ -72,7 +78,7 @@ class MonthlyClosingUnacceptedTest {
     void closingSummaryIncludesUnacceptedCount() {
         // unscoped（管理者相当）: 全件
         when(dataScopeService.isScoped()).thenReturn(false);
-        MonthlyClosingSummaryDto summary = monthlyClosingService.summary("2026-07");
+        MonthlyClosingSummaryDto summary = monthlyClosingService.summary(workMonth);
         assertEquals(1, summary.getUnacceptedCount(), "未検収件数1件がchecklistに含まれる");
 
         // scoped（マネージャー）で契約が許可集合に無い場合: 0件（全社件数を見せない）
@@ -80,7 +86,7 @@ class MonthlyClosingUnacceptedTest {
         when(dataScopeService.allowedContractIds()).thenReturn(Set.of(999999L));
         when(dataScopeService.allowedContractIdsAsOf(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(Set.of(999999L));
-        MonthlyClosingSummaryDto scopedSummary = monthlyClosingService.summary("2026-07");
+        MonthlyClosingSummaryDto scopedSummary = monthlyClosingService.summary(workMonth);
         assertEquals(0, scopedSummary.getUnacceptedCount(), "scope外の未検収は見せない");
     }
 
@@ -90,18 +96,18 @@ class MonthlyClosingUnacceptedTest {
         // 提出済（検収済でない）acceptanceを作る
         com.ses.dto.acceptance.AcceptanceSubmitRequest req = new com.ses.dto.acceptance.AcceptanceSubmitRequest();
         req.setContractId(contractId);
-        req.setWorkMonth("2026-07");
+        req.setWorkMonth(workMonth);
         jdbcTemplate.update(
                 "INSERT INTO t_acceptance (contract_id, work_record_id, work_month, status, submitted_at)"
                         + " SELECT c.id, w.id, w.work_month, '提出済', CURRENT_TIMESTAMP"
                         + " FROM t_contract c JOIN t_work_record w ON w.contract_id = c.id"
-                        + " WHERE c.id = ? AND w.work_month = '2026-07'", contractId);
+                        + " WHERE c.id = ? AND w.work_month = ?", contractId, workMonth);
 
         notificationGenerateService.acceptanceUnsubmitted();
 
         Long notifications = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE type = 'ACCEPTANCE_UNSUBMITTED'"
-                        + " AND message LIKE '%2026-07%'", Long.class);
+                        + " AND message LIKE '%" + workMonth + "%'", Long.class);
         assertEquals(0L, notifications, "提出済の検収に「未提出」通知は出さない（R09-P1-06）");
     }
 
@@ -127,7 +133,7 @@ class MonthlyClosingUnacceptedTest {
 
         Long acceptanceNotifications = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE type = 'ACCEPTANCE_UNSUBMITTED'"
-                        + " AND message LIKE '%2026-07%'", Long.class);
+                        + " AND message LIKE '%" + workMonth + "%'", Long.class);
         assertTrue(acceptanceNotifications > 0, "検収未提出通知が発行されるはず");
     }
 
@@ -137,17 +143,17 @@ class MonthlyClosingUnacceptedTest {
         notificationGenerateService.acceptanceUnsubmitted();
         Long firstCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE type='ACCEPTANCE_UNSUBMITTED' "
-                        + "AND message LIKE '%2026-07%'", Long.class);
+                        + "AND message LIKE '%" + workMonth + "%'", Long.class);
         assertNotNull(firstCount);
         assertTrue(firstCount > 0);
 
         notificationGenerateService.acceptanceUnsubmitted();
         Long secondCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_notification WHERE type='ACCEPTANCE_UNSUBMITTED' "
-                        + "AND message LIKE '%2026-07%'", Long.class);
+                        + "AND message LIKE '%" + workMonth + "%'", Long.class);
         Long distinctKeys = jdbcTemplate.queryForObject(
                 "SELECT COUNT(DISTINCT dedupe_key) FROM t_notification "
-                        + "WHERE type='ACCEPTANCE_UNSUBMITTED' AND message LIKE '%2026-07%'", Long.class);
+                        + "WHERE type='ACCEPTANCE_UNSUBMITTED' AND message LIKE '%" + workMonth + "%'", Long.class);
 
         assertEquals(firstCount, secondCount, "同じ通知を再生成してもDB行数は増えない");
         assertEquals(secondCount, distinctKeys, "通知行とdedupe keyは1対1である");

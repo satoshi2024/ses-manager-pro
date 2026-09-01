@@ -32,7 +32,7 @@ public class CopilotRunService {
     private final AiRecommendationRunMapper runMapper;
     private final ObjectMapper objectMapper;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public CopilotRunRecord recordQueryRun(
             SemanticCatalogEntry entry,
             String parameterHash,
@@ -41,7 +41,7 @@ public class CopilotRunService {
         return insertRun(entry, parameterHash, scopeHash, "QUERY_EXECUTED", metricCount);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public CopilotRunRecord recordCatalogRun(SemanticCatalogEntry entry, String parameterHash, String scopeHash) {
         return insertRun(entry, parameterHash, scopeHash, "CATALOG_RESOLVED", 0);
     }
