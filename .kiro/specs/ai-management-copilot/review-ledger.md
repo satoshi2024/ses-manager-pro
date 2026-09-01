@@ -5,7 +5,7 @@
 | 項目 | 状態 |
 |---|---|
 | Review type | Plan **CONDITIONAL PASS**（2026-09-01）。F1実装可。最終PRは R-NF08 IMPLEMENTATION PASS 後 |
-| Implementation state | **A1 DONE / B1〜M 未着手** |
+| Implementation state | **B1 DONE / B2〜M 未着手** |
 | Central NF-08 state | `CANDIDATE` |
 | 具体AIモデル | **未決定**（pipelineはモデル非依存。summary層のみ`AiTextService`で差し替え） |
 | Existing AI learning state | `CONDITIONAL PASS`（P2残、GATE-S17-G10-PROD保留） |
@@ -53,7 +53,7 @@
 | 画面/export/AI metric一致 | R10、F2、design§13 | 未実装・受入条件化 |
 | scope A/B | R5、design§4、F2 | 未実装・受入条件化 |
 | prompt injection / 0/NULL / 巨大result | R2/R6/R10、B2 | 未実装・受入条件化 |
-| provider 429/timeout/invalid JSON | R8、design§11、B1 | 未実装・受入条件化 |
+| provider 429/timeout/invalid JSON | R8、design§11、B1 | B1 mock検証済み（metrics維持） |
 | scope外ID/PII推測防止、citation再認可 | R5/R7、design§10 | 未実装・受入条件化 |
 | feedback/model/prompt/data version/cost/latency記録 | R9、design§9、F1/B1/B2 | 未実装・受入条件化 |
 | mock/ruleまで、外部AI無効 | R1/R8、design§7-8、Review state | 完了（設定変更なし） |
@@ -71,9 +71,9 @@
 | F1 catalog/run/feedback | **DONE** | feat(nf08-f1) | SemanticCatalogRegistry, IntentParser, CopilotRunService, V144, tests |
 | F2 intent/parameter/scope/service gateway | **DONE** | feat(nf08-f2) | CatalogQueryGateway, 5 adapters, TypedResultEnvelope, scope A/B tests |
 | A1 chat/citation UI | **DONE** | feat(nf08-a1) | chat.html, copilot.js, CitationAuthorizationService, V145 menu |
-| B1 summary provider | **READY** | — | A1 PASS。次タスク |
-| B1 provider/redaction/timeout/cost | BLOCKED | — | gate/provider policy待ち。mock/rule以外禁止 |
-| B2 evaluation/adversarial | BLOCKED | — | B1、dataset/segment/owner/budget承認待ち |
+| B1 summary provider | **DONE** | feat(nf08-b1) | CopilotSummaryService, MockAiResponses, validator, UI summary |
+| B1 provider/redaction/timeout/cost | **DONE** | feat(nf08-b1) | mock/rule only。外部providerは引き続きOFF |
+| B2 evaluation/adversarial | **READY** | — | B1 PASS。次タスク |
 | M integration/review handoff | BLOCKED | — | F1〜B2と全production gate待ち |
 
 ## 4. Review handoff contract
@@ -107,4 +107,12 @@ CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。F1は
 2. **最終Review**: M完了後 `review-conversations.md` §4 R-NF08。
 3. **SNF01〜10横断**: `review-conversations.md` §5 を横断Review AIへ渡す。
 
-現段階: **PLAN CONDITIONAL PASS / IMPLEMENTATION NOT READY**。本番AI有効化は不可。
+現段階: **PLAN CONDITIONAL PASS / B1 DONE / B2 READY**。本番AI有効化は不可。
+
+## 6. モデル / provider 切替手順（B1）
+
+1. **artifact登録**: `t_ai_artifact_version` に `use_case=MANAGEMENT_COPILOT` の candidate を追加（prompt/model/data version を固定）。
+2. **評価**: B2 adversarial suite で baseline と比較（min segment ≥ 5、自動 promotion 禁止）。
+3. **provider切替**: `application.yml` の `ai.provider` を変更する前に `ai.external-send-enabled=false` を維持し、DG-08 / `GATE-S17-G10-PROD` 承認後のみ `external-send-enabled=true`。
+4. **feature flag**: `ai.management-copilot-enabled=true` は M 統合 gate と scope/citation 受入後に限定。
+5. **rollback**: active artifact を shadow/retired へ戻し、`ai.provider=mock` + `external-send-enabled=false` + management copilot flag OFF。

@@ -96,7 +96,7 @@
 
 ### B1: Provider / redaction / timeout / cost
 
-- [ ] **Objective**: mock/rule providerで評価可能なsummary gatewayと、PII redaction・canary・timeout・429・invalid JSON・cost上限を固定する。**具体モデル未決定でも`AiTextService`差し替え点を実装する。**
+- [x] **Objective**: mock/rule providerで評価可能なsummary gatewayと、PII redaction・canary・timeout・429・invalid JSON・cost上限を固定する。**具体モデル未決定でも`AiTextService`差し替え点を実装する。**
 - **Blocked until**: A1またはAPI contractがPASS。外部provider有効化は別承認（本taskでは不可）。
 - **開工対話**: [start-conversations.md §B1](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-B1](review-conversations.md)（任意）

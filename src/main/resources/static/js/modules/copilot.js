@@ -13,6 +13,7 @@
         actual: '実績',
         mixed: '実績/予測',
         citationUnavailable: '出典を表示できません',
+        summaryLabel: '要約',
         errorGeneric: '処理に失敗しました。',
         sending: '分析中...'
     };
@@ -53,6 +54,16 @@
             : metric.basis === 'MIXED' ? t('copilot.metric.mixed') : t('copilot.metric.actual');
         const period = metric.period ? ' <span class="text-muted small">(' + SES.escapeHtml(metric.period) + ' · ' + basis + ')</span>' : '';
         return '<span class="metric-value fw-semibold text-white">' + SES.escapeHtml(valueText) + '</span>' + period;
+    }
+
+    function renderSummary(summary) {
+        if (!summary || !summary.available || !summary.text) {
+            return '';
+        }
+        return '<div class="copilot-summary mb-3 p-2 rounded border border-secondary-subtle">'
+            + '<div class="text-muted small mb-1">' + SES.escapeHtml(t('copilot.summary.label')) + '</div>'
+            + '<div class="text-light">' + SES.escapeHtml(summary.text) + '</div>'
+            + '</div>';
     }
 
     function renderMetrics(values) {
@@ -132,6 +143,7 @@
                     return;
                 }
                 let html = '<div class="text-muted small mb-2">' + SES.escapeHtml(data.queryId) + '</div>';
+                html += renderSummary(data.summary);
                 html += renderMetrics(data.result.values);
                 html += renderCitations(data.citations);
                 if (data.result.limit && data.result.limit.truncated) {

@@ -3,6 +3,7 @@ package com.ses.service.ai.copilot;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.AiConfig;
 import com.ses.dto.ai.CopilotQueryResult;
+import com.ses.dto.ai.CopilotSummaryView;
 import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
@@ -13,6 +14,8 @@ import com.ses.service.ai.copilot.parameter.TypedParameterBinder;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeResolver;
+import com.ses.service.ai.copilot.summary.CopilotSummaryService;
+import com.ses.service.ai.copilot.summary.SummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -22,7 +25,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 /**
- * Intent → parameter → scope → 正本service → typed result → citation再認可（F2/A1）。LLMは呼ばない。
+ * Intent → parameter → scope → 正本service → typed result → citation再認可 → summary（B1）。
  */
 @Service
 @RequiredArgsConstructor
@@ -35,6 +38,7 @@ public class CopilotQueryService {
     private final CatalogQueryGateway catalogQueryGateway;
     private final CopilotRunService copilotRunService;
     private final CitationAuthorizationService citationAuthorizationService;
+    private final CopilotSummaryService copilotSummaryService;
 
     public CopilotQueryResult query(String question) {
         assertCopilotEnabled();
@@ -53,6 +57,8 @@ public class CopilotQueryService {
                 entry, parameterHash, scope.scopeHash(), envelope.values().size());
 
         List<ResolvedCitationDto> citations = citationAuthorizationService.authorizeAll(entry.citationKeys());
+        SummaryResponse summaryResponse = copilotSummaryService.summarize(envelope, run.traceId());
+        CopilotSummaryView summary = toSummaryView(summaryResponse);
 
         return new CopilotQueryResult(
                 entry.queryId(),
@@ -64,7 +70,21 @@ public class CopilotQueryService {
                 run.runId(),
                 entry.citationKeys(),
                 citations,
-                envelope);
+                envelope,
+                summary);
+    }
+
+    private CopilotSummaryView toSummaryView(SummaryResponse response) {
+        if (response == null || !response.isAvailable()) {
+            return CopilotSummaryView.unavailable(
+                    response == null ? SummaryResponse.STATUS_UNAVAILABLE : response.providerStatus());
+        }
+        return new CopilotSummaryView(
+                response.summaryText(),
+                response.claimKeys(),
+                response.providerStatus(),
+                response.modelVersion(),
+                true);
     }
 
     private CopilotQueryResult unsupported(String queryId, String reasonCode) {
@@ -78,7 +98,8 @@ public class CopilotQueryService {
                 null,
                 List.of(),
                 List.of(),
-                null);
+                null,
+                CopilotSummaryView.unavailable(SummaryResponse.STATUS_UNAVAILABLE));
     }
 
     private void assertCopilotEnabled() {

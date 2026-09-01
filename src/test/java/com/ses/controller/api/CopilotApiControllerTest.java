@@ -1,6 +1,7 @@
 package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.dto.ai.CopilotSummaryView;
 import com.ses.dto.ai.CopilotQueryResult;
 import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.CopilotQueryService;
@@ -89,7 +90,13 @@ class CopilotApiControllerTest {
                         10L,
                         List.of("dashboard.utilization-forecast"),
                         List.of(new ResolvedCitationDto("dashboard.utilization-forecast", "稼働率予測", "/dashboard", true)),
-                        envelope));
+                        envelope,
+                        new CopilotSummaryView(
+                                "登録された指標キーを確認しました。",
+                                List.of("forecast.utilization.2026-09"),
+                                "SUCCEEDED",
+                                "mock",
+                                true)));
 
         mockMvc.perform(post("/api/copilot/query")
                         .contentType(APPLICATION_JSON)
@@ -98,7 +105,9 @@ class CopilotApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.queryId").value("dashboard.utilization-forecast"))
                 .andExpect(jsonPath("$.data.result.values[0].key").value("forecast.utilization.2026-09"))
-                .andExpect(jsonPath("$.data.citations[0].available").value(true));
+                .andExpect(jsonPath("$.data.citations[0].available").value(true))
+                .andExpect(jsonPath("$.data.summary.available").value(true))
+                .andExpect(jsonPath("$.data.summary.text").exists());
     }
 
     @Test

@@ -26,7 +26,8 @@ public final class AiPiiMasker {
             "projectSkill.skillId", "projectSkill.skillName", "projectSkill.isMust",
             "bp.experienceYears", "bp.unitPrice", "bp.availableFrom", "bp.skillNames",
             "bp.initialName", "bp.bpCompany",
-            "ruleScore.total", "ruleScore.mustCoverage", "ruleScore.priceScore", "ruleScore.dateScore");
+            "ruleScore.total", "ruleScore.mustCoverage", "ruleScore.priceScore", "ruleScore.dateScore",
+            "catalog.queryId", "catalog.catalogVersion", "summary.claimKeys");
 
     public static final Set<String> NEVER_SEND = Set.of(
             "engineer.fullName", "engineer.fullNameKana", "engineer.gender", "engineer.birthDate",
@@ -66,6 +67,29 @@ public final class AiPiiMasker {
             }
             if ("career.role".equals(id)) {
                 out.put(id, maskRole(String.valueOf(value)));
+                continue;
+            }
+            if (value instanceof String str && HTML.matcher(str).find()) {
+                continue;
+            }
+            out.put(id, value);
+        }
+        return out;
+    }
+
+    /** management copilot summary 用の allowlist（G10 managementCopilot 契約）。 */
+    public static Map<String, Object> maskCopilot(Map<String, Object> input) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (input == null) {
+            return out;
+        }
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            String id = entry.getKey();
+            if (id == null || !ALLOWED_SEND.contains(id)) {
+                continue;
+            }
+            Object value = entry.getValue();
+            if (value == null) {
                 continue;
             }
             if (value instanceof String str && HTML.matcher(str).find()) {

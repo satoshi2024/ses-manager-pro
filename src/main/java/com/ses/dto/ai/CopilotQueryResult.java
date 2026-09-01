@@ -15,6 +15,7 @@ public record CopilotQueryResult(
         Long runId,
         List<String> citationKeys,
         List<ResolvedCitationDto> citations,
-        TypedResultEnvelope result
+        TypedResultEnvelope result,
+        CopilotSummaryView summary
 ) {
 }
