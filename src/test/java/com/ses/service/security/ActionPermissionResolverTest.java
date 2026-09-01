@@ -105,6 +105,18 @@ class ActionPermissionResolverTest {
     }
 
     @Test
+    void 顧客ヘルスの二つのsnapshotURLは同一actionへ正規化する() {
+        assertEquals("customer-health.snapshot",
+                ActionPermissionResolver.resolve("POST", "/api/customer-success/health/snapshots"));
+        assertEquals("customer-health.snapshot",
+                ActionPermissionResolver.resolve("POST", "/api/service-desk/health/snapshots"));
+        assertEquals("customer-health.view",
+                ActionPermissionResolver.resolve("GET", "/api/customer-success/health"));
+        assertEquals("customer-health.view",
+                ActionPermissionResolver.resolve("GET", "/api/service-desk/health"));
+    }
+
+    @Test
     void 資産証跡Documentのdetailとdownloadは本人向けactionへ正規化する() {
         assertEquals("my.asset.view",
                 ActionPermissionResolver.resolve("GET", "/api/documents/10"));

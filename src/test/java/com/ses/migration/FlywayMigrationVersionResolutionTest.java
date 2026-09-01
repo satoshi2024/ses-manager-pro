@@ -43,6 +43,7 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("145"), "V145 (migration-dev: seed_r3_current_modules) が解決されること");
         assertTrue(seenVersions.contains("146"), "V146 (migration-dev: seed_r3_approval_route_extension) が解決されること");
         assertTrue(seenVersions.contains("144"), "V144 (digital_invoice_safe_diagnostics) が解決されること");
+        assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -51,5 +52,12 @@ class FlywayMigrationVersionResolutionTest {
         assertEquals(1, v144Info.size(), "V144 は1件のみ存在すること");
         assertTrue(v144Info.get(0).getScript().contains("digital_invoice_safe_diagnostics"),
                 "V144 のスクリプト名は digital_invoice_safe_diagnostics であること: " + v144Info.get(0).getScript());
+
+        List<MigrationInfo> v147Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "147".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v147Info.size(), "V147 は1件のみ存在すること");
+        assertTrue(v147Info.get(0).getScript().contains("customer_success_service_desk"),
+                "V147 のスクリプト名は customer_success_service_desk であること: " + v147Info.get(0).getScript());
     }
 }

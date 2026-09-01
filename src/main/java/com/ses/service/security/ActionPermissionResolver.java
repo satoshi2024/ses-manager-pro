@@ -103,7 +103,12 @@ public final class ActionPermissionResolver {
             Map.entry("search", "search"),
             Map.entry("tasks", "task"),
             Map.entry("saved-views", "saved-view"),
-            Map.entry("batch-operations", "batch-operation")
+            Map.entry("batch-operations", "batch-operation"),
+            // customer-success-service-desk (NF02)
+            Map.entry("service-desk", "service-desk"),
+            Map.entry("customer-success", "customer-health"),
+            Map.entry("customer-health", "customer-health"),
+            Map.entry("customer-qbr", "customer-qbr")
     );
 
     private ActionPermissionResolver() {
@@ -238,6 +243,26 @@ public final class ActionPermissionResolver {
         }
         if ("POST".equals(method) && uri.matches("/api/integration-hub/inbound-events/[^/]+/replay")) {
             return "integration.webhook.replay";
+        }
+        if (matchesPrefix(uri, "/api/customer-success/health/snapshots")
+                || matchesPrefix(uri, "/api/service-desk/health/snapshots")) {
+            return "customer-health.snapshot";
+        }
+        if (matchesPrefix(uri, "/api/customer-success/health")) {
+            return "customer-health.view";
+        }
+        if (matchesPrefix(uri, "/api/customer-success/qbrs")) {
+            return action("customer-qbr", method);
+        }
+        // 顧客ヘルスは2つのURL aliasで公開しているため、snapshot/viewとも同一actionへ正規化する。
+        if (matchesPrefix(uri, "/api/service-desk/health")) {
+            return "customer-health.view";
+        }
+        if (matchesPrefix(uri, "/api/service-desk/policies")) {
+            return "service-desk.view";
+        }
+        if (matchesPrefix(uri, "/api/service-desk")) {
+            return action("service-desk", method);
         }
         return action(resource, method);
     }

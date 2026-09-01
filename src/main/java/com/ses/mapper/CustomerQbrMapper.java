@@ -1,0 +1,12 @@
+package com.ses.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.ses.entity.CustomerQbr;
+import org.apache.ibatis.annotations.Mapper;
+
+/**
+ * 定例会・QBR記録マッパー
+ */
+@Mapper
+public interface CustomerQbrMapper extends BaseMapper<CustomerQbr> {
+}

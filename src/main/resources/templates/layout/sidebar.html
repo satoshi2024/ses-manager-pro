@@ -129,6 +129,18 @@
                         <i class="bi bi-kanban me-2"></i><span th:text="#{menu.crm.opportunity}">商機管理</span>
                     </a>
                 </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('service-desk')}">
+                    <a th:href="@{/service-desk/requests}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/service-desk/requests' or currentNavKey == '/service-desk' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-headset me-2 text-accent-blue"></i>
+                        <span th:text="#{menu.serviceDesk}">サービスデスク</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('service-desk')}">
+                    <a th:href="@{/customer-success/health}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/customer-success/health' or currentNavKey == '/customer-success' ? 'active bg-tertiary text-white' : 'text-secondary'}">
+                        <i class="bi bi-heart-pulse me-2 text-danger"></i>
+                        <span th:text="#{menu.customerHealth}">顧客ヘルス</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:if="${allowedMenus != null and allowedMenus.contains('project')}">
                     <a th:href="@{/project/list}" class="nav-link px-3 py-2 rounded-md" th:classappend="${currentNavKey == '/project' ? 'active bg-tertiary text-white' : 'text-secondary'}">
                         <i class="bi bi-briefcase me-2"></i>
