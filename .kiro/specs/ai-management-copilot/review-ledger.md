@@ -4,8 +4,8 @@
 
 | 項目 | 状態 |
 |---|---|
-| Review type | Plan **CONDITIONAL PASS**（2026-09-01）。実装 **CONDITIONAL PASS**（2026-09-01 M handoff） |
-| Implementation state | **M DONE — F1〜M 実装完了。独立 Review 待ち** |
+| Review type | Plan **CONDITIONAL PASS**（2026-09-01）。実装 **PASS**（2026-09-01 R-NF08 再Review、NF-08 スコープ） |
+| Implementation state | **M DONE — P1 修正済み。R-NF08 再Review 完了** |
 | Central NF-08 state | `CANDIDATE` |
 | 具体AIモデル | **未決定**（pipelineはモデル非依存。summary層のみ`AiTextService`で差し替え） |
 | Existing AI learning state | `CONDITIONAL PASS`（P2残、GATE-S17-G10-PROD保留） |
@@ -16,7 +16,7 @@
 | Feature flag | `ai.management-copilot-enabled=false`（本番ON不可） |
 | PR | **作成しない**（R-NF08 IMPLEMENTATION PASS 後に別主体） |
 | Base | `origin/main@4c93b558d57193c3d77e06cb54c0a6573c87a60b` |
-| Remote Head | `origin/codex/ai-management-copilot`（push 後 `git rev-parse` で確認） |
+| Remote Head | `b1cdc7bc` (`origin/codex/ai-management-copilot`) |
 | Working branch | `codex/ai-management-copilot` |
 | Working tree | `C:\work\ses-manager-pro-ai-management-copilot` |
 | Remote | `https://github.com/satoshi2024/ses-manager-pro.git` |
@@ -63,7 +63,8 @@
 | A1 chat/citation UI | **DONE** | `519db6b0` | chat.html, copilot.js, V145 menu |
 | B1 summary provider | **DONE** | `56616fba` | CopilotSummaryService, validator, mock TASK |
 | B2 evaluation/adversarial | **DONE** | `b39bfee4` | fixture 12 cases, evaluation API |
-| M integration/review handoff | **DONE** | `docs(nf08-m)` | 本 ledger、feature gate test、remote push |
+| M integration/review handoff | **DONE** | `46332d94` | ledger、feature gate test、remote push |
+| P1 metric contract 拡張 | **DONE** | `719987d9` | 5 adapters contract test |
 
 ## 4. Review handoff contract
 
@@ -73,9 +74,9 @@
 
 CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。
 
-### Implementation Review（M handoff 自己申告）
+### Implementation Review（R-NF08 再Review 2026-09-01）
 
-**判定: IMPLEMENTATION CONDITIONAL PASS**
+**判定: IMPLEMENTATION PASS**（NF-08 スコープ。本番 gate は引き続き BLOCKED）
 
 | # | 観点 | 結果 |
 |---|---|---|
@@ -84,8 +85,10 @@ CONDITIONAL理由: `<APPROVED_SCOPE>` / `<OWNER>` / NF-07 / DG-08 未決。
 | 3 | typed result / scope / citation | PASS |
 | 4 | summary 層分離・mock/rule only | PASS |
 | 5 | adversarial / feature flag OFF | PASS |
-| 6 | NF-07 / DG-08 / G10-PROD gate | **BLOCKED**（本番AI不可） |
-| 7 | approved catalog / owner | **BLOCKED**（provisional のまま） |
+| 6 | metric contract（5 adapters） | **PASS**（P1 修正後） |
+| 7 | NF-07 / DG-08 / G10-PROD gate | **BLOCKED**（本番AI不可） |
+| 8 | approved catalog / owner | **BLOCKED**（provisional のまま） |
+| 9 | 全 repo verify-like-ci | **FAIL**（7件は NF-08 無関係。§5.2 参照） |
 
 **本番 AI 有効化: 不可**（`management-copilot-enabled=false`、`external-send-enabled=false` 維持）
 
