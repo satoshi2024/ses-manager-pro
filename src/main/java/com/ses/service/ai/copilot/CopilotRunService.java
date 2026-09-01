@@ -8,7 +8,6 @@ import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
-import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,7 +33,25 @@ public class CopilotRunService {
     private final ObjectMapper objectMapper;
 
     @Transactional
+    public CopilotRunRecord recordQueryRun(
+            SemanticCatalogEntry entry,
+            String parameterHash,
+            String scopeHash,
+            int metricCount) {
+        return insertRun(entry, parameterHash, scopeHash, "QUERY_EXECUTED", metricCount);
+    }
+
+    @Transactional
     public CopilotRunRecord recordCatalogRun(SemanticCatalogEntry entry, String parameterHash, String scopeHash) {
+        return insertRun(entry, parameterHash, scopeHash, "CATALOG_RESOLVED", 0);
+    }
+
+    private CopilotRunRecord insertRun(
+            SemanticCatalogEntry entry,
+            String parameterHash,
+            String scopeHash,
+            String runKind,
+            int metricCount) {
         AiArtifactVersion active = versionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
                 .eq(AiArtifactVersion::getUseCase, AiGatewayRequest.USE_COPILOT)
                 .eq(AiArtifactVersion::getStatus, "ACTIVE")
@@ -45,13 +62,14 @@ public class CopilotRunService {
 
         String traceId = UUID.randomUUID().toString();
         Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("kind", "MANAGEMENT_COPILOT_RUN");
+        envelope.put("kind", runKind);
         envelope.put("queryId", entry.queryId());
         envelope.put("catalogVersion", entry.catalogVersion());
         envelope.put("resultSchemaVersion", entry.resultSchemaVersion());
         envelope.put("parameterHash", parameterHash);
         envelope.put("scopeHash", scopeHash);
         envelope.put("dataVersion", "1");
+        envelope.put("metricCount", metricCount);
         envelope.put("provider", active.getProvider());
         envelope.put("modelVersion", active.getModelName());
         envelope.put("promptVersion", active.getPromptVersion());

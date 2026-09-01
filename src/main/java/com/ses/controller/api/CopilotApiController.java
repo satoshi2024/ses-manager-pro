@@ -1,8 +1,8 @@
 package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
-import com.ses.dto.ai.CopilotCatalogResult;
-import com.ses.service.ai.copilot.CopilotCatalogService;
+import com.ses.dto.ai.CopilotQueryResult;
+import com.ses.service.ai.copilot.CopilotQueryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * AI経営コパイロット API（F1: catalog解決とrun記録）。
+ * AI経営コパイロット API（F2: typed result pipeline）。
  */
 @RestController
 @RequestMapping("/api/copilot")
@@ -22,11 +22,11 @@ public class CopilotApiController {
 
     private static final int MAX_QUESTION_LENGTH = 2000;
 
-    private final CopilotCatalogService copilotCatalogService;
+    private final CopilotQueryService copilotQueryService;
 
     @PostMapping("/query")
-    public ApiResult<CopilotCatalogResult> query(@Valid @RequestBody CopilotQueryRequest request) {
-        return ApiResult.success(copilotCatalogService.resolveAndRecord(request.question()));
+    public ApiResult<CopilotQueryResult> query(@Valid @RequestBody CopilotQueryRequest request) {
+        return ApiResult.success(copilotQueryService.query(request.question()));
     }
 
     public record CopilotQueryRequest(

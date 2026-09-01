@@ -60,7 +60,7 @@
 
 ### F2: Intent / typed parameter / scope / service gateway
 
-- [ ] **Objective**: 質問をtyped parameterへ変換し、DataScope/role/menu認可後にcanonical serviceだけを実行してtyped resultを返す。
+- [x] **Objective**: 質問をtyped parameterへ変換し、DataScope/role/menu認可後にcanonical serviceだけを実行してtyped resultを返す。
 - **Blocked until**: F1 PASS、Scope A/Bの受入fixture、canonical service adapter契約（provisional catalogで可）。
 - **開工対話**: [start-conversations.md §F2](start-conversations.md)
 - **Review対話**: [review-conversations.md §R-F2](review-conversations.md)（任意）

@@ -1,8 +1,17 @@
 package com.ses.controller.api;
 
 import com.ses.common.exception.BusinessException;
-import com.ses.dto.ai.CopilotCatalogResult;
-import com.ses.service.ai.copilot.CopilotCatalogService;
+import com.ses.dto.ai.CopilotQueryResult;
+import com.ses.service.ai.copilot.CopilotQueryService;
+import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
+import com.ses.service.ai.copilot.result.CopilotLimitInfo;
+import com.ses.service.ai.copilot.result.CopilotScopeInfo;
+import com.ses.service.ai.copilot.result.MetricBasis;
+import com.ses.service.ai.copilot.result.MetricState;
+import com.ses.service.ai.copilot.result.MetricUnit;
+import com.ses.service.ai.copilot.result.MetricValue;
+import com.ses.service.ai.copilot.result.TypedResultEnvelope;
+import com.ses.service.ai.copilot.scope.CopilotScopeResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -11,6 +20,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyString;
@@ -29,11 +40,11 @@ class CopilotApiControllerTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private CopilotCatalogService copilotCatalogService;
+    private CopilotQueryService copilotQueryService;
 
     @Test
     void flagが無効なら503() throws Exception {
-        when(copilotCatalogService.resolveAndRecord(anyString()))
+        when(copilotQueryService.query(anyString()))
                 .thenThrow(new BusinessException(503, "経営コパイロットは現在無効化されています。"));
 
         mockMvc.perform(post("/api/copilot/query")
@@ -44,17 +55,34 @@ class CopilotApiControllerTest {
     }
 
     @Test
-    void catalog解決結果を返す() throws Exception {
-        when(copilotCatalogService.resolveAndRecord(anyString())).thenReturn(
-                new CopilotCatalogResult(
+    void typedResultを返す() throws Exception {
+        Instant now = Instant.now();
+        TypedResultEnvelope envelope = new TypedResultEnvelope(
+                "dashboard.utilization-forecast",
+                "nf08-provisional-1",
+                "nf08-result-1",
+                now,
+                now,
+                "Asia/Tokyo",
+                new CopilotScopeInfo("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash"),
+                List.of(new MetricValue("forecast.utilization.2026-09", BigDecimal.valueOf(75.0), null,
+                        MetricUnit.PERCENT, MetricState.VALUE, "2026-09", MetricBasis.FORECAST, 1)),
+                List.of(),
+                new CopilotFreshnessInfo(now, false, MetricBasis.FORECAST),
+                List.of("dashboard.utilization-forecast"),
+                new CopilotLimitInfo(200, false),
+                "1");
+        when(copilotQueryService.query(anyString())).thenReturn(
+                new CopilotQueryResult(
                         "dashboard.utilization-forecast",
                         "nf08-provisional-1",
                         "nf08-result-1",
-                        "CATALOG_RESOLVED",
+                        "SUCCEEDED",
                         "ok",
                         "trace-1",
                         10L,
-                        List.of("dashboard.utilization-forecast")));
+                        List.of("dashboard.utilization-forecast"),
+                        envelope));
 
         mockMvc.perform(post("/api/copilot/query")
                         .contentType(APPLICATION_JSON)
@@ -62,6 +90,6 @@ class CopilotApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.queryId").value("dashboard.utilization-forecast"))
-                .andExpect(jsonPath("$.data.traceId").value("trace-1"));
+                .andExpect(jsonPath("$.data.result.values[0].key").value("forecast.utilization.2026-09"));
     }
 }
