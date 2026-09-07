@@ -65,4 +65,16 @@ recipient previewのscope判定は、配布対象がreportの全データを参�
 
 9. documentのpreview/downloadはrun直結の公開経路を持たず、recipient deliveryのtoken、期限、再認証、現在scopeを通過するdelivery経路だけを使用する。通知発行直後は `ENQUEUED` とし、outbox dispatcherの成功・retry・DLQ結果をdeliveryへ同期する。
 
+### 3.4 delivery トランザクション時序（remediation）
+
+| 段階 | 境界 | 内容 |
+|---|---|---|
+| 1 | 短TXまたは読取のみ | run状態確認、recipient preview、previewHash検証（ユーザー経路） |
+| 2 | TX外（`REQUIRES_NEW`） | PDF/XLSX/CSV生成とDocumentService登録（`ReportDeliveryDocumentRegistrar`） |
+| 3 | 短TX（`ReportDeliveryIssueService`） | delivery行のPROCESSING→outbox登録→ENQUEUED/RETRY/FAILED を同一TXでcommit/rollback |
+| 4 | TX外 | download stream / 非PDF on-demand生成 |
+| 5 | 短TX | `markDownloaded` のみ |
+
+ユーザー配布は `deliverUser(runId, requiredPreviewHash)`。schedulerは `deliverScheduled(runId, ReportScheduledDeliveryContext)` で明示system principalを渡し、null previewHashをsystem権限の代替に使わない。
+
 F1は承認Base `origin/main@455fc92e3aa259d2a93f25c6a545ca6c6af835bc`へ統合済みの専用branchで、最新migration番号、V1/H2 schema、MySQL smoke、shape testをそろえて開始する。
