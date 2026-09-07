@@ -43,7 +43,8 @@ class CopilotFeatureGateTest {
                 mock(com.ses.service.ai.copilot.gateway.CatalogQueryGateway.class),
                 mock(CopilotRunService.class),
                 mock(com.ses.service.ai.copilot.citation.CitationAuthorizationService.class),
-                mock(com.ses.service.ai.copilot.summary.CopilotSummaryService.class));
+                mock(com.ses.service.ai.copilot.summary.CopilotSummaryService.class),
+                mock(CopilotExecutionContextFactory.class));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.query("稼働率"));
         assertEquals(503, ex.getCode());

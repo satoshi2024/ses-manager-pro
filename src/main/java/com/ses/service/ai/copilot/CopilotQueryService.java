@@ -8,6 +8,7 @@ import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
 import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
+import com.ses.service.ai.copilot.digest.CopilotDigest;
 import com.ses.service.ai.copilot.gateway.CatalogQueryGateway;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.parameter.TypedParameterBinder;
@@ -19,9 +20,6 @@ import com.ses.service.ai.copilot.summary.SummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.List;
 
 /**
@@ -39,20 +37,22 @@ public class CopilotQueryService {
     private final CopilotRunService copilotRunService;
     private final CitationAuthorizationService citationAuthorizationService;
     private final CopilotSummaryService copilotSummaryService;
+    private final CopilotExecutionContextFactory executionContextFactory;
 
     public CopilotQueryResult query(String question) {
         assertCopilotEnabled();
+        CopilotExecutionContext context = executionContextFactory.create();
         IntentParser.ParsedIntent parsed = intentParser.parse(question);
         if (!parsed.isSupported()) {
             return unsupported(parsed.queryId(), parsed.reasonCode());
         }
 
         SemanticCatalogEntry entry = SemanticCatalogRegistry.requireEnabled(parsed.queryId());
-        CopilotQueryParameters parameters = parameterBinder.bind(entry.queryId(), question);
-        CopilotScopeContext scope = scopeResolver.resolve(entry);
-        TypedResultEnvelope envelope = catalogQueryGateway.execute(entry, parameters, scope);
+        CopilotQueryParameters parameters = parameterBinder.bind(entry.queryId(), question, context);
+        CopilotScopeContext scope = scopeResolver.resolve(entry, context);
+        TypedResultEnvelope envelope = catalogQueryGateway.execute(entry, parameters, scope, context);
 
-        String parameterHash = sha256(parameterBinder.parameterHash(parameters));
+        String parameterHash = CopilotDigest.sha256(parameterBinder.parameterHash(parameters, context));
         CopilotRunService.CopilotRunRecord run = copilotRunService.recordQueryRun(
                 entry, parameterHash, scope.scopeHash(), envelope.values().size());
 
@@ -119,15 +119,5 @@ public class CopilotQueryService {
             case "CATALOG_DISABLED" -> "この分析queryは現在利用できません。";
             default -> "分析queryを処理できませんでした。";
         };
-    }
-
-    private static String sha256(String value) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (Exception ex) {
-            return "0".repeat(64);
-        }
     }
 }

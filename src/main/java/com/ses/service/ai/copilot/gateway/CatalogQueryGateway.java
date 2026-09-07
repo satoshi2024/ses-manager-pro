@@ -1,6 +1,7 @@
 package com.ses.service.ai.copilot.gateway;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
@@ -28,11 +29,12 @@ public class CatalogQueryGateway {
     public TypedResultEnvelope execute(
             SemanticCatalogEntry entry,
             CopilotQueryParameters parameters,
-            CopilotScopeContext scope) {
+            CopilotScopeContext scope,
+            CopilotExecutionContext context) {
         CatalogQueryAdapter adapter = adapters.get(entry.queryId());
         if (adapter == null) {
             throw BusinessException.of(404, "CATALOG_NOT_FOUND");
         }
-        return adapter.execute(entry, parameters, scope);
+        return adapter.execute(entry, parameters, scope, context);
     }
 }

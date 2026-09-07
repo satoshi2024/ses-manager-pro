@@ -1,9 +1,9 @@
 package com.ses.service.ai.copilot.parameter;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,52 +18,52 @@ public class TypedParameterBinder {
     private static final Pattern MONTH_COUNT_PATTERN = Pattern.compile("(\\d{1,2})\\s*(ヶ月|か月|个月|months?)");
     private static final Pattern YEAR_MONTH_PATTERN = Pattern.compile("(20\\d{2})[-/](0?[1-9]|1[0-2])");
 
-    public CopilotQueryParameters bind(String queryId, String question) {
+    public CopilotQueryParameters bind(String queryId, String question, CopilotExecutionContext context) {
         if (queryId == null || queryId.isBlank()) {
             throw BusinessException.of(400, "INVALID_QUERY");
         }
         String text = question == null ? "" : question;
         return switch (queryId) {
             case "dashboard.summary" -> new CopilotQueryParameters(
-                    queryId, resolveFiscalYear(text), null, null, null);
+                    queryId, resolveFiscalYear(text, context), null, null, null);
             case "dashboard.profit-analysis" -> CopilotQueryParameters.ofQuery(queryId);
             case "dashboard.utilization-forecast" -> new CopilotQueryParameters(
                     queryId, null, clampUtilizationMonths(resolveMonthCount(text, 3)), null, null);
             case "management-accounting.summary" -> new CopilotQueryParameters(
-                    queryId, null, null, null, resolveAccountingMonth(text));
+                    queryId, null, null, null, resolveAccountingMonth(text, context));
             case "cashflow.forecast" -> new CopilotQueryParameters(
                     queryId,
                     null,
                     clampCashflowMonths(resolveMonthCount(text, 6)),
-                    resolveFromMonth(text),
+                    resolveFromMonth(text, context),
                     null);
             default -> throw BusinessException.of(404, "CATALOG_NOT_FOUND");
         };
     }
 
-    private Integer resolveFiscalYear(String text) {
+    private Integer resolveFiscalYear(String text, CopilotExecutionContext context) {
         Matcher matcher = YEAR_PATTERN.matcher(text);
         if (matcher.find()) {
             return Integer.parseInt(matcher.group(1));
         }
-        YearMonth now = YearMonth.now();
+        YearMonth now = context.yearMonth();
         return now.getMonthValue() < 4 ? now.getYear() - 1 : now.getYear();
     }
 
-    private YearMonth resolveAccountingMonth(String text) {
+    private YearMonth resolveAccountingMonth(String text, CopilotExecutionContext context) {
         Matcher matcher = YEAR_MONTH_PATTERN.matcher(text);
         if (matcher.find()) {
             return YearMonth.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
         }
-        return YearMonth.now();
+        return context.yearMonth();
     }
 
-    private YearMonth resolveFromMonth(String text) {
+    private YearMonth resolveFromMonth(String text, CopilotExecutionContext context) {
         Matcher matcher = YEAR_MONTH_PATTERN.matcher(text);
         if (matcher.find()) {
             return YearMonth.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)));
         }
-        return YearMonth.now();
+        return context.yearMonth();
     }
 
     private int resolveMonthCount(String text, int defaultValue) {
@@ -82,7 +82,7 @@ public class TypedParameterBinder {
         return Math.max(1, Math.min(months, 36));
     }
 
-    public String parameterHash(CopilotQueryParameters parameters) {
+    public String parameterHash(CopilotQueryParameters parameters, CopilotExecutionContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append(parameters.queryId()).append('|');
         if (parameters.fiscalYear() != null) {
@@ -97,7 +97,8 @@ public class TypedParameterBinder {
         if (parameters.accountingMonth() != null) {
             sb.append("acct=").append(parameters.accountingMonth()).append('|');
         }
-        sb.append("asOf=").append(LocalDate.now());
+        sb.append("asOf=").append(context.asOf()).append('|');
+        sb.append("zone=").append(context.zoneId().getId());
         return sb.toString();
     }
 }

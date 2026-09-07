@@ -4,6 +4,7 @@ import com.ses.dto.dashboard.DashboardSummaryDto;
 import com.ses.dto.dashboard.UtilizationForecastDto;
 import com.ses.service.DashboardService;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
@@ -14,6 +15,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +36,7 @@ class CatalogQueryGatewayTest {
 
     private CatalogQueryGateway gateway;
     private CopilotScopeContext scope;
+    private CopilotExecutionContext context;
 
     @BeforeEach
     void setUp() {
@@ -37,6 +44,16 @@ class CatalogQueryGatewayTest {
                 new DashboardSummaryCatalogAdapter(dashboardService),
                 new DashboardUtilizationForecastCatalogAdapter(utilizationForecastService)));
         scope = new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash", false);
+        Instant instant = Instant.parse("2026-09-07T00:00:00Z");
+        ZoneId zone = ZoneId.of("Asia/Tokyo");
+        context = new CopilotExecutionContext(
+                Clock.fixed(instant, zone),
+                instant,
+                zone,
+                LocalDate.of(2026, 9, 7),
+                YearMonth.of(2026, 9),
+                "default",
+                "");
     }
 
     @Test
@@ -51,9 +68,17 @@ class CatalogQueryGatewayTest {
                 DashboardSummaryDto.builder().kpi(managerKpi).build());
 
         var entry = SemanticCatalogRegistry.requireEnabled("dashboard.summary");
-        long adminRevenue = gateway.execute(entry, new CopilotQueryParameters("dashboard.summary", null, null, null, null), scope)
+        long adminRevenue = gateway.execute(
+                        entry,
+                        new CopilotQueryParameters("dashboard.summary", null, null, null, null),
+                        scope,
+                        context)
                 .values().stream().filter(v -> "kpi.revenue".equals(v.key())).findFirst().orElseThrow().longValue();
-        long managerRevenue = gateway.execute(entry, new CopilotQueryParameters("dashboard.summary", null, null, null, null), scope)
+        long managerRevenue = gateway.execute(
+                        entry,
+                        new CopilotQueryParameters("dashboard.summary", null, null, null, null),
+                        scope,
+                        context)
                 .values().stream().filter(v -> "kpi.revenue".equals(v.key())).findFirst().orElseThrow().longValue();
 
         assertTrue(adminRevenue >= managerRevenue);
@@ -73,8 +98,10 @@ class CatalogQueryGatewayTest {
         var envelope = gateway.execute(
                 SemanticCatalogRegistry.requireEnabled("dashboard.utilization-forecast"),
                 new CopilotQueryParameters("dashboard.utilization-forecast", null, 3, null, null),
-                scope);
+                scope,
+                context);
 
         assertTrue(envelope.values().stream().anyMatch(v -> v.key().startsWith("forecast.utilization.")));
+        assertTrue(envelope.values().stream().allMatch(v -> "2026-09".equals(v.period()) || "current".equals(v.period())));
     }
 }

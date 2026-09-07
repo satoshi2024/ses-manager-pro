@@ -8,6 +8,7 @@ import com.ses.dto.dashboard.UtilizationForecastDto;
 import com.ses.service.DashboardService;
 import com.ses.service.ManagementAccountingService;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
@@ -17,6 +18,7 @@ import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeResolver;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.security.OrganizationScopeService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -24,7 +26,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +45,8 @@ class CopilotMetricContractTest {
 
     private static final CopilotScopeContext SCOPE =
             new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash", false);
+
+    private CopilotExecutionContext context;
 
     @Mock
     private DashboardService dashboardService;
@@ -62,6 +70,20 @@ class CopilotMetricContractTest {
     @InjectMocks
     private CashFlowForecastCatalogAdapter cashFlowForecastAdapter;
 
+    @BeforeEach
+    void setUpContext() {
+        Instant instant = Instant.parse("2026-09-07T00:00:00Z");
+        ZoneId zone = ZoneId.of("Asia/Tokyo");
+        context = new CopilotExecutionContext(
+                Clock.fixed(instant, zone),
+                instant,
+                zone,
+                LocalDate.of(2026, 9, 7),
+                YearMonth.of(2026, 9),
+                "default",
+                "");
+    }
+
     @Test
     void dashboardSummaryは正本KPIと一致する() {
         DashboardSummaryDto.KpiDto kpi = DashboardSummaryDto.KpiDto.builder()
@@ -78,12 +100,15 @@ class CopilotMetricContractTest {
         var envelope = dashboardSummaryAdapter.execute(
                 SemanticCatalogRegistry.requireEnabled("dashboard.summary"),
                 new CopilotQueryParameters("dashboard.summary", 2026, null, null, null),
-                SCOPE);
+                SCOPE,
+                context);
 
         assertEquals(82.5, findMetric(envelope.values(), "kpi.utilization").numericValue().doubleValue());
         assertEquals(12_000_000L, findMetric(envelope.values(), "kpi.revenue").longValue());
         assertEquals(MetricState.VALUE, findMetric(envelope.values(), "kpi.revenue").state());
         assertEquals(MetricBasis.MIXED, findMetric(envelope.values(), "kpi.revenue").basis());
+        assertEquals("2026-09", findMetric(envelope.values(), "kpi.revenue").period());
+        assertEquals(context.instant(), envelope.asOf());
     }
 
     @Test
@@ -101,7 +126,8 @@ class CopilotMetricContractTest {
         var envelope = utilizationForecastAdapter.execute(
                 SemanticCatalogRegistry.requireEnabled("dashboard.utilization-forecast"),
                 new CopilotQueryParameters("dashboard.utilization-forecast", null, 3, null, null),
-                SCOPE);
+                SCOPE,
+                context);
 
         assertEquals(75.0, findMetric(envelope.values(), "forecast.utilization.2026-09").numericValue().doubleValue());
         assertEquals(3L, findMetric(envelope.values(), "forecast.benchCount.2026-09").longValue());
@@ -120,7 +146,8 @@ class CopilotMetricContractTest {
         var envelope = profitAnalysisAdapter.execute(
                 SemanticCatalogRegistry.requireEnabled("dashboard.profit-analysis"),
                 new CopilotQueryParameters("dashboard.profit-analysis", null, null, null, null),
-                SCOPE);
+                SCOPE,
+                context);
 
         assertEquals(1L, findMetric(envelope.values(), "profit.rowCount").longValue());
         assertEquals(1_500_000L, findMetric(envelope.values(), "profit.totalGross").longValue());
@@ -141,7 +168,8 @@ class CopilotMetricContractTest {
         var envelope = managementAccountingAdapter.execute(
                 SemanticCatalogRegistry.requireEnabled("management-accounting.summary"),
                 new CopilotQueryParameters("management-accounting.summary", null, null, YearMonth.of(2026, 9), null),
-                SCOPE);
+                SCOPE,
+                context);
 
         assertEquals(10_000_000L, findMetric(envelope.values(), "accounting.totalRevenue").longValue());
         assertEquals(3_000_000L, findMetric(envelope.values(), "accounting.totalGrossProfit").longValue());
@@ -171,7 +199,8 @@ class CopilotMetricContractTest {
         var envelope = cashFlowForecastAdapter.execute(
                 SemanticCatalogRegistry.requireEnabled("cashflow.forecast"),
                 new CopilotQueryParameters("cashflow.forecast", null, 6, null, YearMonth.of(2026, 9)),
-                SCOPE);
+                SCOPE,
+                context);
 
         assertEquals(8_000_000L, findMetric(envelope.values(), "cashflow.inflow.2026-09").longValue());
         assertEquals(5_000_000L, findMetric(envelope.values(), "cashflow.outflow.2026-09").longValue());

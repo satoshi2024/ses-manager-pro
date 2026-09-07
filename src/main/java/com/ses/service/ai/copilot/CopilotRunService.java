@@ -8,15 +8,13 @@ import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
+import com.ses.service.ai.copilot.digest.CopilotDigest;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -86,7 +84,7 @@ public class CopilotRunService {
         run.setUseCase(AiGatewayRequest.USE_COPILOT);
         run.setArtifactVersionId(active.getId());
         run.setActorUserId(SecurityUtils.currentUserId());
-        run.setInputHash(sha256(json));
+        run.setInputHash(CopilotDigest.sha256(json));
         run.setRedactedSummaryJson(json);
         run.setLatencyMs(0);
         run.setCostJpy(0);
@@ -101,13 +99,4 @@ public class CopilotRunService {
     public record CopilotRunRecord(Long runId, String traceId, String queryId, String catalogVersion) {
     }
 
-    private static String sha256(String value) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (Exception ex) {
-            return "0".repeat(64);
-        }
-    }
 }
