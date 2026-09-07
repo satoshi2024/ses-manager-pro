@@ -186,4 +186,17 @@ public class BatchOperationServiceH2Test {
         assertEquals(1, result.getFailureCount());
         assertEquals(eng2.getId(), result.getErrors().get(0).getId());
     }
+
+    @Test
+    void testProdWithTestProfile_failsFastWhenTokenSecretMissing() {
+        org.springframework.mock.env.MockEnvironment env = new org.springframework.mock.env.MockEnvironment();
+        env.setActiveProfiles("prod", "test");
+        BatchOperationServiceImpl service = new BatchOperationServiceImpl(null, null, null, env);
+        assertThrows(IllegalStateException.class, service::validateTokenSecretOnStartup);
+
+        org.springframework.mock.env.MockEnvironment env2 = new org.springframework.mock.env.MockEnvironment();
+        env2.setActiveProfiles("test", "prod");
+        BatchOperationServiceImpl service2 = new BatchOperationServiceImpl(null, null, null, env2);
+        assertThrows(IllegalStateException.class, service2::validateTokenSecretOnStartup);
+    }
 }

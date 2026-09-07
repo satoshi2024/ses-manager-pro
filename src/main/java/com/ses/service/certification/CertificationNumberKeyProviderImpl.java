@@ -94,9 +94,6 @@ public class CertificationNumberKeyProviderImpl implements CertificationNumberKe
 
     private boolean isProdProfile() {
         for (String profile : environment.getActiveProfiles()) {
-            if ("test".equalsIgnoreCase(profile)) {
-                return false;
-            }
             if ("prod".equalsIgnoreCase(profile)) {
                 return true;
             }
@@ -111,10 +108,18 @@ public class CertificationNumberKeyProviderImpl implements CertificationNumberKe
     }
 
     private byte[] decodeKey(String rawKey) {
-        if (rawKey.contains("=") || rawKey.contains(" ") || rawKey.contains("\n")) {
+        if (!StringUtils.hasText(rawKey)) {
+            throw new IllegalArgumentException("Raw key cannot be empty");
+        }
+        if (rawKey.contains("=") || rawKey.contains(" ") || rawKey.contains("\n") || rawKey.contains("\r")) {
             throw new IllegalArgumentException("Key must be unpadded base64url");
         }
-        byte[] decoded = Base64.getUrlDecoder().decode(rawKey.trim());
+        byte[] decoded;
+        try {
+            decoded = Base64.getUrlDecoder().decode(rawKey.trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid base64url key format: " + e.getMessage(), e);
+        }
         if (decoded.length != 32) {
             throw new IllegalArgumentException("Decoded key must be 32 bytes");
         }
