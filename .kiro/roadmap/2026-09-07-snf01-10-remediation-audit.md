@@ -309,3 +309,18 @@ NF-06・NF-07 は merge 衝突なし（Discovery / 未 merge）。NF-01 は文�
 ---
 
 *本書は只読監査の成果物である。実装・台帳の authoritative 更新は統合フェーズで行う。*
+
+---
+
+## 9. 統合フェーズ最終追補（2026-09-07）
+
+本追補は `C:\\work\\ses-snf-integration` / `codex/snf-integration-gate` で実施した最終統合監査を記録する。詳細なコマンド、SHA、Surefire内訳、Browser試行結果は `.kiro/roadmap/2026-09-07-snf-integration-gate-evidence.md` を正本とする。
+
+- 指定6 branch はすべて固定 base `996289c00983bfccd0b75c4d3bdd3dcc26904136` の clean descendant だった。
+- 指定順の6 merge はすべて通常の `--no-ff` merge で conflict 0。NF02/NF03/NF05/NF08/NF10 の変更 file pairwise overlap も 0 だった。
+- V150 は NF02 専用、V151 は NF03 専用で各1件。V150<V151、V1への追記なし、H2 schema同期済み。Flyway version / shard inventory の統合断言は `2 / 0 / 0 / 0`。
+- fast は `3670 / 2 / 7 / 0`、MySQL は Docker未検出により `118 / 0 / 1 / 116`、performance は `1 / 0 / 0 / 0`、verify-like-ci は Docker前提で exit 1、real browser profile は loopback 起因で `15 / 0 / 15 / 0`。
+- NF05 の公開 status code と既存 snapshot assertion、NF10 の隔離監査違反は feature AIへ返す semantic blocker とし、統合branchでは推測修正していない。
+- NF04 は Chrome に接続したが、実アプリは loopback 制約で起動できず Browser evidence 未取得。BROWSER_BLOCKED を維持する。
+- NF06/NF07 は DISCOVERY/CANDIDATE のまま、NF09 の独立 Review は PENDING のまま、NF08 は production flag OFF のままとした。
+- status は implementation evidence と production approval を分離し、未達のものを COMPLETE に昇格していない。

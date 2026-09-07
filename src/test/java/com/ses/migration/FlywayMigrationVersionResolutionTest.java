@@ -46,6 +46,8 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
         assertTrue(seenVersions.contains("148"), "V148 (ai_management_copilot_f1_artifact) が解決されること");
         assertTrue(seenVersions.contains("149"), "V149 (ai_management_copilot_a1_menu) が解決されること");
+        assertTrue(seenVersions.contains("150"), "V150 (service_request_atomic_sequence) が解決されること");
+        assertTrue(seenVersions.contains("151"), "V151 (certification_continuity_group) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)
@@ -75,5 +77,22 @@ class FlywayMigrationVersionResolutionTest {
         assertEquals(1, v149Info.size(), "V149 は1件のみ存在すること");
         assertTrue(v149Info.get(0).getScript().contains("ai_management_copilot_a1_menu"),
                 "V149 のスクリプト名は ai_management_copilot_a1_menu であること: " + v149Info.get(0).getScript());
+
+        List<MigrationInfo> v150Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "150".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v150Info.size(), "V150 は1件のみ存在すること");
+        assertTrue(v150Info.get(0).getScript().contains("service_request_atomic_sequence"),
+                "V150 のスクリプト名は service_request_atomic_sequence であること: " + v150Info.get(0).getScript());
+
+        List<MigrationInfo> v151Info = Arrays.stream(allMigrations)
+                .filter(m -> m.getVersion() != null && "151".equals(m.getVersion().getVersion()))
+                .toList();
+        assertEquals(1, v151Info.size(), "V151 は1件のみ存在すること");
+        assertTrue(v151Info.get(0).getScript().contains("certification_continuity_group"),
+                "V151 のスクリプト名は certification_continuity_group であること: " + v151Info.get(0).getScript());
+
+        assertTrue(v150Info.get(0).getVersion().compareTo(v151Info.get(0).getVersion()) < 0,
+                "V150 は V151 より前に解決されること");
     }
 }
