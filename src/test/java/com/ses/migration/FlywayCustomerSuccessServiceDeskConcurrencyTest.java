@@ -265,6 +265,150 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
         }
     }
 
+    @Test
+    void MySQLで20並行トランザクションによる同月リクエスト採番と一意性を検証しロールバックで汚染されないこと() throws Exception {
+        migrate();
+        long customerId = insertCustomer(88004L, "採番並行テスト顧客");
+
+        String month = "202609";
+
+        // 事前初期化（テーブル行の作成）
+        try (Connection connection = MYSQL.createConnection("")) {
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
+                            + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+                stmt.setString(1, month);
+                stmt.executeUpdate();
+            }
+        }
+
+        // --- 1. ロールバック非汚染検証 ---
+        // トランザクション1: 番号をロック・採番し、リクエストを挿入後、意図的にROLLBACK
+        try (Connection connection = MYSQL.createConnection("")) {
+            connection.setAutoCommit(false);
+            int seq = allocateSequence(connection, month);
+            assertEquals(1, seq);
+            insertServiceRequestWithNo(connection, customerId, String.format("REQ-%s-%04d", month, seq));
+            connection.rollback();
+        }
+
+        // トランザクション2: 再度採番すると、ロールバックされたため再度 seq = 1 が取得され、正常にCOMMITできること
+        try (Connection connection = MYSQL.createConnection("")) {
+            connection.setAutoCommit(false);
+            int seq = allocateSequence(connection, month);
+            assertEquals(1, seq, "ロールバックされたトランザクションの採番はコミットされず、再利用されること");
+            insertServiceRequestWithNo(connection, customerId, String.format("REQ-%s-%04d", month, seq));
+            connection.commit();
+        }
+
+        try (Connection connection = MYSQL.createConnection(""); Statement stmt = connection.createStatement()) {
+            assertEquals(1, queryInt(stmt, "SELECT COUNT(*) FROM t_service_request WHERE customer_id = " + customerId));
+            assertEquals(1, queryInt(stmt, "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = '" + month + "'"));
+        }
+
+        // --- 2. 20並行トランザクションによる採番・一意性検証 ---
+        String testMonth = "202610";
+        try (Connection connection = MYSQL.createConnection("")) {
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
+                            + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+                stmt.setString(1, testMonth);
+                stmt.executeUpdate();
+            }
+        }
+
+        int concurrency = 20;
+        CountDownLatch ready = new CountDownLatch(concurrency);
+        CountDownLatch start = new CountDownLatch(1);
+        ConcurrentLinkedQueue<String> generatedNos = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Throwable> errors = new ConcurrentLinkedQueue<>();
+
+        List<Thread> workers = new ArrayList<>();
+        for (int i = 0; i < concurrency; i++) {
+            Thread worker = new Thread(() -> {
+                try (Connection connection = MYSQL.createConnection("")) {
+                    ready.countDown();
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    connection.setAutoCommit(false);
+
+                    int seq = allocateSequence(connection, testMonth);
+                    String requestNo = String.format("REQ-%s-%04d", testMonth, seq);
+                    insertServiceRequestWithNo(connection, customerId, requestNo);
+                    connection.commit();
+
+                    generatedNos.add(requestNo);
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }, "nf02-seq-worker-" + i);
+            workers.add(worker);
+            worker.start();
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Thread worker : workers) {
+            worker.join(15_000);
+            assertTrue(!worker.isAlive(), "採番workerが終了していません");
+        }
+
+        assertTrue(errors.isEmpty(), "並行採番中にエラーが発生しました: " + errors);
+        assertEquals(concurrency, generatedNos.size());
+
+        // 全てREQ-202610-0001〜0020で重複がないことを検証
+        List<String> sortedNos = generatedNos.stream().sorted().toList();
+        List<String> expectedNos = new ArrayList<>();
+        for (int i = 1; i <= concurrency; i++) {
+            expectedNos.add(String.format("REQ-%s-%04d", testMonth, i));
+        }
+        assertEquals(expectedNos, sortedNos, "20並行の全採番が一意かつ連続した番号で採番されていること");
+
+        try (Connection connection = MYSQL.createConnection(""); Statement stmt = connection.createStatement()) {
+            assertEquals(concurrency, queryInt(stmt,
+                    "SELECT COUNT(*) FROM t_service_request WHERE request_no LIKE 'REQ-" + testMonth + "-%'"));
+            assertEquals(concurrency, queryInt(stmt,
+                    "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = '" + testMonth + "'"));
+        }
+    }
+
+    private static int allocateSequence(Connection connection, String month) throws SQLException {
+        try (PreparedStatement insert = connection.prepareStatement(
+                "INSERT INTO t_service_request_sequence (sequence_month, current_val, updated_at) "
+                        + "VALUES (?, 0, NOW()) ON DUPLICATE KEY UPDATE sequence_month = sequence_month")) {
+            insert.setString(1, month);
+            insert.executeUpdate();
+        }
+        int currentVal = 0;
+        try (PreparedStatement select = connection.prepareStatement(
+                "SELECT current_val FROM t_service_request_sequence WHERE sequence_month = ? FOR UPDATE")) {
+            select.setString(1, month);
+            try (ResultSet rs = select.executeQuery()) {
+                if (rs.next()) {
+                    currentVal = rs.getInt(1);
+                }
+            }
+        }
+        int nextVal = currentVal + 1;
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE t_service_request_sequence SET current_val = ?, updated_at = NOW() WHERE sequence_month = ?")) {
+            update.setInt(1, nextVal);
+            update.setString(2, month);
+            update.executeUpdate();
+        }
+        return nextVal;
+    }
+
+    private static void insertServiceRequestWithNo(Connection connection, long customerId, String requestNo) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO t_service_request "
+                        + "(request_no, customer_id, category, priority, channel, subject, description, status, reopen_count, version) "
+                        + "VALUES (?, ?, 'SYSTEM', 'P1', 'INTERNAL', '採番テスト', '採番テスト本文', 'RECEIVED', 0, 0)")) {
+            statement.setString(1, requestNo);
+            statement.setLong(2, customerId);
+            statement.executeUpdate();
+        }
+    }
+
     private static int queryInt(Statement statement, String sql) throws SQLException {
         try (ResultSet resultSet = statement.executeQuery(sql)) {
             assertTrue(resultSet.next(), "クエリ結果が空です: " + sql);

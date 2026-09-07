@@ -49,12 +49,19 @@ portal userは DataScope/組織scope/menu を持たない。母集団は `portal
 | `t_customer_csat` | 1 request 1回答 | UNIQUE(service_request_id) |
 | `t_customer_qbr` / `t_customer_qbr_action` | 内部定例会 | portal非公開 |
 | `t_customer_health_snapshot` | 日次snapshot | UNIQUE(customer_id, snapshot_date, version_no)。訂正は非空理由付きINSERT専用revision。DB triggerでもUPDATE/DELETEを拒否 |
+| `t_service_request_sequence` | 月次採番シーケンス (V150) | sequence_month(yyyyMM)主キー、FOR UPDATE行ロックによる原子インクリメント、月間9999件上限 |
 
-同期対象（F1 DoD）: 増分Flyway、V1（重複ADD禁止）、`sql/schema-service-desk-h2.sql`、`application-test.yml` schema-locations、entity、MySQL smoke。
+同期対象（F1 DoD）: 増分Flyway（V147, V150）、V1（重複ADD禁止）、`sql/schema-service-desk-h2.sql`、`application-test.yml` schema-locations、entity、MySQL smoke。
 
 ---
 
-## 2. SLA計算機
+## 2. SLA計算機と採番・入力検証
+
+### 2.1 月次原子採番・SLA fail-closed・入力契約検証
+- **採番方式（V150）**: `max + 1` の集計クエリを完全排除し、`t_service_request_sequence` テーブルによる月次（`yyyyMM`）原子採番を導入。`SELECT current_val FROM t_service_request_sequence WHERE sequence_month = ? FOR UPDATE` により行排他ロックを獲得し、`REQ-YYYYMM-0001`〜`9999` を並行安全に発行。9999件超過時は BusinessException(400) を送出。DB制約・競合例外は BusinessException(409/503) に変換。
+- **SLA フェイルクローズ**: リクエスト起票時（`createRequest`）および再オープン時（`changeStatus` REOPENED）において、該当優先度（priority）に `ACTIVE` な SLA ポリシーが存在しない場合、即時 BusinessException(400) をスローしてトランザクションをロールバック。SLA 時計が存在しない孤立リクエストの発生を遮断。
+- **流入チャネル検証**: チャネルは `PORTAL`, `EMAIL`, `PHONE`, `MEETING`, `INTERNAL` の5種に限定。未指定時は `INTERNAL` をデフォルト設定し、不正なチャネル指定は 400 で拒否。ポータル起票時はクライアントからの指定を無視して強制的に `PORTAL` を設定。
+- **担当者（`ownerUserId`）検証**: 指定時は `sys_user` の存在性、有効性（`status == 1` かつ `deleted_flag == 0`）、適格ロール（`管理者`, `営業`, `マネージャー`）を検証。非適格ロール（HR/要員等）や無効ユーザーは 400 で拒否。ポータル起票時は常に `null` に強制設定。
 
 入力: start Instant、targetHours、policy（営業開始/終了）、ZoneId、休日判定関数、pause営業分数。
 出力: deadline Instant（DBはtenant local DATETIMEでもよいが zoneを明示）。

@@ -6,7 +6,7 @@
 >
 > **既定解**: `platform-invariants.md`。時間/scope/状態は `design.md` 決定表。無い論点は推測実装せずspecへ戻す。
 >
-> **Migration**: 現行mainへ統合するNF-02版はV136。旧featureのV110は履歴衝突用fixtureとしてのみreset/repair検証し、正規migration番号として再利用しない。欠番埋め・公開済み編集禁止。
+> **Migration**: 現行mainへ統合するNF-02版はV147、月次採番シーケンス是正版はV150。旧featureのV110は履歴衝突用fixtureとしてのみreset/repair検証し、正規migration番号として再利用しない。欠番埋め・公開済み編集禁止。
 >
 > **先行WIP**: branch `codex/customer-success-service-desk` の旧V110実装は履歴衝突の検証対象。F1〜Mのcheckboxは、現行branchの定向test・MySQL gate・Demo evidenceが揃うまで完了とみなさない。
 
@@ -21,13 +21,13 @@
   - **Rollback**: specのみ。コード無し。
 
 - [ ] **F1. request/comment/SLA/CSAT/QBR DDL と状態競合**
-  - **Objective**: 10系統テーブル、policy version、clock UNIQUE(request,round)、CSAT UNIQUE、append-only event を同期する。
+  - **Objective**: 10系統テーブル＋V150月次採番テーブル（`t_service_request_sequence`）、policy version、clock UNIQUE(request,round)、CSAT UNIQUE、append-only event を同期する。
   - **Requirements**: CS-R1, CS-R2.1, CS-R3, CR-03
-  - **実装ガイダンス**: V136 Flyway、V1重複ADD禁止、`schema-service-desk-h2.sql`、entity/mapper。`UNIQUE(priority,status)`は使わない。H2 replayにMySQL DDLを足さない。fresh V1→V136、V133→V136、旧NF02 V110 reset/repairを実MySQLで確認する。
+  - **実装ガイダンス**: V147/V150 Flyway、V1重複ADD禁止、`schema-service-desk-h2.sql`、entity/mapper。`UNIQUE(priority,status)`は使わない。H2 replayにMySQL DDLを足さない。fresh V1→V150、旧NF02 V110 reset/repairを実MySQLで確認する。
   - **テスト要件**: L1〜L3。UNIQUE衝突、fresh/legacy smoke、H2起動。
   - **Demo**: 空DBと既存DBでmigration成功。
   - **Rollback**: 新テーブルDROP（既存業務テーブル非変更）。
-  - **WIP注意**: 旧V110草案は正規版ではない。V136の実列・trigger・append-only schemaを確認する。
+  - **WIP注意**: 旧V110草案は正規版ではない。V147およびV150の実列・trigger・append-only schemaを確認する。
 
 - [ ] **F2. 状態機械 / SLA calculator / scope**
   - **Objective**: 営業時間・法人休日・timezone・pause営業分数・reopen round不変、DataScope/Portal scopeをserviceに固定する。
