@@ -133,6 +133,8 @@ class ExternalApiEnabledConnectorE2ETest {
         assertTrue(response.getHeaders().containsKey("X-Correlation-ID"));
         assertTrue(response.getBody() != null && response.getBody().contains("publicProjectId"));
         assertTrue(response.getBody() != null && response.getBody().contains("2026-09-01"));
+        assertTrue(response.getBody() != null && response.getBody().contains("\"status\":\"OPEN\""));
+        assertFalse(response.getBody() != null && response.getBody().contains("募集中"));
         assertFalse(response.getBody() != null && response.getBody().contains("internal-project"));
         assertFalse(response.getBody() != null && response.getBody().contains("\"id\""));
         assertFalse(response.getBody() != null && response.getBody().contains("project_name"));

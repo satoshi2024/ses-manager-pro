@@ -68,9 +68,14 @@ class IntegrationHubMPenetrationTest {
         String outOfScope = codec.encode(clientA, "project", PROJECT_B);
         String invalid = "not-a-valid-public-id";
 
-        assertEquals("募集中", readService.getProject(clientA, scopeA, inScope).status());
-        assertNull(readService.getProject(clientA, scopeA, outOfScope));
-        assertNull(readService.getProject(clientA, scopeA, invalid));
+        var project = readService.getProject(clientA, scopeA, inScope);
+        org.junit.jupiter.api.Assertions.assertNotNull(project);
+        assertEquals("OPEN", project.status());
+        org.junit.jupiter.api.Assertions.assertFalse(project.status().contains("募集中"));
+        org.junit.jupiter.api.Assertions.assertFalse(project.status().matches(".*[\\u3040-\\u30ff\\u4e00-\\u9fff].*"));
+        org.junit.jupiter.api.Assertions.assertFalse(project.publicProjectId().contains(String.valueOf(PROJECT_A)));
+        org.junit.jupiter.api.Assertions.assertNull(readService.getProject(clientA, scopeA, outOfScope));
+        org.junit.jupiter.api.Assertions.assertNull(readService.getProject(clientA, scopeA, invalid));
     }
 
     @Test

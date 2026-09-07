@@ -66,7 +66,8 @@ class ExternalApiReadServiceTest {
         assertTrue(response.hasMore());
         assertTrue(response.nextCursor().startsWith("v1."));
         ExternalApiProject first = response.items().get(0);
-        assertEquals("ACTIVE", first.status());
+        assertEquals("OPEN", first.status());
+        assertTrue(!first.status().contains("募集中"));
         verify(mapper).selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513);
         verify(snapshotMapper, never()).selectExpiredSnapshotIds(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
         verify(snapshotMapper, never()).deleteSnapshotsById(org.mockito.ArgumentMatchers.anyList());
@@ -85,7 +86,7 @@ class ExternalApiReadServiceTest {
         String cursor = fractionalService.listProjects(principal, scope, 1, null).nextCursor();
         when(snapshotMapper.selectItemsAfter(anyString(), eq(2L), eq(2))).thenReturn(List.of(
                 new ExternalApiSnapshotItem(1L,
-                        "{\"publicProjectId\":\"public-project-1\",\"status\":\"ACTIVE\","
+                        "{\"publicProjectId\":\"public-project-1\",\"status\":\"OPEN\","
                                 + "\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\","
                                 + "\"publicCustomerId\":\"public-customer-10\"}")));
 
@@ -101,7 +102,7 @@ class ExternalApiReadServiceTest {
         String cursor = service.listProjects(principal, scope, 1, null).nextCursor();
         when(snapshotMapper.selectItemsAfter(anyString(), eq(2L), eq(2))).thenReturn(List.of(
                 new ExternalApiSnapshotItem(1L,
-                        "{\"publicProjectId\":\"public-project-1\",\"status\":\"ACTIVE\","
+                        "{\"publicProjectId\":\"public-project-1\",\"status\":\"OPEN\","
                                 + "\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\","
                                 + "\"publicCustomerId\":\"public-customer-10\"}")));
 
@@ -153,12 +154,15 @@ class ExternalApiReadServiceTest {
         ExternalApiInvoiceStatus result = service.getInvoiceStatus(principal, invoiceScope, publicId);
 
         assertNull(result.publicContractId());
+        assertEquals("UNSENT", result.status());
+        assertEquals("OUTSTANDING", result.settlementStatus());
+        assertTrue(!result.status().contains("未送付"));
     }
 
     private ExternalApiReadRow projectRow(long id, long customerId) {
         ExternalApiReadRow row = new ExternalApiReadRow();
         row.setId(id);
-        row.setStatus("ACTIVE");
+        row.setStatus("募集中");
         row.setStartDate(LocalDate.of(2026, 1, 1));
         row.setEndDate(LocalDate.of(2026, 12, 31));
         row.setCustomerId(customerId);
