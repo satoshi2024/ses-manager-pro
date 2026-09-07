@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.entity.Certification;
+import com.ses.entity.CertificationContinuityGroup;
 import com.ses.entity.Engineer;
 import com.ses.entity.EngineerCertification;
 import com.ses.entity.CertificationEvent;
+import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.CertificationMapper;
 import com.ses.mapper.EngineerCertificationMapper;
@@ -29,6 +31,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
     private final CertificationEventMapper eventMapper;
     private final CertificationEvidenceValidator evidenceValidator;
     private final java.time.Clock clock;
+    private final CertificationContinuityGroupMapper continuityGroupMapper;
 
     /** F1互換の直接生成用。Springは下記の@Autowired constructorを使用する。 */
     public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
@@ -36,7 +39,18 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                                             EngineerMapper engineerMapper,
                                             CertificationNumberCryptoService cryptoService) {
         this(engineerCertificationMapper, certificationMapper, engineerMapper, cryptoService, null, null,
-                java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")));
+                java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")), null);
+    }
+
+    public EngineerCertificationServiceImpl(EngineerCertificationMapper engineerCertificationMapper,
+                                            CertificationMapper certificationMapper,
+                                            EngineerMapper engineerMapper,
+                                            CertificationNumberCryptoService cryptoService,
+                                            CertificationEventMapper eventMapper,
+                                            CertificationEvidenceValidator evidenceValidator,
+                                            java.time.Clock clock) {
+        this(engineerCertificationMapper, certificationMapper, engineerMapper, cryptoService, eventMapper,
+                evidenceValidator, clock, null);
     }
 
     @Autowired
@@ -46,7 +60,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
                                             CertificationNumberCryptoService cryptoService,
                                             CertificationEventMapper eventMapper,
                                             CertificationEvidenceValidator evidenceValidator,
-                                            java.time.Clock clock) {
+                                            java.time.Clock clock,
+                                            CertificationContinuityGroupMapper continuityGroupMapper) {
         this.engineerCertificationMapper = engineerCertificationMapper;
         this.certificationMapper = certificationMapper;
         this.engineerMapper = engineerMapper;
@@ -54,6 +69,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         this.eventMapper = eventMapper;
         this.evidenceValidator = evidenceValidator;
         this.clock = clock;
+        this.continuityGroupMapper = continuityGroupMapper;
     }
 
     @Override
@@ -84,11 +100,24 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             throw BusinessException.of(409, "certification.record.duplicate");
         }
 
+        Long continuityGroupId;
+        if (continuityGroupMapper != null) {
+            CertificationContinuityGroup continuityGroup = new CertificationContinuityGroup();
+            continuityGroup.setTenantId(tenantId);
+            continuityGroup.setEngineerId(engineerId);
+            continuityGroup.setCertificationId(certificationId);
+            continuityGroup.setCreatedBy(actorUserId);
+            continuityGroupMapper.insert(continuityGroup);
+            continuityGroupId = continuityGroup.getId();
+        } else {
+            throw new IllegalStateException("continuityGroupMapper is required to allocate continuity_group_id");
+        }
+
         EngineerCertification record = new EngineerCertification();
         record.setTenantId(tenantId);
         record.setEngineerId(engineerId);
         record.setCertificationId(certificationId);
-        record.setContinuityGroupId(Math.abs(System.nanoTime()));
+        record.setContinuityGroupId(continuityGroupId);
         record.setAcquiredOn(acquiredOn);
         record.setExpiresOn(expiresOn);
         record.setExpiryRuleVersion(certification.getRuleVersion());
