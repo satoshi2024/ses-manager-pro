@@ -187,6 +187,13 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     CONSTRAINT chk_health_snapshot_revision_reason CHECK (CHAR_LENGTH(TRIM(revision_reason)) > 0)
 );
 
+CREATE TABLE IF NOT EXISTS t_service_request_sequence (
+    sequence_month  VARCHAR(6) NOT NULL PRIMARY KEY,
+    current_val     INT NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 初期マスタデータ
 MERGE INTO m_service_sla_policy (priority, name, response_time_hours, resolve_time_hours, business_hours_start, business_hours_end, include_holidays, status, version)
 KEY(priority, status)
