@@ -217,3 +217,40 @@ remediation後のfast/performance/MySQLは再実行済み（fast 3060 run / 2 fa
 | MySQL known error | 既存`FreeeConcurrentRefreshTest.<clinit>`のWindows loopback。NF-03 feature/migration reportはfailure/error/skipなし |
 | Browser | admin master/course登録、本人catalog・証憑upload・cancel/resubmit、0円plan APPROVED、enrollment PLANNED、admin verify後ACTIVEを確認 |
 | remaining | 独立Implementation再Review、証憑binary本文採取。PR/merge/branch削除は未実施 |
+
+## continuity group 一意性永続化・整合性制約および本番プロファイル安全化のremediation（2026-09-07）
+
+独立レビュー指摘およびセキュリティ監査に基づき、continuity groupの乱数生成リスク、スキーマ整合性制約の未強制、および本番プロファイル判定におけるtest優先の脆弱性を修正した。
+
+| finding | 指摘 | remediation | status |
+|---|---|---|---|
+| SEC-01 | KeyProviderでactive profile判定時にtestプロファイルがprodより優先され、本番鍵のfail-fastが迂回される脆弱性 | `561a40c1` で `CertificationNumberKeyProviderImpl`、`ComplianceReviewerFingerprintKeyProviderImpl`、`ComplianceGateCredentialKeyProviderImpl`、`BatchOperationServiceImpl` の全4箇所を修正。`prod` プロファイルが含まれる場合は最優先で本番モードと判定し、不正/空の本番鍵では即座に `IllegalStateException` で fail-fast する。単体テスト12件を追加拡充 | CLOSED |
+| DATA-01 | `continuity_group_id` に `Math.abs(System.nanoTime())` が使われており、マルチJVM、再起動、高並行実行時の衝突リスク | `eb6748b9` でエンティティ `CertificationContinuityGroup`、mapper、Flyway V151 を追加。DBシーケンス/AUTO_INCREMENTによって永続化・一意採番。`renew` では元レコードの `continuity_group_id` を厳格に継承 | CLOSED |
+| DATA-02 | `t_engineer_certification` における continuity group および current_holder_key の整合性制約がDB層で強制されていない | `eb6748b9` で V151 および H2スキーマに複合FK `(continuity_group_id, tenant_id, engineer_id, certification_id)` と CHECK制約 `chk_eng_cert_current_holder` (`((current_flag = 1 AND current_holder_key IS NOT NULL AND current_holder_key = continuity_group_id) OR (current_flag = 0 AND current_holder_key IS NULL))`) を追加 | CLOSED |
+
+### 修正の詳細と検証証拠
+
+1. **本番プロファイル安全化（Commit `561a40c1`）**:
+   - `isProdProfile()` 実装において、`Arrays.asList(env.getActiveProfiles()).contains("prod")` を最優先判定。
+   - `prod` と `test` が同時指定された複合環境でも、`prod` が勝つ安全設計へ統一。
+   - `CertificationNumberKeyProviderImplTest` に 12 ケース（prod単独、test単独、prod+test混在、test+prod混在、鍵未設定、鍵長不足、BASE64不正など）を追加し全件PASS。
+   - `ComplianceReviewerFingerprintKeyProviderImplTest`、`ComplianceGateCredentialCryptoServiceTest`、`BatchOperationServiceH2Test` にも混在プロファイルのフェイルファスト検証を追加し全件PASS。
+
+2. **continuity group 永続化と整合性制約（Commit `eb6748b9`）**:
+   - `t_certification_continuity_group` テーブルおよびエンティティ・Mapper新設。
+   - `V151__certification_continuity_group.sql`:
+     - `t_certification_continuity_group` 作成（`id AUTO_INCREMENT`、`uk_cert_continuity_group_ident`）。
+     - 既存 `t_engineer_certification` からの初期バックフィル。
+     - `t_engineer_certification` への複合外部キー制約 `fk_eng_cert_continuity_group` 追加。
+     - `t_engineer_certification` への CHECK 制約 `chk_eng_cert_current_holder` 追加。
+   - `schema-certification-learning-skill-gap-h2.sql` を V151 と完全に同期。
+   - `EngineerCertificationServiceImpl`:
+     - `submitApplication`: `continuityGroupMapper.insert(group)` により DB で一意採番。
+     - `renew`: 元レコードの `continuity_group_id` を継承し、旧レコードは SUPERSEDED (`current_flag = 0, current_holder_key = NULL`)、新レコードは ACTIVE (`current_flag = 1, current_holder_key = continuityGroupId`) として生成。
+   - テスト検証:
+     - `EngineerCertificationServiceTest`: 独立チェーンで異なるグループID採番、renew時のグループID継承とholder更新、CHECK制約違反（`current_flag=1` かつ `current_holder_key IS NULL`、`current_flag=0` かつ `current_holder_key` 非NULL）の拒絶、FK・CHECKスキーマ定義存在を検証（全6件PASS）。
+     - `FlywayCertificationLearningSkillGapSchemaSmokeTest`: 最新バージョン151検証、テーブル・列・インデックス・FK・CHECK制約の存在検証、マルチスレッド（10並行）での continuity_group_id 一意採番・MySQL上の renew 整合性・CHECK制約違反拒絶・FK制約違反拒絶を実演するテストメソッドを追加。
+
+3. **Status / 次gate**:
+   - Task M は未完了（`[ ]`）を維持。
+   - 独立Implementation再レビューを待つ。PR作成、マージ、ブランチ削除は実施していない。

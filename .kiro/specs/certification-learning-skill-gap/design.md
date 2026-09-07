@@ -18,7 +18,8 @@
 |---|---|---|---|
 | `m_certification` | 資格master・expiry rule | issuer_key、external_code_key、name_key、identity_key、expiry_type、expiry_months、rule_version、active | tenant＋identity_key unique。code NULLもname identityで一意、表記揺れはalias/merge review |
 | `m_certification_alias` | 資格名表記揺れ・merge候補 | certification_id、issuer/name alias、normalized_key、valid period、approved_by | aliasから別masterを作らず、mergeはappend-only eventと人の承認が必要 |
-| `t_engineer_certification` | engineerの取得record/current state | engineer_id、certification_id、continuity_group_id、acquired_on、expires_on、expiry_rule_version、certificate_number_ref、record_state、current_flag、revision、version | current_flag=1のcontinuity groupをrow lock＋uniqueで一意化、期限はLocalDate、scope owner固定 |
+| `t_certification_continuity_group` | 資格取得renew継続グループの永続化エンティティ | tenant_id、engineer_id、certification_id、created_by、created_at、updated_at、deleted_flag | `id AUTO_INCREMENT`、`(id, tenant_id, engineer_id, certification_id)` 複合UNIQUE、`t_engineer_certification` からの複合FKで整合性を保証 |
+| `t_engineer_certification` | engineerの取得record/current state | engineer_id、certification_id、continuity_group_id、acquired_on、expires_on、expiry_rule_version、certificate_number_ref、record_state、current_flag、current_holder_key、revision、version | `t_certification_continuity_group`への複合FK。`chk_eng_cert_current_holder` CHECK制約でcurrent_flagとcurrent_holder_keyの整合性を担保。current_flag=1のcontinuity groupをrow lock＋uniqueで一意化、期限はLocalDate、scope owner固定 |
 | `t_certification_event` | append-only state/correction history | certification_record_id、event_type、supersedes_event_id、reason、actor、occurred_at、effective fields、evidence_document_version_id、evidence_hash | event id unique、update/delete禁止、correct/cancel reason必須。CORRECTEDはeventのみ |
 | `m_training_course` | course/provider/catalog | provider、name、cost_jpy、period、capacity、active | JPY BigDecimal、capacity非負、期間inclusive |
 | `t_training_course_skill` | courseとcanonical skillの関連 | course_id、skill_id、target_level、required_flag | `(course_id,skill_id)` unique、名称保存を正本にしない |
@@ -78,6 +79,11 @@ feature有効化より前の期間にeventがない場合は`historical_data_una
 資格masterは入力をtrim、全角正規化、uppercase化した`issuer_key`、`external_code_key`、`name_key`を作り、`identity_key`（codeがある場合はissuer+code、ない場合はissuer+nameのhash）をNOT NULLでuniqueにする。issuer別の同じcodeは別master候補としてmerge reviewへ送り、code NULLの行もname identityで重複を防ぐ。名称aliasは`m_certification_alias`で解決し、silent mergeはしない。
 
 取得recordは`record_state`（DRAFT/SUBMITTED/VERIFIED/ACTIVE/CANCELLED/SUPERSEDED）と`current_flag`を持つ。`EXPIRED`は`as_of > expires_on`から導出し、`CORRECTED`はstateにしない。訂正は同一recordのrevision/eventを追加し、訂正後もACTIVEまたはEXPIRED等を独立に判定する。renewは同じ`continuity_group_id`の新recordとして作り、旧recordをSUPERSEDEDにして履歴を保持する。current_flag=1の行はtenant・engineer・certification・continuity group単位でuniqueにし、cancel/renew/correctは同一group row lock＋version CASで直列化する。
+
+**continuity group の永続化と一意性保証（V151）**:
+`continuity_group_id` はインメモリの `System.nanoTime()` ではなく、DBシーケンス/AUTO_INCREMENTを持つエンティティ `t_certification_continuity_group` により採番・永続化する。これにより、複数JVMインスタンス、プロセス再起動、高並行実行、およびマルチテナント環境下においても一切重複や衝突を生じさせない。
+新規取得申請（`submitApplication`）時に `t_certification_continuity_group` レコードを新規発行し、更新（`renew`）時には既存レコードの `continuity_group_id` を厳格に継承する。
+また、DBスキーマレベルで `(continuity_group_id, tenant_id, engineer_id, certification_id)` の複合外部キー制約（`fk_eng_cert_continuity_group`）、および `current_holder_key` の状態不変条件制約（`chk_eng_cert_current_holder`: `((current_flag = 1 AND current_holder_key IS NOT NULL AND current_holder_key = continuity_group_id) OR (current_flag = 0 AND current_holder_key IS NULL))`）を強制し、アプリケーション層の不整合を防ぐ。
 
 `expires_on`当日はAsia/Tokyoの終日まで有効である。masterのexpiry rule更新は既存recordへ遡及せず、recordの`expiry_rule_version`を使って取得時の計算を再現する。
 
@@ -148,6 +154,12 @@ AI候補は既存AI logまたはcandidate recordへprovider/model、生成時刻
 | HR_FINAL | HR/admin | HR scope | 公式skillとして既存画面へ | 可（human actor必須） |
 
 SELFをstaffing gap・配置候補・commission計算の入力に使うことは禁止。異議申立てフローはOwner/HR承認後に別specへ委譲可。
+
+### 3.10 本番暗号鍵プロファイル判定とフェイルファスト（セキュリティ安全化）
+
+暗号化キーを扱うすべての KeyProvider（`CertificationNumberKeyProviderImpl`、`ComplianceReviewerFingerprintKeyProviderImpl`、`ComplianceGateCredentialKeyProviderImpl`、および `BatchOperationServiceImpl`）において、アクティブプロファイルに `prod` が含まれる場合は最優先で本番モードと判定する。
+これにより、プロファイル指定に `test` や `dev` が混在した場合でも本番判定がバイパスされてデフォルトテスト鍵へフォールバックする脆弱性を完全に排除する。
+本番モード時は、32バイトのセキュアな本番鍵が明示的に設定されていない場合、起動時または復号時に即座に `IllegalStateException` をスローして fail-fast 停止する。
 
 ## 4. Decision tables
 
