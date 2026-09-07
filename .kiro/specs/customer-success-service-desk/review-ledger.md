@@ -5,11 +5,11 @@
 | 項目 | 値 |
 |---|---|
 | Feature | NF-02 `customer-success-service-desk` |
-| Worktree | `C:\work\ses-fix-nf02-main-integration-hardening` |
-| Branch / remote | `fix/nf02-main-integration-hardening` / `origin/fix/nf02-main-integration-hardening` |
-| Base branch / commit | `origin/main` / `118a1046`（PR #95 後。旧 `4c93b558` / `6fc44e15` は置換） |
-| Head | `d721b76c`（実装修正。docs follow-up あり。tip は `git rev-parse fix/nf02-main-integration-hardening`） |
-| 公式Status | **DISCOVERY**（Owner未定、DG-02未APPROVED）。IMPLEMENTING/REVIEWINGではない |
+| Worktree | `C:\work\ses-nf02-remediation` |
+| Branch / remote | `codex/nf02-review-remediation` |
+| Base branch / commit | `996289c00983bfccd0b75c4d3bdd3dcc26904136` |
+| Head | commitログ参照（`git rev-parse HEAD`） |
+| 公式Status | **DISCOVERY**（Owner未定、DG-02未APPROVED）。COMPLETE/APPROVEDではない |
 | Owner | 未定（開工プレースホルダ `<OWNER>` 未置換） |
 | Approved scope | 未指定（`<APPROVED_SCOPE>` 未置換） |
 | Review開始 | **NO**（Owner / Approved scope / DecisionId / DG-02未確定。実装検証結果はhandoff用に記録するがReview開始とは扱わない） |
@@ -74,6 +74,7 @@ Plan Review / WIP指摘（WIP-1〜11, P0〜P2、再Review指摘）に対する�
 | `[P1] NF02-MAIN-P1-03` | P1 | SLA warning/初回breach/継続breach、受信者不在の永続escalation、配信retry、dedupeを実装。contact/contract/project/engineerのcustomer一致をserviceで検証。 | `ServiceSlaMonitoringServiceImpl`, `ServiceSlaSchedulerTest`, service tests |
 | `[P1] NF02-MAIN-P1-04` | P1 | portal添付downloadをDocumentService/FileScopeValidationService経由に統一し、scopeとCLEANを必須化。healthをP0=-30/P1=-15、SLA30d=-10、90日CSAT平均（<3.0=-15、3.0〜3.9=-5）、AR=-25、QBR60d=-10でtraceability/runbook/code一致。 | portal controller, FileScopeValidationService, spec docs |
 | `[P1] NF02-MAIN-P1-05` | P1 | snapshotは非空訂正理由、customer/date/version一意性、最大version解決、DB UPDATE/DELETE trigger、同一hash冪等を実装。 | V147、snapshot service、MySQL trigger/concurrency test |
+| `[P0] NF02-REMEDIATION-01` | P0 | 月次原子採番（V150 `t_service_request_sequence`、`FOR UPDATE`行ロック、月間9999件上限、DB競合の409/503変換）、SLA fail-closed（ACTIVEポリシー不在時の即時ロールバック）、流入チャネル5種制限（PORTAL/EMAIL/PHONE/MEETING/INTERNAL、ポータル強制PORTAL）、担当者検証（存在・有効status=1・管理者/営業/マネージャー限定・ポータル強制null）を実装。 | `ServiceRequestServiceImplTest` (13件PASS), `FlywayCustomerSuccessServiceDeskConcurrencyTest` (20並行一意性・ロールバック非汚染), `FlywayCustomerSuccessServiceDeskSchemaSmokeTest` (V150) |
 
 ---
 
