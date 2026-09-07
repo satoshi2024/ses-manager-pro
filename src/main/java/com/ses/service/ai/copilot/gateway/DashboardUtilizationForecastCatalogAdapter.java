@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.dashboard.UtilizationForecastDto;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
@@ -26,7 +27,11 @@ class DashboardUtilizationForecastCatalogAdapter extends CatalogAdapterSupport i
     }
 
     @Override
-    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
+    public TypedResultEnvelope execute(
+            SemanticCatalogEntry entry,
+            CopilotQueryParameters parameters,
+            CopilotScopeContext scope,
+            CopilotExecutionContext context) {
         int months = parameters.forecastMonths() == null ? 3 : parameters.forecastMonths();
         UtilizationForecastDto forecast = utilizationForecastService.getForecast(months);
         List<MetricValue> values = new ArrayList<>();
@@ -52,6 +57,6 @@ class DashboardUtilizationForecastCatalogAdapter extends CatalogAdapterSupport i
         }
         int rolloffCount = forecast.getRolloffEngineers() == null ? 0 : forecast.getRolloffEngineers().size();
         values.add(MetricValue.count("forecast.rolloffCount", rolloffCount, "current", MetricBasis.FORECAST));
-        return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit());
+        return envelope(entry, scope, context, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit());
     }
 }

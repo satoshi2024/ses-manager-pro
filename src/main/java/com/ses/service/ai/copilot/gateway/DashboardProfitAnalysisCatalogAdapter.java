@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.dashboard.ContractProfitDto;
 import com.ses.service.DashboardService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.BoundedResultRow;
@@ -12,7 +13,6 @@ import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,9 +30,13 @@ class DashboardProfitAnalysisCatalogAdapter extends CatalogAdapterSupport implem
     }
 
     @Override
-    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
+    public TypedResultEnvelope execute(
+            SemanticCatalogEntry entry,
+            CopilotQueryParameters parameters,
+            CopilotScopeContext scope,
+            CopilotExecutionContext context) {
         List<ContractProfitDto> profits = dashboardService.getProfitAnalysis();
-        String period = YearMonth.now().toString();
+        String period = context.yearMonth().toString();
         long totalGross = profits.stream()
                 .mapToLong(row -> row.getGrossProfitAmount() == null ? 0L : row.getGrossProfitAmount())
                 .sum();
@@ -50,6 +54,6 @@ class DashboardProfitAnalysisCatalogAdapter extends CatalogAdapterSupport implem
             rows.add(new BoundedResultRow(row.getContractNo(), fields));
         });
 
-        return envelope(entry, scope, values, rows, MetricBasis.ACTUAL, truncated, maxRows);
+        return envelope(entry, scope, context, values, rows, MetricBasis.ACTUAL, truncated, maxRows);
     }
 }

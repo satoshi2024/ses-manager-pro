@@ -1,6 +1,7 @@
 package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.billing.CashFlowForecastDto;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
@@ -14,7 +15,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,10 +32,14 @@ class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements Ca
     }
 
     @Override
-    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
-        YearMonth from = parameters.fromMonth() == null ? YearMonth.now() : parameters.fromMonth();
+    public TypedResultEnvelope execute(
+            SemanticCatalogEntry entry,
+            CopilotQueryParameters parameters,
+            CopilotScopeContext scope,
+            CopilotExecutionContext context) {
+        YearMonth from = parameters.fromMonth() == null ? context.yearMonth() : parameters.fromMonth();
         int months = parameters.forecastMonths() == null ? 6 : parameters.forecastMonths();
-        CashFlowForecastScope cashFlowScope = resolveCashFlowScope();
+        CashFlowForecastScope cashFlowScope = resolveCashFlowScope(context);
         CashFlowForecastDto forecast = cashFlowForecastService.forecast(from, months, null, cashFlowScope);
 
         List<MetricValue> values = new ArrayList<>();
@@ -54,22 +58,21 @@ class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements Ca
             values.add(metricYen("cashflow.reconciliation.invoicedSubtotal", rec.getInvoicedSubtotal(), rec.getMonth()));
             values.add(metricYen("cashflow.reconciliation.difference", rec.getDifference(), rec.getMonth()));
         }
-        return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit());
+        return envelope(entry, scope, context, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit());
     }
 
-    private CashFlowForecastScope resolveCashFlowScope() {
+    private CashFlowForecastScope resolveCashFlowScope(CopilotExecutionContext context) {
         if (organizationScopeService.hasFullAccess()) {
             return null;
         }
-        LocalDate asOf = LocalDate.now();
         return new CashFlowForecastScope(
                 false,
-                new ArrayList<>(organizationScopeService.allowedInvoiceIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedContractIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedEngineerIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)),
-                asOf);
+                new ArrayList<>(organizationScopeService.allowedInvoiceIds(context.asOf())),
+                new ArrayList<>(organizationScopeService.allowedContractIds(context.asOf())),
+                new ArrayList<>(organizationScopeService.allowedEngineerIds(context.asOf())),
+                new ArrayList<>(organizationScopeService.allowedOrganizationIds(context.asOf())),
+                new ArrayList<>(organizationScopeService.allowedDirectUserIds(context.asOf())),
+                context.asOf());
     }
 
     private MetricValue metricYen(String key, BigDecimal amount, String period) {
