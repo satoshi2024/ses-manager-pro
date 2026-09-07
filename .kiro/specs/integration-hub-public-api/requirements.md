@@ -219,6 +219,7 @@ numeric current scopeからHMAC opaque IDを再計算してpayload membershipを
     envelope `publicResourceId`と対応するprimary DTO fieldの双方へ同一値を要求する。workerはclaim後・外部HTTP前に同じ検証を再実行し、
     不一致rowを送信せずfail-closedにする。`DuplicateKeyException`収束もpayload hash、primary type、primary IDを同一判定へ含め、primary type/ID不一致、
     同一payload・別primaryの同時enqueueを拒否する。内部ID、任意文字列public ID、secret、raw bodyをbinding証跡へ保存・出力しない。
+19. ExternalApiReadService は内部DBの日本語業務ステータス（「募集中」「稼動中」「未送付」「入金済」等）を外部APIへ直接透過させず、専用の独立マッパー（Project, Contract, Invoice, renewalStatus, settlementStatus）により安定した大文字ASCIIコードへ変換する。ProjectはOPEN/SELECTING/FILLED/CLOSED/UNKNOWN、ContractはDRAFT/ACTIVE/COMPLETED/CANCELLED/UNKNOWN、InvoiceはUNSENT/SENT/PARTIALLY_PAID/PAID/UNKNOWN、renewalStatusはCONTINUE/END/UNKNOWN（未設定はnull）、settlementStatusはSETTLED/PARTIALLY_SETTLED/OUTSTANDING/UNKNOWNへ収束させ、未知値・空値・異常長は安全なUNKNOWNコードへフェイルクローズする。内部ID、日本語状態、原価、粗利、PIIの応答含有を禁止する。
 
 ## IH-R3 Inbound / outbound webhook
 

@@ -373,7 +373,8 @@ limit+1をSQL境界へ固定する。detailはopaque public IDを内部IDへ解�
 
 responseは`ExternalApiEngineerAvailability`、`ExternalApiProject`、`ExternalApiContractStatus`、
 `ExternalApiInvoiceStatus`およびlist/count wrapperだけを使う。engineer availabilityでは現行sourceの`available_date`だけを
-`availableFrom`へ写像し、`availableTo`と`skillTagCode`はcanonical sourceがないためnullとする。public IDはHMAC-SHA256で生成し、
+`availableFrom`へ写像し、`availableTo`と`skillTagCode`はcanonical sourceがないためnullとする。
+公開ステータスはDB内部の日本語（「募集中」「稼動中」「未送付」「入金済」等）をそのまま返さず、独立したマッパー（`ExternalApiProjectStatusMapper`、`ExternalApiContractStatusMapper`、`ExternalApiInvoiceStatusMapper`、`ExternalApiRenewalStatusMapper`、`ExternalApiSettlementStatusMapper`、および統合ファサード`ExternalApiStatusMapper`）により大文字ASCIIコードへ変換する。Projectは`OPEN`/`SELECTING`/`FILLED`/`CLOSED`/`UNKNOWN`、Contractは`DRAFT`/`ACTIVE`/`COMPLETED`/`CANCELLED`/`UNKNOWN`、Invoiceは`UNSENT`/`SENT`/`PARTIALLY_PAID`/`PAID`/`UNKNOWN`、renewalStatusは`CONTINUE`/`END`/`UNKNOWN`（未設定はnull）、settlementStatusは`SETTLED`/`PARTIALLY_SETTLED`/`OUTSTANDING`/`UNKNOWN`へ写像し、未知値・不正値・長大値はUNKNOWNへ安全にフェイルクローズする。内部ID、原価、粗利、PIIは一切公開DTOおよびsnapshotへ含めない。public IDはHMAC-SHA256で生成し、
 cursorはAES-GCM暗号化してclient、tenant、legal entity、route template、scope digest、snapshot ID、as-of、expiryへbindする。
 
 初回listが次ページを持つ場合、serviceは秒精度へ正規化したrequest受信時のserver clockをas-ofとして、SQLでscope済みの全visible rowをallow-list DTOへ変換し、
