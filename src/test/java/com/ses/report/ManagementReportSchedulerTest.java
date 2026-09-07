@@ -138,6 +138,7 @@ class ManagementReportSchedulerTest {
                 .dispatchDue();
 
         verify(mapper).markSuccess(eq(5L), any(), eq(logicalRunAt));
-        verify(deliveryService).deliver(99L, null);
+        verify(deliveryService).deliverScheduled(99L,
+                com.ses.dto.report.ReportScheduledDeliveryContext.of(5L, 1L));
     }
 }
