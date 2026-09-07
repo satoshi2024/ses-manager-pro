@@ -136,6 +136,27 @@ class ReportDocumentServiceImplTest {
     }
 
     @Test
+    void registerは同一businessKeyの再呼び出しでDocumentServiceの冪等経路を再利用する() {
+        Document document = new Document();
+        document.setId(20L);
+        document.setStatus("DRAFT");
+        DocumentVersion version = new DocumentVersion();
+        version.setDocumentId(20L);
+        version.setVersionNo(1);
+        when(documentService.registerGenerated(any(), any())).thenReturn(document);
+        when(documentVersionMapper.findLatestByDocumentId(20L)).thenReturn(version);
+
+        ReportDocumentArtifact first = service.register(10L, "PDF");
+        ReportDocumentArtifact second = service.register(10L, "PDF");
+
+        assertThat(first.getDocument().getId()).isEqualTo(second.getDocument().getId());
+        verify(documentService, times(2)).registerGenerated(
+                org.mockito.ArgumentMatchers.argThat(req ->
+                        "MANAGEMENT_REPORT:10:PDF".equals(req.getBusinessKey())), any());
+        verify(documentService, times(2)).confirm(20L);
+    }
+
+    @Test
     void registersGeneratedDocumentAndConfirmsRetentionThroughDocumentService() {
         Document document = new Document();
         document.setId(20L);

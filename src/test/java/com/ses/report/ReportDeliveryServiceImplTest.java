@@ -19,6 +19,7 @@ import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
+import com.ses.service.report.ReportDeliveryIssueService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
@@ -54,6 +55,7 @@ class ReportDeliveryServiceImplTest {
     private ReportSnapshotService snapshotService;
     private ReportDocumentService documentService;
     private ReportDeliveryDocumentRegistrar documentRegistrar;
+    private ReportDeliveryIssueService deliveryIssueService;
     private DocumentService archiveService;
     private NotificationService notificationService;
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
@@ -69,6 +71,7 @@ class ReportDeliveryServiceImplTest {
         snapshotService = mock(ReportSnapshotService.class);
         documentService = mock(ReportDocumentService.class);
         documentRegistrar = mock(ReportDeliveryDocumentRegistrar.class);
+        deliveryIssueService = mock(ReportDeliveryIssueService.class);
         archiveService = mock(DocumentService.class);
         notificationService = mock(NotificationService.class);
         when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
@@ -78,8 +81,8 @@ class ReportDeliveryServiceImplTest {
         when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
         when(timezoneResolver.now("default")).thenAnswer(invocation -> LocalDateTime.now());
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
-                snapshotService, documentService, documentRegistrar, archiveService, notificationService, passwordEncoder,
-                new ObjectMapper(), timezoneResolver);
+                snapshotService, documentService, documentRegistrar, deliveryIssueService, archiveService, passwordEncoder,
+                timezoneResolver);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
@@ -102,13 +105,36 @@ class ReportDeliveryServiceImplTest {
         version.setVersionNo(1);
         ReportDocumentArtifact artifact = new ReportDocumentArtifact(10L, "PDF", "hash", document, version);
         when(documentRegistrar.registerArtifact(10L, "PDF")).thenReturn(artifact);
+        ReportDelivery issued = new ReportDelivery();
+        issued.setLinkTokenHash("a".repeat(64));
+        issued.setDeliveryStatus("ENQUEUED");
+        when(deliveryIssueService.issue(eq(run), isNull(), eq(recipient), eq(artifact))).thenReturn(issued);
 
-        ReportDeliveryResult result = service.deliver(10L, "preview-hash");
+        ReportDeliveryResult result = service.deliverUser(10L, "preview-hash");
 
         assertThat(result.getDeliveries()).hasSize(1);
         assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        verify(deliveryIssueService).issue(eq(run), isNull(), eq(recipient), eq(artifact));
+    }
+
+    @Test
+    void deliverUserはpreviewHash未指定を拒否する() {
+        assertThatThrownBy(() -> service.deliverUser(10L, null))
+                .hasMessageContaining("error.managementReport.recipientPreviewRequired");
+        assertThatThrownBy(() -> service.deliverUser(10L, "  "))
+                .hasMessageContaining("error.managementReport.recipientPreviewRequired");
+    }
+
+    @Test
+    void deliverUserはstalePreviewHashを拒否する() {
+        ReportRun run = readyRun();
+        when(runMapper.selectById(10L)).thenReturn(run);
+        when(previewService.previewForRun(run)).thenReturn(preview(
+                new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+
+        assertThatThrownBy(() -> service.deliverUser(10L, "stale-hash"))
+                .hasMessageContaining("error.managementReport.recipientPreviewStale");
+        verifyNoInteractions(documentRegistrar, deliveryIssueService);
     }
 
     @Test
@@ -124,11 +150,11 @@ class ReportDeliveryServiceImplTest {
         existing.setDeliveryStatus("ENQUEUED");
         when(deliveryMapper.selectOne(any())).thenReturn(existing);
 
-        ReportDeliveryResult result = service.deliver(10L, "preview-hash");
+        ReportDeliveryResult result = service.deliverUser(10L, "preview-hash");
 
         assertThat(result.getDeliveries()).containsExactly(existing);
         verify(documentRegistrar, never()).registerArtifact(anyLong(), anyString());
-        verifyNoInteractions(notificationService);
+        verifyNoInteractions(deliveryIssueService);
     }
 
     @Test
@@ -150,15 +176,17 @@ class ReportDeliveryServiceImplTest {
         version.setVersionNo(1);
         when(documentRegistrar.registerArtifact(10L, "PDF"))
                 .thenReturn(new ReportDocumentArtifact(10L, "PDF", "hash", document, version));
+        ReportDelivery reissued = new ReportDelivery();
+        reissued.setDeliveryStatus("ENQUEUED");
+        reissued.setLinkTokenHash("b".repeat(64));
+        when(deliveryIssueService.issue(eq(run), eq(existing), eq(recipient), any())).thenReturn(reissued);
 
-        ReportDeliveryResult result = service.deliver(10L, "preview-hash");
+        ReportDeliveryResult result = service.deliverUser(10L, "preview-hash");
 
         assertThat(result.getDeliveries()).hasSize(1);
         assertThat(result.getDeliveries().get(0).getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
-        verify(deliveryMapper, atLeastOnce()).updateById(existing);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        verify(deliveryIssueService).issue(eq(run), eq(existing), eq(recipient), any());
     }
 
     @Test
@@ -248,6 +276,7 @@ class ReportDeliveryServiceImplTest {
         verify(snapshotService).scopeSnapshotOf(run);
         verify(snapshotService, never()).assertAccessible(run);
         verify(archiveService).download(20L, 1);
+        verify(deliveryIssueService).markDownloaded(7L);
     }
 
     @Test
@@ -318,13 +347,18 @@ class ReportDeliveryServiceImplTest {
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+        when(deliveryIssueService.issue(any(), eq(delivery), any(), any())).thenAnswer(invocation -> {
+            ReportDelivery target = invocation.getArgument(1);
+            target.setDeliveryStatus("ENQUEUED");
+            target.setAttemptCount(1);
+            return target;
+        });
 
         service.manualReplay(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(delivery.getAttemptCount()).isEqualTo(1);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        verify(deliveryIssueService).issue(any(), eq(delivery), any(), any());
     }
 
     @Test
