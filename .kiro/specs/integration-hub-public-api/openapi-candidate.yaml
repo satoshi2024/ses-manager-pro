@@ -684,7 +684,7 @@ components:
           type: string
         status:
           type: string
-          maxLength: 64
+          enum: [OPEN, SELECTING, FILLED, CLOSED, UNKNOWN]
         startDate:
           type: string
           format: date
@@ -719,7 +719,7 @@ components:
           nullable: true
         status:
           type: string
-          maxLength: 64
+          enum: [DRAFT, ACTIVE, COMPLETED, CANCELLED, UNKNOWN]
         startDate:
           type: string
           format: date
@@ -730,7 +730,7 @@ components:
           nullable: true
         renewalStatus:
           type: string
-          maxLength: 64
+          enum: [CONTINUE, END, UNKNOWN]
           nullable: true
     InvoiceStatus:
       type: object
@@ -756,7 +756,7 @@ components:
           nullable: true
         status:
           type: string
-          maxLength: 64
+          enum: [UNSENT, SENT, PARTIALLY_PAID, PAID, UNKNOWN]
         issueDate:
           type: string
           format: date
@@ -770,7 +770,7 @@ components:
           nullable: true
         settlementStatus:
           type: string
-          maxLength: 64
+          enum: [SETTLED, PARTIALLY_SETTLED, OUTSTANDING, UNKNOWN]
           nullable: true
     EngineerAvailabilityList:
       type: object

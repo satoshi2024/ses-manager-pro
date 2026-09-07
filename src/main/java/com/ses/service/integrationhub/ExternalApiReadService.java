@@ -243,41 +243,31 @@ public class ExternalApiReadService {
 
     private ExternalApiProject toProject(ExternalApiPrincipal principal, ExternalApiReadRow row) {
         return new ExternalApiProject(publicIdCodec.encode(principal, "project", row.getId()),
-                boundedStatus(row.getStatus()), row.getStartDate(), row.getEndDate(),
+                ExternalApiProjectStatusMapper.toExternalStatus(row.getStatus()), row.getStartDate(), row.getEndDate(),
                 row.getCustomerId() == null ? null : publicIdCodec.encode(principal, "customer", row.getCustomerId()));
     }
 
     private ExternalApiContractStatus toContract(ExternalApiPrincipal principal, ExternalApiReadRow row) {
         return new ExternalApiContractStatus(publicIdCodec.encode(principal, "contract-status", row.getId()),
                 row.getProjectId() == null ? null : publicIdCodec.encode(principal, "project", row.getProjectId()),
-                boundedStatus(row.getStatus()), row.getStartDate(), row.getEndDate(),
-                blankToNull(row.getRenewalStatus()));
+                ExternalApiContractStatusMapper.toExternalStatus(row.getStatus()), row.getStartDate(), row.getEndDate(),
+                ExternalApiRenewalStatusMapper.toExternalStatus(row.getRenewalStatus()));
     }
 
     private ExternalApiInvoiceStatus toInvoice(ExternalApiPrincipal principal, ExternalApiReadRow row) {
-        boolean settled = row.getPaidDate() != null || "入金済".equals(row.getStatus());
         Instant paidAt = row.getPaidDate() == null ? null
                 : row.getPaidDate().atStartOfDay(SERVER_ZONE).toInstant();
         return new ExternalApiInvoiceStatus(publicIdCodec.encode(principal, "invoice-status", row.getId()),
                 row.getContractId() == null || !Long.valueOf(1L).equals(row.getContractCount()) ? null
                         : publicIdCodec.encode(principal, "contract-status", row.getContractId()),
-                boundedStatus(row.getStatus()), row.getIssueDate(), row.getDueDate(), paidAt,
-                settled ? "SETTLED" : "OUTSTANDING");
+                ExternalApiInvoiceStatusMapper.toExternalStatus(row.getStatus()), row.getIssueDate(), row.getDueDate(), paidAt,
+                ExternalApiSettlementStatusMapper.toExternalStatus(row.getStatus(), row.getPaidDate()));
     }
 
     private String availabilityStatus(String status) {
         if ("Bench".equals(status) || "提案中".equals(status)) return "AVAILABLE";
         if ("稼動中".equals(status) || "退場予定".equals(status)) return "UNAVAILABLE";
         return "UNKNOWN";
-    }
-
-    private String boundedStatus(String status) {
-        if (status == null || status.isBlank()) return "UNKNOWN";
-        return status.length() <= 64 ? status : "UNKNOWN";
-    }
-
-    private String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value;
     }
 
     private Long resolveId(ExternalApiPrincipal principal, String resourceType, String publicId,
