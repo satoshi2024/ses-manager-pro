@@ -1,5 +1,6 @@
 package com.ses.controller.api;
 
+import com.ses.common.exception.BusinessException;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.report.ReportDeliveryResult;
 import com.ses.dto.report.ReportDownload;
@@ -31,7 +32,10 @@ public class ManagementReportDeliveryApiController {
     @PostMapping("/runs/{runId}/deliver")
     public ApiResult<ReportDeliveryResult> deliver(@PathVariable Long runId,
                                                    @RequestParam(required = false) String previewHash) {
-        return ApiResult.success(deliveryService.deliver(runId, previewHash));
+        if (previewHash == null || previewHash.isBlank()) {
+            throw BusinessException.of(400, "error.managementReport.recipientPreviewRequired");
+        }
+        return ApiResult.success(deliveryService.deliverUser(runId, previewHash));
     }
 
     @PostMapping("/deliveries/{deliveryId}/reauthenticate")

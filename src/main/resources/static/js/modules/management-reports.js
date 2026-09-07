@@ -201,7 +201,11 @@ function deliverReport() {
 }
 
 function deliverRun(runId, previewHash) {
-    const query = previewHash ? `?previewHash=${encodeURIComponent(previewHash)}` : '';
+    if (!previewHash) {
+        Toast.error('recipient preview hashが必要です');
+        return;
+    }
+    const query = `?previewHash=${encodeURIComponent(previewHash)}`;
     $.ajax({
         url: `/api/management-reports/runs/${runId}/deliver${query}`,
         method: 'POST',

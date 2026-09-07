@@ -6,6 +6,7 @@ import com.ses.mapper.ReportScheduleMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.dto.report.ReportScheduledDeliveryContext;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.dto.report.ReportGenerationCommand;
@@ -99,7 +100,8 @@ public class ManagementReportScheduler {
         if (result.getRun() == null || !"SUCCEEDED".equals(result.getRun().getStatus())) {
             throw BusinessException.of(409, "error.managementReport.generationPartial");
         }
-        deliveryService.deliver(result.getRun().getId(), null);
+        deliveryService.deliverScheduled(result.getRun().getId(),
+                ReportScheduledDeliveryContext.of(schedule.getId(), schedule.getCreatedBy()));
     }
 
     private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt) {
