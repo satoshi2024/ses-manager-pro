@@ -9,8 +9,10 @@ import com.ses.entity.AiArtifactVersion;
 import com.ses.entity.AiEvaluation;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiEvaluationMapper;
+import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiOfflineEvaluationService;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.ai.copilot.evaluation.CopilotAdversarialEvaluationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -31,17 +33,27 @@ public class AiOfflineEvaluationServiceImpl implements AiOfflineEvaluationServic
     private final AiEvaluationMapper evaluationMapper;
     private final ObjectMapper objectMapper;
     private final AiConfig aiConfig;
+    private final CopilotAdversarialEvaluationService copilotAdversarialEvaluationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AiEvaluation evaluate(Long candidateVersionId, Long baselineVersionId) {
         AiArtifactVersion candidate = versionMapper.selectById(candidateVersionId);
+        if (candidate != null && AiGatewayRequest.USE_COPILOT.equals(candidate.getUseCase())) {
+            return copilotAdversarialEvaluationService.evaluate(candidateVersionId, baselineVersionId);
+        }
         AiArtifactVersion baseline = versionMapper.selectById(baselineVersionId);
         if (candidate == null || baseline == null) {
             throw new BusinessException(404, "artifact version が見つかりません");
         }
         JsonNode fixture = loadFixture();
         return evaluate(candidateVersionId, baselineVersionId, fixture);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AiEvaluation evaluateCopilot(Long candidateVersionId, Long baselineVersionId) {
+        return copilotAdversarialEvaluationService.evaluate(candidateVersionId, baselineVersionId);
     }
 
     public AiEvaluation evaluate(Long candidateVersionId, Long baselineVersionId, JsonNode fixture) {

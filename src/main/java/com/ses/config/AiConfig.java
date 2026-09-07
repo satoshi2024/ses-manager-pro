@@ -20,6 +20,11 @@ public class AiConfig {
     private boolean enabled = false;
 
     /**
+     * 経営コパイロット専用feature flag。既定は無効。
+     */
+    private boolean managementCopilotEnabled = false;
+
+    /**
      * AIプロバイダー名（例: openai, gemini, claude）
      */
     private String provider;

@@ -9,6 +9,15 @@ public final class MockAiResponses {
     }
 
     public static String generate(String prompt) {
+        if (prompt != null && prompt.contains("[TASK:MANAGEMENT_COPILOT]")) {
+            String claimKeysJson = extractCopilotClaimKeysJson(prompt);
+            return """
+                    {
+                      "summaryText": "登録された指標キーを確認しました。数値は画面の指標カードを参照してください。",
+                      "claimKeys": %s
+                    }
+                    """.formatted(claimKeysJson);
+        }
         if (prompt != null && (prompt.contains("提案メール") || prompt.contains("[TASK:PROPOSAL_DRAFT]"))) {
             return """
                     {
@@ -48,5 +57,24 @@ public final class MockAiResponses {
               "matchScore": 80
             }
             """;
+    }
+
+    private static String extractCopilotClaimKeysJson(String prompt) {
+        for (String line : prompt.split("\n")) {
+            if (line.startsWith("summary.claimKeys=")) {
+                String keys = line.substring("summary.claimKeys=".length()).trim();
+                if (!keys.isBlank()) {
+                    String joined = java.util.Arrays.stream(keys.split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isBlank())
+                            .map(s -> "\"" + s + "\"")
+                            .collect(java.util.stream.Collectors.joining(","));
+                    if (!joined.isBlank()) {
+                        return "[" + joined + "]";
+                    }
+                }
+            }
+        }
+        return "[\"kpi.utilization\"]";
     }
 }

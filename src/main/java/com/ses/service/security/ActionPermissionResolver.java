@@ -39,6 +39,7 @@ public final class ActionPermissionResolver {
             Map.entry("digital-invoices", "digital-invoice"),
             Map.entry("inbound-invoices", "inbound-invoice"),
             Map.entry("contracts", "contract"),
+            Map.entry("copilot", "copilot"),
             Map.entry("certification-learning-gap", "certification-learning-gap"),
             // CRM(S08)。ここへ登録しないと resolve() が null を返し、V73が m_menu へ入れた
             // path_prefix='/crm/leads' に MenuPermissionFilter がヒットした時点で

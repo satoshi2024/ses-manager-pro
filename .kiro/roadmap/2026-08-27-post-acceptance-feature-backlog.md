@@ -251,6 +251,18 @@ BPコンプライアンス、顧客/BPポータル、勤怠、会計連携、AI�
 - scope漏えい0件、金額不一致0件、幻覚指標の報告件数。
 - 定例資料作成時間の短縮。
 
+#### 実装・Review入口（SNF01〜10横断時の正本）
+
+| 用途 | パス |
+|---|---|
+| spec package | `.kiro/specs/ai-management-copilot/` |
+| 開工対話（F1〜M） | `.kiro/specs/ai-management-copilot/start-conversations.md` |
+| 独立Review対話 | `.kiro/specs/ai-management-copilot/review-conversations.md` |
+| 中央要約（実装） | `2026-08-27-post-acceptance-start-conversations.md` §S-NF08 |
+| 中央要約（Review） | `2026-08-27-post-acceptance-review-conversations.md` §R-NF08 |
+
+具体AIモデルは未決定。先に catalog→正本service→typed result の deterministic core を構築し、summary のみ `AiTextService` で差し替える。
+
 ### NF-09 貸与資産・アカウント・ライセンス管理
 
 #### 顧客価値

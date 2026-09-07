@@ -333,6 +333,7 @@ app:
 ai:
   enabled: true
   provider: mock
+  management-copilot-enabled: false
   external-send-enabled: false
   learning-candidate-timeout-ms: 2000
   learning-candidate-ttl-minutes: 60
