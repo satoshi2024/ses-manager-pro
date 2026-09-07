@@ -182,9 +182,6 @@ public class ComplianceReviewerFingerprintKeyProviderImpl
 
     private boolean isProdProfile() {
         for (String profile : environment.getActiveProfiles()) {
-            if ("test".equalsIgnoreCase(profile)) {
-                return false;
-            }
             if ("prod".equalsIgnoreCase(profile)) {
                 return true;
             }
