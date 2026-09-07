@@ -11,18 +11,27 @@ import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.entity.Customer;
 import com.ses.entity.CustomerCsat;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.ServiceRequestSequence;
 import com.ses.entity.ServiceSlaClock;
+import com.ses.entity.ServiceSlaPolicy;
+import com.ses.entity.SysUser;
 import com.ses.mapper.CustomerCsatMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
+import com.ses.mapper.ServiceRequestSequenceMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
+import com.ses.mapper.ServiceSlaPolicyMapper;
 import com.ses.mapper.ServiceStateEventMapper;
+import com.ses.mapper.SysUserMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +66,15 @@ class ServiceRequestServiceImplTest {
 
     @Autowired
     private CustomerCsatMapper csatMapper;
+
+    @Autowired
+    private ServiceRequestSequenceMapper sequenceMapper;
+
+    @Autowired
+    private ServiceSlaPolicyMapper slaPolicyMapper;
+
+    @Autowired
+    private SysUserMapper sysUserMapper;
 
     private Customer testCustomer;
 
@@ -380,5 +398,189 @@ class ServiceRequestServiceImplTest {
         // 他社顧客IDでポータル詳細を取得しようとすると 404 拒否されること
         assertThrows(BusinessException.class, () ->
                 serviceRequestService.getPortalDetail(reqId, otherCustomerId));
+    }
+
+    @Test
+    @DisplayName("無効な流入チャネル（INVALID_CHANNEL）での起票が400拒否されること")
+    void testCreateRequest_invalidChannel() {
+        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("CONTRACT")
+                .priority("P1")
+                .channel("INVALID_CHANNEL")
+                .subject("チャネル不正テスト")
+                .description("無効なチャネル指定")
+                .build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(req, 100L, false, null));
+        assertEquals(400, ex.getCode());
+        assertTrue(ex.getMessage().contains("無効なチャネルです"));
+    }
+
+    @Test
+    @DisplayName("ポータル起票時はチャネル指定が無視されてPORTALが強制され、担当者IDがnullに初期化されること")
+    void testCreateRequest_portalChannelForced() {
+        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .channel("PHONE")
+                .ownerUserId(999L)
+                .subject("ポータル経由の起票")
+                .description("ポータルチャネル強制テスト")
+                .build();
+
+        ServiceRequest created = serviceRequestService.createRequest(req, 200L, true, null);
+        assertNotNull(created.getId());
+        assertEquals("PORTAL", created.getChannel(), "ポータル経由起票ではchannelがPORTALに強制されること");
+        assertNull(created.getOwnerUserId(), "ポータル経由起票ではownerUserIdがnullに強制されること");
+    }
+
+    @Test
+    @DisplayName("有効なSLAポリシーが存在しない場合（INACTIVE）に起票が400で拒否され、レコードがロールバックされること")
+    void testCreateRequest_missingActivePolicyRollback() {
+        ServiceSlaPolicy p0Policy = slaPolicyMapper.selectOne(
+                new LambdaQueryWrapper<ServiceSlaPolicy>().eq(ServiceSlaPolicy::getPriority, "P0")
+        );
+        assertNotNull(p0Policy);
+        p0Policy.setStatus("INACTIVE");
+        slaPolicyMapper.updateById(p0Policy);
+
+        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P0")
+                .subject("SLAポリシー未定義テスト")
+                .description("フェイルクローズテスト")
+                .build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(req, 100L, false, null));
+        assertEquals(400, ex.getCode());
+        assertTrue(ex.getMessage().contains("有効なSLAポリシー"));
+
+        Long countReq = serviceRequestMapper.selectCount(
+                new LambdaQueryWrapper<ServiceRequest>().eq(ServiceRequest::getSubject, "SLAポリシー未定義テスト")
+        );
+        assertEquals(0L, countReq, "リクエスト作成トランザクションがロールバックされレコードが残らないこと");
+    }
+
+    @Test
+    @DisplayName("月次リクエスト採番が9999件上限で正常発行され、上限超過時に400拒否されること")
+    void testCreateRequest_sequence9999BoundaryAndOverflow() {
+        String currentMonth = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMM"));
+        sequenceMapper.insertInitialIfAbsent(currentMonth);
+        sequenceMapper.updateCurrentVal(currentMonth, 9998);
+
+        ServiceRequestCreateRequest req1 = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("9999件目テスト")
+                .description("境界値テスト")
+                .build();
+
+        ServiceRequest created1 = serviceRequestService.createRequest(req1, 100L, false, null);
+        assertEquals("REQ-" + currentMonth + "-9999", created1.getRequestNo());
+
+        // 次の起票で9999件超過エラー(400)が発生すること
+        ServiceRequestCreateRequest req2 = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .subject("10000件目超過テスト")
+                .description("上限超過テスト")
+                .build();
+
+        BusinessException ex = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(req2, 100L, false, null));
+        assertEquals(400, ex.getCode());
+        assertTrue(ex.getMessage().contains("月間リクエスト採番上限（9999件）を超過しました"));
+    }
+
+    @Test
+    @DisplayName("担当者指定の検証（存在性・有効性・社内対象ロール管理者/営業/マネージャーのみ許可）")
+    void testCreateRequest_ownerUserValidation() {
+        // 1. 存在しないユーザーID
+        ServiceRequestCreateRequest reqNonexistent = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .ownerUserId(888888L)
+                .subject("担当者検証-存在しない")
+                .description("テスト")
+                .build();
+        BusinessException ex1 = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(reqNonexistent, 100L, false, null));
+        assertEquals(400, ex1.getCode());
+        assertTrue(ex1.getMessage().contains("指定された担当ユーザーが存在しません"));
+
+        // 2. 無効化されたユーザー (status = 0)
+        SysUser inactiveUser = SysUser.builder()
+                .username("inactive_sales")
+                .password("pass123")
+                .realName("無効営業")
+                .role("営業")
+                .status(0)
+                .build();
+        sysUserMapper.insert(inactiveUser);
+
+        ServiceRequestCreateRequest reqInactive = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .ownerUserId(inactiveUser.getId())
+                .subject("担当者検証-無効ユーザー")
+                .description("テスト")
+                .build();
+        BusinessException ex2 = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(reqInactive, 100L, false, null));
+        assertEquals(400, ex2.getCode());
+        assertTrue(ex2.getMessage().contains("指定された担当ユーザーは無効です"));
+
+        // 3. 対象外ロール (HR)
+        SysUser hrUser = SysUser.builder()
+                .username("hr_user")
+                .password("pass123")
+                .realName("人事担当")
+                .role("HR")
+                .status(1)
+                .build();
+        sysUserMapper.insert(hrUser);
+
+        ServiceRequestCreateRequest reqHr = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .ownerUserId(hrUser.getId())
+                .subject("担当者検証-対象外ロール")
+                .description("テスト")
+                .build();
+        BusinessException ex3 = assertThrows(BusinessException.class, () ->
+                serviceRequestService.createRequest(reqHr, 100L, false, null));
+        assertEquals(400, ex3.getCode());
+        assertTrue(ex3.getMessage().contains("指定されたユーザーは内部担当者として設定できません"));
+
+        // 4. 有効な営業担当者 (営業) -> 成功
+        SysUser salesUser = SysUser.builder()
+                .username("valid_sales")
+                .password("pass123")
+                .realName("有効営業")
+                .role("営業")
+                .status(1)
+                .build();
+        sysUserMapper.insert(salesUser);
+
+        ServiceRequestCreateRequest reqValid = ServiceRequestCreateRequest.builder()
+                .customerId(testCustomer.getId())
+                .category("SYSTEM")
+                .priority("P2")
+                .ownerUserId(salesUser.getId())
+                .subject("担当者検証-有効営業")
+                .description("テスト")
+                .build();
+        ServiceRequest created = serviceRequestService.createRequest(reqValid, 100L, false, null);
+        assertEquals(salesUser.getId(), created.getOwnerUserId());
     }
 }
