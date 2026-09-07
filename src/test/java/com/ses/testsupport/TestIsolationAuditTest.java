@@ -76,7 +76,9 @@ class TestIsolationAuditTest {
             // 添付ファイル公開メタデータがクラスTX内では download 経路から見えない
             "com.ses.changerequest.EngineerChangeRequestAttachmentApiTest",
             // jdbcTemplateで更新した直後にmapper再読込。クラスTX+MyBatis 1次キャッシュで古いmembershipが返る
-            "com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest"
+            "com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest",
+            // ReportDeliveryIssueServiceの実Spring proxy TX rollback検証。クラスTXは被測境界を壊する。@AfterEachでテスト専用行のみ明示削除
+            "com.ses.report.ReportDeliveryTransactionIntegrationTest"
     );
 
     @Test
