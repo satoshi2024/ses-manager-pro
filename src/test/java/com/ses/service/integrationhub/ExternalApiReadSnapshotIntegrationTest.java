@@ -74,7 +74,7 @@ class ExternalApiReadSnapshotIntegrationTest {
         assertEquals(1, second.items().size());
         ExternalApiProject originalA = second.items().get(0);
         assertEquals(publicIdCodec.encode(PRINCIPAL, "project", PROJECT_A), originalA.publicProjectId());
-        assertEquals("募集中", originalA.status());
+        assertEquals("OPEN", originalA.status());
         assertEquals(publicIdCodec.encode(PRINCIPAL, "customer", CUSTOMER_A), originalA.publicCustomerId());
         assertEquals(null, second.nextCursor());
         assertEquals(false, second.hasMore());
