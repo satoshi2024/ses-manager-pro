@@ -722,6 +722,9 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
     private EngineerAccountLinkService engineerAccountLinkService;
 
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
     private com.ses.service.impl.AssetScopeServiceImpl assetScopeServiceImpl;
 
     @Autowired
@@ -790,7 +793,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngA);
-        engineerAccountLinkService.link(engineerA.getId(), userEngA.getId(), 1L);
+        linkEngineerAccountIsolated(engineerA.getId(), userEngA.getId(), 1L);
 
         SysUser userEngB = SysUser.builder()
                 .username("eng-scope-b-" + suffix)
@@ -799,7 +802,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngB);
-        engineerAccountLinkService.link(engineerB.getId(), userEngB.getId(), 1L);
+        linkEngineerAccountIsolated(engineerB.getId(), userEngB.getId(), 1L);
 
         // 4. 要員スコープ: 自己 ACTIVE 貸与資産のみ可視、他要員への貸与・未貸与・別法人資産は不可視
         assertThat(assetScopeService.isAccessible(assetA.getId(), "要員", userEngA.getId()))
@@ -993,7 +996,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngA);
-        engineerAccountLinkService.link(engineerAId, userEngA.getId(), 1L);
+        linkEngineerAccountIsolated(engineerAId, userEngA.getId(), 1L);
 
         // 4. 要員Aは DocumentLink 経由で証跡文書へアクセス可能（自己貸与中）
         assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngA.getId()))
@@ -1007,7 +1010,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .status(1)
                 .build();
         sysUserMapper.insert(userEngB);
-        engineerAccountLinkService.link(engineerBId, userEngB.getId(), 1L);
+        linkEngineerAccountIsolated(engineerBId, userEngB.getId(), 1L);
 
         assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngB.getId()))
                 .as("要員Bは他要員の貸与証跡文書へアクセス不可（Fail-Closed）").isFalse();
@@ -1145,5 +1148,17 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .eq(AssetEvent::getAssetId, asset2.getId())
                 .eq(AssetEvent::getEventType, "DISPOSED"));
         assertThat(disposeEventCount).isGreaterThanOrEqualTo(1);
+    }
+
+    /**
+     * 共有H2では他テスト（NOT_SUPPORTED等）が残した link 行と engineer ID 再利用が衝突しうるため、
+     * 該当 engineer/user の既存 link を先に削除してから紐付ける。
+     */
+    private void linkEngineerAccountIsolated(long engineerId, long sysUserId, long linkedBy) {
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, engineerId));
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getSysUserId, sysUserId));
+        engineerAccountLinkService.link(engineerId, sysUserId, linkedBy);
     }
 }
