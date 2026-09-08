@@ -21,6 +21,7 @@ import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.servicedesk.ServiceRequestAttachmentService;
 import com.ses.service.servicedesk.ServiceRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -36,9 +38,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.UUID;
+import java.util.Set;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -84,6 +90,9 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
 
     @MockBean
     private DocumentService documentService;
+
+    @MockBean
+    private ServiceRequestAttachmentService attachmentService;
 
     @Override
     protected JdbcTemplate jdbcTemplate() {
@@ -228,6 +237,48 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                         .content(objectMapper.writeValueAsString(invalidReq)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("ポータル添付uploadは公開可能な表示項目だけを返し内部link entityを返さないこと")
+    void testAttachmentUpload_returnsSafeProjectionOnly() throws Exception {
+        ServiceAttachmentLink internalLink = ServiceAttachmentLink.builder()
+                .tenantId("tenant-a")
+                .id(7001L)
+                .serviceRequestId(customerARequest.getId())
+                .commentId(7002L)
+                .documentId(7003L)
+                .visibility("PORTAL_VISIBLE")
+                .businessKey("SERVICE_REQUEST:secret")
+                .fileName("portal-report.pdf")
+                .fileSize(123L)
+                .createdAt(java.time.LocalDateTime.of(2026, 9, 8, 12, 30))
+                .build();
+        when(attachmentService.uploadPortal(eq(customerARequest.getId()), eq(null), org.mockito.ArgumentMatchers.any(),
+                eq(customerAOrg.getCustomerId()), eq(customerAUser.user().getId())))
+                .thenReturn(internalLink);
+        CsrfPair csrf = fetchPortalCsrf(mockMvc);
+
+        String response = mockMvc.perform(multipart("/api/portal/customer/service-desk/requests/"
+                        + customerARequest.getId() + "/attachments")
+                        .file(new MockMultipartFile("file", "portal-report.pdf", "application/pdf", "PDF".getBytes()))
+                        .cookie(customerAUser.sessionCookie(), csrf.cookie())
+                        .header("X-XSRF-TOKEN-PORTAL", csrf.headerValue())
+                        .contentType(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.attachmentId").value(7001))
+                .andExpect(jsonPath("$.data.fileName").value("portal-report.pdf"))
+                .andExpect(jsonPath("$.data.fileSize").value(123))
+                .andExpect(jsonPath("$.data.createdAt").value("2026-09-08T12:30:00"))
+                .andReturn().getResponse().getContentAsString();
+
+        Set<String> fields = new HashSet<>();
+        Iterator<String> names = objectMapper.readTree(response).get("data").fieldNames();
+        while (names.hasNext()) {
+            fields.add(names.next());
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(Set.of("attachmentId", "fileName", "fileSize", "createdAt"), fields);
     }
 
     @Test

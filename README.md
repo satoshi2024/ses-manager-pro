@@ -123,6 +123,7 @@
    > 💡 既存の（旧 `sql/001`〜`008` を手動適用済みの）DBに対しては、`baseline-on-migrate: true` / `baseline-version: 9` により V1〜V9 は再実行されず V10 以降のみ適用されます。
    > 💡 既定の `mvn test` はH2/unit/MVCの高速feedback suiteで、`mysql`/`performance` tagを明示的に除外します。Dockerの有無で実行範囲が変化することはありません。
    > 💡 実MySQL/Flywayは `mvn test -Pmysql-tests`（Docker必須）、性能回帰は `mvn test -Pperformance-tests` で実行します。push前は `scripts/verify-like-ci.sh`（Windowsは `scripts\verify-like-ci.ps1`）を実行すると、CIと同じ3つのgateとbackup integrationを検証します。
+   > 💡 本番系profileでは `ACCOUNTING_TENANT_IDS` が必須です。対象tenant IDをカンマ区切り（例: `tenant-a,tenant-b`）で設定してください。未設定・空白のみの場合は起動を停止します。schedulerは設定された各tenantを個別contextで処理します。
 
 3. **プロジェクトのビルドと起動**:
    プロジェクトのルートディレクトリで以下のコマンドを実行します。

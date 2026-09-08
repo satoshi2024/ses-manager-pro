@@ -18,6 +18,7 @@ import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,6 +91,34 @@ class CertificationExpiryNotificationSchedulerTest {
         verify(certificationMapper, org.mockito.Mockito.times(2)).selectList(any());
         verify(timezoneResolver).resolve("tenant-a");
         verify(timezoneResolver).resolve("tenant-b");
+        org.junit.jupiter.api.Assertions.assertNull(
+                com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void 空inventoryは実行時に成功件数ゼロを返さず失敗する() {
+        AccountingTenantInventoryProperties inventory = new AccountingTenantInventoryProperties();
+        CertificationExpiryNotificationScheduler scheduler = new CertificationExpiryNotificationScheduler(
+                certificationMapper, expiryService, populationResolver, notificationService,
+                genericNotificationService, Clock.systemUTC(), inventory, timezoneResolver);
+
+        assertThrows(IllegalStateException.class, () -> scheduler.dispatch(date()));
+    }
+
+    @Test
+    void tenant処理中の例外後もcontextを残さない() {
+        AccountingTenantInventoryProperties inventory = inventory("tenant-a", "tenant-b");
+        when(certificationMapper.selectList(any())).thenAnswer(invocation -> {
+            if ("tenant-b".equals(com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId())) {
+                throw new IllegalStateException("test failure");
+            }
+            return List.of();
+        });
+        CertificationExpiryNotificationScheduler scheduler = new CertificationExpiryNotificationScheduler(
+                certificationMapper, expiryService, populationResolver, notificationService,
+                genericNotificationService, Clock.systemUTC(), inventory, timezoneResolver);
+
+        assertThrows(IllegalStateException.class, () -> scheduler.dispatch(date()));
         org.junit.jupiter.api.Assertions.assertNull(
                 com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId());
     }

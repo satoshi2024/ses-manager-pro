@@ -12,7 +12,7 @@ public interface CertificationMasterService {
 
     Certification getMaster(Long id);
 
-    Certification updateMaster(Long id, Certification certification, Long actorUserId);
+    Certification updateMaster(Long id, Certification certification, Long actorUserId, Integer expectedVersion);
 
-    Certification deactivateMaster(Long id, Long actorUserId);
+    Certification deactivateMaster(Long id, Long actorUserId, Integer expectedVersion);
 }

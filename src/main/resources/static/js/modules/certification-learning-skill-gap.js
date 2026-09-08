@@ -8,6 +8,7 @@
     let trainingCourses = [];
     let skillTags = [];
     let editingCourseVersion = null;
+    let editingCertificationVersion = null;
 
     function value(id) { return document.getElementById(id)?.value || ''; }
 
@@ -192,7 +193,7 @@
 
     function renderMasters() {
         document.getElementById('cert-gap-master-body').innerHTML = certificationMasters.map(function (item) {
-            return '<tr><td>' + esc(item.displayName || '-') + '</td><td>' + esc(item.issuerDisplay || '-') + '</td><td>' + esc(item.expiryType || 'NONE') + (item.expiryMonths ? ' / ' + esc(item.expiryMonths) + 'か月' : '') + '</td><td>' + (item.activeFlag === 1 ? '有効' : '無効') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openCertificationMasterForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateCertificationMaster(' + item.id + ')">無効化</button>' : '') + '</div></td></tr>';
+            return '<tr><td>' + esc(item.displayName || '-') + '</td><td>' + esc(item.issuerDisplay || '-') + '</td><td>' + esc(item.expiryType || 'NONE') + (item.expiryMonths ? ' / ' + esc(item.expiryMonths) + 'か月' : '') + '</td><td>' + (item.activeFlag === 1 ? '有効' : '無効') + '</td><td><div class="d-flex flex-wrap justify-content-end align-items-center gap-1"><button class="btn btn-sm btn-outline-info" onclick="openCertificationMasterForm(' + item.id + ')">編集</button>' + (item.activeFlag === 1 ? '<button class="btn btn-sm btn-outline-danger" onclick="deactivateCertificationMaster(' + item.id + ',' + item.version + ')">無効化</button>' : '') + '</div></td></tr>';
         }).join('') || '<tr><td colspan="5" class="text-muted">資格masterはありません</td></tr>';
     }
 
@@ -204,7 +205,9 @@
 
     window.openCertificationMasterForm = async function (id) {
         try {
+            editingCertificationVersion = null;
             const item = id ? await SES.api.get('/api/certification-learning-gap/masters/certifications/' + id) : {};
+            if (id) editingCertificationVersion = item.version;
             document.getElementById('cert-gap-master-id').value = item.id || '';
             document.getElementById('cert-gap-master-name').value = item.displayName || '';
             document.getElementById('cert-gap-master-issuer').value = item.issuerDisplay || '';
@@ -220,10 +223,10 @@
     window.saveCertificationMaster = async function () {
         const id = document.getElementById('cert-gap-master-id').value;
         const expiryType = document.getElementById('cert-gap-master-expiry-type').value;
-        const payload = { displayName: document.getElementById('cert-gap-master-name').value, issuerDisplay: document.getElementById('cert-gap-master-issuer').value, externalCode: document.getElementById('cert-gap-master-code').value, expiryType: expiryType, expiryMonths: expiryType === 'FIXED_MONTHS' ? Number(document.getElementById('cert-gap-master-expiry-months').value) : null, ruleVersion: Number(document.getElementById('cert-gap-master-rule-version').value || 1), activeFlag: Number(document.getElementById('cert-gap-master-active').value) };
+        const payload = { displayName: document.getElementById('cert-gap-master-name').value, issuerDisplay: document.getElementById('cert-gap-master-issuer').value, externalCode: document.getElementById('cert-gap-master-code').value, expiryType: expiryType, expiryMonths: expiryType === 'FIXED_MONTHS' ? Number(document.getElementById('cert-gap-master-expiry-months').value) : null, ruleVersion: Number(document.getElementById('cert-gap-master-rule-version').value || 1), activeFlag: Number(document.getElementById('cert-gap-master-active').value), expectedVersion: editingCertificationVersion };
         try { if (id) await SES.api.put('/api/certification-learning-gap/masters/certifications/' + id, payload); else await SES.api.post('/api/certification-learning-gap/masters/certifications', payload); bootstrap.Modal.getInstance(document.getElementById('cert-gap-master-modal')).hide(); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの保存に失敗しました'); }
     };
-    window.deactivateCertificationMaster = async function (id) { const result = await Swal.fire({ title: '資格masterを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/certifications/' + id); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの無効化に失敗しました'); } };
+    window.deactivateCertificationMaster = async function (id, version) { const result = await Swal.fire({ title: '資格masterを無効化', showCancelButton: true, confirmButtonText: '無効化', cancelButtonText: '戻る' }); if (!result.isConfirmed) return; try { await SES.api.delete('/api/certification-learning-gap/masters/certifications/' + id + '?expectedVersion=' + encodeURIComponent(version)); loadCatalogs(); } catch (e) { showCertificationError(e, '資格masterの無効化に失敗しました'); } };
 
     window.openTrainingCourseForm = async function (id) {
         try {

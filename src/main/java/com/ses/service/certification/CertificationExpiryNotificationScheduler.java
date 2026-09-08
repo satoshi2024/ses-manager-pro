@@ -56,7 +56,7 @@ public class CertificationExpiryNotificationScheduler {
 
     public int dispatch(LocalDate asOf) {
         int attempted = 0;
-        for (String tenantId : tenantInventory.normalizedIds()) {
+        for (String tenantId : tenantInventory.requireNormalizedIds()) {
             ZoneId zone = timezoneResolver.resolve(tenantId);
             LocalDate tenantDate = asOf == null ? LocalDate.now(clock.withZone(zone)) : asOf;
             attempted += AccountingTenantContextHolder.runWithTenant(tenantId, zone,

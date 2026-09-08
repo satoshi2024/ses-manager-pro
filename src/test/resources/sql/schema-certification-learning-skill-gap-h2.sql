@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS m_certification (
     expiry_months INT NULL,
     rule_version INT NOT NULL DEFAULT 1,
     active_flag TINYINT NOT NULL DEFAULT 1,
+    version INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by BIGINT NULL,

@@ -42,7 +42,7 @@ public class ServiceSlaScheduler {
     public int processSlaMonitoring(LocalDateTime asOf) {
         log.info("SLA 違反監視スケジューラ実行開始: asOf={}", asOf);
         int breachedCount = 0;
-        for (String tenantId : tenantInventory.normalizedIds()) {
+        for (String tenantId : tenantInventory.requireNormalizedIds()) {
             java.time.ZoneId zone = timezoneResolver.resolve(tenantId);
             LocalDateTime tenantAsOf = asOf != null ? asOf : LocalDateTime.now(clock.withZone(zone));
             breachedCount += AccountingTenantContextHolder.runWithTenant(tenantId,

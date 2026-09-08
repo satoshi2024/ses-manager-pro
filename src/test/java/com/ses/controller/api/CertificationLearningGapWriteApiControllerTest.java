@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.certification.CertificationLifecycleActionView;
+import com.ses.dto.certification.CertificationMasterView;
 import com.ses.dto.certificationlearninggap.TrainingCourseMasterView;
 import com.ses.entity.Certification;
 import com.ses.entity.EngineerCertification;
@@ -41,7 +42,7 @@ class CertificationLearningGapWriteApiControllerTest {
         when(masterService.createMaster(any(Certification.class), any())).thenReturn(master);
         when(courseService.create(any(TrainingCourseMasterService.TrainingCourseCommand.class), any())).thenReturn(course);
 
-        ApiResult<Certification> masterResult = controller.createCertificationMaster(
+        ApiResult<CertificationMasterView> masterResult = controller.createCertificationMaster(
                 new CertificationLearningGapApiController.CertificationMasterRequest(
                         "default", "FE", "IPA", "FE", "NONE", null, 1, 1));
         ApiResult<TrainingCourse> courseResult = controller.createTrainingCourse(
@@ -49,7 +50,7 @@ class CertificationLearningGapWriteApiControllerTest {
                         "default", "provider", "AWS", "desc", java.math.BigDecimal.TEN, 3, 10, 1, null, List.of(5L)));
 
         assertEquals(200, masterResult.getCode());
-        assertEquals(1L, masterResult.getData().getId());
+        assertEquals(1L, masterResult.getData().id());
         assertEquals(200, courseResult.getCode());
         assertEquals(2L, courseResult.getData().getId());
         verify(masterService).createMaster(any(Certification.class), any());

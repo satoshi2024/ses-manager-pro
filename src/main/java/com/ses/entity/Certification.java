@@ -1,6 +1,7 @@
 package com.ses.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -22,6 +23,8 @@ public class Certification extends BaseEntity {
     private Integer expiryMonths;
     private Integer ruleVersion;
     private Integer activeFlag;
+    @Version
+    private Integer version;
     private Long createdBy;
     private Long updatedBy;
 }

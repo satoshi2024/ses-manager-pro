@@ -9,6 +9,7 @@ import com.ses.dto.portal.PortalServiceCommentCreateRequest;
 import com.ses.dto.portal.PortalServiceCommentDto;
 import com.ses.dto.portal.PortalServiceRequestCreateRequest;
 import com.ses.dto.portal.PortalServiceRequestDto;
+import com.ses.dto.portal.PortalAttachmentResponse;
 import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceCommentDto;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
@@ -244,11 +245,12 @@ public class PortalCustomerServiceDeskApiController {
     }
 
     @PostMapping(value = "/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResult<ServiceAttachmentLink> uploadAttachment(@PathVariable Long id,
-                                                              @RequestPart("file") MultipartFile file,
-                                                              @RequestParam(required = false) Long commentId) {
+    public ApiResult<PortalAttachmentResponse> uploadAttachment(@PathVariable Long id,
+                                                                @RequestPart("file") MultipartFile file,
+                                                                @RequestParam(required = false) Long commentId) {
         authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
-        return ApiResult.success(attachmentService.uploadPortal(id, commentId, file, customerId(), portalUserId()));
+        ServiceAttachmentLink link = attachmentService.uploadPortal(id, commentId, file, customerId(), portalUserId());
+        return ApiResult.success(PortalAttachmentResponse.from(link));
     }
 
     /**

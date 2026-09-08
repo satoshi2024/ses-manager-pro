@@ -6,6 +6,7 @@ import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.dto.certificationlearninggap.CertificationLearningGapAiView;
 import com.ses.dto.certification.CertificationLifecycleActionView;
+import com.ses.dto.certification.CertificationMasterView;
 import com.ses.dto.certificationlearninggap.TrainingCourseMasterView;
 import com.ses.entity.Certification;
 import com.ses.entity.EngineerCertification;
@@ -59,37 +60,44 @@ public class CertificationLearningGapApiController {
 
     @GetMapping("/masters/certifications")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<List<Certification>> certificationMasters(
+    public ApiResult<List<CertificationMasterView>> certificationMasters(
             @RequestParam(defaultValue = "true") boolean includeInactive) {
-        return ApiResult.success(certificationMasterService.listMasters(includeInactive));
+        return ApiResult.success(certificationMasterService.listMasters(includeInactive).stream()
+                .map(CertificationMasterView::from).toList());
     }
 
     @GetMapping("/masters/certifications/{id}")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<Certification> certificationMaster(@PathVariable Long id) {
-        return ApiResult.success(certificationMasterService.getMaster(id));
+    public ApiResult<CertificationMasterView> certificationMaster(@PathVariable Long id) {
+        return ApiResult.success(CertificationMasterView.from(certificationMasterService.getMaster(id)));
     }
 
     @PostMapping("/masters/certifications")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<Certification> createCertificationMaster(@RequestBody CertificationMasterRequest request) {
-        return ApiResult.success(certificationMasterService.createMaster(toCertification(request),
-                com.ses.common.util.SecurityUtils.currentUserId()));
+    public ApiResult<CertificationMasterView> createCertificationMaster(@RequestBody CertificationMasterRequest request) {
+        return ApiResult.success(CertificationMasterView.from(certificationMasterService.createMaster(
+                toCertification(request), com.ses.common.util.SecurityUtils.currentUserId())));
     }
 
     @PutMapping("/masters/certifications/{id}")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<Certification> updateCertificationMaster(@PathVariable Long id,
-                                                               @RequestBody CertificationMasterRequest request) {
-        return ApiResult.success(certificationMasterService.updateMaster(id, toCertification(request),
-                com.ses.common.util.SecurityUtils.currentUserId()));
+    public ApiResult<CertificationMasterView> updateCertificationMaster(@PathVariable Long id,
+                                                                         @RequestBody CertificationMasterRequest request) {
+        return ApiResult.success(CertificationMasterView.from(certificationMasterService.updateMaster(id,
+                toCertification(request), com.ses.common.util.SecurityUtils.currentUserId(),
+                request == null ? null : request.expectedVersion())));
     }
 
     @DeleteMapping("/masters/certifications/{id}")
     @PreAuthorize("hasAnyRole('管理者','HR')")
-    public ApiResult<Certification> deactivateCertificationMaster(@PathVariable Long id) {
-        return ApiResult.success(certificationMasterService.deactivateMaster(id,
-                com.ses.common.util.SecurityUtils.currentUserId()));
+    public ApiResult<CertificationMasterView> deactivateCertificationMaster(
+            @PathVariable Long id,
+            @RequestParam(required = false) Integer expectedVersion,
+            @RequestBody(required = false) CertificationMasterVersionRequest request) {
+        Integer version = expectedVersion != null ? expectedVersion
+                : request == null ? null : request.expectedVersion();
+        return ApiResult.success(CertificationMasterView.from(certificationMasterService.deactivateMaster(id,
+                com.ses.common.util.SecurityUtils.currentUserId(), version)));
     }
 
     @GetMapping("/masters/courses")
@@ -362,7 +370,16 @@ public class CertificationLearningGapApiController {
 
     public record CertificationMasterRequest(String tenantId, String displayName, String issuerDisplay,
                                              String externalCode, String expiryType, Integer expiryMonths,
-                                             Integer ruleVersion, Integer activeFlag) { }
+                                             Integer ruleVersion, Integer activeFlag, Integer expectedVersion) {
+        public CertificationMasterRequest(String tenantId, String displayName, String issuerDisplay,
+                                          String externalCode, String expiryType, Integer expiryMonths,
+                                          Integer ruleVersion, Integer activeFlag) {
+            this(tenantId, displayName, issuerDisplay, externalCode, expiryType, expiryMonths,
+                    ruleVersion, activeFlag, null);
+        }
+    }
+
+    public record CertificationMasterVersionRequest(Integer expectedVersion) { }
 
     public record CertificationVerificationCommand(Integer expectedVersion, Long evidenceDocumentId,
                                                    Long evidenceDocumentVersionId, String evidenceHash) { }
