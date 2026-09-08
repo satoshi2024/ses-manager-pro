@@ -8,10 +8,13 @@ import com.ses.dto.skillgap.SkillGapRequest;
 import com.ses.dto.skillgap.SkillGapResult;
 import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingCourseSkill;
+import com.ses.entity.Project;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingCourseSkillMapper;
 import com.ses.service.SkillGapService;
 import com.ses.service.skillgap.AiLearningCandidateService;
+import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,11 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
     private final TrainingCourseMapper courseMapper;
     private final Clock clock;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ProjectMapper projectMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DataScopeService dataScopeService;
+
     @Override
     public CertificationLearningGapAiView suggest(Long engineerId, Long projectId, LocalDate asOf,
                                                    LocalDate periodFrom, LocalDate periodTo,
@@ -40,6 +48,17 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
                                                    Long actorUserId, Authentication authentication) {
         if (engineerId == null || projectId == null) {
             throw BusinessException.of(400, "skill.gap.requestRequired");
+        }
+        Project project = projectMapper == null ? null : projectMapper.selectById(projectId);
+        if (projectMapper != null && project == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        if (dataScopeService != null) {
+            dataScopeService.assertAllowedEngineer(engineerId);
+            dataScopeService.assertAllowedProject(projectId);
+            if (project != null && project.getCustomerId() != null) {
+                dataScopeService.assertAllowedCustomer(project.getCustomerId());
+            }
         }
         LocalDate effectiveAsOf = asOf == null ? LocalDate.now(clock) : asOf;
         SkillGapService.DemandSource source = demandSource == null
@@ -66,14 +85,29 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
             return List.of();
         }
         List<Long> courseIds = courseSkillMapper.selectList(new LambdaQueryWrapper<TrainingCourseSkill>()
+                        .eq(TrainingCourseSkill::getTenantId, currentTenant())
                         .in(TrainingCourseSkill::getSkillId, skillIds)
                         .eq(TrainingCourseSkill::getRequiredFlag, 1))
                 .stream().map(TrainingCourseSkill::getCourseId).filter(Objects::nonNull).distinct().toList();
         if (courseIds.isEmpty()) {
             return List.of();
         }
-        return courseMapper.selectBatchIds(courseIds).stream()
+        List<TrainingCourse> tenantCourses = courseMapper.selectList(new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getTenantId, currentTenant())
+                .in(TrainingCourse::getId, courseIds));
+        // V116以前の直接serviceテスト／旧fixtureにはtenant列が未設定の行が残る。
+        // 非nullで別tenantの行をfallbackすることはない。
+        if (tenantCourses.isEmpty() && "default".equals(currentTenant())) {
+            tenantCourses = courseMapper.selectBatchIds(courseIds).stream()
+                    .filter(course -> course.getTenantId() == null || currentTenant().equals(course.getTenantId()))
+                    .toList();
+        }
+        return tenantCourses.stream()
                 .filter(course -> Integer.valueOf(1).equals(course.getActiveFlag()))
                 .map(TrainingCourse::getId).filter(Objects::nonNull).toList();
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
     }
 }

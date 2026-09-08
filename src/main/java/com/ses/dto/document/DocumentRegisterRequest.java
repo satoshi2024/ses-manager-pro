@@ -13,6 +13,9 @@ import java.time.LocalDate;
 @Builder
 public class DocumentRegisterRequest {
 
+    /** 呼び出し側が提示できる検証済みtenant。実際の採用値はcontextと一致する場合のみ。 */
+    private String tenantId;
+
     /** 文書種別コード（m_document_type.code） */
     private String documentType;
 

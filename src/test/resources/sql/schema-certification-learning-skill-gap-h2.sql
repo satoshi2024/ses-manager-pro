@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS t_certification_continuity_group (
     tenant_id VARCHAR(100) NOT NULL,
     engineer_id BIGINT NOT NULL,
     certification_id BIGINT NOT NULL,
-    continuity_group_id BIGINT NOT NULL,
+    continuity_group_id BIGINT AUTO_INCREMENT NOT NULL,
     PRIMARY KEY (tenant_id, engineer_id, certification_id, continuity_group_id),
     UNIQUE (continuity_group_id)
 );
@@ -362,6 +362,33 @@ CREATE TABLE IF NOT EXISTS t_learning_decision_event (
     adverse_use_flag TINYINT NOT NULL DEFAULT 0,
     reason VARCHAR(2000) NOT NULL,
     snapshot_hash VARCHAR(64) NULL,
+    idempotency_key VARCHAR(255) NULL,
     occurred_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS t_learning_candidate (
+    id BIGINT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    engineer_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    customer_id BIGINT NULL,
+    as_of_date DATE NOT NULL,
+    rule_gap_snapshot_id BIGINT NULL,
+    rule_course_ids_json CLOB NOT NULL,
+    ai_course_ids_json CLOB NOT NULL,
+    snapshot_hash CHAR(64) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    expires_at TIMESTAMP NOT NULL,
+    decision_actor_user_id BIGINT NULL,
+    decision_reason VARCHAR(2000) NULL,
+    decided_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_flag INT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_learning_candidate_tenant_id UNIQUE (tenant_id, id),
+    CONSTRAINT fk_learning_candidate_run FOREIGN KEY (id) REFERENCES t_ai_recommendation_run(id),
+    CONSTRAINT fk_learning_candidate_snapshot FOREIGN KEY (rule_gap_snapshot_id) REFERENCES t_skill_gap_snapshot(id)
+);
+CREATE INDEX IF NOT EXISTS idx_learning_candidate_scope
+    ON t_learning_candidate(tenant_id, engineer_id, project_id, customer_id, status);

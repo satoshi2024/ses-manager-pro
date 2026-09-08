@@ -51,7 +51,6 @@ import java.util.stream.Collectors;
 @Service
 public class SkillGapServiceImpl implements SkillGapService {
 
-    private static final String DEFAULT_TENANT = "default";
     private static final Map<String, Integer> LEVELS = Map.of(
             "初級", 1,
             "中級", 2,
@@ -107,8 +106,9 @@ public class SkillGapServiceImpl implements SkillGapService {
             return SkillGapResult.unavailable(request, "as_of_before_feature_start");
         }
 
+        String tenantId = currentTenant();
         List<EngineerSkillEvent> allSupplyEvents = engineerSkillEventMapper
-                .selectByEngineerId(request.engineerId());
+                .selectByTenantAndEngineerId(tenantId, request.engineerId());
         List<EngineerSkillEvent> supplyEvents = effectiveSupply(allSupplyEvents, request.asOf());
 
         DemandData demand = loadDemand(request);
@@ -142,7 +142,9 @@ public class SkillGapServiceImpl implements SkillGapService {
     @Override
     @Transactional(readOnly = true)
     public SkillGapResult replay(Long snapshotId) {
-        SkillGapSnapshot snapshot = snapshotMapper.selectById(snapshotId);
+        SkillGapSnapshot snapshot = snapshotMapper.selectOne(new LambdaQueryWrapper<SkillGapSnapshot>()
+                .eq(SkillGapSnapshot::getId, snapshotId)
+                .eq(SkillGapSnapshot::getTenantId, currentTenant()));
         if (snapshot == null || snapshot.getResultJson() == null || snapshot.getResultHash() == null) {
             throw BusinessException.of(404, "error.skillGap.snapshotNotFound");
         }
@@ -191,8 +193,9 @@ public class SkillGapServiceImpl implements SkillGapService {
     }
 
     private DemandData loadDemand(SkillGapRequest request) {
-        List<ProjectSkillEvent> projectEvents = projectSkillEventMapper.selectByProjectId(request.projectId());
-        List<ProjectPositionEvent> positionEvents = projectPositionEventMapper.selectByProjectId(request.projectId());
+        String tenantId = currentTenant();
+        List<ProjectSkillEvent> projectEvents = projectSkillEventMapper.selectByTenantAndProjectId(tenantId, request.projectId());
+        List<ProjectPositionEvent> positionEvents = projectPositionEventMapper.selectByTenantAndProjectId(tenantId, request.projectId());
         DemandData project = new DemandData(new ArrayList<>(), eventIds(projectEvents), new ArrayList<>(),
                 !projectEvents.isEmpty());
         DemandData position = new DemandData(new ArrayList<>(), eventIds(positionEvents), new ArrayList<>(),
@@ -364,7 +367,7 @@ public class SkillGapServiceImpl implements SkillGapService {
         try {
             String json = objectMapper.writeValueAsString(result);
             SkillGapSnapshot snapshot = new SkillGapSnapshot();
-            snapshot.setTenantId(DEFAULT_TENANT);
+            snapshot.setTenantId(currentTenant());
             snapshot.setAsOfDate(request.asOf());
             snapshot.setEngineerId(request.engineerId());
             snapshot.setProjectId(request.projectId());
@@ -513,5 +516,9 @@ public class SkillGapServiceImpl implements SkillGapService {
         private static int levelRank(String value) {
             return LEVELS.getOrDefault(value, value == null ? 0 : 1);
         }
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
     }
 }

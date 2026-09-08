@@ -181,7 +181,6 @@ class DocumentServiceImplTest {
             d.setId(10L);
             return 1;
         });
-        when(documentVersionMapper.findLatestByDocumentId(anyLong())).thenReturn(null);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
@@ -202,7 +201,7 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void registerReceived_hashClaim重複はstorage保存前に409を返す() {
+    void registerReceived_hashClaim重複はCLEAN後metadata保存で409となりStorageを補償削除する() {
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
             ((Document) inv.getArgument(0)).setId(10L);
@@ -219,7 +218,8 @@ class DocumentServiceImplTest {
 
         assertEquals(409, ex.getCode());
         assertEquals("error.order.duplicateSourceDocument", ex.getMessageKey());
-        verify(documentStorage, never()).put(anyString(), any(InputStream.class), anyBoolean());
+        verify(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        verify(documentStorage).delete(anyString());
     }
 
     @Test
@@ -230,7 +230,6 @@ class DocumentServiceImplTest {
             return 1;
         });
         when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(11L))).thenReturn(1);
-        when(documentVersionMapper.findLatestByDocumentId(11L)).thenReturn(null);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
         var req = DocumentRegisterRequest.builder()
@@ -251,14 +250,8 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    void registerReceived_storagePutFailureでもtransaction中に即時cleanupする() {
+    void registerReceived_storagePutFailureでも即時cleanupする() {
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
-        when(documentMapper.insert(any(Document.class))).thenAnswer(inv -> {
-            ((Document) inv.getArgument(0)).setId(12L);
-            return 1;
-        });
-        when(documentHashClaimMapper.insertClaim(anyString(), eq("ORDER_RECEIVED"), anyString(), eq(12L)))
-                .thenReturn(1);
         doThrow(new RuntimeException("simulated put failure"))
                 .when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         var req = DocumentRegisterRequest.builder()
@@ -270,8 +263,8 @@ class DocumentServiceImplTest {
             assertThrows(RuntimeException.class, () ->
                     sut.registerReceived(req, new ByteArrayInputStream("content".getBytes())));
             verify(documentStorage).delete(anyString());
-            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager
-                    .getSynchronizations().isEmpty(), "put前にrollback補償が登録されているべき");
+            assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .getSynchronizations().isEmpty(), "Storage put前にDB transaction補償を登録しない");
         } finally {
             org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
         }
@@ -430,6 +423,10 @@ class DocumentServiceImplTest {
 
     @Test
     void verifyIntegrity_hashMismatch_returnsMismatchFinding() {
+        Document document = new Document();
+        document.setId(50L);
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
         DocumentVersion v = new DocumentVersion();
         v.setId(101L);
         v.setDocumentId(50L);
@@ -448,6 +445,10 @@ class DocumentServiceImplTest {
 
     @Test
     void verifyIntegrity_storageMissing_returnsMissingFinding() {
+        Document document = new Document();
+        document.setId(51L);
+        document.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(document);
         DocumentVersion v = new DocumentVersion();
         v.setId(102L);
         v.setDocumentId(51L);
@@ -555,6 +556,10 @@ class DocumentServiceImplTest {
 
     @Test
     void getVersionStorageKey_returnsDbKey() {
+        Document doc = new Document();
+        doc.setId(1L);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         DocumentVersion v = new DocumentVersion();
         v.setStorageKey("real-db-key");
         when(documentVersionMapper.selectOne(any())).thenReturn(v);

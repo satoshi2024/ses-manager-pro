@@ -13,6 +13,11 @@ public interface EngineerCertificationMapper extends BaseMapper<EngineerCertific
     @Select("SELECT * FROM t_engineer_certification WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     EngineerCertification selectByIdForUpdate(@Param("id") Long id);
 
+    @Select("SELECT * FROM t_engineer_certification WHERE tenant_id = #{tenantId} "
+            + "AND id = #{id} AND deleted_flag = 0 FOR UPDATE")
+    EngineerCertification selectByTenantIdForUpdate(@Param("tenantId") String tenantId,
+                                                    @Param("id") Long id);
+
     @Select("SELECT COUNT(*) FROM t_engineer_certification "
             + "WHERE tenant_id = #{tenantId} AND engineer_id = #{engineerId} "
             + "AND certification_id = #{certificationId} AND acquired_on = #{acquiredOn} "

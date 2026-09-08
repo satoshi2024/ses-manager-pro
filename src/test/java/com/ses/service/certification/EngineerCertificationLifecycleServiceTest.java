@@ -2,10 +2,12 @@ package com.ses.service.certification;
 
 import com.ses.entity.Certification;
 import com.ses.entity.EngineerCertification;
+import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.CertificationMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.mapper.CertificationContinuityGroupMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +39,7 @@ class EngineerCertificationLifecycleServiceTest {
     @Mock private CertificationNumberCryptoService cryptoService;
     @Mock private CertificationEventMapper eventMapper;
     @Mock private CertificationEvidenceValidator evidenceValidator;
+    @Mock private CertificationContinuityGroupMapper continuityGroupMapper;
 
     private EngineerCertificationService service;
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
@@ -45,6 +48,7 @@ class EngineerCertificationLifecycleServiceTest {
     void setUp() {
         service = new EngineerCertificationServiceImpl(recordMapper, certificationMapper, engineerMapper,
                 cryptoService, eventMapper, evidenceValidator, clock);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "continuityGroupMapper", continuityGroupMapper);
     }
 
     @Test
@@ -150,6 +154,61 @@ class EngineerCertificationLifecycleServiceTest {
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.submitApplication(20L, 2L, LocalDate.of(2026, 1, 1), null,
                         null, 7L, false));
+        verify(recordMapper, never()).insert(any(EngineerCertification.class));
+    }
+
+    @Test
+    void 新規取得はDB生成continuityIdを読み取りrecordへ設定する() {
+        Certification master = new Certification();
+        master.setId(2L);
+        master.setTenantId("default");
+        master.setActiveFlag(1);
+        master.setRuleVersion(1);
+        master.setDisplayName("資格");
+        when(engineerMapper.selectById(20L)).thenReturn(new com.ses.entity.Engineer());
+        when(certificationMapper.selectById(2L)).thenReturn(master);
+        when(recordMapper.countNonTerminalAcquisition(eq("default"), eq(20L), eq(2L), any(), eq(null)))
+                .thenReturn(0L);
+        when(continuityGroupMapper.insert(any(com.ses.entity.CertificationContinuityGroup.class))).thenAnswer(invocation -> {
+            com.ses.entity.CertificationContinuityGroup group = invocation.getArgument(0);
+            group.setContinuityGroupId(901L);
+            return 1;
+        });
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((EngineerCertification) invocation.getArgument(0)).setId(902L);
+            return 1;
+        }).when(recordMapper).insert(any(EngineerCertification.class));
+
+        EngineerCertificationViewDto view = service.submitApplication(20L, 2L,
+                LocalDate.of(2026, 9, 1), null, null, 7L, false);
+
+        assertEquals(902L, view.getId());
+        org.mockito.ArgumentCaptor<EngineerCertification> record =
+                org.mockito.ArgumentCaptor.forClass(EngineerCertification.class);
+        verify(recordMapper).insert(record.capture());
+        assertEquals(901L, record.getValue().getContinuityGroupId());
+    }
+
+    @Test
+    void continuityMapperが無い場合は採番を推測せずfailClosedする() {
+        service = new EngineerCertificationServiceImpl(recordMapper, certificationMapper, engineerMapper,
+                cryptoService, eventMapper, evidenceValidator, clock);
+        Certification master = new Certification();
+        master.setId(2L);
+        master.setTenantId("default");
+        master.setActiveFlag(1);
+        master.setRuleVersion(1);
+        master.setDisplayName("資格");
+        when(engineerMapper.selectById(20L)).thenReturn(new com.ses.entity.Engineer());
+        when(certificationMapper.selectById(2L)).thenReturn(master);
+        when(recordMapper.countNonTerminalAcquisition(eq("default"), eq(20L), eq(2L), any(), eq(null)))
+                .thenReturn(0L);
+
+        com.ses.common.exception.BusinessException error = org.junit.jupiter.api.Assertions.assertThrows(
+                com.ses.common.exception.BusinessException.class,
+                () -> service.submitApplication(20L, 2L, LocalDate.of(2026, 9, 1), null,
+                        null, 7L, false));
+        assertEquals(503, error.getCode());
         verify(recordMapper, never()).insert(any(EngineerCertification.class));
     }
 

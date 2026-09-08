@@ -17,6 +17,7 @@ import com.ses.service.training.TrainingCourseMasterService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapQueryService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapTrainingApprovalService;
 import com.ses.service.certificationlearninggap.CertificationLearningGapAiService;
+import com.ses.service.skillgap.AiLearningCandidateService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -50,6 +51,8 @@ public class CertificationLearningGapApiController {
     private final CertificationLearningGapTrainingApprovalService trainingApprovalService;
     private final com.ses.service.certificationlearninggap.CertificationEvidenceAccessService evidenceAccessService;
     private final CertificationLearningGapAiService aiService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AiLearningCandidateService aiLearningCandidateService;
     private final CertificationMasterService certificationMasterService;
     private final EngineerCertificationService engineerCertificationService;
     private final TrainingCourseMasterService trainingCourseMasterService;
@@ -239,6 +242,7 @@ public class CertificationLearningGapApiController {
     }
 
     @GetMapping("/{engineerId}/ai-candidates")
+    @PreAuthorize("hasAnyRole('管理者','HR','マネージャー')")
     public ApiResult<CertificationLearningGapAiView> aiCandidates(@PathVariable Long engineerId,
                                                                   @RequestParam Long projectId,
                                                                   @RequestParam(required = false) LocalDate asOf,
@@ -248,6 +252,30 @@ public class CertificationLearningGapApiController {
                                                                   Authentication authentication) {
         return ApiResult.success(aiService.suggest(engineerId, projectId, asOf, periodFrom, periodTo,
                 demandSource, com.ses.common.util.SecurityUtils.currentUserId(), authentication));
+    }
+
+    @PostMapping("/{engineerId}/ai-candidates/{candidateId}/accept")
+    @PreAuthorize("hasAnyRole('管理者','HR','マネージャー')")
+    public ApiResult<Void> acceptAiCandidate(@PathVariable Long engineerId, @PathVariable Long candidateId,
+                                             @RequestBody(required = false) AiDecisionRequest request) {
+        if (aiLearningCandidateService == null) {
+            throw com.ses.common.exception.BusinessException.of(503, "skill.ai.candidateUnavailable");
+        }
+        aiLearningCandidateService.acceptCandidate(candidateId, engineerId,
+                com.ses.common.util.SecurityUtils.currentUserId(), request == null ? null : request.reason());
+        return ApiResult.success(null);
+    }
+
+    @PostMapping("/{engineerId}/ai-candidates/{candidateId}/reject")
+    @PreAuthorize("hasAnyRole('管理者','HR','マネージャー')")
+    public ApiResult<Void> rejectAiCandidate(@PathVariable Long engineerId, @PathVariable Long candidateId,
+                                             @RequestBody(required = false) AiDecisionRequest request) {
+        if (aiLearningCandidateService == null) {
+            throw com.ses.common.exception.BusinessException.of(503, "skill.ai.candidateUnavailable");
+        }
+        aiLearningCandidateService.rejectCandidate(candidateId, engineerId,
+                com.ses.common.util.SecurityUtils.currentUserId(), request == null ? null : request.reason());
+        return ApiResult.success(null);
     }
 
     @GetMapping("/export")
@@ -329,6 +357,8 @@ public class CertificationLearningGapApiController {
 
     public record BudgetAmendmentCommand(Integer expectedVersion, java.math.BigDecimal amendedCostJpy,
                                          Long approvalRequestId, String reason) { }
+
+    public record AiDecisionRequest(String reason) { }
 
     public record CertificationMasterRequest(String tenantId, String displayName, String issuerDisplay,
                                              String externalCode, String expiryType, Integer expiryMonths,

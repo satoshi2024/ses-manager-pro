@@ -42,8 +42,10 @@ import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaPolicyMapper;
 import com.ses.mapper.ServiceStateEventMapper;
+import com.ses.mapper.ServiceRequestSequenceMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
 import com.ses.service.servicedesk.ServiceRequestService;
 import com.ses.service.servicedesk.ServiceSlaCalculator;
 import com.ses.service.servicedesk.ServiceDeskExecutionContext;
@@ -69,6 +71,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ServiceRequestServiceImpl implements ServiceRequestService {
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestSequenceMapper requestSequenceMapper;
 
     private final ServiceRequestMapper serviceRequestMapper;
     private final ServiceSlaPolicyMapper slaPolicyMapper;
@@ -119,8 +127,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
 
-        if (!isPortal && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(req.getCustomerId());
+        if (!isPortal) {
+            assertInternalCustomerAllowed(req.getCustomerId());
         }
 
         requireExecutionContext(executionContext);
@@ -133,6 +141,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         Long effectiveActorId = isPortal ? portalUserId : executionContext.actorId();
 
         ServiceRequest serviceRequest = ServiceRequest.builder()
+                .tenantId(executionContext.tenantId())
                 .requestNo(requestNo)
                 .customerId(req.getCustomerId())
                 .contactId(req.getContactId())
@@ -209,12 +218,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public ServiceRequestDto getInternalDetail(Long id) {
         ServiceRequest req = serviceRequestMapper.selectById(id);
-        if (req == null) {
+        if (req == null || !currentTenant().equals(req.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(req.getCustomerId());
-        }
+        assertInternalCustomerAllowed(req.getCustomerId());
 
         return convertToInternalDto(req);
     }
@@ -223,7 +230,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(readOnly = true)
     public PortalServiceRequestDto getPortalDetail(Long id, Long customerId) {
         ServiceRequest req = serviceRequestMapper.selectById(id);
-        if (req == null || !Objects.equals(req.getCustomerId(), customerId)) {
+        if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)) {
             // 他社または存在しない場合は404秘匿
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -237,18 +244,21 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                                           String priority, String category, Long customerId) {
         Page<ServiceRequest> mpPage = new Page<>(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ServiceRequest::getTenantId, currentTenant());
 
         if (customerId != null) {
-            if (dataScopeService.isScoped()) {
-                dataScopeService.assertAllowedCustomer(customerId);
-            }
+            assertInternalCustomerAllowed(customerId);
             wrapper.eq(ServiceRequest::getCustomerId, customerId);
-        } else if (dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed == null || allowed.isEmpty()) {
-                return new Page<>(page, size, 0);
+        } else {
+            Set<Long> allowed = resolvedCustomerIds();
+            if (allowed == null) {
+                // all件可視
+            } else {
+                if (allowed.isEmpty()) {
+                    return new Page<>(page, size, 0);
+                }
+                wrapper.in(ServiceRequest::getCustomerId, allowed);
             }
-            wrapper.in(ServiceRequest::getCustomerId, allowed);
         }
 
         if (StringUtils.hasText(status)) {
@@ -287,6 +297,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
         Page<ServiceRequest> mpPage = new Page<>(page, size);
         LambdaQueryWrapper<ServiceRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ServiceRequest::getTenantId, currentTenant());
         wrapper.eq(ServiceRequest::getCustomerId, customerId);
 
         if (StringUtils.hasText(status)) {
@@ -313,12 +324,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void updateRequest(Long id, ServiceRequestUpdateRequest req) {
         ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null) {
+        if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
-        }
+        assertInternalCustomerAllowed(existing.getCustomerId());
 
         if (!VALID_CATEGORIES.contains(req.getCategory())) {
             throw BusinessException.of(400, "無効なカテゴリです: " + req.getCategory());
@@ -382,13 +391,13 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
         ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null) {
+        if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
         // クライアント指定の法人は受理せず、顧客・契約から解決した法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
-        if ("INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if ("INTERNAL_USER".equals(executionContext.actorType())) {
+            assertInternalCustomerAllowed(existing.getCustomerId());
         }
 
         String fromStatus = existing.getStatus();
@@ -605,8 +614,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
         // 顧客返信による WAITING_CUSTOMER→IN_PROGRESS 自動復帰でも法人既定カレンダーを使う。
         executionContext = bindCalendarScope(executionContext, existing.getCustomerId(), existing.getContractId());
-        if (!isPortal && "INTERNAL_USER".equals(executionContext.actorType()) && dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
+        if (!isPortal && "INTERNAL_USER".equals(executionContext.actorType())) {
+            assertInternalCustomerAllowed(existing.getCustomerId());
         }
 
         String visibility = isPortal ? "PORTAL_VISIBLE" : (StringUtils.hasText(req.getVisibility()) ? req.getVisibility() : "PORTAL_VISIBLE");
@@ -703,7 +712,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Transactional(rollbackFor = Exception.class)
     public void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId) {
         ServiceRequest existing = serviceRequestMapper.selectById(id);
-        if (existing == null || !Objects.equals(existing.getCustomerId(), customerId)) {
+        if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
 
@@ -902,24 +911,51 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     private String generateRequestNo(LocalDateTime now) {
-        String prefix = "REQ-" + now.format(DateTimeFormatter.ofPattern("yyyyMM")) + "-";
-        List<ServiceRequest> latest = serviceRequestMapper.selectList(
-                new LambdaQueryWrapper<ServiceRequest>()
-                        .likeRight(ServiceRequest::getRequestNo, prefix)
-                        .orderByDesc(ServiceRequest::getRequestNo)
-                        .last("LIMIT 1")
-        );
-
-        int seq = 1;
-        if (!latest.isEmpty() && latest.get(0).getRequestNo() != null) {
-            String lastNo = latest.get(0).getRequestNo();
-            try {
-                String seqStr = lastNo.substring(prefix.length());
-                seq = Integer.parseInt(seqStr) + 1;
-            } catch (Exception ignored) {
-            }
+        String month = now.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        if (requestSequenceMapper == null) {
+            throw BusinessException.of(503, "service.request.sequenceUnavailable");
         }
-        return String.format("%s%04d", prefix, seq);
+        String tenantId = currentTenant();
+        requestSequenceMapper.ensureRow(tenantId, month);
+        if (requestSequenceMapper.incrementIfAvailable(tenantId, month) != 1) {
+            throw BusinessException.of(409, "当月のリクエスト採番上限(9999)に達しました");
+        }
+        Integer next = requestSequenceMapper.selectLastNumber(tenantId, month);
+        if (next == null || next < 1 || next > 9999) {
+            throw BusinessException.of(409, "リクエスト採番状態が不正です");
+        }
+        return String.format("REQ-%s-%04d", month, next);
+    }
+
+    private String currentTenant() {
+        String tenant = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        if (tenant == null || tenant.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenant;
+    }
+
+    private Set<Long> resolvedCustomerIds() {
+        // サービス層の既存単体テスト／バッチ呼出しにはSecurityContextがない場合がある。
+        // HTTP入口はSecurityConfigで認証済みのため、認証主体がない場合だけ従来の呼出し契約を維持する。
+        if (SecurityUtils.currentRole() == null) {
+            return null;
+        }
+        return customerScopeResolver == null ? (dataScopeService.isScoped()
+                ? dataScopeService.allowedCustomerIds() : null) : customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+    }
+
+    private void assertInternalCustomerAllowed(Long customerId) {
+        if (SecurityUtils.currentRole() == null) {
+            return;
+        }
+        if (customerScopeResolver == null) {
+            if (dataScopeService.isScoped()) {
+                dataScopeService.assertAllowedCustomer(customerId);
+            }
+            return;
+        }
+        customerScopeResolver.assertAllowed(customerId);
     }
 
     private ServiceRequestDto convertToInternalDto(ServiceRequest req) {
@@ -945,9 +981,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .firstRespondedAt(clockRow.getFirstRespondedAt())
                     .responseBreached(clockRow.getResponseBreached())
                     .responseBreachedAt(clockRow.getResponseBreachedAt())
+                    .responseBreachTimeUnknown(clockRow.getResponseBreachTimeUnknown())
                     .resolvedAt(clockRow.getResolvedAt())
                     .resolveBreached(clockRow.getResolveBreached())
                     .resolveBreachedAt(clockRow.getResolveBreachedAt())
+                    .resolveBreachTimeUnknown(clockRow.getResolveBreachTimeUnknown())
                     .totalPauseMinutes(clockRow.getTotalPauseMinutes())
                     .lastPausedAt(clockRow.getLastPausedAt())
                     .status(clockRow.getStatus())

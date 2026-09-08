@@ -21,6 +21,7 @@ import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
 import com.ses.service.servicedesk.CustomerHealthService;
 import com.ses.service.servicedesk.SnapshotExecutionContext;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CustomerHealthServiceImpl implements CustomerHealthService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
     private static final Pattern MONTH_PATTERN = Pattern.compile("^\\d{4}-(0[1-9]|1[0-2])$");
 
     private final CustomerMapper customerMapper;
@@ -76,9 +80,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Customer::getDeletedFlag, 0);
 
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedCustomerIds = dataScopeService.allowedCustomerIds();
-            if (allowedCustomerIds == null || allowedCustomerIds.isEmpty()) {
+        Set<Long> allowedCustomerIds = resolvedCustomerIds();
+        if (allowedCustomerIds != null) {
+            if (allowedCustomerIds.isEmpty()) {
                 wrapper.eq(Customer::getId, -1L);
             } else {
                 wrapper.in(Customer::getId, allowedCustomerIds);
@@ -116,9 +120,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         if (customerId == null) {
             throw BusinessException.of(400, "顧客IDは必須です");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(customerId);
-        }
+        assertAllowedCustomer(customerId);
 
         Customer customer = customerMapper.selectById(customerId);
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
@@ -152,6 +154,8 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 1. 問い合わせデータ一括取得
         List<ServiceRequest> allRequests = serviceRequestMapper.selectList(
                 new LambdaQueryWrapper<ServiceRequest>()
+                        .eq(ServiceRequest::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId())
                         .in(ServiceRequest::getCustomerId, customerIds)
         );
         Map<Long, List<ServiceRequest>> requestsByCustomer = allRequests.stream()
@@ -166,11 +170,16 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                 );
 
         Set<Long> breachedRequestIds = new HashSet<>();
+        Set<Long> historicalUnknownRequestIds = new HashSet<>();
         for (ServiceSlaClock clk : allClocks) {
             boolean responseInWindow = inWindow(clk.getResponseBreachedAt(), thirtyDaysAgo, now);
             boolean resolveInWindow = inWindow(clk.getResolveBreachedAt(), thirtyDaysAgo, now);
             if (responseInWindow || resolveInWindow) {
                 breachedRequestIds.add(clk.getServiceRequestId());
+            }
+            if (Boolean.TRUE.equals(clk.getResponseBreachTimeUnknown())
+                    || Boolean.TRUE.equals(clk.getResolveBreachTimeUnknown())) {
+                historicalUnknownRequestIds.add(clk.getServiceRequestId());
             }
         }
 
@@ -227,10 +236,14 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             int openCritical = openP0 + openP1;
 
             int slaBreaches30d = 0;
+            int historicalUnknown = 0;
             List<Long> custReqIds = custReqs.stream().map(ServiceRequest::getId).toList();
             for (Long rId : custReqIds) {
                 if (breachedRequestIds.contains(rId)) {
                     slaBreaches30d++;
+                }
+                if (historicalUnknownRequestIds.contains(rId)) {
+                    historicalUnknown++;
                 }
             }
 
@@ -265,8 +278,12 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             if (custReqIds.isEmpty()) {
                 missingInputs.add("SLA");
             }
+            if (historicalUnknown > 0) {
+                missingInputs.add("SLA_BREACH_TIMESTAMP_HISTORICAL_UNKNOWN");
+            }
             deductions += slaDeduction;
             breakdown.put("slaBreachDeduction", slaDeduction);
+            breakdown.put("slaBreachHistoricalUnknownCount", historicalUnknown);
 
             // 3. CSAT平均 (<3.0は-15, 3.0-3.9は-5, >=4.0は0, 回答0はmissing)
             int csatDeduction = 0;
@@ -311,6 +328,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             List<String> explanations = new ArrayList<>();
             if (openCritical > 0) explanations.add("未解決重大障害: " + openCritical + "件 (-" + (p0Deduction + p1Deduction) + "点)");
             if (slaBreaches30d > 0) explanations.add("直近30日SLA違反: " + slaBreaches30d + "件 (-" + slaDeduction + "点)");
+            if (historicalUnknown > 0) explanations.add("過去SLA違反の検知時刻不明: " + historicalUnknown + "件（履歴不明）");
             if (csatDeduction > 0) explanations.add("CSAT評価低迷: " + avgCsat + " (-" + csatDeduction + "点)");
             if (arDeduction > 0) explanations.add("売掛金延滞発生中 (-25点)");
             if (qbrDeduction > 0) explanations.add("直近60日定例会(QBR)未開催 (-10点)");
@@ -323,6 +341,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                     .healthStatus(healthStatus)
                     .openCriticalIssuesCount(openCritical)
                     .slaBreachCount30d(slaBreaches30d)
+                    .slaBreachHistoricalUnknownCount(historicalUnknown)
                     .avgCsatScore(avgCsat)
                     .arOverdueFlag(arOverdue)
                     .missingInputs(missingInputs)
@@ -478,6 +497,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                     .healthStatus(dto.getHealthStatus())
                     .openCriticalIssuesCount(dto.getOpenCriticalIssuesCount())
                     .slaBreachCount30d(dto.getSlaBreachCount30d())
+                    .slaBreachHistoricalUnknownCount(dto.getSlaBreachHistoricalUnknownCount())
                     .avgCsatScore(dto.getAvgCsatScore())
                     .arOverdueFlag(dto.getArOverdueFlag())
                     .missingInputsJson(missingJson)
@@ -525,6 +545,27 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             return hexString.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 algorithm not available", e);
+        }
+    }
+
+    private Set<Long> resolvedCustomerIds() {
+        if (SecurityUtils.currentRole() == null) {
+            return null;
+        }
+        if (customerScopeResolver != null) {
+            return customerScopeResolver.resolve(LocalDate.now(clock));
+        }
+        return dataScopeService.isScoped() ? dataScopeService.allowedCustomerIds() : null;
+    }
+
+    private void assertAllowedCustomer(Long customerId) {
+        if (SecurityUtils.currentRole() == null) {
+            return;
+        }
+        if (customerScopeResolver != null) {
+            customerScopeResolver.assertAllowed(customerId);
+        } else if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
         }
     }
 }

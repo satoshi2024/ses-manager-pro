@@ -52,10 +52,12 @@ public class ServiceRequestExportServiceImpl implements ServiceRequestExportServ
                 ServiceSlaClockDto clock = r.getSlaClock();
                 String respDead = clock != null && clock.getResponseDeadline() != null ? clock.getResponseDeadline().toString().replace('T', ' ') : "";
                 String firstResp = r.getFirstResponseAt() != null ? r.getFirstResponseAt().toString().replace('T', ' ') : "";
-                String respBreached = clock != null && Boolean.TRUE.equals(clock.getResponseBreached()) ? "違反" : "達成";
+                String respBreached = clock != null && Boolean.TRUE.equals(clock.getResponseBreachTimeUnknown())
+                        ? "履歴不明" : (clock != null && Boolean.TRUE.equals(clock.getResponseBreached()) ? "違反" : "達成");
                 String resDead = clock != null && clock.getResolveDeadline() != null ? clock.getResolveDeadline().toString().replace('T', ' ') : "";
                 String resolvedAt = r.getResolvedAt() != null ? r.getResolvedAt().toString().replace('T', ' ') : "";
-                String resBreached = clock != null && Boolean.TRUE.equals(clock.getResolveBreached()) ? "違反" : "達成";
+                String resBreached = clock != null && Boolean.TRUE.equals(clock.getResolveBreachTimeUnknown())
+                        ? "履歴不明" : (clock != null && Boolean.TRUE.equals(clock.getResolveBreached()) ? "違反" : "達成");
                 String csat = r.getCsatScore() != null ? String.valueOf(r.getCsatScore()) : "";
                 String createdAt = r.getCreatedAt() != null ? r.getCreatedAt().toString().replace('T', ' ') : "";
 

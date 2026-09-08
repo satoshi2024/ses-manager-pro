@@ -65,7 +65,7 @@ class AiFeedbackLearningSchemaTest {
     private AiRecommendationRetentionService retentionService;
 
     @Test
-    void tenant列とrawPrompt列が無い() throws Exception {
+    void aiRunだけtenant境界を持ちrawPrompt列は持たない() throws Exception {
         try (Connection connection = dataSource.getConnection()) {
             DatabaseMetaData meta = connection.getMetaData();
             for (String table : List.of(
@@ -73,8 +73,10 @@ class AiFeedbackLearningSchemaTest {
                     "T_AI_RECOMMENDATION_ITEM", "T_AI_FEEDBACK",
                     "T_AI_OUTCOME", "T_AI_EVALUATION")) {
                 List<String> columns = columnNames(meta, table);
-                assertTrue(columns.stream().noneMatch(c -> "TENANT_ID".equalsIgnoreCase(c)),
-                        table + " に tenant_id がある");
+                boolean tenantExpected = "T_AI_RECOMMENDATION_RUN".equalsIgnoreCase(table);
+                assertEquals(tenantExpected,
+                        columns.stream().anyMatch(c -> "TENANT_ID".equalsIgnoreCase(c)),
+                        table + " のtenant境界が不正です");
                 assertTrue(columns.stream().noneMatch(c ->
                                 c.equalsIgnoreCase("RAW_PROMPT")
                                         || c.equalsIgnoreCase("REQUEST_PARAMS")

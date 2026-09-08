@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS m_ai_artifact_version (
 );
 
 CREATE TABLE IF NOT EXISTS t_ai_recommendation_run (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
     trace_id CHAR(36) NOT NULL,
     use_case VARCHAR(32) NOT NULL,
     artifact_version_id BIGINT NOT NULL,

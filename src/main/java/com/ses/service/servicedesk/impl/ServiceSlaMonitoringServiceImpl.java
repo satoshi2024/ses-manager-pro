@@ -16,6 +16,8 @@ import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
+import com.ses.service.security.CustomerScopeResolver;
+import com.ses.common.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
     private final ServiceSlaClockMapper slaClockMapper;
     private final ServiceSlaEscalationMapper escalationMapper;
     private final ServiceRequestMapper serviceRequestMapper;
@@ -48,13 +53,11 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     private final Clock clock;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void checkAndNotifyBreaches() {
         checkSlaBreaches(LocalDateTime.now(clock));
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public int checkSlaBreaches(LocalDateTime asOf) {
         LocalDateTime now = asOf != null ? asOf : LocalDateTime.now(clock);
         int breachedCount = 0;
@@ -66,7 +69,11 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
         for (ServiceSlaClock clk : runningClocks) {
             ServiceRequest req = serviceRequestMapper.selectById(clk.getServiceRequestId());
-            if (req == null || "RESOLVED".equals(req.getStatus()) || "CLOSED".equals(req.getStatus())) {
+            if (req == null || (req.getTenantId() != null && !currentTenant().equals(req.getTenantId()))
+                    || "RESOLVED".equals(req.getStatus()) || "CLOSED".equals(req.getStatus())) {
+                continue;
+            }
+            if (!isVisibleCustomer(req.getCustomerId())) {
                 continue;
             }
 
@@ -146,9 +153,11 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         .eq(ServiceSlaClock::getVersion, version)
                         .set(ServiceSlaClock::getResponseBreached, clk.getResponseBreached())
                         .set(ServiceSlaClock::getResponseBreachedAt, clk.getResponseBreachedAt())
+                        .set(ServiceSlaClock::getResponseBreachTimeUnknown, clk.getResponseBreachTimeUnknown())
                         .set(ServiceSlaClock::getResponseWarningSent, clk.getResponseWarningSent())
                         .set(ServiceSlaClock::getResolveBreached, clk.getResolveBreached())
                         .set(ServiceSlaClock::getResolveBreachedAt, clk.getResolveBreachedAt())
+                        .set(ServiceSlaClock::getResolveBreachTimeUnknown, clk.getResolveBreachTimeUnknown())
                         .set(ServiceSlaClock::getResolveWarningSent, clk.getResolveWarningSent())
                         .set(ServiceSlaClock::getLastResponseAlertAt, clk.getLastResponseAlertAt())
                         .set(ServiceSlaClock::getLastResolveAlertAt, clk.getLastResolveAlertAt())
@@ -239,6 +248,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private void markResponseBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
         clockRow.setResponseBreached(true);
+        clockRow.setResponseBreachTimeUnknown(false);
         if (clockRow.getResponseBreachedAt() == null) {
             clockRow.setResponseBreachedAt(breachedAt);
         }
@@ -246,6 +256,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private void markResolveBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
         clockRow.setResolveBreached(true);
+        clockRow.setResolveBreachTimeUnknown(false);
         if (clockRow.getResolveBreachedAt() == null) {
             clockRow.setResolveBreachedAt(breachedAt);
         }
@@ -321,6 +332,11 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             return Collections.emptyList();
         }
 
+        if ((req.getTenantId() != null && !currentTenant().equals(req.getTenantId()))
+                || !isVisibleCustomer(req.getCustomerId())) {
+            return Collections.emptyList();
+        }
+
         // ① リクエスト担当者
         if (req.getOwnerUserId() != null) {
             SysUser owner = sysUserMapper.selectById(req.getOwnerUserId());
@@ -369,5 +385,25 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         }
 
         return Collections.emptyList();
+    }
+
+    private boolean isVisibleCustomer(Long customerId) {
+        if (customerScopeResolver == null || SecurityUtils.currentRole() == null) {
+            return true;
+        }
+        try {
+            customerScopeResolver.assertAllowed(customerId);
+            return true;
+        } catch (com.ses.common.exception.BusinessException denied) {
+            return false;
+        }
+    }
+
+    private String currentTenant() {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw com.ses.common.exception.BusinessException.of(403, "tenant.context.required");
+        }
+        return tenantId;
     }
 }

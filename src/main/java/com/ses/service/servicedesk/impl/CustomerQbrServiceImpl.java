@@ -14,6 +14,7 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.CustomerQbrMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.CustomerScopeResolver;
 import com.ses.service.servicedesk.CustomerQbrService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CustomerQbrServiceImpl implements CustomerQbrService {
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CustomerScopeResolver customerScopeResolver;
+
     private final CustomerQbrMapper qbrMapper;
     private final CustomerMapper customerMapper;
     private final SysUserMapper sysUserMapper;
@@ -45,16 +49,16 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         LambdaQueryWrapper<CustomerQbr> wrapper = new LambdaQueryWrapper<>();
 
         if (customerId != null) {
-            if (dataScopeService.isScoped()) {
-                dataScopeService.assertAllowedCustomer(customerId);
-            }
+            assertAllowed(customerId);
             wrapper.eq(CustomerQbr::getCustomerId, customerId);
-        } else if (dataScopeService.isScoped()) {
-            Set<Long> allowed = dataScopeService.allowedCustomerIds();
-            if (allowed == null || allowed.isEmpty()) {
+        } else {
+            Set<Long> allowed = resolvedCustomerIds();
+            if (allowed != null && allowed.isEmpty()) {
                 return new Page<>(page, size, 0);
             }
-            wrapper.in(CustomerQbr::getCustomerId, allowed);
+            if (allowed != null) {
+                wrapper.in(CustomerQbr::getCustomerId, allowed);
+            }
         }
 
         if (StringUtils.hasText(keyword)) {
@@ -82,9 +86,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         if (qbr == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(qbr.getCustomerId());
-        }
+        assertAllowed(qbr.getCustomerId());
         return convertToDto(qbr);
     }
 
@@ -95,9 +97,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(req.getCustomerId());
-        }
+        assertAllowed(req.getCustomerId());
 
         LocalDateTime now = LocalDateTime.now(clock);
         Long effectiveActor = actorUserId != null ? actorUserId : SecurityUtils.currentUserId();
@@ -126,9 +126,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         if (existing == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
-        }
+        assertAllowed(existing.getCustomerId());
 
         existing.setMeetingDate(req.getMeetingDate());
         existing.setTitle(req.getTitle());
@@ -149,9 +147,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         if (existing == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedCustomer(existing.getCustomerId());
-        }
+        assertAllowed(existing.getCustomerId());
         qbrMapper.deleteById(id);
     }
 
@@ -182,5 +178,25 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
                 .createdAt(qbr.getCreatedAt())
                 .updatedAt(qbr.getUpdatedAt())
                 .build();
+    }
+
+    private Set<Long> resolvedCustomerIds() {
+        if (SecurityUtils.currentRole() == null) {
+            return null;
+        }
+        return customerScopeResolver == null
+                ? (dataScopeService.isScoped() ? dataScopeService.allowedCustomerIds() : null)
+                : customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+    }
+
+    private void assertAllowed(Long customerId) {
+        if (SecurityUtils.currentRole() == null) {
+            return;
+        }
+        if (customerScopeResolver != null) {
+            customerScopeResolver.assertAllowed(customerId);
+        } else if (dataScopeService.isScoped()) {
+            dataScopeService.assertAllowedCustomer(customerId);
+        }
     }
 }

@@ -25,6 +25,7 @@ public class LearningDecisionEvent implements Serializable {
     private Integer adverseUseFlag;
     private String reason;
     private String snapshotHash;
+    private String idempotencyKey;
     private LocalDateTime occurredAt;
     private LocalDateTime createdAt;
 }

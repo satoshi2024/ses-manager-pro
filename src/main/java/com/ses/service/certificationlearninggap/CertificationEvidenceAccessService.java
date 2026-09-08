@@ -38,6 +38,9 @@ public class CertificationEvidenceAccessService {
     private final Clock clock;
     private final CertificationEventMapper eventMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CertificationEvidenceRestrictedResolver restrictedResolver;
+
     /** 既存の単体テスト／直接利用互換。Springは下記9引数constructorを使用する。 */
     public CertificationEvidenceAccessService(EngineerCertificationMapper certificationMapper,
                                               DocumentLinkMapper documentLinkMapper,
@@ -92,6 +95,12 @@ public class CertificationEvidenceAccessService {
     }
 
     private EvidenceDownload download(EngineerCertification record, Long documentId, Integer versionNo) {
+        if (restrictedResolver != null) {
+            CertificationEvidenceRestrictedResolver.ResolvedEvidence resolved =
+                    restrictedResolver.resolve(record.getId(), documentId, versionNo, true);
+            return new EvidenceDownload(documentId, versionNo, resolved.version().getOriginalName(),
+                    resolved.version().getContentType(), documentService.download(documentId, versionNo));
+        }
         if (documentId == null || versionNo == null) {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
@@ -99,6 +108,7 @@ public class CertificationEvidenceAccessService {
             throw BusinessException.of(403, "certification.evidence.linkRequired");
         }
         boolean linked = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                        .eq(DocumentLink::getTenantId, currentTenant())
                         .eq(DocumentLink::getDocumentId, documentId)
                         .eq(DocumentLink::getTargetType, "CERTIFICATION_RECORD")
                         .eq(DocumentLink::getTargetId, record.getId()))
@@ -112,6 +122,7 @@ public class CertificationEvidenceAccessService {
             throw BusinessException.of(403, "certification.evidence.versionMismatch");
         }
         DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getTenantId, currentTenant())
                 .eq(DocumentVersion::getDocumentId, documentId).eq(DocumentVersion::getVersionNo, versionNo));
         if (version == null || !"CLEAN".equals(version.getScanStatus())) {
             throw BusinessException.of(403, "error.file.scanNotReady");
@@ -136,7 +147,15 @@ public class CertificationEvidenceAccessService {
         if (eventMapper == null || recordId == null) {
             throw BusinessException.of(403, "certification.evidence.versionMismatch");
         }
-        java.util.List<CertificationEvent> events = eventMapper.selectByRecordId(recordId);
+        java.util.List<CertificationEvent> events = eventMapper.selectByTenantAndRecordId(
+                currentTenant(), recordId);
+        if ((events == null || events.isEmpty())
+                && "default".equals(currentTenant())) {
+            // 旧fixtureにはtenant列がないため、default tenantでのみ互換fallbackする。
+            events = eventMapper.selectByRecordId(recordId).stream()
+                    .filter(event -> event.getTenantId() == null || currentTenant().equals(event.getTenantId()))
+                    .toList();
+        }
         if (events == null) {
             return null;
         }
@@ -148,11 +167,25 @@ public class CertificationEvidenceAccessService {
     }
 
     private EngineerCertification record(Long recordId) {
-        EngineerCertification record = recordId == null ? null : certificationMapper.selectById(recordId);
+        EngineerCertification record = recordId == null ? null : certificationMapper.selectOne(
+                new LambdaQueryWrapper<EngineerCertification>().eq(EngineerCertification::getId, recordId)
+                        .eq(EngineerCertification::getTenantId,
+                                currentTenant()));
+        if (record == null && recordId != null
+                && "default".equals(currentTenant())) {
+            EngineerCertification legacy = certificationMapper.selectById(recordId);
+            if (legacy != null && legacy.getTenantId() == null) {
+                record = legacy;
+            }
+        }
         if (record == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
         return record;
+    }
+
+    private String currentTenant() {
+        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
     }
 
     public record EvidenceDownload(Long documentId, Integer versionNo, String fileName, String contentType,

@@ -10,6 +10,8 @@ import lombok.EqualsAndHashCode;
 @TableName("t_ai_recommendation_run")
 public class AiRecommendationRun extends BaseEntity {
 
+    private String tenantId;
+
     private String traceId;
     private String useCase;
     private Long artifactVersionId;

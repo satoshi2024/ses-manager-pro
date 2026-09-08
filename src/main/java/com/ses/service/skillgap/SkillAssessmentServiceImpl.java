@@ -33,7 +33,6 @@ import java.util.List;
 @Service
 public class SkillAssessmentServiceImpl implements SkillAssessmentService {
 
-    private static final String TENANT = "default";
     private static final List<String> LEVELS = List.of("初級", "中級", "上級");
 
     private final EngineerSkillAssessmentMapper assessmentMapper;
@@ -136,7 +135,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         }
         LocalDate from = effectiveFrom == null ? LocalDate.now(clock) : effectiveFrom;
         EngineerSkillAssessment assessment = new EngineerSkillAssessment();
-        assessment.setTenantId(TENANT);
+        assessment.setTenantId(currentTenant());
         assessment.setEngineerId(engineerId);
         assessment.setSkillId(skillId);
         assessment.setAssessmentType(type);
@@ -188,7 +187,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     private void appendDecision(String domain, Long sourceId, Long actorUserId, String reason,
                                 String hash, int adverseUseFlag) {
         LearningDecisionEvent event = new LearningDecisionEvent();
-        event.setTenantId(TENANT);
+        event.setTenantId(currentTenant());
         event.setDecisionDomain(domain);
         event.setSourceType("ENGINEER_SKILL_ASSESSMENT");
         event.setSourceId(sourceId);
@@ -199,6 +198,14 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         event.setOccurredAt(LocalDateTime.now(clock));
         event.setCreatedAt(event.getOccurredAt());
         decisionEventMapper.insertEvent(event);
+    }
+
+    private String currentTenant() {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenantId;
     }
 
     private String snapshotHash(EngineerSkillAssessment assessment) {

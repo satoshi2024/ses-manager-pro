@@ -8,6 +8,7 @@ import com.ses.entity.DocumentVersion;
 import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentExportService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.storage.DocumentStorage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,8 +30,6 @@ import java.util.zip.ZipOutputStream;
 @RequiredArgsConstructor
 public class DocumentExportServiceImpl implements DocumentExportService {
 
-    private static final String DEFAULT_TENANT_ID = "default";
-
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final DocumentStorage documentStorage;
@@ -38,8 +37,9 @@ public class DocumentExportServiceImpl implements DocumentExportService {
 
     @Override
     public void exportTaxZip(DocumentSearchQuery query, OutputStream os) {
+        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
-                .eq(Document::getTenantId, DEFAULT_TENANT_ID);
+                .eq(Document::getTenantId, tenantId);
 
         documentService.applyDataScopeFilter(wrapper);
 
@@ -86,7 +86,7 @@ public class DocumentExportServiceImpl implements DocumentExportService {
             csvBuilder.append("document_id,version_no,document_type,document_no,title,counterparty_name,transaction_date,amount,currency,direction,sha256,hash_verification_result,filename\n");
 
             for (Document doc : documents) {
-                List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(doc.getId());
+                List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, doc.getId());
                 if (versions.isEmpty()) {
                     continue;
                 }
@@ -122,7 +122,7 @@ public class DocumentExportServiceImpl implements DocumentExportService {
 
             // 2. CLEAN 版のみバイナリ追加。非 CLEAN は manifest で SKIPPED。
             for (Document doc : documents) {
-                List<DocumentVersion> versions = documentVersionMapper.findByDocumentId(doc.getId());
+                List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, doc.getId());
                 for (DocumentVersion ver : versions) {
                     if (ver.getStorageKey() == null || !"CLEAN".equals(ver.getScanStatus())) {
                         continue;

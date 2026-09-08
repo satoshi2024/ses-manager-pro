@@ -81,7 +81,11 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             throw BusinessException.of(400, "certification.record.expiryBeforeAcquired");
         }
 
-        String tenantId = StringUtils.hasText(certification.getTenantId()) ? certification.getTenantId() : "default";
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        if (!StringUtils.hasText(tenantId)
+                || (StringUtils.hasText(certification.getTenantId()) && !tenantId.equals(certification.getTenantId()))) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
 
         if (engineerCertificationMapper.countNonTerminalAcquisition(tenantId, engineerId, certificationId,
                 acquiredOn, null) > 0) {
@@ -92,7 +96,6 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         record.setTenantId(tenantId);
         record.setEngineerId(engineerId);
         record.setCertificationId(certificationId);
-        record.setContinuityGroupId(Math.abs(System.nanoTime()));
         record.setAcquiredOn(acquiredOn);
         record.setExpiresOn(expiresOn);
         record.setExpiryRuleVersion(certification.getRuleVersion());
@@ -102,14 +105,17 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         record.setRevision(1);
         record.setCreatedBy(actorUserId);
         record.setUpdatedBy(actorUserId);
-        if (continuityGroupMapper != null) {
-            com.ses.entity.CertificationContinuityGroup group = new com.ses.entity.CertificationContinuityGroup();
-            group.setTenantId(tenantId);
-            group.setEngineerId(engineerId);
-            group.setCertificationId(certificationId);
-            group.setContinuityGroupId(record.getContinuityGroupId());
-            continuityGroupMapper.insert(group);
+        if (continuityGroupMapper == null) {
+            throw BusinessException.of(503, "certification.continuity.mapperUnavailable");
         }
+        com.ses.entity.CertificationContinuityGroup group = new com.ses.entity.CertificationContinuityGroup();
+        group.setTenantId(tenantId);
+        group.setEngineerId(engineerId);
+        group.setCertificationId(certificationId);
+        if (continuityGroupMapper.insert(group) != 1 || group.getContinuityGroupId() == null) {
+            throw BusinessException.of(503, "certification.continuity.sequenceUnavailable");
+        }
+        record.setContinuityGroupId(group.getContinuityGroupId());
         engineerCertificationMapper.insert(record);
 
         if (StringUtils.hasText(certificateNumberPlaintext)) {
@@ -273,8 +279,16 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (recordId == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        EngineerCertification record = engineerCertificationMapper.selectByIdForUpdate(recordId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        EngineerCertification record = engineerCertificationMapper.selectByTenantIdForUpdate(tenantId, recordId);
+        // 旧直接テスト／旧adapter互換。戻り値は必ずtenantを再検証し、横断を許可しない。
         if (record == null) {
+            record = engineerCertificationMapper.selectByIdForUpdate(recordId);
+        }
+        if (record == null) {
+            throw BusinessException.of(404, "certification.record.notFound");
+        }
+        if (!tenantId.equals(record.getTenantId())) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
         if (expectedVersion == null) {

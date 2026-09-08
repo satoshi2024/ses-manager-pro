@@ -179,7 +179,6 @@ public class PortalBpServiceImpl implements PortalBpService {
     // ===== 提出物 =====
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public PortalBpSubmissionDto submitDocument(Long paymentId, Long bpCompanyId, String originalName,
                                                 String contentType, byte[] content) {
         if (content == null || content.length == 0) {

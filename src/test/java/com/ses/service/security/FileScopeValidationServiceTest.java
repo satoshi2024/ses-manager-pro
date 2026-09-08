@@ -359,7 +359,7 @@ class FileScopeValidationServiceTest {
         Document document = new Document();
         document.setDocumentType("CERTIFICATION_EVIDENCE");
         document.setTenantId("default");
-        when(documentMapper.selectById(9100L)).thenReturn(document);
+        when(documentMapper.selectOne(any())).thenReturn(document);
 
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);

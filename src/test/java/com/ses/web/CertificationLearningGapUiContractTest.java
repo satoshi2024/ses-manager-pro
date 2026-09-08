@@ -27,6 +27,8 @@ class CertificationLearningGapUiContractTest {
         assertTrue(js.contains("masters/courses"));
         assertTrue(js.contains("verifyCertificationRecord"));
         assertTrue(js.contains("rejectCertificationRecord"));
+        assertTrue(js.contains("/ai-candidates/"));
+        assertTrue(js.contains("decideCertificationLearningGapCandidate"));
         assertTrue(html.contains("cert-gap-catalog-panel"));
         assertTrue(html.contains("cert-gap-course-skills"));
         assertTrue(js.contains("SES.escapeHtml"));

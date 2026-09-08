@@ -11,7 +11,6 @@ import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.entity.LearningPlan;
 import com.ses.entity.Certification;
 import com.ses.entity.TrainingCourse;
-import com.ses.entity.TrainingEnrollment;
 import com.ses.service.certificationlearninggap.CertificationLearningGapSelfService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -124,24 +123,24 @@ public class MyCertificationLearningGapApiController {
     }
 
     @PostMapping("/learning-plans")
-    public ApiResult<LearningPlan> createPlan(@RequestBody LearningPlan draft) {
-        return ApiResult.success(selfService.createPlan(userId(), draft));
+    public ApiResult<LearningPlanSelfView> createPlan(@RequestBody LearningPlan draft) {
+        return ApiResult.success(selfService.createPlanView(userId(), draft));
     }
 
     @PutMapping("/learning-plans/{planId}")
-    public ApiResult<LearningPlan> updatePlan(@PathVariable Long planId, @RequestBody LearningPlan draft) {
-        return ApiResult.success(selfService.updatePlan(userId(), planId, draft.getVersion(), draft));
+    public ApiResult<LearningPlanSelfView> updatePlan(@PathVariable Long planId, @RequestBody LearningPlan draft) {
+        return ApiResult.success(selfService.updatePlanView(userId(), planId, draft.getVersion(), draft));
     }
 
     @PostMapping("/learning-plans/{planId}/submit")
-    public ApiResult<LearningPlan> submitPlan(@PathVariable Long planId, @RequestBody(required = false) PlanCommand command) {
-        return ApiResult.success(selfService.submitPlan(userId(), planId, version(command),
+    public ApiResult<LearningPlanSelfView> submitPlan(@PathVariable Long planId, @RequestBody(required = false) PlanCommand command) {
+        return ApiResult.success(selfService.submitPlanView(userId(), planId, version(command),
                 command == null ? null : command.zeroCostReason()));
     }
 
     @PostMapping("/learning-plans/{planId}/withdraw")
-    public ApiResult<LearningPlan> withdrawPlan(@PathVariable Long planId, @RequestBody PlanCommand command) {
-        return ApiResult.success(selfService.withdrawPlan(userId(), planId, version(command), reason(command)));
+    public ApiResult<LearningPlanSelfView> withdrawPlan(@PathVariable Long planId, @RequestBody PlanCommand command) {
+        return ApiResult.success(selfService.withdrawPlanView(userId(), planId, version(command), reason(command)));
     }
 
     @PostMapping("/learning-plans/{planId}/resubmit")
@@ -150,27 +149,27 @@ public class MyCertificationLearningGapApiController {
     }
 
     @PostMapping("/learning-plans/{planId}/enrollments")
-    public ApiResult<TrainingEnrollment> enroll(@PathVariable Long planId, @RequestBody EnrollmentRequest request) {
-        return ApiResult.success(selfService.enroll(userId(), planId, request.expectedVersion(), request.courseId()));
+    public ApiResult<com.ses.dto.certificationlearninggap.TrainingEnrollmentSelfView> enroll(@PathVariable Long planId, @RequestBody EnrollmentRequest request) {
+        return ApiResult.success(selfService.enrollView(userId(), planId, request.expectedVersion(), request.courseId()));
     }
 
     @PostMapping("/enrollments/{enrollmentId}/start")
-    public ApiResult<TrainingEnrollment> startEnrollment(@PathVariable Long enrollmentId,
+    public ApiResult<com.ses.dto.certificationlearninggap.TrainingEnrollmentSelfView> startEnrollment(@PathVariable Long enrollmentId,
                                                          @RequestBody StateCommand command) {
-        return ApiResult.success(selfService.startEnrollment(userId(), enrollmentId, version(command)));
+        return ApiResult.success(selfService.startEnrollmentView(userId(), enrollmentId, version(command)));
     }
 
     @PostMapping("/enrollments/{enrollmentId}/complete")
-    public ApiResult<TrainingEnrollment> completeEnrollment(@PathVariable Long enrollmentId,
+    public ApiResult<com.ses.dto.certificationlearninggap.TrainingEnrollmentSelfView> completeEnrollment(@PathVariable Long enrollmentId,
                                                              @RequestBody EnrollmentCompletionRequest request) {
-        return ApiResult.success(selfService.completeEnrollment(userId(), enrollmentId, request.expectedVersion(),
+        return ApiResult.success(selfService.completeEnrollmentView(userId(), enrollmentId, request.expectedVersion(),
                 request.completedOn(), request.score()));
     }
 
     @PostMapping("/enrollments/{enrollmentId}/cancel")
-    public ApiResult<TrainingEnrollment> cancelEnrollment(@PathVariable Long enrollmentId,
+    public ApiResult<com.ses.dto.certificationlearninggap.TrainingEnrollmentSelfView> cancelEnrollment(@PathVariable Long enrollmentId,
                                                           @RequestBody StateCommand command) {
-        return ApiResult.success(selfService.cancelEnrollment(userId(), enrollmentId, version(command), reason(command)));
+        return ApiResult.success(selfService.cancelEnrollmentView(userId(), enrollmentId, version(command), reason(command)));
     }
 
     @GetMapping("/export")

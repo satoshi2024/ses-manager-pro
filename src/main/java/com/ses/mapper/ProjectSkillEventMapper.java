@@ -28,6 +28,10 @@ public interface ProjectSkillEventMapper {
     @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} ORDER BY occurred_at, id")
     List<ProjectSkillEvent> selectByProjectId(@Param("projectId") Long projectId);
 
+    @Select("SELECT * FROM t_project_skill_event WHERE tenant_id = #{tenantId} AND project_id = #{projectId} ORDER BY occurred_at, id")
+    List<ProjectSkillEvent> selectByTenantAndProjectId(@Param("tenantId") String tenantId,
+                                                       @Param("projectId") Long projectId);
+
     @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} AND skill_id = #{skillId} "
             + "AND event_type = 'OPEN' AND effective_to IS NULL ORDER BY id DESC LIMIT 1")
     ProjectSkillEvent selectOpenEvent(@Param("projectId") Long projectId, @Param("skillId") Long skillId);

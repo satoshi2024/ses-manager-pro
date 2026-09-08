@@ -130,9 +130,26 @@
             const result = await SES.api.get('/api/certification-learning-gap/' + encodeURIComponent(engineerId) + '/ai-candidates', query);
             const candidate = result.aiCandidate;
             const rule = result.ruleGap || {};
-            Swal.fire({ title: '学習course候補', html: '<p>rule gap: ' + esc(rule.status || '-') + '</p><p>as-of: ' + esc(rule.asOf || '-') + '</p><p>候補: ' + esc(candidate ? (candidate.aiSuggestedCourseIds || []).join(', ') : 'AI停止または履歴不足') + '</p><p class="text-muted small">AIは評価・配置・採否を確定しません。</p>', confirmButtonText: '閉じる' });
+            const candidateId = candidate && candidate.aiRunId;
+            const decisionButtons = candidateId && candidate.humanDecisionRequired && candidate.status === 'AI_CANDIDATE'
+                ? '<div class="d-flex justify-content-center gap-2 mt-3"><button id="cert-gap-ai-accept" type="button" class="btn btn-sm btn-outline-success">候補を採用</button><button id="cert-gap-ai-reject" type="button" class="btn btn-sm btn-outline-danger">候補を却下</button></div>' : '';
+            Swal.fire({ title: '学習course候補', html: '<p>rule gap: ' + esc(rule.status || '-') + '</p><p>as-of: ' + esc(rule.asOf || '-') + '</p><p>候補: ' + esc(candidate ? (candidate.aiSuggestedCourseIds || []).join(', ') : 'AI停止または履歴不足') + '</p><p class="text-muted small">AIは評価・配置・採否を確定しません。</p>' + decisionButtons, showConfirmButton: !decisionButtons, confirmButtonText: '閉じる', didOpen: function () {
+                const accept = document.getElementById('cert-gap-ai-accept');
+                const reject = document.getElementById('cert-gap-ai-reject');
+                if (accept) accept.addEventListener('click', function () { decideCertificationLearningGapCandidate(engineerId, candidateId, 'accept'); });
+                if (reject) reject.addEventListener('click', function () { decideCertificationLearningGapCandidate(engineerId, candidateId, 'reject'); });
+            } });
         } catch (e) { showCertificationError(e, '学習course候補の取得に失敗しました'); }
     };
+
+    async function decideCertificationLearningGapCandidate(engineerId, candidateId, decision) {
+        const result = await Swal.fire({ title: decision === 'accept' ? 'AI候補を採用' : 'AI候補を却下', input: 'text', inputLabel: '理由', inputValidator: function (value) { return value && value.trim() ? undefined : '理由を入力してください'; }, showCancelButton: true, confirmButtonText: decision === 'accept' ? '採用' : '却下', cancelButtonText: '戻る' });
+        if (!result.isConfirmed) return;
+        try {
+            await SES.api.post('/api/certification-learning-gap/' + encodeURIComponent(engineerId) + '/ai-candidates/' + encodeURIComponent(candidateId) + '/' + decision, { reason: result.value });
+            Toast.success('AI候補の判断を記録しました');
+        } catch (e) { showCertificationError(e, 'AI候補の判断に失敗しました'); }
+    }
 
     window.verifyCertificationRecord = async function (recordId, version, documentId, documentVersionId, evidenceHash) {
         const result = await Swal.fire({ title: '証憑を確認してACTIVE化', text: '指定版のCLEAN証憑を確認します。', showCancelButton: true, confirmButtonText: '確認', cancelButtonText: '戻る' });

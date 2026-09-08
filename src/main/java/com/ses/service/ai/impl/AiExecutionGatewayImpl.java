@@ -81,6 +81,8 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         Long runId = null;
         if (request.isPersistRun()) {
             AiRecommendationRun run = runMapper.selectOne(new LambdaQueryWrapper<AiRecommendationRun>()
+                    .eq(AiRecommendationRun::getTenantId,
+                            com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId())
                     .eq(AiRecommendationRun::getTraceId, request.getTraceId())
                     .last("LIMIT 1"));
             if (run != null) {
@@ -152,6 +154,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             request.setTraceId(traceId);
             String json = objectMapper.writeValueAsString(masked);
             AiRecommendationRun run = new AiRecommendationRun();
+            run.setTenantId(com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId());
             run.setTraceId(traceId);
             run.setUseCase(useCase);
             run.setArtifactVersionId(active.getId());

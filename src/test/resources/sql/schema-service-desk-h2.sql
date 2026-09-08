@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS m_service_sla_policy (
 
 CREATE TABLE IF NOT EXISTS t_service_request (
     id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id         VARCHAR(100) NOT NULL DEFAULT 'default',
     request_no        VARCHAR(64) NOT NULL,
     customer_id       BIGINT NOT NULL,
     contact_id        BIGINT NULL,
@@ -41,7 +42,17 @@ CREATE TABLE IF NOT EXISTS t_service_request (
     version           INT NOT NULL DEFAULT 0,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (request_no)
+    UNIQUE (tenant_id, request_no)
+);
+
+CREATE TABLE IF NOT EXISTS t_service_request_sequence (
+    tenant_id VARCHAR(100) NOT NULL,
+    request_month CHAR(6) NOT NULL,
+    last_number INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, request_month),
+    CONSTRAINT chk_service_request_sequence_range CHECK (last_number BETWEEN 0 AND 9999)
 );
 
 CREATE TABLE IF NOT EXISTS t_service_sla_clock (
@@ -54,10 +65,12 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     first_responded_at  DATETIME NULL,
     response_breached   TINYINT(1) NOT NULL DEFAULT 0,
     response_breached_at DATETIME NULL,
+    response_breach_time_unknown TINYINT(1) NOT NULL DEFAULT 0,
     response_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     resolved_at         DATETIME NULL,
     resolve_breached    TINYINT(1) NOT NULL DEFAULT 0,
     resolve_breached_at DATETIME NULL,
+    resolve_breach_time_unknown TINYINT(1) NOT NULL DEFAULT 0,
     resolve_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     last_response_alert_at DATETIME NULL,
     last_resolve_alert_at DATETIME NULL,
@@ -178,6 +191,7 @@ CREATE TABLE IF NOT EXISTS t_customer_health_snapshot (
     total_score                 INT NOT NULL,
     open_critical_issues_count  INT NOT NULL DEFAULT 0,
     sla_breach_count_30d        INT NOT NULL DEFAULT 0,
+    sla_breach_historical_unknown_count INT NOT NULL DEFAULT 0,
     avg_csat_score              DECIMAL(3,2) NULL,
     ar_overdue_flag             TINYINT(1) NOT NULL DEFAULT 0,
     missing_inputs_json         CLOB NULL,

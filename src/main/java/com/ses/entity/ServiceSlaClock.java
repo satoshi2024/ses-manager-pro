@@ -48,6 +48,9 @@ public class ServiceSlaClock {
     /** 初回応答超過を最初に検知した実時刻（履歴として不変）。 */
     private LocalDateTime responseBreachedAt;
 
+    /** 旧データで検知時刻を復元できない場合の明示的なhistorical-unknown。 */
+    private Boolean responseBreachTimeUnknown;
+
     /** 初回応答warningを一度だけ発行したか。 */
     private Boolean responseWarningSent;
 
@@ -62,6 +65,9 @@ public class ServiceSlaClock {
 
     /** 解決目標超過を最初に検知した実時刻（履歴として不変）。 */
     private LocalDateTime resolveBreachedAt;
+
+    /** 旧データで検知時刻を復元できない場合の明示的なhistorical-unknown。 */
+    private Boolean resolveBreachTimeUnknown;
 
     /** 継続breach通知の最終発行時刻。 */
     private LocalDateTime lastResponseAlertAt;

@@ -39,6 +39,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
     @Override
     public List<TrainingCourseMasterView> list(boolean includeInactive) {
         LambdaQueryWrapper<TrainingCourse> query = new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getTenantId, currentTenant())
                 .orderByAsc(TrainingCourse::getName).orderByAsc(TrainingCourse::getId);
         if (!includeInactive) {
             query.eq(TrainingCourse::getActiveFlag, 1);
@@ -57,7 +58,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
         validate(command);
         List<Long> skillIds = validateSkillIds(command.requiredSkillIds());
         TrainingCourse course = new TrainingCourse();
-        course.setTenantId(defaultTenant(command.tenantId()));
+        course.setTenantId(tenantFor(command.tenantId()));
         copyFields(course, command);
         course.setActiveFlag(command.activeFlag() == null ? 1 : command.activeFlag());
         course.setVersion(0);
@@ -102,7 +103,18 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
     }
 
     private TrainingCourse requireCourse(Long id) {
-        TrainingCourse course = id == null ? null : courseMapper.selectById(id);
+        String tenantId = currentTenant();
+        TrainingCourse course = id == null ? null : courseMapper.selectOne(new LambdaQueryWrapper<TrainingCourse>()
+                .eq(TrainingCourse::getId, id).eq(TrainingCourse::getTenantId, tenantId));
+        if (course == null && id != null && "default".equals(tenantId)) {
+            TrainingCourse legacy = courseMapper.selectById(id);
+            if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
+                course = legacy;
+                if (course.getTenantId() == null) {
+                    course.setTenantId(tenantId);
+                }
+            }
+        }
         if (course == null) {
             throw BusinessException.of(404, "training.course.notFound");
         }
@@ -144,10 +156,11 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
 
     private void replaceSkills(TrainingCourse course, List<Long> skillIds) {
         courseSkillMapper.delete(new LambdaQueryWrapper<TrainingCourseSkill>()
+                .eq(TrainingCourseSkill::getTenantId, course.getTenantId())
                 .eq(TrainingCourseSkill::getCourseId, course.getId()));
         for (Long skillId : skillIds) {
             TrainingCourseSkill relation = new TrainingCourseSkill();
-            relation.setTenantId(defaultTenant(course.getTenantId()));
+            relation.setTenantId(tenantFor(course.getTenantId()));
             relation.setCourseId(course.getId());
             relation.setSkillId(skillId);
             relation.setRequiredFlag(1);
@@ -157,6 +170,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
 
     private TrainingCourseMasterView toView(TrainingCourse course) {
         List<TrainingCourseSkill> relations = courseSkillMapper.selectList(new LambdaQueryWrapper<TrainingCourseSkill>()
+                .eq(TrainingCourseSkill::getTenantId, course.getTenantId())
                 .eq(TrainingCourseSkill::getCourseId, course.getId())
                 .eq(TrainingCourseSkill::getRequiredFlag, 1)
                 .orderByAsc(TrainingCourseSkill::getSkillId));
@@ -179,7 +193,18 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
                 course.getActiveFlag(), course.getVersion(), skills);
     }
 
-    private String defaultTenant(String tenantId) {
-        return StringUtils.hasText(tenantId) ? tenantId : "default";
+    private String tenantFor(String tenantId) {
+        String current = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        if (!StringUtils.hasText(current)) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        if (StringUtils.hasText(tenantId) && !current.equals(tenantId)) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        return current;
+    }
+
+    private String currentTenant() {
+        return tenantFor(null);
     }
 }
