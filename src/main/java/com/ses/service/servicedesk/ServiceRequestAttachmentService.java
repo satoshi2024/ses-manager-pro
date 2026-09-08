@@ -246,7 +246,7 @@ public class ServiceRequestAttachmentService {
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private void assertAllowed(Long customerId) {

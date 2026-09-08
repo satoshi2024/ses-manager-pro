@@ -3,6 +3,7 @@ package com.ses.service.certification;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.Certification;
 import com.ses.mapper.CertificationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +28,12 @@ class CertificationMasterServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new CertificationMasterServiceImpl(mapper, new CertificationIdentityNormalizer());
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

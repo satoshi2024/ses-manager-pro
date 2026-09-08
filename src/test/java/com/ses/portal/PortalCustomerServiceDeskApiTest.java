@@ -21,9 +21,11 @@ import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.servicedesk.ServiceRequestAttachmentService;
 import com.ses.service.servicedesk.ServiceRequestService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,6 +113,7 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         String uA = unique();
         String uB = unique();
         customerAOrg = createCustomerOrg("A-" + uA);
@@ -140,6 +143,11 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
         serviceRequestService.addComment(customerARequest.getId(),
                 ServiceCommentCreateRequest.builder().commentText("お問い合わせありがとうございます。担当よりご連絡します。").visibility("PORTAL_VISIBLE").build(),
                 100L, "INTERNAL_USER", "サポート担当", false);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     private void grantServiceDeskPermissions(Long portalUserId) {

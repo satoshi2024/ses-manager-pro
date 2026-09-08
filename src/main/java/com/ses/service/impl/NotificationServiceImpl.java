@@ -45,12 +45,9 @@ public class NotificationServiceImpl implements NotificationService {
         String tenantId = explicitTenantId();
         List<Long> organizations = scopedIds();
         List<NotificationDto> list = organizations == null
-                ? (tenantId == null ? notificationMapper.selectPageForUser(userId, null, null, 10, 0)
-                : notificationMapper.selectPageForUserByTenant(tenantId, userId, null, null, 10, 0))
-                : (tenantId == null ? notificationMapper.selectPageForUserScoped(userId, null, null, 10, 0,
-                organizationScopeService.hasFullAccess(), organizations)
+                ? notificationMapper.selectPageForUserByTenant(tenantId, userId, null, null, 10, 0)
                 : notificationMapper.selectPageForUserScopedByTenant(tenantId, userId, null, null, 10, 0,
-                organizationScopeService.hasFullAccess(), organizations));
+                organizationScopeService.hasFullAccess(), organizations);
         list.forEach(this::translateDto);
         return list;
     }
@@ -68,20 +65,14 @@ public class NotificationServiceImpl implements NotificationService {
         List<Long> ids = scopedIds();
         String tenantId = explicitTenantId();
         List<NotificationDto> records = ids == null
-                ? (tenantId == null ? notificationMapper.selectPageForUser(userId, type, unreadOnly, (int) size, offset)
-                : notificationMapper.selectPageForUserByTenant(tenantId, userId, type, unreadOnly, (int) size, offset))
-                : (tenantId == null ? notificationMapper.selectPageForUserScoped(userId, type, unreadOnly, (int) size, offset,
-                organizationScopeService.hasFullAccess(), ids)
+                ? notificationMapper.selectPageForUserByTenant(tenantId, userId, type, unreadOnly, (int) size, offset)
                 : notificationMapper.selectPageForUserScopedByTenant(tenantId, userId, type, unreadOnly, (int) size, offset,
-                organizationScopeService.hasFullAccess(), ids));
+                organizationScopeService.hasFullAccess(), ids);
         records.forEach(this::translateDto);
         long total = ids == null
-                ? (tenantId == null ? notificationMapper.countPageForUser(userId, type, unreadOnly)
-                : notificationMapper.countPageForUserByTenant(tenantId, userId, type, unreadOnly))
-                : (tenantId == null ? notificationMapper.countPageForUserScoped(userId, type, unreadOnly,
-                organizationScopeService.hasFullAccess(), ids)
+                ? notificationMapper.countPageForUserByTenant(tenantId, userId, type, unreadOnly)
                 : notificationMapper.countPageForUserScopedByTenant(tenantId, userId, type, unreadOnly,
-                organizationScopeService.hasFullAccess(), ids));
+                organizationScopeService.hasFullAccess(), ids);
         page.setRecords(records);
         page.setTotal(total);
         return page;
@@ -108,11 +99,9 @@ public class NotificationServiceImpl implements NotificationService {
         List<Long> ids = scopedIds();
         String tenantId = explicitTenantId();
         return ids == null
-                ? (tenantId == null ? notificationMapper.countUnread(userId)
-                : notificationMapper.countUnreadByTenant(tenantId, userId))
-                : (tenantId == null ? notificationMapper.countUnreadScoped(userId, organizationScopeService.hasFullAccess(), ids)
+                ? notificationMapper.countUnreadByTenant(tenantId, userId)
                 : notificationMapper.countUnreadScopedByTenant(tenantId, userId,
-                organizationScopeService.hasFullAccess(), ids));
+                organizationScopeService.hasFullAccess(), ids);
     }
 
     @Override
@@ -120,12 +109,9 @@ public class NotificationServiceImpl implements NotificationService {
         List<Long> ids = scopedIds();
         String tenantId = explicitTenantId();
         long visible = ids == null
-                ? (tenantId == null ? notificationMapper.countVisible(notificationId, userId)
-                : notificationMapper.countVisibleByTenant(tenantId, notificationId, userId))
-                : (tenantId == null ? notificationMapper.countVisibleScoped(notificationId, userId,
-                organizationScopeService.hasFullAccess(), ids)
+                ? notificationMapper.countVisibleByTenant(tenantId, notificationId, userId)
                 : notificationMapper.countVisibleScopedByTenant(tenantId, notificationId, userId,
-                organizationScopeService.hasFullAccess(), ids));
+                organizationScopeService.hasFullAccess(), ids);
         if (visible == 0) return;
         try {
             NotificationRead read = new NotificationRead();
@@ -143,10 +129,7 @@ public class NotificationServiceImpl implements NotificationService {
         List<Long> ids = scopedIds();
         String tenantId = explicitTenantId();
         if (ids == null) {
-            if (tenantId == null) notificationMapper.markAllReadForUser(userId);
-            else notificationMapper.markAllReadForUserByTenant(tenantId, userId);
-        } else if (tenantId == null) {
-            notificationMapper.markAllReadForUserScoped(userId, organizationScopeService.hasFullAccess(), ids);
+            notificationMapper.markAllReadForUserByTenant(tenantId, userId);
         } else {
             notificationMapper.markAllReadForUserScopedByTenant(tenantId, userId,
                     organizationScopeService.hasFullAccess(), ids);
@@ -237,8 +220,8 @@ public class NotificationServiceImpl implements NotificationService {
         }
         try {
             Notification notification = new Notification();
-            String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
-            notification.setTenantId(tenantId == null ? "default" : tenantId);
+            String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            notification.setTenantId(tenantId);
             notification.setRecipientUserId(userId);
             notification.setType(type);
             notification.setTitle(title);
@@ -298,7 +281,7 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     private String explicitTenantId() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private Long resolveRecipientOrganizationId(Long userId) {

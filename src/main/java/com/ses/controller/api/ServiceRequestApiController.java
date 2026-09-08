@@ -177,7 +177,7 @@ public class ServiceRequestApiController {
 
     private ServiceDeskExecutionContext executionContext(Long actorId, String actorType, String actorName,
                                                          String source, Long organizationId, Long legalEntityId) {
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         return new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
                 Instant.now(clock), organizationId, legalEntityId, actorId, actorType, actorName, source);
     }

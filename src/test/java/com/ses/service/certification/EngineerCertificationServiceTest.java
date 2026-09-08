@@ -7,6 +7,9 @@ import com.ses.dto.certification.EngineerCertificationViewDto;
 import com.ses.mapper.CertificationMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,6 +39,16 @@ class EngineerCertificationServiceTest {
     private EngineerMapper engineerMapper;
     @Autowired
     private CertificationNumberCryptoService cryptoService;
+
+    @BeforeEach
+    void bindDefaultTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void submitApplication_staysDraft_andEncryptsNumber() {

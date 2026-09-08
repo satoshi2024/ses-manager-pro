@@ -24,6 +24,8 @@ import com.ses.mapper.SkillTagMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +56,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
 class EngineerChangeRequestFlowIntegrationTest {
+
+    @BeforeEach
+    void bindDefaultTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
 
     @Autowired
     private EngineerChangeRequestService changeRequestService;
@@ -243,6 +250,7 @@ class EngineerChangeRequestFlowIntegrationTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

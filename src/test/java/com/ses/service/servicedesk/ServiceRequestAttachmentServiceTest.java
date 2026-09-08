@@ -12,6 +12,7 @@ import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,7 @@ class ServiceRequestAttachmentServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new ServiceRequestAttachmentService(requestMapper, commentMapper, attachmentLinkMapper,
                 documentVersionMapper, documentService, dataScopeService, new UploadProperties(),
                 Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
@@ -68,6 +70,11 @@ class ServiceRequestAttachmentServiceTest {
         version.setVersionNo(1);
         version.setScanStatus("CLEAN");
         lenient().when(documentVersionMapper.findLatestByDocumentId(30L)).thenReturn(version);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

@@ -25,6 +25,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.FreeeIntegrationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.SystemConfigService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.changerequest.EngineerChangeRequestService;
@@ -152,6 +153,7 @@ class EngineerSelfServicePortalMRegressionTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         systemConfigService.put("survey.min-answers", "1", "テスト用閾値");
 
         adminUserId = insertUser("管理者", "admin");
@@ -194,6 +196,7 @@ class EngineerSelfServicePortalMRegressionTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     private RequestPostProcessor engineerUser(long userId) {

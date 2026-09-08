@@ -52,6 +52,7 @@ public class SecurityConfig {
     private final ObjectProvider<ClientRegistrationRepository> clientRegistrationRepositoryProvider;
     private final MfaEnforcementFilter mfaEnforcementFilter;
     private final PersistentSessionFilter persistentSessionFilter;
+    private final InternalTenantContextFilter internalTenantContextFilter;
     private final com.ses.service.AuditLogService auditLogService;
     private final com.ses.service.security.PersistentSessionService persistentSessionService;
     private final ObjectProvider<org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient<
@@ -105,6 +106,15 @@ public class SecurityConfig {
         return registrationBean;
     }
 
+    /** 内部tenant context filterのServletコンテナへの自動登録を無効化する。 */
+    @Bean
+    public FilterRegistrationBean<InternalTenantContextFilter> disableInternalTenantAutoRegistration(
+            InternalTenantContextFilter filter) {
+        FilterRegistrationBean<InternalTenantContextFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setEnabled(false);
+        return registrationBean;
+    }
+
     /**
      * セキュリティフィルタチェーンの設定
      * アクセス制御、フォームログイン、ログアウト、CSRF設定を定義する
@@ -116,8 +126,10 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+            // 認証済みLoginUserのtenantを以降の内部Security/業務チェーン全体へ固定する
+            .addFilterAfter(internalTenantContextFilter, UsernamePasswordAuthenticationFilter.class)
             // ロール別メニューアクセス制御フィルター（認証フィルターの後、認可判定の前に実行）
-            .addFilterAfter(menuPermissionFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(menuPermissionFilter, InternalTenantContextFilter.class)
             // API操作ログフィルター（メニュー権限フィルターの後に実行）
             .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // break-glassのMFA未完了中はMFA endpoint以外を遮断

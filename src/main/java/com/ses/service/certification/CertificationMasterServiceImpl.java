@@ -188,7 +188,7 @@ public class CertificationMasterServiceImpl implements CertificationMasterServic
     }
 
     private String trustedTenant(Certification requested) {
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (requested != null && StringUtils.hasText(requested.getTenantId())
                 && !tenantId.equals(requested.getTenantId().trim())) {
             throw BusinessException.of(403, "error.forbidden");

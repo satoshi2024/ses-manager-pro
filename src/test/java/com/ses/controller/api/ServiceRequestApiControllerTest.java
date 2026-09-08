@@ -9,6 +9,8 @@ import com.ses.entity.Customer;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.servicedesk.ServiceRequestService;
+import com.ses.mapper.ServiceRequestMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,6 +19,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,11 +53,15 @@ public class ServiceRequestApiControllerTest {
     @Autowired
     private ServiceRequestService serviceRequestService;
 
+    @Autowired
+    private ServiceRequestMapper serviceRequestMapper;
+
     private Customer testCustomer;
     private ServiceRequest testRequest;
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
         testCustomer = new Customer();
         testCustomer.setCompanyName("株式会社APIテスト顧客");
         customerMapper.insert(testCustomer);
@@ -64,6 +74,11 @@ public class ServiceRequestApiControllerTest {
                 .description("APIテスト本文")
                 .build();
         testRequest = serviceRequestService.createRequest(req, 100L, false, null);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -215,5 +230,73 @@ public class ServiceRequestApiControllerTest {
         mockMvc.perform(get("/api/service-desk/requests/export"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "text/csv; charset=UTF-8"));
+    }
+
+    @Test
+    @DisplayName("認証主体tenantをサービスデスクの読み書きへ固定しrequest入力を無視すること")
+    void authenticatedTenantBindsServiceDeskHttpScope() throws Exception {
+        AccountingTenantContextHolder.clear();
+        mockMvc.perform(get("/api/service-desk/requests")
+                        .with(authentication("tenant-a"))
+                        .param("tenantId", "tenant-b")
+                        .header("X-Tenant-Id", "tenant-b"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].subject").value("APIテスト件名"));
+        org.junit.jupiter.api.Assertions.assertEquals("tenant-a",
+                serviceRequestMapper.selectById(testRequest.getId()).getTenantId());
+        org.junit.jupiter.api.Assertions.assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    @DisplayName("別tenantはサービスデスク詳細更新添付exportへ到達してもtenant-a資料を扱えないこと")
+    void otherTenantCannotReadWriteUploadOrExportServiceDeskData() throws Exception {
+        AccountingTenantContextHolder.clear();
+        mockMvc.perform(get("/api/service-desk/requests/" + testRequest.getId())
+                        .with(authentication("tenant-b")))
+                .andExpect(status().isNotFound());
+
+        ServiceRequestUpdateRequest update = ServiceRequestUpdateRequest.builder()
+                .subject("越境更新")
+                .description("拒否される更新")
+                .priority("P2")
+                .category("SYSTEM")
+                .version(testRequest.getVersion())
+                .build();
+        mockMvc.perform(put("/api/service-desk/requests/" + testRequest.getId())
+                        .with(authentication("tenant-b"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(update)))
+                .andExpect(status().isNotFound());
+
+        MockMultipartFile file = new MockMultipartFile("file", "越境.pdf", "application/pdf", "PDF".getBytes());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .multipart("/api/service-desk/requests/" + testRequest.getId() + "/attachments")
+                        .file(file)
+                        .with(authentication("tenant-b"))
+                        .with(csrf()))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/service-desk/requests/export").with(authentication("tenant-b")))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString(
+                                testRequest.getRequestNo()))));
+        org.junit.jupiter.api.Assertions.assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    private RequestPostProcessor authentication(String tenantId) {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("admin123");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId(tenantId);
+        com.ses.config.LoginUser principal = new com.ses.config.LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

@@ -4,6 +4,7 @@ import com.ses.entity.Notification;
 import com.ses.entity.Task;
 import com.ses.mapper.NotificationMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.TaskService;
 import com.ses.service.scheduler.TaskDueDateNotificationScheduler;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,16 @@ import static org.junit.jupiter.api.Assertions.*;
 @ActiveProfiles("test")
 @Transactional
 public class TaskNotificationSchedulerH2Test {
+
+    @org.junit.jupiter.api.BeforeEach
+    void bindDefaultTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private TaskService taskService;

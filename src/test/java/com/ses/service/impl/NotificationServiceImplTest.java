@@ -48,6 +48,7 @@ class NotificationServiceImplTest {
 
     @org.junit.jupiter.api.BeforeEach
     void injectOptionalOutboxDependency() {
+        AccountingTenantContextHolder.setTenantId("default");
         org.springframework.test.util.ReflectionTestUtils.setField(
                 notificationService, "notificationOutboxService", notificationOutboxService);
         // R1-P2-03: 注入Clock（単体テストはシステム時計で動作させる）
@@ -78,7 +79,8 @@ class NotificationServiceImplTest {
     void testGetRecentNotifications() {
         NotificationDto dto = new NotificationDto();
         dto.setId(1L);
-        when(notificationMapper.selectPageForUser(1L, null, null, 10, 0)).thenReturn(Collections.singletonList(dto));
+        when(notificationMapper.selectPageForUserByTenant("default", 1L, null, null, 10, 0))
+                .thenReturn(Collections.singletonList(dto));
 
         List<NotificationDto> result = notificationService.getRecentNotifications(1L);
         assertEquals(1, result.size());
@@ -87,8 +89,9 @@ class NotificationServiceImplTest {
     @Test
     void testPageForUser() {
         NotificationDto dto = new NotificationDto();
-        when(notificationMapper.selectPageForUser(1L, null, false, 10, 0)).thenReturn(Collections.singletonList(dto));
-        when(notificationMapper.countPageForUser(1L, null, false)).thenReturn(1L);
+        when(notificationMapper.selectPageForUserByTenant("default", 1L, null, false, 10, 0))
+                .thenReturn(Collections.singletonList(dto));
+        when(notificationMapper.countPageForUserByTenant("default", 1L, null, false)).thenReturn(1L);
 
         Page<NotificationDto> result = notificationService.pageForUser(1L, 1, 10, null, false);
         assertEquals(1, result.getRecords().size());
@@ -97,21 +100,21 @@ class NotificationServiceImplTest {
 
     @Test
     void testUnreadCount() {
-        when(notificationMapper.countUnread(1L)).thenReturn(5L);
+        when(notificationMapper.countUnreadByTenant("default", 1L)).thenReturn(5L);
         long count = notificationService.unreadCount(1L);
         assertEquals(5L, count);
     }
 
     @Test
     void testMarkRead_Success() {
-        when(notificationMapper.countVisible(10L, 1L)).thenReturn(1L);
+        when(notificationMapper.countVisibleByTenant("default", 10L, 1L)).thenReturn(1L);
         notificationService.markRead(10L, 1L);
         verify(notificationReadMapper, times(1)).insert(any(NotificationRead.class));
     }
 
     @Test
     void testMarkRead_Duplicate() {
-        when(notificationMapper.countVisible(10L, 1L)).thenReturn(1L);
+        when(notificationMapper.countVisibleByTenant("default", 10L, 1L)).thenReturn(1L);
         doThrow(new DuplicateKeyException("Duplicate")).when(notificationReadMapper).insert(any(NotificationRead.class));
         assertDoesNotThrow(() -> notificationService.markRead(10L, 1L));
     }
@@ -122,7 +125,9 @@ class NotificationServiceImplTest {
 
         notificationService.publish("SYSTEM", "Title", "Msg", "Url", "Key");
 
-        verify(notificationMapper, times(1)).insert(any(Notification.class));
+        ArgumentCaptor<Notification> notificationCaptor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationMapper, times(1)).insert(notificationCaptor.capture());
+        assertEquals("default", notificationCaptor.getValue().getTenantId());
         verify(notificationOutboxService).enqueue(any(Notification.class));
         verify(notificationOutboxService).dispatchOne(1L);
         verify(webhookNotifier, never()).notify(any(Notification.class));
@@ -136,6 +141,7 @@ class NotificationServiceImplTest {
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(notificationMapper).insert(captor.capture());
+        assertEquals("default", captor.getValue().getTenantId());
         assertEquals(22L, captor.getValue().getOrganizationId());
         assertEquals(7L, captor.getValue().getRecipientUserId());
     }
@@ -151,7 +157,7 @@ class NotificationServiceImplTest {
     void testMarkAllRead() {
         // 1回のINSERT..SELECTで完結するため、件数取得や1件ずつのinsertは発生しない
         notificationService.markAllRead(1L);
-        verify(notificationMapper, times(1)).markAllReadForUser(1L);
+        verify(notificationMapper, times(1)).markAllReadForUserByTenant("default", 1L);
         verify(notificationReadMapper, never()).insert(any(NotificationRead.class));
     }
 }

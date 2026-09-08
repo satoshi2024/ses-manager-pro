@@ -760,7 +760,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                                       Long organizationId, Long legalEntityId) {
         ZoneId zone = com.ses.service.accounting.AccountingTenantContextHolder.getZoneId();
         return new ServiceDeskExecutionContext(
-                com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(),
                 zone, Instant.now(clock), organizationId, legalEntityId, actorId,
                 actorType, StringUtils.hasText(actorName) ? actorName : "内部ユーザー",
                 portal ? "PORTAL_REQUEST" : "INTERNAL_REQUEST");
@@ -936,11 +936,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     private String currentTenant() {
-        String tenant = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
-        if (tenant == null || tenant.isBlank()) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
-        }
-        return tenant;
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private Set<Long> resolvedCustomerIds() {

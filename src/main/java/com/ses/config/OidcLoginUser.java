@@ -29,6 +29,12 @@ public class OidcLoginUser extends LoginUser implements OidcUser {
         return getUsername();
     }
 
+    /** OIDCのtenantも内部SysUserの認証済みtenantを唯一の根拠とする。 */
+    @Override
+    public String getTenantId() {
+        return super.getTenantId();
+    }
+
     @Override
     public Map<String, Object> getAttributes() {
         return delegate.getAttributes();

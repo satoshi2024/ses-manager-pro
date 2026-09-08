@@ -18,6 +18,8 @@ import com.ses.mapper.ServiceCommentMapper;
 import com.ses.mapper.ServiceRequestMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceStateEventMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,9 +64,15 @@ class ServiceRequestServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         testCustomer = new Customer();
         testCustomer.setCompanyName("株式会社テスト顧客CS");
         customerMapper.insert(testCustomer);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

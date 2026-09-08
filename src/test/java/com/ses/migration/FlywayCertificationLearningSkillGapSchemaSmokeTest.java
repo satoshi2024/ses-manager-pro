@@ -114,6 +114,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
     void MySQLの資格mastertenant付きversionCASは同時更新を一件だけ成功させる() throws Exception {
         migrate();
         String tenantId = "cert-cas-" + UUID.randomUUID();
+        String otherTenantId = "cert-other-" + UUID.randomUUID();
         long certificationId;
         try (Connection connection = MYSQL.createConnection("");
              PreparedStatement insert = connection.prepareStatement(
@@ -130,6 +131,48 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
                 assertTrue(keys.next());
                 certificationId = keys.getLong(1);
             }
+        }
+
+        long otherCertificationId;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement insert = connection.prepareStatement(
+                     "INSERT INTO m_certification "
+                             + "(tenant_id, issuer_key, name_key, identity_key, display_name) VALUES (?, ?, ?, ?, ?)",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            insert.setString(1, otherTenantId);
+            insert.setString(2, "ipa");
+            insert.setString(3, "other-name");
+            insert.setString(4, "other-" + UUID.randomUUID());
+            insert.setString(5, "別tenant資格");
+            insert.executeUpdate();
+            try (var keys = insert.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                otherCertificationId = keys.getLong(1);
+            }
+        }
+
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement select = connection.prepareStatement(
+                     "SELECT COUNT(*) FROM m_certification WHERE id = ? AND tenant_id = ?");
+             PreparedStatement update = connection.prepareStatement(
+                     "UPDATE m_certification SET display_name = ? "
+                             + "WHERE id = ? AND tenant_id = ? AND version = 0")) {
+            select.setLong(1, certificationId);
+            select.setString(2, otherTenantId);
+            try (ResultSet rows = select.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(0, rows.getInt(1), "別tenantからtenant-a資格を読めないこと");
+            }
+            select.setLong(1, otherCertificationId);
+            select.setString(2, otherTenantId);
+            try (ResultSet rows = select.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1), "別tenant資格は自身のtenantでだけ読めること");
+            }
+            update.setString(1, "越境更新");
+            update.setLong(2, certificationId);
+            update.setString(3, otherTenantId);
+            assertEquals(0, update.executeUpdate(), "tenant条件なしの越境更新を許さないこと");
         }
 
         CountDownLatch ready = new CountDownLatch(2);
