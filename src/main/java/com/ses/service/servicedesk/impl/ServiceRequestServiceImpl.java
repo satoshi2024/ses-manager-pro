@@ -175,7 +175,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .responseDeadline(responseDeadline)
                     .resolveDeadline(resolveDeadline)
                     .responseBreached(false)
+                    .responseBreachedAt(null)
                     .resolveBreached(false)
+                    .resolveBreachedAt(null)
                     .totalPauseMinutes(0)
                     .status("RUNNING")
                     .version(0)
@@ -435,7 +437,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     if (clockRow.getFirstRespondedAt() == null) {
                         clockRow.setFirstRespondedAt(now);
                     if (clockRow.getResponseDeadline() != null && now.isAfter(clockRow.getResponseDeadline())) {
-                            clockRow.setResponseBreached(true);
+                        markResponseBreach(clockRow, now);
                         }
                     }
                 }
@@ -454,7 +456,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     clockRow.setResolvedAt(now);
                     clockRow.setStatus("COMPLETED");
                     if (clockRow.getResolveDeadline() != null && now.isAfter(clockRow.getResolveDeadline())) {
-                        clockRow.setResolveBreached(true);
+                        markResolveBreach(clockRow, now);
                     }
                 }
                 break;
@@ -465,6 +467,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     clockRow.setStatus("COMPLETED");
                     if (clockRow.getResolvedAt() == null) {
                         clockRow.setResolvedAt(now);
+                    }
+                    if (clockRow.getResolveDeadline() != null && now.isAfter(clockRow.getResolveDeadline())) {
+                        markResolveBreach(clockRow, now);
                     }
                 }
                 break;
@@ -498,7 +503,9 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                                 .responseDeadline(responseDeadline)
                                 .resolveDeadline(resolveDeadline)
                                 .responseBreached(false)
+                                .responseBreachedAt(null)
                                 .resolveBreached(false)
+                                .resolveBreachedAt(null)
                                 .totalPauseMinutes(0)
                                 .status("RUNNING")
                                 .version(0)
@@ -545,8 +552,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .eq(ServiceSlaClock::getVersion, clockVersion)
                     .set(ServiceSlaClock::getFirstRespondedAt, clockRow.getFirstRespondedAt())
                     .set(ServiceSlaClock::getResponseBreached, clockRow.getResponseBreached())
+                    .set(ServiceSlaClock::getResponseBreachedAt, clockRow.getResponseBreachedAt())
                     .set(ServiceSlaClock::getResolvedAt, clockRow.getResolvedAt())
                     .set(ServiceSlaClock::getResolveBreached, clockRow.getResolveBreached())
+                    .set(ServiceSlaClock::getResolveBreachedAt, clockRow.getResolveBreachedAt())
                     .set(ServiceSlaClock::getTotalPauseMinutes, clockRow.getTotalPauseMinutes())
                     .set(ServiceSlaClock::getLastPausedAt, clockRow.getLastPausedAt())
                     .set(ServiceSlaClock::getResolveDeadline, clockRow.getResolveDeadline())
@@ -646,7 +655,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             if (clockRow != null && clockRow.getFirstRespondedAt() == null) {
                 clockRow.setFirstRespondedAt(now);
                 if (clockRow.getResponseDeadline() != null && now.isAfter(clockRow.getResponseDeadline())) {
-                    clockRow.setResponseBreached(true);
+                    markResponseBreach(clockRow, now);
                 }
                 clockRow.setUpdatedAt(now);
                 int clockVersion = clockRow.getVersion() == null ? 0 : clockRow.getVersion();
@@ -655,6 +664,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                         .eq(ServiceSlaClock::getVersion, clockVersion)
                         .set(ServiceSlaClock::getFirstRespondedAt, clockRow.getFirstRespondedAt())
                         .set(ServiceSlaClock::getResponseBreached, clockRow.getResponseBreached())
+                        .set(ServiceSlaClock::getResponseBreachedAt, clockRow.getResponseBreachedAt())
                         .set(ServiceSlaClock::getUpdatedAt, clockRow.getUpdatedAt())
                         .set(ServiceSlaClock::getVersion, clockVersion + 1));
                 if (clockUpdated != 1) {
@@ -701,13 +711,6 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "CSAT回答は解決または完了済みのリクエストのみ可能です");
         }
 
-        CustomerCsat existingCsat = csatMapper.selectOne(
-                new LambdaQueryWrapper<CustomerCsat>().eq(CustomerCsat::getServiceRequestId, id)
-        );
-        if (existingCsat != null) {
-            throw BusinessException.of(409, "このリクエストに対するCSAT回答は既に提出済みです");
-        }
-
         CustomerCsat csat = CustomerCsat.builder()
                 .serviceRequestId(existing.getId())
                 .customerId(customerId)
@@ -717,7 +720,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .answeredAt(LocalDateTime.now(clock))
                 .build();
 
-        csatMapper.insert(csat);
+        try {
+            // 事前selectは競合防止に使わず、uk_csat_requestを最終防線とする。
+            csatMapper.insert(csat);
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            throw BusinessException.of(409, "このリクエストに対するCSAT回答は既に提出済みです");
+        }
     }
 
     private ServiceSlaPolicy getActivePolicy(String priority) {
@@ -936,8 +944,10 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                     .resolveDeadline(clockRow.getResolveDeadline())
                     .firstRespondedAt(clockRow.getFirstRespondedAt())
                     .responseBreached(clockRow.getResponseBreached())
+                    .responseBreachedAt(clockRow.getResponseBreachedAt())
                     .resolvedAt(clockRow.getResolvedAt())
                     .resolveBreached(clockRow.getResolveBreached())
+                    .resolveBreachedAt(clockRow.getResolveBreachedAt())
                     .totalPauseMinutes(clockRow.getTotalPauseMinutes())
                     .lastPausedAt(clockRow.getLastPausedAt())
                     .status(clockRow.getStatus())
@@ -1058,6 +1068,22 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 .csatScore(csat != null ? csat.getScore() : null)
                 .csatAnswerable(answerable)
                 .build();
+    }
+
+    /** breach時刻は最初の検知時だけ設定し、完了roundの履歴を上書きしない。 */
+    private void markResponseBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResponseBreached(true);
+        if (clockRow.getResponseBreachedAt() == null) {
+            clockRow.setResponseBreachedAt(breachedAt);
+        }
+    }
+
+    /** breach時刻は最初の検知時だけ設定し、完了roundの履歴を上書きしない。 */
+    private void markResolveBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResolveBreached(true);
+        if (clockRow.getResolveBreachedAt() == null) {
+            clockRow.setResolveBreachedAt(breachedAt);
+        }
     }
 
     private String resolveUserName(Long userId) {

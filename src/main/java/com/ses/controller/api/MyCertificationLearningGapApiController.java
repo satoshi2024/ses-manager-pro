@@ -7,7 +7,7 @@ import com.ses.dto.certificationlearninggap.CertificationEvidenceView;
 import com.ses.dto.certificationlearninggap.CertificationSelfDashboard;
 import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
-import com.ses.entity.EngineerCertification;
+import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.entity.LearningPlan;
 import com.ses.entity.Certification;
 import com.ses.entity.TrainingCourse;
@@ -93,14 +93,14 @@ public class MyCertificationLearningGapApiController {
     }
 
     @PostMapping("/certifications/{recordId}/withdraw")
-    public ApiResult<EngineerCertification> withdraw(@PathVariable Long recordId,
-                                                     @RequestBody(required = false) StateCommand command) {
+    public ApiResult<CertificationLifecycleActionView> withdraw(@PathVariable Long recordId,
+                                                                 @RequestBody(required = false) StateCommand command) {
         return ApiResult.success(selfService.withdrawCertification(userId(), recordId, version(command), reason(command)));
     }
 
     @PostMapping("/certifications/{recordId}/correct")
-    public ApiResult<EngineerCertification> correct(@PathVariable Long recordId,
-                                                    @RequestBody CertificationCorrectionRequest request) {
+    public ApiResult<CertificationLifecycleActionView> correct(@PathVariable Long recordId,
+                                                                @RequestBody CertificationCorrectionRequest request) {
         return ApiResult.success(selfService.correctCertification(userId(), recordId, request.expectedVersion(),
                 request.acquiredOn(), request.expiresOn(), request.reason()));
     }
@@ -109,6 +109,7 @@ public class MyCertificationLearningGapApiController {
     public ApiResult<EngineerCertificationViewDto> resubmit(@PathVariable Long recordId,
                                                             @RequestBody(required = false) ResubmitRequest request) {
         return ApiResult.success(selfService.resubmitCertification(userId(), recordId,
+                request == null ? null : request.expectedVersion(),
                 request == null ? null : request.certificateNumber()));
     }
 
@@ -144,13 +145,13 @@ public class MyCertificationLearningGapApiController {
     }
 
     @PostMapping("/learning-plans/{planId}/resubmit")
-    public ApiResult<LearningPlanSelfView> resubmitPlan(@PathVariable Long planId) {
-        return ApiResult.success(selfService.resubmitPlan(userId(), planId));
+    public ApiResult<LearningPlanSelfView> resubmitPlan(@PathVariable Long planId, @RequestBody PlanCommand command) {
+        return ApiResult.success(selfService.resubmitPlan(userId(), planId, version(command)));
     }
 
     @PostMapping("/learning-plans/{planId}/enrollments")
     public ApiResult<TrainingEnrollment> enroll(@PathVariable Long planId, @RequestBody EnrollmentRequest request) {
-        return ApiResult.success(selfService.enroll(userId(), planId, request.courseId()));
+        return ApiResult.success(selfService.enroll(userId(), planId, request.expectedVersion(), request.courseId()));
     }
 
     @PostMapping("/enrollments/{enrollmentId}/start")
@@ -201,10 +202,10 @@ public class MyCertificationLearningGapApiController {
                                             LocalDate expiresOn, String certificateNumber) { }
     public record CertificationCorrectionRequest(Integer expectedVersion, LocalDate acquiredOn, LocalDate expiresOn,
                                                 String reason) { }
-    public record ResubmitRequest(String certificateNumber) { }
+    public record ResubmitRequest(Integer expectedVersion, String certificateNumber) { }
     public record StateCommand(Integer expectedVersion, String reason) { }
     public record PlanCommand(Integer expectedVersion, String reason, String zeroCostReason) { }
-    public record EnrollmentRequest(Long courseId) { }
+    public record EnrollmentRequest(Integer expectedVersion, Long courseId) { }
     public record EnrollmentCompletionRequest(Integer expectedVersion, LocalDate completedOn,
                                              java.math.BigDecimal score) { }
 }

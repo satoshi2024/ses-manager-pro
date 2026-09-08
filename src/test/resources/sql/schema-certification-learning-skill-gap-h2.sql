@@ -4,6 +4,15 @@
 -- ===================================================================
 
 -- ---- F1-1: 資格master・engineer取得record ----
+CREATE TABLE IF NOT EXISTS t_certification_continuity_group (
+    tenant_id VARCHAR(100) NOT NULL,
+    engineer_id BIGINT NOT NULL,
+    certification_id BIGINT NOT NULL,
+    continuity_group_id BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, engineer_id, certification_id, continuity_group_id),
+    UNIQUE (continuity_group_id)
+);
+
 CREATE TABLE IF NOT EXISTS m_certification (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
@@ -69,6 +78,12 @@ CREATE TABLE IF NOT EXISTS t_engineer_certification (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_eng_cert_current_holder
     ON t_engineer_certification(tenant_id, engineer_id, certification_id, current_holder_key);
+ALTER TABLE t_engineer_certification ADD CONSTRAINT IF NOT EXISTS fk_eng_cert_continuity_group
+    FOREIGN KEY (tenant_id, engineer_id, certification_id, continuity_group_id)
+    REFERENCES t_certification_continuity_group(tenant_id, engineer_id, certification_id, continuity_group_id);
+ALTER TABLE t_engineer_certification ADD CONSTRAINT IF NOT EXISTS chk_eng_cert_current_holder
+    CHECK ((current_flag = 1 AND current_holder_key = continuity_group_id)
+        OR (current_flag = 0 AND current_holder_key IS NULL));
 
 -- ---- F1-2: 資格event・証憑文書種別 ----
 CREATE TABLE IF NOT EXISTS t_certification_event (
@@ -140,6 +155,8 @@ CREATE TABLE IF NOT EXISTS t_learning_plan (
     planned_start_on DATE NULL,
     planned_end_on DATE NULL,
     planned_cost_jpy DECIMAL(12,0) NULL,
+    amended_cost_jpy DECIMAL(12,0) NULL,
+    amendment_approval_request_id BIGINT NULL,
     expense_request_id BIGINT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
     approval_request_id BIGINT NULL,

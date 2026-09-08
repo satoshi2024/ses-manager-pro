@@ -12,11 +12,13 @@ import com.ses.entity.CustomerHealthSnapshot;
 import com.ses.entity.Engineer;
 import com.ses.entity.Project;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.ServiceSlaClock;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.CustomerHealthSnapshotMapper;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.mapper.ServiceSlaClockMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
@@ -63,6 +66,9 @@ class CustomerHealthServiceTest {
 
     @Autowired
     private ProjectMapper projectMapper;
+
+    @Autowired
+    private ServiceSlaClockMapper slaClockMapper;
 
     private Customer healthyCustomer;
     private Customer atRiskCustomer;
@@ -192,6 +198,35 @@ class CustomerHealthServiceTest {
         assertEquals(100, dto.getHealthScore(), "減点要素なしで100点 (HEALTHY)");
         assertEquals("HEALTHY", dto.getHealthStatus());
         assertTrue(dto.getMissingInputs().contains("CSAT"), "CSATが欠損値として記録されること");
+    }
+
+    @Test
+    @DisplayName("SLA30日集計はround作成時刻ではなく実際のresponse/resolve breach時刻を使うこと")
+    void testSlaBreachCount_usesActualBreachTimestamps() {
+        Customer customer = Customer.builder()
+                .companyName("SLA時刻顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .build();
+        customerMapper.insert(customer);
+        ServiceRequest request = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(customer.getId()).category("SYSTEM").priority("P2")
+                .subject("SLA時刻検証").description("breach時刻検証").build(), 100L, false, null);
+        ServiceSlaClock clock = slaClockMapper.selectOne(new LambdaQueryWrapper<ServiceSlaClock>()
+                .eq(ServiceSlaClock::getServiceRequestId, request.getId()));
+        LocalDateTime now = LocalDateTime.now();
+        clock.setCreatedAt(now.minusDays(60));
+        clock.setResponseBreached(true);
+        clock.setResponseBreachedAt(now.minusDays(5));
+        clock.setResolveBreached(false);
+        clock.setResolveBreachedAt(null);
+        slaClockMapper.updateById(clock);
+
+        CustomerHealthScoreDto recent = customerHealthService.calculateCustomerHealth(customer.getId());
+        assertEquals(1, recent.getSlaBreachCount30d());
+
+        clock.setResponseBreachedAt(now.minusDays(31));
+        slaClockMapper.updateById(clock);
+        CustomerHealthScoreDto old = customerHealthService.calculateCustomerHealth(customer.getId());
+        assertEquals(0, old.getSlaBreachCount30d());
     }
 
     @Test

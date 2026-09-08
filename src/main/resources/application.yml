@@ -270,6 +270,7 @@ app:
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}
+    service-request-uploads-per-minute: ${SERVICE_REQUEST_UPLOADS_PER_MINUTE:60}
     scanner-enabled: ${FILE_SCANNER_ENABLED:true}
     scanner-host: ${FILE_SCANNER_HOST:localhost}
     scanner-port: ${FILE_SCANNER_PORT:3310}

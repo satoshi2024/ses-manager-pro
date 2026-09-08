@@ -1,12 +1,16 @@
 package com.ses.service.training;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.entity.ApprovalAction;
+import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ExpenseRequest;
 import com.ses.entity.LearningPlan;
 import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingEnrollment;
 import com.ses.mapper.LearningPlanEventMapper;
 import com.ses.mapper.LearningPlanMapper;
+import com.ses.mapper.ApprovalActionMapper;
+import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingEnrollmentExpenseMapper;
 import com.ses.mapper.TrainingEnrollmentMapper;
@@ -19,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -47,6 +52,8 @@ class TrainingPlanServiceTest {
     @Mock private ExpenseRequestService expenseRequestService;
     @Mock private ApprovalEngineService approvalEngineService;
     @Mock private MonthlyClosingService monthlyClosingService;
+    @Mock private ApprovalRequestMapper approvalRequestMapper;
+    @Mock private ApprovalActionMapper approvalActionMapper;
 
     private TrainingPlanService service;
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
@@ -56,6 +63,8 @@ class TrainingPlanServiceTest {
         service = new TrainingPlanServiceImpl(planMapper, courseMapper, enrollmentMapper,
                 enrollmentExpenseMapper, eventMapper, expenseRequestService, approvalEngineService,
                 monthlyClosingService, clock);
+        ReflectionTestUtils.setField(service, "approvalRequestMapper", approvalRequestMapper);
+        ReflectionTestUtils.setField(service, "approvalActionMapper", approvalActionMapper);
     }
 
     @Test
@@ -166,12 +175,87 @@ class TrainingPlanServiceTest {
         enrollment.setId(90L);
         enrollment.setPlanId(1L);
         enrollment.setEngineerId(20L);
-        when(enrollmentMapper.selectById(90L)).thenReturn(enrollment);
+        enrollment.setVersion(0);
+        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
         when(planMapper.selectById(1L)).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("150")));
 
-        assertThrows(BusinessException.class, () -> service.linkExpense(90L, 50L, 7L, "実費差額"));
+        assertThrows(BusinessException.class, () -> service.linkExpense(90L, 0, 50L, 7L, "実費差額"));
         verify(enrollmentExpenseMapper, never()).insert(any(com.ses.entity.TrainingEnrollmentExpense.class));
+    }
+
+    @Test
+    void 予定額超過はExpenseの状態だけではlinkもcompleteも許可しない() {
+        for (String status : new String[]{"申請中", "承認済", "会計連携済", "支払済"}) {
+            LearningPlan plan = draft(1L, new BigDecimal("100"));
+            plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+            plan.setExpenseRequestId(50L);
+            TrainingEnrollment enrollment = startedEnrollment(90L);
+            when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+            when(planMapper.selectById(1L)).thenReturn(plan);
+            when(expenseRequestService.getEntity(50L)).thenReturn(expense(status, new BigDecimal("150")));
+
+            assertThrows(BusinessException.class,
+                    () -> service.linkExpense(90L, 0, 50L, 9L, "超過確認"));
+            assertThrows(BusinessException.class,
+                    () -> service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 9L));
+        }
+        verify(enrollmentExpenseMapper, never()).insert(any(com.ses.entity.TrainingEnrollmentExpense.class));
+    }
+
+    @Test
+    void enrollmentに関連済みの超過実費も完了時に同じ予算検証を通る() {
+        LearningPlan plan = draft(1L, new BigDecimal("100"));
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        TrainingEnrollment enrollment = startedEnrollment(90L);
+        com.ses.entity.TrainingEnrollmentExpense relation = new com.ses.entity.TrainingEnrollmentExpense();
+        relation.setEnrollmentId(90L);
+        relation.setExpenseRequestId(50L);
+        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+        when(planMapper.selectById(1L)).thenReturn(plan);
+        when(enrollmentExpenseMapper.selectList(any())).thenReturn(java.util.List.of(relation));
+        when(expenseRequestService.getEntity(50L)).thenReturn(expense("承認済", new BigDecimal("150")));
+
+        assertThrows(BusinessException.class,
+                () -> service.completeEnrollment(90L, 0, LocalDate.of(2026, 9, 1), null, 9L));
+        verify(enrollmentMapper, never()).update(any(), any());
+    }
+
+    @Test
+    void 独立した追加expense承認は金額と承認者を検証してlinkとcompleteを許可する() {
+        LearningPlan plan = draft(1L, new BigDecimal("100"));
+        plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
+        plan.setExpenseRequestId(50L);
+        plan.setApprovalRequestId(70L);
+        TrainingEnrollment enrollment = startedEnrollment(90L);
+        ExpenseRequest expense = expense("承認済", new BigDecimal("150"));
+        expense.setApprovalRequestId(71L);
+        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
+        when(planMapper.selectById(1L)).thenReturn(plan);
+        when(expenseRequestService.getEntity(50L)).thenReturn(expense);
+        when(approvalRequestMapper.selectById(71L)).thenReturn(approvedRequest(71L, "EXPENSE_REQUEST", 50L,
+                new BigDecimal("150"), 7L));
+        when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(71L, 8L)));
+        when(enrollmentExpenseMapper.selectCount(any())).thenReturn(0L);
+
+        assertEquals(90L, service.linkExpense(90L, 0, 50L, 9L, "独立承認").getEnrollmentId());
+        verify(enrollmentExpenseMapper).insert(any(com.ses.entity.TrainingEnrollmentExpense.class));
+    }
+
+    @Test
+    void planAmendmentはplannedCostを変更せず独立承認後だけ超過を許可する() {
+        LearningPlan plan = draft(1L, new BigDecimal("100"));
+        plan.setStatus(TrainingPlanService.PLAN_APPROVED);
+        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
+        when(planMapper.update(any(), any())).thenReturn(1);
+        when(approvalRequestMapper.selectById(72L)).thenReturn(approvedRequest(72L,
+                "LEARNING_PLAN_BUDGET_AMENDMENT", 1L, new BigDecimal("150"), 7L));
+        when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(72L, 8L)));
+
+        LearningPlan amended = service.amendBudget(1L, 0, new BigDecimal("150"), 72L, 9L, "追加研修");
+
+        assertEquals(new BigDecimal("100"), amended.getPlannedCostJpy());
+        assertEquals(new BigDecimal("150"), amended.getAmendedCostJpy());
     }
 
     @Test
@@ -223,5 +307,35 @@ class TrainingPlanServiceTest {
         expense.setAmount(amount);
         expense.setStatus(status);
         return expense;
+    }
+
+    private TrainingEnrollment startedEnrollment(Long id) {
+        TrainingEnrollment enrollment = new TrainingEnrollment();
+        enrollment.setId(id);
+        enrollment.setPlanId(1L);
+        enrollment.setEngineerId(20L);
+        enrollment.setStatus(TrainingPlanService.ENROLLMENT_STARTED);
+        enrollment.setVersion(0);
+        return enrollment;
+    }
+
+    private ApprovalRequest approvedRequest(Long id, String targetType, Long targetId,
+                                            BigDecimal amount, Long applicantId) {
+        ApprovalRequest request = new ApprovalRequest();
+        request.setId(id);
+        request.setTargetType(targetType);
+        request.setTargetId(targetId);
+        request.setAmountSnapshot(amount);
+        request.setApplicantId(applicantId);
+        request.setStatus("approved");
+        return request;
+    }
+
+    private ApprovalAction approvalAction(Long requestId, Long approverId) {
+        ApprovalAction action = new ApprovalAction();
+        action.setRequestId(requestId);
+        action.setAction("APPROVE");
+        action.setApproverUserId(approverId);
+        return action;
     }
 }
