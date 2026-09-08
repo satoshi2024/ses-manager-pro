@@ -139,6 +139,9 @@ app:
       local-login-enabled: true
       tenant-id: default
       break-glass-usernames: []
+  accounting:
+    tenants:
+      ids: default
   mail:
     from: test@example.com
 

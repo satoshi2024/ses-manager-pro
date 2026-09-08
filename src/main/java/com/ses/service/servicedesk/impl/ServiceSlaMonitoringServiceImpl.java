@@ -62,14 +62,12 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         LocalDateTime now = asOf != null ? asOf : LocalDateTime.now(clock);
         int breachedCount = 0;
 
-        List<ServiceSlaClock> runningClocks = slaClockMapper.selectList(
-                new LambdaQueryWrapper<ServiceSlaClock>()
-                        .eq(ServiceSlaClock::getStatus, "RUNNING")
-        );
+        String tenantId = currentTenant();
+        List<ServiceSlaClock> runningClocks = slaClockMapper.selectRunningByTenant(tenantId);
 
         for (ServiceSlaClock clk : runningClocks) {
-            ServiceRequest req = serviceRequestMapper.selectById(clk.getServiceRequestId());
-            if (req == null || (req.getTenantId() != null && !currentTenant().equals(req.getTenantId()))
+            ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(clk.getServiceRequestId(), tenantId);
+            if (req == null || !tenantId.equals(req.getTenantId())
                     || "RESOLVED".equals(req.getStatus()) || "CLOSED".equals(req.getStatus())) {
                 continue;
             }
@@ -81,10 +79,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             boolean responseWasBreached = Boolean.TRUE.equals(clk.getResponseBreached());
             boolean resolveWasBreached = Boolean.TRUE.equals(clk.getResolveBreached());
             List<SlaNotice> notices = new java.util.ArrayList<>();
-            List<ServiceSlaEscalation> retryRows = escalationMapper.selectList(
-                    new LambdaQueryWrapper<ServiceSlaEscalation>()
-                            .eq(ServiceSlaEscalation::getSlaClockId, clk.getId())
-                            .eq(ServiceSlaEscalation::getStatus, "RETRY"));
+            List<ServiceSlaEscalation> retryRows = escalationMapper.selectRetryByClockAndTenant(clk.getId(), tenantId);
             boolean responseFirstRetryPending = hasRetry(retryRows, "RESPONSE", "FIRST");
             boolean resolveFirstRetryPending = hasRetry(retryRows, "RESOLVE", "FIRST");
 
@@ -291,8 +286,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private void persistEscalation(ServiceRequest req, ServiceSlaClock clk, SlaNotice notice,
                                    String dedupeKey, int recipientCount, String error, LocalDateTime now) {
-        ServiceSlaEscalation row = escalationMapper.selectOne(new LambdaQueryWrapper<ServiceSlaEscalation>()
-                .eq(ServiceSlaEscalation::getDedupeKey, dedupeKey));
+        ServiceSlaEscalation row = escalationMapper.selectByDedupeKeyAndTenant(dedupeKey, currentTenant());
         if (row == null) {
             row = ServiceSlaEscalation.builder()
                     .serviceRequestId(req.getId()).slaClockId(clk.getId()).roundNo(clk.getRoundNo())
@@ -332,14 +326,15 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             return Collections.emptyList();
         }
 
-        if ((req.getTenantId() != null && !currentTenant().equals(req.getTenantId()))
+        String tenantId = currentTenant();
+        if (req.getTenantId() == null || !tenantId.equals(req.getTenantId())
                 || !isVisibleCustomer(req.getCustomerId())) {
             return Collections.emptyList();
         }
 
         // ① リクエスト担当者
         if (req.getOwnerUserId() != null) {
-            SysUser owner = sysUserMapper.selectById(req.getOwnerUserId());
+            SysUser owner = sysUserMapper.selectByIdAndTenant(req.getOwnerUserId(), tenantId);
             if (owner != null && Integer.valueOf(1).equals(owner.getStatus()) && Integer.valueOf(0).equals(owner.getDeletedFlag())) {
                 return List.of(owner.getId());
             }
@@ -349,7 +344,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         if (req.getContractId() != null) {
             Contract contract = contractMapper.selectById(req.getContractId());
             if (contract != null && contract.getSalesUserId() != null) {
-                SysUser salesUser = sysUserMapper.selectById(contract.getSalesUserId());
+                SysUser salesUser = sysUserMapper.selectByIdAndTenant(contract.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
                     return List.of(salesUser.getId());
                 }
@@ -366,7 +361,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                             .orderByDesc(Contract::getId)
             );
             for (Contract c : contracts) {
-                SysUser salesUser = sysUserMapper.selectById(c.getSalesUserId());
+                SysUser salesUser = sysUserMapper.selectByIdAndTenant(c.getSalesUserId(), tenantId);
                 if (salesUser != null && Integer.valueOf(1).equals(salesUser.getStatus()) && Integer.valueOf(0).equals(salesUser.getDeletedFlag())) {
                     return List.of(salesUser.getId());
                 }
@@ -374,12 +369,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
         }
 
         // ④ 有効な全管理者へのエスカレーション
-        List<SysUser> activeAdmins = sysUserMapper.selectList(
-                new LambdaQueryWrapper<SysUser>()
-                        .eq(SysUser::getRole, "管理者")
-                        .eq(SysUser::getStatus, 1)
-                        .eq(SysUser::getDeletedFlag, 0)
-        );
+        List<SysUser> activeAdmins = sysUserMapper.selectActiveByRoleAndTenant("管理者", tenantId);
         if (!activeAdmins.isEmpty()) {
             return activeAdmins.stream().map(SysUser::getId).toList();
         }

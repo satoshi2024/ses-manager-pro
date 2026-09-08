@@ -3,6 +3,8 @@ package com.ses.service.certification;
 import com.ses.entity.EngineerCertification;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantInventoryProperties;
+import com.ses.service.accounting.AccountingTimezoneResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -28,12 +30,14 @@ class CertificationExpiryNotificationSchedulerTest {
     @Mock private CertificationNotificationPopulationResolver populationResolver;
     @Mock private CertificationExpiryNotificationService notificationService;
     @Mock private NotificationService genericNotificationService;
+    @Mock private AccountingTimezoneResolver timezoneResolver;
 
     @Test
     void 二重scheduler実行でも同じsemantic入力をDBuniqueへ渡しlifecycle除外を守る() {
         EngineerCertification record = record(10L, 20L);
+        record.setTenantId("default");
         when(certificationMapper.selectList(any())).thenReturn(List.of(record));
-        when(populationResolver.resolve(20L, date())).thenReturn(
+        when(populationResolver.resolve("default", 20L, date())).thenReturn(
                 new CertificationNotificationPopulationResolver.Population(
                         CertificationNotificationPopulationResolver.PopulationCase.NORMAL,
                         501L, List.of(900L), List.of(), List.of(501L), false, true));
@@ -46,14 +50,15 @@ class CertificationExpiryNotificationSchedulerTest {
         verify(notificationService, org.mockito.Mockito.times(2)).publishIfDue(record, date(), 501L);
         // semantic keyの生成・DB unique処理はCertificationExpiryService/NotificationServiceが所有し、
         // schedulerはrevisionや旧managerを独自にkeyへ足さない。
-        verify(populationResolver, org.mockito.Mockito.times(2)).resolve(20L, date());
+        verify(populationResolver, org.mockito.Mockito.times(2)).resolve("default", 20L, date());
     }
 
     @Test
     void 復職はregularExpiryではなくreinstatementのsemanticKeyを使う() {
         EngineerCertification record = record(10L, 20L);
+        record.setTenantId("default");
         when(certificationMapper.selectList(any())).thenReturn(List.of(record));
-        when(populationResolver.resolve(20L, date())).thenReturn(
+        when(populationResolver.resolve("default", 20L, date())).thenReturn(
                 new CertificationNotificationPopulationResolver.Population(
                         CertificationNotificationPopulationResolver.PopulationCase.REINSTATEMENT,
                         501L, List.of(900L), List.of(), List.of(501L), true, true));
@@ -68,10 +73,39 @@ class CertificationExpiryNotificationSchedulerTest {
         assertEquals("CERT_REINSTATEMENT:10:2026-08-28:501", key.getValue());
     }
 
+    @Test
+    void tenantInventoryごとにcontextとtenantAwarePopulationを分離する() {
+        AccountingTenantInventoryProperties inventory = new AccountingTenantInventoryProperties();
+        inventory.setIds(java.util.Set.of("tenant-a", "tenant-b"));
+        when(certificationMapper.selectList(any())).thenReturn(List.of());
+        when(timezoneResolver.resolve(any())).thenReturn(ZoneId.of("Asia/Tokyo"));
+
+        CertificationExpiryNotificationScheduler scheduler =
+                new CertificationExpiryNotificationScheduler(certificationMapper, expiryService,
+                        populationResolver, notificationService, genericNotificationService,
+                        Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("UTC")),
+                        inventory, timezoneResolver);
+
+        assertEquals(0, scheduler.dispatch(date()));
+        verify(certificationMapper, org.mockito.Mockito.times(2)).selectList(any());
+        verify(timezoneResolver).resolve("tenant-a");
+        verify(timezoneResolver).resolve("tenant-b");
+        org.junit.jupiter.api.Assertions.assertNull(
+                com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
     private CertificationExpiryNotificationScheduler scheduler() {
         return new CertificationExpiryNotificationScheduler(certificationMapper, expiryService,
                 populationResolver, notificationService, genericNotificationService,
-                Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo")));
+                Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo")),
+                inventory("default"), timezoneResolver);
+    }
+
+    private AccountingTenantInventoryProperties inventory(String... ids) {
+        AccountingTenantInventoryProperties inventory = new AccountingTenantInventoryProperties();
+        inventory.setIds(java.util.Set.of(ids));
+        when(timezoneResolver.resolve(any())).thenReturn(ZoneId.of("Asia/Tokyo"));
+        return inventory;
     }
 
     private EngineerCertification record(Long id, Long engineerId) {

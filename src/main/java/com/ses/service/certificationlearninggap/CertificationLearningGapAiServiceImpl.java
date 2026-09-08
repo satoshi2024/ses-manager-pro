@@ -15,6 +15,7 @@ import com.ses.mapper.TrainingCourseSkillMapper;
 import com.ses.service.SkillGapService;
 import com.ses.service.skillgap.AiLearningCandidateService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
@@ -49,8 +50,12 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
         if (engineerId == null || projectId == null) {
             throw BusinessException.of(400, "skill.gap.requestRequired");
         }
-        Project project = projectMapper == null ? null : projectMapper.selectById(projectId);
-        if (projectMapper != null && project == null) {
+        String tenantId = currentTenant();
+        if (projectMapper == null || tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        Project project = projectMapper.selectByIdAndTenant(projectId, tenantId);
+        if (project == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
         if (dataScopeService != null) {
@@ -108,6 +113,10 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenantId;
     }
 }

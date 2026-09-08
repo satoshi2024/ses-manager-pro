@@ -352,6 +352,7 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
                 .serviceRequestId(customerARequest.getId())
                 .documentId(version.getDocumentId())
                 .visibility("PORTAL_VISIBLE")
+                .businessKey("portal-service-desk-link:" + version.getDocumentId())
                 .fileName("portal-report.pdf")
                 .fileSize(3L)
                 .build();

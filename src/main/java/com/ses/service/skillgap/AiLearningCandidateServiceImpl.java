@@ -161,8 +161,22 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
         if (!LocalDateTime.now(clock).isBefore(candidate.expiresAt())) {
             throw BusinessException.of(409, "skill.ai.candidateExpired");
         }
+        String tenantId = currentTenant();
+        if (candidateMapper != null) {
+            LearningCandidate persisted = candidateMapper.selectByTenantId(tenantId, candidate.aiRunId());
+            if (persisted == null || !java.util.Objects.equals(persisted.getSnapshotHash(), hash(candidate))) {
+                throw BusinessException.of(403, "error.scope.notFound");
+            }
+            if (runMapper == null) {
+                throw BusinessException.of(503, "skill.ai.candidateUnavailable");
+            }
+            AiRecommendationRun run = runMapper.selectById(candidate.aiRunId());
+            if (run == null || !tenantId.equals(run.getTenantId()) || !USE_CASE.equals(run.getUseCase())) {
+                throw BusinessException.of(403, "error.scope.notFound");
+            }
+        }
         LearningDecisionEvent event = new LearningDecisionEvent();
-        event.setTenantId(currentTenant());
+        event.setTenantId(tenantId);
         event.setDecisionDomain("LEARNING_SUGGESTION_" + decision);
         event.setSourceType("AI_COURSE_CANDIDATE");
         event.setSourceId(candidate.aiRunId());
@@ -186,7 +200,7 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
         candidate.setEngineerId(ruleGap.engineerId());
         candidate.setProjectId(ruleGap.projectId());
         if (projectMapper != null) {
-            com.ses.entity.Project project = projectMapper.selectById(ruleGap.projectId());
+            com.ses.entity.Project project = projectMapper.selectByIdAndTenant(ruleGap.projectId(), candidate.getTenantId());
             candidate.setCustomerId(project == null ? null : project.getCustomerId());
         }
         candidate.setAsOfDate(result.asOf());
@@ -272,7 +286,11 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenantId;
     }
 
     private String json(List<Long> ids) {

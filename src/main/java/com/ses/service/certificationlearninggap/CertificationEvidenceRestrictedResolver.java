@@ -13,6 +13,7 @@ import com.ses.mapper.DocumentMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.certification.CertificationRecordStates;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.impl.FileScopeValidationService;
 import org.springframework.stereotype.Service;
@@ -77,7 +78,8 @@ public class CertificationEvidenceRestrictedResolver {
             throw BusinessException.of(403, "certification.evidence.linkRequired");
         }
         if (Integer.valueOf(1).equals(document.getLegalHoldFlag())
-                || (document.getRetentionUntil() != null && document.getRetentionUntil().isBefore(LocalDate.now()))) {
+                || (document.getRetentionUntil() != null
+                && document.getRetentionUntil().isBefore(LocalDate.now(AccountingTenantContextHolder.getZoneId())))) {
             throw BusinessException.of(403, "error.file.legalHoldActive");
         }
         CertificationEvent verify = currentVerifyEvent(recordId);
@@ -122,6 +124,63 @@ public class CertificationEvidenceRestrictedResolver {
                         return null;
                     }
                 }).filter(Objects::nonNull).distinct().toList();
+    }
+
+    /**
+     * DRAFT/SUBMITTEDのverify候補metadataを返す。VERIFY済みのdownload resolverとは意図的に分離する。
+     * CLEAN・typed link・文書種別・tenant・retentionだけを確認し、binaryやstorage keyは返さない。
+     */
+    public List<ResolvedEvidence> listForVerification(Long recordId) {
+        String tenantId = tenant();
+        EngineerCertification record = loadRecord(recordId, tenantId);
+        if (!CertificationRecordStates.DRAFT.equals(record.getRecordState())
+                && !CertificationRecordStates.SUBMITTED.equals(record.getRecordState())) {
+            return List.of();
+        }
+        dataScopeService.assertAllowedEngineer(record.getEngineerId());
+        return linkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
+                        .eq(DocumentLink::getTenantId, tenantId)
+                        .eq(DocumentLink::getTargetType, "CERTIFICATION_RECORD")
+                        .eq(DocumentLink::getTargetId, recordId))
+                .stream().flatMap(link -> candidateVersions(record, link, tenantId).stream()).toList();
+    }
+
+    /** 一覧/detailはstateに応じてverify前候補またはverify済みexact evidenceを返す。 */
+    public List<ResolvedEvidence> listForDisplay(Long recordId) {
+        String tenantId = tenant();
+        EngineerCertification record = loadRecord(recordId, tenantId);
+        if (CertificationRecordStates.DRAFT.equals(record.getRecordState())
+                || CertificationRecordStates.SUBMITTED.equals(record.getRecordState())) {
+            return listForVerification(recordId);
+        }
+        return list(recordId);
+    }
+
+    private List<ResolvedEvidence> candidateVersions(EngineerCertification record, DocumentLink link,
+                                                      String tenantId) {
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, link.getDocumentId()).eq(Document::getTenantId, tenantId)
+                .eq(Document::getDocumentType, "CERTIFICATION_EVIDENCE"));
+        if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                || (document.getRetentionUntil() != null
+                && document.getRetentionUntil().isBefore(LocalDate.now(AccountingTenantContextHolder.getZoneId())))) {
+            return List.of();
+        }
+        return versionMapper.selectList(new LambdaQueryWrapper<DocumentVersion>()
+                        .eq(DocumentVersion::getTenantId, tenantId)
+                        .eq(DocumentVersion::getDocumentId, link.getDocumentId())
+                        .eq(DocumentVersion::getScanStatus, "CLEAN")
+                        .orderByDesc(DocumentVersion::getVersionNo))
+                .stream().map(version -> new ResolvedEvidence(record, document, version, link)).toList();
+    }
+
+    private EngineerCertification loadRecord(Long recordId, String tenantId) {
+        EngineerCertification record = certificationMapper.selectOne(new LambdaQueryWrapper<EngineerCertification>()
+                .eq(EngineerCertification::getId, recordId).eq(EngineerCertification::getTenantId, tenantId));
+        if (record == null || !Integer.valueOf(1).equals(record.getCurrentFlag())) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        return record;
     }
 
     private CertificationEvent currentVerifyEvent(Long recordId) {

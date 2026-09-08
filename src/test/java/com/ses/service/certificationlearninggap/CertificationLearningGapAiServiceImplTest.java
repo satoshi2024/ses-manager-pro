@@ -6,15 +6,21 @@ import com.ses.dto.skillgap.SkillGapItem;
 import com.ses.dto.skillgap.SkillGapResult;
 import com.ses.entity.TrainingCourse;
 import com.ses.entity.TrainingCourseSkill;
+import com.ses.entity.Project;
+import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingCourseSkillMapper;
 import com.ses.service.SkillGapService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.DataScopeService;
 import com.ses.service.skillgap.AiLearningCandidateService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -38,6 +44,18 @@ class CertificationLearningGapAiServiceImplTest {
     @Mock private AiLearningCandidateService aiLearningCandidateService;
     @Mock private TrainingCourseSkillMapper courseSkillMapper;
     @Mock private TrainingCourseMapper courseMapper;
+    @Mock private ProjectMapper projectMapper;
+    @Mock private DataScopeService dataScopeService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void asOf期間のruleGapを先に計算しactiveCourseだけをAIallowlistへ渡す() {
@@ -58,14 +76,20 @@ class CertificationLearningGapAiServiceImplTest {
         when(skillGapService.calculate(any())).thenReturn(gap);
         when(courseSkillMapper.selectList(any())).thenReturn(List.of(relation));
         when(courseMapper.selectBatchIds(any())).thenReturn(List.of(active));
+        Project project = new Project();
+        project.setId(42L);
+        when(projectMapper.selectByIdAndTenant(9L, "default")).thenReturn(project);
         AiCourseCandidateResult candidate = new AiCourseCandidateResult("AI_CANDIDATE", gap.asOf(),
                 List.of(77L), List.of(77L), "trace", 99L, null, true, true, null, 88L);
         when(aiLearningCandidateService.suggest(eq(gap), eq(List.of(77L)), eq(LocalDate.of(2026, 8, 1)), eq(100L)))
                 .thenReturn(candidate);
 
-        var result = new CertificationLearningGapAiServiceImpl(queryService, skillGapService,
+        CertificationLearningGapAiServiceImpl service = new CertificationLearningGapAiServiceImpl(queryService, skillGapService,
                 aiLearningCandidateService, courseSkillMapper, courseMapper,
-                Clock.fixed(Instant.parse("2026-08-01T03:00:00Z"), ZoneId.of("Asia/Tokyo")))
+                Clock.fixed(Instant.parse("2026-08-01T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
+        ReflectionTestUtils.setField(service, "projectMapper", projectMapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        var result = service
                 .suggest(42L, 9L, LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 1),
                         LocalDate.of(2026, 8, 31), SkillGapService.DemandSource.PROJECT, 100L,
                         new TestingAuthenticationToken("100", "n", "ROLE_HR"));
@@ -85,9 +109,15 @@ class CertificationLearningGapAiServiceImplTest {
                 42L, "対象", "稼動中", "ACTIVE", List.of(), List.of(), null, "historical_data_unavailable", null, List.of()));
         when(skillGapService.calculate(any())).thenReturn(unavailable);
 
-        var result = new CertificationLearningGapAiServiceImpl(queryService, skillGapService,
+        Project project = new Project();
+        project.setId(42L);
+        when(projectMapper.selectByIdAndTenant(9L, "default")).thenReturn(project);
+        CertificationLearningGapAiServiceImpl service = new CertificationLearningGapAiServiceImpl(queryService, skillGapService,
                 aiLearningCandidateService, courseSkillMapper, courseMapper, Clock.systemUTC())
-                .suggest(42L, 9L, LocalDate.of(2025, 1, 1), null, null,
+                ;
+        ReflectionTestUtils.setField(service, "projectMapper", projectMapper);
+        ReflectionTestUtils.setField(service, "dataScopeService", dataScopeService);
+        var result = service.suggest(42L, 9L, LocalDate.of(2025, 1, 1), null, null,
                         SkillGapService.DemandSource.COMBINED, 100L, null);
 
         assertEquals(SkillGapService.STATUS_HISTORICAL_DATA_UNAVAILABLE, result.ruleGap().status());

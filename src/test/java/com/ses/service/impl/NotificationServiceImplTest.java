@@ -7,6 +7,7 @@ import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.notification.NotificationOutboxService;
 import com.ses.service.notification.WebhookNotifier;
 import org.junit.jupiter.api.Test;
@@ -52,6 +53,25 @@ class NotificationServiceImplTest {
         // R1-P2-03: 注入Clock（単体テストはシステム時計で動作させる）
         org.springframework.test.util.ReflectionTestUtils.setField(
                 notificationService, "clock", java.time.Clock.systemDefaultZone());
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
+    @Test
+    void 明示tenantでは通知一覧と件数を同じtenant条件で検索する() {
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        when(notificationMapper.selectPageForUserByTenant("tenant-a", 1L, null, false, 10, 0))
+                .thenReturn(Collections.emptyList());
+        when(notificationMapper.countPageForUserByTenant("tenant-a", 1L, null, false)).thenReturn(0L);
+
+        Page<NotificationDto> result = notificationService.pageForUser(1L, 1, 10, null, false);
+
+        assertEquals(0, result.getTotal());
+        verify(notificationMapper).selectPageForUserByTenant("tenant-a", 1L, null, false, 10, 0);
+        verify(notificationMapper).countPageForUserByTenant("tenant-a", 1L, null, false);
     }
 
     @Test

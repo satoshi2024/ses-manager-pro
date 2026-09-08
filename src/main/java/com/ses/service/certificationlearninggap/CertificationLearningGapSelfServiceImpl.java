@@ -354,7 +354,7 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
                 .canViewFullNumber(false)
                 .build();
         if (restrictedEvidenceResolver != null) {
-            List<CertificationEvidenceView> restricted = restrictedEvidenceResolver.list(record.getId()).stream()
+            List<CertificationEvidenceView> restricted = restrictedEvidenceResolver.listForDisplay(record.getId()).stream()
                     .map(resolved -> new CertificationEvidenceView(resolved.version().getDocumentId(),
                             resolved.version().getId(), resolved.version().getVersionNo(),
                             resolved.version().getOriginalName(), resolved.version().getSha256(),

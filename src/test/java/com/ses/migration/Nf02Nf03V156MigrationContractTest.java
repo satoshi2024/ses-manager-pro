@@ -15,12 +15,13 @@ class Nf02Nf03V156MigrationContractTest {
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
 
     @Test
-    void V156が最新migrationの後ろにあり旧番号へ追記していない() throws Exception {
+    void NF02_NF03の追加migrationがV156の後ろにあり旧番号へ追記していない() throws Exception {
         assertTrue(Files.exists(MIGRATION_ROOT.resolve("V156__nf02_nf03_boundary_repair.sql")));
+        assertTrue(Files.exists(MIGRATION_ROOT.resolve("V157__nf02_nf03_tenant_attachment_notification_boundary.sql")));
         assertFalse(Files.exists(MIGRATION_ROOT.resolve("V150__nf02_nf03_boundary_repair.sql")));
         try (var paths = Files.list(MIGRATION_ROOT)) {
             assertTrue(paths.map(path -> path.getFileName().toString())
-                    .noneMatch(name -> name.startsWith("V157") || name.startsWith("V158")));
+                    .noneMatch(name -> name.startsWith("V158")));
         }
     }
 

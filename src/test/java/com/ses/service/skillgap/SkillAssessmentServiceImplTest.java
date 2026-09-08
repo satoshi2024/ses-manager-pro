@@ -15,6 +15,9 @@ import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.EngineerSkillService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -45,6 +48,16 @@ class SkillAssessmentServiceImplTest {
     @Mock private UserOrganizationMapper userOrganizationMapper;
     @Mock private SysUserMapper sysUserMapper;
     @Mock private EngineerSkillService engineerSkillService;
+
+    @BeforeEach
+    void setTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Test
     void selfとmanagerはproposalだけで公式projectionを変更しない() {

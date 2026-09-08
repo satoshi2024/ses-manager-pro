@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("t_engineer_account_link")
 public class EngineerAccountLink {
+    private String tenantId;
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long engineerId;

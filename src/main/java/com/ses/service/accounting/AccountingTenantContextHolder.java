@@ -33,6 +33,12 @@ public final class AccountingTenantContextHolder {
         return getTenantId();
     }
 
+    /** 明示的に設定されたtenantだけを返す。定期処理のinventory検証で使用する。 */
+    public static String getExplicitTenantId() {
+        String tenant = CURRENT_TENANT.get();
+        return (tenant != null && !tenant.isBlank()) ? tenant : null;
+    }
+
     /** テナントの会計タイムゾーンを設定する。未設定時は Asia/Tokyo を返す。 */
     public static void setZoneId(ZoneId zoneId) {
         if (zoneId != null) {

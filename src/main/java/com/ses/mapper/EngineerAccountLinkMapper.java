@@ -61,6 +61,13 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
     @Select("SELECT * FROM t_engineer_account_link WHERE engineer_id = #{engineerId} LIMIT 1")
     EngineerAccountLink selectByEngineerId(@Param("engineerId") Long engineerId);
 
+    @Select("SELECT l.* FROM t_engineer_account_link l "
+            + "INNER JOIN t_engineer_certification c ON c.engineer_id = l.engineer_id "
+            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "WHERE l.engineer_id = #{engineerId} AND l.tenant_id = #{tenantId} LIMIT 1")
+    EngineerAccountLink selectByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
+                                                    @Param("tenantId") String tenantId);
+
     @Select("<script>SELECT * FROM t_engineer_account_link WHERE engineer_id IN <foreach collection='engineerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<EngineerAccountLink> selectByEngineerIds(@Param("engineerIds") List<Long> engineerIds);
 

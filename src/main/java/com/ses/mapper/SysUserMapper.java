@@ -16,6 +16,14 @@ import java.util.List;
  */
 public interface SysUserMapper extends BaseMapper<SysUser> {
 
+    @Select("SELECT * FROM sys_user WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0")
+    SysUser selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT * FROM sys_user WHERE tenant_id = #{tenantId} AND role = #{role} "
+            + "AND status = 1 AND deleted_flag = 0 ORDER BY id")
+    List<SysUser> selectActiveByRoleAndTenant(@Param("role") String role,
+                                               @Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM sys_user WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     SysUser selectByIdForUpdate(@Param("id") Long id);
 

@@ -79,4 +79,9 @@ public interface DocumentLinkMapper extends BaseMapper<DocumentLink> {
      */
     @Select("SELECT * FROM t_document_link WHERE document_id = #{documentId} AND deleted_flag = 0")
     List<DocumentLink> findByDocumentId(@Param("documentId") Long documentId);
+
+    @Select("SELECT * FROM t_document_link WHERE tenant_id = #{tenantId} "
+            + "AND document_id = #{documentId} AND deleted_flag = 0")
+    List<DocumentLink> findByDocumentIdForTenant(@Param("tenantId") String tenantId,
+                                                 @Param("documentId") Long documentId);
 }

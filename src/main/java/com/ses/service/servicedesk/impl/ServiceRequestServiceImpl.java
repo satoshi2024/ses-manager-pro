@@ -122,6 +122,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
         }
 
+        requireExecutionContext(executionContext);
+
         Customer customer = customerMapper.selectById(req.getCustomerId());
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
@@ -131,13 +133,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             assertInternalCustomerAllowed(req.getCustomerId());
         }
 
-        requireExecutionContext(executionContext);
         validateLinkedEntities(req.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
         executionContext = bindCalendarScope(executionContext, req.getCustomerId(), req.getContractId());
 
         LocalDateTime now = executionContext.occurredAt().atZone(executionContext.zoneId()).toLocalDateTime();
-        String requestNo = generateRequestNo(now);
+        String requestNo = generateRequestNo(now, executionContext.tenantId());
         Long effectiveActorId = isPortal ? portalUserId : executionContext.actorId();
 
         ServiceRequest serviceRequest = ServiceRequest.builder()
@@ -766,8 +767,12 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     private void requireExecutionContext(ServiceDeskExecutionContext context) {
-        if (context == null) {
+        if (context == null || context.tenantId() == null || context.tenantId().isBlank()) {
             throw BusinessException.of(400, "サービスデスクの実行コンテキストが必要です");
+        }
+        String explicitTenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (explicitTenantId != null && !explicitTenantId.equals(context.tenantId().trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
         }
     }
 
@@ -910,12 +915,15 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         }
     }
 
-    private String generateRequestNo(LocalDateTime now) {
+    private String generateRequestNo(LocalDateTime now, String executionTenantId) {
         String month = now.format(DateTimeFormatter.ofPattern("yyyyMM"));
         if (requestSequenceMapper == null) {
             throw BusinessException.of(503, "service.request.sequenceUnavailable");
         }
-        String tenantId = currentTenant();
+        if (executionTenantId == null || executionTenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        String tenantId = executionTenantId.trim();
         requestSequenceMapper.ensureRow(tenantId, month);
         if (requestSequenceMapper.incrementIfAvailable(tenantId, month) != 1) {
             throw BusinessException.of(409, "当月のリクエスト採番上限(9999)に達しました");

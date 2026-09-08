@@ -51,9 +51,10 @@ public class PortalSecurityConfig {
     public SecurityFilterChain portalSecurityFilterChain(HttpSecurity http,
                                                          com.ses.service.portal.PortalSessionService portalSessionService,
                                                          PortalRateLimiter portalRateLimiter,
-                                                         com.ses.common.util.ClientIpResolver clientIpResolver) throws Exception {
+                                                         com.ses.common.util.ClientIpResolver clientIpResolver,
+                                                         com.ses.service.accounting.AccountingTimezoneResolver timezoneResolver) throws Exception {
         PortalSessionFilter portalSessionFilter =
-                new PortalSessionFilter(portalSessionService, portalSecurityProperties);
+                new PortalSessionFilter(portalSessionService, portalSecurityProperties, timezoneResolver);
         PortalRateLimitFilter portalRateLimitFilter =
                 new PortalRateLimitFilter(portalRateLimiter, portalSecurityProperties, clientIpResolver);
 

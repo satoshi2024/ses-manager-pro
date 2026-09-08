@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.dto.certification.CertificationExpiryCandidate;
 import com.ses.entity.EngineerCertification;
 import com.ses.mapper.EngineerCertificationMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -42,11 +43,15 @@ public class CertificationExpiryServiceImpl implements CertificationExpiryServic
         if (asOf == null || recipientUserId == null) {
             return List.of();
         }
-        List<EngineerCertification> records = engineerCertificationMapper.selectList(
-                new LambdaQueryWrapper<EngineerCertification>()
-                        .eq(EngineerCertification::getRecordState, CertificationRecordStates.ACTIVE)
-                        .eq(EngineerCertification::getCurrentFlag, 1)
-                        .isNotNull(EngineerCertification::getExpiresOn));
+        LambdaQueryWrapper<EngineerCertification> query = new LambdaQueryWrapper<EngineerCertification>()
+                .eq(EngineerCertification::getRecordState, CertificationRecordStates.ACTIVE)
+                .eq(EngineerCertification::getCurrentFlag, 1)
+                .isNotNull(EngineerCertification::getExpiresOn);
+        String explicitTenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (explicitTenantId != null) {
+            query.eq(EngineerCertification::getTenantId, explicitTenantId);
+        }
+        List<EngineerCertification> records = engineerCertificationMapper.selectList(query);
         return records.stream()
                 .map(record -> evaluate(record, asOf, recipientUserId))
                 .filter(java.util.Objects::nonNull)
@@ -61,6 +66,10 @@ public class CertificationExpiryServiceImpl implements CertificationExpiryServic
                 || !Integer.valueOf(1).equals(record.getCurrentFlag())
                 || record.getExpiresOn() == null
                 || asOf.isAfter(record.getExpiresOn())) {
+            return null;
+        }
+        String explicitTenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (explicitTenantId != null && !explicitTenantId.equals(record.getTenantId())) {
             return null;
         }
         long remaining = ChronoUnit.DAYS.between(asOf, record.getExpiresOn());

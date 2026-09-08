@@ -207,6 +207,9 @@ logging:
 
 # ===== アプリ固有設定 =====
 app:
+  accounting:
+    tenants:
+      ids: ${ACCOUNTING_TENANT_IDS:}
   # ===== Prometheus スクレイパー・マシン認証（REV-RP-P1-004 / ACC-OPS-P1-002） =====
   # 秘密情報は環境変数のみ。リポジトリ・設定ファイルへ平文パスワードを書かないこと。
   # username/password が両方非空のときだけ ROLE_METRICS_SCRAPER のインメモリユーザーを登録する。

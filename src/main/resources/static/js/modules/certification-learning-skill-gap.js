@@ -90,10 +90,13 @@
     function detailHtml(row) {
         const certs = (row.certifications || []).map(function (item) {
             const number = item.certificateNumber ? esc(item.certificateNumber) : esc(item.certificateNumberMasked || '未登録');
+            const downloadable = item.recordState === 'ACTIVE';
             const evidences = (item.evidences || []).map(function (evidence) {
+                const label = esc(evidence.originalName || '証憑');
+                if (!downloadable) return '<span class="d-block text-muted">' + label + '（確認待ち）</span>';
                 return '<a class="d-block" href="/api/certification-learning-gap/' + encodeURIComponent(row.engineerId)
                     + '/certifications/' + encodeURIComponent(item.id) + '/evidence/' + encodeURIComponent(evidence.documentId)
-                    + '/versions/' + encodeURIComponent(evidence.versionNo) + '/download">' + esc(evidence.originalName || '証憑') + '</a>';
+                    + '/versions/' + encodeURIComponent(evidence.versionNo) + '/download">' + label + '</a>';
             }).join('');
             const state = item.recordState || '';
             let actions = '';

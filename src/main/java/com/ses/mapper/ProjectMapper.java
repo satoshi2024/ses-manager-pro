@@ -17,6 +17,9 @@ import java.util.Collection;
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
 
+    @Select("SELECT * FROM t_project WHERE id = #{id} AND tenant_id = #{tenantId} AND deleted_flag = 0 LIMIT 1")
+    Project selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
     /** 商機変換の冪等判定用。論理削除済みも含めてsourceを一意に解決する。 */
     @Select("SELECT * FROM t_project WHERE source_opportunity_id = #{opportunityId} LIMIT 1")
     Project selectBySourceOpportunityIdIncludingDeleted(@Param("opportunityId") Long opportunityId);

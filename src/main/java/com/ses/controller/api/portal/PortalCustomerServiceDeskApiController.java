@@ -262,7 +262,8 @@ public class PortalCustomerServiceDeskApiController {
         serviceRequestService.getPortalDetail(id, customerId());
 
         // 2. 添付ファイルリンク検証
-        ServiceAttachmentLink link = attachmentLinkMapper.selectById(attachmentId);
+        ServiceAttachmentLink link = attachmentLinkMapper.selectByTenantIdAndRequest(
+                com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId(), attachmentId, id);
         if (link == null || !Objects.equals(link.getServiceRequestId(), id) || !"PORTAL_VISIBLE".equals(link.getVisibility())) {
             throw BusinessException.of(404, "error.notFound");
         }

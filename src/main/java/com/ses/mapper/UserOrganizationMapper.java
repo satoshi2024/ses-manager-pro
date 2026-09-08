@@ -15,6 +15,11 @@ public interface UserOrganizationMapper extends BaseMapper<UserOrganization> {
     @Select("SELECT * FROM t_user_organization WHERE user_id = #{userId} AND deleted_flag = 0 ORDER BY id FOR UPDATE")
     List<UserOrganization> selectByUserForUpdate(@Param("userId") Long userId);
 
+    @Select("SELECT * FROM t_user_organization WHERE tenant_id = #{tenantId} "
+            + "AND user_id = #{userId} AND deleted_flag = 0 ORDER BY id")
+    List<UserOrganization> selectByUserAndTenant(@Param("userId") Long userId,
+                                                  @Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM t_user_organization WHERE manager_user_id = #{userId} AND valid_from <= #{asOf} AND (valid_to IS NULL OR valid_to >= #{asOf}) AND deleted_flag = 0")
     List<UserOrganization> selectActiveByManagerUserId(@Param("userId") Long userId, @Param("asOf") java.time.LocalDate asOf);
 

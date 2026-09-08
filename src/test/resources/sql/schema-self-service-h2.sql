@@ -2,6 +2,7 @@
 -- role/status は H2 では VARCHAR のため ENUM 拡張のスキーマ変更は不要。
 CREATE TABLE IF NOT EXISTS t_engineer_account_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   engineer_id BIGINT NOT NULL UNIQUE,
   sys_user_id BIGINT NOT NULL UNIQUE,
   linked_by   BIGINT,

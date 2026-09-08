@@ -115,14 +115,40 @@ CREATE TABLE IF NOT EXISTS t_service_comment (
 
 CREATE TABLE IF NOT EXISTS t_service_attachment_link (
     id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id           VARCHAR(100) NOT NULL DEFAULT 'default',
     service_request_id  BIGINT NOT NULL,
     comment_id          BIGINT NULL,
     document_id         BIGINT NOT NULL,
     visibility          VARCHAR(20) NOT NULL DEFAULT 'PORTAL_VISIBLE',
+    business_key        VARCHAR(512) NOT NULL,
     file_name           VARCHAR(255) NOT NULL,
     file_size           BIGINT NOT NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_service_attachment_tenant_business_key
+    ON t_service_attachment_link (tenant_id, business_key);
+
+CREATE TABLE IF NOT EXISTS t_service_attachment_compensation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
+    service_request_id BIGINT NOT NULL,
+    comment_id BIGINT,
+    document_id BIGINT NOT NULL,
+    visibility VARCHAR(20) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NOT NULL,
+    business_key VARCHAR(512) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'RETRY',
+    attempt_count INT NOT NULL DEFAULT 1,
+    last_error VARCHAR(255),
+    next_retry_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, business_key)
+);
+CREATE INDEX IF NOT EXISTS idx_service_attachment_compensation_due
+    ON t_service_attachment_compensation(status, next_retry_at);
 
 INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
 SELECT 'SERVICE_REQUEST_ATTACHMENT', 'サービスリクエスト添付', 'INCOMING', 7, 'TRANSACTION_DATE', 1
@@ -241,3 +267,10 @@ CROSS JOIN (
 WHERE g.tenant_id = 'default'
   AND g.enabled = 1
   AND g.group_key IN ('role-sales', 'role-manager', 'role-admin');
+
+-- 共通V1の既存テーブルにも、tenant-aware entity/queryが要求する列を付与する。
+ALTER TABLE sys_user ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_notification ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_engineer_account_link ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_user_organization ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';
+ALTER TABLE t_lifecycle_case ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100) NOT NULL DEFAULT 'default';

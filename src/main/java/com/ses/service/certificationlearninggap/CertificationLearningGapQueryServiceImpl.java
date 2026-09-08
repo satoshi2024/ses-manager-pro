@@ -356,15 +356,15 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
         return new CertificationLearningGapCertificationDto(record.getId(), record.getCertificationId(),
                 master == null ? null : master.getDisplayName(), record.getAcquiredOn(), record.getExpiresOn(),
                 record.getRecordState(), effectiveState, record.getCurrentFlag(), record.getCertificateNumberMasked(), raw,
-                canViewFullNumber, record.getVersion(), evidenceViews(record.getId()));
+                canViewFullNumber, record.getVersion(), evidenceViews(record));
     }
 
-    private List<CertificationEvidenceView> evidenceViews(Long recordId) {
-        if (recordId == null) {
+    private List<CertificationEvidenceView> evidenceViews(EngineerCertification record) {
+        if (record == null || record.getId() == null) {
             return List.of();
         }
         if (restrictedEvidenceResolver != null) {
-            return restrictedEvidenceResolver.list(recordId).stream()
+            return restrictedEvidenceResolver.listForDisplay(record.getId()).stream()
                     .map(resolved -> new CertificationEvidenceView(resolved.version().getDocumentId(),
                             resolved.version().getId(), resolved.version().getVersionNo(),
                             resolved.version().getOriginalName(), resolved.version().getSha256(),
@@ -377,6 +377,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private Map<Long, String> lifecycleStates(Set<Long> engineerIds, LocalDate asOf) {
         if (engineerIds.isEmpty()) return Map.of();
         List<LifecycleCase> cases = lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
+                .eq(LifecycleCase::getTenantId, currentTenant())
                 .in(LifecycleCase::getEngineerId, engineerIds)
                 .in(LifecycleCase::getLifecycleType, "LEAVE", "REINSTATEMENT", "RESIGNATION")
                 .ne(LifecycleCase::getStatus, "CANCELLED")

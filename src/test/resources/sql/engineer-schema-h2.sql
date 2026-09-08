@@ -145,6 +145,7 @@ CREATE TABLE t_project_skill (
 DROP TABLE IF EXISTS t_notification CASCADE;
 CREATE TABLE t_notification (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   type        VARCHAR(30)  NOT NULL,
   title       VARCHAR(200) NOT NULL,
   message     VARCHAR(500),
@@ -152,9 +153,10 @@ CREATE TABLE t_notification (
   menu_key    VARCHAR(50),
   organization_id BIGINT,
   recipient_user_id BIGINT,
-  dedupe_key  VARCHAR(200) NOT NULL UNIQUE,
+  dedupe_key  VARCHAR(200) NOT NULL,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX uk_notification_tenant_dedupe ON t_notification(tenant_id, dedupe_key);
 
 DROP TABLE IF EXISTS t_notification_read CASCADE;
 CREATE TABLE t_notification_read (
@@ -639,6 +641,7 @@ WHERE m.menu_key = 'myLifecycle'
 DROP TABLE IF EXISTS sys_user CASCADE;
 CREATE TABLE sys_user (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id     VARCHAR(100) NOT NULL DEFAULT 'default',
   username      VARCHAR(50) NOT NULL UNIQUE,
   password      VARCHAR(255) NOT NULL,
   real_name     VARCHAR(50),
@@ -762,6 +765,7 @@ CREATE TABLE t_freee_employee_link (
 DROP TABLE IF EXISTS t_engineer_account_link CASCADE;
 CREATE TABLE t_engineer_account_link (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   VARCHAR(100) NOT NULL DEFAULT 'default',
   engineer_id BIGINT NOT NULL UNIQUE,
   sys_user_id BIGINT NOT NULL UNIQUE,
   linked_by   BIGINT,
@@ -1098,6 +1102,7 @@ CREATE TABLE m_organization_unit (
 
 CREATE TABLE t_user_organization (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
   user_id BIGINT NOT NULL,
   organization_id BIGINT NOT NULL,
   position_name VARCHAR(100),

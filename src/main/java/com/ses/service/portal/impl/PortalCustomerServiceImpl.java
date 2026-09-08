@@ -182,7 +182,8 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
         if (dto == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        List<Long> documentIds = documentLinkMapper.findDocumentIdsByTarget("CONTRACT", contractId);
+        List<Long> documentIds = documentLinkMapper.findDocumentIdsByTargetForTenant(
+                tenantId(), "CONTRACT", contractId);
         if (documentIds.isEmpty()) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -344,10 +345,19 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
     }
 
     private void requireLink(Long documentId, String targetType, Long targetId) {
-        boolean linked = documentLinkMapper.findDocumentIdsByTarget(targetType, targetId).contains(documentId);
+        boolean linked = documentLinkMapper.findDocumentIdsByTargetForTenant(
+                tenantId(), targetType, targetId).contains(documentId);
         if (!linked) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+    }
+
+    private String tenantId() {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        return tenantId;
     }
 
     private Integer parseProviderStatus(String value) {

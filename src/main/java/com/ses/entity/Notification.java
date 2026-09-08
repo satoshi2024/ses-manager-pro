@@ -12,6 +12,8 @@ import java.time.LocalDateTime;
 public class Notification {
     @TableId(type = IdType.AUTO)
     private Long id;
+    /** dispatch時のtenant。資格期限通知の母集団・通知行を同じtenantへ固定する。 */
+    private String tenantId;
     private String type;
     private String title;
     private String message;

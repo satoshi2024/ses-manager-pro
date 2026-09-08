@@ -52,35 +52,63 @@ public class CertificationNotificationPopulationResolver {
     }
 
     public Population resolve(Long engineerId, LocalDate asOf) {
+        return resolveInternal(null, engineerId, asOf, false);
+    }
+
+    /** tenantを全母集団queryへ渡す資格期限通知用resolver。 */
+    public Population resolve(String tenantId, Long engineerId, LocalDate asOf) {
+        if (tenantId == null || tenantId.isBlank()) {
+            return Population.empty();
+        }
+        return resolveInternal(tenantId, engineerId, asOf, true);
+    }
+
+    private Population resolveInternal(String tenantId, Long engineerId, LocalDate asOf, boolean tenantAware) {
         if (engineerId == null || asOf == null) {
             return Population.empty();
         }
-        List<LifecycleCase> cases = lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
-                .eq(LifecycleCase::getEngineerId, engineerId)
-                .orderByAsc(LifecycleCase::getAnchorDate)
-                .orderByAsc(LifecycleCase::getId));
+        List<LifecycleCase> cases = tenantAware
+                ? lifecycleCaseMapper.selectByEngineerIdAndTenant(engineerId, tenantId)
+                : lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
+                    .eq(LifecycleCase::getEngineerId, engineerId)
+                    .orderByAsc(LifecycleCase::getAnchorDate).orderByAsc(LifecycleCase::getId));
         CertificationLifecycleStateResolver.Resolution lifecycle = lifecycleStateResolver.resolve(cases, asOf);
         if ("RESIGNED".equals(lifecycle.state())) {
-            return populationFor(cases, engineerId, asOf, PopulationCase.RESIGNATION, false);
+            return populationFor(tenantId, cases, engineerId, asOf, PopulationCase.RESIGNATION, false, tenantAware);
         }
         if ("ON_LEAVE".equals(lifecycle.state())) {
-            return populationFor(cases, engineerId, asOf, PopulationCase.LEAVE, false);
+            return populationFor(tenantId, cases, engineerId, asOf, PopulationCase.LEAVE, false, tenantAware);
         }
-        return populationFor(cases, engineerId, asOf,
+        return populationFor(tenantId, cases, engineerId, asOf,
                 lifecycle.reinstatement() ? PopulationCase.REINSTATEMENT : PopulationCase.NORMAL,
-                lifecycle.reinstatement());
+                lifecycle.reinstatement(), tenantAware);
     }
 
     private Population populationFor(List<LifecycleCase> cases, Long engineerId, LocalDate asOf,
                                      PopulationCase state, boolean reinstatement) {
-        EngineerAccountLink link = accountLinkMapper.selectByEngineerId(engineerId);
-        SysUser account = link == null ? null : sysUserMapper.selectById(link.getSysUserId());
+        return populationFor(null, cases, engineerId, asOf, state, reinstatement, false);
+    }
+
+    private Population populationFor(String tenantId, List<LifecycleCase> cases, Long engineerId, LocalDate asOf,
+                                     PopulationCase state, boolean reinstatement, boolean tenantAware) {
+        EngineerAccountLink link = tenantAware
+                ? accountLinkMapper.selectByEngineerIdAndTenant(engineerId, tenantId)
+                : accountLinkMapper.selectByEngineerId(engineerId);
+        SysUser account = link == null ? null : (tenantAware
+                ? sysUserMapper.selectByIdAndTenant(link.getSysUserId(), tenantId)
+                : sysUserMapper.selectById(link.getSysUserId()));
         boolean accountActive = account != null && Integer.valueOf(1).equals(account.getStatus());
         boolean allowSelf = accountActive && state != PopulationCase.RESIGNATION && state != PopulationCase.LEAVE;
 
         Set<Long> managerIds = new LinkedHashSet<>();
         if (state != PopulationCase.RESIGNATION && link != null) {
-            List<UserOrganization> assignments = userOrganizationMapper.selectList(
+            List<UserOrganization> assignments = tenantAware
+                    ? userOrganizationMapper.selectByUserAndTenant(link.getSysUserId(), tenantId).stream()
+                        .filter(item -> Integer.valueOf(1).equals(item.getPrimaryFlag()))
+                        .filter(item -> item.getValidFrom() == null || !item.getValidFrom().isAfter(asOf))
+                        .filter(item -> item.getValidTo() == null || !item.getValidTo().isBefore(asOf))
+                        .toList()
+                    : userOrganizationMapper.selectList(
                     new LambdaQueryWrapper<UserOrganization>()
                             .eq(UserOrganization::getUserId, link.getSysUserId())
                             .eq(UserOrganization::getPrimaryFlag, 1)
@@ -91,7 +119,7 @@ public class CertificationNotificationPopulationResolver {
                             .orderByDesc(UserOrganization::getId));
             for (UserOrganization assignment : assignments) {
                 Long managerId = assignment.getManagerUserId();
-                if (managerId == null || !isActiveUser(managerId)) {
+                if (managerId == null || !isActiveUser(managerId, tenantId, tenantAware)) {
                     continue;
                 }
                 managerIds.add(managerId);
@@ -99,12 +127,13 @@ public class CertificationNotificationPopulationResolver {
             }
         }
 
-        List<Long> hrIds = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+        List<SysUser> hrUsers = tenantAware ? sysUserMapper.selectActiveByRoleAndTenant("HR", tenantId)
+                : sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getRole, "HR")
                         .eq(SysUser::getStatus, 1)
                         .eq(SysUser::getDeletedFlag, 0)
-                        .orderByAsc(SysUser::getId))
-                .stream().map(SysUser::getId).filter(java.util.Objects::nonNull).toList();
+                        .orderByAsc(SysUser::getId));
+        List<Long> hrIds = hrUsers.stream().map(SysUser::getId).filter(java.util.Objects::nonNull).toList();
 
         List<Long> recipients = new ArrayList<>();
         if (allowSelf) {
@@ -117,8 +146,9 @@ public class CertificationNotificationPopulationResolver {
                 reinstatement, account != null);
     }
 
-    private boolean isActiveUser(Long userId) {
-        SysUser user = sysUserMapper.selectById(userId);
+    private boolean isActiveUser(Long userId, String tenantId, boolean tenantAware) {
+        SysUser user = tenantAware ? sysUserMapper.selectByIdAndTenant(userId, tenantId)
+                : sysUserMapper.selectById(userId);
         return user != null && Integer.valueOf(1).equals(user.getStatus());
     }
 

@@ -25,9 +25,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-/** サービスリクエスト添付の認可・文書台帳・業務リンクを一つのtransactionで管理する。 */
+/** サービスリクエスト添付の認可・Storage処理・短い業務リンク確定を分離して管理する。 */
 @Service
 public class ServiceRequestAttachmentService {
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestAttachmentCommitService attachmentCommitService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ServiceRequestAttachmentCompensationService compensationService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private CustomerScopeResolver customerScopeResolver;
@@ -78,8 +84,15 @@ public class ServiceRequestAttachmentService {
     }
 
     private ServiceRequest validateRequest(Long requestId, boolean portal, Long customerId) {
-        ServiceRequest request = requestId == null ? null : requestMapper.selectById(requestId);
         String tenantId = currentTenant();
+        ServiceRequest request = requestId == null ? null : requestMapper.selectByIdAndTenant(requestId, tenantId);
+        if (request == null && "default".equals(tenantId) && requestId != null) {
+            // V156適用前の直接unit fixtureだけを確認し、NULL tenant以外は互換扱いしない。
+            ServiceRequest legacy = requestMapper.selectById(requestId);
+            if (legacy != null && legacy.getTenantId() == null) {
+                request = legacy;
+            }
+        }
         if (request != null && request.getTenantId() == null && "default".equals(tenantId)) {
             // V156適用前の直接unit fixtureだけを既定tenantへ正規化する。本番DBはNOT NULL。
             request.setTenantId(tenantId);
@@ -101,7 +114,8 @@ public class ServiceRequestAttachmentService {
             String hash = sha256(content);
             String originalName = safeName(file.getOriginalFilename());
             String businessKey = "SERVICE_REQUEST:" + request.getId() + ":"
-                    + (commentId == null ? "REQUEST" : "COMMENT-" + commentId) + ":" + hash;
+                    + (commentId == null ? "REQUEST" : "COMMENT-" + commentId) + ":"
+                    + visibility + ":" + hash;
             DocumentRegisterRequest registerRequest = DocumentRegisterRequest.builder()
                     .tenantId(currentTenant())
                     .documentType("SERVICE_REQUEST_ATTACHMENT")
@@ -126,52 +140,47 @@ public class ServiceRequestAttachmentService {
             if (document == null || document.getId() == null) {
                 throw BusinessException.of(400, "error.file.scanRejected");
             }
-            documentService.link(document.getId(), "SERVICE_REQUEST", request.getId());
-            DocumentVersion version = documentVersionMapper.findByIdempotencyKey(
-                    currentTenant(), "RECEIVED", businessKey, "v1");
-            if (version == null && "default".equals(currentTenant())) {
-                // 旧fixture互換。実DB経路はtenant-aware idempotency queryで確定する。
-                DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(document.getId());
-                if (legacy != null && (legacy.getTenantId() == null || currentTenant().equals(legacy.getTenantId()))) {
-                    version = legacy;
+            try {
+                documentService.link(document.getId(), "SERVICE_REQUEST", request.getId());
+                DocumentVersion version = documentVersionMapper.findByIdempotencyKey(
+                        currentTenant(), "RECEIVED", businessKey, "v1");
+                if (version == null && "default".equals(currentTenant())) {
+                    // 旧fixture互換。実DB経路はtenant-aware idempotency queryで確定する。
+                    DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(document.getId());
+                    if (legacy != null && (legacy.getTenantId() == null || currentTenant().equals(legacy.getTenantId()))) {
+                        version = legacy;
+                    }
                 }
-            }
-            if (version == null || !"CLEAN".equals(version.getScanStatus())) {
-                throw BusinessException.of(403, "error.file.scanNotReady");
-            }
+                if (version == null || !"CLEAN".equals(version.getScanStatus())) {
+                    throw BusinessException.of(403, "error.file.scanNotReady");
+                }
 
+                if (attachmentCommitService != null) {
+                    return attachmentCommitService.commit(currentTenant(), request.getId(), commentId,
+                            document.getId(), visibility, originalName, file.getSize(), businessKey);
+                }
+            } catch (RuntimeException failure) {
+                if (compensationService != null) {
+                    compensationService.record(currentTenant(), request.getId(), commentId, document.getId(),
+                            visibility, originalName, file.getSize(), businessKey, failure);
+                }
+                throw failure;
+            }
+            // Spring外の旧unit adapterだけに残す互換経路。実運用では短transaction serviceが必ず配線される。
             LambdaQueryWrapper<ServiceAttachmentLink> duplicateQuery = new LambdaQueryWrapper<ServiceAttachmentLink>()
                     .eq(ServiceAttachmentLink::getServiceRequestId, request.getId())
                     .eq(ServiceAttachmentLink::getDocumentId, document.getId())
                     .eq(ServiceAttachmentLink::getVisibility, visibility);
-            if (commentId == null) {
-                duplicateQuery.isNull(ServiceAttachmentLink::getCommentId);
-            } else {
-                duplicateQuery.eq(ServiceAttachmentLink::getCommentId, commentId);
-            }
+            if (commentId == null) duplicateQuery.isNull(ServiceAttachmentLink::getCommentId);
+            else duplicateQuery.eq(ServiceAttachmentLink::getCommentId, commentId);
             ServiceAttachmentLink existing = attachmentLinkMapper.selectOne(duplicateQuery);
-            if (existing != null) {
-                return existing;
-            }
-
-            ServiceAttachmentLink link = ServiceAttachmentLink.builder()
-                    .serviceRequestId(request.getId())
-                    .commentId(commentId)
-                    .documentId(document.getId())
-                    .visibility(visibility)
-                    .fileName(originalName)
-                    .fileSize(file.getSize())
-                    .createdAt(java.time.LocalDateTime.now(clock))
-                    .build();
-            try {
-                attachmentLinkMapper.insert(link);
-            } catch (org.springframework.dao.DuplicateKeyException duplicate) {
-                ServiceAttachmentLink raced = attachmentLinkMapper.selectOne(duplicateQuery);
-                if (raced != null) {
-                    return raced;
-                }
-                throw duplicate;
-            }
+            if (existing != null) return existing;
+            ServiceAttachmentLink link = ServiceAttachmentLink.builder().serviceRequestId(request.getId())
+                    .commentId(commentId).documentId(document.getId()).visibility(visibility)
+                    .businessKey(businessKey)
+                    .fileName(originalName).fileSize(file.getSize())
+                    .createdAt(java.time.LocalDateTime.now(clock)).build();
+            attachmentLinkMapper.insert(link);
             return link;
         } catch (IOException e) {
             throw BusinessException.of(400, "error.file.invalid");

@@ -201,7 +201,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     }
 
     private String currentTenant() {
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
         if (tenantId == null || tenantId.isBlank()) {
             throw BusinessException.of(403, "error.tenant.contextRequired");
         }
