@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.ses.entity.ProjectSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.ProjectSkillService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.effective.EffectiveIntervalSupport;
@@ -18,6 +19,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import com.ses.common.exception.BusinessException;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -73,6 +78,34 @@ class ProjectSkillServiceImplTest {
         LocalDate today = LocalDate.now();
         assertEquals(today.minusDays(1), events.get(0).getEffectiveTo());
         assertTrue(noActiveOpenEvent(events, skillId, today));
+    }
+
+    @Test
+    void replaceSkills_explicitRequestのreasonとversionを監査する() {
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(0);
+        request.setReason("案件要件更新");
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(skillId);
+        item.setRequiredLevel("上級");
+        request.setSkills(List.of(item));
+
+        projectSkillService.replaceSkills(projectId, request);
+
+        com.ses.entity.ProjectSkillEvent event = projectSkillEventMapper
+                .selectByTenantAndProjectId("default", projectId).get(0);
+        assertEquals("案件要件更新", event.getReason());
+        assertEquals("OPEN", event.getEventType());
+        assertNotNull(event.getEffectiveFrom());
+        assertNull(event.getEffectiveTo());
+
+        SkillReplaceRequest stale = new SkillReplaceRequest();
+        stale.setExpectedVersion(0);
+        stale.setReason("古い案件更新");
+        stale.setSkills(List.of(item));
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> projectSkillService.replaceSkills(projectId, stale));
+        assertTrue(conflict.getMessage().contains("error.common.optimisticLock"));
     }
 
     private static boolean noActiveOpenEvent(List<com.ses.entity.ProjectSkillEvent> events, Long skillId,

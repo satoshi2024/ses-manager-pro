@@ -38,6 +38,15 @@ public interface ProjectSkillMapper extends BaseMapper<ProjectSkill> {
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0)")
     int deleteByProjectIdForTenant(@Param("projectId") Long projectId, @Param("tenantId") String tenantId);
 
+    @org.apache.ibatis.annotations.Insert("INSERT INTO t_project_skill "
+            + "(project_id, skill_id, required_level, is_must) "
+            + "SELECT #{skill.projectId}, #{skill.skillId}, #{skill.requiredLevel}, #{skill.isMust} "
+            + "WHERE EXISTS (SELECT 1 FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{skill.projectId} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0)")
+    @org.apache.ibatis.annotations.Options(useGeneratedKeys = true, keyProperty = "skill.id")
+    int insertForTenant(@Param("skill") ProjectSkill skill, @Param("tenantId") String tenantId);
+
     @Select("""
         <script>
         SELECT ps.* FROM t_project_skill ps JOIN t_project p ON p.id = ps.project_id

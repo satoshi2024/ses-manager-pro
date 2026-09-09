@@ -224,7 +224,18 @@ public class ProjectIngestionServiceImpl
                 }
             }
             if (!skillEntities.isEmpty()) {
-                projectSkillService.replaceSkills(projectId, skillEntities);
+                com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+                request.setExpectedVersion(0);
+                request.setReason("案件メール取込確定");
+                request.setSkills(skillEntities.stream().map(skill -> {
+                    com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                            new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+                    item.setSkillId(skill.getSkillId());
+                    item.setRequiredLevel(skill.getRequiredLevel());
+                    item.setIsMust(skill.getIsMust());
+                    return item;
+                }).toList());
+                projectSkillService.replaceSkills(projectId, request);
             }
         }
 

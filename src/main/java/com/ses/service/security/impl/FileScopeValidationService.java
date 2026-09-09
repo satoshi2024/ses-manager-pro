@@ -13,6 +13,7 @@ import com.ses.entity.Proposal;
 import com.ses.entity.ResumeIngestion;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.FileSecurityMetadata;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
@@ -21,6 +22,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectIngestionMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.mapper.ResumeIngestionMapper;
+import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.MenuCacheService;
 import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +54,9 @@ public class FileScopeValidationService {
     private final ObjectProvider<com.ses.service.security.AuthorizationService> authorizationServiceProvider;
     private final ObjectProvider<EngineerCertificationMapper> engineerCertificationMapperProvider;
     private final java.time.Clock clock;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private FileSecurityMetadataMapper fileSecurityMetadataMapper;
 
     /** 注文文書（SALES_ORDER link）のscope解決用。テストスライス互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -187,11 +192,54 @@ public class FileScopeValidationService {
      */
     public void assertDownloadAllowed(String storedName, Long expectedDocumentVersionId, String expectedHash) {
         // 1. t_resume_ingestion の原本ファイル
-        ResumeIngestion ingestion = resumeIngestionMapper.selectOne(
-                new QueryWrapper<ResumeIngestion>().eq("stored_file_name", storedName).last("LIMIT 1"));
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        ResumeIngestion ingestion = resumeIngestionMapper.selectByStoredFileNameForTenant(tenantId, storedName);
         if (ingestion != null) {
             assertMenuAllowed("resume-ingestion");
+            if (fileSecurityMetadataMapper == null) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            FileSecurityMetadata metadata = fileSecurityMetadataMapper.selectByStoredName(tenantId, storedName);
+            if (metadata == null || !tenantId.equals(metadata.getTenantId())
+                    || !"PUBLISHED".equals(metadata.getStorageState())
+                    || !"CLEAN".equals(metadata.getScanStatus())) {
+                throw BusinessException.of(403, "error.file.scanNotReady");
+            }
+            if (ingestion.getConvertedEngineerId() != null) {
+                dataScopeService.assertAllowedEngineer(ingestion.getConvertedEngineerId());
+            }
+            DocumentLinkMapper linkMapper = documentLinkMapperProvider.getIfAvailable();
+            com.ses.mapper.DocumentMapper documentMapper = documentMapperProvider.getIfAvailable();
+            if (linkMapper == null || documentMapper == null) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
+            boolean typedLink = false;
+            for (Long documentId : linkMapper.findDocumentIdsByTargetForTenant(tenantId,
+                    "RESUME_INGESTION", ingestion.getId())) {
+                com.ses.entity.Document document = documentMapper.selectOne(new QueryWrapper<com.ses.entity.Document>()
+                        .eq("id", documentId).eq("tenant_id", tenantId).eq("document_type", "RESUME_INGESTION")
+                        .eq("deleted_flag", 0));
+                if (document == null || Integer.valueOf(1).equals(document.getLegalHoldFlag())
+                        || (document.getRetentionUntil() != null
+                        && document.getRetentionUntil().isBefore(java.time.LocalDate.now(clock)))) {
+                    continue;
+                }
+                DocumentVersionMapper mapper = documentVersionMapperProvider.getIfAvailable();
+                if (mapper != null && mapper.findByTenantAndDocumentId(tenantId, documentId).stream()
+                        .anyMatch(version -> "CLEAN".equals(version.getScanStatus()))) {
+                    typedLink = true;
+                    break;
+                }
+            }
+            if (!typedLink) {
+                throw BusinessException.of(403, "error.forbidden");
+            }
             return;
+        }
+        // 現在tenantに見えない履歴原本が別tenantに存在しても、後続の汎用file参照へ
+        // フォールスルーさせない。stored_file_nameの全体一致は認可根拠にしない。
+        if (resumeIngestionMapper.countByStoredFileName(storedName) > 0) {
+            throw BusinessException.of(403, "error.forbidden");
         }
 
         // 2. t_engineer の顔写真 (photo_url)

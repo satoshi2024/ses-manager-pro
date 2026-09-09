@@ -3,6 +3,8 @@ package com.ses.service.impl;
 import com.ses.config.UploadProperties;
 import com.ses.service.FileCleanupService;
 import com.ses.service.FileReferenceProvider;
+import com.ses.service.scheduler.TenantAwareBatchRunner;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,11 +28,26 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class FileCleanupServiceImpl implements FileCleanupService {
 
     private final UploadProperties uploadProperties;
     private final List<FileReferenceProvider> fileReferenceProviders;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
+
+    /** 既存の単体テスト用。通常のSpring生成経路はtenant runner付きコンストラクタを使用する。 */
+    public FileCleanupServiceImpl(UploadProperties uploadProperties,
+                                  List<FileReferenceProvider> fileReferenceProviders) {
+        this(uploadProperties, fileReferenceProviders, null);
+    }
+
+    @Autowired
+    public FileCleanupServiceImpl(UploadProperties uploadProperties,
+                                  List<FileReferenceProvider> fileReferenceProviders,
+                                  TenantAwareBatchRunner tenantAwareBatchRunner) {
+        this.uploadProperties = uploadProperties;
+        this.fileReferenceProviders = fileReferenceProviders;
+        this.tenantAwareBatchRunner = tenantAwareBatchRunner;
+    }
 
     @Override
     public int cleanupOrphanFiles() {
@@ -39,7 +56,7 @@ public class FileCleanupServiceImpl implements FileCleanupService {
             return 0;
         }
 
-        Set<String> referenced = collectReferencedFileNames();
+        Set<String> referenced = collectTenantAwareReferencedFileNames();
         Instant safeBefore = Instant.now().minus(uploadProperties.getCleanupSafetyHours(), ChronoUnit.HOURS);
         int deleted = 0;
 
@@ -81,6 +98,15 @@ public class FileCleanupServiceImpl implements FileCleanupService {
         for (FileReferenceProvider provider : fileReferenceProviders) {
             referenced.addAll(provider.referencedFileNames());
         }
+        return referenced;
+    }
+
+    private Set<String> collectTenantAwareReferencedFileNames() {
+        if (tenantAwareBatchRunner == null) {
+            return collectReferencedFileNames();
+        }
+        Set<String> referenced = new HashSet<>();
+        tenantAwareBatchRunner.run(tenantId -> referenced.addAll(collectReferencedFileNames()));
         return referenced;
     }
 }

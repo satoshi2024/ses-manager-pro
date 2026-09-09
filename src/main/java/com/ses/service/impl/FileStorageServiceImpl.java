@@ -8,6 +8,7 @@ import com.ses.dto.file.StoredFile;
 import com.ses.entity.FileSecurityMetadata;
 import com.ses.mapper.FileSecurityMetadataMapper;
 import com.ses.service.FileStorageService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import com.ses.service.security.impl.LocalSignatureFileScanner;
@@ -169,7 +170,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             return null;
         }
         FileSecurityMetadata metadata = new FileSecurityMetadata();
-        metadata.setTenantId("default");
+        metadata.setTenantId(AccountingTenantContextHolder.requireTenantContext());
         metadata.setStoredName(storedName);
         metadata.setFileKind(kind.name());
         metadata.setStorageState("QUARANTINED");
@@ -201,7 +202,8 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw BusinessException.of("error.file.invalidName");
         }
         if (metadataMapper != null) {
-            FileSecurityMetadata metadata = metadataMapper.selectByStoredName("default", storedName);
+            FileSecurityMetadata metadata = metadataMapper.selectByStoredName(
+                    AccountingTenantContextHolder.requireTenantContext(), storedName);
             if (metadata == null || !"PUBLISHED".equals(metadata.getStorageState())
                     || !"CLEAN".equals(metadata.getScanStatus())) {
                 throw BusinessException.of(403, "error.file.scanNotReady");
@@ -223,12 +225,39 @@ public class FileStorageServiceImpl implements FileStorageService {
     }
 
     @Override
+    public void delete(String storedName) {
+        validateStoredName(storedName);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        FileSecurityMetadata metadata = metadataMapper == null ? null
+                : metadataMapper.selectByStoredName(tenantId, storedName);
+        if (metadataMapper != null && metadata == null) {
+            // tenant不明・metadata不在の実体は削除対象として扱わない。
+            throw BusinessException.of(403, "error.file.unknownReference");
+        }
+        Path published = publishedDir().resolve(storedName).normalize();
+        Path quarantine = quarantineDir().resolve(storedName).normalize();
+        if (!published.startsWith(publishedDir()) || !quarantine.startsWith(quarantineDir())) {
+            throw BusinessException.of("error.file.invalidPath");
+        }
+        try {
+            Files.deleteIfExists(published);
+            Files.deleteIfExists(quarantine);
+            if (metadata != null && metadataMapper.markDeletedForTenant(metadata.getId(), tenantId) != 1) {
+                throw BusinessException.of(409, "error.file.deleteConflict");
+            }
+        } catch (IOException e) {
+            throw BusinessException.of("error.file.deleteFailed");
+        }
+    }
+
+    @Override
     public boolean rescan(String storedName) {
         validateStoredName(storedName);
         if (metadataMapper == null) {
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
-        FileSecurityMetadata metadata = metadataMapper.selectByStoredName("default", storedName);
+        FileSecurityMetadata metadata = metadataMapper.selectByStoredName(
+                AccountingTenantContextHolder.requireTenantContext(), storedName);
         if (metadata == null || "PUBLISHED".equals(metadata.getStorageState())) {
             throw BusinessException.of(404, "error.file.unknownReference");
         }

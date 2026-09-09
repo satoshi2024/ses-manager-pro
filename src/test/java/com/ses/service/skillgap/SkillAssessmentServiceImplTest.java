@@ -10,6 +10,7 @@ import com.ses.entity.LearningDecisionEvent;
 import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillAssessmentMapper;
 import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.mapper.SysUserMapper;
@@ -51,6 +52,7 @@ class SkillAssessmentServiceImplTest {
     @Mock private SysUserMapper sysUserMapper;
     @Mock private EngineerSkillService engineerSkillService;
     @Mock private TenantOwnershipResolver tenantOwnershipResolver;
+    @Mock private EngineerMapper engineerMapper;
 
     @BeforeEach
     void setTenantContext() {
@@ -87,7 +89,7 @@ class SkillAssessmentServiceImplTest {
         assertEquals(EngineerSkillAssessment.TYPE_SELF, self.getAssessmentType());
         assertEquals(EngineerSkillAssessment.TYPE_MANAGER, manager.getAssessmentType());
         assertEquals("PROPOSED", self.getAssessmentState());
-        verify(engineerSkillService, never()).replaceSkills(any(), any());
+        verify(engineerSkillService, never()).replaceSkills(any(), any(java.util.List.class));
     }
 
     @Test
@@ -113,6 +115,7 @@ class SkillAssessmentServiceImplTest {
         existing.setProficiency("初級");
         when(engineerSkillService.listForTenant(10L))
                 .thenReturn(List.of(existing));
+        when(engineerMapper.selectByIdForTenant(10L, "default")).thenReturn(engineer(10L));
         doAnswer(invocation -> {
             EngineerSkillAssessment assessment = invocation.getArgument(0);
             assessment.setId(81L);
@@ -124,9 +127,10 @@ class SkillAssessmentServiceImplTest {
 
         assertEquals(EngineerSkillAssessment.TYPE_HR_FINAL, result.getAssessmentType());
         assertEquals("FINAL", result.getAssessmentState());
-        ArgumentCaptor<List<EngineerSkill>> skills = ArgumentCaptor.forClass(List.class);
-        verify(engineerSkillService).replaceSkills(org.mockito.ArgumentMatchers.eq(10L), skills.capture());
-        assertEquals("上級", skills.getValue().get(0).getProficiency());
+        ArgumentCaptor<com.ses.dto.skill.SkillReplaceRequest> request =
+                ArgumentCaptor.forClass(com.ses.dto.skill.SkillReplaceRequest.class);
+        verify(engineerSkillService).replaceSkills(org.mockito.ArgumentMatchers.eq(10L), request.capture());
+        assertEquals("上級", request.getValue().getSkills().get(0).getProficiency());
         ArgumentCaptor<LearningDecisionEvent> event = ArgumentCaptor.forClass(LearningDecisionEvent.class);
         verify(decisionEventMapper).insertEvent(event.capture());
         assertEquals("SKILL_LEVEL", event.getValue().getDecisionDomain());
@@ -146,7 +150,7 @@ class SkillAssessmentServiceImplTest {
         return new SkillAssessmentServiceImpl(assessmentMapper, decisionEventMapper, accountLinkMapper,
                 userOrganizationMapper, sysUserMapper, engineerSkillService,
                 Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneId.of("Asia/Tokyo")),
-                new ObjectMapper().registerModule(new JavaTimeModule()), tenantOwnershipResolver);
+                new ObjectMapper().registerModule(new JavaTimeModule()), tenantOwnershipResolver, engineerMapper);
     }
 
     private void stubAccount(Long userId) {
@@ -170,6 +174,7 @@ class SkillAssessmentServiceImplTest {
         com.ses.entity.Engineer engineer = new com.ses.entity.Engineer();
         engineer.setId(id);
         engineer.setTenantId("default");
+        engineer.setVersion(0);
         return engineer;
     }
 

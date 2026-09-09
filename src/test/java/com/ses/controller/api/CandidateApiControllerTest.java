@@ -1,8 +1,12 @@
 package com.ses.controller.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ses.config.LoginUser;
 import com.ses.entity.Candidate;
+import com.ses.entity.SysUser;
 import com.ses.service.CandidateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +14,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
@@ -49,6 +55,7 @@ class CandidateApiControllerTest {
 
     @BeforeEach
     void seedMenuPermission() {
+        AccountingTenantContextHolder.setTenantId("default");
         jdbcTemplate.update("DELETE FROM t_role_menu");
         jdbcTemplate.update("DELETE FROM m_menu");
         jdbcTemplate.update(
@@ -57,6 +64,23 @@ class CandidateApiControllerTest {
         jdbcTemplate.update("INSERT INTO t_role_menu (role, menu_id) VALUES ('管理者', ?)", menuId);
         jdbcTemplate.update("INSERT INTO t_role_menu (role, menu_id) VALUES ('営業', ?)", menuId);
         jdbcTemplate.update("INSERT INTO t_role_menu (role, menu_id) VALUES ('HR', ?)", menuId);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor authentication(String role) {
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("test");
+        user.setRole(role);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_" + role)));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 
     private Candidate seedCandidate(String stage) {
@@ -76,6 +100,7 @@ class CandidateApiControllerTest {
         candidate.setSkillSummary("Go 2年");
 
         mockMvc.perform(post("/api/candidates")
+                        .with(authentication("営業"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(candidate)))
@@ -91,7 +116,7 @@ class CandidateApiControllerTest {
     void testGetCandidateList() throws Exception {
         seedCandidate("応募受付");
 
-        mockMvc.perform(get("/api/candidates").param("name", "APIテスト"))
+        mockMvc.perform(get("/api/candidates").with(authentication("HR")).param("name", "APIテスト"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.records", hasSize(1)))
@@ -104,6 +129,7 @@ class CandidateApiControllerTest {
         Candidate candidate = seedCandidate("応募受付");
 
         mockMvc.perform(post("/api/candidates/" + candidate.getId() + "/activities")
+                        .with(authentication("管理者"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"stage\":\"書類選考\",\"remarks\":\"通過\"}"))
@@ -122,6 +148,7 @@ class CandidateApiControllerTest {
 
         // BusinessException.of(messageKey) はデフォルトでcode=500を使う(BusinessException.java参照)
         mockMvc.perform(post("/api/candidates/" + candidate.getId() + "/activities")
+                        .with(authentication("管理者"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"stage\":\"不採用\"}"))
@@ -138,6 +165,7 @@ class CandidateApiControllerTest {
         Candidate candidate = seedCandidate("内定");
 
         mockMvc.perform(post("/api/candidates/" + candidate.getId() + "/convert-to-engineer")
+                        .with(authentication("管理者"))
                         .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code", is(400)));
@@ -149,6 +177,7 @@ class CandidateApiControllerTest {
         Candidate candidate = seedCandidate("入社");
 
         mockMvc.perform(post("/api/candidates/" + candidate.getId() + "/convert-to-engineer")
+                        .with(authentication("管理者"))
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
@@ -160,9 +189,10 @@ class CandidateApiControllerTest {
     @WithMockUser(username = "test", roles = {"管理者"})
     void testLinkConvertedEngineer() throws Exception {
         Candidate candidate = seedCandidate("入社");
-        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) VALUES (123, 'Test Eng', '正社員', '稼働中', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, tenant_id, version, full_name, employment_type, status, deleted_flag) VALUES (123, 'default', 0, 'Test Eng', '正社員', '稼働中', 0)");
 
         mockMvc.perform(put("/api/candidates/" + candidate.getId() + "/converted-engineer")
+                        .with(authentication("管理者"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"engineerId\":123}"))
@@ -180,6 +210,7 @@ class CandidateApiControllerTest {
         Candidate candidate = seedCandidate("応募受付");
 
         mockMvc.perform(delete("/api/candidates/" + candidate.getId())
+                        .with(authentication("管理者"))
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
@@ -193,28 +224,28 @@ class CandidateApiControllerTest {
     @Test
     @WithMockUser(username = "test", roles = {"マネージャー"})
     void testGetCandidateList_managerRoleForbidden() throws Exception {
-        mockMvc.perform(get("/api/candidates"))
+        mockMvc.perform(get("/api/candidates").with(authentication("マネージャー")))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     @WithMockUser(username = "test", roles = {"HR"})
     void testGetCandidateList_hrRoleAllowed() throws Exception {
-        mockMvc.perform(get("/api/candidates"))
+        mockMvc.perform(get("/api/candidates").with(authentication("HR")))
                 .andExpect(status().isOk());
     }
 
     @Test
     @WithMockUser(username = "test", roles = {"営業"})
     void testGetCandidateList_salesRoleAllowed() throws Exception {
-        mockMvc.perform(get("/api/candidates"))
+        mockMvc.perform(get("/api/candidates").with(authentication("営業")))
                 .andExpect(status().isOk());
     }
 
     @Test
     @WithMockUser(username = "test", roles = {"管理者"})
     void testGetCandidateList_adminRoleAllowed() throws Exception {
-        mockMvc.perform(get("/api/candidates"))
+        mockMvc.perform(get("/api/candidates").with(authentication("管理者")))
                 .andExpect(status().isOk());
     }
 }

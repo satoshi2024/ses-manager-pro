@@ -39,6 +39,14 @@ public interface EngineerSkillMapper extends BaseMapper<EngineerSkill> {
     int deleteByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
                                     @Param("tenantId") String tenantId);
 
+    @org.apache.ibatis.annotations.Insert("INSERT INTO t_engineer_skill "
+            + "(engineer_id, skill_id, proficiency, experience_years) "
+            + "SELECT #{skill.engineerId}, #{skill.skillId}, #{skill.proficiency}, #{skill.experienceYears} "
+            + "WHERE EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = #{skill.engineerId} "
+            + "AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0)")
+    @org.apache.ibatis.annotations.Options(useGeneratedKeys = true, keyProperty = "skill.id")
+    int insertForTenant(@Param("skill") EngineerSkill skill, @Param("tenantId") String tenantId);
+
     @Select("""
         <script>
         SELECT es.engineer_id AS engineerId, st.skill_name AS skillName, es.proficiency AS proficiency

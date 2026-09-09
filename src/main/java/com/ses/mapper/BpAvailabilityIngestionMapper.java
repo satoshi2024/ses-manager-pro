@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -95,4 +96,18 @@ public interface BpAvailabilityIngestionMapper extends BaseMapper<BpAvailability
     @Select("SELECT stored_file_name FROM t_bp_availability_ingestion " +
             "WHERE deleted_flag = 0 AND status != '\u5374\u4e0b' AND stored_file_name IS NOT NULL")
     List<String> selectAllStoredFileNames();
+
+    @Select("SELECT b.* FROM t_bp_availability_ingestion b "
+            + "JOIN sys_user u ON u.id = b.created_by AND u.deleted_flag = 0 "
+            + "WHERE b.deleted_flag = 0 AND b.status IN ('確定済','却下') "
+            + "AND b.updated_at < #{cutoff} AND b.extracted_text IS NOT NULL "
+            + "AND u.tenant_id = #{tenantId} ORDER BY b.updated_at, b.id")
+    List<BpAvailabilityIngestion> selectExpiredWithTextForTenant(@Param("tenantId") String tenantId,
+                                                                  @Param("cutoff") LocalDateTime cutoff);
+
+    @Update("UPDATE t_bp_availability_ingestion b SET extracted_text = NULL "
+            + "WHERE b.id = #{id} AND b.deleted_flag = 0 "
+            + "AND EXISTS (SELECT 1 FROM sys_user u WHERE u.id = b.created_by "
+            + "AND u.tenant_id = #{tenantId} AND u.deleted_flag = 0)")
+    int clearExtractedTextForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 }

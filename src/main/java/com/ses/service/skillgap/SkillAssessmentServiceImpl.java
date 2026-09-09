@@ -10,6 +10,7 @@ import com.ses.entity.SysUser;
 import com.ses.entity.UserOrganization;
 import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerSkillAssessmentMapper;
+import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
@@ -45,6 +46,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final TenantOwnershipResolver tenantOwnershipResolver;
+    private final EngineerMapper engineerMapper;
 
     public SkillAssessmentServiceImpl(EngineerSkillAssessmentMapper assessmentMapper,
                                       LearningDecisionEventMapper decisionEventMapper,
@@ -54,7 +56,8 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
                                       EngineerSkillService engineerSkillService,
                                       Clock clock,
                                       ObjectMapper objectMapper,
-                                      TenantOwnershipResolver tenantOwnershipResolver) {
+                                      TenantOwnershipResolver tenantOwnershipResolver,
+                                      EngineerMapper engineerMapper) {
         this.assessmentMapper = assessmentMapper;
         this.decisionEventMapper = decisionEventMapper;
         this.accountLinkMapper = accountLinkMapper;
@@ -64,6 +67,7 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
         this.clock = clock;
         this.objectMapper = objectMapper;
         this.tenantOwnershipResolver = tenantOwnershipResolver;
+        this.engineerMapper = engineerMapper;
     }
 
     @Override
@@ -131,7 +135,22 @@ public class SkillAssessmentServiceImpl implements SkillAssessmentService {
             current.add(skill);
         }
         // 共通serviceがcurrent projectionとeffective eventを同一transactionで更新する。
-        engineerSkillService.replaceSkills(engineerId, current);
+        com.ses.entity.Engineer parent = engineerMapper.selectByIdForTenant(engineerId, tenantId);
+        if (parent == null || parent.getVersion() == null) {
+            throw BusinessException.of(404, "error.engineer.notFound");
+        }
+        com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+        request.setExpectedVersion(parent.getVersion());
+        request.setReason("HR資格評価確定");
+        request.setSkills(current.stream().map(skill -> {
+            com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                    new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+            item.setSkillId(skill.getSkillId());
+            item.setProficiency(skill.getProficiency());
+            item.setExperienceYears(skill.getExperienceYears());
+            return item;
+        }).toList());
+        engineerSkillService.replaceSkills(engineerId, request);
         appendDecision("SKILL_LEVEL", assessment.getId(), actorUserId, reason,
                 snapshotHash(assessment), 0);
         return assessment;

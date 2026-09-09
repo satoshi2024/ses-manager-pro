@@ -201,6 +201,12 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
+    @org.apache.ibatis.annotations.Update("UPDATE t_engineer SET version = version + 1 "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND version = #{expectedVersion} AND deleted_flag = 0")
+    int bumpVersionForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
+                             @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
+                             @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion);
+
     @org.apache.ibatis.annotations.Update("""
         <script>
         UPDATE t_engineer

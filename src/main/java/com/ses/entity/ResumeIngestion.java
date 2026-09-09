@@ -3,6 +3,7 @@ package com.ses.entity;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.ses.common.base.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -14,6 +15,9 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 @TableName("t_resume_ingestion")
 public class ResumeIngestion extends BaseEntity {
+
+    /** 原本取込ジョブのtenant ownership。NULL legacy行は認可母集団に入れない。 */
+    private String tenantId;
 
     /** アップロード時の元ファイル名 */
     private String originalFileName;
@@ -49,6 +53,9 @@ public class ResumeIngestion extends BaseEntity {
 
     /** 候補者起点の場合の t_candidate.id（任意） */
     private Long candidateId;
+
+    @Version
+    private Integer version;
 
     /** レビュー担当メモ */
     private String reviewNote;

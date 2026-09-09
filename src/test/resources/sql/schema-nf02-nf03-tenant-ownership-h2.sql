@@ -24,7 +24,25 @@ CREATE TABLE IF NOT EXISTS nf02_nf03_ownership_repair_queue (
     resolved_at DATETIME,
     resolved_by BIGINT,
     last_checked_at DATETIME,
+    version INT NOT NULL DEFAULT 0,
+    claim_token VARCHAR(100),
+    claimed_by BIGINT,
+    claimed_at DATETIME,
+    incident_id BIGINT,
+    actor_tenant_id VARCHAR(100),
+    evidence_hash VARCHAR(64),
+    approver_id BIGINT,
     UNIQUE (entity_type, entity_id)
 );
 CREATE INDEX IF NOT EXISTS idx_nf02_nf03_repair_status_age
     ON nf02_nf03_ownership_repair_queue (status, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_nf02_nf03_repair_claim
+    ON nf02_nf03_ownership_repair_queue (status, version, claim_token, id);
+
+ALTER TABLE t_candidate ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
+ALTER TABLE t_candidate ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_candidate_tenant_stage
+    ON t_candidate (tenant_id, current_stage, deleted_flag, id);
+ALTER TABLE t_project ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_project_customer_version
+    ON t_project (customer_id, version, deleted_flag, id);

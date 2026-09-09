@@ -23,16 +23,30 @@ public interface OwnershipRepairQueueMapper extends BaseMapper<OwnershipRepairQu
     @Select("SELECT MIN(created_at) FROM nf02_nf03_ownership_repair_queue WHERE status = 'PENDING'")
     LocalDateTime selectOldestPendingAt();
 
+    @Select("SELECT * FROM nf02_nf03_ownership_repair_queue WHERE id = #{id} AND status IN ('PENDING','CLAIMED') "
+            + "FOR UPDATE")
+    OwnershipRepairQueue selectForUpdate(@Param("id") Long id);
+
     @Update("UPDATE nf02_nf03_ownership_repair_queue SET status = 'RESOLVED', "
             + "repair_tenant_id = #{tenantId}, resolution_reason = #{reason}, evidence = #{evidence}, "
-            + "resolved_at = #{resolvedAt}, resolved_by = #{resolvedBy}, last_checked_at = #{resolvedAt} "
-            + "WHERE id = #{id} AND status = 'PENDING'")
-    int markResolved(@Param("id") Long id, @Param("tenantId") String tenantId,
+            + "resolved_at = #{resolvedAt}, resolved_by = #{resolvedBy}, last_checked_at = #{resolvedAt}, "
+            + "incident_id = #{incidentId}, actor_tenant_id = #{actorTenantId}, evidence_hash = #{evidenceHash}, "
+            + "approver_id = #{approverId}, version = version + 1 "
+            + "WHERE id = #{id} AND status = 'CLAIMED' AND claim_token = #{claimToken} AND version = #{expectedVersion}")
+    int markResolvedCas(@Param("id") Long id, @Param("tenantId") String tenantId,
                      @Param("reason") String reason, @Param("evidence") String evidence,
-                     @Param("resolvedAt") LocalDateTime resolvedAt, @Param("resolvedBy") Long resolvedBy);
+                     @Param("resolvedAt") LocalDateTime resolvedAt, @Param("resolvedBy") Long resolvedBy,
+                     @Param("incidentId") Long incidentId, @Param("actorTenantId") String actorTenantId,
+                     @Param("evidenceHash") String evidenceHash, @Param("approverId") Long approverId,
+                     @Param("claimToken") String claimToken, @Param("expectedVersion") Integer expectedVersion);
 
     @Update("UPDATE nf02_nf03_ownership_repair_queue SET assignee_user_id = #{assigneeUserId}, "
-            + "last_checked_at = #{checkedAt} WHERE id = #{id} AND status = 'PENDING'")
-    int assign(@Param("id") Long id, @Param("assigneeUserId") Long assigneeUserId,
-               @Param("checkedAt") LocalDateTime checkedAt);
+            + "status = 'CLAIMED', claim_token = #{claimToken}, claimed_by = #{assigneeUserId}, "
+            + "claimed_at = #{checkedAt}, last_checked_at = #{checkedAt}, incident_id = #{incidentId}, "
+            + "actor_tenant_id = #{actorTenantId}, version = version + 1 "
+            + "WHERE id = #{id} AND status = 'PENDING' AND version = #{expectedVersion}")
+    int claim(@Param("id") Long id, @Param("assigneeUserId") Long assigneeUserId,
+              @Param("claimToken") String claimToken, @Param("checkedAt") LocalDateTime checkedAt,
+              @Param("expectedVersion") Integer expectedVersion,
+              @Param("incidentId") Long incidentId, @Param("actorTenantId") String actorTenantId);
 }

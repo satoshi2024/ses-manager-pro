@@ -130,6 +130,9 @@ public final class ActionPermissionResolver {
         if (matchesPrefix(uri, "/api/security/break-glass/incidents")) {
             return "break-glass.manage";
         }
+        if (matchesPrefix(uri, "/api/admin/nf02-nf03/ownership-repair")) {
+            return "ownership-repair.manage";
+        }
         if ("POST".equals(method) && uri.matches("/api/security/mfa/\\d+/reset")) {
             return "mfa.reset";
         }
@@ -279,7 +282,8 @@ public final class ActionPermissionResolver {
                 || actionKey.equals("file.upload") || actionKey.equals("file.scan.retry")
                 || actionKey.equals("permission.manage") || actionKey.equals("audit.security.view")
                 || actionKey.equals("mfa.reset") || actionKey.equals("sales-order.edit")
-                || actionKey.equals("integration.webhook.replay")) {
+                || actionKey.equals("integration.webhook.replay")
+                || actionKey.equals("ownership-repair.manage")) {
             return true;
         }
         int separator = actionKey.indexOf('.');

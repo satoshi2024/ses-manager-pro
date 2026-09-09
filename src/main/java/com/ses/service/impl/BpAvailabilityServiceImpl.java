@@ -122,7 +122,18 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
                     engSkill.setProficiency("中級"); // Default value
                     engineerSkills.add(engSkill);
                 }
-                engineerSkillService.replaceSkills(engineer.getId(), engineerSkills);
+                com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+                request.setExpectedVersion(0);
+                request.setReason("BP稼働情報から要員化");
+                request.setSkills(engineerSkills.stream().map(skill -> {
+                    com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                            new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+                    item.setSkillId(skill.getSkillId());
+                    item.setProficiency(skill.getProficiency());
+                    item.setExperienceYears(skill.getExperienceYears());
+                    return item;
+                }).toList());
+                engineerSkillService.replaceSkills(engineer.getId(), request);
             } catch (Exception e) {
                 if (e instanceof BusinessException businessException) {
                     throw businessException;

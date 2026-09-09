@@ -187,6 +187,7 @@ CREATE TABLE t_project (
   end_date          DATE,
   remarks           TEXT,
   source_opportunity_id BIGINT,
+  version                INT NOT NULL DEFAULT 0,
   created_by        BIGINT,
   created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -571,6 +572,7 @@ DROP TABLE IF EXISTS t_candidate_activity CASCADE;
 DROP TABLE IF EXISTS t_candidate CASCADE;
 CREATE TABLE t_candidate (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100),
   name                  VARCHAR(100) NOT NULL,
   contact_email         VARCHAR(200),
   contact_phone         VARCHAR(20),
@@ -580,6 +582,7 @@ CREATE TABLE t_candidate (
   current_stage         VARCHAR(20) NOT NULL DEFAULT '応募受付',
   next_action_date      DATE,
   converted_engineer_id BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   remarks               VARCHAR(1000),
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT,
@@ -806,9 +809,10 @@ CREATE TABLE t_contract_price_history (
 DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
-  original_file_name    VARCHAR(255) NOT NULL,
-  stored_file_name      VARCHAR(120) NOT NULL,
-  file_ext              VARCHAR(10)  NOT NULL,
+  tenant_id             VARCHAR(100),
+  original_file_name    VARCHAR(255),
+  stored_file_name      VARCHAR(120),
+  file_ext              VARCHAR(10),
   status                VARCHAR(20)  NOT NULL DEFAULT '取込待ち',
   extracted_text        LONGTEXT,
   parsed_json           LONGTEXT,
@@ -817,12 +821,15 @@ CREATE TABLE t_resume_ingestion (
   error_message         VARCHAR(500),
   converted_engineer_id BIGINT,
   candidate_id          BIGINT,
+  version               INT NOT NULL DEFAULT 0,
   review_note           VARCHAR(500),
   created_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT NOT NULL DEFAULT 0,
   created_by            BIGINT
 );
+CREATE INDEX IF NOT EXISTS idx_resume_ingestion_tenant_status_file
+    ON t_resume_ingestion (tenant_id, status, stored_file_name, deleted_flag);
 
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (

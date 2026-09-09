@@ -25,6 +25,9 @@ public interface FileStorageService {
      */
     Resource load(String storedName);
 
+    /** 保持期限到達等の認可済み処理で、現在tenantの保存実体を消去する。 */
+    void delete(String storedName);
+
     /** quarantine中のファイルを再scanし、CLEANなら公開領域へ移す。 */
     boolean rescan(String storedName);
 }

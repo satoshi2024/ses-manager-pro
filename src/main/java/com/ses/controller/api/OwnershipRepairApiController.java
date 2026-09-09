@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.security.OwnershipRepairRequest;
+import com.ses.dto.security.OwnershipRepairClaimResponse;
 import com.ses.entity.OwnershipRepairQueue;
 import com.ses.service.security.OwnershipRepairService;
 import jakarta.validation.Valid;
@@ -32,13 +33,13 @@ public class OwnershipRepairApiController {
 
     @PostMapping("/{id}/resolve")
     public ApiResult<Void> resolve(@PathVariable Long id, @Valid @RequestBody OwnershipRepairRequest request) {
-        service.resolve(id, request.getTenantId(), request.getReason(), request.getEvidence());
+        service.resolve(id, request);
         return ApiResult.success(null);
     }
 
     @PostMapping("/{id}/assign")
-    public ApiResult<Void> assign(@PathVariable Long id, @RequestParam Long assigneeUserId) {
-        service.assign(id, assigneeUserId);
-        return ApiResult.success(null);
+    public ApiResult<OwnershipRepairClaimResponse> assign(@PathVariable Long id, @RequestParam Long assigneeUserId,
+                                  @RequestParam Integer expectedVersion) {
+        return ApiResult.success(service.assign(id, assigneeUserId, expectedVersion));
     }
 }

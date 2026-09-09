@@ -31,6 +31,17 @@ public interface ProjectMapper extends BaseMapper<Project> {
 
     @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
             + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
+            + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 FOR UPDATE")
+    Project selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @org.apache.ibatis.annotations.Update("UPDATE t_project SET version = version + 1 "
+            + "WHERE id = #{id} AND version = #{expectedVersion} AND deleted_flag = 0 "
+            + "AND customer_id IN (SELECT c.id FROM m_customer c WHERE c.tenant_id = #{tenantId} AND c.deleted_flag = 0)")
+    int bumpVersionForTenant(@Param("id") Long id, @Param("tenantId") String tenantId,
+                             @Param("expectedVersion") Integer expectedVersion);
+
+    @Select("SELECT p.* FROM t_project p JOIN m_customer c ON c.id = p.customer_id "
+            + "WHERE p.id = #{id} AND c.tenant_id = #{tenantId} "
             + "AND p.deleted_flag = 0 AND c.deleted_flag = 0 LIMIT 1")
     Project selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 

@@ -60,11 +60,11 @@ public class ResumeIngestionServiceImplTest {
         job.setStatus("要確認");
 
         when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(1);
+        when(baseMapper.rejectForTenant(jobId, "default", "NG", 0)).thenReturn(1);
 
         resumeIngestionService.reject(jobId, "NG");
 
-        verify(baseMapper).update(isNull(), any());
+        verify(baseMapper).rejectForTenant(jobId, "default", "NG", 0);
     }
 
     @Mock
@@ -84,7 +84,7 @@ public class ResumeIngestionServiceImplTest {
         job.setStatus("確定済");
 
         when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(0); // conflict
+        when(baseMapper.rejectForTenant(jobId, "default", "NG", 0)).thenReturn(0); // conflict
 
         BusinessException ex = assertThrows(BusinessException.class, () -> {
             resumeIngestionService.reject(jobId, "NG");
@@ -100,7 +100,7 @@ public class ResumeIngestionServiceImplTest {
         job.setStatus("要確認");
 
         when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
-        when(baseMapper.update(isNull(), any())).thenReturn(1);
+        when(baseMapper.confirmForTenant(jobId, "default", 99L, null, 0)).thenReturn(1);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
         com.ses.dto.resume.ReviewedResumeDto.EngineerPart ep = new com.ses.dto.resume.ReviewedResumeDto.EngineerPart();
@@ -133,9 +133,9 @@ public class ResumeIngestionServiceImplTest {
         assertEquals(99L, engId);
 
         verify(engineerService).save(any(Engineer.class));
-        verify(engineerSkillService).replaceSkills(eq(99L), any());
+        verify(engineerSkillService).replaceSkills(eq(99L), any(com.ses.dto.skill.SkillReplaceRequest.class));
         verify(engineerCareerService).save(any(com.ses.entity.EngineerCareer.class));
-        verify(baseMapper).update(isNull(), any());
+        verify(baseMapper).confirmForTenant(jobId, "default", 99L, null, 0);
     }
 
     @Test

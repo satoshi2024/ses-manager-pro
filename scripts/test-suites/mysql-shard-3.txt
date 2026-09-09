@@ -17,3 +17,4 @@ FlywayV81RepairSmokeTest
 FlywayV84LegacySchemaSmokeTest
 FlywayV84PartialSchemaSmokeTest
 FlywayCustomerSuccessServiceDeskUpgradeTest
+OwnershipRepairResumeTenantBoundaryMySqlTest

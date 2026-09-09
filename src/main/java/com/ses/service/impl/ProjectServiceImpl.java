@@ -10,6 +10,7 @@ import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.service.ProjectService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,7 +54,7 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         this.save(project);
         dto.setId(project.getId());
         if (dto.getSkills() != null) {
-            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
+            replaceProjectSkills(dto.getId(), dto.getSkills(), "案件作成");
         }
     }
 
@@ -77,12 +78,31 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         org.springframework.beans.BeanUtils.copyProperties(dto, project);
         boolean updated = this.updateById(project);
         if (dto.getSkills() != null) {
-            projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(dto.getId(), dto.getSkills()));
+            replaceProjectSkills(dto.getId(), dto.getSkills(), "案件更新");
         }
         return updated;
     }
-}
 
+    private void replaceProjectSkills(Long projectId, List<com.ses.entity.ProjectSkill> skills, String reason) {
+        com.ses.entity.Project current = baseMapper.selectByIdForTenant(
+                projectId, AccountingTenantContextHolder.requireTenantContext());
+        if (current == null || current.getVersion() == null) {
+            throw BusinessException.of(404, "error.project.notFound");
+        }
+        com.ses.dto.skill.SkillReplaceRequest request = new com.ses.dto.skill.SkillReplaceRequest();
+        request.setExpectedVersion(current.getVersion());
+        request.setReason(reason);
+        request.setSkills(skills.stream().map(skill -> {
+            com.ses.dto.skill.SkillReplaceRequest.SkillItem item =
+                    new com.ses.dto.skill.SkillReplaceRequest.SkillItem();
+            item.setSkillId(skill.getSkillId());
+            item.setRequiredLevel(skill.getRequiredLevel());
+            item.setIsMust(skill.getIsMust());
+            return item;
+        }).toList());
+        projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(projectId, request));
+    }
+}
 
 
 

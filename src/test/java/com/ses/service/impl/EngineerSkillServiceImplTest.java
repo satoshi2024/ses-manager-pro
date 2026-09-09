@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.ses.entity.EngineerSkill;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.Test;
@@ -150,6 +151,33 @@ public class EngineerSkillServiceImplTest {
 
         BusinessException ex = assertThrows(BusinessException.class, () -> engineerSkillService.replaceSkills(engineerId, skills));
         assertTrue(ex.getMessage().contains("error.skill.notFound"));
+    }
+
+    @Test
+    void replaceSkills_explicitRequestのreasonとversionを監査する() {
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(0);
+        request.setReason("HR手動資格更新");
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(10L);
+        item.setProficiency("上級");
+        request.setSkills(List.of(item));
+
+        engineerSkillService.replaceSkills(1L, request);
+
+        com.ses.entity.EngineerSkillEvent event = engineerSkillEventMapper.selectByEngineerId(1L).get(0);
+        assertEquals("HR手動資格更新", event.getReason());
+        assertEquals("OPEN", event.getEventType());
+        assertNotNull(event.getEffectiveFrom());
+        assertNull(event.getEffectiveTo());
+
+        SkillReplaceRequest stale = new SkillReplaceRequest();
+        stale.setExpectedVersion(0);
+        stale.setReason("古い更新");
+        stale.setSkills(List.of(item));
+        BusinessException conflict = assertThrows(BusinessException.class,
+                () -> engineerSkillService.replaceSkills(1L, stale));
+        assertTrue(conflict.getMessage().contains("error.common.optimisticLock"));
     }
 
     private static boolean noActiveOpenEvent(List<com.ses.entity.EngineerSkillEvent> events, Long skillId,

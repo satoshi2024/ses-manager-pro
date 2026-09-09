@@ -20,6 +20,7 @@ import com.ses.service.MenuCacheService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.impl.FileScopeValidationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +79,7 @@ class FileScopeValidationServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new FileScopeValidationService(
                 resumeIngestionMapper,
                 engineerMapper,
@@ -99,6 +101,7 @@ class FileScopeValidationServiceTest {
     @AfterEach
     void clearAuth() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     private void loginAs(String role) {
@@ -116,6 +119,8 @@ class FileScopeValidationServiceTest {
     /** 先行する3判定（レジュメ/写真/スキルシート）に該当させないための共通スタブ。 */
     private void noMatchOnEarlierTables() {
         lenient().when(resumeIngestionMapper.selectOne(any())).thenReturn(null);
+        lenient().when(resumeIngestionMapper.selectByStoredFileNameForTenant(any(), any())).thenReturn(null);
+        lenient().when(resumeIngestionMapper.countByStoredFileName(any())).thenReturn(0);
         lenient().when(engineerMapper.selectOne(any())).thenReturn(null);
         lenient().when(proposalMapper.selectOne(any())).thenReturn(null);
     }
@@ -182,13 +187,15 @@ class FileScopeValidationServiceTest {
         noMatchOnEarlierTables();
         DocumentVersion version = new DocumentVersion();
         version.setDocumentId(9001L);
+        version.setTenantId("default");
         version.setScanStatus("CLEAN");
         Document document = new Document();
         document.setDocumentType("MANAGEMENT_REPORT");
+        document.setTenantId("default");
         when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
         when(documentVersionMapper.selectOne(any())).thenReturn(version);
         when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
-        when(documentMapper.selectById(9001L)).thenReturn(document);
+        when(documentMapper.selectOne(any())).thenReturn(document);
         loginAs("管理者");
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -200,15 +207,17 @@ class FileScopeValidationServiceTest {
         DocumentVersion version = new DocumentVersion();
         version.setId(versionId);
         version.setDocumentId(9100L);
+        version.setTenantId("default");
         version.setStorageKey(storageKey);
         version.setScanStatus("CLEAN");
         version.setSha256(hash);
         Document document = new Document();
         document.setDocumentType("CERTIFICATION_EVIDENCE");
+        document.setTenantId("default");
         lenient().when(documentVersionMapperProvider.getIfAvailable()).thenReturn(documentVersionMapper);
         lenient().when(documentVersionMapper.selectOne(any())).thenReturn(version);
         lenient().when(documentMapperProvider.getIfAvailable()).thenReturn(documentMapper);
-        lenient().when(documentMapper.selectById(9100L)).thenReturn(document);
+        lenient().when(documentMapper.selectOne(any())).thenReturn(document);
         lenient().when(documentLinkMapperProvider.getIfAvailable()).thenReturn(documentLinkMapper);
         lenient().when(engineerCertificationMapperProvider.getIfAvailable()).thenReturn(engineerCertificationMapper);
         return version;
@@ -252,7 +261,8 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         org.mockito.Mockito.doThrow(BusinessException.of(403, "error.forbidden"))
                 .when(dataScopeService).assertAllowedEngineer(50L);
         loginAs("管理者");
@@ -276,7 +286,8 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf"));
@@ -293,7 +304,8 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        lenient().when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -312,7 +324,8 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        lenient().when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        lenient().when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -331,7 +344,8 @@ class FileScopeValidationServiceTest {
         EngineerCertification record = new EngineerCertification();
         record.setId(200L);
         record.setEngineerId(50L);
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        record.setTenantId("default");
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         assertDoesNotThrow(() -> service.assertDownloadAllowed("cert-evidence.pdf", 100L, "abc123"));
@@ -344,7 +358,7 @@ class FileScopeValidationServiceTest {
         Document held = new Document();
         held.setDocumentType("CERTIFICATION_EVIDENCE");
         held.setLegalHoldFlag(1);
-        when(documentMapper.selectById(9100L)).thenReturn(held);
+        when(documentMapper.selectOne(any())).thenReturn(held);
         loginAs("HR");
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -370,7 +384,7 @@ class FileScopeValidationServiceTest {
         recordLink.setTargetType("CERTIFICATION_RECORD");
         recordLink.setTargetId(200L);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
         assertThrows(BusinessException.class, () -> service.assertCertificationEvidenceDownloadAllowed(

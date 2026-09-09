@@ -118,7 +118,10 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
 
     private boolean isMetricsScraperRequest(HttpServletRequest request) {
         String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
-        return (contextPath + "/actuator/prometheus").equals(request.getRequestURI());
+        String uri = request.getRequestURI();
+        String prometheus = contextPath + "/actuator/prometheus";
+        String metrics = contextPath + "/actuator/metrics";
+        return prometheus.equals(uri) || metrics.equals(uri) || uri.startsWith(metrics + "/");
     }
 
     private void deny(HttpServletResponse response, String code) throws IOException {

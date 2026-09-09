@@ -7,6 +7,7 @@ import com.ses.entity.Candidate;
 import com.ses.entity.CandidateActivity;
 import com.ses.mapper.CandidateActivityMapper;
 import com.ses.mapper.CandidateMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,7 @@ class CandidateServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         mockedSecurityUtils = Mockito.mockStatic(com.ses.common.util.SecurityUtils.class);
         mockedSecurityUtils.when(com.ses.common.util.SecurityUtils::currentUserId).thenReturn(1L);
     }
@@ -57,10 +59,12 @@ class CandidateServiceImplTest {
         if (mockedSecurityUtils != null && !mockedSecurityUtils.isClosed()) {
             mockedSecurityUtils.close();
         }
+        AccountingTenantContextHolder.clear();
     }
 
     private Candidate seedCandidate(String stage) {
         Candidate candidate = new Candidate();
+        candidate.setTenantId("default");
         candidate.setName("テスト候補者");
         candidate.setSkillSummary("Java経験3年");
         candidate.setCurrentStage(stage);
@@ -175,7 +179,8 @@ class CandidateServiceImplTest {
     void linkConvertedEngineer_convertedEngineerIdが設定される() {
         Candidate candidate = seedCandidate("入社");
 
-        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, employment_type, status, deleted_flag) VALUES (42, 'Test Eng', '正社員', '稼働中', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, tenant_id, full_name, employment_type, status, version, deleted_flag) "
+                + "VALUES (42, 'default', 'Test Eng', '正社員', '稼働中', 0, 0)");
         candidateService.linkConvertedEngineer(candidate.getId(), 42L);
 
         Candidate updated = candidateMapper.selectById(candidate.getId());

@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.entity.EngineerSkill;
 import com.ses.entity.EngineerSkillEvent;
 import com.ses.mapper.EngineerSkillEventMapper;
@@ -66,16 +67,47 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
     @Transactional(rollbackFor = Exception.class)
     public void replaceSkills(Long engineerId, List<EngineerSkill> skills) {
         String tenantId = requireTenant();
+        com.ses.entity.Engineer parent = engineerMapper.selectByIdForTenant(engineerId, tenantId);
+        if (parent == null || parent.getVersion() == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.engineer.notFound");
+        }
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(parent.getVersion());
+        request.setReason("内部skill projection更新");
+        request.setSkills(skills == null ? List.of() : skills.stream().map(this::toItem).toList());
+        replaceSkills(engineerId, request);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void replaceSkills(Long engineerId, SkillReplaceRequest request) {
+        String tenantId = requireTenant();
         String role = SecurityUtils.currentRole();
         if (role != null && !"HR".equals(role) && !"管理者".equals(role) && !"SYSTEM".equals(role)) {
             // SELF/MANAGER/AIはassessment proposalだけを作成し、公式projectionを直接変更しない。
             throw com.ses.common.exception.BusinessException.of(403, "error.skill.officialProjectionHrOnly");
         }
-        if (tenantOwnershipResolver.selectEngineer(tenantId, engineerId) == null) {
+        if (request == null || request.getExpectedVersion() == null || request.getReason() == null
+                || request.getReason().isBlank() || request.getSkills() == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.skill.replaceRequestRequired");
+        }
+        com.ses.entity.Engineer parent = engineerMapper.selectByIdForUpdateForTenant(engineerId, tenantId);
+        if (parent == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.engineer.notFound");
         }
+        if (parent.getVersion() == null || !request.getExpectedVersion().equals(parent.getVersion())) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+        }
 
-        if (skills != null && !skills.isEmpty()) {
+        List<EngineerSkill> skills = request.getSkills().stream().map(item -> {
+            EngineerSkill skill = new EngineerSkill();
+            skill.setEngineerId(engineerId);
+            skill.setSkillId(item.getSkillId());
+            skill.setProficiency(item.getProficiency());
+            skill.setExperienceYears(item.getExperienceYears());
+            return skill;
+        }).toList();
+        if (!skills.isEmpty()) {
             if (skills.stream().anyMatch(s -> s.getSkillId() == null)) {
                 throw com.ses.common.exception.BusinessException.of(400, "error.skill.notFound");
             }
@@ -105,22 +137,25 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
 
         baseMapper.deleteByEngineerIdAndTenant(engineerId, tenantId);
 
-        if (skills == null || skills.isEmpty()) {
-            return;
-        }
-
         List<EngineerSkill> distinctSkills = skills.stream()
                 .filter(distinctByKey(EngineerSkill::getSkillId))
                 .peek(skill -> skill.setEngineerId(engineerId))
                 .collect(Collectors.toList());
 
-        saveBatch(distinctSkills);
+        for (EngineerSkill skill : distinctSkills) {
+            if (baseMapper.insertForTenant(skill, tenantId) != 1) {
+                throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+            }
+        }
 
         for (EngineerSkill skill : distinctSkills) {
             assertNoOpenSkillEvent(tenantId, engineerId, skill.getSkillId());
             Long supersedesId = resolveSupersedesEventId(tenantId, engineerId, skill.getSkillId(), supersedesBySkillId);
             appendSkillEvent(skill, EngineerSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    supersedesId, actorUserId, actorRole, occurredAt);
+                    supersedesId, actorUserId, actorRole, occurredAt, request.getReason().trim());
+        }
+        if (engineerMapper.bumpVersionForTenant(engineerId, tenantId, request.getExpectedVersion()) != 1) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
     }
 
@@ -154,7 +189,7 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
 
     private void appendSkillEvent(EngineerSkill skill, String eventType, LocalDate effectiveFrom,
                                   LocalDate effectiveTo, Long supersedesEventId, Long actorUserId, String actorRole,
-                                  LocalDateTime occurredAt) {
+                                  LocalDateTime occurredAt, String reason) {
         EngineerSkillEvent event = new EngineerSkillEvent();
         event.setTenantId(requireTenant());
         event.setEngineerId(skill.getEngineerId());
@@ -168,9 +203,18 @@ public class EngineerSkillServiceImpl extends ServiceImpl<com.ses.mapper.Enginee
         event.setSupersedesEventId(supersedesEventId);
         event.setActorUserId(actorUserId);
         event.setActorRoleSnapshot(actorRole);
+        event.setReason(reason);
         event.setOccurredAt(occurredAt);
         event.setCreatedAt(occurredAt);
         engineerSkillEventMapper.insertEvent(event);
+    }
+
+    private SkillReplaceRequest.SkillItem toItem(EngineerSkill skill) {
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(skill.getSkillId());
+        item.setProficiency(skill.getProficiency());
+        item.setExperienceYears(skill.getExperienceYears());
+        return item;
     }
 
     private String requireTenant() {

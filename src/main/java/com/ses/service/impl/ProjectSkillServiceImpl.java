@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.project.ProjectSkillDetailDto;
+import com.ses.dto.skill.SkillReplaceRequest;
 import com.ses.entity.ProjectSkill;
 import com.ses.entity.ProjectSkillEvent;
 import com.ses.mapper.ProjectSkillEventMapper;
@@ -50,11 +51,42 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
     @Transactional(rollbackFor = Exception.class)
     public void replaceSkills(Long projectId, List<ProjectSkill> skills) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
-        if (projectMapper.selectByIdForTenant(projectId, tenantId) == null) {
+        com.ses.entity.Project parent = projectMapper.selectByIdForTenant(projectId, tenantId);
+        if (parent == null || parent.getVersion() == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.project.notFound");
         }
+        SkillReplaceRequest request = new SkillReplaceRequest();
+        request.setExpectedVersion(parent.getVersion());
+        request.setReason("内部skill projection更新");
+        request.setSkills(skills == null ? List.of() : skills.stream().map(this::toItem).toList());
+        replaceSkills(projectId, request);
+    }
 
-        if (skills != null && !skills.isEmpty()) {
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void replaceSkills(Long projectId, SkillReplaceRequest request) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (request == null || request.getExpectedVersion() == null || request.getReason() == null
+                || request.getReason().isBlank() || request.getSkills() == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "error.skill.replaceRequestRequired");
+        }
+        com.ses.entity.Project parent = projectMapper.selectByIdForUpdateForTenant(projectId, tenantId);
+        if (parent == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.project.notFound");
+        }
+        if (parent.getVersion() == null || !request.getExpectedVersion().equals(parent.getVersion())) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+        }
+
+        List<ProjectSkill> skills = request.getSkills().stream().map(item -> {
+            ProjectSkill skill = new ProjectSkill();
+            skill.setProjectId(projectId);
+            skill.setSkillId(item.getSkillId());
+            skill.setRequiredLevel(item.getRequiredLevel());
+            skill.setIsMust(item.getIsMust());
+            return skill;
+        }).toList();
+        if (!skills.isEmpty()) {
             if (skills.stream().anyMatch(s -> s.getSkillId() == null)) {
                 throw com.ses.common.exception.BusinessException.of(400, "error.skill.notFound");
             }
@@ -84,22 +116,25 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
 
         baseMapper.deleteByProjectIdForTenant(projectId, tenantId);
 
-        if (skills == null || skills.isEmpty()) {
-            return;
-        }
-
         List<ProjectSkill> distinctSkills = skills.stream()
                 .filter(distinctByKey(ProjectSkill::getSkillId))
                 .peek(skill -> skill.setProjectId(projectId))
                 .collect(Collectors.toList());
 
-        saveBatch(distinctSkills);
+        for (ProjectSkill skill : distinctSkills) {
+            if (baseMapper.insertForTenant(skill, tenantId) != 1) {
+                throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
+            }
+        }
 
         for (ProjectSkill skill : distinctSkills) {
             assertNoOpenSkillEvent(tenantId, projectId, skill.getSkillId());
             Long supersedesId = resolveSupersedesEventId(tenantId, projectId, skill.getSkillId(), supersedesBySkillId);
             appendSkillEvent(skill, ProjectSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    supersedesId, actorUserId, actorRole, occurredAt, tenantId);
+                    supersedesId, actorUserId, actorRole, occurredAt, tenantId, request.getReason().trim());
+        }
+        if (projectMapper.bumpVersionForTenant(projectId, tenantId, request.getExpectedVersion()) != 1) {
+            throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
     }
 
@@ -135,7 +170,7 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
 
     private void appendSkillEvent(ProjectSkill skill, String eventType, LocalDate effectiveFrom,
                                   LocalDate effectiveTo, Long supersedesEventId, Long actorUserId, String actorRole,
-                                  LocalDateTime occurredAt, String tenantId) {
+                                  LocalDateTime occurredAt, String tenantId, String reason) {
         ProjectSkillEvent event = new ProjectSkillEvent();
         event.setTenantId(tenantId);
         event.setProjectId(skill.getProjectId());
@@ -149,9 +184,18 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
         event.setSupersedesEventId(supersedesEventId);
         event.setActorUserId(actorUserId);
         event.setActorRoleSnapshot(actorRole);
+        event.setReason(reason);
         event.setOccurredAt(occurredAt);
         event.setCreatedAt(occurredAt);
         projectSkillEventMapper.insertEvent(event);
+    }
+
+    private SkillReplaceRequest.SkillItem toItem(ProjectSkill skill) {
+        SkillReplaceRequest.SkillItem item = new SkillReplaceRequest.SkillItem();
+        item.setSkillId(skill.getSkillId());
+        item.setRequiredLevel(skill.getRequiredLevel());
+        item.setIsMust(skill.getIsMust());
+        return item;
     }
 
     private static <T> Predicate<T> distinctByKey(Function<? super T, ?> keyExtractor) {

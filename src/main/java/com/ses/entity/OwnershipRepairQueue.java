@@ -25,4 +25,12 @@ public class OwnershipRepairQueue {
     private LocalDateTime resolvedAt;
     private Long resolvedBy;
     private LocalDateTime lastCheckedAt;
+    private Integer version;
+    private String claimToken;
+    private Long claimedBy;
+    private LocalDateTime claimedAt;
+    private Long incidentId;
+    private String actorTenantId;
+    private String evidenceHash;
+    private Long approverId;
 }

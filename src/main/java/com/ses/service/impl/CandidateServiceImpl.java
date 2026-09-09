@@ -12,6 +12,7 @@ import com.ses.mapper.CandidateActivityMapper;
 import com.ses.mapper.CandidateMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.service.CandidateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,6 +64,11 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Candidate candidate) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (candidate.getTenantId() != null && !tenantId.equals(candidate.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        candidate.setTenantId(tenantId);
         if (!StringUtils.hasText(candidate.getCurrentStage())) {
             candidate.setCurrentStage(StatusConstants.CANDIDATE_STAGE_APPLIED);
         } else {
@@ -170,7 +176,8 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void linkConvertedEngineer(Long candidateId, Long engineerId) {
-        Candidate candidate = this.getById(candidateId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Candidate candidate = baseMapper.selectByIdForUpdateForTenant(candidateId, tenantId);
         if (candidate == null) {
             throw BusinessException.of("error.candidate.notFound");
         }
@@ -181,7 +188,7 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         if (engineerId == null) {
             throw BusinessException.of(400, "error.candidate.invalidEngineerId");
         }
-        com.ses.entity.Engineer eng = engineerMapper.selectById(engineerId);
+        com.ses.entity.Engineer eng = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (eng == null) {
             throw BusinessException.of(404, "error.engineer.notFound");
         }
@@ -194,24 +201,13 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         }
         
         // 他候補者との重複チェック
-        LambdaQueryWrapper<Candidate> dupCheck = new LambdaQueryWrapper<>();
-        dupCheck.eq(Candidate::getConvertedEngineerId, engineerId);
-        if (this.count(dupCheck) > 0) {
+        if (baseMapper.countByConvertedEngineerForTenant(engineerId, tenantId) > 0) {
             throw BusinessException.of(409, "error.candidate.alreadyLinked");
         }
 
-        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Candidate> updateWrapper = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
-        updateWrapper.eq(Candidate::getId, candidateId)
-                     .isNull(Candidate::getConvertedEngineerId)
-                     .set(Candidate::getConvertedEngineerId, engineerId);
-        
-        boolean updated = this.update(updateWrapper);
-        if (!updated) {
-            // Concurrent modification check
-            Candidate current = this.getById(candidateId);
-            if (current != null && engineerId.equals(current.getConvertedEngineerId())) {
-                return;
-            }
+        if (candidate.getVersion() == null
+                || baseMapper.linkConvertedEngineerForTenant(candidateId, engineerId, tenantId,
+                candidate.getVersion()) != 1) {
             throw BusinessException.of(409, "error.candidate.alreadyLinked");
         }
     }

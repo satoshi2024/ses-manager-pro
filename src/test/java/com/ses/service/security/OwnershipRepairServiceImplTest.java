@@ -1,5 +1,6 @@
 package com.ses.service.security;
 
+import com.ses.dto.security.OwnershipRepairRequest;
 import com.ses.entity.OwnershipRepairQueue;
 import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.mapper.CustomerMapper;
@@ -16,82 +17,106 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.authentication.TestingAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-/** unresolved ownershipの修復が明示tenant・根拠・管理者監査を要求することを検証する。 */
 @ExtendWith(MockitoExtension.class)
 class OwnershipRepairServiceImplTest {
-
     @Mock private OwnershipRepairQueueMapper queueMapper;
     @Mock private CustomerMapper customerMapper;
     @Mock private EngineerMapper engineerMapper;
     @Mock private BpAvailabilityMapper bpAvailabilityMapper;
     @Mock private EngineerAccountLinkMapper engineerAccountLinkMapper;
     @Mock private SysUserMapper sysUserMapper;
+    @Mock private RepairAuthorityResolver authorityResolver;
     @InjectMocks private OwnershipRepairServiceImpl service;
 
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("tenant-a");
-        TestingAuthenticationToken authentication = new TestingAuthenticationToken(
-                "repair-admin", "N/A", "ROLE_管理者");
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(authorityResolver.requireAuthority()).thenReturn(
+                new RepairAuthorityResolver.RepairAuthority("tenant-a", 77L, 10L, 11L));
     }
 
     @AfterEach
     void tearDown() {
-        SecurityContextHolder.clearContext();
         AccountingTenantContextHolder.clear();
     }
 
     @Test
-    void resolveはtenant根拠証跡がない場合に拒否する() {
-        assertThrows(RuntimeException.class,
-                () -> service.resolve(1L, "tenant-b", "運用確認", "ticket-1"));
-        assertThrows(RuntimeException.class,
-                () -> service.resolve(1L, "tenant-a", "", "ticket-1"));
-        verify(queueMapper, never()).selectById(any());
-    }
-
-    @Test
-    void customerの修復は明示tenantと監査情報を同時に保存する() {
+    void resolveはclaimと構造化evidenceとCASを必須にする() {
         OwnershipRepairQueue row = new OwnershipRepairQueue();
         row.setId(1L);
         row.setEntityType("CUSTOMER");
         row.setEntityId(10L);
-        row.setStatus("PENDING");
-        when(queueMapper.selectById(1L)).thenReturn(row);
+        row.setStatus("CLAIMED");
+        row.setVersion(2);
+        row.setClaimToken("claim");
+        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+        OwnershipRepairRequest request = new OwnershipRepairRequest();
+        request.setExpectedVersion(2);
+        request.setClaimToken("claim");
+        request.setReason("台帳照合");
+        OwnershipRepairRequest.Evidence evidence = new OwnershipRepairRequest.Evidence();
+        evidence.setSourceType("LEDGER");
+        evidence.setSourceReference("ticket-123");
+        evidence.setStatement("契約台帳と管理者承認を照合した");
+        request.setEvidence(evidence);
         when(customerMapper.assignTenantForRepair(10L, "tenant-a")).thenReturn(1);
-        when(queueMapper.markResolved(eq(1L), eq("tenant-a"), eq("契約台帳で確認"), eq("ticket-123"),
-                any(), any())).thenReturn(1);
+        when(queueMapper.markResolvedCas(eq(1L), eq("tenant-a"), eq("台帳照合"), anyString(),
+                any(), eq(10L), eq(77L), eq("tenant-a"), anyString(), eq(11L), eq("claim"), eq(2)))
+                .thenReturn(1);
 
-        service.resolve(1L, "tenant-a", "契約台帳で確認", "ticket-123");
+        service.resolve(1L, request);
 
         verify(customerMapper).assignTenantForRepair(10L, "tenant-a");
-        verify(queueMapper).markResolved(eq(1L), eq("tenant-a"), eq("契約台帳で確認"), eq("ticket-123"),
-                any(), any());
+        verify(queueMapper).markResolvedCas(eq(1L), eq("tenant-a"), eq("台帳照合"), anyString(),
+                any(), eq(10L), eq(77L), eq("tenant-a"), anyString(), eq(11L), eq("claim"), eq(2));
     }
 
     @Test
-    void 非管理者はrepairの一覧とsummaryを実行できない() {
-        SecurityContextHolder.getContext().setAuthentication(
-                new TestingAuthenticationToken("sales", "N/A", "ROLE_営業"));
+    void authorityが無ければ業務mapperを呼ばない() {
+        when(authorityResolver.requireAuthority()).thenThrow(new RuntimeException("denied"));
         assertThrows(RuntimeException.class, service::listPending);
         assertThrows(RuntimeException.class, service::summary);
+        verifyNoInteractions(queueMapper);
     }
 
     @Test
-    void assign先ユーザーも同じtenantでなければ拒否する() {
-        when(sysUserMapper.selectByIdAndTenant(99L, "tenant-a")).thenReturn(null);
-        assertThrows(RuntimeException.class, () -> service.assign(1L, 99L));
-        verify(queueMapper, never()).assign(any(), any(), any());
+    void assignはversionCASでclaimする() {
+        when(sysUserMapper.selectByIdAndTenant(99L, "tenant-a")).thenReturn(new com.ses.entity.SysUser());
+        OwnershipRepairQueue row = new OwnershipRepairQueue();
+        row.setStatus("PENDING");
+        row.setVersion(0);
+        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+        when(queueMapper.claim(eq(1L), eq(99L), anyString(), any(), eq(0), eq(77L), eq("tenant-a")))
+                .thenReturn(1);
+        service.assign(1L, 99L, 0);
+        verify(queueMapper).claim(eq(1L), eq(99L), anyString(), any(), eq(0), eq(77L), eq("tenant-a"));
+    }
+
+    @Test
+    void evidenceが構造化されていなければ業務更新を行わない() {
+        OwnershipRepairQueue row = new OwnershipRepairQueue();
+        row.setStatus("CLAIMED");
+        row.setVersion(1);
+        row.setClaimToken("claim");
+        when(queueMapper.selectForUpdate(1L)).thenReturn(row);
+
+        OwnershipRepairRequest request = new OwnershipRepairRequest();
+        request.setExpectedVersion(1);
+        request.setClaimToken("claim");
+        request.setReason("確認");
+        request.setEvidence(new OwnershipRepairRequest.Evidence());
+
+        com.ses.common.exception.BusinessException ex = assertThrows(
+                com.ses.common.exception.BusinessException.class, () -> service.resolve(1L, request));
+        assertEquals(400, ex.getCode());
+        verifyNoInteractions(customerMapper, engineerMapper, bpAvailabilityMapper, engineerAccountLinkMapper);
+        verify(queueMapper, never()).markResolvedCas(anyLong(), anyString(), anyString(), anyString(),
+                any(), any(), any(), anyString(), anyString(), any(), anyString(), anyInt());
     }
 }
