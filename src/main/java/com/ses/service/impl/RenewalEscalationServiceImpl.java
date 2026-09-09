@@ -11,6 +11,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.RenewalEscalationService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
 
     @Override
     public int escalateUnhandled() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         List<Stage> stages = parseStages(systemConfigService.getString(CONFIG_KEY, DEFAULT_STAGES));
         if (stages.isEmpty()) {
             return 0;
@@ -94,7 +96,7 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
                     continue;
                 }
                 if (ROLE_SUPERIOR.equals(stage.role()) && superiors == null) {
-                    superiors = resolveSuperiors();
+                    superiors = resolveSuperiors(tenantId);
                 }
                 notified += notifyStage(c, stage, monthKey, superiors);
             }
@@ -102,8 +104,9 @@ public class RenewalEscalationServiceImpl implements RenewalEscalationService {
         return notified;
     }
 
-    private List<SysUser> resolveSuperiors() {
+    private List<SysUser> resolveSuperiors(String tenantId) {
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getTenantId, tenantId)
                 .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
                 .eq(SysUser::getStatus, 1));
     }

@@ -4,6 +4,7 @@ import com.ses.common.security.OutboundUrlException;
 import com.ses.common.security.OutboundUrlGuard;
 import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
@@ -53,7 +54,12 @@ public class WebhookNotifier {
      */
     @Async
     public void notify(Notification notification) {
-        notifyNow(notification);
+        if (notification == null || !StringUtils.hasText(notification.getTenantId())) {
+            log.warn("tenantがないWebhook通知を破棄しました");
+            return;
+        }
+        String tenantId = notification.getTenantId().trim();
+        AccountingTenantContextHolder.runWithTenant(tenantId, () -> notifyNow(notification));
     }
 
     /** outbox workerから同期実行し、成功/再送要否を返す。 */

@@ -8,6 +8,7 @@ import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.service.NotificationService;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.OrganizationScopeService;
 import com.ses.service.notification.WebhookNotifier;
 import com.ses.service.notification.NotificationOutboxService;
@@ -38,6 +39,7 @@ public class NotificationServiceImpl implements NotificationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private NotificationOutboxService notificationOutboxService;
     private final UserOrganizationMapper userOrganizationMapper;
+    private final SysUserMapper sysUserMapper;
     private final java.time.Clock clock;
 
     @Override
@@ -221,6 +223,10 @@ public class NotificationServiceImpl implements NotificationService {
         try {
             Notification notification = new Notification();
             String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            if (userId != null && sysUserMapper.selectByIdAndTenant(userId, tenantId) == null) {
+                // recipient IDだけを別tenantから持ち込む経路を許可しない。
+                return null;
+            }
             notification.setTenantId(tenantId);
             notification.setRecipientUserId(userId);
             notification.setType(type);
@@ -288,6 +294,7 @@ public class NotificationServiceImpl implements NotificationService {
         if (userId == null || userOrganizationMapper == null) {
             return null;
         }
-        return userOrganizationMapper.selectPrimaryOrganizationId(userId, LocalDate.now(clock));
+        return userOrganizationMapper.selectPrimaryOrganizationIdByTenant(
+                explicitTenantId(), userId, LocalDate.now(clock));
     }
 }

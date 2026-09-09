@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -119,6 +120,40 @@ class InternalTenantContextFilterTest {
         assertTrue(response.getContentAsString().contains(InternalTenantContextFilter.OIDC_TENANT_MISMATCH));
         verify(chain, never()).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void 通常LoginUserでもOIDC設定tenantと不一致ならfailClosedする() throws Exception {
+        SecurityContextHolder.getContext().setAuthentication(authentication(user("tenant-b")));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request("/api/service-desk/requests"), response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains(InternalTenantContextFilter.OIDC_TENANT_MISMATCH));
+        verify(chain, never()).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertNull(AccountingTenantContextHolder.getExplicitTenantId());
+    }
+
+    @Test
+    void 機械認証はmetrics以外の内部業務へ到達できない() throws Exception {
+        Authentication machine = new UsernamePasswordAuthenticationToken(
+                "metrics-scraper", null,
+                List.of(new SimpleGrantedAuthority("ROLE_METRICS_SCRAPER")));
+        SecurityContextHolder.getContext().setAuthentication(machine);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request("/api/notifications"), response, chain);
+
+        assertEquals(403, response.getStatus());
+        verify(chain, never()).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        MockHttpServletResponse metricsResponse = new MockHttpServletResponse();
+        filter.doFilter(request("/actuator/prometheus"), metricsResponse, chain);
+        assertEquals(200, metricsResponse.getStatus());
+        verify(chain).doFilter(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     private FilterChain throwingChain() {

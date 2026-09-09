@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS m_approval_route CASCADE;
 
 CREATE TABLE IF NOT EXISTS t_notification_outbox (
   id               BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  tenant_id        VARCHAR(100) NOT NULL DEFAULT 'default',
   notification_id  BIGINT,
   type             VARCHAR(30)  NOT NULL,
   title            VARCHAR(200) NOT NULL,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS t_notification_outbox (
   menu_key         VARCHAR(100),
   recipient_user_id BIGINT,
   organization_id  BIGINT,
-  dedupe_key       VARCHAR(200) NOT NULL UNIQUE,
+  dedupe_key       VARCHAR(200) NOT NULL,
   status           VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
   attempt_count    INT          NOT NULL DEFAULT 0,
   next_attempt_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -33,12 +34,14 @@ CREATE TABLE IF NOT EXISTS t_notification_outbox (
   sent_at          DATETIME,
   created_at       DATETIME     DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uk_notification_outbox_tenant_dedupe
+  ON t_notification_outbox(tenant_id, dedupe_key);
 CREATE INDEX IF NOT EXISTS idx_notification_outbox_due
   ON t_notification_outbox(status, next_attempt_at);
 
 CREATE TABLE IF NOT EXISTS m_approval_route (
   id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
-  tenant_id       BIGINT       NOT NULL DEFAULT 1,
+  tenant_id       VARCHAR(100) NOT NULL DEFAULT 'default',
   request_type    VARCHAR(50)  NOT NULL,
   applicant_role_condition VARCHAR(30),
   organization_id BIGINT,
@@ -72,7 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_route_step_route ON m_approval_route_ste
 
 CREATE TABLE IF NOT EXISTS t_approval_responsibility (
   id                  BIGINT       AUTO_INCREMENT PRIMARY KEY,
-  tenant_id           BIGINT       NOT NULL DEFAULT 1,
+  tenant_id           VARCHAR(100) NOT NULL DEFAULT 'default',
   responsibility_type VARCHAR(30)  NOT NULL,
   organization_id     BIGINT,
   user_id             BIGINT       NOT NULL,
@@ -91,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_approval_responsibility_user
 
 CREATE TABLE IF NOT EXISTS t_approval_request (
   id                  BIGINT        AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100)  NOT NULL DEFAULT 'default',
   request_no          VARCHAR(30),
   request_type        VARCHAR(50)   NOT NULL,
   target_type         VARCHAR(30)   NOT NULL,
@@ -114,15 +118,20 @@ CREATE TABLE IF NOT EXISTS t_approval_request (
   created_at          DATETIME      DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME      DEFAULT CURRENT_TIMESTAMP,
   deleted_flag        TINYINT       NOT NULL DEFAULT 0,
-  CONSTRAINT uk_approval_request_no UNIQUE (request_no),
-  CONSTRAINT uk_approval_request_idempotency UNIQUE (idempotency_key)
+  CONSTRAINT uk_approval_request_tenant_no UNIQUE (tenant_id, request_no),
+  CONSTRAINT uk_approval_request_tenant_id UNIQUE (tenant_id, id),
+  CONSTRAINT uk_approval_request_tenant_idempotency UNIQUE (tenant_id, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS idx_approval_request_applicant ON t_approval_request(applicant_id, status);
 CREATE INDEX IF NOT EXISTS idx_approval_request_target ON t_approval_request(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_approval_request_status ON t_approval_request(status, current_step);
+CREATE INDEX IF NOT EXISTS idx_approval_request_tenant_applicant ON t_approval_request(tenant_id, applicant_id, status);
+CREATE INDEX IF NOT EXISTS idx_approval_request_tenant_target ON t_approval_request(tenant_id, target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_approval_request_tenant_status ON t_approval_request(tenant_id, status, current_step);
 
 CREATE TABLE IF NOT EXISTS t_approval_action (
   id                    BIGINT      AUTO_INCREMENT PRIMARY KEY,
+  tenant_id             VARCHAR(100) NOT NULL DEFAULT 'default',
   request_id            BIGINT      NOT NULL,
   round_no              INT         NOT NULL DEFAULT 1,
   step_no               INT         NOT NULL,
@@ -133,12 +142,14 @@ CREATE TABLE IF NOT EXISTS t_approval_action (
   comment               CLOB,
   delegated_from        BIGINT,
   acted_at              DATETIME    NOT NULL,
-  CONSTRAINT uk_approval_action_slot UNIQUE (request_id, round_no, step_no, approver_slot_user_id)
+  CONSTRAINT uk_approval_action_slot UNIQUE (tenant_id, request_id, round_no, step_no, approver_slot_user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_approval_action_request ON t_approval_action(request_id, round_no, step_no);
+CREATE INDEX IF NOT EXISTS idx_approval_action_tenant_request ON t_approval_action(tenant_id, request_id, round_no, step_no);
 
 CREATE TABLE IF NOT EXISTS t_approval_delegation (
   id                 BIGINT      AUTO_INCREMENT PRIMARY KEY,
+  tenant_id          VARCHAR(100) NOT NULL DEFAULT 'default',
   from_user_id       BIGINT      NOT NULL,
   to_user_id         BIGINT      NOT NULL,
   valid_from         DATE        NOT NULL,
@@ -153,22 +164,30 @@ CREATE TABLE IF NOT EXISTS t_approval_delegation (
 );
 CREATE INDEX IF NOT EXISTS idx_approval_delegation_lookup
   ON t_approval_delegation(from_user_id, valid_from, valid_to);
+CREATE INDEX IF NOT EXISTS idx_approval_delegation_tenant_lookup
+  ON t_approval_delegation(tenant_id, from_user_id, valid_from, valid_to);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_approval_delegation_tenant_id
+  ON t_approval_delegation(tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS t_approval_participant (
   id               BIGINT       AUTO_INCREMENT PRIMARY KEY,
+  tenant_id        VARCHAR(100) NOT NULL DEFAULT 'default',
   request_id       BIGINT       NOT NULL,
   user_id          BIGINT       NOT NULL,
   participant_role VARCHAR(20)  NOT NULL,
   round_no         INT          NOT NULL DEFAULT 1,
-  CONSTRAINT uk_participant UNIQUE (request_id, round_no, user_id, participant_role)
+  CONSTRAINT uk_participant UNIQUE (tenant_id, request_id, round_no, user_id, participant_role)
 );
 CREATE INDEX IF NOT EXISTS idx_participant_user
   ON t_approval_participant(user_id, participant_role);
+CREATE INDEX IF NOT EXISTS idx_participant_tenant_user
+  ON t_approval_participant(tenant_id, user_id, participant_role);
 
 CREATE TABLE IF NOT EXISTS t_approval_delegation_type (
   delegation_id BIGINT      NOT NULL,
+  tenant_id     VARCHAR(100) NOT NULL DEFAULT 'default',
   request_type  VARCHAR(50) NOT NULL,
-  CONSTRAINT pk_approval_delegation_type PRIMARY KEY (delegation_id, request_type)
+  CONSTRAINT pk_approval_delegation_type PRIMARY KEY (tenant_id, delegation_id, request_type)
 );
 
 -- V78対象entityの楽観ロック列。MySQLのV78と同じ列形状にする。

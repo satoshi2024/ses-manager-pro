@@ -106,15 +106,6 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
         String tenantId = currentTenant();
         TrainingCourse course = id == null ? null : courseMapper.selectOne(new LambdaQueryWrapper<TrainingCourse>()
                 .eq(TrainingCourse::getId, id).eq(TrainingCourse::getTenantId, tenantId));
-        if (course == null && id != null && "default".equals(tenantId)) {
-            TrainingCourse legacy = courseMapper.selectById(id);
-            if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                course = legacy;
-                if (course.getTenantId() == null) {
-                    course.setTenantId(tenantId);
-                }
-            }
-        }
         if (course == null) {
             throw BusinessException.of(404, "training.course.notFound");
         }
@@ -194,7 +185,7 @@ public class TrainingCourseMasterServiceImpl implements TrainingCourseMasterServ
     }
 
     private String tenantFor(String tenantId) {
-        String current = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String current = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (!StringUtils.hasText(current)) {
             throw BusinessException.of(403, "error.tenant.contextRequired");
         }

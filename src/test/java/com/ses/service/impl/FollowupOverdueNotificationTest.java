@@ -13,6 +13,8 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationGenerateService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,11 +54,13 @@ class FollowupOverdueNotificationTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         SysUser sales = new SysUser();
         sales.setUsername("sales_followup");
         sales.setPassword("pass");
         sales.setRealName("営業 花子");
         sales.setRole("営業");
+        sales.setTenantId("default");
         sales.setStatus(1);
         sysUserMapper.insert(sales);
         salesUserId = sales.getId();
@@ -94,5 +98,10 @@ class FollowupOverdueNotificationTest extends BaseIntegrationTest {
 
         assertEquals(1, notifications.size());
         assertEquals("engineer", notifications.get(0).getMenuKey());
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 }

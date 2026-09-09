@@ -5,12 +5,19 @@ import com.ses.entity.ApprovalAction;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 @Mapper
 public interface ApprovalActionMapper extends BaseMapper<ApprovalAction> {
 
     @Select("SELECT * FROM t_approval_action "
-            + "WHERE request_id = #{requestId} AND action = 'APPROVE' "
+            + "WHERE tenant_id = #{tenantId} AND request_id = #{requestId} AND action = 'APPROVE' "
             + "ORDER BY acted_at DESC, id DESC LIMIT 1")
-    ApprovalAction selectLatestApprovalByRequestId(@Param("requestId") Long requestId);
+    ApprovalAction selectLatestApprovalByRequestId(@Param("requestId") Long requestId,
+                                                    @Param("tenantId") String tenantId);
+
+    default ApprovalAction selectLatestApprovalByRequestId(Long requestId) {
+        return selectLatestApprovalByRequestId(requestId,
+                AccountingTenantContextHolder.requireTenantContext());
+    }
 }

@@ -26,6 +26,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.billing.CashFlowForecastService;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.impl.ReportSnapshotServiceImpl;
@@ -81,6 +82,7 @@ class ReportSnapshotServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         templateVersionMapper = mock(ReportTemplateVersionMapper.class);
         runMapper = mock(ReportRunMapper.class);
         sectionAttemptMapper = mock(ReportSectionAttemptMapper.class);
@@ -112,7 +114,7 @@ class ReportSnapshotServiceImplTest {
         version.setTemplateId(2L);
         version.setStatus("PUBLISHED");
         version.setSectionConfigJson("{\"sections\":[\"sales\"]}");
-        when(templateVersionMapper.selectById(3L)).thenReturn(version);
+        when(templateVersionMapper.selectOne(any())).thenReturn(version);
         when(monthlyClosingService.isClosed("2026-08")).thenReturn(false);
         when(recipientPreviewService.preview(3L, YearMonth.of(2026, 8)))
                 .thenReturn(new ReportRecipientPreviewResult("preview-1", "APPROVED_SCOPE_CHECKED",
@@ -154,6 +156,7 @@ class ReportSnapshotServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -186,7 +189,7 @@ class ReportSnapshotServiceImplTest {
 
     @Test
     void section失敗はpartialになり配布可能な成功runにしない() {
-        ReportTemplateVersion version = templateVersionMapper.selectById(3L);
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
         version.setSectionConfigJson("{\"sections\":[\"sales\",\"gross-profit\"]}");
         reset(dashboardService);
         when(dashboardService.getSummary(anyInt())).thenThrow(new IllegalStateException("source failure"));
@@ -267,7 +270,7 @@ class ReportSnapshotServiceImplTest {
         manager.setId(7L);
         manager.setRole("マネージャー");
         manager.setStatus(1);
-        when(userMapper.selectById(7L)).thenReturn(manager);
+        when(userMapper.selectByIdAndTenant(7L, "default")).thenReturn(manager);
         when(scopeService.allowedOrganizationIds(any())).thenReturn(Set.of(20L));
         when(scopeService.allowedDirectUserIds(any())).thenReturn(Set.of(21L));
         when(scopeService.allowedEngineerIds(any())).thenReturn(Set.of(22L));
@@ -285,7 +288,7 @@ class ReportSnapshotServiceImplTest {
 
     @Test
     void 確定runの稼働率sectionはUtilizationCalcServiceの実績口径を使う() {
-        ReportTemplateVersion version = templateVersionMapper.selectById(3L);
+        ReportTemplateVersion version = templateVersionMapper.selectOne(any());
         version.setSectionConfigJson("{\"sections\":[\"utilization\"]}");
         when(monthlyClosingService.isClosed("2026-08")).thenReturn(true);
         when(scopeService.hasFullAccess()).thenReturn(true);

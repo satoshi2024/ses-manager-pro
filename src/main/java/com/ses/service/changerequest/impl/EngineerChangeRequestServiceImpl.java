@@ -222,7 +222,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         return toDto(requireOwned(engineerId, id),
-                approvalRequestMapper.selectById(request.getApprovalRequestId()), null);
+                approvalRequestMapper.selectByIdAndTenant(request.getApprovalRequestId(),
+                        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()), null);
     }
 
     @Override
@@ -233,14 +234,16 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
             throw BusinessException.of(400, "error.changeRequest.invalidTransition",
                     request.getStatus(), STATUS_APPLIED);
         }
-        ApprovalRequest approval = approvalRequestMapper.selectById(request.getApprovalRequestId());
+        ApprovalRequest approval = approvalRequestMapper.selectByIdAndTenant(request.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (approval == null
                 || (!"returned".equals(approval.getStatus()) && !"conflict".equals(approval.getStatus()))) {
             throw BusinessException.of(400, "error.changeRequest.notReturned");
         }
         approvalEngineService.resubmit(approval.getId(), SecurityUtils.currentUserId(), null, null, null);
         return toDto(requireOwned(engineerId, id),
-                approvalRequestMapper.selectById(request.getApprovalRequestId()), null);
+                approvalRequestMapper.selectByIdAndTenant(request.getApprovalRequestId(),
+                        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()), null);
     }
 
     // ----------------------------------------------------------------
@@ -648,7 +651,8 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         if (request.getApprovalRequestId() == null) {
             return null;
         }
-        return approvalRequestMapper.selectById(request.getApprovalRequestId());
+        return approvalRequestMapper.selectByIdAndTenant(request.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
     }
 
     /** 管理画面の母集団（design §6.2）: HR/管理者=全件(null)、マネージャー=組織scope配下。 */
@@ -668,7 +672,10 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
         Set<Long> approvalIds = page.getRecords().stream()
                 .map(EngineerChangeRequest::getApprovalRequestId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, ApprovalRequest> approvals = approvalIds.isEmpty() ? Map.of()
-                : approvalRequestMapper.selectBatchIds(approvalIds).stream()
+                : approvalRequestMapper.selectList(new LambdaQueryWrapper<ApprovalRequest>()
+                        .in(ApprovalRequest::getId, approvalIds)
+                        .eq(ApprovalRequest::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())).stream()
                 .collect(Collectors.toMap(ApprovalRequest::getId, Function.identity()));
         Map<Long, String> names = withEngineerName
                 ? engineerNamesOf(page.getRecords().stream()

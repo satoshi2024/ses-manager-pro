@@ -61,10 +61,18 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
         }
 
         Object principal = authentication.getPrincipal();
-        // metrics scraper等の機械認証はtenantを持たない専用境界であり、内部LoginUser契約へ混在させない。
-        // 通常の内部ログイン主体は必ずLoginUser/OidcLoginUserである。
+        // tenantを持たない機械認証はPrometheusのmetrics endpointだけに限定する。
+        // その他の内部page/APIを通過させると、未束縛時のdefault tenantへ到達し得るため、
+        // LoginUser契約を満たさないprincipalはfail-closedにする。
         if (!(principal instanceof LoginUser loginUser)) {
-            filterChain.doFilter(request, response);
+            if (isMetricsScraperRequest(request)
+                    && authentication.getAuthorities().stream().anyMatch(a ->
+                    ("ROLE_" + MetricsScraperAuthConfig.ROLE_METRICS_SCRAPER)
+                            .equals(a.getAuthority()))) {
+                filterChain.doFilter(request, response);
+            } else {
+                deny(response, TENANT_CONTEXT_REQUIRED);
+            }
             return;
         }
 
@@ -75,8 +83,7 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
         }
         tenantId = tenantId.trim();
 
-        if (principal instanceof OidcLoginUser
-                && oidcSecurityProperties != null
+        if (oidcSecurityProperties != null
                 && StringUtils.hasText(oidcSecurityProperties.getTenantId())
                 && !tenantId.equals(oidcSecurityProperties.getTenantId().trim())) {
             deny(response, OIDC_TENANT_MISMATCH);
@@ -107,6 +114,11 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
         if (exception != null) {
             throw new ServletException(exception);
         }
+    }
+
+    private boolean isMetricsScraperRequest(HttpServletRequest request) {
+        String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
+        return (contextPath + "/actuator/prometheus").equals(request.getRequestURI());
     }
 
     private void deny(HttpServletResponse response, String code) throws IOException {

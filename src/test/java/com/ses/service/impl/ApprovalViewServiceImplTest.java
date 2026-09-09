@@ -8,6 +8,7 @@ import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalRequestMapper;
 import com.ses.service.approval.RouteSnapshot;
 import com.ses.service.approval.RouteStepGroup;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.AuthorizationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,7 @@ class ApprovalViewServiceImplTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new ApprovalViewServiceImpl(requestMapper, actionMapper, delegationMapper,
                 objectMapper, authorizationService);
         lenient().when(actionMapper.selectList(any())).thenReturn(List.of());
@@ -49,11 +51,16 @@ class ApprovalViewServiceImplTest {
         lenient().when(authorizationService.isAllowed(any(), eq("bp-company.view"))).thenReturn(false);
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void approverWithoutCostPermission_seesChangedOnlyAndNeverRawValues() throws Exception {
         ApprovalRequest request = request("in_review", 20L,
                 "{\"cost\":{\"label\":\"原価\",\"before\":100,\"after\":200,\"changed\":true},\"title\":{\"label\":\"件名\",\"before\":\"A\",\"after\":\"B\"}}");
-        when(requestMapper.selectById(1L)).thenReturn(request);
+        when(requestMapper.selectByIdAndTenant(1L, "default")).thenReturn(request);
 
         var view = service.detail(1L, 20L, "営業", authentication);
 
@@ -68,7 +75,7 @@ class ApprovalViewServiceImplTest {
     void bankAccountFieldは営業とマネージャーでマスクされ管理者で表示される() throws Exception {
         ApprovalRequest request = request("in_review", 20L,
                 "{\"bankAccount\":{\"label\":\"口座番号\",\"before\":\"123\",\"after\":\"456\",\"changed\":true}}");
-        when(requestMapper.selectById(4L)).thenReturn(request);
+        when(requestMapper.selectByIdAndTenant(4L, "default")).thenReturn(request);
 
         when(authorizationService.isAllowed(authentication, "bp-company.bank-account.view"))
                 .thenReturn(false);
@@ -89,7 +96,7 @@ class ApprovalViewServiceImplTest {
     @Test
     void returnedRequest_isVisibleToApplicantAndCanBeResubmitted() throws Exception {
         ApprovalRequest request = request("returned", 10L, "{\"title\":{\"before\":\"A\",\"after\":\"B\"}}");
-        when(requestMapper.selectById(2L)).thenReturn(request);
+        when(requestMapper.selectByIdAndTenant(2L, "default")).thenReturn(request);
 
         var view = service.detail(2L, 10L, "営業", authentication);
 
@@ -100,7 +107,8 @@ class ApprovalViewServiceImplTest {
 
     @Test
     void unrelatedUser_cannotReadRequest() throws Exception {
-        when(requestMapper.selectById(3L)).thenReturn(request("in_review", 10L, "{}"));
+        when(requestMapper.selectByIdAndTenant(3L, "default"))
+                .thenReturn(request("in_review", 10L, "{}"));
 
         assertThatThrownBy(() -> service.detail(3L, 99L, "営業", authentication))
                 .isInstanceOf(BusinessException.class);
@@ -112,7 +120,8 @@ class ApprovalViewServiceImplTest {
         ApprovalRequest result = ApprovalRequest.builder().requestNo("AR-1").requestType("CONTRACT")
                 .targetType("CONTRACT").targetId(42L).targetVersion(1L).applicantId(applicantId)
                 .organizationId(1L).payloadJson("{\"cost\":100}").diffJson(diff).routeSnapshotJson(route)
-                .status(status).currentStep(1).requestedAt(LocalDateTime.now()).version(0).build();
+                .status(status).currentStep(1).requestedAt(LocalDateTime.now()).version(0)
+                .tenantId("default").build();
         result.setId(1L);
         return result;
     }

@@ -18,8 +18,11 @@ import com.ses.mapper.ServiceSlaClockMapper;
 import com.ses.mapper.ServiceSlaEscalationMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.servicedesk.ServiceSlaMonitoringService;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -46,6 +49,16 @@ import static org.mockito.Mockito.verify;
 @ActiveProfiles("test")
 @Transactional
 class ServiceSlaSchedulerTest {
+
+    @BeforeEach
+    void bindTenant() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private ServiceSlaScheduler serviceSlaScheduler;

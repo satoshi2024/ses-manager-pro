@@ -86,17 +86,6 @@ public class ServiceRequestAttachmentService {
     private ServiceRequest validateRequest(Long requestId, boolean portal, Long customerId) {
         String tenantId = currentTenant();
         ServiceRequest request = requestId == null ? null : requestMapper.selectByIdAndTenant(requestId, tenantId);
-        if (request == null && "default".equals(tenantId) && requestId != null) {
-            // V156適用前の直接unit fixtureだけを確認し、NULL tenant以外は互換扱いしない。
-            ServiceRequest legacy = requestMapper.selectById(requestId);
-            if (legacy != null && legacy.getTenantId() == null) {
-                request = legacy;
-            }
-        }
-        if (request != null && request.getTenantId() == null && "default".equals(tenantId)) {
-            // V156適用前の直接unit fixtureだけを既定tenantへ正規化する。本番DBはNOT NULL。
-            request.setTenantId(tenantId);
-        }
         if (request == null || !tenantId.equals(request.getTenantId())
                 || (portal && !java.util.Objects.equals(request.getCustomerId(), customerId))) {
             throw BusinessException.of(404, "error.notFound");
@@ -144,13 +133,6 @@ public class ServiceRequestAttachmentService {
                 documentService.link(document.getId(), "SERVICE_REQUEST", request.getId());
                 DocumentVersion version = documentVersionMapper.findByIdempotencyKey(
                         currentTenant(), "RECEIVED", businessKey, "v1");
-                if (version == null && "default".equals(currentTenant())) {
-                    // 旧fixture互換。実DB経路はtenant-aware idempotency queryで確定する。
-                    DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(document.getId());
-                    if (legacy != null && (legacy.getTenantId() == null || currentTenant().equals(legacy.getTenantId()))) {
-                        version = legacy;
-                    }
-                }
                 if (version == null || !"CLEAN".equals(version.getScanStatus())) {
                     throw BusinessException.of(403, "error.file.scanNotReady");
                 }

@@ -198,7 +198,8 @@ public class LeaveServiceImpl implements LeaveService {
         if (leave.getApprovalRequestId() == null) {
             throw BusinessException.of(400, "error.leave.notReturned");
         }
-        ApprovalRequest approval = approvalRequestMapper.selectById(leave.getApprovalRequestId());
+        ApprovalRequest approval = approvalRequestMapper.selectByIdAndTenant(leave.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (approval == null || !"returned".equals(approval.getStatus())) {
             throw BusinessException.of(400, "error.leave.notReturned");
         }
@@ -497,7 +498,10 @@ public class LeaveServiceImpl implements LeaveService {
         if (approvalIds == null || approvalIds.isEmpty()) {
             return Map.of();
         }
-        return approvalRequestMapper.selectBatchIds(approvalIds).stream()
+        return approvalRequestMapper.selectList(new LambdaQueryWrapper<ApprovalRequest>()
+                        .in(ApprovalRequest::getId, approvalIds)
+                        .eq(ApprovalRequest::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())).stream()
                 .collect(Collectors.toMap(ApprovalRequest::getId, a -> a));
     }
 

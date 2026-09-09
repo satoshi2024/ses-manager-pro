@@ -8,6 +8,7 @@ import com.ses.entity.Task;
 import com.ses.mapper.TaskMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.TaskService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Task createTask(Task task, Long requesterUserId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (!StringUtils.hasText(task.getTitle())) {
             throw new BusinessException(400, "タスク件名は必須です");
         }
@@ -45,6 +47,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
             throw new BusinessException(400, "担当者は必須です");
         }
         task.setRequesterUserId(requesterUserId);
+        task.setTenantId(tenantId);
         if (!StringUtils.hasText(task.getPriority())) {
             task.setPriority("MEDIUM");
         }
@@ -64,7 +67,9 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Task updateStatus(Long taskId, String newStatus, Long operatorUserId) {
-        Task task = getById(taskId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Task task = getOne(new LambdaQueryWrapper<Task>()
+                .eq(Task::getId, taskId).eq(Task::getTenantId, tenantId));
         if (task == null) {
             throw new BusinessException(404, "タスクが見つかりません: " + taskId);
         }
@@ -118,7 +123,9 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Task updateTaskDetails(Long taskId, Long newAssigneeUserId, LocalDate newDueDate, Boolean clearDueDate, String newPriority, Long operatorUserId) {
-        Task task = getById(taskId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Task task = getOne(new LambdaQueryWrapper<Task>()
+                .eq(Task::getId, taskId).eq(Task::getTenantId, tenantId));
         if (task == null) {
             throw new BusinessException(404, "タスクが見つかりません: " + taskId);
         }
@@ -170,7 +177,8 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
             return List.of();
         }
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(Task::getAssigneeUserId, userId).or().eq(Task::getRequesterUserId, userId))
+        wrapper.eq(Task::getTenantId, AccountingTenantContextHolder.requireTenantContext())
+                .and(w -> w.eq(Task::getAssigneeUserId, userId).or().eq(Task::getRequesterUserId, userId))
                 .orderByDesc(Task::getCreatedAt);
         return list(wrapper);
     }
@@ -181,7 +189,8 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
             return List.of();
         }
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Task::getAssigneeUserId, userId)
+        wrapper.eq(Task::getTenantId, AccountingTenantContextHolder.requireTenantContext())
+                .eq(Task::getAssigneeUserId, userId)
                 .in(Task::getStatus, List.of(STATUS_NOT_STARTED, STATUS_IN_PROGRESS))
                 .isNotNull(Task::getDueDate)
                 .lt(Task::getDueDate, asOfDate)
@@ -221,6 +230,7 @@ public class TaskServiceImpl extends ServiceImpl<TaskMapper, Task> implements Ta
             String status, String priority, Long assigneeUserId, String keyword, Boolean overdue,
             Long current, Long size, Long userId) {
         LambdaQueryWrapper<Task> query = new LambdaQueryWrapper<>();
+        query.eq(Task::getTenantId, AccountingTenantContextHolder.requireTenantContext());
         String role = SecurityUtils.currentRole();
         if (!"管理者".equals(role)) {
             query.and(q -> q.eq(Task::getAssigneeUserId, userId).or().eq(Task::getRequesterUserId, userId));

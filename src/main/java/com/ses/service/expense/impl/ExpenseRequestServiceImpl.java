@@ -206,7 +206,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (expense.getApprovalRequestId() == null) {
             throw BusinessException.of(400, "error.expense.notReturned");
         }
-        ApprovalRequest approval = approvalRequestMapper.selectById(expense.getApprovalRequestId());
+        ApprovalRequest approval = approvalRequestMapper.selectByIdAndTenant(expense.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (approval == null
                 || (!"returned".equals(approval.getStatus()) && !"conflict".equals(approval.getStatus()))) {
             throw BusinessException.of(400, "error.expense.notReturned");
@@ -412,9 +413,11 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (id == null || engineerId == null) {
             throw BusinessException.of(404, "error.expense.notFound");
         }
-        ExpenseRequest expense = expenseRequestMapper.selectOne(new LambdaQueryWrapper<ExpenseRequest>()
-                .eq(ExpenseRequest::getId, id)
-                .eq(ExpenseRequest::getEngineerId, engineerId));
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(id, tenantId);
+        if (expense != null && !Objects.equals(expense.getEngineerId(), engineerId)) {
+            expense = null;
+        }
         if (expense == null) {
             throw BusinessException.of(404, "error.expense.notFound");
         }
@@ -422,7 +425,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     }
 
     private ExpenseRequest require(Long id) {
-        ExpenseRequest expense = id == null ? null : expenseRequestMapper.selectById(id);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = id == null ? null : expenseRequestMapper.selectByIdForTenant(id, tenantId);
         if (expense == null) {
             throw BusinessException.of(404, "error.expense.notFound");
         }
@@ -465,7 +469,10 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, ApprovalRequest> approvals = approvalIds.isEmpty() ? Map.of()
-                : approvalRequestMapper.selectBatchIds(approvalIds).stream()
+                : approvalRequestMapper.selectList(new LambdaQueryWrapper<ApprovalRequest>()
+                        .in(ApprovalRequest::getId, approvalIds)
+                        .eq(ApprovalRequest::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())).stream()
                 .collect(Collectors.toMap(ApprovalRequest::getId, Function.identity()));
         Map<Long, Integer> receiptVersions = latestReceiptVersionNos(page.getRecords().stream()
                 .map(ExpenseRequest::getReceiptDocumentId).filter(Objects::nonNull).collect(Collectors.toSet()));
@@ -506,7 +513,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
 
     private ExpenseRequestDto toDto(ExpenseRequest expense, String engineerName) {
         ApprovalRequest approval = expense.getApprovalRequestId() == null
-                ? null : approvalRequestMapper.selectById(expense.getApprovalRequestId());
+                ? null : approvalRequestMapper.selectByIdAndTenant(expense.getApprovalRequestId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return toDto(expense, engineerName, approval,
                 latestReceiptVersionNo(expense.getReceiptDocumentId()));
     }

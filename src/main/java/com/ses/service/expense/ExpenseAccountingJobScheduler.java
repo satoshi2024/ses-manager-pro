@@ -8,9 +8,10 @@ import com.ses.entity.ExpenseAccountingJob;
 import com.ses.entity.ExpenseRequest;
 import com.ses.mapper.ExpenseAccountingJobMapper;
 import com.ses.mapper.ExpenseRequestMapper;
-import com.ses.service.EngineerAccountLinkService;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -58,11 +59,12 @@ public class ExpenseAccountingJobScheduler {
     private final ExpenseAccountingJobMapper jobMapper;
     private final ObjectProvider<ExpenseAccountingSender> senderProvider;
     private final SystemConfigService systemConfigService;
-    private final EngineerAccountLinkService engineerAccountLinkService;
+    private final EngineerAccountLinkMapper engineerAccountLinkMapper;
     private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final PlatformTransactionManager transactionManager;
+    private final com.ses.service.scheduler.TenantAwareBatchRunner tenantAwareBatchRunner;
 
     /** 会計連携済への遷移も経費正本の支払関連writeとして締めを再検証する。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -77,7 +79,7 @@ public class ExpenseAccountingJobScheduler {
     @Scheduled(cron = "0 * * * * *")
     @SchedulerLock(name = "expenseAccountingDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT5M")
     public void dispatchPending() {
-        processDue(100);
+        tenantAwareBatchRunner.runAndSum(tenant -> processDue(100));
     }
 
     /** schedulerと同じ経路をテスト/Demoから起動する。処理したjob件数を返す。 */
@@ -95,9 +97,11 @@ public class ExpenseAccountingJobScheduler {
 
     /** 30分以上claimされたままの行を再送可能へ戻す（クラッシュ耐性）。 */
     public void recoverStaleRows() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         requiresNewTx().executeWithoutResult(st -> {
             LocalDateTime now = LocalDateTime.now(clock);
             jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
                     .eq("status", STATUS_PROCESSING)
                     .lt("updated_at", now.minusMinutes(30))
                     .set("status", STATUS_PENDING)
@@ -108,15 +112,14 @@ public class ExpenseAccountingJobScheduler {
     /** 承認済かつ未連携の経費へPENDING jobを作成する（UNIQUE(expense_request_id)衝突は冪等スキップ）。 */
     @Transactional(rollbackFor = Exception.class)
     public int createAccountingJobs(int limit) {
-        List<ExpenseRequest> approved = expenseRequestMapper.selectList(new LambdaQueryWrapper<ExpenseRequest>()
-                .eq(ExpenseRequest::getStatus, ExpenseRequestService.STATUS_APPROVED)
-                .isNull(ExpenseRequest::getAccountingJobId)
-                .orderByAsc(ExpenseRequest::getId)
-                .last("LIMIT " + Math.min(Math.max(limit, 1), 1000)));
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        List<ExpenseRequest> approved = expenseRequestMapper.selectApprovedUnaccountedByTenant(
+                tenantId, Math.min(Math.max(limit, 1), 1000));
         int created = 0;
         LocalDateTime now = LocalDateTime.now(clock);
         for (ExpenseRequest expense : approved) {
             ExpenseAccountingJob job = ExpenseAccountingJob.builder()
+                    .tenantId(tenantId)
                     .expenseRequestId(expense.getId())
                     .status(STATUS_PENDING)
                     .payloadHash(payloadHash(expense))
@@ -138,8 +141,10 @@ public class ExpenseAccountingJobScheduler {
     }
 
     List<Long> dueJobExpenseRequestIds(int limit) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LocalDateTime now = LocalDateTime.now(clock);
         return jobMapper.selectList(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                        .eq(ExpenseAccountingJob::getTenantId, tenantId)
                         .eq(ExpenseAccountingJob::getStatus, STATUS_PENDING)
                         .and(w -> w.isNull(ExpenseAccountingJob::getNextAttemptAt)
                                 .or().le(ExpenseAccountingJob::getNextAttemptAt, now))
@@ -203,9 +208,11 @@ public class ExpenseAccountingJobScheduler {
 
     /** PENDINGかつ再試行期限到来のjobをPROCESSINGへclaimし、対象経費と合わせて返す。 */
     public ClaimedJob claim(Long expenseRequestId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         return requiresNewTx().execute(st -> {
             LocalDateTime now = LocalDateTime.now(clock);
             int updated = jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
                     .eq("expense_request_id", expenseRequestId)
                     .eq("status", STATUS_PENDING)
                     .and(w -> w.isNull("next_attempt_at").or().le("next_attempt_at", now))
@@ -216,14 +223,16 @@ public class ExpenseAccountingJobScheduler {
                 return null;
             }
             ExpenseAccountingJob job = jobMapper.selectOne(new LambdaQueryWrapper<ExpenseAccountingJob>()
+                    .eq(ExpenseAccountingJob::getTenantId, tenantId)
                     .eq(ExpenseAccountingJob::getExpenseRequestId, expenseRequestId));
             if (job == null) {
                 return null;
             }
-            ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
+            ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
             if (expense == null) {
                 // 経費行が存在しない（論理削除等）場合は即時終端させる。
                 jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                        .eq("tenant_id", tenantId)
                         .eq("expense_request_id", expenseRequestId)
                         .eq("status", STATUS_PROCESSING)
                         .set("status", STATUS_FAILED)
@@ -238,9 +247,13 @@ public class ExpenseAccountingJobScheduler {
 
     /** 送信成功の結果反映（REQUIRES_NEW）。expense.status=会計連携済 + accounting_job_id + 通知。 */
     public void markSent(Long expenseRequestId, ClaimedJob claimed, String correlationId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         requiresNewTx().executeWithoutResult(st -> {
             LocalDateTime now = LocalDateTime.now(clock);
             ExpenseRequest expense = claimed.expense();
+            if (expenseRequestMapper.selectByIdForTenant(expense.getId(), tenantId) == null) {
+                throw new IllegalStateException("Expense tenant scope changed for expenseId=" + expense.getId());
+            }
             if (monthlyClosingService != null && expense.getExpenseDate() != null) {
                 monthlyClosingService.assertOpenForUpdate(java.time.YearMonth.from(expense.getExpenseDate()).toString());
             }
@@ -258,6 +271,7 @@ public class ExpenseAccountingJobScheduler {
             }
 
             int jobUpdated = jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
                     .eq("expense_request_id", expenseRequestId)
                     .eq("status", STATUS_PROCESSING)
                     .set("status", STATUS_SUCCEEDED)
@@ -275,12 +289,14 @@ public class ExpenseAccountingJobScheduler {
 
     /** 送信失敗の結果反映（REQUIRES_NEW）。max 5回でFAILED、それ以外はbackoff付きでPENDINGへ戻す。 */
     public void markFailure(Long expenseRequestId, ClaimedJob claimed, String errorCode) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         requiresNewTx().executeWithoutResult(st -> {
             LocalDateTime now = LocalDateTime.now(clock);
             int attempts = claimed.job().getAttemptCount() == null
                     ? 1 : Math.max(claimed.job().getAttemptCount(), 1);
             if (attempts >= MAX_ATTEMPTS) {
                 jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                        .eq("tenant_id", tenantId)
                         .eq("expense_request_id", expenseRequestId)
                         .eq("status", STATUS_PROCESSING)
                         .set("status", STATUS_FAILED)
@@ -292,6 +308,7 @@ public class ExpenseAccountingJobScheduler {
             }
             long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
             jobMapper.update(null, new UpdateWrapper<ExpenseAccountingJob>()
+                    .eq("tenant_id", tenantId)
                     .eq("expense_request_id", expenseRequestId)
                     .eq("status", STATUS_PROCESSING)
                     .set("status", STATUS_PENDING)
@@ -316,8 +333,12 @@ public class ExpenseAccountingJobScheduler {
     }
 
     Long applicantUserId(ExpenseRequest expense) {
-        com.ses.entity.EngineerAccountLink link = expense == null || expense.getEngineerId() == null
-                ? null : engineerAccountLinkService.findByEngineerId(expense.getEngineerId());
+        if (expense == null || expense.getEngineerId() == null) {
+            return null;
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                expense.getEngineerId(), tenantId);
         return link == null ? null : link.getSysUserId();
     }
 

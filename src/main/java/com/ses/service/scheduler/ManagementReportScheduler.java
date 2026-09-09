@@ -29,7 +29,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ManagementReportScheduler {
 
-    private static final String TENANT_ID = "default";
     private static final int PROCESSING_LEASE_MINUTES = 30;
 
     private final ReportScheduleMapper scheduleMapper;
@@ -37,28 +36,33 @@ public class ManagementReportScheduler {
     private final ReportDeliveryService deliveryService;
     private final MonthlyClosingService monthlyClosingService;
     private final AccountingTimezoneResolver timezoneResolver;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "${management-report.schedule-cron:0 * * * * *}", zone = "Asia/Tokyo")
     @SchedulerLock(name = "managementReportScheduleDispatch", lockAtLeastFor = "PT10S", lockAtMostFor = "PT10M")
     public void dispatchDue() {
-        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
-        AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+        tenantAwareBatchRunner.run(this::dispatchDueForTenant);
+    }
+
+    private void dispatchDueForTenant(String tenantId) {
+        ZoneId zone = timezoneResolver.resolve(tenantId);
+        AccountingTenantContextHolder.runWithTenant(tenantId, zone, () -> {
             LocalDateTime now = LocalDateTime.now(zone);
             LocalDateTime staleBefore = now.minusMinutes(PROCESSING_LEASE_MINUTES);
-            List<ReportSchedule> due = scheduleMapper.selectDue(now, staleBefore, 50);
+            List<ReportSchedule> due = scheduleMapper.selectDue(tenantId, now, staleBefore, 50);
             for (ReportSchedule schedule : due) {
                 LocalDateTime expected = schedule.getNextRunAt();
                 LocalDateTime logicalRunAt = resolveLogicalRunAt(schedule, now);
                 if (logicalRunAt == null) continue;
-                if (scheduleMapper.claimDue(schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
+                if (scheduleMapper.claimDue(tenantId, schedule.getId(), expected, logicalRunAt, now, staleBefore) != 1) {
                     continue;
                 }
                 try {
                     runOneInternal(schedule, logicalRunAt);
-                    scheduleMapper.markSuccess(schedule.getId(), nextRun(schedule, logicalRunAt), logicalRunAt);
+                    scheduleMapper.markSuccess(tenantId, schedule.getId(), nextRun(schedule, logicalRunAt, tenantId), logicalRunAt);
                 } catch (Exception ex) {
                     LocalDateTime retryAt = now.plusMinutes(retryDelayMinutes(schedule));
-                    scheduleMapper.markFailure(schedule.getId(), retryAt, logicalRunAt,
+                    scheduleMapper.markFailure(tenantId, schedule.getId(), retryAt, logicalRunAt,
                             "SCHEDULE_GENERATION_FAILED", safeMessage(ex));
                     log.error("[定期管理レポート] schedule実行失敗: scheduleId={} retryAt={}",
                             schedule.getId(), retryAt, ex);
@@ -68,8 +72,17 @@ public class ManagementReportScheduler {
     }
 
     public void runOne(ReportSchedule schedule, LocalDateTime scheduledAt) {
-        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
-        AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+        String tenantId = schedule == null ? null : schedule.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = AccountingTenantContextHolder.requireTenantContext();
+        }
+        String currentTenant = AccountingTenantContextHolder.getExplicitTenantId();
+        if (currentTenant != null && !currentTenant.equals(tenantId)) {
+            throw BusinessException.of(403, "error.tenant.contextMismatch");
+        }
+        String resolvedTenantId = tenantId;
+        ZoneId zone = timezoneResolver.resolve(resolvedTenantId);
+        AccountingTenantContextHolder.runWithTenant(resolvedTenantId, zone, () -> {
             try {
                 runOneInternal(schedule, scheduledAt);
             } catch (Exception ex) {
@@ -102,8 +115,8 @@ public class ManagementReportScheduler {
         deliveryService.deliver(result.getRun().getId(), null);
     }
 
-    private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt) {
-        ZoneId zone = timezoneResolver.resolve(TENANT_ID);
+    private LocalDateTime nextRun(ReportSchedule schedule, LocalDateTime logicalRunAt, String tenantId) {
+        ZoneId zone = timezoneResolver.resolve(tenantId);
         if (schedule.getCronExpression() == null || schedule.getCronExpression().isBlank()) {
             return logicalRunAt.plusMonths(1);
         }

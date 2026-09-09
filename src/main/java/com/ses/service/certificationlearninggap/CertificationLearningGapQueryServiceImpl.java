@@ -405,10 +405,6 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     }
 
     private String currentTenant() {
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
-        if (!StringUtils.hasText(tenantId)) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
-        }
-        return tenantId;
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

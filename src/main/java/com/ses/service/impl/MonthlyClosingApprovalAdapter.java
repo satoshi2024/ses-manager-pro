@@ -89,6 +89,7 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
         String month = ApprovalPayloads.text(p, "month");
         int round = request.getRoundNo() == null ? 1 : request.getRoundNo();
         ApprovalAction finalAction = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                        .eq(ApprovalAction::getTenantId, request.getTenantId())
                         .eq(ApprovalAction::getRequestId, request.getId())
                         .eq(ApprovalAction::getRoundNo, round)
                         .eq(ApprovalAction::getStepNo, request.getCurrentStep())
@@ -96,7 +97,7 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
                         .orderByDesc(ApprovalAction::getId))
                 .stream().findFirst()
                 .orElseThrow(() -> BusinessException.of(500, "error.approval.approverUnresolved"));
-        SysUser approver = sysUserMapper.selectById(finalAction.getApproverUserId());
+        SysUser approver = sysUserMapper.selectByIdAndTenant(finalAction.getApproverUserId(), request.getTenantId());
         if (approver == null || approver.getRole() == null) {
             throw BusinessException.of(500, "error.approval.approverUnresolved");
         }

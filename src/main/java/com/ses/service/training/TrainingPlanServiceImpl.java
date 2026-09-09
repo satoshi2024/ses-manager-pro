@@ -80,7 +80,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
             throw BusinessException.of(400, "training.plan.actorRequired");
         }
         assertOpen(draft.getPlannedStartOn());
-        draft.setTenantId(defaultTenant(draft.getTenantId()));
+        draft.setTenantId(tenantContext(draft.getTenantId()));
         draft.setCreatedByUserId(actorUserId);
         draft.setStatus(PLAN_DRAFT);
         draft.setVersion(0);
@@ -103,7 +103,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         assertOpen(draft.getPlannedStartOn());
         int version = value(current.getVersion());
         int updated = planMapper.update(null, new UpdateWrapper<LearningPlan>()
-                .eq("id", planId).eq("tenant_id", defaultTenant(current.getTenantId()))
+                .eq("id", planId).eq("tenant_id", tenantContext(current.getTenantId()))
                 .eq("status", PLAN_DRAFT).eq("version", version)
                 .set("title", draft.getTitle())
                 .set("goal_description", draft.getGoalDescription())
@@ -231,7 +231,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
                 amendedCostJpy, actorUserId);
         int version = value(plan.getVersion());
         int updated = planMapper.update(null, new UpdateWrapper<LearningPlan>()
-                .eq("id", plan.getId()).eq("tenant_id", defaultTenant(plan.getTenantId()))
+                .eq("id", plan.getId()).eq("tenant_id", tenantContext(plan.getTenantId()))
                 .eq("version", version)
                 .set("amended_cost_jpy", amendedCostJpy)
                 .set("amendment_approval_request_id", approvalRequestId)
@@ -281,13 +281,13 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         }
         TrainingCourse course = courseId == null ? null : courseMapper.selectOne(
                 new LambdaQueryWrapper<TrainingCourse>().eq(TrainingCourse::getId, courseId)
-                        .eq(TrainingCourse::getTenantId, defaultTenant(plan.getTenantId())));
+                        .eq(TrainingCourse::getTenantId, tenantContext(plan.getTenantId())));
         if (course == null || !Integer.valueOf(1).equals(course.getActiveFlag())
                 || course.getCostJpy() == null || course.getCostJpy().signum() < 0) {
             throw BusinessException.of(404, "training.course.notFound");
         }
         long duplicate = enrollmentMapper.selectCount(new LambdaQueryWrapper<TrainingEnrollment>()
-                .eq(TrainingEnrollment::getTenantId, defaultTenant(plan.getTenantId()))
+                .eq(TrainingEnrollment::getTenantId, tenantContext(plan.getTenantId()))
                 .eq(TrainingEnrollment::getPlanId, planId)
                 .eq(TrainingEnrollment::getCourseId, courseId)
                 .in(TrainingEnrollment::getStatus, ENROLLMENT_PLANNED, ENROLLMENT_STARTED));
@@ -295,7 +295,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
             throw BusinessException.of(409, "training.enrollment.duplicate");
         }
         TrainingEnrollment enrollment = new TrainingEnrollment();
-        enrollment.setTenantId(defaultTenant(plan.getTenantId()));
+        enrollment.setTenantId(tenantContext(plan.getTenantId()));
         enrollment.setPlanId(planId);
         enrollment.setCourseId(courseId);
         enrollment.setEngineerId(plan.getEngineerId());
@@ -387,17 +387,17 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         LearningPlan plan = requirePlan(enrollment.getPlanId());
         validateExpenseBudget(plan, expense, actorUserId);
         long duplicate = enrollmentExpenseMapper.selectCount(new LambdaQueryWrapper<TrainingEnrollmentExpense>()
-                .eq(TrainingEnrollmentExpense::getTenantId, defaultTenant(enrollment.getTenantId()))
+                .eq(TrainingEnrollmentExpense::getTenantId, tenantContext(enrollment.getTenantId()))
                 .eq(TrainingEnrollmentExpense::getEnrollmentId, enrollmentId)
                 .eq(TrainingEnrollmentExpense::getExpenseRequestId, expenseRequestId));
         if (duplicate > 0) {
             return enrollmentExpenseMapper.selectOne(new LambdaQueryWrapper<TrainingEnrollmentExpense>()
-                    .eq(TrainingEnrollmentExpense::getTenantId, defaultTenant(enrollment.getTenantId()))
+                    .eq(TrainingEnrollmentExpense::getTenantId, tenantContext(enrollment.getTenantId()))
                     .eq(TrainingEnrollmentExpense::getEnrollmentId, enrollmentId)
                     .eq(TrainingEnrollmentExpense::getExpenseRequestId, expenseRequestId));
         }
         TrainingEnrollmentExpense relation = new TrainingEnrollmentExpense();
-        relation.setTenantId(defaultTenant(enrollment.getTenantId()));
+        relation.setTenantId(tenantContext(enrollment.getTenantId()));
         relation.setEnrollmentId(enrollmentId);
         relation.setExpenseRequestId(expenseRequestId);
         relation.setRelationReason(reason);
@@ -418,14 +418,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     }
 
     private LearningPlan lockPlan(Long id, Integer expectedVersion) {
-        String tenantId = defaultTenant(null);
+        String tenantId = tenantContext(null);
         LearningPlan plan = id == null ? null : planMapper.selectByIdForUpdateWithTenant(id, tenantId);
-        if (plan == null && id != null && "default".equals(tenantId)) {
-            plan = planMapper.selectByIdForUpdate(id);
-            if (plan != null && plan.getTenantId() != null && !tenantId.equals(plan.getTenantId())) {
-                plan = null;
-            }
-        }
         if (plan == null) {
             throw BusinessException.of(404, "training.plan.notFound");
         }
@@ -439,15 +433,9 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     }
 
     private LearningPlan requirePlan(Long id) {
-        String tenantId = defaultTenant(null);
+        String tenantId = tenantContext(null);
         LearningPlan plan = id == null ? null : planMapper.selectOne(new LambdaQueryWrapper<LearningPlan>()
                 .eq(LearningPlan::getId, id).eq(LearningPlan::getTenantId, tenantId));
-        if (plan == null && id != null && "default".equals(tenantId)) {
-            plan = planMapper.selectById(id);
-            if (plan != null && plan.getTenantId() != null && !tenantId.equals(plan.getTenantId())) {
-                plan = null;
-            }
-        }
         if (plan == null) {
             throw BusinessException.of(404, "training.plan.notFound");
         }
@@ -458,7 +446,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
                          Long actorUserId) {
         int version = value(plan.getVersion());
         int updated = planMapper.update(null, new UpdateWrapper<LearningPlan>()
-                .eq("id", plan.getId()).eq("version", version)
+                .eq("id", plan.getId()).eq("tenant_id", tenantContext(plan.getTenantId()))
+                .eq("version", version)
                 .set("status", status)
                 .set("expense_request_id", expenseRequestId)
                 .set("approval_request_id", approvalRequestId)
@@ -476,15 +465,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     }
 
     private TrainingEnrollment lockEnrollment(Long id, Integer expectedVersion) {
-        String tenantId = defaultTenant(null);
+        String tenantId = tenantContext(null);
         TrainingEnrollment enrollment = id == null ? null : enrollmentMapper.selectByIdForUpdateWithTenant(id, tenantId);
-        if (enrollment == null && id != null && "default".equals(tenantId)) {
-            enrollment = enrollmentMapper.selectByIdForUpdate(id);
-            if (enrollment != null && enrollment.getTenantId() != null
-                    && !tenantId.equals(enrollment.getTenantId())) {
-                enrollment = null;
-            }
-        }
         if (enrollment == null) {
             throw BusinessException.of(404, "training.enrollment.notFound");
         }
@@ -501,7 +483,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
                                   BigDecimal score, Long actorUserId) {
         int version = value(enrollment.getVersion());
         int updated = enrollmentMapper.update(null, new UpdateWrapper<TrainingEnrollment>()
-                .eq("id", enrollment.getId()).eq("tenant_id", defaultTenant(enrollment.getTenantId()))
+                .eq("id", enrollment.getId()).eq("tenant_id", tenantContext(enrollment.getTenantId()))
                 .eq("version", version)
                 .set("status", status).set("completed_on", completedOn).set("score", score)
                 .set("version", version + 1).set("updated_by", actorUserId)
@@ -519,7 +501,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     private void appendEvent(LearningPlan plan, String eventType, Long actorUserId, String reason,
                              BigDecimal amount) {
         LearningPlanEvent event = new LearningPlanEvent();
-        event.setTenantId(defaultTenant(plan.getTenantId()));
+        event.setTenantId(tenantContext(plan.getTenantId()));
         event.setPlanId(plan.getId());
         event.setSourceType("PLAN");
         event.setSourceId(plan.getId());
@@ -553,7 +535,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         }
         List<TrainingEnrollmentExpense> relations = enrollmentExpenseMapper.selectList(
                 new LambdaQueryWrapper<TrainingEnrollmentExpense>()
-                        .eq(TrainingEnrollmentExpense::getTenantId, defaultTenant(plan.getTenantId()))
+                        .eq(TrainingEnrollmentExpense::getTenantId, tenantContext(plan.getTenantId()))
                         .eq(TrainingEnrollmentExpense::getEnrollmentId, enrollment.getId()));
         if (relations == null) {
             return;
@@ -602,7 +584,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         if (approvalRequestMapper == null || approvalActionMapper == null || approvalRequestId == null) {
             return false;
         }
-        ApprovalRequest approval = approvalRequestMapper.selectById(approvalRequestId);
+        ApprovalRequest approval = approvalRequestMapper.selectByIdAndTenant(approvalRequestId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (approval == null || !"approved".equalsIgnoreCase(approval.getStatus())
                 || !targetType.equals(approval.getTargetType()) || !java.util.Objects.equals(targetId, approval.getTargetId())
                 || amount == null || approval.getAmountSnapshot() == null
@@ -613,6 +596,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
             return false;
         }
         return approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                        .eq(ApprovalAction::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                         .eq(ApprovalAction::getRequestId, approvalRequestId)
                         .eq(ApprovalAction::getAction, "APPROVE"))
                 .stream().anyMatch(action -> !java.util.Objects.equals(action.getApproverUserId(), approval.getApplicantId()));
@@ -630,8 +615,8 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         }
     }
 
-    private String defaultTenant(String tenant) {
-        String current = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+    private String tenantContext(String tenant) {
+        String current = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (!StringUtils.hasText(current)) {
             throw BusinessException.of(403, "error.tenant.contextRequired");
         }

@@ -155,7 +155,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         List<ServiceRequest> allRequests = serviceRequestMapper.selectList(
                 new LambdaQueryWrapper<ServiceRequest>()
                         .eq(ServiceRequest::getTenantId,
-                                com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId())
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                         .in(ServiceRequest::getCustomerId, customerIds)
         );
         Map<Long, List<ServiceRequest>> requestsByCustomer = allRequests.stream()

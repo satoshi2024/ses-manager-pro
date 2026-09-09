@@ -188,7 +188,7 @@ public class PortalCustomerServiceDeskApiController {
                 .ownerUserId(null)
                 .build();
 
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),
                         Instant.now(clock), null, null, userId, "PORTAL_USER", portalUserName(), "PORTAL_REQUEST"),
@@ -213,7 +213,7 @@ public class PortalCustomerServiceDeskApiController {
                 .visibility("PORTAL_VISIBLE")
                 .build();
 
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // 顧客から法人既定を解決。addComment内で契約紐付きを再解決して自動再開にも使う。
         ServiceDeskExecutionContext ctx = serviceRequestService.bindCalendarScope(
                 new ServiceDeskExecutionContext(tenantId, timezoneResolver.resolve(tenantId),

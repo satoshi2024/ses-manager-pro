@@ -390,10 +390,6 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
     }
 
     private String currentTenant() {
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            throw com.ses.common.exception.BusinessException.of(403, "tenant.context.required");
-        }
-        return tenantId;
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

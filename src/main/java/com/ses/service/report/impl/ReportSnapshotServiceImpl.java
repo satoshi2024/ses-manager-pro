@@ -81,7 +81,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
-    private static final String TENANT_ID = "default";
     private static final String SNAPSHOT_SCHEMA = "report-1.0";
     private static final String POLICY_VERSION = "scope-policy-approved-1";
     private static final String ADAPTER_VERSION = "scheduled-management-reporting-f2-1";
@@ -120,7 +119,8 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     @Override
     public ReportRun findRun(Long runId) {
-        ReportRun run = runMapper.selectById(runId);
+        ReportRun run = runMapper.selectOne(new QueryWrapper<ReportRun>()
+                .eq("tenant_id", currentTenant()).eq("id", runId));
         if (run == null) {
             throw BusinessException.of(404, "error.managementReport.runNotFound");
         }
@@ -131,7 +131,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     public List<ReportSectionSnapshot> listSections(Long runId) {
         findRun(runId);
         return sectionMapper.selectList(new QueryWrapper<ReportSectionSnapshot>()
-                .eq("run_id", runId)
+                .eq("tenant_id", currentTenant()).eq("run_id", runId)
                 .orderByAsc("id"));
     }
 
@@ -140,7 +140,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         requireReportRole();
         int safeLimit = Math.max(1, Math.min(limit, 100));
         QueryWrapper<ReportRun> query = new QueryWrapper<ReportRun>()
-                .eq("tenant_id", TENANT_ID)
+                .eq("tenant_id", currentTenant())
                 .orderByDesc("id")
                 .last("LIMIT " + safeLimit);
         if ("マネージャー".equals(SecurityUtils.currentRole())) {
@@ -219,8 +219,9 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     }
 
     private ReportGenerationResult generateInternal(ReportGenerationCommand command) {
+        String tenantId = currentTenant();
         ZoneId zone = tenantZone();
-        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, zone, () -> {
+        return AccountingTenantContextHolder.runWithTenant(tenantId, zone, () -> {
         YearMonth target = command.period();
         LocalDate periodFrom = target.atDay(1);
         LocalDate periodTo = target.atEndOfMonth();
@@ -231,7 +232,8 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             throw BusinessException.of(400, "error.managementReport.closingRequired");
         }
 
-        ReportTemplateVersion templateVersion = templateVersionMapper.selectById(command.templateVersionId());
+        ReportTemplateVersion templateVersion = templateVersionMapper.selectOne(new QueryWrapper<ReportTemplateVersion>()
+                .eq("tenant_id", tenantId).eq("id", command.templateVersionId()));
         if (templateVersion == null || !"PUBLISHED".equals(templateVersion.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.templateVersionNotPublished");
         }
@@ -258,7 +260,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
         String stableRunKey = buildRunKey(templateVersion, target, cutoffKind, scope, command);
         ReportRun run = runMapper.selectOne(new QueryWrapper<ReportRun>()
-                .eq("tenant_id", TENANT_ID)
+                .eq("tenant_id", tenantId)
                 .eq("run_key", stableRunKey));
 
         if (run != null && !command.explicitRegeneration()
@@ -267,7 +269,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         }
         if (run == null) {
             run = new ReportRun();
-            run.setTenantId(TENANT_ID);
+            run.setTenantId(tenantId);
             run.setRunKey(stableRunKey);
             run.setTemplateId(templateVersion.getTemplateId());
             run.setTemplateVersionId(templateVersion.getId());
@@ -338,7 +340,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                              LocalDate periodFrom, LocalDate periodTo,
                              LocalDateTime attemptStartedAt) {
         ReportSectionSnapshot snapshot = existing == null ? new ReportSectionSnapshot() : existing;
-        snapshot.setTenantId(TENANT_ID);
+        snapshot.setTenantId(currentTenant());
         snapshot.setRunId(run.getId());
         snapshot.setSectionKey(sectionKey);
         snapshot.setSectionStatus("SUCCEEDED");
@@ -375,7 +377,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                                    LocalDate periodTo, LocalDateTime attemptStartedAt, Exception ex) {
         log.warn("[定期管理レポート] section生成失敗: runId={} section={}", run.getId(), sectionKey, ex);
         ReportSectionSnapshot snapshot = existing == null ? new ReportSectionSnapshot() : existing;
-        snapshot.setTenantId(TENANT_ID);
+        snapshot.setTenantId(currentTenant());
         snapshot.setRunId(run.getId());
         snapshot.setSectionKey(sectionKey);
         snapshot.setSectionStatus("FAILED");
@@ -411,7 +413,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     private void insertAttempt(ReportRun run, ReportSectionSnapshot snapshot, int attemptNo,
                                LocalDateTime startedAt, LocalDateTime finishedAt) {
         ReportSectionAttempt attempt = new ReportSectionAttempt();
-        attempt.setTenantId(TENANT_ID);
+        attempt.setTenantId(currentTenant());
         attempt.setRunId(run.getId());
         attempt.setSectionKey(snapshot.getSectionKey());
         attempt.setAttemptNo(attemptNo);
@@ -535,7 +537,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     }
 
     private ZoneId tenantZone() {
-        return timezoneResolver.resolve(TENANT_ID);
+        return timezoneResolver.resolve(currentTenant());
     }
 
     /** Dashboardの既存chart値から対象月だけを取り出す。report側で売上式を再計算しない。 */
@@ -642,7 +644,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                                     ReportGenerationCommand command) {
         if (!command.explicitRegeneration()) return 1;
         List<ReportRun> history = runMapper.selectList(new QueryWrapper<ReportRun>()
-                .eq("tenant_id", TENANT_ID)
+                .eq("tenant_id", currentTenant())
                 .eq("template_version_id", version.getId())
                 .eq("period_from", periodFrom)
                 .eq("period_to", periodTo)
@@ -666,7 +668,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             authentication = new UsernamePasswordAuthenticationToken(
                     "report-scheduler", "N/A", List.of(new SimpleGrantedAuthority("ROLE_管理者")));
         } else {
-            SysUser user = sysUserMapper.selectById(userId);
+            SysUser user = sysUserMapper.selectByIdAndTenant(userId, currentTenant());
             if (user == null || user.getStatus() == null || user.getStatus() != 1
                     || !("管理者".equals(user.getRole()) || "マネージャー".equals(user.getRole()))) {
                 throw BusinessException.of(403, "error.managementReport.principalDenied");
@@ -717,12 +719,16 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
     private ReportSectionSnapshot findSection(Long runId, String sectionKey) {
         return sectionMapper.selectOne(new QueryWrapper<ReportSectionSnapshot>()
-                .eq("run_id", runId).eq("section_key", sectionKey));
+                .eq("tenant_id", currentTenant()).eq("run_id", runId).eq("section_key", sectionKey));
     }
 
     private List<ReportSectionSnapshot> listSectionsWithoutLookup(Long runId) {
         return sectionMapper.selectList(new QueryWrapper<ReportSectionSnapshot>()
-                .eq("run_id", runId).orderByAsc("id"));
+                .eq("tenant_id", currentTenant()).eq("run_id", runId).orderByAsc("id"));
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String buildRunKey(ReportTemplateVersion version, YearMonth period, String cutoff,

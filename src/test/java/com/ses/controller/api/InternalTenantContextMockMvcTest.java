@@ -67,6 +67,7 @@ class InternalTenantContextMockMvcTest {
 
     @BeforeEach
     void setUp() {
+        oidcSecurityProperties.setTenantId(null);
         tenantAMaster = AccountingTenantContextHolder.runWithTenant("tenant-a", () -> {
             Certification input = new Certification();
             input.setDisplayName("HTTP資格-" + UUID.randomUUID());
@@ -93,7 +94,7 @@ class InternalTenantContextMockMvcTest {
     @AfterEach
     void clearTenantContext() {
         AccountingTenantContextHolder.clear();
-        oidcSecurityProperties.setTenantId("default");
+        oidcSecurityProperties.setTenantId(null);
     }
 
     @Test

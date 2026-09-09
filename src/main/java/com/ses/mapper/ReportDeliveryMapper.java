@@ -5,6 +5,7 @@ import com.ses.entity.ReportDelivery;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 /** 管理レポート配布Mapper。 */
 @Mapper
@@ -13,8 +14,14 @@ public interface ReportDeliveryMapper extends BaseMapper<ReportDelivery> {
     @Update("UPDATE t_report_delivery SET delivery_status = #{status}, "
             + "last_error_code = #{errorCode}, last_error_message = #{errorMessage}, "
             + "updated_at = CURRENT_TIMESTAMP "
-            + "WHERE notification_outbox_id = #{outboxId} "
+            + "WHERE tenant_id = #{tenantId} AND notification_outbox_id = #{outboxId} "
             + "AND delivery_status IN ('ENQUEUED','PROCESSING','RETRY')")
-    int syncOutboxStatus(@Param("outboxId") Long outboxId, @Param("status") String status,
+    int syncOutboxStatus(@Param("tenantId") String tenantId, @Param("outboxId") Long outboxId,
+                         @Param("status") String status,
                          @Param("errorCode") String errorCode, @Param("errorMessage") String errorMessage);
+
+    default int syncOutboxStatus(Long outboxId, String status, String errorCode, String errorMessage) {
+        return syncOutboxStatus(AccountingTenantContextHolder.requireTenantContext(), outboxId, status,
+                errorCode, errorMessage);
+    }
 }

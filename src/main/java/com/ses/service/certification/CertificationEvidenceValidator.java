@@ -32,29 +32,11 @@ public class CertificationEvidenceValidator {
         if (documentId == null || documentVersionId == null || expectedHash == null || expectedHash.isBlank()) {
             throw BusinessException.of(400, "certification.evidence.versionRequired");
         }
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Document document = documentMapper.selectOne(new QueryWrapper<Document>()
                 .eq("id", documentId).eq("tenant_id", tenantId));
         DocumentVersion version = documentVersionMapper.selectOne(new QueryWrapper<DocumentVersion>()
                 .eq("id", documentVersionId).eq("tenant_id", tenantId));
-        if ("default".equals(tenantId)) {
-            // V156適用前の直接unit fixtureにはtenant列が未設定のものがある。
-            // 本番DDLはNOT NULLのため、ここで別tenantをfallbackすることはない。
-            if (document == null) {
-                Document legacy = documentMapper.selectById(documentId);
-                if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                    legacy.setTenantId(tenantId);
-                    document = legacy;
-                }
-            }
-            if (version == null) {
-                DocumentVersion legacy = documentVersionMapper.selectById(documentVersionId);
-                if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                    legacy.setTenantId(tenantId);
-                    version = legacy;
-                }
-            }
-        }
         if (document == null || !"CERTIFICATION_EVIDENCE".equals(document.getDocumentType())
                 || version == null || !documentId.equals(version.getDocumentId())
                 || !Objects.equals(document.getTenantId(), version.getTenantId())) {

@@ -37,6 +37,11 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Select("SELECT * FROM sys_user WHERE username = #{username} AND deleted_flag = 0")
     SysUser selectByUsername(@Param("username") String username);
 
+    @Select("SELECT * FROM sys_user WHERE username = #{username} AND tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0")
+    SysUser selectByUsernameAndTenant(@Param("username") String username,
+                                      @Param("tenantId") String tenantId);
+
     /** emailは一意とは限らないため、OIDC自動linkに使わず衝突検知専用にcollectionで返す。 */
     @Select("SELECT * FROM sys_user WHERE LOWER(email) = LOWER(#{email}) AND deleted_flag = 0")
     Collection<SysUser> selectByEmail(@Param("email") String email);

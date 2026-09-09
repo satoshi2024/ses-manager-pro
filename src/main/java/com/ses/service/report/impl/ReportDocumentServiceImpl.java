@@ -41,7 +41,6 @@ import java.util.List;
 public class ReportDocumentServiceImpl implements ReportDocumentService {
 
     private static final int MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
-    private static final String TENANT_ID = "default";
     private final ReportSnapshotService snapshotService;
     private final DocumentService documentService;
     private final DocumentVersionMapper documentVersionMapper;

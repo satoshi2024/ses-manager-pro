@@ -648,24 +648,11 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
 
     private List<DocumentVersion> findVersions(String tenantId, Long documentId) {
         List<DocumentVersion> versions = documentVersionMapper.findByTenantAndDocumentId(tenantId, documentId);
-        if ((versions == null || versions.isEmpty()) && "default".equals(tenantId)) {
-            // 旧unit fixture互換。tenantが設定された別tenant行はここへ混入させない。
-            List<DocumentVersion> legacyVersions = documentVersionMapper.findByDocumentId(documentId);
-            versions = legacyVersions == null ? List.of() : legacyVersions.stream()
-                    .filter(version -> version.getTenantId() == null || tenantId.equals(version.getTenantId()))
-                    .toList();
-        }
         return versions == null ? List.of() : versions;
     }
 
     private DocumentVersion findLatestVersion(String tenantId, Long documentId) {
         DocumentVersion latest = documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, documentId);
-        if (latest == null && "default".equals(tenantId)) {
-            DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(documentId);
-            if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                latest = legacy;
-            }
-        }
         return latest;
     }
 
@@ -677,19 +664,8 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
         String tenantId = currentTenant(null);
         Document doc = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
                 .eq(Document::getId, documentId).eq(Document::getTenantId, tenantId));
-        // V1以降はtenant_id NOT NULL。旧unit fixtureのNULLだけはdefault tenantで互換扱いする。
-        if (doc == null && "default".equals(tenantId)) {
-            Document legacy = documentMapper.selectById(documentId);
-            if (legacy != null && legacy.getTenantId() == null) {
-                doc = legacy;
-            }
-        }
         if (doc == null) {
             throw BusinessException.of(404, "error.document.notFound");
-        }
-        if (doc.getTenantId() == null && "default".equals(tenantId)) {
-            // V1以前の直接fixtureにだけ残るNULLを、既定tenantの境界内で正規化する。
-            doc.setTenantId(tenantId);
         }
         return doc;
     }
@@ -725,12 +701,6 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
                                           String storageKey, long sizeBytes, String sha256) {
         DocumentVersion latest = documentId == null ? null
                 : documentVersionMapper.findLatestByTenantAndDocumentId(tenantId, documentId);
-        if (latest == null && documentId != null && "default".equals(tenantId)) {
-            DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(documentId);
-            if (legacy != null && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                latest = legacy;
-            }
-        }
         int nextVersionNo = (latest == null) ? 1 : latest.getVersionNo() + 1;
 
         DocumentVersion v = new DocumentVersion();
@@ -749,7 +719,7 @@ private final com.ses.mapper.SalesOrderMapper salesOrderMapper;
     }
 
     private String currentTenant(DocumentRegisterRequest request) {
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (tenantId == null || tenantId.isBlank()) {
             throw BusinessException.of(403, "error.tenant.contextRequired");
         }

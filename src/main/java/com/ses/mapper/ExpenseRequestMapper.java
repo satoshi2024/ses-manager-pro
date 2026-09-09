@@ -12,6 +12,21 @@ import java.util.List;
 @Mapper
 public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
 
+    @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id AND l.deleted_flag = 0 "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0")
+    ExpenseRequest selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id AND l.deleted_flag = 0 "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE u.tenant_id = #{tenantId} AND er.status = '承認済' "
+            + "AND er.accounting_job_id IS NULL AND er.deleted_flag = 0 "
+            + "ORDER BY er.id LIMIT #{limit}")
+    List<ExpenseRequest> selectApprovedUnaccountedByTenant(@Param("tenantId") String tenantId,
+                                                           @Param("limit") int limit);
+
     /** PWAのbaseVersion確認とdomain更新を同一transactionで直列化する。 */
     @Select("SELECT * FROM t_expense_request WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     ExpenseRequest selectByIdForUpdate(@Param("id") Long id);

@@ -19,6 +19,7 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,6 +72,7 @@ class DocumentServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         var config = new com.baomidou.mybatisplus.core.MybatisConfiguration();
         var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(config, "");
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, Document.class);
@@ -113,6 +115,7 @@ class DocumentServiceImplTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -130,11 +133,12 @@ class DocumentServiceImplTest {
 
         Document existingDoc = new Document();
         existingDoc.setId(1L);
+        existingDoc.setTenantId("default");
         existingDoc.setStatus("DRAFT");
 
         when(documentVersionMapper.findByIdempotencyKey(anyString(), eq("GENERATED"), eq("INVOICE:1"), eq("v1")))
                 .thenReturn(existingVersion);
-        when(documentMapper.selectById(1L)).thenReturn(existingDoc);
+        when(documentMapper.selectOne(any())).thenReturn(existingDoc);
 
         var req = DocumentRegisterRequest.builder()
                 .documentType("INVOICE_OUT")
@@ -274,9 +278,10 @@ class DocumentServiceImplTest {
     void addVersion_confirmedDocument_updatesStatusToAmended() {
         Document doc = new Document();
         doc.setId(10L);
+        doc.setTenantId("default");
         doc.setStatus("CONFIRMED");
         doc.setVersion(1L);
-        when(documentMapper.selectById(10L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         doNothing().when(documentStorage).promote(anyString());
@@ -284,7 +289,7 @@ class DocumentServiceImplTest {
 
         DocumentVersion latest = new DocumentVersion();
         latest.setVersionNo(1);
-        when(documentVersionMapper.findLatestByDocumentId(10L)).thenReturn(latest);
+        when(documentVersionMapper.findLatestByTenantAndDocumentId("default", 10L)).thenReturn(latest);
         when(documentVersionMapper.insert(any(DocumentVersion.class))).thenReturn(1);
         when(documentAccessLogMapper.insert(any(DocumentAccessLog.class))).thenReturn(1);
 
@@ -309,9 +314,10 @@ class DocumentServiceImplTest {
     void addVersion_optimisticLockConflict_throws409() {
         Document doc = new Document();
         doc.setId(10L);
+        doc.setTenantId("default");
         doc.setStatus("CONFIRMED");
         doc.setVersion(1L);
-        when(documentMapper.selectById(10L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentVersionMapper.findByIdempotencyKey(anyString(), anyString(), anyString(), anyString())).thenReturn(null);
         doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
         when(documentMapper.update(any(), any())).thenReturn(0); // CAS 失敗
@@ -334,10 +340,11 @@ class DocumentServiceImplTest {
     void requestDisposal_legalHoldActive_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(5L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(1);
         doc.setRetentionUntil(LocalDate.now().plusYears(5));
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(5L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(5L, "廃棄理由"));
         assertEquals(400, ex.getCode());
@@ -348,10 +355,11 @@ class DocumentServiceImplTest {
     void requestDisposal_retentionUntilNull_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(6L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(0);
         doc.setRetentionUntil(null);
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(6L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(6L, "廃棄理由"));
         assertEquals(400, ex.getCode());
@@ -362,9 +370,10 @@ class DocumentServiceImplTest {
     void placeLegalHold_optimisticLockConflict_throwsBusinessException() {
         Document doc = new Document();
         doc.setId(7L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
-        when(documentMapper.selectById(7L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentMapper.update(any(), any())).thenReturn(0);
 
         var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(7L, true, "訴訟対応"));
@@ -381,8 +390,9 @@ class DocumentServiceImplTest {
 
         Document doc = new Document();
         doc.setId(5L);
+        doc.setTenantId("default");
         doc.setLegalHoldFlag(1); // 途中で hold が設定された
-        when(documentMapper.selectById(5L)).thenReturn(doc);
+        when(documentMapper.selectOne(any())).thenReturn(doc);
 
         BusinessException ex = assertThrows(BusinessException.class, () -> sut.executeDisposal(200L));
         assertEquals(400, ex.getCode());
@@ -430,10 +440,11 @@ class DocumentServiceImplTest {
         DocumentVersion v = new DocumentVersion();
         v.setId(101L);
         v.setDocumentId(50L);
+        v.setTenantId("default");
         v.setStorageKey("path/to/key.pdf");
         v.setSha256("0000000000000000000000000000000000000000000000000000000000000000");
 
-        when(documentVersionMapper.findByDocumentId(50L)).thenReturn(List.of(v));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 50L)).thenReturn(List.of(v));
         when(documentStorage.open("path/to/key.pdf")).thenReturn(new ByteArrayInputStream("actual bytes".getBytes()));
 
         List<IntegrityFinding> findings = sut.verifyIntegrity(50L);
@@ -452,10 +463,11 @@ class DocumentServiceImplTest {
         DocumentVersion v = new DocumentVersion();
         v.setId(102L);
         v.setDocumentId(51L);
+        v.setTenantId("default");
         v.setStorageKey("path/missing.pdf");
         v.setSha256("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
 
-        when(documentVersionMapper.findByDocumentId(51L)).thenReturn(List.of(v));
+        when(documentVersionMapper.findByTenantAndDocumentId("default", 51L)).thenReturn(List.of(v));
         when(documentStorage.open("path/missing.pdf")).thenThrow(new RuntimeException("File not found"));
 
         List<IntegrityFinding> findings = sut.verifyIntegrity(51L);
@@ -484,7 +496,8 @@ class DocumentServiceImplTest {
         doc.setDocumentType("CONTRACT");
         doc.setLegalHoldFlag(0);
         doc.setVersion(1L);
-        when(documentMapper.selectById(70L)).thenReturn(doc);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
 
         var ex = assertThrows(BusinessException.class, () -> sut.placeLegalHold(70L, true, "訴訟"));
@@ -501,7 +514,8 @@ class DocumentServiceImplTest {
         doc.setLegalHoldFlag(0);
         doc.setRetentionUntil(LocalDate.now().plusYears(1));
         doc.setStatus("CONFIRMED");
-        when(documentMapper.selectById(71L)).thenReturn(doc);
+        doc.setTenantId("default");
+        when(documentMapper.selectOne(any())).thenReturn(doc);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
 
         var ex = assertThrows(BusinessException.class, () -> sut.requestDisposal(71L, "廃棄"));

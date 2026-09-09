@@ -192,11 +192,7 @@ public class CertificationEvidenceRestrictedResolver {
     }
 
     private String tenant() {
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
-        }
-        return tenantId;
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String normalize(String value) {

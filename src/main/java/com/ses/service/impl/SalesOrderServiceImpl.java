@@ -468,6 +468,7 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
     private boolean hasApprovedConditionDiff(Long orderId) {
         return approvalRequestMapper.selectCount(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<com.ses.entity.ApprovalRequest>()
+                        .eq("tenant_id", com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                         .eq("request_type", "order.conditionDiff")
                         .eq("target_type", "SALES_ORDER")
                         .eq("target_id", orderId)

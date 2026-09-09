@@ -25,6 +25,7 @@ import com.ses.mapper.EngineerFollowupMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.EngineerAccountLinkMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.dto.WorkRecordGridDto;
 import com.ses.entity.EngineerSales;
 import com.ses.entity.EngineerFollowup;
@@ -67,6 +68,8 @@ public class NotificationGenerateService {
     private final com.ses.service.attendance.AttendanceDiscrepancyService attendanceDiscrepancyService;
 
     public void generateAll() {
+        // 通知生成はHTTP主体の暗黙tenantにも、無指定のdefaultにも依存しない。
+        tenant();
         contractEnding();
         proposalStale();
         benchLong();
@@ -91,6 +94,7 @@ public class NotificationGenerateService {
      * {@code ATT_DISCREPANCY:{engineerId}:{workMonth}} で冪等（確認されるまで再通知しない）。</p>
      */
     public void attendanceDiscrepancyWarning() {
+        String tenantId = tenant();
         try {
             YearMonth target = YearMonth.now().minusMonths(1);
             var pending = attendanceDiscrepancyService.pendingWarnings(target.toString());
@@ -99,6 +103,7 @@ public class NotificationGenerateService {
             }
             List<SysUser> recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                     .in(SysUser::getRole, "管理者", "HR")
+                    .eq(SysUser::getTenantId, tenantId)
                     .eq(SysUser::getStatus, 1));
             for (var item : pending.getItems()) {
                 String dedupeKey = "ATT_DISCREPANCY:" + item.getEngineerId() + ":" + target;
@@ -132,6 +137,7 @@ public class NotificationGenerateService {
      * （対象月が変わらない限り一度だけ発行し、提出されればグリッドから外れて再発行されない）。
      */
     public void attendanceUnsubmitted() {
+        String tenantId = tenant();
         int closingDay = systemConfigService.getInt("attendance.submission-closing-day", 5);
         LocalDate today = LocalDate.now();
         if (today.getDayOfMonth() > closingDay) {
@@ -150,7 +156,8 @@ public class NotificationGenerateService {
             if (contract == null || contract.getEngineerId() == null) {
                 continue;
             }
-            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                    contract.getEngineerId(), tenantId);
             if (link == null || link.getSysUserId() == null) {
                 log.warn("勤怠未提出リマインドの宛先要員アカウントが解決できません: contractId={}, engineerId={}",
                         row.getContractId(), contract.getEngineerId());
@@ -179,6 +186,7 @@ public class NotificationGenerateService {
      * 冪等性: dedupe_key = CASHFLOW_ALERT:{yyyy-MM}
      */
     public void cashflowAlert() {
+        String tenantId = tenant();
         int months = systemConfigService.getInt("cashflow.alert-months", 6);
         java.math.BigDecimal threshold = systemConfigService.getDecimal("cashflow.alert-threshold", java.math.BigDecimal.ZERO);
 
@@ -196,6 +204,7 @@ public class NotificationGenerateService {
             if (recipients == null) {
                 recipients = sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .in(SysUser::getRole, StatusConstants.ROLE_ADMIN, StatusConstants.ROLE_MANAGER)
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getStatus, 1));
             }
             String dedupeKey = "CASHFLOW_ALERT:" + m.getMonth();
@@ -584,10 +593,13 @@ public class NotificationGenerateService {
         if (engineer != null && engineer.getOrganizationId() != null) {
             return engineer.getOrganizationId();
         }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        String tenantId = tenant();
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerIdAndTenant(
+                contract.getEngineerId(), tenantId);
         if (link != null && link.getSysUserId() != null) {
             com.ses.entity.UserOrganization primary = userOrganizationMapper.selectOne(
-                    new QueryWrapper<com.ses.entity.UserOrganization>()
+                            new QueryWrapper<com.ses.entity.UserOrganization>()
+                            .eq("tenant_id", tenantId)
                             .eq("user_id", link.getSysUserId())
                             .eq("primary_flag", 1)
                             .le("valid_from", date)
@@ -608,8 +620,10 @@ public class NotificationGenerateService {
             return java.util.List.of();
         }
         LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        String tenantId = tenant();
         List<Long> userIds = userOrganizationMapper.selectList(
                         new QueryWrapper<com.ses.entity.UserOrganization>()
+                                .eq("tenant_id", tenantId)
                                 .eq("organization_id", orgId)
                                 .eq("primary_flag", 1)
                                 .le("valid_from", date)
@@ -621,6 +635,7 @@ public class NotificationGenerateService {
         }
         return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
                         .in(SysUser::getId, userIds)
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getRole, "マネージャー")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).collect(Collectors.toList());
@@ -634,18 +649,24 @@ public class NotificationGenerateService {
     }
 
     private List<Long> resolveSalesRecipients(List<Long> salesIds) {
+        String tenantId = tenant();
         List<Long> recipients = new java.util.ArrayList<>();
         for (Long salesId : salesIds) {
-            SysUser user = salesId == null ? null : sysUserMapper.selectById(salesId);
+            SysUser user = salesId == null ? null : sysUserMapper.selectByIdAndTenant(salesId, tenantId);
             if (user != null && "営業".equals(user.getRole()) && Integer.valueOf(1).equals(user.getStatus())) {
                 recipients.add(salesId);
             }
         }
         // 管理者へも常時通知（design §5.2 scheduler: 宛先は担当営業/管理者）
         recipients.addAll(sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getTenantId, tenantId)
                         .eq(SysUser::getRole, "管理者")
                         .eq(SysUser::getStatus, 1))
                 .stream().map(SysUser::getId).collect(Collectors.toList()));
         return recipients.stream().distinct().collect(Collectors.toList());
+    }
+
+    private String tenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

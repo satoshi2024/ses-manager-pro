@@ -16,10 +16,11 @@ import org.springframework.stereotype.Component;
 public class RenewalEscalationScheduler {
 
     private final RenewalEscalationService renewalEscalationService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 15 8 * * *")
     @SchedulerLock(name = "renewalEscalationDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void escalateDaily() {
-        renewalEscalationService.escalateUnhandled();
+        tenantAwareBatchRunner.run(tenant -> renewalEscalationService.escalateUnhandled());
     }
 }

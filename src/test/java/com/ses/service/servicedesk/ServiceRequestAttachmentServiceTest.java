@@ -29,6 +29,7 @@ import java.time.ZoneId;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -58,18 +59,22 @@ class ServiceRequestAttachmentServiceTest {
         request = new ServiceRequest();
         request.setId(10L);
         request.setCustomerId(20L);
-        when(requestMapper.selectById(10L)).thenReturn(request);
+        request.setTenantId("default");
+        when(requestMapper.selectByIdAndTenant(10L, "default")).thenReturn(request);
         lenient().when(dataScopeService.isScoped()).thenReturn(false);
 
         document = new Document();
         document.setId(30L);
+        document.setTenantId("default");
         lenient().when(documentService.registerReceived(any(), any())).thenReturn(document);
         version = new DocumentVersion();
         version.setId(31L);
         version.setDocumentId(30L);
         version.setVersionNo(1);
+        version.setTenantId("default");
         version.setScanStatus("CLEAN");
-        lenient().when(documentVersionMapper.findLatestByDocumentId(30L)).thenReturn(version);
+        lenient().when(documentVersionMapper.findByIdempotencyKey(
+                any(), anyString(), anyString(), anyString())).thenReturn(version);
     }
 
     @org.junit.jupiter.api.AfterEach

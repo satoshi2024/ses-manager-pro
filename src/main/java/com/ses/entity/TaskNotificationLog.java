@@ -24,7 +24,12 @@ public class TaskNotificationLog {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private String tenantId;
     private Long taskId;
     private LocalDate notifyDate;
     private LocalDateTime createdAt;
+    /** CLAIMED/SENT/RETRY。送信成功後だけSENTへ遷移する。 */
+    private String status;
+    private LocalDateTime sentAt;
+    private String lastError;
 }

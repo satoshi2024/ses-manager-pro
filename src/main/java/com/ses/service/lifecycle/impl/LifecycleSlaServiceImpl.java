@@ -7,6 +7,7 @@ import com.ses.mapper.LifecycleCaseMapper;
 import com.ses.mapper.LifecycleTaskMapper;
 import com.ses.service.lifecycle.LifecycleNotificationService;
 import com.ses.service.lifecycle.LifecycleSlaService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,13 +37,15 @@ public class LifecycleSlaServiceImpl implements LifecycleSlaService {
         // 進行中の全案件を取得
         List<LifecycleCase> activeCases = caseMapper.selectList(
                 new LambdaQueryWrapper<LifecycleCase>()
+                        .eq(LifecycleCase::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                         .eq(LifecycleCase::getStatus, "ACTIVE")
         );
 
         int processedCount = 0;
 
         for (LifecycleCase lcCase : activeCases) {
-            List<LifecycleTask> tasks = taskMapper.selectByCaseId(lcCase.getId());
+            List<LifecycleTask> tasks = taskMapper.selectByCaseIdAndTenant(lcCase.getId(),
+                    AccountingTenantContextHolder.requireTenantContext());
 
             for (LifecycleTask task : tasks) {
                 // 完了済み・免除済みタスクは対象外

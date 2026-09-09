@@ -19,12 +19,12 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
-import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -46,7 +46,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
-    private static final String TENANT_ID = "default";
     private static final int MAX_ATTEMPTS = 5;
     private static final int LINK_DAYS = 7;
     private static final int REAUTH_MINUTES = 10;
@@ -66,30 +65,29 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     @Override
     public ReportDeliveryResult deliver(Long runId, String previewHash) {
-        return AccountingTenantContextHolder.runWithTenant(TENANT_ID, tenantZone(), () -> {
-            ReportRun run = runMapper.selectById(runId);
-            requireReady(run);
-            snapshotService.assertAccessible(run);
-            ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
-            if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
-                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        String tenantId = requireTenant();
+        ReportRun run = findRun(runId, tenantId);
+        requireReady(run);
+        snapshotService.assertAccessible(run);
+        ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        if (previewHash != null && !previewHash.equals(preview.getPreviewHash())) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
+        ReportDocumentArtifact artifact = null;
+        List<ReportDelivery> deliveries = new ArrayList<>();
+        for (ReportRecipientPreview recipient : preview.getRecipients()) {
+            if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
+            ReportDelivery delivery = find(runId, recipient.getRecipientUserId(), tenantId);
+            if (delivery != null && !"CANCELLED".equals(delivery.getDeliveryStatus())) {
+                deliveries.add(delivery);
+                continue;
             }
-            ReportDocumentArtifact artifact = null;
-            List<ReportDelivery> deliveries = new ArrayList<>();
-            for (ReportRecipientPreview recipient : preview.getRecipients()) {
-                if (!"ALLOW".equals(recipient.getScopeDecision())) continue;
-                ReportDelivery delivery = find(runId, recipient.getRecipientUserId());
-                if (delivery != null && !"CANCELLED".equals(delivery.getDeliveryStatus())) {
-                    deliveries.add(delivery);
-                    continue;
-                }
-                if (artifact == null) {
-                    artifact = documentRegistrar.registerArtifact(runId, "PDF");
-                }
-                deliveries.add(issueTransactional(run, delivery, recipient, artifact));
+            if (artifact == null) {
+                artifact = documentRegistrar.registerArtifact(runId, "PDF");
             }
-            return new ReportDeliveryResult(preview, deliveries);
-        });
+            deliveries.add(issueTransactional(run, delivery, recipient, artifact));
+        }
+        return new ReportDeliveryResult(preview, deliveries);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -102,12 +100,13 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reauthenticate(Long deliveryId, String password) {
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         Long userId = currentUserId();
         if (!userId.equals(delivery.getRecipientUserId()) || password == null || password.isBlank()) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
-        SysUser user = sysUserMapper.selectById(userId);
+        SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
         }
@@ -118,7 +117,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReportDownload download(Long deliveryId, String token, String format) {
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         Long userId = currentUserId();
         if (!userId.equals(delivery.getRecipientUserId())) {
             throw BusinessException.of(403, "error.managementReport.scopeDenied");
@@ -138,7 +138,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
                 || delivery.getReauthenticatedAt().isBefore(now().minusMinutes(REAUTH_MINUTES)))) {
             throw BusinessException.of(403, "error.managementReport.reauthenticationRequired");
         }
-        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRun run = findRun(delivery.getRunId(), tenantId);
         // 配布runのowner参照認可と、配布先本人のdownload認可は別物である。
         // ownerと別のmanagerでも、preview時にowner scopeを包含していた本人なら利用できる。
         // ここでは保存scopeのhashだけを検証し、owner本人であることは要求しない。
@@ -185,7 +185,8 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Transactional(rollbackFor = Exception.class)
     public void retry(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         // outbox dispatch中のdeliveryをretry APIから再送すると、同一通知のtoken/outboxが重複する。
         // 通常retryはdispatcherがRETRYへ戻したdeliveryだけを対象にし、manualReplayが明示的に
         // RETRYへ遷移させる。ENQUEUED/PROCESSING/SENT/PENDINGは状態を変えず終了する。
@@ -199,7 +200,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             deliveryMapper.updateById(delivery);
             return;
         }
-        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRun run = findRun(delivery.getRunId(), tenantId);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
         ReportRecipientPreview recipient = preview.getRecipients().stream()
                 .filter(item -> delivery.getRecipientUserId().equals(item.getRecipientUserId()))
@@ -213,7 +214,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         // outboxのRETRYは既存行を再利用する。新しい通知を発行すると旧outboxと新outboxが
         // 同じrun/recipientを指し、二重通知または古いlinkの通知が発生する。
         if (delivery.getNotificationOutboxId() != null) {
-            if (notificationOutboxMapper.requeueReport(delivery.getNotificationOutboxId()) == 0) {
+            if (notificationOutboxMapper.requeueReport(tenantId, delivery.getNotificationOutboxId()) == 0) {
                 return;
             }
             delivery.setDeliveryStatus("ENQUEUED");
@@ -231,14 +232,15 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Transactional(rollbackFor = Exception.class)
     public void manualReplay(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        String tenantId = requireTenant();
+        ReportDelivery delivery = findRequired(deliveryId, tenantId);
         if (!"FAILED".equals(delivery.getDeliveryStatus())) {
             return;
         }
         // DLQ replayも同じnotification/outboxを再利用する。delivery attemptは監査用に保持し、
         // outboxのattemptだけをreplay世代として0へ戻すため、dedupe keyの再衝突を起こさない。
         if (delivery.getNotificationOutboxId() != null) {
-            if (notificationOutboxMapper.replayReport(delivery.getNotificationOutboxId()) == 0) {
+            if (notificationOutboxMapper.replayReport(tenantId, delivery.getNotificationOutboxId()) == 0) {
                 return;
             }
             delivery.setDeliveryStatus("ENQUEUED");
@@ -260,7 +262,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        ReportDelivery delivery = findRequired(deliveryId, requireTenant());
         if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
             return;
         }
@@ -274,13 +276,14 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     @Override
     public List<ReportDelivery> listByRun(Long runId) {
-        ReportRun run = runMapper.selectById(runId);
+        String tenantId = requireTenant();
+        ReportRun run = findRun(runId, tenantId);
         if (run == null) {
             throw BusinessException.of(404, "error.managementReport.runNotFound");
         }
         snapshotService.assertAccessible(run);
         return deliveryMapper.selectList(new QueryWrapper<ReportDelivery>()
-                .eq("run_id", runId).orderByAsc("id"));
+                .eq("tenant_id", tenantId).eq("run_id", runId).orderByAsc("id"));
     }
 
     private ReportDelivery issue(ReportRun run, ReportDelivery existing,
@@ -289,7 +292,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         int attempt = delivery.getAttemptCount() == null ? 1 : delivery.getAttemptCount() + 1;
         String token = UUID.randomUUID() + "-" + UUID.randomUUID();
         LocalDateTime expiresAt = now().plusDays(LINK_DAYS);
-        delivery.setTenantId("default");
+        delivery.setTenantId(requireTenant());
         delivery.setRunId(run.getId());
         if (artifact.getDocument() != null) {
             delivery.setDocumentId(artifact.getDocument().getId());
@@ -335,15 +338,23 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         return delivery;
     }
 
-    private ReportDelivery find(Long runId, Long userId) {
+    private ReportDelivery find(Long runId, Long userId, String tenantId) {
         return deliveryMapper.selectOne(new QueryWrapper<ReportDelivery>()
-                .eq("run_id", runId).eq("recipient_user_id", userId));
+                .eq("tenant_id", tenantId).eq("run_id", runId).eq("recipient_user_id", userId));
     }
 
-    private ReportDelivery findRequired(Long deliveryId) {
-        ReportDelivery delivery = deliveryMapper.selectById(deliveryId);
+    private ReportDelivery findRequired(Long deliveryId, String tenantId) {
+        ReportDelivery delivery = deliveryMapper.selectOne(new QueryWrapper<ReportDelivery>()
+                .eq("tenant_id", tenantId).eq("id", deliveryId));
         if (delivery == null) throw BusinessException.of(404, "error.managementReport.deliveryNotFound");
         return delivery;
+    }
+
+    private ReportRun findRun(Long runId, String tenantId) {
+        ReportRun run = runMapper.selectOne(new QueryWrapper<ReportRun>()
+                .eq("tenant_id", tenantId).eq("id", runId));
+        if (run == null) throw BusinessException.of(404, "error.managementReport.runNotFound");
+        return run;
     }
 
     private void requireReady(ReportRun run) {
@@ -365,11 +376,11 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private LocalDateTime now() {
-        return timezoneResolver.now(TENANT_ID);
+        return timezoneResolver.now(requireTenant());
     }
 
-    private ZoneId tenantZone() {
-        return timezoneResolver.resolve(TENANT_ID);
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String toJson(Object value) {

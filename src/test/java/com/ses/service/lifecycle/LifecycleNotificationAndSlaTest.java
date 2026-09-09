@@ -11,6 +11,8 @@ import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.lifecycle.impl.LifecycleExceptionApprovalAdapter;
 import com.ses.service.scheduler.LifecycleSlaScheduler;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -86,6 +88,7 @@ class LifecycleNotificationAndSlaTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         adminUser = SysUser.builder()
                 .username("admin_sla_test")
                 .password("pass")
@@ -158,6 +161,11 @@ class LifecycleNotificationAndSlaTest {
                                 .build()
                 ))
                 .build(), adminUser.getId());
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

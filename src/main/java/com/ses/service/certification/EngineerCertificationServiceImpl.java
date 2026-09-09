@@ -81,9 +81,8 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             throw BusinessException.of(400, "certification.record.expiryBeforeAcquired");
         }
 
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
-        if (!StringUtils.hasText(tenantId)
-                || (StringUtils.hasText(certification.getTenantId()) && !tenantId.equals(certification.getTenantId()))) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (StringUtils.hasText(certification.getTenantId()) && !tenantId.equals(certification.getTenantId())) {
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
 
@@ -279,7 +278,7 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (recordId == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         EngineerCertification record = engineerCertificationMapper.selectByTenantIdForUpdate(tenantId, recordId);
         // 旧直接テスト／旧adapter互換。戻り値は必ずtenantを再検証し、横断を許可しない。
         if (record == null) {

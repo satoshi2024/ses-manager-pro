@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 public class NotificationOutbox {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String tenantId;
     private Long notificationId;
     private String type;
     private String title;

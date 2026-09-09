@@ -37,7 +37,7 @@ public class DocumentExportServiceImpl implements DocumentExportService {
 
     @Override
     public void exportTaxZip(DocumentSearchQuery query, OutputStream os) {
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getTenantId, tenantId);
 

@@ -7,6 +7,7 @@ import com.ses.entity.NotificationRead;
 import com.ses.mapper.NotificationMapper;
 import com.ses.mapper.NotificationReadMapper;
 import com.ses.mapper.UserOrganizationMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.notification.NotificationOutboxService;
 import com.ses.service.notification.WebhookNotifier;
@@ -36,6 +37,9 @@ class NotificationServiceImplTest {
 
     @Mock
     private UserOrganizationMapper userOrganizationMapper;
+
+    @Mock
+    private SysUserMapper sysUserMapper;
 
     @Mock
     private WebhookNotifier webhookNotifier;
@@ -135,7 +139,12 @@ class NotificationServiceImplTest {
 
     @Test
     void testPublishToUser_setsRecipientOrganization() {
-        when(userOrganizationMapper.selectPrimaryOrganizationId(7L, java.time.LocalDate.now())).thenReturn(22L);
+        com.ses.entity.SysUser recipient = new com.ses.entity.SysUser();
+        recipient.setId(7L);
+        recipient.setTenantId("default");
+        when(sysUserMapper.selectByIdAndTenant(7L, "default")).thenReturn(recipient);
+        when(userOrganizationMapper.selectPrimaryOrganizationIdByTenant(
+                "default", 7L, java.time.LocalDate.now())).thenReturn(22L);
 
         notificationService.publishToUser(7L, "TYPE", "Title", "Msg", "Url", "Key");
 

@@ -519,6 +519,6 @@ public class SkillGapServiceImpl implements SkillGapService {
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 }

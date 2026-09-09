@@ -5,6 +5,7 @@ import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportDeliveryMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,8 +33,10 @@ public class NotificationOutboxDispatcher {
     /** 30分以上claimされたままの行を再送可能へ戻す。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void recoverStaleRows() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LocalDateTime now = LocalDateTime.now();
         outboxMapper.update(null, new UpdateWrapper<NotificationOutbox>()
+                .eq("tenant_id", tenantId)
                 .eq("status", "PROCESSING")
                 .lt("locked_at", now.minusMinutes(30))
                 .set("status", STATUS_RETRY)
@@ -44,19 +47,20 @@ public class NotificationOutboxDispatcher {
     /** claimからWebhook送信、結果更新までを1件単位のtransactionで実行する。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public boolean dispatchOne(Long outboxId) {
-        NotificationOutbox beforeClaim = outboxMapper.selectByIdForDispatch(outboxId);
-        if (beforeClaim == null || outboxMapper.claim(outboxId) == 0) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        NotificationOutbox beforeClaim = outboxMapper.selectByIdForDispatch(tenantId, outboxId);
+        if (beforeClaim == null || outboxMapper.claim(tenantId, outboxId) == 0) {
             return false;
         }
-        NotificationOutbox row = outboxMapper.selectByIdForDispatch(outboxId);
+        NotificationOutbox row = outboxMapper.selectByIdForDispatch(tenantId, outboxId);
         if (row == null) {
             return false;
         }
 
         boolean delivered = webhookNotifier.notifyNow(toNotification(row));
         if (delivered) {
-            outboxMapper.markSent(outboxId);
-            syncReportDelivery(outboxId, "SENT", null, null);
+            outboxMapper.markSent(tenantId, outboxId);
+            syncReportDelivery(tenantId, outboxId, "SENT", null, null);
             return true;
         }
 
@@ -64,22 +68,26 @@ public class NotificationOutboxDispatcher {
         String status = attempts >= MAX_ATTEMPTS ? STATUS_FAILED : STATUS_RETRY;
         long backoffMinutes = Math.min(60L, 1L << Math.min(Math.max(attempts - 1, 0), 6));
         String error = "Webhook通知に失敗しました（attempt=" + attempts + "）";
-        int updated = outboxMapper.markResult(outboxId, status, LocalDateTime.now().plusMinutes(backoffMinutes), error);
+        int updated = outboxMapper.markResult(tenantId, outboxId, status,
+                LocalDateTime.now().plusMinutes(backoffMinutes), error);
         if (updated > 0) {
-            syncReportDelivery(outboxId, status, attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
+            syncReportDelivery(tenantId, outboxId, status,
+                    attempts >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED", error);
         }
         return false;
     }
 
-    private void syncReportDelivery(Long outboxId, String status, String errorCode, String errorMessage) {
+    private void syncReportDelivery(String tenantId, Long outboxId, String status,
+                                    String errorCode, String errorMessage) {
         if (reportDeliveryMapper != null) {
-            reportDeliveryMapper.syncOutboxStatus(outboxId, status, errorCode, errorMessage);
+            reportDeliveryMapper.syncOutboxStatus(tenantId, outboxId, status, errorCode, errorMessage);
         }
     }
 
     private Notification toNotification(NotificationOutbox row) {
         Notification notification = new Notification();
         notification.setId(row.getNotificationId());
+        notification.setTenantId(row.getTenantId());
         notification.setType(row.getType());
         notification.setTitle(row.getTitle());
         notification.setMessage(row.getMessage());

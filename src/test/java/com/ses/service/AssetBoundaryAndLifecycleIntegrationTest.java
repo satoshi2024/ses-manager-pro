@@ -3,15 +3,22 @@ package com.ses.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.BaseIntegrationTest;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.dto.asset.OffboardingClearanceResultDto;
 import com.ses.entity.*;
 import com.ses.mapper.*;
 import com.ses.service.provider.ExternalAccountProviderClient;
 import com.ses.service.provider.impl.MockExternalAccountProviderClientImpl;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
@@ -35,6 +42,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @DisplayName("Asset Comprehensive Boundary & Integration Tests (境界・並行性・Recovery・スコープ検証)")
 class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
+
+    @BeforeEach
+    void bindTenantContext() {
+        AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private AssetService assetService;
@@ -791,6 +808,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngA);
         linkEngineerAccountIsolated(engineerA.getId(), userEngA.getId(), 1L);
@@ -800,6 +818,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngB);
         linkEngineerAccountIsolated(engineerB.getId(), userEngB.getId(), 1L);
@@ -842,8 +861,10 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         engineerMapper.insert(engineerA);
         engineerMapper.insert(engineerB);
 
-        SysUser sales = SysUser.builder().username("asset-sales-" + suffix).password("pass").role("営業").status(1).build();
-        SysUser manager = SysUser.builder().username("asset-manager-" + suffix).password("pass").role("マネージャー").status(1).build();
+        SysUser sales = SysUser.builder().username("asset-sales-" + suffix).password("pass").role("営業").status(1)
+                .tenantId("default").build();
+        SysUser manager = SysUser.builder().username("asset-manager-" + suffix).password("pass").role("マネージャー").status(1)
+                .tenantId("default").build();
         sysUserMapper.insert(sales);
         sysUserMapper.insert(manager);
         userOrganizationMapper.insert(UserOrganization.builder().userId(sales.getId()).organizationId(orgA.getId())
@@ -929,8 +950,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         documentMapper.insert(lostEvidence);
         assetService.reportLost(managerLostAsset.getId(), "担当範囲内の紛失", 1L, lostEvidence.getId());
         mockMvc.perform(get("/api/documents/" + lostEvidence.getId())
-                        .with(SecurityMockMvcRequestPostProcessors.user(String.valueOf(manager.getId()))
-                                .roles("マネージャー")))
+                        .with(loginAs(manager)))
                 .andExpect(status().isOk());
     }
 
@@ -994,6 +1014,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngA);
         linkEngineerAccountIsolated(engineerAId, userEngA.getId(), 1L);
@@ -1008,6 +1029,7 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
                 .password("pass")
                 .role("要員")
                 .status(1)
+                .tenantId("default")
                 .build();
         sysUserMapper.insert(userEngB);
         linkEngineerAccountIsolated(engineerBId, userEngB.getId(), 1L);
@@ -1017,13 +1039,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
 
         // Document APIも実在Document -> DocumentLink -> assignment -> assetの認可を通る。
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                        .with(loginAs(userEngA)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
 
         // 6. 管理者は DocumentLink 経由でも全件アクセス可能
@@ -1051,13 +1073,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
         // 返却後も旧assignmentの本人には自分の受領証跡だけを再表示できるが、他要員へ継承しない。
         assertThat(assetScopeServiceImpl.isAccessibleByDocumentLink(evidenceDocId, "要員", userEngA.getId())).isTrue();
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngA.getUsername()).roles("要員")))
+                        .with(loginAs(userEngA)))
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/documents/" + evidenceDocId)
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/documents/" + evidenceDocId + "/versions/1/download")
-                        .with(SecurityMockMvcRequestPostProcessors.user(userEngB.getUsername()).roles("要員")))
+                        .with(loginAs(userEngB)))
                 .andExpect(status().isForbidden());
     }
 
@@ -1154,6 +1176,13 @@ class AssetBoundaryAndLifecycleIntegrationTest extends BaseIntegrationTest {
      * 共有H2では他テスト（NOT_SUPPORTED等）が残した link 行と engineer ID 再利用が衝突しうるため、
      * 該当 engineer/user の既存 link を先に削除してから紐付ける。
      */
+    private RequestPostProcessor loginAs(SysUser user) {
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole())));
+        return SecurityMockMvcRequestPostProcessors.authentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
+
     private void linkEngineerAccountIsolated(long engineerId, long sysUserId, long linkedBy) {
         engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getEngineerId, engineerId));

@@ -100,13 +100,6 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
         List<TrainingCourse> tenantCourses = courseMapper.selectList(new LambdaQueryWrapper<TrainingCourse>()
                 .eq(TrainingCourse::getTenantId, currentTenant())
                 .in(TrainingCourse::getId, courseIds));
-        // V116以前の直接serviceテスト／旧fixtureにはtenant列が未設定の行が残る。
-        // 非nullで別tenantの行をfallbackすることはない。
-        if (tenantCourses.isEmpty() && "default".equals(currentTenant())) {
-            tenantCourses = courseMapper.selectBatchIds(courseIds).stream()
-                    .filter(course -> course.getTenantId() == null || currentTenant().equals(course.getTenantId()))
-                    .toList();
-        }
         return tenantCourses.stream()
                 .filter(course -> Integer.valueOf(1).equals(course.getActiveFlag()))
                 .map(TrainingCourse::getId).filter(Objects::nonNull).toList();

@@ -154,26 +154,11 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
             try (java.io.InputStream input = new java.io.ByteArrayInputStream(content)) {
                 document = documentService.registerReceived(request, input);
             }
-            if (document != null && document.getTenantId() == null && "default".equals(tenantId)) {
-                document.setTenantId(tenantId);
-            }
             if (document == null || !tenantId.equals(document.getTenantId())) {
                 throw BusinessException.of(403, "error.tenant.mismatch");
             }
             DocumentVersion version = documentVersionMapper.findByIdempotencyKey(
                     tenantId, "RECEIVED", request.getBusinessKey(), "v1");
-            boolean legacyFixture = false;
-            if (version == null && "default".equals(tenantId)) {
-                DocumentVersion legacy = documentVersionMapper.findLatestByDocumentId(document.getId());
-                if (legacy != null && legacy.getBusinessKey() == null
-                        && (legacy.getTenantId() == null || tenantId.equals(legacy.getTenantId()))) {
-                    version = legacy;
-                    legacyFixture = true;
-                }
-            }
-            if (version != null && version.getTenantId() == null && "default".equals(tenantId)) {
-                version.setTenantId(tenantId);
-            }
             if (version == null || !tenantId.equals(version.getTenantId())
                     || !"CLEAN".equals(version.getScanStatus())) {
                 throw BusinessException.of(400, "error.file.scanRejected");
@@ -183,7 +168,7 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
                     .eq(DocumentLink::getDocumentId, document.getId())
                     .eq(DocumentLink::getTargetType, "CERTIFICATION_RECORD")
                     .eq(DocumentLink::getTargetId, record.getId()));
-            if (typedLink == null && !legacyFixture) {
+            if (typedLink == null) {
                 throw BusinessException.of(403, "certification.evidence.linkRequired");
             }
             return new CertificationEvidenceUpload(record.getId(), document.getId(), version.getId(), version.getVersionNo(),
@@ -408,13 +393,7 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
         Long engineerId = ownEngineerId(actorUserId);
         EngineerCertification record = recordId == null ? null : certificationMapper.selectOne(new LambdaQueryWrapper<EngineerCertification>()
                 .eq(EngineerCertification::getId, recordId).eq(EngineerCertification::getTenantId, currentTenant()));
-        if (record == null && recordId != null && "default".equals(currentTenant())) {
-            EngineerCertification legacy = certificationMapper.selectById(recordId);
-            if (legacy != null && legacy.getTenantId() == null) {
-                record = legacy;
-            }
-        }
-        if (record == null || (record.getTenantId() != null && !currentTenant().equals(record.getTenantId()))
+        if (record == null || !currentTenant().equals(record.getTenantId())
                 || !engineerId.equals(record.getEngineerId())) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -479,7 +458,7 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     private String sha256(byte[] content) {

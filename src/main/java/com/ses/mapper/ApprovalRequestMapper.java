@@ -8,18 +8,30 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 @Mapper
 public interface ApprovalRequestMapper extends BaseMapper<ApprovalRequest> {
 
     /** 最終承認transactionの順序（request行ロック→target version再検証→…）を守るための行ロック取得。 */
-    @Select("SELECT * FROM t_approval_request WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
-    ApprovalRequest selectByIdForUpdate(@Param("id") Long id);
+    @Select("SELECT * FROM t_approval_request WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0 FOR UPDATE")
+    ApprovalRequest selectByIdForUpdate(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    /** 既存adapterのsource互換。tenantはThreadLocalから暗黙取得せず必須化する。 */
+    default ApprovalRequest selectByIdForUpdate(Long id) {
+        return selectByIdForUpdate(id, AccountingTenantContextHolder.requireTenantContext());
+    }
 
     @Select("SELECT * FROM t_approval_request WHERE idempotency_key = #{idempotencyKey}"
-            + " AND deleted_flag = 0"
+            + " AND tenant_id = #{tenantId} AND deleted_flag = 0"
             + " AND status NOT IN ('approved','rejected','withdrawn','conflict')")
-    ApprovalRequest selectByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey);
+    ApprovalRequest selectByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey,
+                                           @Param("tenantId") String tenantId);
+
+    @Select("SELECT * FROM t_approval_request WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0")
+    ApprovalRequest selectByIdAndTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     /**
      * participant/delegation typeを可視性のSQL境界へ置いた承認一覧。
@@ -29,13 +41,15 @@ public interface ApprovalRequestMapper extends BaseMapper<ApprovalRequest> {
             <script>
             SELECT r.*
             FROM t_approval_request r
-            WHERE r.deleted_flag = 0
+            WHERE r.tenant_id = #{tenantId}
+              AND r.deleted_flag = 0
             <if test="admin == false">
               AND (
                 EXISTS (
                   SELECT 1
                   FROM t_approval_participant p
                   WHERE p.request_id = r.id
+                    AND p.tenant_id = r.tenant_id
                     AND p.round_no = r.round_no
                     AND p.user_id = #{userId}
                 )
@@ -43,7 +57,9 @@ public interface ApprovalRequestMapper extends BaseMapper<ApprovalRequest> {
                   SELECT 1
                   FROM t_approval_participant p
                   JOIN t_approval_delegation d ON d.from_user_id = p.user_id
+                                             AND d.tenant_id = p.tenant_id
                   WHERE p.request_id = r.id
+                    AND p.tenant_id = r.tenant_id
                     AND p.round_no = r.round_no
                     AND p.participant_role = 'approver'
                     AND d.to_user_id = #{userId}
@@ -54,12 +70,14 @@ public interface ApprovalRequestMapper extends BaseMapper<ApprovalRequest> {
                       NOT EXISTS (
                         SELECT 1
                         FROM t_approval_delegation_type dt_any
-                        WHERE dt_any.delegation_id = d.id
+                        WHERE dt_any.tenant_id = d.tenant_id
+                          AND dt_any.delegation_id = d.id
                       )
                       OR EXISTS (
                         SELECT 1
                         FROM t_approval_delegation_type dt
-                        WHERE dt.delegation_id = d.id
+                        WHERE dt.tenant_id = d.tenant_id
+                          AND dt.delegation_id = d.id
                           AND dt.request_type = r.request_type
                       )
                     )
@@ -86,6 +104,7 @@ public interface ApprovalRequestMapper extends BaseMapper<ApprovalRequest> {
     Page<ApprovalRequest> selectVisiblePage(Page<ApprovalRequest> page,
                                              @Param("userId") Long userId,
                                              @Param("admin") boolean admin,
+                                             @Param("tenantId") String tenantId,
                                              @Param("today") LocalDate today,
                                              @Param("view") String view,
                                              @Param("status") String status);

@@ -149,13 +149,6 @@ public class CertificationEvidenceAccessService {
         }
         java.util.List<CertificationEvent> events = eventMapper.selectByTenantAndRecordId(
                 currentTenant(), recordId);
-        if ((events == null || events.isEmpty())
-                && "default".equals(currentTenant())) {
-            // 旧fixtureにはtenant列がないため、default tenantでのみ互換fallbackする。
-            events = eventMapper.selectByRecordId(recordId).stream()
-                    .filter(event -> event.getTenantId() == null || currentTenant().equals(event.getTenantId()))
-                    .toList();
-        }
         if (events == null) {
             return null;
         }
@@ -171,13 +164,6 @@ public class CertificationEvidenceAccessService {
                 new LambdaQueryWrapper<EngineerCertification>().eq(EngineerCertification::getId, recordId)
                         .eq(EngineerCertification::getTenantId,
                                 currentTenant()));
-        if (record == null && recordId != null
-                && "default".equals(currentTenant())) {
-            EngineerCertification legacy = certificationMapper.selectById(recordId);
-            if (legacy != null && legacy.getTenantId() == null) {
-                record = legacy;
-            }
-        }
         if (record == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
@@ -185,7 +171,7 @@ public class CertificationEvidenceAccessService {
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     public record EvidenceDownload(Long documentId, Integer versionNo, String fileName, String contentType,

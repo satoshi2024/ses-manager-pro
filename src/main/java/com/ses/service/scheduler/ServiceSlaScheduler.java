@@ -25,6 +25,8 @@ public class ServiceSlaScheduler {
     private final Clock clock;
     private final AccountingTenantInventoryProperties tenantInventory;
     private final AccountingTimezoneResolver timezoneResolver;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "${servicedesk.sla.cron:0 */5 * * * *}")
     @SchedulerLock(name = "serviceSlaMonitoring", lockAtLeastFor = "PT1M", lockAtMostFor = "PT10M")
@@ -41,6 +43,15 @@ public class ServiceSlaScheduler {
 
     public int processSlaMonitoring(LocalDateTime asOf) {
         log.info("SLA 違反監視スケジューラ実行開始: asOf={}", asOf);
+        if (tenantAwareBatchRunner != null) {
+            int count = tenantAwareBatchRunner.runAndSum(tenantId -> {
+                java.time.ZoneId zone = timezoneResolver.resolve(tenantId);
+                LocalDateTime tenantAsOf = asOf != null ? asOf : LocalDateTime.now(clock.withZone(zone));
+                return slaMonitoringService.checkSlaBreaches(tenantAsOf);
+            });
+            log.info("SLA 違反監視スケジューラ実行完了: 更新件数={}", count);
+            return count;
+        }
         int breachedCount = 0;
         for (String tenantId : tenantInventory.requireNormalizedIds()) {
             java.time.ZoneId zone = timezoneResolver.resolve(tenantId);

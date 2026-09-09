@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.ApprovalAction;
 import com.ses.entity.ApprovalRequest;
+import com.ses.entity.SysUser;
 import com.ses.mapper.ApprovalActionMapper;
 import com.ses.mapper.ApprovalDelegationMapper;
 import com.ses.mapper.ApprovalDelegationTypeMapper;
@@ -18,7 +19,9 @@ import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
 import com.ses.service.approval.RouteStepGroup;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -68,6 +71,12 @@ class ApprovalEngineConflictTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
+        SysUser applicant = new SysUser();
+        applicant.setId(10L);
+        applicant.setTenantId("default");
+        applicant.setStatus(1);
+        when(userMapper.selectByIdAndTenant(10L, "default")).thenReturn(applicant);
         when(adapter.supportedRequestTypes()).thenReturn(Set.of("quotation.submit"));
         when(adapter.currentVersion(42L)).thenReturn(2L);
         when(adapter.snapshot(eq(42L), anyMap())).thenReturn(new ApprovalSnapshot(
@@ -94,6 +103,11 @@ class ApprovalEngineConflictTest {
         service = new ApprovalEngineServiceImpl(requestMapper, actionMapper, delegationMapper,
                 delegationTypeMapper, participantMapper, userMapper, routeResolver, notificationService,
                 approvalNotificationService, objectMapper, List.of(adapter));
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

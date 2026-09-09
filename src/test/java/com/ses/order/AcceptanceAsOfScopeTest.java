@@ -9,6 +9,7 @@ import com.ses.entity.UserOrganization;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.AcceptanceService;
 import com.ses.service.OrganizationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -67,6 +68,7 @@ class AcceptanceAsOfScopeTest {
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -169,6 +171,7 @@ class AcceptanceAsOfScopeTest {
         user.setRealName(realName);
         user.setRole(role);
         user.setStatus(1);
+        user.setTenantId("default");
         sysUserMapper.insert(user);
         return user;
     }
@@ -178,6 +181,7 @@ class AcceptanceAsOfScopeTest {
                 List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole())));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        AccountingTenantContextHolder.setTenantId(user.getTenantId());
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.ses.mapper.MailDeliveryMapper;
 import com.ses.service.EmailTemplateService;
 import com.ses.service.MailService;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.integration.EmailProviderAdapter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -104,6 +105,7 @@ public class MailServiceImpl implements MailService {
     @Override
     public MailDispatchResult send(String to, String subject, String body, Long invoiceId,
                                    Long contactId, Long opportunityId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         MailDelivery delivery = new MailDelivery();
         delivery.setRecipient(to);
         delivery.setSubject(subject == null ? "" : subject);
@@ -118,16 +120,24 @@ public class MailServiceImpl implements MailService {
             mailDeliveryMapper.insert(delivery);
         }
         if (self != null) {
-            self.executeSend(delivery);
+            self.executeSend(delivery, tenantId);
         } else {
-            executeSend(delivery); // fallback for tests
+            executeSend(delivery, tenantId); // fallback for tests
         }
         return new MailDispatchResult(delivery.getId(), delivery.getStatus());
     }
 
     /** 実際の SMTP 呼び出し。send() が作成した履歴を必ず結果で更新する。 */
-    @Async
+    /** 旧呼出し口は現在の明示tenantを要求し、非同期処理には値を引数で渡す。 */
     public void executeSend(MailDelivery delivery) {
+        executeSend(delivery, AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    @Async
+    public void executeSend(MailDelivery delivery, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.tenant.contextRequired");
+        }
         JavaMailSender sender = mailSenderProvider.getIfAvailable();
         // SMTP未設定（host空 or JavaMailSender未生成）はドライラン
         if (!StringUtils.hasText(host) || sender == null) {
@@ -168,8 +178,9 @@ public class MailServiceImpl implements MailService {
             log.error("メール送信に失敗しました: deliveryId={} recipientDomain={} status=FAILED errorType={}",
                     delivery.getId(), recipientDomain(delivery.getRecipient()), e.getClass().getName());
             notificationServiceProvider.ifAvailable(ns ->
-                    ns.publish("MAIL_FAILED", "メール送信失敗", maskEmail(delivery.getRecipient()) + " 宛のメール送信に失敗しました",
-                            null, "MAIL_FAILED:" + delivery.getId() + ":" + System.currentTimeMillis()));
+                    AccountingTenantContextHolder.runWithTenant(tenantId, () ->
+                            ns.publish("MAIL_FAILED", "メール送信失敗", maskEmail(delivery.getRecipient()) + " 宛のメール送信に失敗しました",
+                                    null, "MAIL_FAILED:" + delivery.getId() + ":" + System.currentTimeMillis())));
         }
     }
 
@@ -193,4 +204,3 @@ public class MailServiceImpl implements MailService {
         return com.ses.common.util.LogRedaction.maskEmail(email);
     }
 }
-

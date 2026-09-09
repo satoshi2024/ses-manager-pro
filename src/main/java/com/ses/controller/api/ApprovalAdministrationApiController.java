@@ -56,7 +56,11 @@ public class ApprovalAdministrationApiController {
 
     @PostMapping("/routes/preview")
     public ApiResult<ApprovalRoutePreviewView> preview(@Valid @RequestBody ApprovalRoutePreviewRequest request) {
-        return ApiResult.success(administrationService.preview(request));
+        // applicantIdはbodyの値を認可根拠にせず、認証済みprincipalから固定する。
+        ApprovalRoutePreviewRequest trusted = new ApprovalRoutePreviewRequest(
+                request.requestType(), request.organizationId(), request.amountSnapshot(),
+                SecurityUtils.currentUserId(), request.asOf());
+        return ApiResult.success(administrationService.preview(trusted));
     }
 
     @GetMapping("/responsibilities")

@@ -127,6 +127,7 @@ class WebhookNotifierTest {
 
     private Notification notification(String type) {
         Notification notification = new Notification();
+        notification.setTenantId("default");
         notification.setType(type);
         notification.setTitle("タイトル");
         notification.setMessage("本文");

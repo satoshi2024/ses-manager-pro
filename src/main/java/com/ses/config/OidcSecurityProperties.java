@@ -25,7 +25,8 @@ public class OidcSecurityProperties {
     /** 通常local loginを閉じても、明示したbreak-glass login入口を表示・許可する。 */
     private boolean breakGlassLoginEnabled = true;
 
-    private String tenantId = "default";
+    /** 未設定時はmulti-tenantの認証済みSysUser.tenant_idだけを信頼する。 */
+    private String tenantId;
     private String providerRegistrationId = "enterprise";
     private String issuerUri;
     /** 起動時discoveryを行わず使用する固定metadata。 */

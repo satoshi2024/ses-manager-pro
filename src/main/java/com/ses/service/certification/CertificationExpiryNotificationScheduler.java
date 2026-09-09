@@ -7,6 +7,7 @@ import com.ses.service.NotificationService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.accounting.AccountingTenantInventoryProperties;
 import com.ses.service.accounting.AccountingTimezoneResolver;
+import com.ses.service.scheduler.TenantAwareBatchRunner;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,8 @@ public class CertificationExpiryNotificationScheduler {
     private final Clock clock;
     private final AccountingTenantInventoryProperties tenantInventory;
     private final AccountingTimezoneResolver timezoneResolver;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @org.springframework.beans.factory.annotation.Autowired
     public CertificationExpiryNotificationScheduler(EngineerCertificationMapper certificationMapper,
@@ -55,6 +58,13 @@ public class CertificationExpiryNotificationScheduler {
     }
 
     public int dispatch(LocalDate asOf) {
+        if (tenantAwareBatchRunner != null) {
+            return tenantAwareBatchRunner.runAndSum(tenantId -> {
+                ZoneId zone = timezoneResolver.resolve(tenantId);
+                LocalDate tenantDate = asOf == null ? LocalDate.now(clock.withZone(zone)) : asOf;
+                return dispatchTenant(tenantId, tenantDate);
+            });
+        }
         int attempted = 0;
         for (String tenantId : tenantInventory.requireNormalizedIds()) {
             ZoneId zone = timezoneResolver.resolve(tenantId);

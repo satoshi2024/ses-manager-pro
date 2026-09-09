@@ -98,7 +98,7 @@ public class FileScopeValidationService {
         }
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
         DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
-                new QueryWrapper<DocumentVersion>().eq("tenant_id", com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId())
+                new QueryWrapper<DocumentVersion>().eq("tenant_id", com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                         .eq("storage_key", storedName)
                         .eq("document_id", documentId).last("LIMIT 1"));
         if (version == null || !java.util.Objects.equals(version.getDocumentId(), documentId)) {
@@ -110,7 +110,7 @@ public class FileScopeValidationService {
         if (serviceRequestMapper == null || serviceRequestId == null || customerId == null) {
             throw BusinessException.of(403, "error.forbidden");
         }
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         ServiceRequest request = serviceRequestMapper.selectOne(new QueryWrapper<ServiceRequest>()
                 .eq("tenant_id", tenantId).eq("id", serviceRequestId));
         if (request == null || !java.util.Objects.equals(request.getCustomerId(), customerId)) {
@@ -153,7 +153,7 @@ public class FileScopeValidationService {
                                                             Long documentId, Long expectedDocumentVersionId,
                                                             String expectedHash) {
         DocumentVersionMapper versionMapper = documentVersionMapperProvider.getIfAvailable();
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         DocumentVersion version = versionMapper == null ? null : versionMapper.selectOne(
                 new QueryWrapper<DocumentVersion>().eq("tenant_id", tenantId)
                         .eq("storage_key", storedName).last("LIMIT 1"));
@@ -410,18 +410,12 @@ public class FileScopeValidationService {
         return document == null ? null : document.getDocumentType();
     }
 
-    /** 現在tenantの文書だけを取得する。旧default fixtureのNULL tenantのみ互換扱いする。 */
+    /** 現在tenantの文書だけを取得する。tenant未設定行は認可対象にしない。 */
     private com.ses.entity.Document findDocumentForCurrentTenant(
             com.ses.mapper.DocumentMapper documentMapper, Long documentId) {
         String tenantId = currentTenant();
         com.ses.entity.Document document = documentMapper.selectOne(new QueryWrapper<com.ses.entity.Document>()
                 .eq("id", documentId).eq("tenant_id", tenantId));
-        if (document == null && "default".equals(tenantId)) {
-            com.ses.entity.Document legacy = documentMapper.selectById(documentId);
-            if (legacy != null && legacy.getTenantId() == null) {
-                document = legacy;
-            }
-        }
         return document;
     }
 
@@ -479,7 +473,7 @@ public class FileScopeValidationService {
 
         List<DocumentLink> links = linkMapper.selectList(
                 new QueryWrapper<DocumentLink>().eq("tenant_id",
-                                com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId())
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
                         .eq("document_id", documentVersion.getDocumentId()));
         List<DocumentLink> certificationLinks = links.stream()
                 .filter(link -> "CERTIFICATION_RECORD".equals(link.getTargetType())
@@ -496,18 +490,10 @@ public class FileScopeValidationService {
                         new QueryWrapper<EngineerCertification>()
                                 .eq("id", link.getTargetId())
                                 .eq("tenant_id", currentTenant()));
-                if (record == null && "default".equals(currentTenant())) {
-                    // 旧unit fixtureにはtenant列を設定していない行があるため、NULLのみ互換扱いする。
-                    EngineerCertification legacy = certificationMapper.selectById(link.getTargetId());
-                    if (legacy != null && legacy.getTenantId() == null) {
-                        record = legacy;
-                    }
-                }
                 if (record == null) {
                     continue;
                 }
-                if (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())
-                        && record.getTenantId() != null) {
+                if (!Objects.equals(record.getTenantId(), documentVersion.getTenantId())) {
                     continue;
                 }
                 dataScopeService.assertAllowedEngineer(record.getEngineerId());
@@ -523,7 +509,7 @@ public class FileScopeValidationService {
     }
 
     private String currentTenant() {
-        return com.ses.service.accounting.AccountingTenantContextHolder.getCurrentTenantId();
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
     }
 
     /** マネージャー（組織scope ∩ DataScope）の配下か判定する。 */

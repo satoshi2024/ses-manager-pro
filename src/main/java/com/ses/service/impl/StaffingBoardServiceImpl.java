@@ -148,7 +148,10 @@ public class StaffingBoardServiceImpl implements StaffingBoardService {
                 : projectMapper.selectBatchIds(projectIds).stream()
                 .collect(Collectors.toMap(Project::getId, Function.identity(), (a, b) -> a));
         Map<Long, ApprovalRequest> approvals = approvalIds.isEmpty() ? Map.of()
-                : approvalRequestMapper.selectBatchIds(approvalIds).stream()
+                : approvalRequestMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ApprovalRequest>()
+                        .in(ApprovalRequest::getId, approvalIds)
+                        .eq(ApprovalRequest::getTenantId,
+                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())).stream()
                 .collect(Collectors.toMap(ApprovalRequest::getId, Function.identity(), (a, b) -> a));
 
         return allocations.stream().collect(Collectors.toMap(AllocationPlan::getId, plan -> {

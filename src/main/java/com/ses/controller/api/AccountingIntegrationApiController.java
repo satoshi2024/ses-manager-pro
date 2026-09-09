@@ -106,7 +106,7 @@ public class AccountingIntegrationApiController {
     @GetMapping("/connections")
     public ApiResult<List<IntegrationConnection>> listConnections() {
         // R1-P1-06: tenant は認証済みコンテキストから解決し、利用者指定パラメータを信用しない
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
 
@@ -128,7 +128,7 @@ public class AccountingIntegrationApiController {
     @GetMapping("/connections/{id}/health")
     public ApiResult<Boolean> checkHealth(@PathVariable("id") Long connectionId) {
         // R1-P1-06: tenant + 法人条件を SQL で適用 (権限外・他tenantは 404)
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIdsOrNull());
         IntegrationConnection conn = connectionService.getByIdScoped(connectionId, tenantId, allowedLegalEntities);
         if (conn == null) {
@@ -149,7 +149,7 @@ public class AccountingIntegrationApiController {
     public ApiResult<Void> updateStatus(@PathVariable("id") Long connectionId,
                                         @RequestParam("status") String status) {
         // R1-P1-06: 管理者も tenant 境界は SQL で適用 (他tenantの状態変更を防止)
-        String tenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         IntegrationConnection conn = connectionService.getByIdScoped(connectionId, tenantId, null);
         if (conn == null) {
             return ApiResult.error(404, "接続マスタが見つかりません");
@@ -165,7 +165,7 @@ public class AccountingIntegrationApiController {
             @RequestParam("connectionId") Long connectionId,
             @RequestParam(value = "objectType", required = false) String objectType) {
         // R1-P1-06: マネージャーは許可接続 (許可法人) のマッピングのみ (SQL境界)。管理者も current tenant に属する接続のみ。
-        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String currentTenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         java.util.Set<Long> allowedLegalEntities = allowedLegalEntityIds(allowedOrgIds);
         java.util.Set<Long> allowedConnectionIds = null;
@@ -194,7 +194,7 @@ public class AccountingIntegrationApiController {
             return ApiResult.error(400, "接続IDが必要です");
         }
         IntegrationConnection conn = connectionService.getByIdScoped(
-                mapping.getConnectionId(), AccountingTenantContextHolder.getCurrentTenantId(), null);
+                mapping.getConnectionId(), AccountingTenantContextHolder.requireTenantContext(), null);
         if (conn == null) {
             return ApiResult.error(404, "接続マスタが見つかりません");
         }
@@ -208,7 +208,7 @@ public class AccountingIntegrationApiController {
         // R1-P1-06: 他tenantのマッピングは verify も不可 (404)
         // R4-R3: mappingId + current tenant をconnection JOIN付きの最初のSQLで解決する。
         boolean verified = mappingService.verifyAndSnapshotMappingScoped(
-                mappingId, AccountingTenantContextHolder.getCurrentTenantId());
+                mappingId, AccountingTenantContextHolder.requireTenantContext());
         if (!verified) {
             return ApiResult.error(404, "マッピングが見つかりません");
         }
@@ -229,7 +229,7 @@ public class AccountingIntegrationApiController {
         LambdaQueryWrapper<IntegrationJob> wrapper = new LambdaQueryWrapper<IntegrationJob>()
                 .orderByDesc(IntegrationJob::getId);
 
-        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String currentTenantId = AccountingTenantContextHolder.requireTenantContext();
         if (currentTenantId != null && !currentTenantId.isBlank()) {
             wrapper.eq(IntegrationJob::getTenantId, currentTenantId);
         }
@@ -262,7 +262,7 @@ public class AccountingIntegrationApiController {
         LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
                 .eq(IntegrationJob::getId, jobId);
 
-        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String currentTenantId = AccountingTenantContextHolder.requireTenantContext();
         if (currentTenantId != null && !currentTenantId.isBlank()) {
             query.eq(IntegrationJob::getTenantId, currentTenantId);
         }
@@ -288,7 +288,7 @@ public class AccountingIntegrationApiController {
     public ApiResult<Void> retryJob(@PathVariable("id") Long jobId) {
         LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
                 .eq(IntegrationJob::getId, jobId);
-        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String currentTenantId = AccountingTenantContextHolder.requireTenantContext();
         if (currentTenantId != null && !currentTenantId.isBlank()) {
             query.eq(IntegrationJob::getTenantId, currentTenantId);
         }
@@ -307,7 +307,7 @@ public class AccountingIntegrationApiController {
                                      @RequestParam(value = "reason", defaultValue = "REASON_CLIENT_CANCEL") String reason) {
         LambdaQueryWrapper<IntegrationJob> query = new LambdaQueryWrapper<IntegrationJob>()
                 .eq(IntegrationJob::getId, jobId);
-        String currentTenantId = AccountingTenantContextHolder.getCurrentTenantId();
+        String currentTenantId = AccountingTenantContextHolder.requireTenantContext();
         if (currentTenantId != null && !currentTenantId.isBlank()) {
             query.eq(IntegrationJob::getTenantId, currentTenantId);
         }

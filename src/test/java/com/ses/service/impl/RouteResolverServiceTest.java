@@ -18,6 +18,8 @@ import com.ses.mapper.UserOrganizationMapper;
 import com.ses.mapper.UserPermissionGroupMapper;
 import com.ses.service.approval.ResolvedRoute;
 import com.ses.service.approval.RouteResolverService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,8 +73,14 @@ class RouteResolverServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         approverId = insertUser("route-approver");
         applicantId = insertUser("route-applicant");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     private Long insertUser(String prefix) {
@@ -85,6 +93,7 @@ class RouteResolverServiceTest {
                 .password("x")
                 .realName(prefix)
                 .role(role)
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -94,7 +103,7 @@ class RouteResolverServiceTest {
     private Long insertRoute(String requestType, BigDecimal min, BigDecimal max, int versionNo, Long orgId,
                               Long approverUserId) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L)
+                .tenantId("default")
                 .requestType(requestType)
                 .organizationId(orgId)
                 .minAmount(min)
@@ -157,7 +166,7 @@ class RouteResolverServiceTest {
         Long roleUser2 = insertUser("route-role-user2", role);
         String type = "route.role-any-of." + System.nanoTime();
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(type).organizationId(null)
+                .tenantId("default").requestType(type).organizationId(null)
                 .minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -182,7 +191,7 @@ class RouteResolverServiceTest {
     @Test
     void 申請者自身しか承認候補が居ないrouteは承認者解決不能で拒否される() {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType("route.self").organizationId(null)
+                .tenantId("default").requestType("route.self").organizationId(null)
                 .minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -283,15 +292,15 @@ class RouteResolverServiceTest {
                 .type("部").validFrom(LocalDate.now().minusDays(1)).status("有効").version(0).build();
         organizationUnitMapper.insert(organization);
         approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
-                .tenantId(1L).responsibilityType("ORGANIZATION_MANAGER")
+                .tenantId("default").responsibilityType("ORGANIZATION_MANAGER")
                 .organizationId(organization.getId()).userId(organizationApprover)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build());
         approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
-                .tenantId(1L).responsibilityType("FINANCE_MANAGER")
+                .tenantId("default").responsibilityType("FINANCE_MANAGER")
                 .organizationId(null).userId(financeApprover)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build());
 
-        ApprovalRoute route = ApprovalRoute.builder().tenantId(1L).requestType(type)
+        ApprovalRoute route = ApprovalRoute.builder().tenantId("default").requestType(type)
                 .organizationId(organization.getId()).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -650,6 +659,7 @@ class RouteResolverServiceTest {
     private void insertUserOrganization(Long userId, Long organizationId, Long managerUserId,
                                         LocalDate validFrom, LocalDate validTo) {
         com.ses.entity.UserOrganization uo = com.ses.entity.UserOrganization.builder()
+                .tenantId("default")
                 .userId(userId)
                 .organizationId(organizationId)
                 .managerUserId(managerUserId)
@@ -691,7 +701,7 @@ class RouteResolverServiceTest {
     private Long insertSourceRoute(String requestType, String approverType, String approverValue,
                                    Long organizationId, LocalDate validFrom, LocalDate validTo) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(requestType).organizationId(organizationId)
+                .tenantId("default").requestType(requestType).organizationId(organizationId)
                 .minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(validFrom).validTo(validTo).activeFlag(1).build();
         approvalRouteMapper.insert(route);
@@ -704,7 +714,7 @@ class RouteResolverServiceTest {
     private void insertResponsibility(String type, Long organizationId, Long userId,
                                       LocalDate validFrom, LocalDate validTo) {
         approvalResponsibilityMapper.insert(ApprovalResponsibility.builder()
-                .tenantId(1L).responsibilityType(type).organizationId(organizationId).userId(userId)
+                .tenantId("default").responsibilityType(type).organizationId(organizationId).userId(userId)
                 .validFrom(validFrom).validTo(validTo).activeFlag(1).build());
     }
 
@@ -714,7 +724,7 @@ class RouteResolverServiceTest {
 
     private Long insertRoleRoute(String requestType, String applicantRole, Long approverUserId) {
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L).requestType(requestType).applicantRoleCondition(applicantRole)
+                .tenantId("default").requestType(requestType).applicantRoleCondition(applicantRole)
                 .organizationId(null).minAmount(null).maxAmount(null).versionNo(1)
                 .validFrom(LocalDate.now().minusDays(1)).validTo(null).activeFlag(1).build();
         approvalRouteMapper.insert(route);

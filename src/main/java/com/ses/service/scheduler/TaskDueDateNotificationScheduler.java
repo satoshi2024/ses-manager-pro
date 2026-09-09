@@ -5,7 +5,9 @@ import com.ses.entity.Task;
 import com.ses.entity.TaskNotificationLog;
 import com.ses.mapper.TaskMapper;
 import com.ses.mapper.TaskNotificationLogMapper;
+import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
@@ -27,7 +29,9 @@ public class TaskDueDateNotificationScheduler {
 
     private final TaskMapper taskMapper;
     private final TaskNotificationLogMapper taskNotificationLogMapper;
+    private final SysUserMapper sysUserMapper;
     private final NotificationService notificationService;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     /**
      * 毎日深夜 02:00 に実行
@@ -35,7 +39,8 @@ public class TaskDueDateNotificationScheduler {
     @Scheduled(cron = "0 0 2 * * ?")
     @SchedulerLock(name = "taskDueDateOverdueDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void runDailyOverdueCheck() {
-        processOverdueTaskNotifications(LocalDate.now());
+        tenantAwareBatchRunner.runAndSum(tenant -> processOverdueTaskNotifications(
+                LocalDate.now(AccountingTenantContextHolder.getZoneId())));
     }
 
     /**
@@ -45,6 +50,7 @@ public class TaskDueDateNotificationScheduler {
      * @return 送信された通知件数
      */
     public int processOverdueTaskNotifications(LocalDate asOfDate) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (asOfDate == null) {
             asOfDate = LocalDate.now();
         }
@@ -54,6 +60,7 @@ public class TaskDueDateNotificationScheduler {
         wrapper.isNotNull(Task::getDueDate)
                 .lt(Task::getDueDate, asOfDate)
                 .in(Task::getStatus, List.of("NOT_STARTED", "IN_PROGRESS"))
+                .eq(Task::getTenantId, tenantId)
                 .eq(Task::getDeletedFlag, 0);
 
         List<Task> overdueTasks = taskMapper.selectList(wrapper);
@@ -64,19 +71,31 @@ public class TaskDueDateNotificationScheduler {
         int sentCount = 0;
         for (Task task : overdueTasks) {
             TaskNotificationLog logEntry = TaskNotificationLog.builder()
+                    .tenantId(tenantId)
                     .taskId(task.getId())
                     .notifyDate(asOfDate)
                     .createdAt(LocalDateTime.now())
+                    .status("CLAIMED")
                     .build();
 
             try {
-                // UNIQUE(task_id, notify_date) による重複防止
+                // 先にCLAIMEDを保存し、送信成功後だけSENTへ遷移する。
                 taskNotificationLogMapper.insert(logEntry);
             } catch (DuplicateKeyException e) {
-                // 既に本日分が通知済みの場合はスキップ
-                continue;
+                int claimed = taskNotificationLogMapper.claimRetry(tenantId, task.getId(), asOfDate,
+                        LocalDateTime.now().minusMinutes(30));
+                if (claimed != 1) {
+                    continue;
+                }
             } catch (Exception e) {
                 log.warn("タスク期限通知ログの保存に失敗しました: taskId={}", task.getId(), e);
+                continue;
+            }
+
+            if (task.getAssigneeUserId() == null
+                    || sysUserMapper.selectByIdAndTenant(task.getAssigneeUserId(), tenantId) == null) {
+                taskNotificationLogMapper.markRetry(tenantId, task.getId(), asOfDate,
+                        "担当者が同一tenantに存在しません");
                 continue;
             }
 
@@ -92,12 +111,23 @@ public class TaskDueDateNotificationScheduler {
                         dedupeKey,
                         "todo"
                 );
-                sentCount++;
+                if (taskNotificationLogMapper.markSent(tenantId, task.getId(), asOfDate, LocalDateTime.now()) == 1) {
+                    sentCount++;
+                }
             } catch (Exception e) {
                 log.error("タスク期限超過通知の送出に失敗しました: taskId={}", task.getId(), e);
+                taskNotificationLogMapper.markRetry(tenantId, task.getId(), asOfDate,
+                        safeError(e));
             }
         }
 
         return sentCount;
+    }
+
+    private String safeError(Exception e) {
+        String message = e.getMessage();
+        return message == null || message.isBlank()
+                ? "タスク期限通知の送出に失敗しました"
+                : message.substring(0, Math.min(message.length(), 240));
     }
 }
