@@ -40,14 +40,16 @@ CREATE TABLE IF NOT EXISTS t_ai_recommendation_run (
     error_code VARCHAR(64) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_flag TINYINT DEFAULT 0,
+      deleted_flag TINYINT DEFAULT 0,
     CONSTRAINT uk_ai_run_trace UNIQUE (trace_id),
+    CONSTRAINT uk_ai_run_tenant_id UNIQUE (tenant_id, id),
     CONSTRAINT fk_ai_run_version FOREIGN KEY (artifact_version_id)
         REFERENCES m_ai_artifact_version (id)
 );
 
 CREATE TABLE IF NOT EXISTS t_ai_recommendation_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
     run_id BIGINT NOT NULL,
     rank_no INT NOT NULL,
     target_type VARCHAR(32) NOT NULL,
@@ -58,13 +60,15 @@ CREATE TABLE IF NOT EXISTS t_ai_recommendation_item (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag TINYINT DEFAULT 0,
-    CONSTRAINT uk_ai_item_run_rank UNIQUE (run_id, rank_no),
-    CONSTRAINT fk_ai_item_run FOREIGN KEY (run_id)
-        REFERENCES t_ai_recommendation_run (id)
+    CONSTRAINT uk_ai_item_tenant_run_rank UNIQUE (tenant_id, run_id, rank_no),
+    CONSTRAINT uk_ai_item_tenant_id UNIQUE (tenant_id, id),
+    CONSTRAINT fk_ai_item_run_tenant FOREIGN KEY (tenant_id, run_id)
+        REFERENCES t_ai_recommendation_run (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS t_ai_feedback (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
     item_id BIGINT NOT NULL,
     decision VARCHAR(16) NULL,
     reason_code VARCHAR(32) NULL,
@@ -74,12 +78,13 @@ CREATE TABLE IF NOT EXISTS t_ai_feedback (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag TINYINT DEFAULT 0,
-    CONSTRAINT fk_ai_feedback_item FOREIGN KEY (item_id)
-        REFERENCES t_ai_recommendation_item (id)
+    CONSTRAINT fk_ai_feedback_item_tenant FOREIGN KEY (tenant_id, item_id)
+        REFERENCES t_ai_recommendation_item (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS t_ai_outcome (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id VARCHAR(100) NOT NULL,
     item_id BIGINT NOT NULL,
     outcome_type VARCHAR(32) NOT NULL,
     source_type VARCHAR(32) NOT NULL,
@@ -91,8 +96,8 @@ CREATE TABLE IF NOT EXISTS t_ai_outcome (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_flag TINYINT DEFAULT 0,
     CONSTRAINT uk_ai_outcome_idempotent UNIQUE (item_id, outcome_type, source_type, source_id),
-    CONSTRAINT fk_ai_outcome_item FOREIGN KEY (item_id)
-        REFERENCES t_ai_recommendation_item (id)
+    CONSTRAINT fk_ai_outcome_item_tenant FOREIGN KEY (tenant_id, item_id)
+        REFERENCES t_ai_recommendation_item (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS t_ai_evaluation (

@@ -8,5 +8,6 @@ import java.util.List;
 
 public interface EngineerSkillService extends IService<EngineerSkill> {
     List<EngineerSkillDetailDto> listDetail(Long engineerId);
+    List<EngineerSkill> listForTenant(Long engineerId);
     void replaceSkills(Long engineerId, List<EngineerSkill> skills);
 }

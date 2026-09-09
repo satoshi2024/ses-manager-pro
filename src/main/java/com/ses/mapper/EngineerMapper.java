@@ -1,6 +1,7 @@
 package com.ses.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.entity.Engineer;
 import org.apache.ibatis.annotations.Mapper;
@@ -12,6 +13,52 @@ import java.util.List;
 
 @Mapper
 public interface EngineerMapper extends BaseMapper<Engineer> {
+
+    @org.apache.ibatis.annotations.Update("UPDATE t_engineer SET tenant_id = #{tenantId} "
+            + "WHERE id = #{id} AND tenant_id IS NULL AND deleted_flag = 0")
+    int assignTenantForRepair(@org.apache.ibatis.annotations.Param("id") Long id,
+                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
+    @Select("""
+        <script>
+        SELECT e.* FROM t_engineer e
+        WHERE e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+          <choose>
+            <when test="allowedIds != null and allowedIds.size() > 0">
+              AND e.id IN <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            </when>
+            <when test="allowedIds != null">AND 1 = 0</when>
+          </choose>
+          <if test="fullName != null and fullName != ''">AND LOWER(e.full_name) LIKE LOWER(CONCAT('%', #{fullName}, '%'))</if>
+          <if test="status != null and status != ''">AND e.status = #{status}</if>
+          <if test="employmentType != null and employmentType != ''">AND e.employment_type = #{employmentType}</if>
+          <if test="skillIds != null and skillIds.size() > 0">
+            <foreach collection="skillIds" item="skillId">
+              AND EXISTS (SELECT 1 FROM t_engineer_skill es WHERE es.engineer_id = e.id AND es.skill_id = #{skillId})
+            </foreach>
+          </if>
+          <if test="salesUserId != null">
+            AND EXISTS (SELECT 1 FROM t_engineer_sales esales WHERE esales.engineer_id = e.id
+              AND esales.sales_user_id = #{salesUserId} AND esales.released_at IS NULL AND esales.deleted_flag = 0)
+          </if>
+          <if test="accountLinked != null">
+            <choose>
+              <when test="accountLinked">AND EXISTS (SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId})</when>
+              <otherwise>AND NOT EXISTS (SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId})</otherwise>
+            </choose>
+          </if>
+        ORDER BY e.id DESC
+        </script>
+        """)
+    Page<Engineer> selectPageForTenant(Page<Engineer> page,
+                                       @Param("tenantId") String tenantId,
+                                       @Param("allowedIds") Collection<Long> allowedIds,
+                                       @Param("fullName") String fullName,
+                                       @Param("status") String status,
+                                       @Param("employmentType") String employmentType,
+                                       @Param("skillIds") Collection<Long> skillIds,
+                                       @Param("salesUserId") Long salesUserId,
+                                       @Param("accountLinked") Boolean accountLinked);
 
     /**
      * 稼動率推移の集計用に id/created_at のみを取得する軽量プロジェクション。
@@ -65,8 +112,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
 
     /** 経費・会計プレビューの要員も明示的tenant ownershipで解決する。 */
     @Select("SELECT e.* FROM t_engineer e "
-            + "WHERE e.id = #{id} AND e.deleted_flag = 0 AND (e.tenant_id = #{tenantId} OR EXISTS ("
-            + "SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId}))")
+            + "WHERE e.id = #{id} AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0")
     Engineer selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -76,8 +122,7 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
         SELECT e.*
         FROM t_engineer e
         WHERE e.deleted_flag = 0
-          AND (e.tenant_id = #{tenantId} OR EXISTS (SELECT 1 FROM t_engineer_account_link l
-               WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId}))
+          AND e.tenant_id = #{tenantId}
           AND e.id IN
           <foreach collection="engineerIds" item="id" open="(" separator="," close=")">
             #{id}
@@ -87,11 +132,115 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     List<Engineer> selectByIdsForTenant(@org.apache.ibatis.annotations.Param("engineerIds") Collection<Long> engineerIds,
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
+    /** 経費のowner linkを正本とする表示名解決。legacy要員も、信頼できるlinkがあるtenantだけ返す。 */
+    @Select("""
+        <script>
+        SELECT DISTINCT e.*
+          FROM t_engineer e
+          INNER JOIN t_engineer_account_link l
+                  ON l.engineer_id = e.id
+                 AND l.tenant_id = #{tenantId}
+          INNER JOIN sys_user u
+                  ON u.id = l.sys_user_id
+                 AND u.tenant_id = #{tenantId}
+                 AND u.deleted_flag = 0
+         WHERE e.deleted_flag = 0
+           AND e.id IN
+           <foreach collection="engineerIds" item="id" open="(" separator="," close=")">
+             #{id}
+           </foreach>
+        </script>
+        """)
+    List<Engineer> selectByIdsForOwnerTenant(@Param("engineerIds") Collection<Long> engineerIds,
+                                             @Param("tenantId") String tenantId);
+
+    /** 経費の単一要員表示名解決。 */
+    @Select("SELECT DISTINCT e.* FROM t_engineer e "
+            + "INNER JOIN t_engineer_account_link l ON l.engineer_id = e.id AND l.tenant_id = #{tenantId} "
+            + "INNER JOIN sys_user u ON u.id = l.sys_user_id AND u.tenant_id = #{tenantId} AND u.deleted_flag = 0 "
+            + "WHERE e.id = #{id} AND e.deleted_flag = 0")
+    Engineer selectByIdForOwnerTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    /** 月次snapshotのBench母集団を明示的な要員ownershipへ限定する。 */
+    @Select("""
+        <script>
+        SELECT e.id AS engineerId,
+               CASE
+                 WHEN eh.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
+                 WHEN eh.organization_history_status = 'UNKNOWN' THEN NULL
+                 ELSE COALESCE(eh.organization_id, uo.organization_id)
+               END AS organizationId,
+               CASE WHEN eh.id IS NULL THEN e.cost_center_id ELSE eh.cost_center_id END AS costCenterId,
+               COALESCE(CASE WHEN eh.id IS NULL THEN e.expected_unit_price ELSE eh.expected_unit_price END, 0) AS waitCost
+        FROM t_engineer e
+        LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id AND l.tenant_id = #{tenantId}
+        LEFT JOIN t_engineer_accounting_history eh ON eh.engineer_id = e.id
+             AND eh.deleted_flag = 0
+             AND eh.valid_from &lt;= #{monthStart} AND (eh.valid_to IS NULL OR eh.valid_to &gt;= #{monthStart})
+        LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id AND uo.tenant_id = #{tenantId}
+             AND uo.primary_flag = 1 AND uo.deleted_flag = 0
+             AND uo.valid_from &lt;= #{monthStart} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
+        WHERE e.deleted_flag = 0 AND e.tenant_id = #{tenantId}
+          AND NOT EXISTS (
+            SELECT 1 FROM t_contract c
+            JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
+            WHERE c.engineer_id = e.id AND c.deleted_flag = 0
+              AND c.status IN ('稼動中', '準備中', '終了')
+              AND c.start_date IS NOT NULL AND c.start_date &lt;= #{monthEnd}
+              AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
+          )
+        </script>
+        """)
+    List<com.ses.dto.accounting.AccountingWaitCostSnapshotRow> selectAccountingWaitCostByEngineerForTenant(
+            @org.apache.ibatis.annotations.Param("monthStart") java.time.LocalDate monthStart,
+            @org.apache.ibatis.annotations.Param("monthEnd") java.time.LocalDate monthEnd,
+            @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
     @Select("SELECT e.* FROM t_engineer e "
-            + "WHERE e.id = #{id} AND e.deleted_flag = 0 AND (e.tenant_id = #{tenantId} OR EXISTS ("
-            + "SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId})) FOR UPDATE")
+            + "WHERE e.id = #{id} AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 FOR UPDATE")
     Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
+    @org.apache.ibatis.annotations.Update("""
+        <script>
+        UPDATE t_engineer
+        <set>
+          <if test="engineer.fullName != null">full_name = #{engineer.fullName},</if>
+          <if test="engineer.fullNameKana != null">full_name_kana = #{engineer.fullNameKana},</if>
+          <if test="engineer.initialName != null">initial_name = #{engineer.initialName},</if>
+          <if test="engineer.gender != null">gender = #{engineer.gender},</if>
+          <if test="engineer.birthDate != null">birth_date = #{engineer.birthDate},</if>
+          <if test="engineer.nationality != null">nationality = #{engineer.nationality},</if>
+          <if test="engineer.nearestStation != null">nearest_station = #{engineer.nearestStation},</if>
+          <if test="engineer.phone != null">phone = #{engineer.phone},</if>
+          <if test="engineer.prefecture != null">prefecture = #{engineer.prefecture},</if>
+          <if test="engineer.railwayCompany != null">railway_company = #{engineer.railwayCompany},</if>
+          <if test="engineer.employmentType != null">employment_type = #{engineer.employmentType},</if>
+          <if test="engineer.status != null">status = #{engineer.status},</if>
+          <if test="engineer.expectedUnitPrice != null">expected_unit_price = #{engineer.expectedUnitPrice},</if>
+          <if test="engineer.costCenterId != null">cost_center_id = #{engineer.costCenterId},</if>
+          <if test="engineer.organizationId != null">organization_id = #{engineer.organizationId},</if>
+          <if test="engineer.overtimeExemptFlag != null">overtime_exempt_flag = #{engineer.overtimeExemptFlag},</if>
+          <if test="engineer.availableDate != null">available_date = #{engineer.availableDate},</if>
+          <if test="engineer.experienceYears != null">experience_years = #{engineer.experienceYears},</if>
+          <if test="engineer.japaneseLevel != null">japanese_level = #{engineer.japaneseLevel},</if>
+          <if test="engineer.resumeSummary != null">resume_summary = #{engineer.resumeSummary},</if>
+          <if test="engineer.photoUrl != null">photo_url = #{engineer.photoUrl},</if>
+          <if test="engineer.remarks != null">remarks = #{engineer.remarks},</if>
+          version = version + 1
+        </set>
+        WHERE id = #{engineer.id} AND tenant_id = #{tenantId} AND version = #{expectedVersion} AND deleted_flag = 0
+        </script>
+        """)
+    int updateByIdForTenant(@org.apache.ibatis.annotations.Param("engineer") Engineer engineer,
+                            @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
+                            @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion);
+
+    @org.apache.ibatis.annotations.Update("UPDATE t_engineer SET deleted_flag = 1, version = version + 1 "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND version = #{expectedVersion} AND deleted_flag = 0")
+    int deleteByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
+                            @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
+                            @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion);
 
     /** 組織統合で要員の所属組織を統合先へ付け替える。
      * version を +1 し、並行する単行更新との衝突を検出できるようにする。

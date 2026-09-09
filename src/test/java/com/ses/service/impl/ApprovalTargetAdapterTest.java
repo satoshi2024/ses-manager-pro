@@ -23,6 +23,7 @@ import com.ses.service.approval.ApprovalRequestCommand;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.approval.ApprovalTargetAdapterRegistry;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -136,14 +137,21 @@ class ApprovalTargetAdapterTest {
         SysUserMapper userMapper = mock(SysUserMapper.class);
         MonthlyClosingApprovalAdapter adapter = new MonthlyClosingApprovalAdapter(service, objectMapper, actionMapper, userMapper);
         ApprovalRequest request = request(16L, Map.of("operation", "confirm", "month", "2026-08"));
+        request.setTenantId("default");
         request.setCurrentStep(1);
-        when(actionMapper.selectList(any())).thenReturn(List.of(ApprovalAction.builder()
-                .requestId(16L).stepNo(1).approverUserId(99L).action("APPROVE").build()));
+        AccountingTenantContextHolder.setTenantId("default");
+        when(actionMapper.selectLatestApprovalForStep(16L, "default", 1, 1))
+                .thenReturn(ApprovalAction.builder().tenantId("default").requestId(16L).roundNo(1).stepNo(1)
+                        .approverUserId(99L).action("APPROVE").build());
         SysUser approver = SysUser.builder().role("管理者").build();
         approver.setId(99L);
-        when(userMapper.selectById(99L)).thenReturn(approver);
+        when(userMapper.selectByIdAndTenant(99L, "default")).thenReturn(approver);
 
-        adapter.applyApproved(request);
+        try {
+            adapter.applyApproved(request);
+        } finally {
+            AccountingTenantContextHolder.clear();
+        }
 
         verify(service).confirmClosing("2026-08", 99L, "管理者");
     }

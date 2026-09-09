@@ -7,6 +7,7 @@ import com.ses.service.EngineerSkillService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 
@@ -26,6 +27,7 @@ public class EngineerSkillApiController {
     }
 
     @PutMapping
+    @PreAuthorize("hasAnyRole('管理者','HR')")
     public ApiResult<Void> replaceSkills(@PathVariable Long engineerId, @RequestBody List<@Valid EngineerSkill> skills) {
         // 親要員のスコープを検証（担当外要員のスキル書込IDOR防止 / R3R-32）。
         dataScopeService.assertAllowedEngineer(engineerId);

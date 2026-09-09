@@ -15,8 +15,10 @@ import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.LearningDecisionEventMapper;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +53,8 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
     private DataScopeService dataScopeService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ProjectMapper projectMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private TenantOwnershipResolver tenantOwnershipResolver;
 
     public AiLearningCandidateServiceImpl(AiExecutionGateway gateway,
                                           LearningDecisionEventMapper decisionEventMapper,
@@ -71,6 +75,7 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
             throw BusinessException.of(400, "skill.ai.ruleGapRequired");
         }
         LocalDate effectiveAsOf = asOf == null ? LocalDate.now(clock) : asOf;
+        String tenantId = currentTenant();
         List<Long> ruleIds = normalizedIds(ruleBasedCourseIds);
         if (!aiConfig.isEnabled()) {
             return new AiCourseCandidateResult("RULE_ONLY", effectiveAsOf, ruleIds, List.of(), null, null,
@@ -93,7 +98,8 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
                 .requireJson(true)
                 .build();
         CompletableFuture<com.ses.service.ai.AiGatewayResult> future = CompletableFuture.supplyAsync(
-                () -> gateway.execute(request));
+                () -> AccountingTenantContextHolder.runWithTenant(tenantId,
+                        () -> gateway.execute(request)));
         try {
             com.ses.service.ai.AiGatewayResult response = future.get(Math.max(1, aiConfig.getLearningCandidateTimeoutMs()),
                     TimeUnit.MILLISECONDS);
@@ -170,10 +176,11 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
             if (runMapper == null) {
                 throw BusinessException.of(503, "skill.ai.candidateUnavailable");
             }
-            AiRecommendationRun run = runMapper.selectById(candidate.aiRunId());
+            AiRecommendationRun run = runMapper.selectByIdAndTenant(candidate.aiRunId(), tenantId);
             if (run == null || !tenantId.equals(run.getTenantId()) || !USE_CASE.equals(run.getUseCase())) {
                 throw BusinessException.of(403, "error.scope.notFound");
             }
+            assertCandidateOwnership(persisted, tenantId);
         }
         LearningDecisionEvent event = new LearningDecisionEvent();
         event.setTenantId(tenantId);
@@ -199,6 +206,7 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
         candidate.setTenantId(currentTenant());
         candidate.setEngineerId(ruleGap.engineerId());
         candidate.setProjectId(ruleGap.projectId());
+        assertCandidateOwnership(candidate, candidate.getTenantId());
         if (projectMapper != null) {
             com.ses.entity.Project project = projectMapper.selectByIdAndTenant(ruleGap.projectId(), candidate.getTenantId());
             candidate.setCustomerId(project == null ? null : project.getCustomerId());
@@ -246,10 +254,11 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
         if (runMapper == null) {
             throw BusinessException.of(503, "skill.ai.candidateUnavailable");
         }
-        AiRecommendationRun run = runMapper.selectById(candidate.getId());
+        AiRecommendationRun run = runMapper.selectByIdAndTenant(candidate.getId(), tenantId);
         if (run == null || !tenantId.equals(run.getTenantId()) || !"LEARNING_CANDIDATE".equals(run.getUseCase())) {
             throw BusinessException.of(403, "error.scope.notFound");
         }
+        assertCandidateOwnership(candidate, tenantId);
         String expectedStatus = decision.equals("ACCEPT") ? "ACCEPTED" : "REJECTED";
         if (expectedStatus.equals(candidate.getStatus())) {
             // 同じ判断の再送は既存candidate/eventを正本とする（期限後も結果を反転させない）。
@@ -286,11 +295,22 @@ public class AiLearningCandidateServiceImpl implements AiLearningCandidateServic
     }
 
     private String currentTenant() {
-        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
+        return com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+    }
+
+    private void assertCandidateOwnership(LearningCandidate candidate, String tenantId) {
+        if (candidate == null || !tenantId.equals(candidate.getTenantId()) || tenantOwnershipResolver == null
+                || tenantOwnershipResolver.selectEngineer(tenantId, candidate.getEngineerId()) == null
+                || projectMapper == null
+                || projectMapper.selectByIdForTenant(candidate.getProjectId(), tenantId) == null) {
+            throw BusinessException.of(403, "error.scope.notFound");
         }
-        return tenantId;
+        if (candidate.getCustomerId() != null) {
+            com.ses.entity.Project project = projectMapper.selectByIdForTenant(candidate.getProjectId(), tenantId);
+            if (project == null || !candidate.getCustomerId().equals(project.getCustomerId())) {
+                throw BusinessException.of(403, "error.scope.notFound");
+            }
+        }
     }
 
     private String json(List<Long> ids) {

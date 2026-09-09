@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 @TableName("t_ai_recommendation_item")
 public class AiRecommendationItem extends BaseEntity {
 
+    private String tenantId;
     private Long runId;
     private Integer rankNo;
     private String targetType;

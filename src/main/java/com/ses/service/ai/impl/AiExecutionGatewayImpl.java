@@ -48,6 +48,9 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (request == null || request.getUseCase() == null) {
             throw new BusinessException("AI use case が指定されていません");
         }
+        // provider呼出し自体もtenant-bound requestだけに限定し、persist=false経路から
+        // tenant未束縛の外部送信が発生しないようにする。
+        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Map<String, Object> masked = AiPiiMasker.mask(request.getAllowlistedFields());
         if (AiPiiMasker.containsCanary(masked)) {
             throw new BusinessException(400, "PII canary を外部送信できません");

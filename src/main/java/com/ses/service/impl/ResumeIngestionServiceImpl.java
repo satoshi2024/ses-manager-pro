@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
@@ -23,6 +24,7 @@ import com.ses.service.ResumeIngestionService;
 import com.ses.service.DocumentTextExtractor;
 import com.ses.service.SkillTagResolver;
 import com.ses.service.ai.ResumeParseService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
@@ -65,7 +67,18 @@ public class ResumeIngestionServiceImpl
     private final ObjectProvider<ResumeIngestionService> selfProvider;
 
     @Override
+    public Page<ResumeIngestion> pageForCurrentTenant(Page<ResumeIngestion> page, String status) {
+        return baseMapper.selectPageForTenant(page, requireTenant(), status);
+    }
+
+    @Override
+    public ResumeIngestion getForCurrentTenant(Long id) {
+        return baseMapper.selectByIdForTenant(id, requireTenant());
+    }
+
+    @Override
     public ResumeIngestion createJob(MultipartFile file, Long candidateId) {
+        String tenantId = requireTenant();
         // ファイル保存
         StoredFile stored = fileStorageService.store(file, FileKind.SKILL_SHEET);
 
@@ -84,13 +97,32 @@ public class ResumeIngestionServiceImpl
         log.info("スキルシート取込ジョブを作成しました: jobId={}, fileName={}", job.getId(), stored.getOriginalName());
 
         // 非同期解析を起動
-        selfProvider.getIfAvailable().parseAsync(job.getId());
+        selfProvider.getIfAvailable().parseAsync(job.getId(), tenantId);
         return job;
     }
 
     @Override
     @Async("taskExecutor")
     public void parseAsync(Long id) {
+        parseAsyncInTenant(id, requireTenant());
+    }
+
+    @Override
+    @Async("taskExecutor")
+    public void parseAsync(Long id, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+        AccountingTenantContextHolder.runWithTenant(tenantId, () -> parseAsyncInTenant(id, tenantId));
+    }
+
+    private void parseAsyncInTenant(Long id, String tenantId) {
+        ResumeIngestion job = baseMapper.selectByIdForTenant(id, tenantId);
+        if (job == null) {
+            log.error("ジョブが見つかりません: id={}", id);
+            return;
+        }
+
         // 状態を "抽出中" に CAS 更新
         boolean casOk = casStatus(id, STATUS_PENDING, STATUS_PARSING);
         // 再解析時は "要確認"/"失敗" -> "抽出中" も許容
@@ -102,12 +134,6 @@ public class ResumeIngestionServiceImpl
         }
         if (!casOk) {
             log.warn("状態遷移ができませんでした: id={}", id);
-            return;
-        }
-
-        ResumeIngestion job = this.getById(id);
-        if (job == null) {
-            log.error("ジョブが見つかりません: id={}", id);
             return;
         }
 
@@ -153,7 +179,7 @@ public class ResumeIngestionServiceImpl
         if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
             throw BusinessException.of("error.resume.invalidStatus");
         }
-        selfProvider.getIfAvailable().parseAsync(id);
+        selfProvider.getIfAvailable().parseAsync(id, requireTenant());
     }
 
     @Override
@@ -301,11 +327,15 @@ public class ResumeIngestionServiceImpl
     // --- プライベートメソッド ---
 
     private ResumeIngestion getJobOrThrow(Long id) {
-        ResumeIngestion job = this.getById(id);
+        ResumeIngestion job = baseMapper.selectByIdForTenant(id, requireTenant());
         if (job == null) {
             throw BusinessException.of(404, "error.resume.notFound");
         }
         return job;
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 
     /**

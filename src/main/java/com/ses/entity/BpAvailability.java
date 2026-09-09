@@ -19,6 +19,7 @@ import java.time.LocalDate;
 @TableName("t_bp_availability")
 public class BpAvailability extends BaseEntity {
 
+    private String tenantId;
     private String initialName;
     private String bpCompany;
     private Long bpCompanyId;

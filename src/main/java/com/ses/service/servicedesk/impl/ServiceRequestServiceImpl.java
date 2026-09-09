@@ -46,6 +46,7 @@ import com.ses.mapper.ServiceRequestSequenceMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.CustomerScopeResolver;
+import com.ses.service.security.TenantOwnershipResolver;
 import com.ses.service.servicedesk.ServiceRequestService;
 import com.ses.service.servicedesk.ServiceSlaCalculator;
 import com.ses.service.servicedesk.ServiceDeskExecutionContext;
@@ -95,6 +96,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     private final ServiceSlaCalculator slaCalculator;
     private final DataScopeService dataScopeService;
     private final Clock clock;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     private static final Set<String> VALID_CATEGORIES = Set.of(
             "CONTRACT", "BILLING", "ATTENDANCE", "QUALITY", "SYSTEM", "OTHER"
@@ -124,7 +126,11 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
         requireExecutionContext(executionContext);
 
-        Customer customer = customerMapper.selectById(req.getCustomerId());
+        String tenantId = currentTenant();
+        if (!tenantId.equals(executionContext.tenantId().trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId());
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
@@ -133,7 +139,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             assertInternalCustomerAllowed(req.getCustomerId());
         }
 
-        validateLinkedEntities(req.getCustomerId(), req.getContactId(), req.getContractId(),
+        validateLinkedEntities(tenantId, req.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
         executionContext = bindCalendarScope(executionContext, req.getCustomerId(), req.getContractId());
 
@@ -218,7 +224,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(readOnly = true)
     public ServiceRequestDto getInternalDetail(Long id) {
-        ServiceRequest req = serviceRequestMapper.selectById(id);
+        ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (req == null || !currentTenant().equals(req.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -230,7 +236,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(readOnly = true)
     public PortalServiceRequestDto getPortalDetail(Long id, Long customerId) {
-        ServiceRequest req = serviceRequestMapper.selectById(id);
+        ServiceRequest req = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (req == null || !currentTenant().equals(req.getTenantId()) || !Objects.equals(req.getCustomerId(), customerId)) {
             // 他社または存在しない場合は404秘匿
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
@@ -324,7 +330,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateRequest(Long id, ServiceRequestUpdateRequest req) {
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -337,13 +343,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             throw BusinessException.of(400, "無効な優先度です: " + req.getPriority());
         }
 
-        validateLinkedEntities(existing.getCustomerId(), req.getContactId(), req.getContractId(),
+        validateLinkedEntities(currentTenant(), existing.getCustomerId(), req.getContactId(), req.getContractId(),
                 req.getProjectId(), req.getEngineerId());
 
         int expectedVersion = req.getVersion() != null ? req.getVersion()
                 : (existing.getVersion() != null ? existing.getVersion() : 0);
         int updated = serviceRequestMapper.update(null, new LambdaUpdateWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getId, id)
+                .eq(ServiceRequest::getTenantId, currentTenant())
                 .eq(ServiceRequest::getVersion, expectedVersion)
                 .set(ServiceRequest::getContactId, req.getContactId())
                 .set(ServiceRequest::getContractId, req.getContractId())
@@ -367,7 +374,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public void changeStatus(Long id, ServiceRequestStatusChangeRequest req, Long actorId, String actorType, String actorName) {
         // 既存のservice直呼び出し互換。HTTP/明示context経路はversionを必須にする。
         if (req.getVersion() == null) {
-            ServiceRequest current = serviceRequestMapper.selectById(id);
+            ServiceRequest current = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
             if (current == null) {
                 throw BusinessException.of(404, "指定されたリクエストが見つかりません");
             }
@@ -391,7 +398,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (req == null || req.getVersion() == null) {
             throw BusinessException.of(400, "サービスリクエストversionは必須です");
         }
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId())) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -538,6 +545,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         existing.setUpdatedAt(now);
         LambdaUpdateWrapper<ServiceRequest> requestUpdate = new LambdaUpdateWrapper<ServiceRequest>()
                 .eq(ServiceRequest::getId, existing.getId())
+                .eq(ServiceRequest::getTenantId, currentTenant())
                 .eq(ServiceRequest::getVersion, expectedVersion)
                 .eq(ServiceRequest::getStatus, fromStatus)
                 .set(ServiceRequest::getStatus, existing.getStatus())
@@ -609,7 +617,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     public ServiceCommentDto addComment(Long id, ServiceCommentCreateRequest req, boolean isPortal,
                                         ServiceDeskExecutionContext executionContext) {
         requireExecutionContext(executionContext);
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -647,6 +655,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             int requestVersion = existing.getVersion() == null ? 0 : existing.getVersion();
             int requestUpdated = serviceRequestMapper.update(null, new LambdaUpdateWrapper<ServiceRequest>()
                     .eq(ServiceRequest::getId, existing.getId())
+                    .eq(ServiceRequest::getTenantId, currentTenant())
                     .eq(ServiceRequest::getVersion, requestVersion)
                     .set(ServiceRequest::getFirstResponseAt, existing.getFirstResponseAt())
                     .set(ServiceRequest::getUpdatedAt, now)
@@ -712,7 +721,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void submitCsat(Long id, PortalCsatCreateRequest req, Long customerId, Long portalUserId) {
-        ServiceRequest existing = serviceRequestMapper.selectById(id);
+        ServiceRequest existing = serviceRequestMapper.selectByIdAndTenant(id, currentTenant());
         if (existing == null || !currentTenant().equals(existing.getTenantId()) || !Objects.equals(existing.getCustomerId(), customerId)) {
             throw BusinessException.of(404, "指定されたリクエストが見つかりません");
         }
@@ -770,8 +779,8 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (context == null || context.tenantId() == null || context.tenantId().isBlank()) {
             throw BusinessException.of(400, "サービスデスクの実行コンテキストが必要です");
         }
-        String explicitTenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
-        if (explicitTenantId != null && !explicitTenantId.equals(context.tenantId().trim())) {
+        String explicitTenantId = currentTenant();
+        if (!explicitTenantId.equals(context.tenantId().trim())) {
             throw BusinessException.of(403, "error.tenant.mismatch");
         }
     }
@@ -807,7 +816,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
      */
     private Long resolveLegalEntityId(Long customerId, Long contractId) {
         if (contractId != null) {
-            Contract contract = contractMapper.selectById(contractId);
+            Contract contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, currentTenant());
             if (contract != null && (customerId == null || Objects.equals(contract.getCustomerId(), customerId))) {
                 Long fromContract = legalEntityFromCostCenter(contract.getCostCenterId());
                 if (fromContract != null) {
@@ -818,12 +827,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
         if (customerId == null) {
             return null;
         }
-        List<Contract> contracts = contractMapper.selectList(
-                new LambdaQueryWrapper<Contract>()
-                        .eq(Contract::getCustomerId, customerId)
-                        .isNotNull(Contract::getCostCenterId)
-                        .orderByDesc(Contract::getId)
-                        .last("LIMIT 10"));
+        List<Contract> contracts = contractMapper.selectByCustomerAndTenant(customerId, currentTenant());
         for (Contract contract : contracts) {
             Long legalEntityId = legalEntityFromCostCenter(contract.getCostCenterId());
             if (legalEntityId != null) {
@@ -875,23 +879,23 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     /** 問い合わせに紐づく4種の業務対象が同一顧客に属することをservice境界で保証する。 */
-    private void validateLinkedEntities(Long customerId, Long contactId, Long contractId,
+    private void validateLinkedEntities(String tenantId, Long customerId, Long contactId, Long contractId,
                                         Long projectId, Long engineerId) {
         if (contactId != null) {
-            CustomerContact contact = contactMapper.selectById(contactId);
+            CustomerContact contact = contactMapper.selectByIdForTenant(contactId, customerId, tenantId);
             if (contact == null || !Objects.equals(customerId, contact.getCustomerId())) {
                 throw BusinessException.of(400, "指定された顧客担当者は顧客と一致しません");
             }
         }
         Contract contract = null;
         if (contractId != null) {
-            contract = contractMapper.selectById(contractId);
+            contract = contractMapper.selectByIdForCustomerAndTenant(contractId, customerId, tenantId);
             if (contract == null || !Objects.equals(customerId, contract.getCustomerId())) {
                 throw BusinessException.of(400, "指定された契約は顧客と一致しません");
             }
         }
         if (projectId != null) {
-            Project project = projectMapper.selectById(projectId);
+            Project project = projectMapper.selectByIdForCustomerAndTenant(projectId, customerId, tenantId);
             if (project == null || !Objects.equals(customerId, project.getCustomerId())) {
                 throw BusinessException.of(400, "指定された案件は顧客と一致しません");
             }
@@ -900,16 +904,14 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
             }
         }
         if (engineerId != null) {
-            Engineer engineer = engineerMapper.selectById(engineerId);
+            Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
             if (engineer == null) {
                 throw BusinessException.of(400, "指定された要員が見つかりません");
             }
             if (contract != null && !Objects.equals(engineerId, contract.getEngineerId())) {
                 throw BusinessException.of(400, "指定された要員は契約と一致しません");
             }
-            if (contract == null && contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getCustomerId, customerId)
-                    .eq(Contract::getEngineerId, engineerId)) == 0) {
+            if (contract == null && contractMapper.countByCustomerAndEngineerForTenant(customerId, engineerId, tenantId) == 0) {
                 throw BusinessException.of(400, "指定された要員は顧客の契約に紐付いていません");
             }
         }
@@ -940,19 +942,26 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
     }
 
     private Set<Long> resolvedCustomerIds() {
-        // サービス層の既存単体テスト／バッチ呼出しにはSecurityContextがない場合がある。
-        // HTTP入口はSecurityConfigで認証済みのため、認証主体がない場合だけ従来の呼出し契約を維持する。
-        if (SecurityUtils.currentRole() == null) {
-            return null;
+        String tenantId = currentTenant();
+        Set<Long> owned = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
+        if (customerScopeResolver != null) {
+            Set<Long> scoped = customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+            // nullは「現在のtenant内でscope制限なし」を表す。全DBを意味しないため、
+            // tenant ownership resolverが解決した母集団はそのまま維持する。
+            if (scoped != null) owned.retainAll(scoped);
+        } else if (dataScopeService.isScoped()) {
+            Set<Long> scoped = dataScopeService.allowedCustomerIds();
+            if (scoped == null) owned.clear(); else owned.retainAll(scoped);
         }
-        return customerScopeResolver == null ? (dataScopeService.isScoped()
-                ? dataScopeService.allowedCustomerIds() : null) : customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+        return owned;
     }
 
     private void assertInternalCustomerAllowed(Long customerId) {
-        if (SecurityUtils.currentRole() == null) {
-            return;
+        String tenantId = currentTenant();
+        if (tenantOwnershipResolver.selectCustomer(tenantId, customerId) == null) {
+            throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
+        if (SecurityUtils.currentRole() == null) return;
         if (customerScopeResolver == null) {
             if (dataScopeService.isScoped()) {
                 dataScopeService.assertAllowedCustomer(customerId);
@@ -1020,13 +1029,18 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
                 new LambdaQueryWrapper<CustomerCsat>().eq(CustomerCsat::getServiceRequestId, req.getId())
         );
 
-        Customer customer = customerMapper.selectById(req.getCustomerId());
-        CustomerContact contact = req.getContactId() != null ? contactMapper.selectById(req.getContactId()) : null;
-        Contract contract = req.getContractId() != null ? contractMapper.selectById(req.getContractId()) : null;
-        Project project = req.getProjectId() != null ? projectMapper.selectById(req.getProjectId()) : null;
-        Engineer engineer = req.getEngineerId() != null ? engineerMapper.selectById(req.getEngineerId()) : null;
-        SysUser ownerUser = req.getOwnerUserId() != null ? sysUserMapper.selectById(req.getOwnerUserId()) : null;
-        SysUser creatorUser = req.getCreatedBy() != null ? sysUserMapper.selectById(req.getCreatedBy()) : null;
+        String tenantId = currentTenant();
+        Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId());
+        CustomerContact contact = req.getContactId() != null
+                ? contactMapper.selectByIdForTenant(req.getContactId(), req.getCustomerId(), tenantId) : null;
+        Contract contract = req.getContractId() != null
+                ? contractMapper.selectByIdForCustomerAndTenant(req.getContractId(), req.getCustomerId(), tenantId) : null;
+        Project project = req.getProjectId() != null
+                ? projectMapper.selectByIdForCustomerAndTenant(req.getProjectId(), req.getCustomerId(), tenantId) : null;
+        Engineer engineer = req.getEngineerId() != null
+                ? tenantOwnershipResolver.selectEngineer(tenantId, req.getEngineerId()) : null;
+        SysUser ownerUser = req.getOwnerUserId() != null ? sysUserMapper.selectByIdAndTenant(req.getOwnerUserId(), tenantId) : null;
+        SysUser creatorUser = req.getCreatedBy() != null ? sysUserMapper.selectByIdAndTenant(req.getCreatedBy(), tenantId) : null;
 
         return ServiceRequestDto.builder()
                 .id(req.getId())
@@ -1130,7 +1144,7 @@ public class ServiceRequestServiceImpl implements ServiceRequestService {
 
     private String resolveUserName(Long userId) {
         if (userId == null) return "SYSTEM";
-        SysUser u = sysUserMapper.selectById(userId);
+        SysUser u = sysUserMapper.selectByIdAndTenant(userId, currentTenant());
         return u != null && u.getRealName() != null ? u.getRealName() : "ユーザー#" + userId;
     }
 

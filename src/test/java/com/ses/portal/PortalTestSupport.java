@@ -157,7 +157,8 @@ public abstract class PortalTestSupport {
 
     private long insertCustomer(String name) {
         org.springframework.jdbc.core.JdbcTemplate jdbc = jdbcTemplate();
-        jdbc.update("INSERT INTO m_customer (company_name) VALUES (?)", name);
+        // V163以降、portal fixtureも明示的なtenant ownershipを持たせる。
+        jdbc.update("INSERT INTO m_customer (company_name, tenant_id) VALUES (?, ?)", name, "default");
         return jdbc.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, name);
     }
 

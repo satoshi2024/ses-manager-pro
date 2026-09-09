@@ -212,6 +212,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
             return Set.of();
         }
         return Set.copyOf(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(),
                 new java.util.ArrayList<>(allowedOrganizationIds(asOf)),
                 new java.util.ArrayList<>(allowedDirectUserIds(asOf)),
                 asOf == null ? LocalDate.now() : asOf));

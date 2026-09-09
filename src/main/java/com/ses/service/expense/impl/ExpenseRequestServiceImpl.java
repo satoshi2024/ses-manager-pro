@@ -533,7 +533,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (engineerIds.isEmpty()) {
             return new java.util.HashMap<>();
         }
-        return engineerMapper.selectByIdsForTenant(engineerIds,
+        return engineerMapper.selectByIdsForOwnerTenant(engineerIds,
                         com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()).stream()
                 .collect(Collectors.toMap(Engineer::getId,
                         e -> e.getFullName() == null ? "" : e.getFullName()));
@@ -543,7 +543,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (engineerId == null) {
             return null;
         }
-        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId,
+        Engineer engineer = engineerMapper.selectByIdForOwnerTenant(engineerId,
                 com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return engineer == null ? null
                 : (engineer.getFullName() == null ? "" : engineer.getFullName());

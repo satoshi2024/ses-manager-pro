@@ -13,7 +13,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import com.ses.config.LoginUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDate;
@@ -48,6 +51,10 @@ class EngineerDetailAccessTest {
     private RetentionRiskService retentionRiskService;
     @MockBean
     private EngineerAccountLinkService engineerAccountLinkService;
+    @MockBean
+    private com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
+    @MockBean
+    private com.ses.mapper.EngineerMapper engineerMapper;
 
     @BeforeEach
     void setUp() {
@@ -55,25 +62,25 @@ class EngineerDetailAccessTest {
         when(organizationScopeService.hasFullAccess()).thenReturn(false);
         when(organizationScopeService.allowedEngineerIds(any(LocalDate.class))).thenReturn(Set.of(1L, 3L));
         when(organizationScopeService.intersectWithDataScope(any(), isNull())).thenReturn(Set.of(1L, 3L));
+        when(tenantOwnershipResolver.resolveEngineerIds("default")).thenReturn(Set.of(1L, 3L));
     }
 
     @Test
-    @WithMockUser(roles = "マネージャー")
     void scope内detailは実dataを200で返す() throws Exception {
         Engineer engineer = Engineer.builder().fullName("範囲内 要員").status("Bench").build();
         engineer.setId(1L);
-        when(engineerService.getById(1L)).thenReturn(engineer);
+        engineer.setTenantId("default");
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(engineer);
 
-        mockMvc.perform(get("/api/engineers/1"))
+        mockMvc.perform(get("/api/engineers/1").with(tenantAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.fullName").value("範囲内 要員"));
     }
 
     @Test
-    @WithMockUser(roles = "マネージャー")
     void scope外detailはservice取得前に非漏えい404() throws Exception {
-        mockMvc.perform(get("/api/engineers/2"))
+        mockMvc.perform(get("/api/engineers/2").with(tenantAuthentication()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
 
@@ -81,12 +88,24 @@ class EngineerDetailAccessTest {
     }
 
     @Test
-    @WithMockUser(roles = "マネージャー")
     void scope内IDでも不存在なら同じ404() throws Exception {
-        when(engineerService.getById(3L)).thenReturn(null);
+        when(tenantOwnershipResolver.selectEngineer("default", 3L)).thenReturn(null);
 
-        mockMvc.perform(get("/api/engineers/3"))
+        mockMvc.perform(get("/api/engineers/3").with(tenantAuthentication()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
+    }
+    private RequestPostProcessor tenantAuthentication() {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("manager");
+        user.setPassword("password");
+        user.setRole("マネージャー");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_マネージャー")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

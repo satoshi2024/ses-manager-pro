@@ -53,6 +53,7 @@ class EngineerCertificationServiceTest {
     @Test
     void submitApplication_staysDraft_andEncryptsNumber() {
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
         engineer.setFullName("テスト太郎");
         engineer.setEmploymentType("正社員");
         engineer.setStatus("Bench");

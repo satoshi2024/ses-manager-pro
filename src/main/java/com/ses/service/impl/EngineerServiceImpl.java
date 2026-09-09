@@ -14,6 +14,7 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.ScopeChangeInvalidator;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     private final EngineerSalesService engineerSalesService;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
     private final com.ses.mapper.SysUserMapper sysUserMapper;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     /** 要員アカウント無効化時のsession失効。未配線のテストsliceでは何もしない。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -49,7 +51,27 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         Long engineerId = Long.valueOf(id.toString());
+        Engineer current = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
+        if (current == null) {
+            return false;
+        }
+        return removeById(id, current.getVersion() == null ? 0 : current.getVersion());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeById(Serializable id, Integer expectedVersion) {
+        if (id == null || expectedVersion == null) {
+            throw BusinessException.of(400, "error.common.optimisticLock");
+        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Long engineerId = Long.valueOf(id.toString());
+        Engineer current = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
+        if (current == null) {
+            return false;
+        }
         long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
@@ -62,7 +84,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (openProposals > 0) {
             throw BusinessException.of("error.engineer.delete.activeProposal");
         }
-        boolean removed = super.removeById(id);
+        boolean removed = baseMapper.deleteByIdForTenant(engineerId, tenantId, expectedVersion) == 1;
         // 削除が成功したときだけ現任の担当営業割当を解除する（released_at 設定。履歴保全のため
         // 論理削除はしない）。削除失敗(false)時に解除だけがコミットされるのを防ぐ（review-fixes G3）。
         if (removed) {
@@ -72,7 +94,7 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
             if (link != null) {
                 Long userId = link.getSysUserId();
                 engineerAccountLinkService.unlinkByEngineerId(engineerId);
-                com.ses.entity.SysUser user = sysUserMapper.selectById(userId);
+                com.ses.entity.SysUser user = sysUserMapper.selectByIdAndTenant(userId, tenantId);
                 if (user != null) {
                     user.setStatus(0);
                     sysUserMapper.updateById(user);
@@ -91,7 +113,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (engineer == null || engineer.getId() == null || engineer.getVersion() == null) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
-        Engineer old = getById(engineer.getId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Engineer old = tenantOwnershipResolver.selectEngineer(tenantId, engineer.getId());
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -108,7 +131,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         }
         // OptimisticLockerInnerInterceptor が version を検査し、成功時に +1 する。
         // 競合は 409。存在しない行との区別を保つため false 返却や 404 へ落とさない。
-        if (baseMapper.updateById(engineer) != 1) {
+        if (baseMapper.updateByIdForTenant(engineer, tenantId,
+                engineer.getVersion()) != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
         }
         recordAccountingHistory(engineer.getId());
@@ -127,10 +151,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Engineer entity) {
-        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
-        if (tenantId != null) {
-            entity.setTenantId(tenantId);
-        }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        entity.setTenantId(tenantId);
         boolean saved = super.save(entity);
         if (saved) {
             recordAccountingHistory(entity.getId());
@@ -150,7 +172,8 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (engineerAccountingHistoryMapper == null || engineerId == null) {
             return;
         }
-        Engineer saved = getById(engineerId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Engineer saved = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
         if (saved == null) {
             return;
         }
@@ -189,6 +212,4 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         return left.compareTo(right) == 0;
     }
 }
-
-
 

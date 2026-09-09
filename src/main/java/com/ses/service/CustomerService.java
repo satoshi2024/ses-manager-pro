@@ -1,7 +1,11 @@
 package com.ses.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.entity.Customer;
+
+import java.io.Serializable;
+import java.util.Set;
 
 /**
  * 顧客サービスインターフェース
@@ -13,4 +17,11 @@ public interface CustomerService extends IService<Customer> {
      * 存在しない ID は 404（競合を 404 に落とさない）。
      */
     boolean updateWithOptimisticLock(Customer customer);
+
+    Page<Customer> pageForTenant(Page<Customer> page, String tenantId, Set<Long> customerIds,
+                                 String companyName, String commercialFlow, String trustLevel);
+
+    Customer getByIdForTenant(Long customerId, String tenantId);
+
+    boolean removeById(Serializable id, Integer expectedVersion);
 }

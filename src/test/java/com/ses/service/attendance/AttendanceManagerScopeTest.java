@@ -70,7 +70,7 @@ class AttendanceManagerScopeTest {
         userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId())
                 .organizationId(own.getId()).primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
         Engineer engineer = Engineer.builder().fullName("ATT-MGR-ENGINEER").employmentType("正社員")
-                .status("Bench").organizationId(moved.getId()).build();
+                .status("Bench").organizationId(moved.getId()).tenantId("default").build();
         engineerMapper.insert(engineer);
         historyMapper.insert(com.ses.entity.EngineerAccountingHistory.builder().engineerId(engineer.getId())
                 .organizationId(own.getId()).organizationHistoryStatus("KNOWN")
@@ -82,9 +82,9 @@ class AttendanceManagerScopeTest {
         authenticate(manager.getId());
         assertFalse(organizationScopeService.hasFullAccess());
         assertTrue(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
-                List.of(own.getId()), List.of(), LocalDate.of(2026, 6, 30)).contains(engineer.getId()));
+                "default", List.of(own.getId()), List.of(), LocalDate.of(2026, 6, 30)).contains(engineer.getId()));
         assertFalse(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
-                List.of(own.getId()), List.of(), LocalDate.of(2026, 7, 31)).contains(engineer.getId()));
+                "default", List.of(own.getId()), List.of(), LocalDate.of(2026, 7, 31)).contains(engineer.getId()));
         SecurityContextHolder.clearContext();
     }
 
@@ -102,7 +102,7 @@ class AttendanceManagerScopeTest {
         userOrganizationMapper.insert(UserOrganization.builder().userId(manager.getId())
                 .organizationId(own.getId()).primaryFlag(1).validFrom(LocalDate.of(2026, 1, 1)).build());
         Engineer engineer = Engineer.builder().fullName("ATT-MGR-NULL-ENGINEER").employmentType("正社員")
-                .status("Bench").organizationId(own.getId()).build();
+                .status("Bench").organizationId(own.getId()).tenantId("default").build();
         engineerMapper.insert(engineer);
         historyMapper.insert(com.ses.entity.EngineerAccountingHistory.builder().engineerId(engineer.getId())
                 .organizationId(null).organizationHistoryStatus("KNOWN")
@@ -110,7 +110,7 @@ class AttendanceManagerScopeTest {
 
         authenticate(manager.getId());
         assertTrue(engineerAccountLinkMapper.selectEngineerIdsByOrganizationScope(
-                List.of(own.getId()), List.of(), LocalDate.of(2026, 8, 31)).isEmpty());
+                "default", List.of(own.getId()), List.of(), LocalDate.of(2026, 8, 31)).isEmpty());
         SecurityContextHolder.clearContext();
     }
 

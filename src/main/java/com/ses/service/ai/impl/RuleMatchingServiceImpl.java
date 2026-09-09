@@ -19,6 +19,8 @@ import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.entity.BpAvailability;
 import com.ses.service.ai.AiMatchingService;
 import com.ses.service.ai.MatchScoreCalculator;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -42,39 +44,39 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
     private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
     private final com.ses.service.security.DataScopeService dataScopeService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     @Override
     public List<MatchResultDto> findMatchingProjects(Long engineerId) {
         if (dataScopeService.isScoped()) {
             dataScopeService.assertAllowedEngineer(engineerId);
         }
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
         if (engineer == null) {
             return Collections.emptyList();
         }
 
-        List<EngineerSkillDetailDto> engSkills = engineerSkillMapper.selectDetailByEngineerId(engineerId);
+        List<EngineerSkillDetailDto> engSkills = engineerSkillMapper.selectDetailByEngineerIdAndTenant(engineerId, tenantId);
         Set<Long> engSkillIds = engSkills.stream()
                 .map(EngineerSkillDetailDto::getSkillId)
                 .collect(Collectors.toSet());
 
-        LambdaQueryWrapper<Project> pWrapper = new LambdaQueryWrapper<Project>().eq(Project::getStatus, "募集中");
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedProjectIds = dataScopeService.allowedProjectIds();
-            if (allowedProjectIds == null || allowedProjectIds.isEmpty()) {
-                return Collections.emptyList();
-            }
-            pWrapper.in(Project::getId, allowedProjectIds);
+        Set<Long> allowedProjectIds = dataScopeService.isScoped() ? dataScopeService.allowedProjectIds() : null;
+        List<Project> activeProjects = new java.util.ArrayList<>();
+        if (allowedProjectIds == null && dataScopeService.isScoped()) return Collections.emptyList();
+        // Project ownership is resolved by its customer relationship; the mapper applies tenant in SQL.
+        if (allowedProjectIds == null) {
+            activeProjects = projectMapper.selectListForTenant(tenantId, "募集中");
+        } else if (!allowedProjectIds.isEmpty()) {
+            activeProjects = projectMapper.selectListForTenantAndIds(tenantId, "募集中", allowedProjectIds);
         }
-        List<Project> activeProjects = projectMapper.selectList(pWrapper);
         if (activeProjects.isEmpty()) {
             return Collections.emptyList();
         }
 
         List<Long> projectIds = activeProjects.stream().map(Project::getId).collect(Collectors.toList());
-        List<ProjectSkill> allProjectSkills = projectSkillMapper.selectList(
-                new LambdaQueryWrapper<ProjectSkill>().in(ProjectSkill::getProjectId, projectIds)
-        );
+        List<ProjectSkill> allProjectSkills = projectSkillMapper.selectListForTenant(projectIds, tenantId);
         Map<Long, List<ProjectSkill>> psMap = allProjectSkills.stream()
                 .collect(Collectors.groupingBy(ProjectSkill::getProjectId));
 
@@ -120,34 +122,27 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         if (dataScopeService.isScoped()) {
             dataScopeService.assertAllowedProject(projectId);
         }
-        Project project = projectMapper.selectById(projectId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Project project = projectMapper.selectByIdForTenant(projectId, tenantId);
         if (project == null) {
             return Collections.emptyList();
         }
 
-        List<ProjectSkill> pSkills = projectSkillMapper.selectList(
-                new LambdaQueryWrapper<ProjectSkill>().eq(ProjectSkill::getProjectId, projectId)
-        );
+        List<ProjectSkill> pSkills = projectSkillMapper.selectListForTenant(java.util.List.of(projectId), tenantId);
         Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
         Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
-        LambdaQueryWrapper<Engineer> eWrapper = new LambdaQueryWrapper<Engineer>().in(Engineer::getStatus, Arrays.asList("Bench", "提案中"));
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
-            if (allowedEngineerIds == null || allowedEngineerIds.isEmpty()) {
-                return Collections.emptyList();
-            }
-            eWrapper.in(Engineer::getId, allowedEngineerIds);
-        }
-        List<Engineer> candidates = engineerMapper.selectList(eWrapper);
+        Set<Long> allowedEngineerIds = dataScopeService.isScoped() ? dataScopeService.allowedEngineerIds() : null;
+        if (allowedEngineerIds != null && allowedEngineerIds.isEmpty()) return Collections.emptyList();
+        List<Engineer> candidates = engineerMapper.selectPopulationForTenant(tenantId, allowedEngineerIds,
+                null, null, null).stream()
+                .filter(e -> "Bench".equals(e.getStatus()) || "提案中".equals(e.getStatus())).toList();
         if (candidates.isEmpty()) {
             return Collections.emptyList();
         }
 
         List<Long> engineerIds = candidates.stream().map(Engineer::getId).collect(Collectors.toList());
-        List<EngineerSkill> allEngSkills = engineerSkillMapper.selectList(
-                new LambdaQueryWrapper<EngineerSkill>().in(EngineerSkill::getEngineerId, engineerIds)
-        );
+        List<EngineerSkill> allEngSkills = engineerSkillMapper.selectListByEngineerIdsAndTenant(engineerIds, tenantId);
         Map<Long, Set<Long>> esMap = allEngSkills.stream()
                 .collect(Collectors.groupingBy(EngineerSkill::getEngineerId, Collectors.mapping(EngineerSkill::getSkillId, Collectors.toSet())));
 
@@ -183,7 +178,7 @@ public class RuleMatchingServiceImpl implements AiMatchingService {
         // --- BpAvailability の検索 (提案可能のみ) ---
         LambdaQueryWrapper<BpAvailability> bpWrapper = new LambdaQueryWrapper<BpAvailability>()
                 .eq(BpAvailability::getStatus, "提案可能");
-        List<BpAvailability> externalBps = bpAvailabilityMapper.selectList(bpWrapper);
+        List<BpAvailability> externalBps = bpAvailabilityMapper.selectAvailableForTenant(tenantId, "提案可能");
         
         Map<String, Long> tagNameReverseMap = new HashMap<>();
         for (Map.Entry<Long, String> entry : tagNameMap.entrySet()) {

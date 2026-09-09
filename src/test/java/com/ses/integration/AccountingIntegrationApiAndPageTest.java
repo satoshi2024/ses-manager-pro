@@ -81,6 +81,7 @@ class AccountingIntegrationApiAndPageTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         normalizeMockPrincipal();
         connection = connectionService.getOrCreateConnection("default", 1L, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
@@ -90,6 +91,12 @@ class AccountingIntegrationApiAndPageTest {
                 .expiresIn(3600L)
                 .build();
         connectionService.saveTokens(connection.getId(), tokens, 10001L, "テスト株式会社", 1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+        SecurityContextHolder.clearContext();
     }
 
     /** 内部HTTP契約に合わせ、@WithMockUserを明示的なtenant付きLoginUserへ変換する。 */

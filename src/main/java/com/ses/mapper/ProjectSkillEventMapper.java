@@ -25,21 +25,28 @@ public interface ProjectSkillEventMapper {
     @Options(useGeneratedKeys = true, keyProperty = "event.id")
     int insertEvent(@Param("event") ProjectSkillEvent event);
 
-    @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} ORDER BY occurred_at, id")
-    List<ProjectSkillEvent> selectByProjectId(@Param("projectId") Long projectId);
-
     @Select("SELECT * FROM t_project_skill_event WHERE tenant_id = #{tenantId} AND project_id = #{projectId} ORDER BY occurred_at, id")
     List<ProjectSkillEvent> selectByTenantAndProjectId(@Param("tenantId") String tenantId,
                                                        @Param("projectId") Long projectId);
 
-    @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} AND skill_id = #{skillId} "
+    @Select("SELECT * FROM t_project_skill_event WHERE tenant_id = #{tenantId} "
+            + "AND project_id = #{projectId} AND skill_id = #{skillId} "
             + "AND event_type = 'OPEN' AND effective_to IS NULL ORDER BY id DESC LIMIT 1")
-    ProjectSkillEvent selectOpenEvent(@Param("projectId") Long projectId, @Param("skillId") Long skillId);
+    ProjectSkillEvent selectOpenEventForTenant(@Param("tenantId") String tenantId,
+                                               @Param("projectId") Long projectId,
+                                               @Param("skillId") Long skillId);
 
-    @Update("UPDATE t_project_skill_event SET effective_to = #{effectiveTo} WHERE id = #{eventId} AND effective_to IS NULL")
-    int closeOpenEvent(@Param("eventId") Long eventId, @Param("effectiveTo") LocalDate effectiveTo);
+    @Update("UPDATE t_project_skill_event SET effective_to = #{effectiveTo} "
+            + "WHERE id = #{eventId} AND tenant_id = #{tenantId} AND effective_to IS NULL")
+    int closeOpenEventForTenant(@Param("eventId") Long eventId,
+                                @Param("effectiveTo") LocalDate effectiveTo,
+                                @Param("tenantId") String tenantId);
 
-    @Select("SELECT * FROM t_project_skill_event WHERE project_id = #{projectId} AND skill_id = #{skillId} "
+    @Select("SELECT * FROM t_project_skill_event WHERE tenant_id = #{tenantId} "
+            + "AND project_id = #{projectId} AND skill_id = #{skillId} "
             + "AND event_type = 'OPEN' AND effective_to IS NOT NULL ORDER BY id DESC LIMIT 1")
-    ProjectSkillEvent selectLastClosedOpenEvent(@Param("projectId") Long projectId, @Param("skillId") Long skillId);
+    ProjectSkillEvent selectLastClosedOpenEventForTenant(@Param("tenantId") String tenantId,
+                                                         @Param("projectId") Long projectId,
+                                                         @Param("skillId") Long skillId);
+
 }

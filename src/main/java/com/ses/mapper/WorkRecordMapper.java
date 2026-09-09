@@ -12,6 +12,21 @@ import java.util.List;
 
 @Mapper
 public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
+    /** 承認の組織解決対象も契約・顧客ownershipでtenantを固定する。 */
+    @Select("SELECT w.* FROM t_work_record w "
+            + "JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0 "
+            + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
+            + "WHERE w.id = #{id}")
+    WorkRecord selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
+    /** 月次snapshotの実績も契約の顧客ownershipでtenantを固定する。 */
+    @Select("SELECT w.* FROM t_work_record w "
+            + "JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0 "
+            + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
+            + "WHERE w.work_month = #{workMonth} AND w.status = '確定' ORDER BY w.id")
+    List<WorkRecord> selectConfirmedByWorkMonthForTenant(@Param("workMonth") String workMonth,
+                                                         @Param("tenantId") String tenantId);
+
     @Select("SELECT work_month FROM t_work_record WHERE id = #{id}")
     String selectWorkMonthById(@Param("id") Long id);
 

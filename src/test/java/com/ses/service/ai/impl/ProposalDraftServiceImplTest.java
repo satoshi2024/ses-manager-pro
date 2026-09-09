@@ -10,6 +10,7 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,11 +49,23 @@ class ProposalDraftServiceImplTest {
     @Mock
     private DataScopeService dataScopeService;
     @Mock
+    private TenantOwnershipResolver tenantOwnershipResolver;
+    @Mock
     private AiExecutionGateway aiExecutionGateway;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks
     private ProposalDraftServiceImpl proposalDraftService;
+
+    @BeforeEach
+    void setTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     private Engineer mockEngineer;
     private Project mockProject;
@@ -65,6 +79,7 @@ class ProposalDraftServiceImplTest {
         mockEngineer.setInitialName("Y.T");
         mockEngineer.setExpectedUnitPrice(new BigDecimal("800000"));
         mockEngineer.setExperienceYears(5);
+        mockEngineer.setTenantId("default");
 
         mockProject = new Project();
         mockProject.setId(1L);
@@ -83,10 +98,10 @@ class ProposalDraftServiceImplTest {
         when(dataScopeService.isScoped()).thenReturn(true);
         doNothing().when(dataScopeService).assertAllowedEngineer(1L);
         doNothing().when(dataScopeService).assertAllowedProject(1L);
-        when(engineerMapper.selectById(1L)).thenReturn(mockEngineer);
-        when(projectMapper.selectById(1L)).thenReturn(mockProject);
-        when(engineerSkillMapper.selectDetailByEngineerId(1L)).thenReturn(mockSkills);
-        when(projectSkillMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(mockEngineer);
+        when(projectMapper.selectByIdForTenant(1L, "default")).thenReturn(mockProject);
+        when(engineerSkillMapper.selectDetailByEngineerIdAndTenant(1L, "default")).thenReturn(mockSkills);
+        when(projectSkillMapper.selectListForTenant(any(), eq("default"))).thenReturn(java.util.Collections.emptyList());
 
         String dummyJson = "{\"emailText\":\"この度はお世話になります。Y.Tをご提案いたします。\",\"matchReason\":\"Java経験豊富\",\"sellingPoints\":\"コミュニケーション\",\"matchScore\":85}";
         ArgumentCaptor<AiGatewayRequest> captor = ArgumentCaptor.forClass(AiGatewayRequest.class);
@@ -113,7 +128,7 @@ class ProposalDraftServiceImplTest {
     @Test
     void generateDraft_EngineerNotFound() {
         when(dataScopeService.isScoped()).thenReturn(false);
-        when(engineerMapper.selectById(1L)).thenReturn(null);
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(null);
         BusinessException ex = assertThrows(BusinessException.class, () -> proposalDraftService.generateDraft(1L, 1L));
         assertEquals(404, ex.getCode());
     }

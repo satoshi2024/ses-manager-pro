@@ -10,8 +10,9 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface EngineerCertificationMapper extends BaseMapper<EngineerCertification> {
 
-    @Select("SELECT * FROM t_engineer_certification WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
-    EngineerCertification selectByIdForUpdate(@Param("id") Long id);
+    @Select("SELECT * FROM t_engineer_certification WHERE id = #{id} AND tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0")
+    EngineerCertification selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT * FROM t_engineer_certification WHERE tenant_id = #{tenantId} "
             + "AND id = #{id} AND deleted_flag = 0 FOR UPDATE")
@@ -34,8 +35,10 @@ public interface EngineerCertificationMapper extends BaseMapper<EngineerCertific
             + "acquired_on = #{acquiredOn}, expires_on = #{expiresOn}, "
             + "expiry_rule_version = #{expiryRuleVersion}, revision = #{revision}, "
             + "updated_by = #{updatedBy}, version = version + 1 "
-            + "WHERE id = #{id} AND version = #{expectedVersion} AND deleted_flag = 0")
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND version = #{expectedVersion} "
+            + "AND deleted_flag = 0")
     int updateLifecycleCas(@Param("id") Long id,
+                           @Param("tenantId") String tenantId,
                            @Param("expectedVersion") Integer expectedVersion,
                            @Param("recordState") String recordState,
                            @Param("currentFlag") Integer currentFlag,
@@ -45,4 +48,17 @@ public interface EngineerCertificationMapper extends BaseMapper<EngineerCertific
                            @Param("expiryRuleVersion") Integer expiryRuleVersion,
                            @Param("revision") Integer revision,
                            @Param("updatedBy") Long updatedBy);
+
+    @Update("UPDATE t_engineer_certification SET certificate_number_encrypted = #{encrypted}, "
+            + "certificate_number_key_version = #{keyVersion}, "
+            + "certificate_number_cipher_format = #{cipherFormat}, "
+            + "certificate_number_masked = #{masked}, version = version + 1 "
+            + "WHERE id = #{id} AND tenant_id = #{tenantId} AND version = #{expectedVersion} "
+            + "AND deleted_flag = 0")
+    int updateCertificateNumberForTenant(@Param("id") Long id, @Param("tenantId") String tenantId,
+                                         @Param("expectedVersion") Integer expectedVersion,
+                                         @Param("encrypted") byte[] encrypted,
+                                         @Param("keyVersion") String keyVersion,
+                                         @Param("cipherFormat") String cipherFormat,
+                                         @Param("masked") String masked);
 }

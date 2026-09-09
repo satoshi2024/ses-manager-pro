@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.project.ProjectSkillDetailDto;
@@ -8,6 +7,7 @@ import com.ses.entity.ProjectSkill;
 import com.ses.entity.ProjectSkillEvent;
 import com.ses.mapper.ProjectSkillEventMapper;
 import com.ses.service.ProjectSkillService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.effective.EffectiveIntervalSupport;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,8 +24,6 @@ import java.util.stream.Collectors;
 
 @Service
 public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectSkillMapper, ProjectSkill> implements ProjectSkillService {
-
-    private static final String DEFAULT_TENANT = "default";
 
     private final com.ses.mapper.ProjectMapper projectMapper;
     private final com.ses.mapper.SkillTagMapper skillTagMapper;
@@ -44,13 +42,15 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
 
     @Override
     public List<ProjectSkillDetailDto> listDetail(Long projectId) {
-        return baseMapper.selectDetailByProjectId(projectId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        return baseMapper.selectDetailByProjectIdForTenant(projectId, tenantId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void replaceSkills(Long projectId, List<ProjectSkill> skills) {
-        if (projectMapper.selectById(projectId) == null) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (projectMapper.selectByIdForTenant(projectId, tenantId) == null) {
             throw com.ses.common.exception.BusinessException.of(404, "error.project.notFound");
         }
 
@@ -73,17 +73,16 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
         Long actorUserId = SecurityUtils.currentUserId();
         String actorRole = SecurityUtils.currentRole();
 
-        List<ProjectSkill> existing = list(new LambdaQueryWrapper<ProjectSkill>()
-                .eq(ProjectSkill::getProjectId, projectId));
+        List<ProjectSkill> existing = baseMapper.selectByProjectIdForTenant(projectId, tenantId);
         Map<Long, Long> supersedesBySkillId = new HashMap<>();
         for (ProjectSkill skill : existing) {
-            Long closedEventId = closeOpenSkillEvent(projectId, skill.getSkillId(), effectiveDate);
+            Long closedEventId = closeOpenSkillEvent(tenantId, projectId, skill.getSkillId(), effectiveDate);
             if (closedEventId != null) {
                 supersedesBySkillId.put(skill.getSkillId(), closedEventId);
             }
         }
 
-        remove(new LambdaQueryWrapper<ProjectSkill>().eq(ProjectSkill::getProjectId, projectId));
+        baseMapper.deleteByProjectIdForTenant(projectId, tenantId);
 
         if (skills == null || skills.isEmpty()) {
             return;
@@ -97,46 +96,48 @@ public class ProjectSkillServiceImpl extends ServiceImpl<com.ses.mapper.ProjectS
         saveBatch(distinctSkills);
 
         for (ProjectSkill skill : distinctSkills) {
-            assertNoOpenSkillEvent(projectId, skill.getSkillId());
-            Long supersedesId = resolveSupersedesEventId(projectId, skill.getSkillId(), supersedesBySkillId);
+            assertNoOpenSkillEvent(tenantId, projectId, skill.getSkillId());
+            Long supersedesId = resolveSupersedesEventId(tenantId, projectId, skill.getSkillId(), supersedesBySkillId);
             appendSkillEvent(skill, ProjectSkillEvent.TYPE_OPEN, effectiveDate, null,
-                    supersedesId, actorUserId, actorRole, occurredAt);
+                    supersedesId, actorUserId, actorRole, occurredAt, tenantId);
         }
     }
 
-    private Long resolveSupersedesEventId(Long projectId, Long skillId, Map<Long, Long> closedInTx) {
+    private Long resolveSupersedesEventId(String tenantId, Long projectId, Long skillId,
+                                          Map<Long, Long> closedInTx) {
         Long supersedesId = closedInTx.get(skillId);
         if (supersedesId != null) {
             return supersedesId;
         }
-        ProjectSkillEvent lastClosed = projectSkillEventMapper.selectLastClosedOpenEvent(projectId, skillId);
+        ProjectSkillEvent lastClosed = projectSkillEventMapper.selectLastClosedOpenEventForTenant(
+                tenantId, projectId, skillId);
         return lastClosed != null ? lastClosed.getId() : null;
     }
 
-    private Long closeOpenSkillEvent(Long projectId, Long skillId, LocalDate changeDate) {
-        ProjectSkillEvent open = projectSkillEventMapper.selectOpenEvent(projectId, skillId);
+    private Long closeOpenSkillEvent(String tenantId, Long projectId, Long skillId, LocalDate changeDate) {
+        ProjectSkillEvent open = projectSkillEventMapper.selectOpenEventForTenant(tenantId, projectId, skillId);
         if (open == null) {
             return null;
         }
         LocalDate closeTo = EffectiveIntervalSupport.closeEffectiveTo(open.getEffectiveFrom(), changeDate);
-        int rows = projectSkillEventMapper.closeOpenEvent(open.getId(), closeTo);
+        int rows = projectSkillEventMapper.closeOpenEventForTenant(open.getId(), closeTo, tenantId);
         if (rows != 1) {
             throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
         return open.getId();
     }
 
-    private void assertNoOpenSkillEvent(Long projectId, Long skillId) {
-        if (projectSkillEventMapper.selectOpenEvent(projectId, skillId) != null) {
+    private void assertNoOpenSkillEvent(String tenantId, Long projectId, Long skillId) {
+        if (projectSkillEventMapper.selectOpenEventForTenant(tenantId, projectId, skillId) != null) {
             throw com.ses.common.exception.BusinessException.of(409, "error.common.optimisticLock");
         }
     }
 
     private void appendSkillEvent(ProjectSkill skill, String eventType, LocalDate effectiveFrom,
                                   LocalDate effectiveTo, Long supersedesEventId, Long actorUserId, String actorRole,
-                                  LocalDateTime occurredAt) {
+                                  LocalDateTime occurredAt, String tenantId) {
         ProjectSkillEvent event = new ProjectSkillEvent();
-        event.setTenantId(DEFAULT_TENANT);
+        event.setTenantId(tenantId);
         event.setProjectId(skill.getProjectId());
         event.setProjectSkillId(skill.getId());
         event.setSkillId(skill.getSkillId());

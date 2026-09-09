@@ -12,10 +12,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+import com.ses.config.LoginUser;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 import java.time.LocalDate;
 import java.util.UUID;
@@ -47,15 +51,16 @@ class CustomerQbrApiControllerTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         Customer c = Customer.builder()
                 .companyName("QBRテスト顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(c);
         testCustomerId = c.getId();
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("定例会(QBR)の作成・取得・更新・削除のCRUDが正常に動作すること")
     void testQbrCrudFlow() throws Exception {
         CustomerQbrCreateRequest req = CustomerQbrCreateRequest.builder()
@@ -69,7 +74,7 @@ class CustomerQbrApiControllerTest {
                 .build();
 
         // 1. 作成 (POST)
-        String resJson = mockMvc.perform(post("/api/customer-success/qbrs")
+        String resJson = mockMvc.perform(post("/api/customer-success/qbrs").with(tenantAuthentication())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
@@ -82,7 +87,7 @@ class CustomerQbrApiControllerTest {
         Long qbrId = objectMapper.readTree(resJson).path("data").path("id").asLong();
 
         // 2. 詳細取得 (GET)
-        mockMvc.perform(get("/api/customer-success/qbrs/" + qbrId))
+        mockMvc.perform(get("/api/customer-success/qbrs/" + qbrId).with(tenantAuthentication()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.id").value(qbrId))
@@ -90,7 +95,7 @@ class CustomerQbrApiControllerTest {
                 .andExpect(jsonPath("$.data.minutes").value("要員評価は良好。来期1名増員の意向あり。"));
 
         // 3. 一覧検索 (GET)
-        mockMvc.perform(get("/api/customer-success/qbrs")
+        mockMvc.perform(get("/api/customer-success/qbrs").with(tenantAuthentication())
                         .param("customerId", String.valueOf(testCustomerId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
@@ -107,7 +112,7 @@ class CustomerQbrApiControllerTest {
                 .attendees("参加者更新")
                 .build();
 
-        mockMvc.perform(put("/api/customer-success/qbrs/" + qbrId)
+        mockMvc.perform(put("/api/customer-success/qbrs/" + qbrId).with(tenantAuthentication())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateReq)))
@@ -115,14 +120,28 @@ class CustomerQbrApiControllerTest {
                 .andExpect(jsonPath("$.code").value(200));
 
         // 5. 削除 (DELETE)
-        mockMvc.perform(delete("/api/customer-success/qbrs/" + qbrId)
+        mockMvc.perform(delete("/api/customer-success/qbrs/" + qbrId).with(tenantAuthentication())
                         .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200));
 
         // 6. 削除後の取得は 404
-        mockMvc.perform(get("/api/customer-success/qbrs/" + qbrId))
+        mockMvc.perform(get("/api/customer-success/qbrs/" + qbrId).with(tenantAuthentication()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
+    }
+
+    private RequestPostProcessor tenantAuthentication() {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("password");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

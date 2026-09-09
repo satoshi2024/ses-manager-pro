@@ -1,11 +1,12 @@
 package com.ses.controller.api;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.SysUser;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.EngineerAccountLinkService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +27,8 @@ public class EngineerAccountLinkApiController {
     private EngineerAccountLinkService linkService;
     @Autowired
     private SysUserMapper sysUserMapper;
+    @Autowired
+    private TenantOwnershipResolver tenantOwnershipResolver;
 
     /** 現在の紐付け（未紐付けは null）。 */
     @GetMapping
@@ -41,9 +44,12 @@ public class EngineerAccountLinkApiController {
      */
     @GetMapping("/candidates")
     public ApiResult<?> candidates(@PathVariable Long engineerId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (tenantOwnershipResolver.selectEngineer(tenantId, engineerId) == null) {
+            throw com.ses.common.exception.BusinessException.of(404, "error.notFound");
+        }
         // 有効・無効を分けて数えたいので status で絞らずに取得する。
-        List<SysUser> engineerRoleUsers = sysUserMapper.selectList(new QueryWrapper<SysUser>()
-                .eq("role", "要員"));
+        List<SysUser> engineerRoleUsers = sysUserMapper.selectByRoleAndTenant("要員", tenantId);
         List<SysUser> activeUsers = engineerRoleUsers.stream()
                 .filter(u -> Integer.valueOf(1).equals(u.getStatus()))
                 .toList();

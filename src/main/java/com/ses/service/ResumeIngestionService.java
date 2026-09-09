@@ -3,12 +3,17 @@ package com.ses.service;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ses.dto.resume.ReviewedResumeDto;
 import com.ses.entity.ResumeIngestion;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
  * スキルシート取込サービスインターフェース。
  */
 public interface ResumeIngestionService extends IService<ResumeIngestion> {
+
+    Page<ResumeIngestion> pageForCurrentTenant(Page<ResumeIngestion> page, String status);
+
+    ResumeIngestion getForCurrentTenant(Long id);
 
     /**
      * 取込ジョブを作成し、非同期解析を開始する。
@@ -19,6 +24,9 @@ public interface ResumeIngestionService extends IService<ResumeIngestion> {
      * 非同期でテキスト抽出・AI解析を実行する。
      */
     void parseAsync(Long id);
+
+    /** 非同期実行へtenantを明示的に引き渡す。親threadのThreadLocalには依存しない。 */
+    void parseAsync(Long id, String tenantId);
 
     /**
      * 要確認/失敗ジョブを再解析する。

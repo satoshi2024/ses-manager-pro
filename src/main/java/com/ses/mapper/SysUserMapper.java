@@ -24,6 +24,22 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     List<SysUser> selectActiveByRoleAndTenant(@Param("role") String role,
                                                @Param("tenantId") String tenantId);
 
+    /** ロール候補を現在tenant内だけで取得する（無効ユーザーも理由判定のため含める）。 */
+    @Select("SELECT * FROM sys_user WHERE tenant_id = #{tenantId} AND role = #{role} "
+            + "AND deleted_flag = 0 ORDER BY id")
+    List<SysUser> selectByRoleAndTenant(@Param("role") String role,
+                                        @Param("tenantId") String tenantId);
+
+    /** 内部候補一覧を現在tenant内だけで取得する。 */
+    @Select("SELECT * FROM sys_user WHERE tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0 ORDER BY id")
+    List<SysUser> selectByTenant(@Param("tenantId") String tenantId);
+
+    /** 管理者向けユーザー候補の表示名もtenant境界をSQLで適用する。 */
+    @Select("SELECT username FROM sys_user WHERE tenant_id = #{tenantId} "
+            + "AND deleted_flag = 0 ORDER BY id")
+    List<String> selectUsernamesByTenant(@Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM sys_user WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     SysUser selectByIdForUpdate(@Param("id") Long id);
 

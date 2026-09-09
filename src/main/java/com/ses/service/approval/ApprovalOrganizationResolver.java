@@ -14,6 +14,7 @@ import com.ses.mapper.CostCenterMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -35,75 +36,81 @@ public class ApprovalOrganizationResolver {
     private final WorkRecordMapper workRecordMapper;
 
     public Long forQuotation(Quotation quotation) {
+        String tenantId = requireTenant();
         if (quotation == null) {
             return null;
         }
-        Long fromCreator = primaryOrg(quotation.getCreatedBy(), LocalDate.now());
+        Long fromCreator = primaryOrg(quotation.getCreatedBy(), LocalDate.now(), tenantId);
         if (fromCreator != null) {
             return fromCreator;
         }
-        return engineerOrg(quotation.getEngineerId());
+        return engineerOrg(quotation.getEngineerId(), tenantId);
     }
 
     public Long forSalesOrder(SalesOrder order) {
+        String tenantId = requireTenant();
         if (order == null) {
             return null;
         }
-        return primaryOrg(order.getCreatedBy(), LocalDate.now());
+        return primaryOrg(order.getCreatedBy(), LocalDate.now(), tenantId);
     }
 
     public Long forInvoice(Invoice invoice) {
+        String tenantId = requireTenant();
         if (invoice == null) {
             return null;
         }
-        Long fromCc = costCenterOrg(invoice.getCostCenterId());
+        Long fromCc = costCenterOrg(invoice.getCostCenterId(), tenantId);
         if (fromCc != null) {
             return fromCc;
         }
-        return primaryOrg(invoice.getCreatedBy(), LocalDate.now());
+        return primaryOrg(invoice.getCreatedBy(), LocalDate.now(), tenantId);
     }
 
     public Long forContract(Contract contract) {
+        String tenantId = requireTenant();
         if (contract == null) {
             return null;
         }
-        Long fromSales = primaryOrg(contract.getSalesUserId(), LocalDate.now());
+        Long fromSales = primaryOrg(contract.getSalesUserId(), LocalDate.now(), tenantId);
         if (fromSales != null) {
             return fromSales;
         }
-        Long fromEngineer = engineerOrg(contract.getEngineerId());
+        Long fromEngineer = engineerOrg(contract.getEngineerId(), tenantId);
         if (fromEngineer != null) {
             return fromEngineer;
         }
-        return primaryOrg(contract.getCreatedBy(), LocalDate.now());
+        return primaryOrg(contract.getCreatedBy(), LocalDate.now(), tenantId);
     }
 
     public Long forAcceptance(Acceptance acceptance) {
+        String tenantId = requireTenant();
         if (acceptance == null) {
             return null;
         }
         if (acceptance.getContractId() != null) {
-            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(), tenantId);
             Long fromContract = forContract(contract);
             if (fromContract != null) {
                 return fromContract;
             }
         }
-        return primaryOrg(acceptance.getCreatedBy(), LocalDate.now());
+        return primaryOrg(acceptance.getCreatedBy(), LocalDate.now(), tenantId);
     }
 
     public Long forBpPayment(BpPayment payment) {
+        String tenantId = requireTenant();
         if (payment == null) {
             return null;
         }
-        Long fromCc = costCenterOrg(payment.getCostCenterId());
+        Long fromCc = costCenterOrg(payment.getCostCenterId(), tenantId);
         if (fromCc != null) {
             return fromCc;
         }
         if (payment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(payment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(payment.getWorkRecordId(), tenantId);
             if (wr != null && wr.getContractId() != null) {
-                Contract contract = contractMapper.selectById(wr.getContractId());
+                Contract contract = contractMapper.selectByIdForTenant(wr.getContractId(), tenantId);
                 LocalDate asOf = LocalDate.now();
                 if (wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
                     try {
@@ -113,33 +120,37 @@ public class ApprovalOrganizationResolver {
                     }
                 }
                 if (contract != null && contract.getSalesUserId() != null) {
-                    return primaryOrg(contract.getSalesUserId(), asOf);
+                    return primaryOrg(contract.getSalesUserId(), asOf, tenantId);
                 }
             }
         }
         return null;
     }
 
-    private Long costCenterOrg(Long costCenterId) {
+    private Long costCenterOrg(Long costCenterId, String tenantId) {
         if (costCenterId == null) {
             return null;
         }
-        CostCenter cc = costCenterMapper.selectById(costCenterId);
+        CostCenter cc = costCenterMapper.selectByIdForTenant(costCenterId, tenantId);
         return cc == null ? null : cc.getOrganizationId();
     }
 
-    private Long primaryOrg(Long userId, LocalDate asOf) {
+    private Long primaryOrg(Long userId, LocalDate asOf, String tenantId) {
         if (userId == null) {
             return null;
         }
-        return userOrganizationMapper.selectPrimaryOrganizationAt(userId, asOf);
+        return userOrganizationMapper.selectPrimaryOrganizationAtForTenant(tenantId, userId, asOf);
     }
 
-    private Long engineerOrg(Long engineerId) {
+    private Long engineerOrg(Long engineerId, String tenantId) {
         if (engineerId == null) {
             return null;
         }
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         return engineer == null ? null : engineer.getOrganizationId();
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

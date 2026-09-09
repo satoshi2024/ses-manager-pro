@@ -12,8 +12,10 @@ import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.EngineerAccountLinkService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.impl.FileScopeValidationService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -54,16 +56,19 @@ class CertificationEvidenceAccessServiceTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         service = new CertificationEvidenceAccessService(certificationMapper, documentLinkMapper,
                 documentVersionMapper, documentService, fileScopeValidationService, accountLinkService,
                 queryService, Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")), eventMapper);
         record = new EngineerCertification();
         record.setId(11L);
+        record.setTenantId("default");
         record.setEngineerId(42L);
         record.setRecordState("ACTIVE");
         record.setCurrentFlag(1);
         version = new DocumentVersion();
         version.setId(88L);
+        version.setTenantId("default");
         version.setDocumentId(77L);
         version.setVersionNo(2);
         version.setOriginalName("evidence.pdf");
@@ -77,10 +82,11 @@ class CertificationEvidenceAccessServiceTest {
         verify.setEvidenceDocumentId(77L);
         verify.setEvidenceDocumentVersionId(88L);
         verify.setEvidenceDocumentHash("abc123");
-        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(verify));
-        when(certificationMapper.selectById(11L)).thenReturn(record);
+        when(eventMapper.selectByTenantAndRecordId("default", 11L)).thenReturn(List.of(verify));
+        when(certificationMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(record);
         DocumentLink link = new DocumentLink();
         link.setDocumentId(77L);
+        link.setTenantId("default");
         link.setTargetType("CERTIFICATION_RECORD");
         link.setTargetId(11L);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of(link));
@@ -89,6 +95,11 @@ class CertificationEvidenceAccessServiceTest {
         when(documentService.download(77L, 2)).thenReturn(new ByteArrayInputStream("pdf".getBytes()));
         when(queryService.detail(eq(42L), any(), any())).thenReturn(new CertificationLearningGapRow(
                 42L, "対象", "稼動中", "ACTIVE", List.of(), List.of(), null, null, null, List.of()));
+    }
+
+    @AfterEach
+    void clearTenant() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -134,7 +145,7 @@ class CertificationEvidenceAccessServiceTest {
         event.setEvidenceDocumentId(77L);
         event.setEvidenceDocumentVersionId(88L);
         event.setEvidenceDocumentHash("different-hash");
-        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(event));
+        when(eventMapper.selectByTenantAndRecordId("default", 11L)).thenReturn(List.of(event));
 
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.downloadForSelf(100L, 11L, 77L, 2));
@@ -142,7 +153,7 @@ class CertificationEvidenceAccessServiceTest {
 
     @Test
     void VERIFYeventが無い証憑とgenericEngineerLinkだけの証憑は拒否する() {
-        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of());
+        when(eventMapper.selectByTenantAndRecordId("default", 11L)).thenReturn(List.of());
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.downloadForSelf(100L, 11L, 77L, 2));
 
@@ -152,7 +163,7 @@ class CertificationEvidenceAccessServiceTest {
         verify.setEvidenceDocumentId(77L);
         verify.setEvidenceDocumentVersionId(88L);
         verify.setEvidenceDocumentHash("abc123");
-        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(verify));
+        when(eventMapper.selectByTenantAndRecordId("default", 11L)).thenReturn(List.of(verify));
         DocumentLink generic = new DocumentLink();
         generic.setDocumentId(77L);
         generic.setTargetType("ENGINEER");

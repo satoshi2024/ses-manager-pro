@@ -15,6 +15,8 @@ import com.ses.mapper.CustomerQbrMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.CustomerScopeResolver;
+import com.ses.service.security.TenantOwnershipResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.servicedesk.CustomerQbrService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,35 +43,20 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     private final SysUserMapper sysUserMapper;
     private final DataScopeService dataScopeService;
     private final Clock clock;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     @Override
     @Transactional(readOnly = true)
     public Page<CustomerQbrDto> searchQbrs(int page, int size, Long customerId, String keyword) {
         Page<CustomerQbr> mpPage = new Page<>(page, size);
-        LambdaQueryWrapper<CustomerQbr> wrapper = new LambdaQueryWrapper<>();
-
+        String tenantId = currentTenant();
+        Set<Long> allowed = resolvedCustomerIds(tenantId);
         if (customerId != null) {
             assertAllowed(customerId);
-            wrapper.eq(CustomerQbr::getCustomerId, customerId);
-        } else {
-            Set<Long> allowed = resolvedCustomerIds();
-            if (allowed != null && allowed.isEmpty()) {
-                return new Page<>(page, size, 0);
-            }
-            if (allowed != null) {
-                wrapper.in(CustomerQbr::getCustomerId, allowed);
-            }
+            allowed = Set.of(customerId);
         }
-
-        if (StringUtils.hasText(keyword)) {
-            wrapper.and(w -> w.like(CustomerQbr::getTitle, keyword)
-                    .or().like(CustomerQbr::getAgenda, keyword)
-                    .or().like(CustomerQbr::getDiscussion, keyword));
-        }
-
-        wrapper.orderByDesc(CustomerQbr::getMeetingDate);
-
-        Page<CustomerQbr> result = qbrMapper.selectPage(mpPage, wrapper);
+        Page<CustomerQbr> result = qbrMapper.selectPageForTenant(mpPage, tenantId, allowed, customerId,
+                StringUtils.hasText(keyword) ? keyword.trim() : null);
         List<CustomerQbrDto> dtos = result.getRecords().stream()
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
@@ -82,7 +69,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     @Override
     @Transactional(readOnly = true)
     public CustomerQbrDto getQbr(Long id) {
-        CustomerQbr qbr = qbrMapper.selectById(id);
+        CustomerQbr qbr = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (qbr == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
@@ -93,8 +80,9 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CustomerQbrDto createQbr(CustomerQbrCreateRequest req, Long actorUserId) {
-        Customer customer = customerMapper.selectById(req.getCustomerId());
-        if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
+        String tenantId = currentTenant();
+        Customer customer = tenantOwnershipResolver.selectCustomer(tenantId, req.getCustomerId());
+        if (customer == null) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
         assertAllowed(req.getCustomerId());
@@ -122,7 +110,7 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateQbr(Long id, CustomerQbrUpdateRequest req) {
-        CustomerQbr existing = qbrMapper.selectById(id);
+        CustomerQbr existing = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (existing == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
@@ -137,27 +125,31 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
         existing.setUpdatedBy(SecurityUtils.currentUserId());
         existing.setUpdatedAt(LocalDateTime.now(clock));
 
-        qbrMapper.updateById(existing);
+        if (qbrMapper.updateByIdForTenant(existing, currentTenant()) != 1) {
+            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteQbr(Long id) {
-        CustomerQbr existing = qbrMapper.selectById(id);
+        CustomerQbr existing = qbrMapper.selectByIdForTenantId(id, currentTenant());
         if (existing == null) {
             throw BusinessException.of(404, "指定された定例会記録が見つかりません");
         }
         assertAllowed(existing.getCustomerId());
-        qbrMapper.deleteById(id);
+        if (qbrMapper.deleteByIdForTenant(id, existing.getCustomerId(), currentTenant()) != 1) {
+            throw BusinessException.of(404, "指定された定例会記録が見つかりません");
+        }
     }
 
     private CustomerQbrDto convertToDto(CustomerQbr qbr) {
-        Customer c = customerMapper.selectById(qbr.getCustomerId());
+        Customer c = tenantOwnershipResolver.selectCustomer(currentTenant(), qbr.getCustomerId());
         String customerName = c != null ? c.getCompanyName() : "顧客#" + qbr.getCustomerId();
 
         String createdByName = "システム";
         if (qbr.getCreatedBy() != null) {
-            SysUser u = sysUserMapper.selectById(qbr.getCreatedBy());
+            SysUser u = sysUserMapper.selectByIdAndTenant(qbr.getCreatedBy(), currentTenant());
             if (u != null && u.getRealName() != null) {
                 createdByName = u.getRealName();
             }
@@ -180,23 +172,32 @@ public class CustomerQbrServiceImpl implements CustomerQbrService {
                 .build();
     }
 
-    private Set<Long> resolvedCustomerIds() {
+    private Set<Long> resolvedCustomerIds(String tenantId) {
+        Set<Long> owned = new java.util.HashSet<>(tenantOwnershipResolver.resolveCustomerIds(tenantId));
         if (SecurityUtils.currentRole() == null) {
-            return null;
+            return owned;
         }
-        return customerScopeResolver == null
+        Set<Long> scoped = customerScopeResolver == null
                 ? (dataScopeService.isScoped() ? dataScopeService.allowedCustomerIds() : null)
                 : customerScopeResolver.resolve(java.time.LocalDate.now(clock));
+        if (scoped != null) owned.retainAll(scoped);
+        return owned;
     }
 
     private void assertAllowed(Long customerId) {
-        if (SecurityUtils.currentRole() == null) {
-            return;
+        String tenantId = currentTenant();
+        if (tenantOwnershipResolver.selectCustomer(tenantId, customerId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
         }
+        if (SecurityUtils.currentRole() == null) return;
         if (customerScopeResolver != null) {
             customerScopeResolver.assertAllowed(customerId);
         } else if (dataScopeService.isScoped()) {
             dataScopeService.assertAllowedCustomer(customerId);
         }
+    }
+
+    private String currentTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

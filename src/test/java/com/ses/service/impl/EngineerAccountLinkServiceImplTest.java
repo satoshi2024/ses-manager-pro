@@ -112,9 +112,9 @@ class EngineerAccountLinkServiceImplTest {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setId(11L);
         when(linkMapper.selectByEngineerIdAndTenant(1L, "default")).thenReturn(link);
-        when(linkMapper.deleteById(11L)).thenReturn(1);
+        when(linkMapper.deleteByIdForTenant(11L, "default")).thenReturn(1);
         service.unlinkByEngineerId(1L);
-        verify(linkMapper).deleteById(11L);
+        verify(linkMapper).deleteByIdForTenant(11L, "default");
         verify(scopeChangeInvalidator).invalidate();
     }
 }

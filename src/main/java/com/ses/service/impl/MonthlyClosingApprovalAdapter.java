@@ -1,6 +1,5 @@
 package com.ses.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
@@ -88,16 +87,16 @@ public class MonthlyClosingApprovalAdapter implements ApprovalTargetAdapter {
         Map<String, Object> p = ApprovalPayloads.read(objectMapper, request.getPayloadJson());
         String month = ApprovalPayloads.text(p, "month");
         int round = request.getRoundNo() == null ? 1 : request.getRoundNo();
-        ApprovalAction finalAction = approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
-                        .eq(ApprovalAction::getTenantId, request.getTenantId())
-                        .eq(ApprovalAction::getRequestId, request.getId())
-                        .eq(ApprovalAction::getRoundNo, round)
-                        .eq(ApprovalAction::getStepNo, request.getCurrentStep())
-                        .eq(ApprovalAction::getAction, "APPROVE")
-                        .orderByDesc(ApprovalAction::getId))
-                .stream().findFirst()
-                .orElseThrow(() -> BusinessException.of(500, "error.approval.approverUnresolved"));
-        SysUser approver = sysUserMapper.selectByIdAndTenant(finalAction.getApproverUserId(), request.getTenantId());
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (request.getTenantId() == null || !tenantId.equals(request.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        ApprovalAction finalAction = approvalActionMapper.selectLatestApprovalForStep(
+                        request.getId(), tenantId, round, request.getCurrentStep());
+        if (finalAction == null) {
+            throw BusinessException.of(500, "error.approval.approverUnresolved");
+        }
+        SysUser approver = sysUserMapper.selectByIdAndTenant(finalAction.getApproverUserId(), tenantId);
         if (approver == null || approver.getRole() == null) {
             throw BusinessException.of(500, "error.approval.approverUnresolved");
         }

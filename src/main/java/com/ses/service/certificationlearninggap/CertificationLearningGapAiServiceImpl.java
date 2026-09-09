@@ -106,10 +106,6 @@ public class CertificationLearningGapAiServiceImpl implements CertificationLearn
     }
 
     private String currentTenant() {
-        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
-        }
-        return tenantId;
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

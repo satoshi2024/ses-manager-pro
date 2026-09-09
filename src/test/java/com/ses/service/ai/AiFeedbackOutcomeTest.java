@@ -8,7 +8,10 @@ import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiOutcomeMapper;
 import com.ses.service.ai.impl.AiOutcomeServiceImpl;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
@@ -27,6 +30,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @WithMockUser(username = "1", roles = "管理者")
 @Transactional
 class AiFeedbackOutcomeTest {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("INSERT INTO m_customer (id, tenant_id, company_name, deleted_flag, version) "
+                + "SELECT 1, 'default', 'AI feedback fixture customer', 0, 0 "
+                + "WHERE NOT EXISTS (SELECT 1 FROM m_customer WHERE id = 1)");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO t_project (id, project_name, customer_id, status, created_at, updated_at, deleted_flag) "
+                + "SELECT 101, 'AI feedback fixture', 1, '募集中', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0 "
+                + "WHERE NOT EXISTS (SELECT 1 FROM t_project WHERE id = 101)");
+        jdbcTemplate.update("UPDATE t_project SET customer_id = 1, deleted_flag = 0 WHERE id = 101");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Autowired
     private AiFeedbackService feedbackService;

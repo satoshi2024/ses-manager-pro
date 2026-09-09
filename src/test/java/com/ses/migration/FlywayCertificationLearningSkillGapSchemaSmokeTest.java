@@ -46,8 +46,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latestVersion) >= 158,
-                    "NF-03 certification master version migration以降まで適用されていること");
+            assertTrue(Integer.parseInt(latestVersion) >= 167,
+                    "NF-02/NF-03 AI recommendation tenant records migration以降まで適用されていること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -67,8 +67,23 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "m_customer", "tenant_id");
             assertColumnExists(statement, "t_engineer", "tenant_id");
             assertTableExists(statement, "nf02_nf03_ownership_repair_queue");
+            for (String column : new String[]{"status", "assignee_user_id", "repair_tenant_id",
+                    "resolution_reason", "evidence", "resolved_at", "resolved_by", "last_checked_at"}) {
+                assertColumnExists(statement, "nf02_nf03_ownership_repair_queue", column);
+            }
+            assertIndexExists(statement, "nf02_nf03_ownership_repair_queue", "idx_nf02_nf03_repair_status_age");
             assertIndexExists(statement, "m_customer", "idx_customer_tenant_population");
             assertIndexExists(statement, "t_engineer", "idx_engineer_tenant_population");
+            assertColumnExists(statement, "t_bp_availability", "tenant_id");
+            assertIndexExists(statement, "t_bp_availability", "idx_bp_availability_tenant_population");
+            assertIndexExists(statement, "t_engineer_account_link", "idx_engineer_account_link_tenant_owner");
+            for (String table : new String[]{"t_ai_recommendation_run", "t_ai_recommendation_item",
+                    "t_ai_feedback", "t_ai_outcome"}) {
+                assertColumnExists(statement, table, "tenant_id");
+            }
+            assertIndexExists(statement, "t_ai_recommendation_item", "idx_ai_item_tenant_target");
+            assertIndexExists(statement, "t_ai_feedback", "idx_ai_feedback_tenant_item");
+            assertIndexExists(statement, "t_ai_outcome", "idx_ai_outcome_tenant_item");
             assertColumnExists(statement, "t_learning_plan", "amended_cost_jpy");
             assertColumnExists(statement, "t_learning_plan", "amendment_approval_request_id");
             assertColumnExists(statement, "t_project_position_event", "skills_json");
@@ -220,6 +235,70 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             assertEquals(1, queryInt(statement,
                     "SELECT version FROM m_certification WHERE id = " + certificationId));
+        }
+    }
+
+    @Test
+    void MySQLのunresolved修復queueは推測せず監査付きで解決できる() throws Exception {
+        migrate();
+        String tenantId = "repair-" + UUID.randomUUID();
+        long customerId;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement insert = connection.prepareStatement(
+                     "INSERT INTO m_customer (company_name, tenant_id, deleted_flag) VALUES (?, NULL, 0)",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            insert.setString(1, "unresolved-customer-" + tenantId);
+            insert.executeUpdate();
+            try (ResultSet keys = insert.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                customerId = keys.getLong(1);
+            }
+        }
+
+        long queueId;
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement insert = connection.prepareStatement(
+                     "INSERT INTO nf02_nf03_ownership_repair_queue "
+                             + "(entity_type, entity_id, reason) VALUES ('CUSTOMER', ?, 'TENANT_UNRESOLVED')",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            insert.setLong(1, customerId);
+            insert.executeUpdate();
+            try (ResultSet keys = insert.getGeneratedKeys()) {
+                assertTrue(keys.next());
+                queueId = keys.getLong(1);
+            }
+        }
+
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement updateCustomer = connection.prepareStatement(
+                     "UPDATE m_customer SET tenant_id = ? WHERE id = ? AND tenant_id IS NULL");
+             PreparedStatement resolveQueue = connection.prepareStatement(
+                     "UPDATE nf02_nf03_ownership_repair_queue SET status='RESOLVED', repair_tenant_id=?, "
+                             + "resolution_reason=?, evidence=?, resolved_at=NOW(), last_checked_at=NOW() "
+                             + "WHERE id=? AND status='PENDING'")) {
+            updateCustomer.setString(1, tenantId);
+            updateCustomer.setLong(2, customerId);
+            assertEquals(1, updateCustomer.executeUpdate());
+            resolveQueue.setString(1, tenantId);
+            resolveQueue.setString(2, "契約台帳でtenantを確認");
+            resolveQueue.setString(3, "ticket=" + queueId);
+            resolveQueue.setLong(4, queueId);
+            assertEquals(1, resolveQueue.executeUpdate());
+        }
+
+        try (Connection connection = MYSQL.createConnection("");
+             PreparedStatement select = connection.prepareStatement(
+                     "SELECT c.tenant_id, q.status, q.repair_tenant_id, q.evidence "
+                             + "FROM m_customer c JOIN nf02_nf03_ownership_repair_queue q "
+                             + "ON q.entity_type='CUSTOMER' AND q.entity_id=c.id WHERE c.id=?")) {
+            select.setLong(1, customerId);
+            try (ResultSet rows = select.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(tenantId, rows.getString(1));
+                assertEquals("RESOLVED", rows.getString(2));
+                assertEquals(tenantId, rows.getString(3));
+                assertTrue(rows.getString(4).contains("ticket=" + queueId));
+            }
         }
     }
 

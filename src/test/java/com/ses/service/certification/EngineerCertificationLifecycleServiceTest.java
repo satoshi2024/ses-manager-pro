@@ -9,6 +9,7 @@ import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.CertificationContinuityGroupMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -46,9 +47,15 @@ class EngineerCertificationLifecycleServiceTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         service = new EngineerCertificationServiceImpl(recordMapper, certificationMapper, engineerMapper,
                 cryptoService, eventMapper, evidenceValidator, clock);
         org.springframework.test.util.ReflectionTestUtils.setField(service, "continuityGroupMapper", continuityGroupMapper);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -57,8 +64,8 @@ class EngineerCertificationLifecycleServiceTest {
         record.setRecordState(CertificationRecordStates.SUBMITTED);
         record.setCurrentFlag(0);
         record.setCurrentHolderKey(null);
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
-        when(recordMapper.updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(record);
+        when(recordMapper.updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(1);
         when(recordMapper.countNonTerminalAcquisition(any(), anyLong(), anyLong(), any(), any())).thenReturn(0L);
 
@@ -77,12 +84,12 @@ class EngineerCertificationLifecycleServiceTest {
     void verifyは証憑三組nullを拒否しACTIVEにしない() {
         EngineerCertification record = activeRecord();
         record.setRecordState(CertificationRecordStates.SUBMITTED);
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(record);
 
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.verify(1L, 0, 7L, null, null, null));
         verify(evidenceValidator, never()).validate(anyLong(), any(), any(), any());
-        verify(recordMapper, never()).updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
+        verify(recordMapper, never()).updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -91,18 +98,18 @@ class EngineerCertificationLifecycleServiceTest {
                 engineerMapper, cryptoService);
         EngineerCertification record = activeRecord();
         record.setRecordState(CertificationRecordStates.SUBMITTED);
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(record);
 
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> legacy.verify(1L, 0, 7L, null, null, null));
-        verify(recordMapper, never()).updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
+        verify(recordMapper, never()).updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test
     void cancelは理由必須でcurrentを解除する() {
         EngineerCertification record = activeRecord();
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
-        when(recordMapper.updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(record);
+        when(recordMapper.updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(1);
 
         EngineerCertification cancelled = service.cancel(1L, 0, 7L, "本人申請取消");
@@ -115,17 +122,17 @@ class EngineerCertificationLifecycleServiceTest {
     void version不一致は更新せず409() {
         EngineerCertification record = activeRecord();
         record.setVersion(3);
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(record);
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(record);
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.cancel(1L, 2, 7L, "取消"));
-        verify(recordMapper, never()).updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
+        verify(recordMapper, never()).updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test
     void renewは旧recordをsupersededにして同一continuityの新currentを作る() {
         EngineerCertification old = activeRecord();
-        when(recordMapper.selectByIdForUpdate(1L)).thenReturn(old);
-        when(recordMapper.updateLifecycleCas(anyLong(), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
+        when(recordMapper.selectByTenantIdForUpdate("default", 1L)).thenReturn(old);
+        when(recordMapper.updateLifecycleCas(anyLong(), eq("default"), anyInt(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(1);
         when(recordMapper.countNonTerminalAcquisition(any(), anyLong(), anyLong(), any(), any())).thenReturn(0L);
         doReturn(1).when(recordMapper).insert(any(EngineerCertification.class));
@@ -147,8 +154,8 @@ class EngineerCertificationLifecycleServiceTest {
         master.setActiveFlag(1);
         master.setRuleVersion(1);
         master.setDisplayName("資格");
-        when(engineerMapper.selectById(20L)).thenReturn(new com.ses.entity.Engineer());
-        when(certificationMapper.selectById(2L)).thenReturn(master);
+        when(engineerMapper.selectByIdForTenant(20L, "default")).thenReturn(new com.ses.entity.Engineer());
+        when(certificationMapper.selectByIdForTenant(2L, "default")).thenReturn(master);
         when(recordMapper.countNonTerminalAcquisition(eq("default"), eq(20L), eq(2L), any(), eq(null)))
                 .thenReturn(1L);
         assertThrows(com.ses.common.exception.BusinessException.class,
@@ -165,8 +172,8 @@ class EngineerCertificationLifecycleServiceTest {
         master.setActiveFlag(1);
         master.setRuleVersion(1);
         master.setDisplayName("資格");
-        when(engineerMapper.selectById(20L)).thenReturn(new com.ses.entity.Engineer());
-        when(certificationMapper.selectById(2L)).thenReturn(master);
+        when(engineerMapper.selectByIdForTenant(20L, "default")).thenReturn(new com.ses.entity.Engineer());
+        when(certificationMapper.selectByIdForTenant(2L, "default")).thenReturn(master);
         when(recordMapper.countNonTerminalAcquisition(eq("default"), eq(20L), eq(2L), any(), eq(null)))
                 .thenReturn(0L);
         when(continuityGroupMapper.insert(any(com.ses.entity.CertificationContinuityGroup.class))).thenAnswer(invocation -> {
@@ -199,8 +206,8 @@ class EngineerCertificationLifecycleServiceTest {
         master.setActiveFlag(1);
         master.setRuleVersion(1);
         master.setDisplayName("資格");
-        when(engineerMapper.selectById(20L)).thenReturn(new com.ses.entity.Engineer());
-        when(certificationMapper.selectById(2L)).thenReturn(master);
+        when(engineerMapper.selectByIdForTenant(20L, "default")).thenReturn(new com.ses.entity.Engineer());
+        when(certificationMapper.selectByIdForTenant(2L, "default")).thenReturn(master);
         when(recordMapper.countNonTerminalAcquisition(eq("default"), eq(20L), eq(2L), any(), eq(null)))
                 .thenReturn(0L);
 

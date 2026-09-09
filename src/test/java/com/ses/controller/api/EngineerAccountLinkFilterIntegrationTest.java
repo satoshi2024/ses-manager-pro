@@ -72,7 +72,10 @@ class EngineerAccountLinkFilterIntegrationTest {
     }
 
     private void link(Long engineerId, Long sysUserId) {
-        jdbcTemplate.update("INSERT INTO t_engineer_account_link (engineer_id, sys_user_id) VALUES (?, ?)",
+        jdbcTemplate.update("INSERT INTO sys_user (id, tenant_id, username, password, role, status, deleted_flag) "
+                        + "VALUES (?, 'default', ?, 'test', '要員', 1, 0)",
+                sysUserId, "link-user-" + sysUserId);
+        jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) VALUES ('default', ?, ?)",
                 engineerId, sysUserId);
     }
 

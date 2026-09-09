@@ -416,6 +416,11 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
         AccountingTenantContextHolder.runWithTenant(job.getTenantId(), timezoneResolver.resolve(job.getTenantId()), () -> {
             try {
                 CanonicalExpenseDeal canonical = objectMapper.readValue(job.getPayloadSnapshot(), CanonicalExpenseDeal.class);
+                String tenantId = AccountingTenantContextHolder.requireTenantContext();
+                if (expenseRequestMapper.selectByIdForTenant(job.getTargetId(), tenantId) == null) {
+                    jobService.markFailed(jobId, "TENANT_SCOPE_VIOLATION", "経費申請のtenant所有権を確認できません");
+                    return;
+                }
 
                 AccountingProvider provider = providerFactory.getProvider(conn);
                 CanonicalDealResult result = provider.upsertExpenseDeal(conn, canonical);
@@ -426,10 +431,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
                                 java.time.YearMonth.from(canonical.getExpenseDate()).toString());
                     }
                     // 経費ステータス更新 (CAS: 承認済 -> 会計連携済) (P1-08)
-                    int updated = expenseRequestMapper.update(null, new LambdaUpdateWrapper<ExpenseRequest>()
-                            .set(ExpenseRequest::getStatus, "会計連携済")
-                            .eq(ExpenseRequest::getId, job.getTargetId())
-                            .eq(ExpenseRequest::getStatus, "承認済"));
+                    int updated = expenseRequestMapper.updateStatusForTenant(
+                            job.getTargetId(), tenantId, "承認済", "会計連携済");
 
                     if (updated != 1) {
                         jobService.markFailed(jobId, "CAS_CONFLICT",

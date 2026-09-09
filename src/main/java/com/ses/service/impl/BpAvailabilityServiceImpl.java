@@ -1,6 +1,7 @@
 package com.ses.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.BpAvailability;
 import com.ses.entity.Engineer;
@@ -10,6 +11,8 @@ import com.ses.service.BpAvailabilityService;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.EngineerService;
 import com.ses.service.SkillTagResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.scheduler.TenantAwareBatchRunner;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
@@ -26,11 +29,66 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
     private final EngineerSkillService engineerSkillService;
     private final SkillTagResolver skillTagResolver;
     private final ObjectMapper objectMapper;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
+
+    @Override
+    public boolean save(BpAvailability entity) {
+        String tenantId = requireTenant();
+        if (entity == null) {
+            return false;
+        }
+        if (entity.getTenantId() != null && !tenantId.equals(entity.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        entity.setTenantId(tenantId);
+        return super.save(entity);
+    }
+
+    @Override
+    public Page<BpAvailability> pageForCurrentTenant(Page<BpAvailability> page, String status) {
+        return baseMapper.selectPageForTenant(page, requireTenant(), status);
+    }
+
+    @Override
+    public BpAvailability getForCurrentTenant(Long id) {
+        return baseMapper.selectByIdForTenant(id, requireTenant());
+    }
+
+    @Override
+    public boolean updateForCurrentTenant(Long id, BpAvailability availability) {
+        String tenantId = requireTenant();
+        if (availability == null) {
+            return false;
+        }
+        if (availability.getTenantId() != null && !tenantId.equals(availability.getTenantId())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
+        }
+        BpAvailability existing = baseMapper.selectByIdForTenant(id, tenantId);
+        if (existing == null) {
+            return false;
+        }
+        if (availability.getInitialName() != null) existing.setInitialName(availability.getInitialName());
+        if (availability.getSkillsJson() != null) existing.setSkillsJson(availability.getSkillsJson());
+        if (availability.getUnitPrice() != null) existing.setUnitPrice(availability.getUnitPrice());
+        if (availability.getAvailableFrom() != null) existing.setAvailableFrom(availability.getAvailableFrom());
+        if (availability.getExperienceYears() != null) existing.setExperienceYears(availability.getExperienceYears());
+        if (availability.getStatus() != null) existing.setStatus(availability.getStatus());
+        if (availability.getPromotedEngineerId() != null) existing.setPromotedEngineerId(availability.getPromotedEngineerId());
+        if (availability.getRemarks() != null) existing.setRemarks(availability.getRemarks());
+        existing.setTenantId(tenantId);
+        return baseMapper.updateByIdForTenant(id, tenantId, existing) > 0;
+    }
+
+    @Override
+    public boolean removeForCurrentTenant(Long id) {
+        return baseMapper.removeByIdForTenant(id, requireTenant()) > 0;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Engineer promoteToEngineer(Long id) {
-        BpAvailability availability = this.getById(id);
+        String tenantId = requireTenant();
+        BpAvailability availability = baseMapper.selectByIdForTenant(id, tenantId);
         if (availability == null) {
             throw BusinessException.of(404, "error.bpAvailability.notFound");
         }
@@ -75,7 +133,9 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
         
         availability.setPromotedEngineerId(engineer.getId());
         availability.setStatus("要員化済");
-        this.updateById(availability);
+        if (baseMapper.updateByIdForTenant(id, tenantId, availability) == 0) {
+            throw BusinessException.of(404, "error.bpAvailability.notFound");
+        }
 
         return engineer;
     }
@@ -88,32 +148,43 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
     @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "bpAvailabilityExpireDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     @Transactional(rollbackFor = Exception.class)
     public void expireBpAvailabilities() {
-        java.time.LocalDateTime threshold = java.time.LocalDateTime.now().minusDays(60);
-        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpAvailability> wrapper = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
-        wrapper.eq(BpAvailability::getStatus, "提案可能")
-               .lt(BpAvailability::getUpdatedAt, threshold)
-               .set(BpAvailability::getStatus, "失効");
-        this.update(wrapper);
+        tenantAwareBatchRunner.run(tenantId -> {
+            java.time.LocalDateTime threshold = java.time.LocalDateTime.now(
+                    AccountingTenantContextHolder.getZoneId()).minusDays(60);
+            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpAvailability> wrapper =
+                    new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+            wrapper.eq(BpAvailability::getTenantId, tenantId)
+                   .eq(BpAvailability::getStatus, "提案可能")
+                   .lt(BpAvailability::getUpdatedAt, threshold)
+                   .set(BpAvailability::getStatus, "失効");
+            this.update(wrapper);
+        });
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void review(Long id, boolean approved, String comment) {
         // 状態CAS（design §6.3）: 未確認→提案可能/却下。二重reviewの敗者は0件で409。
+        String tenantId = requireTenant();
         String next = approved
                 ? com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_ACTIVE
                 : com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_REJECTED;
         boolean updated = this.update(new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpAvailability>()
                 .eq(BpAvailability::getId, id)
+                .eq(BpAvailability::getTenantId, tenantId)
                 .eq(BpAvailability::getStatus, com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_PENDING)
                 .set(BpAvailability::getStatus, next)
                 .set(comment != null && !comment.isBlank(), BpAvailability::getRemarks, comment == null ? null : comment.trim()));
         if (!updated) {
-            BpAvailability availability = this.getById(id);
+            BpAvailability availability = baseMapper.selectByIdForTenant(id, tenantId);
             if (availability == null) {
                 throw BusinessException.of(404, "error.bpAvailability.notFound");
             }
             throw BusinessException.of(409, "error.portal.bp.availabilityReviewed");
         }
+    }
+
+    private String requireTenant() {
+        return AccountingTenantContextHolder.requireTenantContext();
     }
 }

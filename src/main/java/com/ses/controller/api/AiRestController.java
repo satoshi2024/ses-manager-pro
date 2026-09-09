@@ -11,6 +11,9 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.mapper.ProjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +36,8 @@ public class AiRestController {
     private final ProjectService projectService;
     private final DataScopeService dataScopeService;
     private final AiConfig aiConfig;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
+    private final ProjectMapper projectMapper;
 
     /**
      * AI対話リクエスト。APIキーはサーバー側設定(ai.api-key)のみを使用するため、
@@ -71,6 +76,7 @@ public class AiRestController {
 
     @PostMapping("/chat")
     public ApiResult<String> chat(@RequestBody AiChatRequest request) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (!request.getUnknownFields().isEmpty()) {
             // 旧 apiKey を含む未知フィールドはサイレントに無視せず拒否する（値はエコーしない）。
             return ApiResult.error(400, "許可されていないフィールドが含まれています。APIキーはサーバー側で管理されます。");
@@ -82,12 +88,14 @@ public class AiRestController {
             Map<String, Object> fields = new LinkedHashMap<>();
             if (request.getEngineerId() != null) {
                 dataScopeService.assertAllowedEngineer(request.getEngineerId());
-                Engineer eng = engineerService.getById(request.getEngineerId());
+                Engineer eng = tenantOwnershipResolver.selectEngineer(tenantId, request.getEngineerId());
+                if (eng == null) throw com.ses.common.exception.BusinessException.of(404, "error.engineer.notFound");
                 fields.putAll(AiAllowlistFields.engineer(eng, null));
             }
             if (request.getProjectId() != null) {
                 dataScopeService.assertAllowedProject(request.getProjectId());
-                Project proj = projectService.getById(request.getProjectId());
+                Project proj = projectMapper.selectByIdForTenant(request.getProjectId(), tenantId);
+                if (proj == null) throw com.ses.common.exception.BusinessException.of(404, "error.project.notFound");
                 fields.putAll(AiAllowlistFields.project(proj));
             }
             AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()

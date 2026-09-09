@@ -29,6 +29,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -59,6 +60,9 @@ public class ServiceRequestApiControllerTest {
     @Autowired
     private ServiceRequestMapper serviceRequestMapper;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private Customer testCustomer;
     private ServiceRequest testRequest;
 
@@ -88,6 +92,9 @@ public class ServiceRequestApiControllerTest {
                 .description("APIテスト本文")
                 .build();
         testRequest = serviceRequestService.createRequest(req, 100L, false, null);
+        org.junit.jupiter.api.Assertions.assertEquals("tenant-a",
+                jdbcTemplate.queryForObject("SELECT tenant_id FROM t_service_request WHERE id = ?",
+                        String.class, testRequest.getId()));
     }
 
     @org.junit.jupiter.api.AfterEach
@@ -96,7 +103,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests - 一覧取得が成功すること")
     void testListRequests() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests")
@@ -111,7 +117,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/{id} - 詳細取得が成功すること")
     void testGetRequest() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/" + testRequest.getId())
@@ -124,7 +129,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("POST /api/service-desk/requests - 新規起票が成功すること")
     void testCreateRequest() throws Exception {
         ServiceRequestCreateRequest newReq = ServiceRequestCreateRequest.builder()
@@ -146,7 +150,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("PUT /api/service-desk/requests/{id} - 属性更新が成功すること")
     void testUpdateRequest() throws Exception {
         ServiceRequestUpdateRequest updateReq = ServiceRequestUpdateRequest.builder()
@@ -170,7 +173,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("POST /api/service-desk/requests/{id}/status - ステータス変更が成功すること")
     void testChangeStatus() throws Exception {
         ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
@@ -193,7 +195,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("HTTP状態変更はversionなしを拒否すること")
     void testChangeStatus_requiresVersion() throws Exception {
         ServiceRequestStatusChangeRequest statusReq = ServiceRequestStatusChangeRequest.builder()
@@ -209,7 +210,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("POST /api/service-desk/requests/{id}/comments - コメント投稿が成功すること")
     void testAddComment() throws Exception {
         ServiceCommentCreateRequest commentReq = ServiceCommentCreateRequest.builder()
@@ -227,7 +227,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/policies - SLAポリシー一覧取得が成功すること")
     void testGetPolicies() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/policies")
@@ -238,7 +237,6 @@ public class ServiceRequestApiControllerTest {
     }
 
     @Test
-    @WithMockUser(username = "admin", roles = {"管理者"})
     @DisplayName("GET /api/service-desk/requests/export - CSVエクスポートが成功すること")
     void testExportCsv() throws Exception {
         mockMvc.perform(get("/api/service-desk/requests/export"))

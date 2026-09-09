@@ -4,6 +4,8 @@ import com.ses.entity.EngineerSkill;
 import com.ses.service.EngineerSkillService;
 import com.ses.service.effective.EffectiveIntervalSupport;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -26,7 +28,7 @@ import com.ses.common.exception.BusinessException;
 @org.springframework.test.context.jdbc.Sql("/sql/engineer-schema-h2.sql")
 // replaceSkills は要員・スキルタグの存在を検証するため、対象データをseedする。
 @org.springframework.test.context.jdbc.Sql(statements = {
-        "INSERT INTO t_engineer (id, full_name) VALUES (1, 'テスト要員')",
+        "INSERT INTO t_engineer (id, tenant_id, full_name) VALUES (1, 'default', 'テスト要員')",
         "INSERT INTO m_skill_tag (id, skill_name) VALUES (10, 'Java'), (20, 'Python')"
 })
 public class EngineerSkillServiceImplTest {
@@ -36,6 +38,16 @@ public class EngineerSkillServiceImplTest {
 
     @Autowired
     private com.ses.mapper.EngineerSkillEventMapper engineerSkillEventMapper;
+
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
 
     @Test
     public void testReplaceSkills() {

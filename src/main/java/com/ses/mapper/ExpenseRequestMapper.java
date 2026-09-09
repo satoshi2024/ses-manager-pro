@@ -6,6 +6,7 @@ import com.ses.entity.ExpenseRequest;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -18,6 +19,10 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
         <script>
         SELECT er.*
         FROM t_expense_request er
+        INNER JOIN t_engineer e
+                ON e.id = er.engineer_id
+               AND e.tenant_id = #{tenantId}
+               AND e.deleted_flag = 0
         INNER JOIN t_engineer_account_link l
                 ON l.engineer_id = er.engineer_id
                AND l.tenant_id = #{tenantId}
@@ -46,7 +51,9 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
         <script>
         SELECT er.*
         FROM t_expense_request er
-        INNER JOIN t_engineer e ON e.id = er.engineer_id AND e.deleted_flag = 0
+        INNER JOIN t_engineer e ON e.id = er.engineer_id
+                                AND e.tenant_id = #{tenantId}
+                                AND e.deleted_flag = 0
         INNER JOIN t_engineer_account_link l
                 ON l.engineer_id = er.engineer_id
                AND l.tenant_id = #{tenantId}
@@ -82,13 +89,39 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
                                                @Param("status") String status);
 
     @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer e ON e.id = er.engineer_id AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0")
     ExpenseRequest selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
+    /** 会計WorkerのCAS更新も、ジョブtenantと要員account linkの所有権を同時に検証する。 */
+    @Update("""
+        UPDATE t_expense_request er
+           SET status = #{toStatus}
+         WHERE er.id = #{id}
+           AND er.status = #{fromStatus}
+           AND er.deleted_flag = 0
+           AND EXISTS (
+               SELECT 1 FROM t_engineer e
+                JOIN t_engineer_account_link l ON l.engineer_id = e.id
+                                              AND l.tenant_id = #{tenantId}
+                JOIN sys_user u ON u.id = l.sys_user_id
+                               AND u.tenant_id = #{tenantId}
+                               AND u.deleted_flag = 0
+               WHERE e.id = er.engineer_id
+                 AND e.tenant_id = #{tenantId}
+                 AND e.deleted_flag = 0
+           )
+        """)
+    int updateStatusForTenant(@Param("id") Long id,
+                              @Param("tenantId") String tenantId,
+                              @Param("fromStatus") String fromStatus,
+                              @Param("toStatus") String toStatus);
+
     @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer e ON e.id = er.engineer_id AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
@@ -104,6 +137,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
 
     /** PWAのFOR UPDATEもtenant所有権をSQLで検証する。 */
     @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer e ON e.id = er.engineer_id AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0 "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
@@ -114,8 +148,14 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
     @Select("""
         <script>
         SELECT er.* FROM t_expense_request er
-        WHERE er.id = #{id}
+            WHERE er.id = #{id}
           AND er.deleted_flag = 0
+          AND EXISTS (
+            SELECT 1 FROM t_engineer owner_engineer
+             WHERE owner_engineer.id = er.engineer_id
+               AND owner_engineer.tenant_id = #{tenantId}
+               AND owner_engineer.deleted_flag = 0
+          )
           AND EXISTS (
             SELECT 1 FROM t_engineer_account_link owner_link
             JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
@@ -169,6 +209,12 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
         WHERE er.expense_date &gt;= #{startDate} AND er.expense_date &lt;= #{endDate}
           AND er.deleted_flag = 0
           AND EXISTS (
+            SELECT 1 FROM t_engineer owner_engineer
+             WHERE owner_engineer.id = er.engineer_id
+               AND owner_engineer.tenant_id = #{tenantId}
+               AND owner_engineer.deleted_flag = 0
+          )
+          AND EXISTS (
             SELECT 1 FROM t_engineer_account_link owner_link
             JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
                  AND owner_user.deleted_flag = 0
@@ -221,6 +267,12 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
         SELECT er.* FROM t_expense_request er
         WHERE er.expense_date >= #{startDate} AND er.expense_date <= #{endDate}
           AND er.deleted_flag = 0
+          AND EXISTS (
+            SELECT 1 FROM t_engineer owner_engineer
+             WHERE owner_engineer.id = er.engineer_id
+               AND owner_engineer.tenant_id = #{tenantId}
+               AND owner_engineer.deleted_flag = 0
+          )
           AND EXISTS (
             SELECT 1 FROM t_engineer_account_link l
             JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0

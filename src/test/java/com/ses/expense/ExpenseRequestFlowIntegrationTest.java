@@ -432,6 +432,7 @@ class ExpenseRequestFlowIntegrationTest {
 
     long createEngineer(Long organizationId) {
         Engineer engineer = Engineer.builder()
+                .tenantId("default")
                 .fullName("経費テスト要員-" + System.nanoTime())
                 .employmentType("正社員")
                 .status("Bench")
@@ -451,6 +452,7 @@ class ExpenseRequestFlowIntegrationTest {
         EngineerAccountLink link = new EngineerAccountLink();
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
+        link.setTenantId("default");
         engineerAccountLinkMapper.insert(link);
     }
 

@@ -14,6 +14,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.AssetAlertService;
 import com.ses.service.NotificationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int checkOverdueAssignments() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         LocalDate today = LocalDate.now();
         List<AssetAssignment> activeList = assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
                 .eq(AssetAssignment::getStatus, "ACTIVE")
@@ -95,6 +97,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int checkExpiringLeases() {
+        AccountingTenantContextHolder.requireTenantContext();
         LocalDate today = LocalDate.now();
         LocalDate threshold = today.plusDays(30);
 
@@ -128,6 +131,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void notifyLostAssetIncident(Asset asset, AssetLostIncident incident) {
+        AccountingTenantContextHolder.requireTenantContext();
         if (asset == null) return;
         if (incident == null || incident.getId() == null) return;
         String dedupeKey = "asset:lost:" + incident.getId();
@@ -153,6 +157,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
 
     @Override
     public List<AssetAssignment> getOverdueAssignments() {
+        AccountingTenantContextHolder.requireTenantContext();
         LocalDate today = LocalDate.now();
         return assetAssignmentMapper.selectList(new LambdaQueryWrapper<AssetAssignment>()
                 .and(w -> w.eq(AssetAssignment::getStatus, "OVERDUE")
@@ -170,7 +175,9 @@ public class AssetAlertServiceImpl implements AssetAlertService {
         if ("USER".equals(assignment.getAssigneeType())) {
             recipients.add(assignment.getAssigneeId());
         } else if ("ENGINEER".equals(assignment.getAssigneeType())) {
-            EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(assignment.getAssigneeId());
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
+            EngineerAccountLink link = engineerAccountLinkMapper
+                    .selectByEngineerIdAndTenant(assignment.getAssigneeId(), tenantId);
             if (link != null && link.getSysUserId() != null) {
                 recipients.add(link.getSysUserId());
             }
@@ -179,6 +186,7 @@ public class AssetAlertServiceImpl implements AssetAlertService {
         for (Long userId : initial) {
             userOrganizationMapper.selectList(new LambdaQueryWrapper<UserOrganization>()
                             .eq(UserOrganization::getUserId, userId)
+                            .eq(UserOrganization::getTenantId, AccountingTenantContextHolder.requireTenantContext())
                             .eq(UserOrganization::getPrimaryFlag, 1)
                             .le(UserOrganization::getValidFrom, LocalDate.now())
                             .and(w -> w.isNull(UserOrganization::getValidTo).or().ge(UserOrganization::getValidTo, LocalDate.now())))
@@ -193,17 +201,20 @@ public class AssetAlertServiceImpl implements AssetAlertService {
     }
 
     private Set<Long> managementUserIds() {
-        return new LinkedHashSet<>(sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                        .select(SysUser::getId)
-                        .in(SysUser::getRole, List.of("管理者", "HR"))
-                        .eq(SysUser::getStatus, 1))
-                .stream().map(SysUser::getId).filter(java.util.Objects::nonNull).toList());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Set<Long> ids = new LinkedHashSet<>();
+        for (String role : List.of("管理者", "HR")) {
+            ids.addAll(sysUserMapper.selectActiveByRoleAndTenant(role, tenantId).stream()
+                    .map(SysUser::getId).filter(java.util.Objects::nonNull).toList());
+        }
+        return ids;
     }
 
     private void publishToRelevantUsers(String type, String title, String message, String linkUrl,
                                         String dedupeKey, Set<Long> recipientIds) {
         for (Long recipientId : recipientIds) {
-            SysUser recipient = sysUserMapper.selectById(recipientId);
+            SysUser recipient = sysUserMapper.selectByIdAndTenant(
+                    recipientId, AccountingTenantContextHolder.requireTenantContext());
             if (recipient == null || !Integer.valueOf(1).equals(recipient.getStatus())) {
                 continue;
             }

@@ -66,6 +66,7 @@ class ServiceRequestServiceImplTest {
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
         testCustomer = new Customer();
+        testCustomer.setTenantId("default");
         testCustomer.setCompanyName("株式会社テスト顧客CS");
         customerMapper.insert(testCustomer);
     }

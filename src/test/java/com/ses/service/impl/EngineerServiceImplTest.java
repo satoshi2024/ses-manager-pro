@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 
 /**
  * 要員削除時の割当解放の順序（review-fixes G3）を検証する単体テスト。
@@ -40,6 +41,8 @@ class EngineerServiceImplTest {
     private com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
     @Mock
     private com.ses.mapper.SysUserMapper sysUserMapper;
+    @Mock
+    private com.ses.service.security.TenantOwnershipResolver tenantOwnershipResolver;
 
     @Mock
     private com.ses.service.security.ScopeChangeInvalidator scopeChangeInvalidator;
@@ -49,17 +52,22 @@ class EngineerServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new EngineerServiceImpl(contractMapper, proposalMapper, engineerSalesService,
-                engineerAccountLinkService, sysUserMapper);
+                engineerAccountLinkService, sysUserMapper, tenantOwnershipResolver);
         ReflectionTestUtils.setField(service, "baseMapper", engineerMapper);
         ReflectionTestUtils.setField(service, "scopeChangeInvalidator", scopeChangeInvalidator);
         // 削除ガードは通過する状態にする
         when(contractMapper.selectCount(any())).thenReturn(0L);
         when(proposalMapper.selectCount(any())).thenReturn(0L);
+        AccountingTenantContextHolder.setTenantId("default");
     }
 
     @Test
     void removeById_削除成功時のみ割当を解除する() {
-        when(engineerMapper.deleteById(any(Serializable.class))).thenReturn(1);
+        Engineer current = new Engineer();
+        current.setId(1L);
+        current.setVersion(0);
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(current);
+        when(engineerMapper.deleteByIdForTenant(1L, "default", 0)).thenReturn(1);
 
         assertTrue(service.removeById(1L));
         verify(engineerSalesService, times(1)).releaseAllByEngineerId(1L);
@@ -68,7 +76,11 @@ class EngineerServiceImplTest {
     @Test
     void removeById_削除失敗時は割当を解除しない() {
         // 並行削除等で対象行が既に無く removeById が false を返すケース
-        when(engineerMapper.deleteById(any(Serializable.class))).thenReturn(0);
+        Engineer current = new Engineer();
+        current.setId(1L);
+        current.setVersion(0);
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(current);
+        when(engineerMapper.deleteByIdForTenant(1L, "default", 0)).thenReturn(0);
 
         assertFalse(service.removeById(1L));
         verify(engineerSalesService, never()).releaseAllByEngineerId(any());
@@ -83,8 +95,8 @@ class EngineerServiceImplTest {
     void updateWithStatusGuard_所属組織変更時はscope世代を進める() {
         Engineer old = Engineer.builder().fullName("要員A").organizationId(100L).build();
         old.setId(1L);
-        when(engineerMapper.selectById(1L)).thenReturn(old);
-        when(engineerMapper.updateById(any(Engineer.class))).thenReturn(1);
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(old);
+        when(engineerMapper.updateByIdForTenant(any(Engineer.class), eq("default"), eq(0))).thenReturn(1);
 
         Engineer changed = Engineer.builder().fullName("要員A").organizationId(200L).build();
         changed.setId(1L);
@@ -100,8 +112,8 @@ class EngineerServiceImplTest {
     void updateWithStatusGuard_所属組織が変わらなければscope世代を進めない() {
         Engineer old = Engineer.builder().fullName("要員A").organizationId(100L).build();
         old.setId(1L);
-        when(engineerMapper.selectById(1L)).thenReturn(old);
-        when(engineerMapper.updateById(any(Engineer.class))).thenReturn(1);
+        when(tenantOwnershipResolver.selectEngineer("default", 1L)).thenReturn(old);
+        when(engineerMapper.updateByIdForTenant(any(Engineer.class), eq("default"), eq(0))).thenReturn(1);
 
         Engineer unchanged = Engineer.builder().fullName("要員A").organizationId(100L).build();
         unchanged.setId(1L);

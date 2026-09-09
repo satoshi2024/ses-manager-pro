@@ -18,7 +18,7 @@ class Nf02Nf03V156MigrationContractTest {
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
 
     @Test
-    void NF02_NF03の追加migrationがV156からV163まで順序通りに存在する() throws Exception {
+    void NF02_NF03の追加migrationがV156からV167まで順序通りに存在する() throws Exception {
         List<String> expected = List.of(
                 "V156__nf02_nf03_boundary_repair.sql",
                 "V157__nf02_nf03_tenant_attachment_notification_boundary.sql",
@@ -27,7 +27,11 @@ class Nf02Nf03V156MigrationContractTest {
                 "V160__task_notification_tenant_retry_state.sql",
                 "V161__expense_accounting_job_tenant_scope.sql",
                 "V162__notification_outbox_tenant_scope.sql",
-                "V163__nf02_nf03_explicit_customer_engineer_ownership.sql");
+                "V163__nf02_nf03_explicit_customer_engineer_ownership.sql",
+                "V164__nf02_nf03_ownership_repair_operations.sql",
+                "V165__nf03_bp_availability_tenant_scope.sql",
+                "V166__nf02_nf03_engineer_account_link_tenant_repair.sql",
+                "V167__nf03_ai_recommendation_tenant_records.sql");
         for (String name : expected) {
             assertTrue(Files.exists(MIGRATION_ROOT.resolve(name)), name);
         }
@@ -37,10 +41,10 @@ class Nf02Nf03V156MigrationContractTest {
                     .map(Pattern.compile("^V(\\d+)(__|_).*")::matcher)
                     .filter(java.util.regex.Matcher::matches)
                     .map(m -> Integer.valueOf(m.group(1)))
-                    .filter(v -> v >= 156 && v <= 163)
+                    .filter(v -> v >= 156 && v <= 167)
                     .sorted()
                     .toList();
-            assertEquals(List.of(156, 157, 158, 159, 160, 161, 162, 163), versions);
+            assertEquals(List.of(156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167), versions);
         }
     }
 
@@ -71,6 +75,10 @@ class Nf02Nf03V156MigrationContractTest {
         String v161 = read("V161__expense_accounting_job_tenant_scope.sql");
         String v162 = read("V162__notification_outbox_tenant_scope.sql");
         String v163 = read("V163__nf02_nf03_explicit_customer_engineer_ownership.sql");
+        String v164 = read("V164__nf02_nf03_ownership_repair_operations.sql");
+        String v165 = read("V165__nf03_bp_availability_tenant_scope.sql");
+        String v166 = read("V166__nf02_nf03_engineer_account_link_tenant_repair.sql");
+        String v167 = read("V167__nf03_ai_recommendation_tenant_records.sql");
 
         assertTrue(v158.contains("ALTER TABLE m_certification"));
         assertTrue(v158.contains("version INT NOT NULL DEFAULT 0"));
@@ -96,6 +104,28 @@ class Nf02Nf03V156MigrationContractTest {
         assertTrue(v163.contains("idx_engineer_tenant_population"));
         assertFalse(v163.contains("SET c.tenant_id = 'default'"));
         assertFalse(v163.contains("SET e.tenant_id = 'default'"));
+        assertTrue(v164.contains("status VARCHAR(32) NOT NULL DEFAULT 'PENDING'"));
+        assertTrue(v164.contains("repair_tenant_id"));
+        assertTrue(v164.contains("resolution_reason"));
+        assertTrue(v164.contains("evidence"));
+        assertTrue(v164.contains("resolved_at"));
+        assertTrue(v164.contains("resolved_by"));
+        assertTrue(v164.contains("idx_nf02_nf03_repair_status_age"));
+        assertTrue(v165.contains("ALTER TABLE t_bp_availability"));
+        assertTrue(v165.contains("ADD COLUMN tenant_id VARCHAR(100) NULL"));
+        assertTrue(v165.contains("BP_AVAILABILITY"));
+        assertTrue(v165.contains("idx_bp_availability_tenant_population"));
+        assertTrue(v166.contains("ENGINEER_ACCOUNT_LINK"));
+        assertTrue(v166.contains("TENANT_UNRESOLVED"));
+        assertTrue(v166.contains("idx_engineer_account_link_tenant_owner"));
+        assertTrue(v167.contains("t_ai_recommendation_item"));
+        assertTrue(v167.contains("t_ai_feedback"));
+        assertTrue(v167.contains("t_ai_outcome"));
+        assertTrue(v167.contains("__ses_check_v167_ai_tenant_records"));
+        assertTrue(v167.contains("fk_ai_item_run_tenant"));
+        assertTrue(v167.contains("fk_ai_feedback_item_tenant"));
+        assertTrue(v167.contains("fk_ai_outcome_item_tenant"));
+        assertFalse(v167.contains("tenant_id = 'default'"));
     }
 
     private String read(String name) throws Exception {

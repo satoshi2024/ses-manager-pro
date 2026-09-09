@@ -1,6 +1,5 @@
 package com.ses.controller.api;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.common.util.PageUtils;
@@ -34,10 +33,7 @@ public class ResumeIngestionApiController {
             @RequestParam(defaultValue = "10") long size,
             @RequestParam(required = false) String status) {
         Page<ResumeIngestion> page = PageUtils.safePage(current, size);
-        LambdaQueryWrapper<ResumeIngestion> wrapper = new LambdaQueryWrapper<ResumeIngestion>()
-                .eq(status != null && !status.isBlank(), ResumeIngestion::getStatus, status)
-                .orderByDesc(ResumeIngestion::getCreatedAt);
-        return ApiResult.success(resumeIngestionService.page(page, wrapper));
+        return ApiResult.success(resumeIngestionService.pageForCurrentTenant(page, status));
     }
 
     /**
@@ -55,7 +51,7 @@ public class ResumeIngestionApiController {
      */
     @GetMapping("/{id}")
     public ApiResult<ResumeIngestion> getById(@PathVariable Long id) {
-        return ApiResult.success(resumeIngestionService.getById(id));
+        return ApiResult.success(resumeIngestionService.getForCurrentTenant(id));
     }
 
     /**

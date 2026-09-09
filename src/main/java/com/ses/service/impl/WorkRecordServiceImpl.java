@@ -20,6 +20,7 @@ import com.ses.common.util.PageUtils;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationService;
 import com.ses.service.WorkRecordService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.billing.SettlementCalculator;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.RequiredArgsConstructor;
@@ -246,8 +247,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         // 現在値は当月の新規入力に限って利用し、過去月は明示された履歴または
         // platform-invariantsで定めた既知の直属account-linkだけを参照する。
         if (YearMonth.from(asOf).equals(YearMonth.now())) {
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
             com.ses.entity.Engineer engineer = engineerMapper == null ? null
-                    : engineerMapper.selectById(contract.getEngineerId());
+                    : engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenantId);
             if (engineer != null && engineer.getOrganizationId() != null) {
                 if (allowedOrganizationIds.contains(engineer.getOrganizationId())) {
                     return;
@@ -266,7 +268,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (engineerAccountLinkMapper == null) {
             return false;
         }
-        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper
+                .selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
         Set<Long> directUserIds = organizationScopeService.allowedDirectUserIds(asOf);
         return link != null && directUserIds != null && directUserIds.contains(link.getSysUserId());
     }
@@ -511,8 +515,9 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (record == null || contract == null || Integer.valueOf(1).equals(record.getAccountingDimensionFrozen())) {
             return;
         }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         com.ses.entity.Engineer engineer = engineerMapper == null || contract.getEngineerId() == null
-                ? null : engineerMapper.selectById(contract.getEngineerId());
+                ? null : engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenantId);
         LocalDate asOf = record.getWorkMonth() == null || record.getWorkMonth().isBlank()
                 ? LocalDate.now().withDayOfMonth(1)
                 : com.ses.common.util.DateUtils.parseYearMonth(record.getWorkMonth()).atDay(1);
@@ -522,9 +527,10 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         if (engineerAccountLinkMapper != null && userOrganizationMapper != null
                 && contract.getEngineerId() != null) {
             com.ses.entity.EngineerAccountLink link = engineerAccountLinkMapper
-                    .selectByEngineerId(contract.getEngineerId());
+                    .selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
             if (link != null && link.getSysUserId() != null) {
-                organizationId = userOrganizationMapper.selectPrimaryOrganizationId(link.getSysUserId(), asOf);
+                organizationId = userOrganizationMapper.selectPrimaryOrganizationIdByTenant(
+                        tenantId, link.getSysUserId(), asOf);
             }
         }
         // 直接所属しか持たない要員は当月分だけ現在マスタを使う。過去月に履歴が
@@ -1040,12 +1046,13 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     /** 契約IDから稼働要員に紐付くログインユーザーIDを解決する（未紐付けは null）。 */
     private Long resolveEngineerUserId(Long contractId) {
-        Contract contract = contractMapper.selectById(contractId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractMapper.selectByIdForTenant(contractId, tenantId);
         if (contract == null || contract.getEngineerId() == null) {
             return null;
         }
         com.ses.entity.EngineerAccountLink link =
-                engineerAccountLinkMapper.selectByEngineerId(contract.getEngineerId());
+                engineerAccountLinkMapper.selectByEngineerIdAndTenant(contract.getEngineerId(), tenantId);
         return link == null ? null : link.getSysUserId();
     }
 }

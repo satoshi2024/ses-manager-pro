@@ -9,6 +9,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import com.ses.config.LoginUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.ArrayList;
@@ -50,14 +54,14 @@ class EngineerStatusFilterTest extends BaseIntegrationTest {
         addRows(rows, "提案中", 22);
         addRows(rows, "退場予定", 15);
         jdbcTemplate.batchUpdate(
-                "INSERT INTO t_engineer (full_name, employment_type, status, deleted_flag) VALUES (?, '正社員', ?, 0)",
+                "INSERT INTO t_engineer (full_name, employment_type, status, tenant_id, deleted_flag) VALUES (?, '正社員', ?, 'default', 0)",
                 rows);
     }
 
     @Test
-    @WithMockUser(roles = "管理者")
     void Benchは32件を返す() throws Exception {
         mockMvc.perform(get("/api/engineers")
+                        .with(tenantAuthentication())
                         .param("fullName", FIXTURE_PREFIX)
                         .param("status", "Bench")
                         .param("size", "10"))
@@ -68,9 +72,9 @@ class EngineerStatusFilterTest extends BaseIntegrationTest {
 
     @ParameterizedTest
     @CsvSource({"稼動中,131", "提案中,22", "退場予定,15", "未知,0"})
-    @WithMockUser(roles = "管理者")
     void status別件数と未知値0件を維持する(String filter, long expected) throws Exception {
         mockMvc.perform(get("/api/engineers")
+                        .with(tenantAuthentication())
                         .param("fullName", FIXTURE_PREFIX)
                         .param("status", filter))
                 .andExpect(status().isOk())
@@ -81,5 +85,19 @@ class EngineerStatusFilterTest extends BaseIntegrationTest {
         for (int i = 1; i <= count; i++) {
             rows.add(new Object[]{FIXTURE_PREFIX + status + "-" + i, status});
         }
+    }
+
+    private RequestPostProcessor tenantAuthentication() {
+        com.ses.entity.SysUser user = new com.ses.entity.SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setPassword("password");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
     }
 }

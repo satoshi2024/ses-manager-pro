@@ -136,10 +136,14 @@ class ExpenseManagementTenantIsolationTest {
                 username, username, "管理者", tenantId);
         long userId = jdbcTemplate.queryForObject("SELECT id FROM sys_user WHERE username = ?", Long.class, username);
         jdbcTemplate.update("INSERT INTO t_engineer "
-                        + "(full_name, employment_type, status, created_by) VALUES (?, '正社員', 'Bench', ?)",
-                engineerName, userId);
+                        + "(tenant_id, full_name, employment_type, status, created_by) "
+                        + "VALUES (?, ?, '正社員', 'Bench', ?)",
+                tenantId, engineerName, userId);
         long engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?",
                 Long.class, engineerName);
+        // 共有H2で同一IDのlegacy linkが残っている場合も、今回の一意なownerを明示する。
+        jdbcTemplate.update("DELETE FROM t_engineer_account_link WHERE engineer_id = ? OR sys_user_id = ?",
+                engineerId, userId);
         jdbcTemplate.update("INSERT INTO t_engineer_account_link (tenant_id, engineer_id, sys_user_id) VALUES (?, ?, ?)",
                 tenantId, engineerId, userId);
         String expenseNo = "T-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);

@@ -21,6 +21,7 @@ import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiEvaluationMetrics;
 import com.ses.service.ai.AiEvaluationQueryService;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -47,12 +48,14 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
 
     @Override
     public List<AiEvaluation> listEvaluations() {
+        AccountingTenantContextHolder.requireTenantContext();
         return evaluationMapper.selectList(new LambdaQueryWrapper<AiEvaluation>()
                 .orderByDesc(AiEvaluation::getId));
     }
 
     @Override
     public AiEvaluationDashboardDto dashboard() {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         AiEvaluationDashboardDto dto = new AiEvaluationDashboardDto();
         int minSeg = aiConfig.getEvaluation() == null ? 5 : aiConfig.getEvaluation().getMinSegmentCount();
         dto.setMinSegmentCount(minSeg);
@@ -70,6 +73,7 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
 
         List<AiArtifactVersion> versions = versionMapper.selectList(null);
         LambdaQueryWrapper<AiRecommendationRun> runQw = new LambdaQueryWrapper<AiRecommendationRun>()
+                .eq(AiRecommendationRun::getTenantId, tenantId)
                 .ge(AiRecommendationRun::getCreatedAt, since);
         if (actor != null) {
             runQw.eq(AiRecommendationRun::getActorUserId, actor);
@@ -80,15 +84,18 @@ public class AiEvaluationQueryServiceImpl implements AiEvaluationQueryService {
         List<Long> runIds = runs.stream().map(AiRecommendationRun::getId).toList();
         List<AiRecommendationItem> items = runIds.isEmpty() ? List.of()
                 : itemMapper.selectList(new LambdaQueryWrapper<AiRecommendationItem>()
+                .eq(AiRecommendationItem::getTenantId, tenantId)
                 .in(AiRecommendationItem::getRunId, runIds));
         Map<Long, List<AiRecommendationItem>> itemsByRun = items.stream()
                 .collect(Collectors.groupingBy(AiRecommendationItem::getRunId));
         List<Long> itemIds = items.stream().map(AiRecommendationItem::getId).toList();
         List<AiFeedback> feedbacks = itemIds.isEmpty() ? List.of()
                 : feedbackMapper.selectList(new LambdaQueryWrapper<AiFeedback>()
+                .eq(AiFeedback::getTenantId, tenantId)
                 .in(AiFeedback::getItemId, itemIds));
         List<AiOutcome> outcomes = itemIds.isEmpty() ? List.of()
                 : outcomeMapper.selectList(new LambdaQueryWrapper<AiOutcome>()
+                .eq(AiOutcome::getTenantId, tenantId)
                 .in(AiOutcome::getItemId, itemIds));
 
         Map<Long, List<AiFeedback>> fbByItem = feedbacks.stream()

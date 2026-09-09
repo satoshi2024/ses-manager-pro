@@ -16,6 +16,8 @@ import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.ProposalDraftService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,33 +45,33 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
     private final DataScopeService dataScopeService;
     private final AiExecutionGateway aiExecutionGateway;
     private final ObjectMapper objectMapper;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     @Override
     public ProposalDraftDto generateDraft(Long engineerId, Long projectId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (dataScopeService.isScoped()) {
             dataScopeService.assertAllowedEngineer(engineerId);
             dataScopeService.assertAllowedProject(projectId);
         }
 
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
         if (engineer == null) {
             throw BusinessException.of(404, "error.engineer.notFound");
         }
 
-        Project project = projectMapper.selectById(projectId);
+        Project project = projectMapper.selectByIdForTenant(projectId, tenantId);
         if (project == null) {
             throw BusinessException.of(404, "error.project.notFound");
         }
 
-        List<EngineerSkillDetailDto> engSkills = engineerSkillMapper.selectDetailByEngineerId(engineerId);
+        List<EngineerSkillDetailDto> engSkills = engineerSkillMapper.selectDetailByEngineerIdAndTenant(engineerId, tenantId);
 
         Set<Long> engSkillIds = engSkills.stream()
                 .map(EngineerSkillDetailDto::getSkillId)
                 .collect(Collectors.toSet());
 
-        List<ProjectSkill> pSkills = projectSkillMapper.selectList(
-                new LambdaQueryWrapper<ProjectSkill>().eq(ProjectSkill::getProjectId, projectId)
-        );
+        List<ProjectSkill> pSkills = projectSkillMapper.selectListForTenant(List.of(projectId), tenantId);
         Set<Long> mustIds = pSkills.stream()
                 .filter(s -> Integer.valueOf(1).equals(s.getIsMust()))
                 .map(ProjectSkill::getSkillId)

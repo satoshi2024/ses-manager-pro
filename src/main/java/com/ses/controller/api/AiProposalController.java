@@ -2,6 +2,7 @@ package com.ses.controller.api;
 
 import com.ses.common.result.ApiResult;
 import com.ses.dto.ai.ProposalDraftDto;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.ai.ProposalDraftService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class AiProposalController {
      */
     @PostMapping("/proposal-draft")
     public ApiResult<ProposalDraftDto> generateDraft(@RequestBody ProposalDraftRequest request) {
+        AccountingTenantContextHolder.requireTenantContext();
         if (request.getEngineerId() == null || request.getProjectId() == null) {
             return ApiResult.error(400, "要員IDと案件IDは必須です");
         }

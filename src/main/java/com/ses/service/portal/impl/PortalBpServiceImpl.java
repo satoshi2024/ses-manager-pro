@@ -84,6 +84,7 @@ public class PortalBpServiceImpl implements PortalBpService {
                 PageUtils.safePage(current, size),
                 new LambdaQueryWrapper<BpAvailability>()
                         .eq(BpAvailability::getBpCompanyId, bpCompanyId)
+                        .eq(BpAvailability::getTenantId, tenantId())
                         .orderByDesc(BpAvailability::getId));
         Page<PortalBpAvailabilityDto> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(this::toAvailabilityDto).toList());
@@ -95,8 +96,9 @@ public class PortalBpServiceImpl implements PortalBpService {
     public PortalBpAvailabilityDto createAvailability(Long bpCompanyId, PortalBpAvailabilityRequest request) {
         requireBpTenant(bpCompanyId);
         BpAvailability entity = new BpAvailability();
+        entity.setTenantId(tenantId());
         entity.setBpCompanyId(bpCompanyId);
-        BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
         entity.setBpCompany(company == null ? null : company.getLegalName());
         entity.setInitialName(request.getInitialName().trim());
         entity.setSkillsJson(request.getSkillsJson());
@@ -116,7 +118,8 @@ public class PortalBpServiceImpl implements PortalBpService {
         requireBpTenant(bpCompanyId);
         BpAvailability existing = availabilityMapper.selectOne(new LambdaQueryWrapper<BpAvailability>()
                 .eq(BpAvailability::getId, availabilityId)
-                .eq(BpAvailability::getBpCompanyId, bpCompanyId));
+                .eq(BpAvailability::getBpCompanyId, bpCompanyId)
+                .eq(BpAvailability::getTenantId, tenantId()));
         if (existing == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -145,6 +148,7 @@ public class PortalBpServiceImpl implements PortalBpService {
         int updated = availabilityMapper.update(null, new UpdateWrapper<BpAvailability>()
                 .eq("id", availabilityId)
                 .eq("bp_company_id", bpCompanyId)
+                .eq("tenant_id", tenantId())
                 .eq("status", AVAILABILITY_ACTIVE)
                 .set("status", AVAILABILITY_EXPIRED));
         if (updated == 0) {
@@ -205,7 +209,7 @@ public class PortalBpServiceImpl implements PortalBpService {
         String businessKey = "BP_PORTAL_SUBMISSION:" + paymentId + ":" + contentHash;
         // t_document_version.created_by はNOT NULL。portal principalには内部user IDがないため、
         // BPの担当営業（内部user）を明示的に作成者として指定する（監査の一貫性。R4.2）
-        BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
         DocumentRegisterRequest req = DocumentRegisterRequest.builder()
                 .tenantId(tenantId())
                 .documentType("BP_SUBMISSION")
@@ -333,8 +337,8 @@ public class PortalBpServiceImpl implements PortalBpService {
     }
 
     private void requireBpTenant(Long bpCompanyId) {
-        BpCompany company = bpCompanyMapper.selectById(bpCompanyId);
-        if (company == null || !legacyTenantId().equals(company.getTenantId())) {
+        BpCompany company = bpCompanyMapper.selectByIdForTenant(bpCompanyId, legacyTenantId());
+        if (company == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
     }

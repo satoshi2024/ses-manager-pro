@@ -272,6 +272,7 @@ public class AccountingReconciliationTest {
 
         // 3. 要員立替経費 (Population 3)
         Engineer eng = new Engineer();
+        eng.setTenantId("default");
         eng.setFullName("立替太郎");
         eng.setEmploymentType("正社員");
         engineerMapper.insert(eng);

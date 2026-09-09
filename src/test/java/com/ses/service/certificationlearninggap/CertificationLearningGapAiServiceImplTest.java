@@ -75,7 +75,7 @@ class CertificationLearningGapAiServiceImplTest {
                 42L, "対象", "稼動中", "ACTIVE", List.of(), List.of(), null, null, 88L, List.of(item)));
         when(skillGapService.calculate(any())).thenReturn(gap);
         when(courseSkillMapper.selectList(any())).thenReturn(List.of(relation));
-        when(courseMapper.selectBatchIds(any())).thenReturn(List.of(active));
+        when(courseMapper.selectList(any())).thenReturn(List.of(active));
         Project project = new Project();
         project.setId(42L);
         when(projectMapper.selectByIdAndTenant(9L, "default")).thenReturn(project);

@@ -164,10 +164,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 2. SLAクロック一括取得。created_atはround開始時刻であり、breach時刻の代替にしない。
         List<Long> allRequestIds = allRequests.stream().map(ServiceRequest::getId).toList();
         List<ServiceSlaClock> allClocks = allRequestIds.isEmpty() ? Collections.emptyList() :
-                slaClockMapper.selectList(
-                        new LambdaQueryWrapper<ServiceSlaClock>()
-                                .in(ServiceSlaClock::getServiceRequestId, allRequestIds)
-                );
+                slaClockMapper.selectByRequestIdsForTenant(allRequestIds, tenantId);
 
         Set<Long> breachedRequestIds = new HashSet<>();
         Set<Long> historicalUnknownRequestIds = new HashSet<>();
@@ -184,29 +181,18 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         }
 
         // 3. CSAT回答一括取得 (直近90日)
-        List<CustomerCsat> allCsats = csatMapper.selectList(
-                new LambdaQueryWrapper<CustomerCsat>()
-                        .in(CustomerCsat::getCustomerId, scopedCustomerIds)
-                        .in(!allRequestIds.isEmpty(), CustomerCsat::getServiceRequestId, allRequestIds)
-                        .ge(CustomerCsat::getAnsweredAt, ninetyDaysAgo)
-        );
+        List<CustomerCsat> allCsats = allRequestIds.isEmpty() ? Collections.emptyList()
+                : csatMapper.selectByCustomersForTenant(scopedCustomerIds, allRequestIds, ninetyDaysAgo, tenantId);
         Map<Long, List<CustomerCsat>> csatByCustomer = allCsats.stream()
                 .collect(Collectors.groupingBy(CustomerCsat::getCustomerId));
 
         // 4. 定例会(QBR)記録一括取得
-        List<CustomerQbr> allQbrs = qbrMapper.selectList(
-                new LambdaQueryWrapper<CustomerQbr>()
-                        .in(CustomerQbr::getCustomerId, scopedCustomerIds)
-        );
+        List<CustomerQbr> allQbrs = qbrMapper.selectByCustomerIdsForTenant(scopedCustomerIds, tenantId);
         Map<Long, List<CustomerQbr>> allQbrByCustomer = allQbrs.stream()
                 .collect(Collectors.groupingBy(CustomerQbr::getCustomerId));
 
         // 5. 売掛金延滞(Invoice)一括取得
-        List<Invoice> allInvoices = invoiceMapper.selectList(
-                new LambdaQueryWrapper<Invoice>()
-                        .in(Invoice::getCustomerId, scopedCustomerIds)
-                        .eq(Invoice::getDeletedFlag, 0)
-        );
+        List<Invoice> allInvoices = invoiceMapper.selectByCustomerIdsForTenant(scopedCustomerIds, tenantId);
         Map<Long, List<Invoice>> allInvoicesByCustomer = allInvoices.stream()
                 .collect(Collectors.groupingBy(Invoice::getCustomerId));
 

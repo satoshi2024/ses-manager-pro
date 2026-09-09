@@ -39,11 +39,17 @@ public class ResumeIngestionServiceImplTest {
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         org.springframework.test.util.ReflectionTestUtils.setField(resumeIngestionService, "baseMapper", baseMapper);
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
             new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""), 
             ResumeIngestion.class
         );
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -53,7 +59,7 @@ public class ResumeIngestionServiceImplTest {
         job.setId(jobId);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
         when(baseMapper.update(isNull(), any())).thenReturn(1);
 
         resumeIngestionService.reject(jobId, "NG");
@@ -77,7 +83,7 @@ public class ResumeIngestionServiceImplTest {
         job.setId(jobId);
         job.setStatus("確定済");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
         when(baseMapper.update(isNull(), any())).thenReturn(0); // conflict
 
         BusinessException ex = assertThrows(BusinessException.class, () -> {
@@ -93,7 +99,7 @@ public class ResumeIngestionServiceImplTest {
         job.setId(jobId);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
         when(baseMapper.update(isNull(), any())).thenReturn(1);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
@@ -140,7 +146,7 @@ public class ResumeIngestionServiceImplTest {
         job.setStatus("確定済");
         job.setConvertedEngineerId(99L);
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
 
@@ -158,7 +164,7 @@ public class ResumeIngestionServiceImplTest {
         job.setId(jobId);
         job.setStatus("要確認");
 
-        when(baseMapper.selectById(jobId)).thenReturn(job);
+        when(baseMapper.selectByIdForTenant(jobId, "default")).thenReturn(job);
 
         com.ses.dto.resume.ReviewedResumeDto dto = new com.ses.dto.resume.ReviewedResumeDto();
         com.ses.dto.resume.ReviewedResumeDto.EngineerPart ep = new com.ses.dto.resume.ReviewedResumeDto.EngineerPart();

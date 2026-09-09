@@ -10,6 +10,7 @@ import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiFeedbackService;
 import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,14 +35,15 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AiFeedback record(Long itemId, String decision, String reasonCode, String comment) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (itemId == null) {
             throw new BusinessException(400, "itemId は必須です");
         }
-        AiRecommendationItem item = itemMapper.selectById(itemId);
+        AiRecommendationItem item = itemMapper.selectByIdAndTenant(itemId, tenantId);
         if (item == null) {
             throw new BusinessException(404, "推薦候補が見つかりません");
         }
-        AiRecommendationRun run = runMapper.selectById(item.getRunId());
+        AiRecommendationRun run = runMapper.selectByIdAndTenant(item.getRunId(), tenantId);
         if (run == null) {
             throw new BusinessException(404, "推薦候補が見つかりません");
         }
@@ -53,6 +55,7 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
             throw new BusinessException(400, "reasonCode が不正です");
         }
         AiFeedback feedback = new AiFeedback();
+        feedback.setTenantId(tenantId);
         feedback.setItemId(itemId);
         feedback.setDecision(decision == null || decision.isBlank() ? null : decision);
         feedback.setReasonCode(reasonCode == null || reasonCode.isBlank() ? null : reasonCode);
@@ -65,8 +68,7 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
         feedback.setDecidedAt(LocalDateTime.now());
         feedbackMapper.insert(feedback);
         if ("ACCEPT".equals(feedback.getDecision())) {
-            item.setSelectedFlag(1);
-            itemMapper.updateById(item);
+            itemMapper.updateSelectedByIdAndTenant(item.getId(), tenantId, 1);
         }
         return feedback;
     }

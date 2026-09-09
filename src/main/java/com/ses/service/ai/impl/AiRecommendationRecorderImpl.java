@@ -12,12 +12,15 @@ import com.ses.entity.Project;
 import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.mapper.BpAvailabilityMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.service.ai.AiAllowlistFields;
 import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.AiRecommendationRecorder;
+import com.ses.service.accounting.AccountingTenantContextHolder;
+import com.ses.service.security.TenantOwnershipResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,7 +43,9 @@ public class AiRecommendationRecorderImpl implements AiRecommendationRecorder {
     private final EngineerMapper engineerMapper;
     private final ProjectMapper projectMapper;
     private final EngineerSkillMapper engineerSkillMapper;
+    private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -49,6 +54,7 @@ public class AiRecommendationRecorderImpl implements AiRecommendationRecorder {
         if (results == null || results.isEmpty()) {
             return null;
         }
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         AiArtifactVersion active = versionMapper.selectOne(new LambdaQueryWrapper<AiArtifactVersion>()
                 .eq(AiArtifactVersion::getUseCase, useCase)
                 .eq(AiArtifactVersion::getStatus, "ACTIVE")
@@ -57,16 +63,21 @@ public class AiRecommendationRecorderImpl implements AiRecommendationRecorder {
             return null;
         }
         MatchResultDto first = results.get(0);
+        if (first == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "AI推薦候補が不正です");
+        }
         Long engineerId = sourceEngineerId != null ? sourceEngineerId : first.getEngineerId();
         Long projectId = sourceProjectId != null ? sourceProjectId : first.getProjectId();
+        validateTargetTenant(sourceEngineerId, sourceProjectId, tenantId);
         Map<String, Object> masked = AiPiiMasker.mask(AiAllowlistFields.merge(
-                engineerFields(engineerId),
-                projectFields(projectId)));
+                engineerFields(tenantId, engineerId),
+                projectFields(tenantId, projectId)));
         String summaryJson = toJson(masked);
 
         String traceId = UUID.randomUUID().toString();
         AiRecommendationRun run = new AiRecommendationRun();
         run.setTraceId(traceId);
+        run.setTenantId(tenantId);
         run.setUseCase(useCase);
         run.setArtifactVersionId(active.getId());
         run.setActorUserId(actorUserId != null ? actorUserId : SecurityUtils.currentUserId());
@@ -79,7 +90,12 @@ public class AiRecommendationRecorderImpl implements AiRecommendationRecorder {
 
         int rank = 1;
         for (MatchResultDto dto : results) {
+            if (dto == null) {
+                throw com.ses.common.exception.BusinessException.of(400, "AI推薦候補が不正です");
+            }
+            validateTargetTenant(dto, tenantId);
             AiRecommendationItem item = new AiRecommendationItem();
+            item.setTenantId(tenantId);
             item.setRunId(run.getId());
             item.setRankNo(rank++);
             if (dto.getEngineerId() != null) {
@@ -108,22 +124,45 @@ public class AiRecommendationRecorderImpl implements AiRecommendationRecorder {
         return traceId;
     }
 
-    private Map<String, Object> engineerFields(Long engineerId) {
+    private void validateTargetTenant(MatchResultDto dto, String tenantId) {
+        if (dto == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "AI推薦候補が不正です");
+        }
+        validateTargetTenant(dto.getEngineerId(), dto.getProjectId(), tenantId);
+        if (dto.getBpAvailabilityId() != null
+                && bpAvailabilityMapper.selectByIdForTenant(dto.getBpAvailabilityId(), tenantId) == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.scope.notFound");
+        }
+    }
+
+    private void validateTargetTenant(Long engineerId, Long projectId, String tenantId) {
+        if (engineerId != null
+                && tenantOwnershipResolver.selectEngineer(tenantId, engineerId) == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.scope.notFound");
+        }
+        if (projectId != null
+                && projectMapper.selectByIdForTenant(projectId, tenantId) == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "error.scope.notFound");
+        }
+    }
+
+    private Map<String, Object> engineerFields(String tenantId, Long engineerId) {
         if (engineerId == null) {
             return Map.of();
         }
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = tenantOwnershipResolver.selectEngineer(tenantId, engineerId);
         if (engineer == null) {
             return Map.of();
         }
-        return AiAllowlistFields.engineer(engineer, engineerSkillMapper.selectDetailByEngineerId(engineerId));
+        return AiAllowlistFields.engineer(engineer,
+                engineerSkillMapper.selectDetailByEngineerIdAndTenant(engineerId, tenantId));
     }
 
-    private Map<String, Object> projectFields(Long projectId) {
+    private Map<String, Object> projectFields(String tenantId, Long projectId) {
         if (projectId == null) {
             return Map.of();
         }
-        Project project = projectMapper.selectById(projectId);
+        Project project = projectMapper.selectByIdForTenant(projectId, tenantId);
         if (project == null) {
             return Map.of();
         }

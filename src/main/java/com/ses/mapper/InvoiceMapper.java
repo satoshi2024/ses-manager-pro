@@ -9,9 +9,26 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.util.Collection;
 
 @Mapper
 public interface InvoiceMapper extends BaseMapper<Invoice> {
+
+    /** 顧客ヘルス集計用。請求書にtenantを持たせず、m_customer ownershipで限定する。 */
+    @Select("""
+        <script>
+        SELECT i.* FROM t_invoice i
+        INNER JOIN m_customer c ON c.id = i.customer_id
+                               AND c.tenant_id = #{tenantId}
+                               AND c.deleted_flag = 0
+        WHERE i.deleted_flag = 0
+          AND i.customer_id IN
+          <foreach collection="customerIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY i.customer_id, i.id
+        </script>
+        """)
+    List<Invoice> selectByCustomerIdsForTenant(@Param("customerIds") Collection<Long> customerIds,
+                                               @Param("tenantId") String tenantId);
 
     /** 承認最終適用の対象行をロックして取得する。request行→invoice行の順で呼び出す。 */
     @Select("SELECT * FROM t_invoice WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")

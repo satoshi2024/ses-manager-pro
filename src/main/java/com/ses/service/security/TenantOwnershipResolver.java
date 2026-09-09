@@ -5,6 +5,7 @@ import com.ses.entity.Customer;
 import com.ses.entity.Engineer;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -29,13 +30,13 @@ public class TenantOwnershipResolver {
     private final EngineerMapper engineerMapper;
 
     public Set<Long> resolveCustomerIds(String tenantId) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         Set<Long> ids = customerMapper.selectOwnedCustomerIds(tenantId);
         return ids == null ? Set.of() : Set.copyOf(ids);
     }
 
     public List<Customer> selectCustomers(String tenantId, Collection<Long> customerIds, String keyword) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         if (customerIds == null || customerIds.isEmpty()) {
             return Collections.emptyList();
         }
@@ -45,7 +46,7 @@ public class TenantOwnershipResolver {
     }
 
     public Customer selectCustomer(String tenantId, Long customerId) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         if (customerId == null) {
             return null;
         }
@@ -53,20 +54,20 @@ public class TenantOwnershipResolver {
     }
 
     public Set<Long> resolveEngineerIds(String tenantId) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         Set<Long> ids = engineerMapper.selectOwnedEngineerIds(tenantId);
         return ids == null ? Set.of() : Set.copyOf(ids);
     }
 
     public List<Engineer> selectEngineers(String tenantId, Collection<Long> allowedIds,
                                           Long engineerId, String engineerName, String engineerStatus) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         Set<Long> ids = allowedIds == null ? null : Set.copyOf(allowedIds);
         return engineerMapper.selectPopulationForTenant(tenantId, ids, engineerId, engineerName, engineerStatus);
     }
 
     public Engineer selectEngineer(String tenantId, Long engineerId) {
-        requireTenant(tenantId);
+        requireBoundTenant(tenantId);
         if (engineerId == null) {
             return null;
         }
@@ -76,6 +77,14 @@ public class TenantOwnershipResolver {
     private void requireTenant(String tenantId) {
         if (!StringUtils.hasText(tenantId)) {
             throw BusinessException.of(403, "error.tenant.contextRequired");
+        }
+    }
+
+    private void requireBoundTenant(String tenantId) {
+        requireTenant(tenantId);
+        String currentTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (!currentTenant.equals(tenantId.trim())) {
+            throw BusinessException.of(403, "error.tenant.mismatch");
         }
     }
 }
