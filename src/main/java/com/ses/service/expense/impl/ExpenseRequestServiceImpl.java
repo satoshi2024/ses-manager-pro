@@ -27,6 +27,7 @@ import com.ses.service.approval.ApprovalTargetAdapterRegistry;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.service.impl.ExpenseRequestApprovalAdapter;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -68,6 +69,7 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     private final EngineerAccountLinkService engineerAccountLinkService;
     private final NotificationService notificationService;
     private final OrganizationScopeService organizationScopeService;
+    private final DataScopeService dataScopeService;
     private final java.time.Clock clock;
 
     /** 締め済み月の経費変更を全write pathで拒否する共通guard。 */
@@ -81,13 +83,12 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     @Override
     @Transactional(readOnly = true)
     public Page<ExpenseRequestDto> pageForEngineer(Long engineerId, String status, long current, long size) {
-        LambdaQueryWrapper<ExpenseRequest> query = new LambdaQueryWrapper<ExpenseRequest>()
-                .eq(ExpenseRequest::getEngineerId, engineerId)
-                .orderByDesc(ExpenseRequest::getId);
-        if (status != null && !status.isBlank()) {
-            query.eq(ExpenseRequest::getStatus, status);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        if (engineerId == null) {
+            throw BusinessException.of(404, "error.expense.notFound");
         }
-        Page<ExpenseRequest> page = expenseRequestMapper.selectPage(PageUtils.safePage(current, size), query);
+        Page<ExpenseRequest> page = expenseRequestMapper.selectPageForEngineerTenant(
+                PageUtils.safePage(current, size), engineerId, trimToNull(status), tenantId);
         return toDtoPage(page, false);
     }
 
@@ -289,12 +290,9 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
             throw BusinessException.of(404, "error.expense.receiptNotFound");
         }
         // scan=CLEANの最新版のcontentType/元ファイル名を解決する（fail-closed: CLEAN以外は拒否）。
-        List<DocumentVersion> versions = documentVersionMapper.selectList(
-                new LambdaQueryWrapper<DocumentVersion>()
-                        .eq(DocumentVersion::getDocumentId, expense.getReceiptDocumentId())
-                        .orderByDesc(DocumentVersion::getVersionNo)
-                        .last("LIMIT 1"));
-        DocumentVersion version = versions.isEmpty() ? null : versions.get(0);
+        DocumentVersion version = documentVersionMapper.findLatestByTenantAndDocumentId(
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(),
+                expense.getReceiptDocumentId());
         if (version == null || version.getScanStatus() == null || !"CLEAN".equals(version.getScanStatus())) {
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
@@ -311,35 +309,15 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
     @Override
     @Transactional(readOnly = true)
     public Page<ExpenseRequestDto> pageManagement(String engineerName, String status, long current, long size) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Set<Long> scopeIds = managementScopeEngineerIds();
         if (scopeIds != null && scopeIds.isEmpty()) {
             return new Page<>(current <= 0 ? 1 : current, size <= 0 ? PageUtils.DEFAULT_PAGE_SIZE : size);
         }
-        LambdaQueryWrapper<ExpenseRequest> query = new LambdaQueryWrapper<ExpenseRequest>()
-                .orderByDesc(ExpenseRequest::getId);
-        if (scopeIds != null) {
-            query.in(ExpenseRequest::getEngineerId, scopeIds);
-        }
-        if (status != null && !status.isBlank()) {
-            query.eq(ExpenseRequest::getStatus, status);
-        }
-        if (engineerName != null && !engineerName.isBlank()) {
-            Set<Long> nameIds = engineerMapper.selectList(new LambdaQueryWrapper<Engineer>()
-                            .like(Engineer::getFullName, engineerName.trim()))
-                    .stream().map(Engineer::getId).collect(Collectors.toSet());
-            if (nameIds.isEmpty()) {
-                return new Page<>(current <= 0 ? 1 : current, size <= 0 ? PageUtils.DEFAULT_PAGE_SIZE : size);
-            }
-            if (scopeIds != null) {
-                nameIds.retainAll(scopeIds);
-                if (nameIds.isEmpty()) {
-                    return new Page<>(current <= 0 ? 1 : current,
-                            size <= 0 ? PageUtils.DEFAULT_PAGE_SIZE : size);
-                }
-            }
-            query.in(ExpenseRequest::getEngineerId, nameIds);
-        }
-        Page<ExpenseRequest> page = expenseRequestMapper.selectPage(PageUtils.safePage(current, size), query);
+        Page<ExpenseRequest> page = expenseRequestMapper.selectManagementPage(
+                PageUtils.safePage(current, size), tenantId,
+                scopeIds == null ? null : new java.util.ArrayList<>(scopeIds),
+                trimToNull(engineerName), trimToNull(status));
         return toDtoPage(page, true);
     }
 
@@ -439,18 +417,28 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         return require(id);
     }
 
-    /** 管理画面の母集団（design §6.2決定表）: 管理者=全件(null)、マネージャー=組織scope∩DataScope。 */
+    /** 管理画面の母集団: 管理者=現在tenant内全組織、マネージャー=組織scope∩DataScope。 */
     private Set<Long> managementScopeEngineerIds() {
         String role = SecurityUtils.currentRole();
         if (!"管理者".equals(role) && !"マネージャー".equals(role)) {
             // controllerの@PreAuthorizeに加えてservice層でも明示的に拒否する（fail-closed）。
             throw BusinessException.of(403, "error.accessDenied");
         }
-        if ("管理者".equals(role) || organizationScopeService.hasFullAccess()) {
+        if ("管理者".equals(role)) {
             return null;
         }
-        Set<Long> allowed = organizationScopeService.allowedEngineerIds(LocalDate.now(clock));
-        return allowed == null ? Set.of() : new HashSet<>(allowed);
+        Set<Long> organizationIds = organizationScopeService.hasFullAccess()
+                ? null : new HashSet<>(organizationScopeService.allowedEngineerIds(LocalDate.now(clock)));
+        Set<Long> dataScopeIds = dataScopeService.isScoped()
+                ? new HashSet<>(dataScopeService.allowedEngineerIds()) : null;
+        if (organizationIds == null) {
+            return dataScopeIds;
+        }
+        if (dataScopeIds == null) {
+            return organizationIds;
+        }
+        organizationIds.retainAll(dataScopeIds);
+        return organizationIds;
     }
 
     private void assertManagementScope(Long engineerId) {
@@ -500,9 +488,11 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
             // （receipt_document_id=NULLの下書き行からもtoDtoPageが呼ばれる）。
             return new java.util.HashMap<>();
         }
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         List<DocumentVersion> versions = documentVersionMapper.selectList(
                 new LambdaQueryWrapper<DocumentVersion>()
                         .in(DocumentVersion::getDocumentId, documentIds)
+                        .eq(DocumentVersion::getTenantId, tenantId)
                         .orderByDesc(DocumentVersion::getVersionNo));
         Map<Long, Integer> latest = new java.util.HashMap<>();
         for (DocumentVersion version : versions) {
@@ -534,19 +524,17 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (documentId == null) {
             return null;
         }
-        List<DocumentVersion> versions = documentVersionMapper.selectList(
-                new LambdaQueryWrapper<DocumentVersion>()
-                        .eq(DocumentVersion::getDocumentId, documentId)
-                        .orderByDesc(DocumentVersion::getVersionNo)
-                        .last("LIMIT 1"));
-        return versions.isEmpty() ? null : versions.get(0).getVersionNo();
+        DocumentVersion version = documentVersionMapper.findLatestByTenantAndDocumentId(
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext(), documentId);
+        return version == null ? null : version.getVersionNo();
     }
 
     private Map<Long, String> engineerNameOf(Set<Long> engineerIds) {
         if (engineerIds.isEmpty()) {
             return new java.util.HashMap<>();
         }
-        return engineerMapper.selectBatchIds(engineerIds).stream()
+        return engineerMapper.selectByIdsForTenant(engineerIds,
+                        com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()).stream()
                 .collect(Collectors.toMap(Engineer::getId,
                         e -> e.getFullName() == null ? "" : e.getFullName()));
     }
@@ -555,7 +543,8 @@ public class ExpenseRequestServiceImpl implements ExpenseRequestService {
         if (engineerId == null) {
             return null;
         }
-        Engineer engineer = engineerMapper.selectById(engineerId);
+        Engineer engineer = engineerMapper.selectByIdForTenant(engineerId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return engineer == null ? null
                 : (engineer.getFullName() == null ? "" : engineer.getFullName());
     }

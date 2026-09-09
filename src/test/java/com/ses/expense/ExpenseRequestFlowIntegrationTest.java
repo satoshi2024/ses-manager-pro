@@ -369,6 +369,9 @@ class ExpenseRequestFlowIntegrationTest {
         long engineer2 = createEngineer(org2);
         // マネージャーはorg1を主所属として管理する（組織scope=org1配下）
         insertManagerAssignment(manager, org1);
+        // 管理一覧のownership正本（要員account link→sys_user→tenant）もfixtureへ明示する。
+        link(engineer1, admin);
+        link(engineer2, approver);
 
         authenticate(sales, "要員");
         ExpenseRequestService.ExpenseRequestDto e1 = expenseRequestService.createDraft(engineer1,

@@ -6,6 +6,7 @@ import com.ses.entity.Engineer;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.Collection;
 import java.util.List;
 
 @Mapper
@@ -32,6 +33,28 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
             + "WHERE e.id = #{id} AND u.tenant_id = #{tenantId} AND e.deleted_flag = 0")
     Engineer selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
+    /** 経費管理画面の表示名も、一覧SQLと同じtenant ownershipで解決する。 */
+    @Select("""
+        <script>
+        SELECT e.*
+        FROM t_engineer e
+        INNER JOIN t_engineer_account_link l
+                ON l.engineer_id = e.id
+               AND l.tenant_id = #{tenantId}
+        INNER JOIN sys_user u
+                ON u.id = l.sys_user_id
+               AND u.deleted_flag = 0
+               AND u.tenant_id = #{tenantId}
+        WHERE e.deleted_flag = 0
+          AND e.id IN
+          <foreach collection="engineerIds" item="id" open="(" separator="," close=")">
+            #{id}
+          </foreach>
+        </script>
+        """)
+    List<Engineer> selectByIdsForTenant(@org.apache.ibatis.annotations.Param("engineerIds") Collection<Long> engineerIds,
+                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT e.* FROM t_engineer e "
             + "JOIN t_engineer_account_link l ON l.engineer_id = e.id "

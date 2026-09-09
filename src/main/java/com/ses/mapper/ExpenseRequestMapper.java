@@ -1,6 +1,7 @@
 package com.ses.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.entity.ExpenseRequest;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -12,14 +13,84 @@ import java.util.List;
 @Mapper
 public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
 
+    /** 本人の経費一覧も、要員account linkのtenant所有権をSQL内で解決する。 */
+    @Select("""
+        <script>
+        SELECT er.*
+        FROM t_expense_request er
+        INNER JOIN t_engineer_account_link l
+                ON l.engineer_id = er.engineer_id
+               AND l.tenant_id = #{tenantId}
+        INNER JOIN sys_user u
+                ON u.id = l.sys_user_id
+               AND u.deleted_flag = 0
+               AND u.tenant_id = #{tenantId}
+        WHERE er.engineer_id = #{engineerId}
+          AND er.deleted_flag = 0
+          <if test="status != null and status != ''">
+            AND er.status = #{status}
+          </if>
+        ORDER BY er.id DESC
+        </script>
+        """)
+    Page<ExpenseRequest> selectPageForEngineerTenant(Page<ExpenseRequest> page,
+                                                      @Param("engineerId") Long engineerId,
+                                                      @Param("status") String status,
+                                                      @Param("tenantId") String tenantId);
+
+    /**
+     * 管理画面の経費一覧。経費本体にtenant列を追加せず、要員account linkとsys_userを
+     * ownershipの正本としてSQL内で解決する。検索・状態・scope・並び順は全てDBへ渡す。
+     */
+    @Select("""
+        <script>
+        SELECT er.*
+        FROM t_expense_request er
+        INNER JOIN t_engineer e ON e.id = er.engineer_id AND e.deleted_flag = 0
+        INNER JOIN t_engineer_account_link l
+                ON l.engineer_id = er.engineer_id
+               AND l.tenant_id = #{tenantId}
+        INNER JOIN sys_user u
+                ON u.id = l.sys_user_id
+               AND u.deleted_flag = 0
+               AND u.tenant_id = #{tenantId}
+        WHERE er.deleted_flag = 0
+          <if test="engineerIds != null">
+            <choose>
+              <when test="engineerIds.size() > 0">
+                AND er.engineer_id IN
+                <foreach collection="engineerIds" item="engineerId" open="(" separator="," close=")">
+                    #{engineerId}
+                </foreach>
+              </when>
+              <otherwise>AND 1 = 0</otherwise>
+            </choose>
+          </if>
+          <if test="engineerName != null and engineerName != ''">
+            AND LOWER(COALESCE(e.full_name, '')) LIKE CONCAT('%', LOWER(#{engineerName}), '%')
+          </if>
+          <if test="status != null and status != ''">
+            AND er.status = #{status}
+          </if>
+        ORDER BY er.id DESC
+        </script>
+        """)
+    Page<ExpenseRequest> selectManagementPage(Page<ExpenseRequest> page,
+                                               @Param("tenantId") String tenantId,
+                                               @Param("engineerIds") List<Long> engineerIds,
+                                               @Param("engineerName") String engineerName,
+                                               @Param("status") String status);
+
     @Select("SELECT er.* FROM t_expense_request er "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
+            + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0")
     ExpenseRequest selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT er.* FROM t_expense_request er "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
+            + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE u.tenant_id = #{tenantId} AND er.status = '承認済' "
             + "AND er.accounting_job_id IS NULL AND er.deleted_flag = 0 "
@@ -34,6 +105,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
     /** PWAのFOR UPDATEもtenant所有権をSQLで検証する。 */
     @Select("SELECT er.* FROM t_expense_request er "
             + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
+            + "AND l.tenant_id = #{tenantId} "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0 FOR UPDATE")
     ExpenseRequest selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
@@ -49,6 +121,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
             JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
                  AND owner_user.deleted_flag = 0
             WHERE owner_link.engineer_id = er.engineer_id
+              AND owner_link.tenant_id = #{tenantId}
               AND owner_user.tenant_id = #{tenantId}
           )
           AND (
@@ -100,6 +173,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
             JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
                  AND owner_user.deleted_flag = 0
             WHERE owner_link.engineer_id = er.engineer_id
+              AND owner_link.tenant_id = #{tenantId}
               AND owner_user.tenant_id = #{tenantId}
           )
           AND (
@@ -151,6 +225,7 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
             SELECT 1 FROM t_engineer_account_link l
             JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0
             WHERE l.engineer_id = er.engineer_id
+              AND l.tenant_id = #{tenantId}
               AND u.tenant_id = #{tenantId}
           )
         ORDER BY er.id
