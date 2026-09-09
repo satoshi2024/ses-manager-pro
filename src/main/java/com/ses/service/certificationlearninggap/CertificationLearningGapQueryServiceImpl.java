@@ -33,6 +33,7 @@ import com.ses.service.certification.CertificationLifecycleStateResolver;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -66,6 +67,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private static final String ON_LEAVE = "ON_LEAVE";
 
     private final EngineerService engineerService;
+    private final TenantOwnershipResolver tenantOwnershipResolver;
     private final DataScopeService dataScopeService;
     private final OrganizationScopeService organizationScopeService;
     private final AuthorizationService authorizationService;
@@ -83,7 +85,9 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private final java.time.Clock clock;
 
     /** 既存の直接生成互換。新しいSpring経路ではClockを注入する。 */
-    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService,
+                                                    TenantOwnershipResolver tenantOwnershipResolver,
+                                                    DataScopeService dataScopeService,
                                                     OrganizationScopeService organizationScopeService,
                                                     AuthorizationService authorizationService,
                                                     EngineerCertificationMapper certificationRecordMapper,
@@ -92,14 +96,16 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                                                     LifecycleCaseMapper lifecycleCaseMapper, SkillGapService skillGapService,
                                                     CertificationNumberCryptoService numberCryptoService,
                                                     DocumentLinkMapper documentLinkMapper, DocumentVersionMapper documentVersionMapper) {
-        this(engineerService, dataScopeService, organizationScopeService, authorizationService, certificationRecordMapper,
+        this(engineerService, tenantOwnershipResolver, dataScopeService, organizationScopeService, authorizationService, certificationRecordMapper,
                 certificationMapper, learningPlanMapper, enrollmentMapper, courseMapper, lifecycleCaseMapper, skillGapService,
                 numberCryptoService, documentLinkMapper, documentVersionMapper, new CertificationLifecycleStateResolver(),
                 java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")));
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService,
+                                                    TenantOwnershipResolver tenantOwnershipResolver,
+                                                    DataScopeService dataScopeService,
                                                     OrganizationScopeService organizationScopeService,
                                                     AuthorizationService authorizationService,
                                                     EngineerCertificationMapper certificationRecordMapper,
@@ -111,6 +117,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                                                     CertificationLifecycleStateResolver lifecycleStateResolver,
                                                     java.time.Clock clock) {
         this.engineerService = engineerService;
+        this.tenantOwnershipResolver = tenantOwnershipResolver;
         this.dataScopeService = dataScopeService;
         this.organizationScopeService = organizationScopeService;
         this.authorizationService = authorizationService;
@@ -172,42 +179,39 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     @Override
     public Set<Long> visibleEngineerIds(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         LocalDate date = asOf == null ? LocalDate.now(clock) : asOf;
         Set<Long> dataIds = dataScopeService.isScoped() ? safeSet(dataScopeService.allowedEngineerIds()) : null;
+        Set<Long> tenantIds = new java.util.HashSet<>(tenantOwnershipResolver.resolveEngineerIds(tenantId));
         if (organizationScopeService.hasFullAccess()) {
-            return dataIds == null ? null : Set.copyOf(dataIds);
+            if (dataIds != null) {
+                tenantIds.retainAll(dataIds);
+            }
+            return Set.copyOf(tenantIds);
         }
-        return organizationScopeService.intersectWithDataScope(
+        Set<Long> scoped = organizationScopeService.intersectWithDataScope(
                 organizationScopeService.allowedEngineerIds(date), dataIds);
+        if (scoped == null) {
+            return Set.copyOf(tenantIds);
+        }
+        tenantIds.retainAll(scoped);
+        return Set.copyOf(tenantIds);
     }
 
     private List<CertificationLearningGapRow> rows(CertificationLearningGapFilter rawFilter,
                                                    Authentication authentication, boolean includeFullNumber) {
         CertificationLearningGapFilter filter = normalize(rawFilter);
         Set<Long> allowedIds = visibleEngineerIds(filter.asOf());
-        if (allowedIds != null && allowedIds.isEmpty()) {
+        if (allowedIds.isEmpty()) {
             return List.of();
         }
         // DB wrapperだけに依存せず、detailのID直指定も同じpopulationでfail closedにする。
-        if (allowedIds != null && filter.engineerId() != null && !allowedIds.contains(filter.engineerId())) {
+        if (filter.engineerId() != null && !allowedIds.contains(filter.engineerId())) {
             return List.of();
         }
-
-        LambdaQueryWrapper<Engineer> engineerQuery = new LambdaQueryWrapper<>();
-        if (allowedIds != null) {
-            engineerQuery.in(Engineer::getId, allowedIds);
-        }
-        if (filter.engineerId() != null) {
-            engineerQuery.eq(Engineer::getId, filter.engineerId());
-        }
-        if (StringUtils.hasText(filter.engineerName())) {
-            engineerQuery.like(Engineer::getFullName, filter.engineerName());
-        }
-        if (StringUtils.hasText(filter.engineerStatus())) {
-            engineerQuery.eq(Engineer::getStatus, filter.engineerStatus());
-        }
-        engineerQuery.orderByDesc(Engineer::getId);
-        List<Engineer> engineers = engineerService.list(engineerQuery);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        List<Engineer> engineers = tenantOwnershipResolver.selectEngineers(
+                tenantId, allowedIds, filter.engineerId(), filter.engineerName(), filter.engineerStatus());
         if (engineers.isEmpty()) {
             return List.of();
         }

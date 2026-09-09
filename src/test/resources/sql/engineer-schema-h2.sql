@@ -23,6 +23,7 @@ CREATE TABLE t_mail_delivery (
 DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id         VARCHAR(100),
   company_name      VARCHAR(200) NOT NULL,
   company_name_kana VARCHAR(200),
   contact_person    VARCHAR(100),
@@ -43,6 +44,7 @@ DROP TABLE IF EXISTS t_engineer CASCADE;
 
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id           VARCHAR(100),
   full_name           VARCHAR(100),
   full_name_kana      VARCHAR(100),
   initial_name        VARCHAR(10),

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.ses.dto.analytics.EngineerCreatedAtDto;
 import com.ses.entity.Engineer;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.Collection;
@@ -26,11 +27,46 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     @Select("SELECT * FROM t_engineer WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Engineer selectByIdForUpdate(Long id);
 
-    /** 経費・会計プレビューの要員もaccount linkのtenant所有権で解決する。 */
+    /** 要員自身の明示的tenant ownershipから母集団を解決する。 */
+    @Select("SELECT id FROM t_engineer WHERE tenant_id = #{tenantId} AND deleted_flag = 0")
+    java.util.Set<Long> selectOwnedEngineerIds(@Param("tenantId") String tenantId);
+
+    /** 資格・学習gapの一覧母集団。tenant、scope、検索条件をすべてSQLで適用する。 */
+    @Select("""
+        <script>
+        SELECT e.*
+        FROM t_engineer e
+        WHERE e.deleted_flag = 0
+          AND e.tenant_id = #{tenantId}
+          <if test="allowedIds != null">
+            <choose>
+              <when test="allowedIds.size() > 0">
+                AND e.id IN
+                <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <otherwise>AND 1 = 0</otherwise>
+            </choose>
+          </if>
+          <if test="engineerId != null">AND e.id = #{engineerId}</if>
+          <if test="engineerName != null and engineerName != ''">
+            AND LOWER(e.full_name) LIKE LOWER(CONCAT('%', #{engineerName}, '%'))
+          </if>
+          <if test="engineerStatus != null and engineerStatus != ''">
+            AND e.status = #{engineerStatus}
+          </if>
+        ORDER BY e.id DESC
+        </script>
+        """)
+    List<Engineer> selectPopulationForTenant(@Param("tenantId") String tenantId,
+                                             @Param("allowedIds") Collection<Long> allowedIds,
+                                             @Param("engineerId") Long engineerId,
+                                             @Param("engineerName") String engineerName,
+                                             @Param("engineerStatus") String engineerStatus);
+
+    /** 経費・会計プレビューの要員も明示的tenant ownershipで解決する。 */
     @Select("SELECT e.* FROM t_engineer e "
-            + "JOIN t_engineer_account_link l ON l.engineer_id = e.id "
-            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
-            + "WHERE e.id = #{id} AND u.tenant_id = #{tenantId} AND e.deleted_flag = 0")
+            + "WHERE e.id = #{id} AND e.deleted_flag = 0 AND (e.tenant_id = #{tenantId} OR EXISTS ("
+            + "SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId}))")
     Engineer selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -39,14 +75,9 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
         <script>
         SELECT e.*
         FROM t_engineer e
-        INNER JOIN t_engineer_account_link l
-                ON l.engineer_id = e.id
-               AND l.tenant_id = #{tenantId}
-        INNER JOIN sys_user u
-                ON u.id = l.sys_user_id
-               AND u.deleted_flag = 0
-               AND u.tenant_id = #{tenantId}
         WHERE e.deleted_flag = 0
+          AND (e.tenant_id = #{tenantId} OR EXISTS (SELECT 1 FROM t_engineer_account_link l
+               WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId}))
           AND e.id IN
           <foreach collection="engineerIds" item="id" open="(" separator="," close=")">
             #{id}
@@ -57,9 +88,8 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT e.* FROM t_engineer e "
-            + "JOIN t_engineer_account_link l ON l.engineer_id = e.id "
-            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
-            + "WHERE e.id = #{id} AND u.tenant_id = #{tenantId} AND e.deleted_flag = 0 FOR UPDATE")
+            + "WHERE e.id = #{id} AND e.deleted_flag = 0 AND (e.tenant_id = #{tenantId} OR EXISTS ("
+            + "SELECT 1 FROM t_engineer_account_link l WHERE l.engineer_id = e.id AND l.tenant_id = #{tenantId})) FOR UPDATE")
     Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 

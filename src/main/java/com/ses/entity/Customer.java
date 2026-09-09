@@ -20,6 +20,9 @@ import lombok.*;
 @TableName("m_customer")
 public class Customer extends BaseEntity {
 
+    /** 顧客のtenant所有権。NULLのlegacy行は修復完了まで業務母集団へ入れない。 */
+    private String tenantId;
+
     /**
      * 会社名
      */

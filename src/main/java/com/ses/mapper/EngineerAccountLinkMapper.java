@@ -58,6 +58,11 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
     @Select("SELECT * FROM t_engineer_account_link WHERE sys_user_id = #{sysUserId} LIMIT 1")
     EngineerAccountLink selectByUserId(@Param("sysUserId") Long sysUserId);
 
+    @Select("SELECT l.* FROM t_engineer_account_link l "
+            + "WHERE l.sys_user_id = #{sysUserId} AND l.tenant_id = #{tenantId} LIMIT 1")
+    EngineerAccountLink selectByUserIdAndTenant(@Param("sysUserId") Long sysUserId,
+                                                @Param("tenantId") String tenantId);
+
     @Select("SELECT * FROM t_engineer_account_link WHERE engineer_id = #{engineerId} LIMIT 1")
     EngineerAccountLink selectByEngineerId(@Param("engineerId") Long engineerId);
 
@@ -70,10 +75,22 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
     @Select("<script>SELECT * FROM t_engineer_account_link WHERE engineer_id IN <foreach collection='engineerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<EngineerAccountLink> selectByEngineerIds(@Param("engineerIds") List<Long> engineerIds);
 
+    @Select("<script>SELECT l.* FROM t_engineer_account_link l "
+            + "WHERE l.tenant_id = #{tenantId} AND l.engineer_id IN "
+            + "<foreach collection='engineerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<EngineerAccountLink> selectByEngineerIdsAndTenant(@Param("engineerIds") List<Long> engineerIds,
+                                                           @Param("tenantId") String tenantId);
+
     /**
      * 紐付け済みのログインユーザーID。ユーザー一覧で「要員ロールなのに紐付いていない」行を
      * 1クエリで判定するために使う（1件ずつ {@link #selectByUserId} を引くとN+1になる）。
      */
     @Select("<script>SELECT sys_user_id FROM t_engineer_account_link WHERE sys_user_id IN <foreach collection='sysUserIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
     List<Long> selectLinkedUserIds(@Param("sysUserIds") List<Long> sysUserIds);
+
+    @Select("<script>SELECT l.sys_user_id FROM t_engineer_account_link l "
+            + "WHERE l.tenant_id = #{tenantId} AND l.sys_user_id IN "
+            + "<foreach collection='sysUserIds' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> selectLinkedUserIdsAndTenant(@Param("sysUserIds") List<Long> sysUserIds,
+                                            @Param("tenantId") String tenantId);
 }

@@ -7,6 +7,8 @@ import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.dto.servicedesk.ServiceRequestUpdateRequest;
 import com.ses.entity.Customer;
 import com.ses.entity.ServiceRequest;
+import com.ses.entity.SysUser;
+import com.ses.config.LoginUser;
 import com.ses.mapper.CustomerMapper;
 import com.ses.service.servicedesk.ServiceRequestService;
 import com.ses.mapper.ServiceRequestMapper;
@@ -21,6 +23,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
@@ -35,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.security.oidc.tenant-id=")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
@@ -62,8 +65,19 @@ public class ServiceRequestApiControllerTest {
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("tenant-a");
+        SysUser user = new SysUser();
+        user.setId(1L);
+        user.setUsername("admin");
+        user.setRole("管理者");
+        user.setStatus(1);
+        user.setTenantId("tenant-a");
+        LoginUser principal = new LoginUser(user,
+                java.util.List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         testCustomer = new Customer();
         testCustomer.setCompanyName("株式会社APIテスト顧客");
+        testCustomer.setTenantId("tenant-a");
         customerMapper.insert(testCustomer);
 
         ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()

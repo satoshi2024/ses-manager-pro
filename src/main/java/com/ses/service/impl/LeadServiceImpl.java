@@ -173,6 +173,10 @@ public class LeadServiceImpl implements LeadService {
         assertVersion(lead, expectedVersion);
 
         Customer customer = new Customer();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId != null) {
+            customer.setTenantId(tenantId);
+        }
         customer.setCompanyName(lead.getCompanyName());
         customerMapper.insert(customer);
 

@@ -81,6 +81,7 @@ class CustomerHealthServiceTest {
         AccountingTenantContextHolder.setTenantId("default");
         healthyCustomer = Customer.builder()
                 .companyName("健全顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(healthyCustomer);
 
@@ -130,6 +131,7 @@ class CustomerHealthServiceTest {
 
         atRiskCustomer = Customer.builder()
                 .companyName("危険顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(atRiskCustomer);
 
@@ -198,6 +200,7 @@ class CustomerHealthServiceTest {
     void testNewCustomer_missingInputTracking() {
         Customer newCust = Customer.builder()
                 .companyName("新規顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(newCust);
         serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
@@ -214,10 +217,70 @@ class CustomerHealthServiceTest {
     }
 
     @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("Service Requestが無いtenant所有顧客も一覧・詳細・月次snapshotの母集団に残ること")
+    void noRequestCustomer_remainsInHealthPopulation() {
+        Customer customer = Customer.builder()
+                .companyName("問い合わせ無し顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
+                .build();
+        customerMapper.insert(customer);
+
+        List<CustomerHealthScoreDto> list = customerHealthService.listCustomerHealthSummaries(null, customer.getCompanyName());
+        assertEquals(1, list.size());
+        assertEquals(customer.getId(), list.get(0).getCustomerId());
+        assertEquals(customer.getId(), customerHealthService.calculateCustomerHealth(customer.getId()).getCustomerId());
+
+        String targetMonth = YearMonth.now().toString();
+        customerHealthService.generateMonthlySnapshot(targetMonth, "no-request検証");
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, customer.getId())
+                .eq(CustomerHealthSnapshot::getSnapshotDate, LocalDate.parse(targetMonth + "-01"))).size() >= 1);
+    }
+
+    @Test
+    @WithMockUser(username = "admin", roles = {"管理者"})
+    @DisplayName("Customer Healthの顧客母集団はtenant単位で一覧・詳細・snapshotを分離すること")
+    void tenantOwnership_isSharedByListDetailAndSnapshot() {
+        Customer tenantACustomer = Customer.builder()
+                .companyName("tenant-a 顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("tenant-a")
+                .build();
+        Customer tenantBCustomer = Customer.builder()
+                .companyName("tenant-b 顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("tenant-b")
+                .build();
+        customerMapper.insert(tenantACustomer);
+        customerMapper.insert(tenantBCustomer);
+
+        AccountingTenantContextHolder.setTenantId("tenant-a");
+        List<CustomerHealthScoreDto> tenantAList = customerHealthService
+                .listCustomerHealthSummaries(null, tenantACustomer.getCompanyName());
+        assertEquals(List.of(tenantACustomer.getId()), tenantAList.stream()
+                .map(CustomerHealthScoreDto::getCustomerId).toList());
+        assertThrows(BusinessException.class,
+                () -> customerHealthService.calculateCustomerHealth(tenantBCustomer.getId()));
+        customerHealthService.generateMonthlySnapshot(YearMonth.now().toString(), "tenant-a snapshot");
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, tenantACustomer.getId())).size() >= 1);
+        assertTrue(snapshotMapper.selectList(new LambdaQueryWrapper<CustomerHealthSnapshot>()
+                .eq(CustomerHealthSnapshot::getCustomerId, tenantBCustomer.getId())).isEmpty());
+
+        AccountingTenantContextHolder.setTenantId("tenant-b");
+        List<CustomerHealthScoreDto> tenantBList = customerHealthService
+                .listCustomerHealthSummaries(null, tenantBCustomer.getCompanyName());
+        assertEquals(List.of(tenantBCustomer.getId()), tenantBList.stream()
+                .map(CustomerHealthScoreDto::getCustomerId).toList());
+        assertEquals(tenantBCustomer.getId(), customerHealthService
+                .calculateCustomerHealth(tenantBCustomer.getId()).getCustomerId());
+    }
+
+    @Test
     @DisplayName("SLA30日集計はround作成時刻ではなく実際のresponse/resolve breach時刻を使うこと")
     void testSlaBreachCount_usesActualBreachTimestamps() {
         Customer customer = Customer.builder()
                 .companyName("SLA時刻顧客-" + UUID.randomUUID().toString().substring(0, 6))
+                .tenantId("default")
                 .build();
         customerMapper.insert(customer);
         ServiceRequest request = serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()

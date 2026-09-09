@@ -15,8 +15,8 @@ public interface CustomerHealthSnapshotMapper extends BaseMapper<CustomerHealthS
     /** 同一顧客・対象月の版採番を直列化する。 */
     @Select("SELECT s.* FROM t_customer_health_snapshot s "
             + "WHERE s.customer_id = #{customerId} AND s.snapshot_date = #{snapshotDate} "
-            + "AND EXISTS (SELECT 1 FROM t_service_request r "
-            + "WHERE r.customer_id = s.customer_id AND r.tenant_id = #{tenantId}) "
+            + "AND EXISTS (SELECT 1 FROM m_customer c "
+            + "WHERE c.id = s.customer_id AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0) "
             + "ORDER BY version_no DESC LIMIT 1 FOR UPDATE")
     CustomerHealthSnapshot selectLatestForUpdate(@Param("customerId") Long customerId,
                                                   @Param("snapshotDate") java.time.LocalDate snapshotDate,

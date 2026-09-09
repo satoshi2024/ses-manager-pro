@@ -3,6 +3,7 @@ package com.ses.controller.api;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.result.ApiResult;
 import com.ses.dto.engineer.EngineerListDto;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,15 +48,21 @@ class EngineerAccountLinkFilterIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         jdbcTemplate.update("DELETE FROM t_engineer_account_link");
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, deleted_flag) "
-                + "VALUES ('紐付け済太郎', '正社員', 'Bench', 0)");
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status, deleted_flag) "
-                + "VALUES ('未紐付け花子', '正社員', 'Bench', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, tenant_id, employment_type, status, deleted_flag) "
+                + "VALUES ('紐付け済太郎', 'default', '正社員', 'Bench', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, tenant_id, employment_type, status, deleted_flag) "
+                + "VALUES ('未紐付け花子', 'default', '正社員', 'Bench', 0)");
         linkedEngineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = '紐付け済太郎'", Long.class);
         unlinkedEngineerId = jdbcTemplate.queryForObject(
                 "SELECT id FROM t_engineer WHERE full_name = '未紐付け花子'", Long.class);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     private List<EngineerListDto> search(Boolean accountLinked) {

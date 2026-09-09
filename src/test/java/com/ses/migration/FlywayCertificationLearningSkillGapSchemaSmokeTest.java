@@ -64,6 +64,11 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertColumnExists(statement, "t_certification_event", "evidence_document_version_id");
             assertColumnExists(statement, "t_certification_event", "evidence_document_hash");
             assertColumnExists(statement, "m_certification", "version");
+            assertColumnExists(statement, "m_customer", "tenant_id");
+            assertColumnExists(statement, "t_engineer", "tenant_id");
+            assertTableExists(statement, "nf02_nf03_ownership_repair_queue");
+            assertIndexExists(statement, "m_customer", "idx_customer_tenant_population");
+            assertIndexExists(statement, "t_engineer", "idx_engineer_tenant_population");
             assertColumnExists(statement, "t_learning_plan", "amended_cost_jpy");
             assertColumnExists(statement, "t_learning_plan", "amendment_approval_request_id");
             assertColumnExists(statement, "t_project_position_event", "skills_json");

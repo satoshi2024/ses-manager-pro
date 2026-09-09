@@ -12,6 +12,7 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.service.CustomerService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +29,16 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     private final ProjectMapper projectMapper;
     private final ContractMapper contractMapper;
     private final InvoiceMapper invoiceMapper;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Customer entity) {
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId != null) {
+            entity.setTenantId(tenantId);
+        }
+        return super.save(entity);
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -65,7 +76,6 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         return super.removeById(id);
     }
 }
-
 
 
 

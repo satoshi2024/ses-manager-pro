@@ -18,7 +18,7 @@ class Nf02Nf03V156MigrationContractTest {
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
 
     @Test
-    void NF02_NF03の追加migrationがV156からV162まで順序通りに存在する() throws Exception {
+    void NF02_NF03の追加migrationがV156からV163まで順序通りに存在する() throws Exception {
         List<String> expected = List.of(
                 "V156__nf02_nf03_boundary_repair.sql",
                 "V157__nf02_nf03_tenant_attachment_notification_boundary.sql",
@@ -26,7 +26,8 @@ class Nf02Nf03V156MigrationContractTest {
                 "V159__approval_tenant_isolation.sql",
                 "V160__task_notification_tenant_retry_state.sql",
                 "V161__expense_accounting_job_tenant_scope.sql",
-                "V162__notification_outbox_tenant_scope.sql");
+                "V162__notification_outbox_tenant_scope.sql",
+                "V163__nf02_nf03_explicit_customer_engineer_ownership.sql");
         for (String name : expected) {
             assertTrue(Files.exists(MIGRATION_ROOT.resolve(name)), name);
         }
@@ -36,10 +37,10 @@ class Nf02Nf03V156MigrationContractTest {
                     .map(Pattern.compile("^V(\\d+)(__|_).*")::matcher)
                     .filter(java.util.regex.Matcher::matches)
                     .map(m -> Integer.valueOf(m.group(1)))
-                    .filter(v -> v >= 156 && v <= 162)
+                    .filter(v -> v >= 156 && v <= 163)
                     .sorted()
                     .toList();
-            assertEquals(List.of(156, 157, 158, 159, 160, 161, 162), versions);
+            assertEquals(List.of(156, 157, 158, 159, 160, 161, 162, 163), versions);
         }
     }
 
@@ -69,6 +70,7 @@ class Nf02Nf03V156MigrationContractTest {
         String v160 = read("V160__task_notification_tenant_retry_state.sql");
         String v161 = read("V161__expense_accounting_job_tenant_scope.sql");
         String v162 = read("V162__notification_outbox_tenant_scope.sql");
+        String v163 = read("V163__nf02_nf03_explicit_customer_engineer_ownership.sql");
 
         assertTrue(v158.contains("ALTER TABLE m_certification"));
         assertTrue(v158.contains("version INT NOT NULL DEFAULT 0"));
@@ -84,6 +86,16 @@ class Nf02Nf03V156MigrationContractTest {
         assertTrue(v161.contains("uk_expense_job_tenant_request"));
         assertTrue(v162.contains("ALTER TABLE t_notification_outbox"));
         assertTrue(v162.contains("uk_notification_outbox_tenant_dedupe"));
+        assertTrue(v163.contains("ALTER TABLE m_customer"));
+        assertTrue(v163.contains("ALTER TABLE t_engineer"));
+        assertTrue(v163.contains("__ses_v163_check_customer_ownership"));
+        assertTrue(v163.contains("__ses_v163_check_engineer_ownership"));
+        assertTrue(v163.contains("nf02_nf03_ownership_repair_queue"));
+        assertTrue(v163.contains("TENANT_UNRESOLVED"));
+        assertTrue(v163.contains("idx_customer_tenant_population"));
+        assertTrue(v163.contains("idx_engineer_tenant_population"));
+        assertFalse(v163.contains("SET c.tenant_id = 'default'"));
+        assertFalse(v163.contains("SET e.tenant_id = 'default'"));
     }
 
     private String read(String name) throws Exception {

@@ -12,6 +12,7 @@ import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProposalMapper;
 import com.ses.service.EngineerSalesService;
 import com.ses.service.EngineerService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.ScopeChangeInvalidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -126,6 +127,10 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Engineer entity) {
+        String tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+        if (tenantId != null) {
+            entity.setTenantId(tenantId);
+        }
         boolean saved = super.save(entity);
         if (saved) {
             recordAccountingHistory(entity.getId());
@@ -184,7 +189,6 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         return left.compareTo(right) == 0;
     }
 }
-
 
 
 

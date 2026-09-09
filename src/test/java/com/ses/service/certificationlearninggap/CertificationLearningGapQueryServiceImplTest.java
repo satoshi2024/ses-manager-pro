@@ -19,6 +19,8 @@ import com.ses.service.certification.CertificationNumberCryptoService;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.security.TenantOwnershipResolver;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,6 +49,7 @@ import static org.mockito.Mockito.when;
 class CertificationLearningGapQueryServiceImplTest {
 
     @Mock private EngineerService engineerService;
+    @Mock private TenantOwnershipResolver tenantOwnershipResolver;
     @Mock private DataScopeService dataScopeService;
     @Mock private OrganizationScopeService organizationScopeService;
     @Mock private AuthorizationService authorizationService;
@@ -66,7 +69,8 @@ class CertificationLearningGapQueryServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new CertificationLearningGapQueryServiceImpl(engineerService, dataScopeService,
+        AccountingTenantContextHolder.setTenantId("default");
+        service = new CertificationLearningGapQueryServiceImpl(engineerService, tenantOwnershipResolver, dataScopeService,
                 organizationScopeService, authorizationService, certificationRecordMapper, certificationMapper,
                 learningPlanMapper, enrollmentMapper, courseMapper, lifecycleCaseMapper, skillGapService,
                 numberCryptoService, documentLinkMapper, documentVersionMapper);
@@ -78,6 +82,14 @@ class CertificationLearningGapQueryServiceImplTest {
         when(lifecycleCaseMapper.selectList(any())).thenReturn(List.of());
         when(documentLinkMapper.selectList(any())).thenReturn(List.of());
         when(authorizationService.isAllowed(any(), any())).thenReturn(false);
+        when(tenantOwnershipResolver.resolveEngineerIds("default")).thenReturn(Set.of(1L, 2L));
+        when(tenantOwnershipResolver.selectEngineers(eq("default"), anySet(), any(), any(), any()))
+                .thenReturn(List.of(engineer(1L, "対象 一郎"), engineer(2L, "対象 二郎")));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -95,7 +107,8 @@ class CertificationLearningGapQueryServiceImplTest {
     void list_detail_count_exportは同じID母集団で番号policyだけが異なる() {
         Engineer first = engineer(1L, "対象 一郎");
         Engineer second = engineer(2L, "対象 二郎");
-        when(engineerService.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of(first, second));
+        when(tenantOwnershipResolver.selectEngineers(eq("default"), anySet(), any(), any(), any()))
+                .thenReturn(List.of(first, second));
 
         EngineerCertification record = new EngineerCertification();
         record.setId(11L);
@@ -148,7 +161,8 @@ class CertificationLearningGapQueryServiceImplTest {
 
     @Test
     void skillGapにはSELFやMANAGERの評価を混入させない() {
-        when(engineerService.list(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of(engineer(1L, "対象 一郎")));
+        when(tenantOwnershipResolver.selectEngineers(eq("default"), anySet(), any(), any(), any()))
+                .thenReturn(List.of(engineer(1L, "対象 一郎")));
         when(skillGapService.calculate(any())).thenReturn(new com.ses.dto.skillgap.SkillGapResult(
                 SkillGapService.STATUS_OK, null, LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 28),
                 LocalDate.of(2026, 8, 28), 1L, 9L, SkillGapService.DemandSource.PROJECT, List.of(), List.of(), 55L));
