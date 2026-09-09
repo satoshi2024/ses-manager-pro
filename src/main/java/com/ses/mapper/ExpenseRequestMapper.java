@@ -13,13 +13,13 @@ import java.util.List;
 public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
 
     @Select("SELECT er.* FROM t_expense_request er "
-            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id AND l.deleted_flag = 0 "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0")
     ExpenseRequest selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT er.* FROM t_expense_request er "
-            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id AND l.deleted_flag = 0 "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
             + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
             + "WHERE u.tenant_id = #{tenantId} AND er.status = '承認済' "
             + "AND er.accounting_job_id IS NULL AND er.deleted_flag = 0 "
@@ -31,11 +31,26 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
     @Select("SELECT * FROM t_expense_request WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     ExpenseRequest selectByIdForUpdate(@Param("id") Long id);
 
+    /** PWAのFOR UPDATEもtenant所有権をSQLで検証する。 */
+    @Select("SELECT er.* FROM t_expense_request er "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = er.engineer_id "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE er.id = #{id} AND u.tenant_id = #{tenantId} AND er.deleted_flag = 0 FOR UPDATE")
+    ExpenseRequest selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
+
     /** 会計連携プレビュー用の組織スコープ付き取得 (R1-P1-06 / design §5.1, §5.2)。権限外は null。 */
     @Select("""
         <script>
         SELECT er.* FROM t_expense_request er
         WHERE er.id = #{id}
+          AND er.deleted_flag = 0
+          AND EXISTS (
+            SELECT 1 FROM t_engineer_account_link owner_link
+            JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
+                 AND owner_user.deleted_flag = 0
+            WHERE owner_link.engineer_id = er.engineer_id
+              AND owner_user.tenant_id = #{tenantId}
+          )
           AND (
             <if test="orgIds.size() == 0">1 = 0</if>
             <if test="orgIds.size() > 0">
@@ -71,13 +86,22 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
           )
         </script>
         """)
-    ExpenseRequest selectForPreviewScoped(@Param("id") Long id, @Param("orgIds") List<Long> orgIds);
+    ExpenseRequest selectForPreviewScoped(@Param("id") Long id, @Param("orgIds") List<Long> orgIds,
+                                          @Param("tenantId") String tenantId);
 
     /** 月次照合 (経費母集団) の組織スコープ付き一覧 (R1-P1-06 / design §5.1)。 */
     @Select("""
         <script>
         SELECT er.* FROM t_expense_request er
         WHERE er.expense_date &gt;= #{startDate} AND er.expense_date &lt;= #{endDate}
+          AND er.deleted_flag = 0
+          AND EXISTS (
+            SELECT 1 FROM t_engineer_account_link owner_link
+            JOIN sys_user owner_user ON owner_user.id = owner_link.sys_user_id
+                 AND owner_user.deleted_flag = 0
+            WHERE owner_link.engineer_id = er.engineer_id
+              AND owner_user.tenant_id = #{tenantId}
+          )
           AND (
             <if test="orgIds.size() == 0">1 = 0</if>
             <if test="orgIds.size() > 0">
@@ -115,5 +139,24 @@ public interface ExpenseRequestMapper extends BaseMapper<ExpenseRequest> {
         """)
     List<ExpenseRequest> selectForReconciliationScoped(@Param("startDate") java.time.LocalDate startDate,
                                                        @Param("endDate") java.time.LocalDate endDate,
-                                                       @Param("orgIds") List<Long> orgIds);
+                                                       @Param("orgIds") List<Long> orgIds,
+                                                       @Param("tenantId") String tenantId);
+
+    /** 管理者の全組織アクセスでもtenant所有権は省略しない。 */
+    @Select("""
+        SELECT er.* FROM t_expense_request er
+        WHERE er.expense_date >= #{startDate} AND er.expense_date <= #{endDate}
+          AND er.deleted_flag = 0
+          AND EXISTS (
+            SELECT 1 FROM t_engineer_account_link l
+            JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0
+            WHERE l.engineer_id = er.engineer_id
+              AND u.tenant_id = #{tenantId}
+          )
+        ORDER BY er.id
+        """)
+    List<ExpenseRequest> selectForReconciliationByTenant(
+            @Param("startDate") java.time.LocalDate startDate,
+            @Param("endDate") java.time.LocalDate endDate,
+            @Param("tenantId") String tenantId);
 }

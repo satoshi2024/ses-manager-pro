@@ -4,12 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ses.common.exception.PwaConflictException;
+import com.ses.config.LoginUser;
 import com.ses.entity.Engineer;
+import com.ses.entity.EngineerAccountLink;
 import com.ses.entity.PwaClientMutation;
 import com.ses.entity.ExpenseRequest;
+import com.ses.entity.SysUser;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.PwaClientMutationMapper;
 import com.ses.mapper.ExpenseRequestMapper;
+import com.ses.mapper.SysUserMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.expense.ExpenseRequestService;
 import com.ses.test.MySQLContainer;
 import org.junit.jupiter.api.AfterEach;
@@ -20,7 +26,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -45,7 +55,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -87,6 +96,12 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     @Autowired
     private EngineerMapper engineerMapper;
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+    @Autowired
+    private SysUserMapper sysUserMapper;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    @Autowired
     private ExpenseRequestService expenseService;
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -110,6 +125,10 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
     void cleanup() {
         mapper.delete(new QueryWrapper<PwaClientMutation>()
                 .eq("user_id", USER_ID));
+        engineerAccountLinkMapper.delete(new QueryWrapper<EngineerAccountLink>()
+                .eq("sys_user_id", USER_ID));
+        // sys_user は論理削除テーブルのため、固定fixtureのPKを次のテストで再利用できるよう物理的に除去する。
+        jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", USER_ID);
         if (expenseId != null) expenseMapper.deleteById(expenseId);
         if (engineerId != null) engineerMapper.deleteById(engineerId);
     }
@@ -135,7 +154,8 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 try {
                     ready.countDown();
                     start.await(10, TimeUnit.SECONDS);
-                    claims.add(ledger.claim(command, REQUEST_ID, hash, createdAt, SCOPE));
+                    claims.add(AccountingTenantContextHolder.runWithTenant("default",
+                            () -> ledger.claim(command, REQUEST_ID, hash, createdAt, SCOPE)));
                 } catch (Throwable e) {
                     failures.add(e);
                 }
@@ -152,13 +172,14 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         assertThat(mapper.selectByUserAndClientRequest(USER_ID, REQUEST_ID)).isNotNull();
 
         PwaClientMutationLedgerService.Claim winner = claims.get(0);
-        ledger.complete(winner.mutationId(), Map.of("version", 0));
+        AccountingTenantContextHolder.runWithTenant("default",
+                () -> ledger.complete(winner.mutationId(), Map.of("version", 0)));
         String rotatedScope = "opaque-scope-mysql-rotated";
         when(userContextService.assertCurrent(rotatedScope)).thenReturn(
                 new PwaUserContextService.CurrentContext(USER_ID, 900001L, rotatedScope,
                         Instant.now().minusSeconds(60)));
-        PwaClientMutationLedgerService.Claim replay = ledger.claim(command, REQUEST_ID, hash, createdAt,
-                rotatedScope);
+        PwaClientMutationLedgerService.Claim replay = AccountingTenantContextHolder.runWithTenant(
+                "default", () -> ledger.claim(command, REQUEST_ID, hash, createdAt, rotatedScope));
         assertThat(replay.replay()).isTrue();
     }
 
@@ -206,8 +227,9 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 try {
                     ready.countDown();
                     start.await(10, TimeUnit.SECONDS);
-                    TransactionTemplate tx = new TransactionTemplate(transactionManager);
-                    tx.executeWithoutResult(status -> {
+                    AccountingTenantContextHolder.runWithTenant("default", () -> {
+                        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                        tx.executeWithoutResult(status -> {
                         PwaClientMutationLedgerService.Claim claim = ledger.claim(
                                 command, requestId, hash, createdAt, SCOPE);
                         ExpenseRequest locked = expenseMapper.selectByIdForUpdate(expenseId);
@@ -224,6 +246,8 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                         ExpenseRequest after = expenseMapper.selectById(expenseId);
                         ledger.complete(claim.mutationId(), Map.of("version", after.getVersion()));
                         successfulVersions.add(after.getVersion());
+                        });
+                        return null;
                     });
                 } catch (Throwable e) {
                     failures.add(e);
@@ -277,7 +301,7 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         when(userContextService.hashScope(SCOPE)).thenReturn("e".repeat(64));
 
         mockMvc.perform(put("/api/my/pwa/expenses/drafts/" + expenseId)
-                        .with(user("1").roles("要員")).with(csrf())
+                        .with(tenantAuthentication()).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body.toString())
                         .header("X-Client-Request-Id", "pwa-mysql-http-1")
@@ -333,7 +357,7 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         failCompletion.set(true);
         try {
             mockMvc.perform(put("/api/my/pwa/expenses/drafts/" + expenseId)
-                            .with(user("1").roles("要員")).with(csrf())
+                            .with(tenantAuthentication()).with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(body.toString())
                             .header("X-Client-Request-Id", "pwa-mysql-http-rollback")
@@ -380,16 +404,19 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
         when(userContextService.hashScope(SCOPE)).thenReturn("d".repeat(64));
 
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        assertThatThrownBy(() -> tx.executeWithoutResult(status -> {
-            PwaClientMutationLedgerService.Claim claim = ledger.claim(
-                    command, "pwa-mysql-rollback", hash, Instant.now().toEpochMilli(), SCOPE);
-            expenseService.updateDraft(engineerId, expenseId,
-                    new ExpenseRequestService.ExpenseDraftCommand(
-                            java.time.LocalDate.of(2026, 8, 28),
-                            ExpenseRequestService.CATEGORY_TRANSPORT,
-                            new java.math.BigDecimal("3000"), null, null, "rollback後は残さない"));
-            ledger.complete(claim.mutationId(), Map.of("version", 1));
-            throw new IllegalStateException("forced PWA rollback");
+        assertThatThrownBy(() -> AccountingTenantContextHolder.runWithTenant("default", () -> {
+            tx.executeWithoutResult(status -> {
+                PwaClientMutationLedgerService.Claim claim = ledger.claim(
+                        command, "pwa-mysql-rollback", hash, Instant.now().toEpochMilli(), SCOPE);
+                expenseService.updateDraft(engineerId, expenseId,
+                        new ExpenseRequestService.ExpenseDraftCommand(
+                                java.time.LocalDate.of(2026, 8, 28),
+                                ExpenseRequestService.CATEGORY_TRANSPORT,
+                                new java.math.BigDecimal("3000"), null, null, "rollback後は残さない"));
+                ledger.complete(claim.mutationId(), Map.of("version", 1));
+                throw new IllegalStateException("forced PWA rollback");
+            });
+            return null;
         })).isInstanceOf(IllegalStateException.class);
 
         ExpenseRequest restored = expenseMapper.selectById(expenseId);
@@ -407,6 +434,34 @@ class PwaClientMutationLedgerMySqlConcurrencyTest {
                 .version(0)
                 .build();
         engineerMapper.insert(engineer);
+        SysUser sysUser = new SysUser();
+        sysUser.setId(USER_ID);
+        sysUser.setUsername("pwa-mysql-user");
+        sysUser.setPassword("password");
+        sysUser.setRole("要員");
+        sysUser.setStatus(1);
+        sysUser.setTenantId("default");
+        sysUserMapper.insert(sysUser);
+        EngineerAccountLink link = new EngineerAccountLink();
+        link.setEngineerId(engineer.getId());
+        link.setSysUserId(USER_ID);
+        link.setTenantId("default");
+        engineerAccountLinkMapper.insert(link);
         return engineer.getId();
+    }
+
+    private RequestPostProcessor tenantAuthentication() {
+        SysUser sysUser = new SysUser();
+        sysUser.setId(USER_ID);
+        sysUser.setUsername("pwa-mysql-user");
+        sysUser.setPassword("password");
+        sysUser.setRole("要員");
+        sysUser.setStatus(1);
+        sysUser.setTenantId("default");
+        LoginUser principal = new LoginUser(sysUser,
+                List.of(new SimpleGrantedAuthority("ROLE_要員")));
+        return org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+                .authentication(new UsernamePasswordAuthenticationToken(
+                        principal, null, principal.getAuthorities()));
     }
 }

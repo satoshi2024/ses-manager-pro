@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS t_task_notification_log (
     status VARCHAR(20) NOT NULL DEFAULT 'RETRY',
     sent_at TIMESTAMP,
     last_error VARCHAR(255),
+    attempt_count INT NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMP,
     CONSTRAINT uk_task_notify_tenant_date UNIQUE (tenant_id, task_id, notify_date)
 );
 
@@ -60,8 +62,10 @@ ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(1
 ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'RETRY';
 ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS sent_at TIMESTAMP;
 ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS last_error VARCHAR(255);
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS attempt_count INT NOT NULL DEFAULT 0;
+ALTER TABLE t_task_notification_log ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP;
 DROP INDEX IF EXISTS uk_task_notify_date;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_task_notify_tenant_date
     ON t_task_notification_log(tenant_id, task_id, notify_date);
 CREATE INDEX IF NOT EXISTS idx_task_notify_retry
-    ON t_task_notification_log(tenant_id, status, notify_date);
+    ON t_task_notification_log(tenant_id, status, next_retry_at, notify_date);

@@ -25,6 +25,21 @@ public interface EngineerMapper extends BaseMapper<Engineer> {
     @Select("SELECT * FROM t_engineer WHERE id = #{id} AND deleted_flag = 0 FOR UPDATE")
     Engineer selectByIdForUpdate(Long id);
 
+    /** 経費・会計プレビューの要員もaccount linkのtenant所有権で解決する。 */
+    @Select("SELECT e.* FROM t_engineer e "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = e.id "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE e.id = #{id} AND u.tenant_id = #{tenantId} AND e.deleted_flag = 0")
+    Engineer selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
+                                 @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
+    @Select("SELECT e.* FROM t_engineer e "
+            + "JOIN t_engineer_account_link l ON l.engineer_id = e.id "
+            + "JOIN sys_user u ON u.id = l.sys_user_id AND u.deleted_flag = 0 "
+            + "WHERE e.id = #{id} AND u.tenant_id = #{tenantId} AND e.deleted_flag = 0 FOR UPDATE")
+    Engineer selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
+                                          @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
+
     /** 組織統合で要員の所属組織を統合先へ付け替える。
      * version を +1 し、並行する単行更新との衝突を検出できるようにする。
      * 単行の期待 version 照合が必要な場合は {@code updateById} を使うこと。 */

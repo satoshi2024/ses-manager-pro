@@ -52,7 +52,7 @@ public class TaskDueDateNotificationScheduler {
     public int processOverdueTaskNotifications(LocalDate asOfDate) {
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (asOfDate == null) {
-            asOfDate = LocalDate.now();
+            asOfDate = LocalDate.now(AccountingTenantContextHolder.getZoneId());
         }
 
         // due_date IS NOT NULL かつ due_date < asOfDate かつ 未完了 (NOT_STARTED, IN_PROGRESS)
@@ -74,8 +74,9 @@ public class TaskDueDateNotificationScheduler {
                     .tenantId(tenantId)
                     .taskId(task.getId())
                     .notifyDate(asOfDate)
-                    .createdAt(LocalDateTime.now())
+                    .createdAt(LocalDateTime.now(AccountingTenantContextHolder.getZoneId()))
                     .status("CLAIMED")
+                    .attemptCount(0)
                     .build();
 
             try {
@@ -83,7 +84,7 @@ public class TaskDueDateNotificationScheduler {
                 taskNotificationLogMapper.insert(logEntry);
             } catch (DuplicateKeyException e) {
                 int claimed = taskNotificationLogMapper.claimRetry(tenantId, task.getId(), asOfDate,
-                        LocalDateTime.now().minusMinutes(30));
+                        LocalDateTime.now(AccountingTenantContextHolder.getZoneId()).minusMinutes(30));
                 if (claimed != 1) {
                     continue;
                 }
@@ -95,7 +96,7 @@ public class TaskDueDateNotificationScheduler {
             if (task.getAssigneeUserId() == null
                     || sysUserMapper.selectByIdAndTenant(task.getAssigneeUserId(), tenantId) == null) {
                 taskNotificationLogMapper.markRetry(tenantId, task.getId(), asOfDate,
-                        "担当者が同一tenantに存在しません");
+                        "担当者が同一tenantに存在しません", retryAt());
                 continue;
             }
 
@@ -111,17 +112,23 @@ public class TaskDueDateNotificationScheduler {
                         dedupeKey,
                         "todo"
                 );
-                if (taskNotificationLogMapper.markSent(tenantId, task.getId(), asOfDate, LocalDateTime.now()) == 1) {
+                if (taskNotificationLogMapper.markSent(tenantId, task.getId(), asOfDate,
+                        LocalDateTime.now(AccountingTenantContextHolder.getZoneId())) == 1) {
                     sentCount++;
                 }
             } catch (Exception e) {
                 log.error("タスク期限超過通知の送出に失敗しました: taskId={}", task.getId(), e);
                 taskNotificationLogMapper.markRetry(tenantId, task.getId(), asOfDate,
-                        safeError(e));
+                        safeError(e), retryAt());
             }
         }
 
         return sentCount;
+    }
+
+    /** 送信失敗は即時SENTにせず、短い退避時間を設けて次回batchで再送する。 */
+    private LocalDateTime retryAt() {
+        return LocalDateTime.now(AccountingTenantContextHolder.getZoneId()).plusMinutes(1);
     }
 
     private String safeError(Exception e) {

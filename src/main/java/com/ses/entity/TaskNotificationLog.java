@@ -32,4 +32,8 @@ public class TaskNotificationLog {
     private String status;
     private LocalDateTime sentAt;
     private String lastError;
+    /** 再送claimの回数。送信成功の証跡ではない。 */
+    private Integer attemptCount;
+    /** RETRYが再びclaim可能になる時刻。 */
+    private LocalDateTime nextRetryAt;
 }

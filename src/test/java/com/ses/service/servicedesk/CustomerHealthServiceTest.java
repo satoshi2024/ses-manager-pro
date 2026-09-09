@@ -19,7 +19,9 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.ServiceSlaClockMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +77,8 @@ class CustomerHealthServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Service直呼出しでもHTTP tenant filterと同じ前提を明示する。
+        AccountingTenantContextHolder.setTenantId("default");
         healthyCustomer = Customer.builder()
                 .companyName("健全顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
@@ -159,6 +163,11 @@ class CustomerHealthServiceTest {
                 atRiskCustomer.getId(), 200L);
     }
 
+    @AfterEach
+    void tearDown() {
+        AccountingTenantContextHolder.clear();
+    }
+
     @Test
     @DisplayName("健全顧客のヘルススコアが100点減点モデルで80点以上かつHEALTHYと判定されること")
     void testHealthyCustomer_scoreAndRank() {
@@ -191,6 +200,10 @@ class CustomerHealthServiceTest {
                 .companyName("新規顧客-" + UUID.randomUUID().toString().substring(0, 6))
                 .build();
         customerMapper.insert(newCust);
+        serviceRequestService.createRequest(ServiceRequestCreateRequest.builder()
+                .customerId(newCust.getId()).category("OTHER").priority("P3")
+                .subject("新規顧客初回問い合わせ").description("tenant所有権fixture").build(),
+                100L, false, null);
 
         CustomerHealthScoreDto dto = customerHealthService.calculateCustomerHealth(newCust.getId());
 

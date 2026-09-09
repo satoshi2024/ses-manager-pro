@@ -3,6 +3,7 @@ package com.ses.expense;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.config.LoginUser;
 import com.ses.entity.ApprovalRequest;
 import com.ses.entity.ApprovalRoute;
 import com.ses.entity.ApprovalRouteStep;
@@ -26,6 +27,7 @@ import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.UserOrganizationMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.expense.ExpenseAccountingJobScheduler;
 import com.ses.service.expense.ExpenseAccountingSender;
@@ -112,6 +114,7 @@ class ExpenseRequestFlowIntegrationTest {
     @AfterEach
     void tearDown() {
         SecurityContextHolder.clearContext();
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -417,6 +420,7 @@ class ExpenseRequestFlowIntegrationTest {
                 .password("x")
                 .realName("経費テスト")
                 .role(role)
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -468,7 +472,7 @@ class ExpenseRequestFlowIntegrationTest {
         // 共有H2には他のexpense.request routeも残るため、このrouteが最新になるよう
         // version_noを単調増加の一意値にする（RouteResolverはversion_no降順で採用）。
         ApprovalRoute route = ApprovalRoute.builder()
-                .tenantId(1L)
+                .tenantId("default")
                 .requestType("expense.request")
                 .organizationId(null)
                 .minAmount(null)
@@ -494,8 +498,13 @@ class ExpenseRequestFlowIntegrationTest {
     }
 
     void authenticate(long userId, String role) {
+        SysUser user = sysUserMapper.selectById(userId);
+        user.setRole(role);
+        user.setTenantId("default");
+        LoginUser principal = new LoginUser(user,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role)));
         SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(String.valueOf(userId), "n/a",
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))));
+                new UsernamePasswordAuthenticationToken(principal, "n/a", principal.getAuthorities()));
+        AccountingTenantContextHolder.setTenantId("default");
     }
 }

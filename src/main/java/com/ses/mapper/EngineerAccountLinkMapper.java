@@ -63,7 +63,7 @@ public interface EngineerAccountLinkMapper extends BaseMapper<EngineerAccountLin
 
     @Select("SELECT l.* FROM t_engineer_account_link l "
             + "WHERE l.engineer_id = #{engineerId} AND l.tenant_id = #{tenantId} "
-            + "AND l.deleted_flag = 0 LIMIT 1")
+            + "LIMIT 1")
     EngineerAccountLink selectByEngineerIdAndTenant(@Param("engineerId") Long engineerId,
                                                     @Param("tenantId") String tenantId);
 

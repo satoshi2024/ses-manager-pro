@@ -9,6 +9,7 @@ import com.ses.mapper.ExpenseRequestMapper;
 import com.ses.service.approval.ApprovalSnapshot;
 import com.ses.service.approval.ApprovalTargetAdapter;
 import com.ses.service.expense.ExpenseRequestService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -100,7 +101,8 @@ public class ExpenseRequestApprovalAdapter implements ApprovalTargetAdapter {
     }
 
     private ExpenseRequest require(Long targetId) {
-        ExpenseRequest expense = targetId == null ? null : expenseRequestMapper.selectById(targetId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = targetId == null ? null : expenseRequestMapper.selectByIdForTenant(targetId, tenantId);
         if (expense == null) {
             throw BusinessException.of(404, "error.expense.notFound");
         }
@@ -122,7 +124,8 @@ public class ExpenseRequestApprovalAdapter implements ApprovalTargetAdapter {
         if (expense.getEngineerId() == null) {
             return null;
         }
-        Engineer engineer = engineerMapper.selectById(expense.getEngineerId());
+        Engineer engineer = engineerMapper.selectByIdForTenant(expense.getEngineerId(),
+                AccountingTenantContextHolder.requireTenantContext());
         return engineer == null ? null : engineer.getOrganizationId();
     }
 }

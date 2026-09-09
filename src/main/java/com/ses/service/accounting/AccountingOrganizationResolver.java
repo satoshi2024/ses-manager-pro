@@ -131,7 +131,8 @@ public class AccountingOrganizationResolver {
         }
 
         // 優先度2: 履歴行が全く存在しない場合（V60以前のレガシー要員データ）: t_engineer.organization_id へフォールバック
-        Engineer engineer = engineerMapper.selectById(expenseRequest.getEngineerId());
+        Engineer engineer = engineerMapper.selectByIdForTenant(expenseRequest.getEngineerId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (engineer != null) {
             return engineer.getOrganizationId();
         }

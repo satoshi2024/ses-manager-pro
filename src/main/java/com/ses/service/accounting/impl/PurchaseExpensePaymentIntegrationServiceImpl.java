@@ -186,7 +186,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IntegrationJob triggerExpenseSync(Long expenseRequestId, Long triggeredByUserId) {
-        ExpenseRequest expense = expenseRequestMapper.selectById(expenseRequestId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        ExpenseRequest expense = expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
         if (expense == null) {
             throw new BusinessException(404, "経費申請レコードが見つかりません (id=" + expenseRequestId + ")");
         }
@@ -204,7 +205,7 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
             throw new BusinessException(400, "承認済の経費申請のみ会計連携可能です (現在: " + expense.getStatus() + ")");
         }
 
-        IntegrationConnection conn = resolveConnection("default", null, "freee", "accounting");
+        IntegrationConnection conn = resolveConnection(tenantId, null, "freee", "accounting");
         String engineerCode = "ENG-" + expense.getEngineerId();
 
         mappingService.assertMappingVerified(conn.getId(), "ACCOUNT_EXPENSE", "EXPENSE_DEFAULT");

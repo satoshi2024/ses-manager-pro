@@ -407,7 +407,8 @@ public class PwaMutationApiController {
         }
         if ("expense".equals(command.screen())) {
             Long id = payload.has("id") && !payload.path("id").isNull() ? payload.path("id").asLong() : null;
-            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectByIdForUpdate(id);
+            ExpenseRequest row = id == null ? null : expenseRequestMapper.selectByIdForUpdateForTenant(
+                    id, com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             if (!Objects.equals(context.engineerId(), row.getEngineerId())) {
                 throw BusinessException.of(403, "error.my.notOwner");
@@ -419,7 +420,8 @@ public class PwaMutationApiController {
             return new VersionSnapshot(value(row.getVersion()), data);
         }
         if ("change-request".equals(command.screen())) {
-            Engineer row = engineerMapper.selectByIdForUpdate(context.engineerId());
+            Engineer row = engineerMapper.selectByIdForUpdateForTenant(context.engineerId(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) throw BusinessException.of(404, "error.my.notLinked");
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));

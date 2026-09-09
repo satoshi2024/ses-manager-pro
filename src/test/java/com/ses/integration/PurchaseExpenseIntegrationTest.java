@@ -6,6 +6,7 @@ import com.ses.entity.*;
 import com.ses.mapper.BpBankAccountMapper;
 import com.ses.mapper.BpCompanyMapper;
 import com.ses.mapper.BpPaymentMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.accounting.AccountingTenantContextHolder;
@@ -15,6 +16,7 @@ import com.ses.service.integration.ExternalMappingService;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,6 +65,9 @@ class PurchaseExpenseIntegrationTest {
     private BpPaymentMapper bpPaymentMapper;
 
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
     private WorkRecordMapper workRecordMapper;
 
     @Autowired
@@ -87,7 +92,15 @@ class PurchaseExpenseIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
+        engineerAccountLinkMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, 1L));
+        EngineerAccountLink ownerLink = new EngineerAccountLink();
+        ownerLink.setEngineerId(1L);
+        ownerLink.setSysUserId(1L);
+        ownerLink.setTenantId("default");
+        engineerAccountLinkMapper.insert(ownerLink);
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
         IntegrationTokensDto tokens = IntegrationTokensDto.builder()
@@ -181,6 +194,11 @@ class PurchaseExpenseIntegrationTest {
         mappingService.saveOrUpdateMapping(taxMap);
         ExternalMapping savedTax = mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10");
         mappingService.verifyMapping(savedTax.getId(), "{\"verified\":true}");
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -354,7 +372,7 @@ class PurchaseExpenseIntegrationTest {
         mappingService.verifyMapping(mappingService.getMapping(connection.getId(), "TAX_PURCHASE_10", "TAX_PURCHASE_10").getId(), "{\"verified\":true}");
 
         ExpenseRequest exp = new ExpenseRequest();
-        exp.setEngineerId(1001L);
+        exp.setEngineerId(1L);
         exp.setExpenseNo("EX-202608-999");
         exp.setExpenseDate(LocalDate.of(2026, 8, 10));
         exp.setCategory("交通費");

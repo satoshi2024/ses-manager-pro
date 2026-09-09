@@ -7,11 +7,14 @@ import com.ses.dto.accounting.AccountingReconciliationSummaryDto.ReconciliationI
 import com.ses.dto.accounting.IntegrationTokensDto;
 import com.ses.entity.*;
 import com.ses.mapper.CustomerMapper;
+import com.ses.mapper.EngineerAccountLinkMapper;
 import com.ses.mapper.InvoiceMapper;
 import com.ses.service.accounting.AccountingReconciliationService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,6 +75,9 @@ public class AccountingReconciliationTest {
     private com.ses.mapper.EngineerMapper engineerMapper;
 
     @Autowired
+    private EngineerAccountLinkMapper engineerAccountLinkMapper;
+
+    @Autowired
     private RestTemplate restTemplate;
 
     private MockRestServiceServer mockServer;
@@ -80,6 +86,7 @@ public class AccountingReconciliationTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -94,6 +101,11 @@ public class AccountingReconciliationTest {
         customer = new Customer();
         customer.setCompanyName("照合テスト株式会社-" + UUID.randomUUID().toString().substring(0, 6));
         customerMapper.insert(customer);
+    }
+
+    @AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -263,6 +275,13 @@ public class AccountingReconciliationTest {
         eng.setFullName("立替太郎");
         eng.setEmploymentType("正社員");
         engineerMapper.insert(eng);
+        engineerAccountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
+                .eq(EngineerAccountLink::getEngineerId, eng.getId()));
+        EngineerAccountLink ownerLink = new EngineerAccountLink();
+        ownerLink.setEngineerId(eng.getId());
+        ownerLink.setSysUserId(1L);
+        ownerLink.setTenantId("default");
+        engineerAccountLinkMapper.insert(ownerLink);
 
         ExpenseRequest exp = new ExpenseRequest();
         exp.setEngineerId(eng.getId());

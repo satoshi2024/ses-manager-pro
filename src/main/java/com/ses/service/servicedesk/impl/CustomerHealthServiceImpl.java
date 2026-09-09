@@ -77,23 +77,21 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     @Override
     @Transactional(readOnly = true)
     public List<CustomerHealthScoreDto> listCustomerHealthSummaries(String healthStatus, String keyword) {
-        LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Customer::getDeletedFlag, 0);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
 
-        Set<Long> allowedCustomerIds = resolvedCustomerIds();
-        if (allowedCustomerIds != null) {
-            if (allowedCustomerIds.isEmpty()) {
-                wrapper.eq(Customer::getId, -1L);
-            } else {
-                wrapper.in(Customer::getId, allowedCustomerIds);
-            }
-        }
+        Set<Long> ownedCustomerIds = customerMapper.selectOwnedCustomerIds(tenantId);
+        Set<Long> allowedCustomerIds = intersectOwnedCustomerIds(ownedCustomerIds, resolvedCustomerIds());
 
+        List<Customer> customers = allowedCustomerIds == null || allowedCustomerIds.isEmpty()
+                ? Collections.emptyList()
+                : customerMapper.selectListForOwnedIds(allowedCustomerIds, tenantId);
         if (StringUtils.hasText(keyword)) {
-            wrapper.like(Customer::getCompanyName, keyword);
+            String normalizedKeyword = keyword.trim().toLowerCase(java.util.Locale.ROOT);
+            customers = customers.stream()
+                    .filter(c -> c.getCompanyName() != null
+                            && c.getCompanyName().toLowerCase(java.util.Locale.ROOT).contains(normalizedKeyword))
+                    .toList();
         }
-
-        List<Customer> customers = customerMapper.selectList(wrapper);
         if (customers.isEmpty()) {
             return Collections.emptyList();
         }
@@ -120,9 +118,10 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         if (customerId == null) {
             throw BusinessException.of(400, "顧客IDは必須です");
         }
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         assertAllowedCustomer(customerId);
 
-        Customer customer = customerMapper.selectById(customerId);
+        Customer customer = customerMapper.selectByIdForTenant(customerId, tenantId);
         if (customer == null || Integer.valueOf(1).equals(customer.getDeletedFlag())) {
             throw BusinessException.of(404, "指定された顧客が見つかりません");
         }
@@ -138,11 +137,19 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     @Override
     @Transactional(readOnly = true)
     public Map<Long, CustomerHealthScoreDto> getHealthMapForCustomers(Set<Long> customerIds) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (customerIds == null || customerIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        List<Customer> customers = customerMapper.selectBatchIds(customerIds);
+        Set<Long> ownedCustomerIds = customerMapper.selectOwnedCustomerIds(tenantId);
+        Set<Long> scopedCustomerIds = intersectOwnedCustomerIds(ownedCustomerIds, customerIds);
+        scopedCustomerIds = intersectOwnedCustomerIds(scopedCustomerIds, resolvedCustomerIds());
+        if (scopedCustomerIds == null || scopedCustomerIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Customer> customers = customerMapper.selectListForOwnedIds(scopedCustomerIds, tenantId);
         Map<Long, String> customerNameMap = customers.stream()
                 .collect(Collectors.toMap(Customer::getId, Customer::getCompanyName, (a, b) -> a));
 
@@ -155,8 +162,8 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         List<ServiceRequest> allRequests = serviceRequestMapper.selectList(
                 new LambdaQueryWrapper<ServiceRequest>()
                         .eq(ServiceRequest::getTenantId,
-                                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())
-                        .in(ServiceRequest::getCustomerId, customerIds)
+                                tenantId)
+                        .in(ServiceRequest::getCustomerId, scopedCustomerIds)
         );
         Map<Long, List<ServiceRequest>> requestsByCustomer = allRequests.stream()
                 .collect(Collectors.groupingBy(ServiceRequest::getCustomerId));
@@ -186,7 +193,8 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 3. CSAT回答一括取得 (直近90日)
         List<CustomerCsat> allCsats = csatMapper.selectList(
                 new LambdaQueryWrapper<CustomerCsat>()
-                        .in(CustomerCsat::getCustomerId, customerIds)
+                        .in(CustomerCsat::getCustomerId, scopedCustomerIds)
+                        .in(!allRequestIds.isEmpty(), CustomerCsat::getServiceRequestId, allRequestIds)
                         .ge(CustomerCsat::getAnsweredAt, ninetyDaysAgo)
         );
         Map<Long, List<CustomerCsat>> csatByCustomer = allCsats.stream()
@@ -195,7 +203,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 4. 定例会(QBR)記録一括取得
         List<CustomerQbr> allQbrs = qbrMapper.selectList(
                 new LambdaQueryWrapper<CustomerQbr>()
-                        .in(CustomerQbr::getCustomerId, customerIds)
+                        .in(CustomerQbr::getCustomerId, scopedCustomerIds)
         );
         Map<Long, List<CustomerQbr>> allQbrByCustomer = allQbrs.stream()
                 .collect(Collectors.groupingBy(CustomerQbr::getCustomerId));
@@ -203,7 +211,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         // 5. 売掛金延滞(Invoice)一括取得
         List<Invoice> allInvoices = invoiceMapper.selectList(
                 new LambdaQueryWrapper<Invoice>()
-                        .in(Invoice::getCustomerId, customerIds)
+                        .in(Invoice::getCustomerId, scopedCustomerIds)
                         .eq(Invoice::getDeletedFlag, 0)
         );
         Map<Long, List<Invoice>> allInvoicesByCustomer = allInvoices.stream()
@@ -221,7 +229,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
 
         Map<Long, CustomerHealthScoreDto> resultMap = new HashMap<>();
 
-        for (Long custId : customerIds) {
+        for (Long custId : scopedCustomerIds) {
             String companyName = customerNameMap.getOrDefault(custId, "顧客#" + custId);
 
             List<ServiceRequest> custReqs = requestsByCustomer.getOrDefault(custId, Collections.emptyList());
@@ -382,6 +390,7 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
     public void generateMonthlySnapshot(String targetMonth, String reason,
                                         SnapshotExecutionContext executionContext) {
         validateExecutionContext(executionContext);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
 
         // targetMonth 解決 & フォーマット検証
         String effectiveMonth = targetMonth;
@@ -413,9 +422,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Long actorId = executionContext.actorId();
         String actorName = executionContext.actorName();
 
-        List<Customer> allCustomers = customerMapper.selectList(
-                new LambdaQueryWrapper<Customer>().eq(Customer::getDeletedFlag, 0)
-        );
+        Set<Long> ownedCustomerIds = customerMapper.selectOwnedCustomerIds(tenantId);
+        List<Customer> allCustomers = ownedCustomerIds == null || ownedCustomerIds.isEmpty()
+                ? Collections.emptyList() : customerMapper.selectListForOwnedIds(ownedCustomerIds, tenantId);
         if (allCustomers.isEmpty()) {
             return;
         }
@@ -478,7 +487,9 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
                                          String actorType, Long actorId, String actorName,
                                          LocalDateTime now, String effectiveMonth) {
         for (int attempt = 0; attempt < 3; attempt++) {
-            CustomerHealthSnapshot latest = snapshotMapper.selectLatestForUpdate(dto.getCustomerId(), snapshotDate);
+            String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+            CustomerHealthSnapshot latest = snapshotMapper.selectLatestForUpdate(
+                    dto.getCustomerId(), snapshotDate, tenantId);
             if (latest != null && computedHash.equals(latest.getSnapshotHash())) {
                 log.debug("顧客ヘルススナップショット同一内容スキップ: customerId={}, month={}",
                         dto.getCustomerId(), effectiveMonth);
@@ -556,6 +567,16 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
             return customerScopeResolver.resolve(LocalDate.now(clock));
         }
         return dataScopeService.isScoped() ? dataScopeService.allowedCustomerIds() : null;
+    }
+
+    /** tenant所有権とDataScope/組織scopeの共通積集合。nullはfull-accessを意味する。 */
+    private Set<Long> intersectOwnedCustomerIds(Set<Long> ownedCustomerIds, Set<Long> allowedCustomerIds) {
+        Set<Long> owned = ownedCustomerIds == null ? Set.of() : new HashSet<>(ownedCustomerIds);
+        if (allowedCustomerIds == null) {
+            return owned;
+        }
+        owned.retainAll(allowedCustomerIds);
+        return owned;
     }
 
     private void assertAllowedCustomer(Long customerId) {

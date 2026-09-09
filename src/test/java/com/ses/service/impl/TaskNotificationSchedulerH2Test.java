@@ -3,6 +3,7 @@ package com.ses.service.impl;
 import com.ses.entity.Notification;
 import com.ses.entity.Task;
 import com.ses.mapper.NotificationMapper;
+import com.ses.mapper.TaskNotificationLogMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.TaskService;
@@ -14,6 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -44,6 +46,9 @@ public class TaskNotificationSchedulerH2Test {
 
     @Autowired
     private TaskDueDateNotificationScheduler scheduler;
+
+    @Autowired
+    private TaskNotificationLogMapper taskNotificationLogMapper;
 
     @Test
     void testSchedulerIdempotencyAndNotificationSeparation() {
@@ -86,5 +91,41 @@ public class TaskNotificationSchedulerH2Test {
         // 通知は削除されずにDBに維持される (R2.3)
         List<Notification> notifications = notificationMapper.selectList(null);
         assertTrue(notifications.stream().anyMatch(n -> "TASK_OVERDUE".equals(n.getType())));
+    }
+
+    @Test
+    void 旧配送証跡不明行はRETRYとして退避後に再送できる() {
+        LocalDate today = LocalDate.now();
+        Task task = new Task();
+        task.setTitle("歴史通知再送確認");
+        task.setAssigneeUserId(1L);
+        task.setRequesterUserId(1L);
+        task.setDueDate(today.minusDays(1));
+        taskService.createTask(task, 1L);
+
+        com.ses.entity.TaskNotificationLog historical = com.ses.entity.TaskNotificationLog.builder()
+                .tenantId("default")
+                .taskId(task.getId())
+                .notifyDate(today)
+                .status("RETRY")
+                .attemptCount(0)
+                .nextRetryAt(LocalDateTime.now().plusMinutes(10))
+                .build();
+        taskNotificationLogMapper.insert(historical);
+
+        assertEquals(0, scheduler.processOverdueTaskNotifications(today),
+                "退避中のRETRYは同一batchで直ちにclaimしない");
+
+        historical.setNextRetryAt(LocalDateTime.now().minusMinutes(1));
+        taskNotificationLogMapper.updateById(historical);
+        assertEquals(1, scheduler.processOverdueTaskNotifications(today));
+
+        com.ses.entity.TaskNotificationLog sent = taskNotificationLogMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.ses.entity.TaskNotificationLog>()
+                        .eq(com.ses.entity.TaskNotificationLog::getTenantId, "default")
+                        .eq(com.ses.entity.TaskNotificationLog::getTaskId, task.getId())
+                        .eq(com.ses.entity.TaskNotificationLog::getNotifyDate, today));
+        assertEquals("SENT", sent.getStatus());
+        assertEquals(1, sent.getAttemptCount());
     }
 }

@@ -58,8 +58,18 @@ public class BreakGlassServiceImpl implements BreakGlassService {
 
     @Override
     public boolean isLoginAllowed(String username) {
-        return properties.isBreakGlassLoginEnabled() && properties.isBreakGlassUsername(username)
-                && hasActiveIncident();
+        if (!properties.isBreakGlassLoginEnabled() || !properties.isBreakGlassUsername(username)) {
+            return false;
+        }
+        try {
+            SysUser user = sysUserMapper.selectByUsername(username);
+            String tenantId = authenticatedTenant(user);
+            return tenantId != null && oidcTenantMatches(tenantId)
+                    && incidentMapper.selectActive(tenantId, LocalDateTime.now(clock)) != null;
+        } catch (RuntimeException e) {
+            log.warn("break-glass loginのtenant/incidentを確認できないため無効として扱います", e);
+            return false;
+        }
     }
 
     @Override
@@ -133,8 +143,20 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (!properties.isBreakGlassUsername(username)) {
             return true;
         }
-        BreakGlassIncident incident = activeIncident();
-        if (incident == null) {
+        SysUser user = sysUserMapper.selectByUsername(username);
+        String tenantId = authenticatedTenant(user);
+        if (tenantId == null || !oidcTenantMatches(tenantId)) {
+            return false;
+        }
+        BreakGlassIncident incident;
+        try {
+            incident = incidentMapper.selectActive(tenantId, LocalDateTime.now(clock));
+        } catch (RuntimeException e) {
+            log.warn("break-glass incidentを取得出来ないためsessionを発行しません", e);
+            return false;
+        }
+        if (incident == null || !tenantId.equals(incident.getTenantId())
+                || !"ACTIVE".equals(incident.getStatus())) {
             return false;
         }
         HttpSession session = request.getSession(true);
@@ -148,19 +170,27 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         if (authentication == null || !properties.isBreakGlassUsername(authentication.getName())) {
             return BreakGlassDecision.ALLOW;
         }
+        String tenantId = authenticatedTenant(authentication);
+        if (tenantId == null || !oidcTenantMatches(tenantId)) {
+            // InternalTenantContextFilterより前に実行されるため、ここでtenant欠落・不一致を止める。
+            return BreakGlassDecision.DENY_SCOPE;
+        }
         HttpSession session = request.getSession(false);
         if (session == null || !(session.getAttribute(INCIDENT_ID_ATTRIBUTE) instanceof Long incidentId)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_UNBOUND");
         }
         BreakGlassIncident incident;
         try {
-            incident = incidentMapper.selectByIdAndTenant(tenantId(), incidentId);
+            incident = incidentMapper.selectByIdAndTenant(tenantId, incidentId);
         } catch (RuntimeException e) {
             log.warn("break-glass incidentの再検証に失敗しました", e);
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_UNAVAILABLE");
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!isActiveBoundIncident(incident, now)) {
+        if (incident != null && !tenantId.equals(incident.getTenantId())) {
+            return BreakGlassDecision.DENY_SCOPE;
+        }
+        if (!isActiveBoundIncident(incident, tenantId, now)) {
             return revokeAndReject(request, authentication, "BREAK_GLASS_INCIDENT_EXPIRED");
         }
         if (isAuthenticationInfrastructure(request) || isPassiveInfrastructure(request)) {
@@ -219,8 +249,8 @@ public class BreakGlassServiceImpl implements BreakGlassService {
         }
     }
 
-    private boolean isActiveBoundIncident(BreakGlassIncident incident, LocalDateTime now) {
-        return incident != null && tenantId().equals(incident.getTenantId())
+    private boolean isActiveBoundIncident(BreakGlassIncident incident, String tenantId, LocalDateTime now) {
+        return incident != null && tenantId.equals(incident.getTenantId())
                 && "ACTIVE".equals(incident.getStatus())
                 && Integer.valueOf(1).equals(incident.getIdpOutageConfirmed())
                 && incident.getApprovedBy1() != null && incident.getApprovedBy2() != null
@@ -298,18 +328,31 @@ public class BreakGlassServiceImpl implements BreakGlassService {
     }
 
     private String tenantId() {
-        String contextTenant = AccountingTenantContextHolder.getExplicitTenantId();
-        String configuredTenant = StringUtils.hasText(properties.getTenantId())
-                ? properties.getTenantId().trim() : null;
-        if (contextTenant != null && configuredTenant != null && !contextTenant.equals(configuredTenant)) {
+        String contextTenant = AccountingTenantContextHolder.requireTenantContext();
+        if (!oidcTenantMatches(contextTenant)) {
             throw BusinessException.of(403, "error.tenant.contextMismatch");
         }
-        if (contextTenant != null) {
-            return contextTenant;
+        return contextTenant;
+    }
+
+    /** 認証主体のSysUserだけからtenantを解決する。設定値・request入力をtenantの代替にしない。 */
+    private String authenticatedTenant(Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof com.ses.config.LoginUser loginUser)) {
+            return null;
         }
-        if (configuredTenant != null) {
-            return configuredTenant;
+        return authenticatedTenant(loginUser.getSysUser());
+    }
+
+    private String authenticatedTenant(SysUser user) {
+        if (user == null || !StringUtils.hasText(user.getTenantId())) {
+            return null;
         }
-        throw BusinessException.of(403, "error.tenant.contextRequired");
+        return user.getTenantId().trim();
+    }
+
+    private boolean oidcTenantMatches(String tenantId) {
+        return StringUtils.hasText(tenantId)
+                && (!StringUtils.hasText(properties.getTenantId())
+                || tenantId.equals(properties.getTenantId().trim()));
     }
 }

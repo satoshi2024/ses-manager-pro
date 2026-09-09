@@ -402,14 +402,20 @@ public class AccountingIntegrationApiController {
     @GetMapping("/preview/expense/{expenseRequestId}")
     public ApiResult<CanonicalExpenseDeal> previewExpense(@PathVariable("expenseRequestId") Long expenseRequestId) {
         // R1-P1-06: 組織条件を最初のSQLへ適用 (UNKNOWN履歴はfail-closed、権限外IDは 404)
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         java.util.Set<Long> allowedOrgIds = allowedOrgIdsOrNull();
         ExpenseRequest exp = allowedOrgIds != null
-                ? expenseRequestMapper.selectForPreviewScoped(expenseRequestId, new java.util.ArrayList<>(allowedOrgIds))
-                : expenseRequestMapper.selectById(expenseRequestId);
+                ? expenseRequestMapper.selectForPreviewScoped(expenseRequestId,
+                new java.util.ArrayList<>(allowedOrgIds), tenantId)
+                : expenseRequestMapper.selectByIdForTenant(expenseRequestId, tenantId);
         if (exp == null) {
             return ApiResult.error(404, "経費申請レコードが見つかりません");
         }
-        Engineer eng = exp.getEngineerId() != null ? engineerMapper.selectById(exp.getEngineerId()) : null;
+        Engineer eng = exp.getEngineerId() != null
+                ? engineerMapper.selectByIdForTenant(exp.getEngineerId(), tenantId) : null;
+        if (exp.getEngineerId() != null && eng == null) {
+            return ApiResult.error(404, "経費申請レコードが見つかりません");
+        }
         CanonicalExpenseDeal preview = CanonicalExpenseDeal.builder()
                 .expenseId(exp.getId())
                 .expenseNo(exp.getExpenseNo() != null ? exp.getExpenseNo() : "EX-" + exp.getId())

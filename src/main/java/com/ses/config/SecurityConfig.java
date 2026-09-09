@@ -128,14 +128,15 @@ public class SecurityConfig {
         http
             // 認証済みLoginUserのtenantを以降の内部Security/業務チェーン全体へ固定する
             .addFilterAfter(internalTenantContextFilter, UsernamePasswordAuthenticationFilter.class)
+            // break-glassを認証主体・incident tenantで再検証してから、業務tenantを固定する。
+            // persistent session filterはThreadLocalに依存しないため、InternalTenantContextFilterより前に置く。
+            .addFilterBefore(persistentSessionFilter, InternalTenantContextFilter.class)
             // ロール別メニューアクセス制御フィルター（認証フィルターの後、認可判定の前に実行）
             .addFilterAfter(menuPermissionFilter, InternalTenantContextFilter.class)
             // API操作ログフィルター（メニュー権限フィルターの後に実行）
             .addFilterAfter(apiAuditFilter, MenuPermissionFilter.class)
             // break-glassのMFA未完了中はMFA endpoint以外を遮断
             .addFilterAfter(mfaEnforcementFilter, ApiAuditFilter.class)
-            // DB上で失効・期限切れになったsessionを即時拒否
-            .addFilterAfter(persistentSessionFilter, MfaEnforcementFilter.class)
             // アクセス制御の設定
                 .authorizeHttpRequests(auth -> auth
                 // 認証不要のパス（ログインページ、静的リソース、認証API）
