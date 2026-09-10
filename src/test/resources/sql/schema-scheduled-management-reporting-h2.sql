@@ -95,6 +95,8 @@ CREATE TABLE t_report_run (
     organization_scope_json CLOB NOT NULL,
     scope_policy_version VARCHAR(100) NOT NULL,
     scope_hash VARCHAR(128) NOT NULL,
+    recipient_preview_hash VARCHAR(128),
+    recipient_snapshot_json CLOB,
     period_from DATE NOT NULL,
     period_to DATE NOT NULL,
     cutoff_kind VARCHAR(30) NOT NULL,

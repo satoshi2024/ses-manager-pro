@@ -27,19 +27,23 @@ class ManagementAccountingSummaryCatalogAdapter extends CatalogAdapterSupport im
     }
 
     @Override
-    public TypedResultEnvelope execute(
-            SemanticCatalogEntry entry,
-            CopilotQueryParameters parameters,
-            CopilotScopeContext scope,
-            CopilotExecutionContext context) {
-        YearMonth month = parameters.accountingMonth() == null ? context.yearMonth() : parameters.accountingMonth();
-        ManagementAccountingSummaryDto summary = managementAccountingService.summary(month.toString());
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    @Override
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope, CopilotExecutionContext context) {
+        requireContext(context);
+        YearMonth month = parameters.accountingMonth() == null
+                ? context.asOfMonth() : parameters.accountingMonth();
+        ManagementAccountingSummaryDto summary = managementAccountingService.summary(month.toString(), context);
         String period = month.toString();
         List<MetricValue> values = List.of(
                 MetricValue.nullableYen("accounting.totalRevenue", summary.getTotalRevenue(), period, MetricBasis.ACTUAL),
                 MetricValue.nullableYen("accounting.totalGrossProfit", summary.getTotalGrossProfit(), period, MetricBasis.ACTUAL),
                 MetricValue.nullableYen("accounting.revenueVariance", summary.getRevenueVariance(), period, MetricBasis.MIXED),
                 MetricValue.nullableYen("accounting.grossProfitVariance", summary.getGrossProfitVariance(), period, MetricBasis.MIXED));
-        return envelope(entry, scope, context, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit());
+        return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit(), context);
     }
 }

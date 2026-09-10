@@ -15,7 +15,14 @@ public class DigitalInvoiceEvent {
     private String eventType;
     private LocalDateTime eventAt;
     private String payloadHash;
+    private String canonicalPayloadHash;
     private Boolean signatureValid;
+
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String correlationId;
+    private String idempotencyKey;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

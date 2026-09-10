@@ -66,7 +66,8 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         return new LoginUser(
             sysUser,
-            Collections.singletonList(authority)
+            Collections.singletonList(authority),
+            oidcSecurityProperties.getTenantId()
         );
     }
 }

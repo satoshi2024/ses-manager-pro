@@ -10,16 +10,27 @@ import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.EngineerSkillMapper;
 import com.ses.mapper.ProjectMapper;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
+import com.ses.service.ai.LegacyAiExecutionContextBinder;
+import com.ses.service.security.DataScopeService;
+import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -47,14 +58,22 @@ class AiRecommendationRecorderHashTest {
     private AiEvaluationQueryService queryService;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private DataScopeService dataScopeService;
+    @Autowired
+    private OrganizationScopeService organizationScopeService;
 
     @Test
     @WithMockUser(username = "1", roles = "管理者")
     void matchingのrunはallowlistのhashとgrain済み勤務地スキルを残す() {
         long stamp = System.nanoTime();
+        ((org.springframework.security.authentication.AbstractAuthenticationToken)
+                SecurityContextHolder.getContext().getAuthentication())
+                .setDetails(Map.of("tenant_id", "tenant-recorder"));
 
         Engineer engineer = new Engineer();
         engineer.setFullName("AI-hash-e-" + stamp);
+        engineer.setLegalEntityId(77L);
         engineer.setEmploymentType("正社員");
         engineer.setStatus("Bench");
         engineerMapper.insert(engineer);
@@ -64,11 +83,12 @@ class AiRecommendationRecorderHashTest {
         Long customerId = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(id), 0) + 1 FROM m_customer", Long.class);
         jdbcTemplate.update(
-                "INSERT INTO m_customer (id, company_name, deleted_flag) VALUES (?, ?, 0)",
-                customerId, "AI-hash-cust-" + stamp);
+                "INSERT INTO m_customer (id, company_name, legal_entity_id, deleted_flag) VALUES (?, ?, ?, 0)",
+                customerId, "AI-hash-cust-" + stamp, 77L);
 
         Project project = new Project();
         project.setProjectName("AI-hash-seed-" + stamp);
+        project.setLegalEntityId(77L);
         project.setCustomerId(customerId);
         project.setStatus("募集中");
         project.setWorkLocation("東京都千代田区丸の内1-1-1");
@@ -92,13 +112,21 @@ class AiRecommendationRecorderHashTest {
         dto.setProjectId(projectId);
         dto.setScore(80);
         dto.setReason("ok");
-        // 引数順: useCase, actorUserId, results, sourceEngineerId, sourceProjectId
-        recorder.recordMatch("MATCHING", 1L, List.of(dto), engineerId, projectId);
+        CopilotExecutionContext context = context();
+        recorder.recordMatch("MATCHING", 1L, List.of(dto), engineerId, projectId, context);
 
         AiRecommendationRun run = runMapper.selectById(dto.getRunId());
         assertNotNull(run, "recommendation run が未作成");
         assertNotEquals("0".repeat(64), run.getInputHash());
         assertTrue(run.getInputHash() != null && run.getInputHash().length() == 64);
+        assertEquals(context.scopeHash(), run.getScopeHash());
+        assertNotNull(run.getParameterHash());
+        assertEquals("tenant-recorder", run.getTenantId());
+        assertEquals(77L, run.getLegalEntityId());
+        assertEquals("UTC", run.getTimezoneId());
+        assertNotNull(run.getAsOfAt());
+        assertEquals("legacy-matching-v1", run.getCatalogVersion());
+        assertEquals("resource-scope-v1", run.getDataVersion());
         String summary = run.getRedactedSummaryJson();
         assertTrue(summary != null && summary.contains("東京都千代田区"), summary);
         assertFalse(summary.contains("丸の内1-1-1"), summary);
@@ -108,12 +136,21 @@ class AiRecommendationRecorderHashTest {
             extra.setProjectId(projectId);
             extra.setScore(70);
             extra.setReason("ok");
-            recorder.recordMatch("MATCHING", 1L, List.of(extra), engineerId, projectId);
+            recorder.recordMatch("MATCHING", 1L, List.of(extra), engineerId, projectId, context);
         }
         AiEvaluationDashboardDto dashboard = queryService.dashboard();
         assertTrue(dashboard.getSegments().stream().anyMatch(row ->
                         String.valueOf(row.get("segment")).contains("location:東京都千代田区")
                                 || String.valueOf(row.get("segment")).startsWith("skill:")),
                 String.valueOf(dashboard.getSegments()));
+    }
+
+    private CopilotExecutionContext context() {
+        LocalDate asOf = LocalDate.of(2026, 9, 9);
+        CopilotExecutionContext context = new CopilotExecutionContext("tenant-recorder", 77L,
+                Instant.parse("2026-09-09T00:00:00Z"), ZoneId.of("UTC"));
+        context.bindSnapshot(new EffectiveScopeSnapshotFactory(dataScopeService, organizationScopeService)
+                .create("tenant-recorder", 77L, asOf));
+        return new LegacyAiExecutionContextBinder().bind(context);
     }
 }

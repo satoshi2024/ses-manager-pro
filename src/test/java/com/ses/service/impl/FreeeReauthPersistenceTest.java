@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.service.FreeeIntegrationService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.lang.reflect.Method;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +39,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class FreeeReauthPersistenceTest {
 
     private static final String TOKEN_URL = "https://accounts.secure.freee.co.jp/public_api/token";
+    private final String fixtureCompanyName = "テスト事業所-" + UUID.randomUUID();
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -48,11 +51,18 @@ class FreeeReauthPersistenceTest {
     @Autowired
     private FreeeIntegrationService service;
 
+    @AfterEach
+    void cleanupFixture() {
+        jdbcTemplate.update("DELETE FROM t_freee_connection WHERE company_id = ? AND company_name = ?",
+                123, fixtureCompanyName);
+    }
+
     @Test
     @DisplayName("invalid_grant後にconnection_statusがREAUTH_REQUIREDで永続化される")
     void invalidGrant後にREAUTH_REQUIREDが永続化される() throws Exception {
         // 共有H2のため、自前のrowだけを使う
-        jdbcTemplate.update("DELETE FROM t_freee_connection");
+        jdbcTemplate.update("DELETE FROM t_freee_connection WHERE company_id = ? AND company_name = ?",
+                123, fixtureCompanyName);
         Object target = org.springframework.test.util.AopTestUtils.getTargetObject(service);
         Method encrypt = target.getClass().getDeclaredMethod("encrypt", String.class);
         encrypt.setAccessible(true);
@@ -61,8 +71,8 @@ class FreeeReauthPersistenceTest {
         jdbcTemplate.update("INSERT INTO t_freee_connection "
                 + "(company_id, company_name, access_token_encrypted, refresh_token_encrypted, "
                 + "token_expires_at, connection_status) "
-                + "VALUES (123, 'テスト事業所', ?, ?, DATEADD('MINUTE', -1, CURRENT_TIMESTAMP), 'CONNECTED')",
-                access, refresh);
+                + "VALUES (123, ?, ?, ?, DATEADD('MINUTE', -1, CURRENT_TIMESTAMP), 'CONNECTED')",
+                fixtureCompanyName, access, refresh);
 
         MockRestServiceServer server = MockRestServiceServer.createServer(restTemplate);
         server.expect(once(), requestTo(TOKEN_URL))
@@ -75,7 +85,8 @@ class FreeeReauthPersistenceTest {
         server.verify();
 
         String status = jdbcTemplate.queryForObject(
-                "SELECT connection_status FROM t_freee_connection", String.class);
+                "SELECT connection_status FROM t_freee_connection WHERE company_id = ? AND company_name = ?",
+                String.class, 123, fixtureCompanyName);
         assertEquals("REAUTH_REQUIRED", status,
                 "REAUTH_REQUIREDがDBへ永続化されること（AC04/REV-002/S15-P1-01）");
     }

@@ -247,6 +247,25 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
     """)
     List<UnbilledWorkRecordDto> selectUnbilledWorkRecords(@Param("customerId") Long customerId, @Param("billingMonth") String billingMonth);
 
+    /** 請求生成前に、実績から辿る契約・要員・案件・顧客の法人を一括再認可する。 */
+    @Select("""
+        <script>
+        SELECT c.legal_entity_id
+        FROM t_work_record w
+        JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+        JOIN m_customer cu ON cu.id = c.customer_id AND cu.deleted_flag = 0
+        WHERE w.id IN <foreach collection="workRecordIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+          AND c.customer_id = cu.id
+          AND c.legal_entity_id IS NOT NULL
+          AND e.legal_entity_id = c.legal_entity_id
+          AND p.legal_entity_id = c.legal_entity_id
+          AND cu.legal_entity_id = c.legal_entity_id
+        </script>
+        """)
+    List<Long> selectLegalEntityIdsByWorkRecordIds(@Param("workRecordIds") List<Long> workRecordIds);
+
     /** 組織scope内の未請求実績だけを選び、混在組織の請求書生成を分割する。 */
     @Select("""
         <script>

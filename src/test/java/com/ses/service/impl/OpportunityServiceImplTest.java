@@ -12,7 +12,9 @@ import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.QuotationMapper;
 import com.ses.service.QuotationService;
+import com.ses.service.ProjectService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -43,6 +45,10 @@ class OpportunityServiceImplTest {
     private DataScopeService dataScopeService;
     @Mock
     private CustomerMapper customerMapper;
+    @Mock
+    private LegalEntityContextService legalEntityContextService;
+    @Mock
+    private ProjectService projectService;
 
     @InjectMocks
     private OpportunityServiceImpl service;
@@ -50,9 +56,13 @@ class OpportunityServiceImplTest {
     @org.junit.jupiter.api.BeforeEach
     void setBaseMapper() {
         ReflectionTestUtils.setField(service, "baseMapper", opportunityMapper);
+        ReflectionTestUtils.setField(service, "legalEntityContextService", legalEntityContextService);
+        ReflectionTestUtils.setField(service, "projectService", projectService);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
         lenient().when(customerMapper.selectById(anyLong())).thenAnswer(invocation -> {
             Customer customer = new Customer();
             customer.setId(invocation.getArgument(0));
+            customer.setLegalEntityId(1L);
             return customer;
         });
     }
@@ -170,8 +180,8 @@ class OpportunityServiceImplTest {
         doAnswer(invocation -> {
             Project p = invocation.getArgument(0);
             p.setId(10L);
-            return 1;
-        }).when(projectMapper).insert(any(Project.class));
+            return true;
+        }).when(projectService).save(any(Project.class));
         doAnswer(invocation -> {
             Quotation q = invocation.getArgument(0);
             q.setId(20L);
@@ -184,7 +194,7 @@ class OpportunityServiceImplTest {
         assertEquals(10L, updated.getConvertedProjectId());
         assertEquals(20L, updated.getConvertedQuotationId());
         ArgumentCaptor<Project> projectCaptor = ArgumentCaptor.forClass(Project.class);
-        verify(projectMapper).insert(projectCaptor.capture());
+        verify(projectService).save(projectCaptor.capture());
         assertEquals(1L, projectCaptor.getValue().getSourceOpportunityId());
         assertEquals("2026-10-01", projectCaptor.getValue().getStartDate().toString());
         assertEquals("2026-11-30", projectCaptor.getValue().getEndDate().toString());
@@ -212,6 +222,7 @@ class OpportunityServiceImplTest {
         Opportunity opportunity = new Opportunity();
         opportunity.setId(id);
         opportunity.setCustomerId(100L);
+        opportunity.setLegalEntityId(1L);
         opportunity.setTitle("検証商機");
         opportunity.setStage(stage);
         opportunity.setVersion(version);

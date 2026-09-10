@@ -11,6 +11,7 @@ import org.springframework.core.type.classreading.MetadataReader;
 import org.springframework.core.type.classreading.MetadataReaderFactory;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,42 +45,36 @@ class TestIsolationAuditTest {
      * 原則空（真に read-only / no-datasource スライスのみ）。
      * 例外: クラスTXだと潰れる並行commit可視性検証（H2上・明示クリーンアップ前提）。
      */
-    private static final Set<String> NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST = Set.of(
-            // 並行 afterCommit 順序・キャッシュ再読込。クラスTXでは他スレッドからcommitが見えない
-            "com.ses.service.impl.SystemConfigCommitOrderingTest",
-            // 並行再承認の commit 可視性。クラスTX不可
-            "com.ses.service.ExternalIdentityProvisioningTransactionTest",
-            // トークン refresh / ジョブ claim の並行。クラスTX不可
-            "com.ses.integration.IntegrationConnectionAndJobTest",
-            // triggerSalesSync 並行。クラスTX不可
-            "com.ses.integration.SalesInvoiceIntegrationTest",
-            // 学習スキーマ並行更新。クラスTX不可
-            "com.ses.service.ai.AiFeedbackLearningSchemaTest",
-            // CloudSign 派遣の並行・ゲート検証。クラスTXだと他スレッドから見えない
-            "com.ses.service.cloudsign.CloudSignDispatchIntegrationTest",
-            // provider HTTP を TX 外に出す契約検証（クラスTXを意図的に付けない）
-            "com.ses.service.ai.AiExecutionGatewayPiiTest",
-            // REQUIRES_NEW / 永続化可視性が必要（クラスTXだと更新が外から見えない）
-            "com.ses.service.impl.FreeeReauthPersistenceTest",
-            "com.ses.controller.api.ComplianceDocumentApiTest",
-            "com.ses.expense.ExpenseRequestFlowIntegrationTest",
-            "com.ses.service.impl.ReferentialIntegrityGuardTest",
-            "com.ses.service.notification.NotificationOutboxSchedulerIntegrationTest",
-            "com.ses.integration.AccountingWorkerRawExceptionLogTest",
-            // 明示的に rollback 挙動を検証するためクラスTXと衝突する
-            "com.ses.controller.api.SystemConfigScopeInvalidationTest",
-            // MockRest + DB 接続読取がクラスTXで company_id が null 化する
-            "com.ses.service.accounting.FreeeAccountingProviderTest",
-            "com.ses.oneonone.OneOnOneSurveyFlowIntegrationTest",
-            // ポータル連携の commit 可視性がクラスTXで潰れる
-            "com.ses.web.EngineerSelfServicePortalMRegressionTest",
-            // 添付ファイル公開メタデータがクラスTX内では download 経路から見えない
-            "com.ses.changerequest.EngineerChangeRequestAttachmentApiTest",
-            // jdbcTemplateで更新した直後にmapper再読込。クラスTX+MyBatis 1次キャッシュで古いmembershipが返る
-            "com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest",
-            // ReportDeliveryIssueServiceの実Spring proxy TX rollback検証。クラスTXは被測境界を壊する。@AfterEachでテスト専用行のみ明示削除
-            "com.ses.report.ReportDeliveryTransactionIntegrationTest"
+    private static final Map<String, IsolationExceptionMetadata> NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST = Map.ofEntries(
+            entry("com.ses.service.impl.SystemConfigCommitOrderingTest", "並行afterCommitの可視性", true, "テスト固有fixtureをdelete", "system-config-commit"),
+            entry("com.ses.service.ExternalIdentityProvisioningTransactionTest", "並行再承認のcommit可視性", true, "テスト固有identityをdelete", "external-identity-transaction"),
+            entry("com.ses.integration.IntegrationConnectionAndJobTest", "token refreshとjob claimの並行性", true, "テスト固有connection/jobをdelete", "integration-connection-job"),
+            entry("com.ses.integration.SalesInvoiceIntegrationTest", "triggerSalesSyncの並行性", true, "テスト固有invoice/jobをdelete", "sales-invoice-integration"),
+            entry("com.ses.service.ai.AiFeedbackLearningSchemaTest", "学習スキーマの並行更新", true, "テスト固有learning rowをdelete", "ai-feedback-learning"),
+            entry("com.ses.service.cloudsign.CloudSignDispatchIntegrationTest", "CloudSign派遣の並行可視性", true, "テスト固有dispatchをdelete", "cloudsign-dispatch"),
+            entry("com.ses.service.ai.AiExecutionGatewayPiiTest", "provider HTTPをTX外で検証", false, "DB書込なし", "ai-gateway-pii"),
+            entry("com.ses.service.impl.FreeeReauthPersistenceTest", "REQUIRES_NEW永続化可視性", true, "テスト固有freee tokenをdelete", "freee-reauth"),
+            entry("com.ses.controller.api.ComplianceDocumentApiTest", "文書配布のcommit可視性", true, "テスト固有document/deliveryをdelete", "compliance-document"),
+            entry("com.ses.expense.ExpenseRequestFlowIntegrationTest", "expenseの外部commit可視性", true, "テスト固有expenseをdelete", "expense-flow"),
+            entry("com.ses.controller.api.SystemConfigScopeInvalidationTest", "rollback境界を明示検証", true, "テスト固有configをdelete", "system-config-scope"),
+            entry("com.ses.service.accounting.FreeeAccountingProviderTest", "MockRestとDB再読込の可視性", true, "テスト固有accounting rowをdelete", "freee-accounting"),
+            entry("com.ses.oneonone.OneOnOneSurveyFlowIntegrationTest", "survey commit可視性", true, "テスト固有surveyをdelete", "oneonone-survey"),
+            entry("com.ses.web.EngineerSelfServicePortalMRegressionTest", "portal commit可視性", true, "テスト固有portal rowをdelete", "portal-regression"),
+            entry("com.ses.changerequest.EngineerChangeRequestAttachmentApiTest", "添付公開metadataの可視性", true, "テスト固有attachmentをdelete", "change-request-attachment"),
+            entry("com.ses.mapper.IntegrationHubWebhookResourceScopeMapperIntegrationTest", "jdbcTemplate更新後の再読込", true, "テスト固有resource scopeをdelete", "integration-hub-resource-scope"),
+            entry("com.ses.report.ReportDeliveryTransactionIntegrationTest", "ReportDeliveryIssueService実Spring proxy TX rollback検証", true, "テスト専用行を@AfterEachで明示削除", "report-delivery-tx")
     );
+
+    private static Map.Entry<String, IsolationExceptionMetadata> entry(String className, String reason,
+                                                                        boolean writesDatabase,
+                                                                        String cleanupMechanism, String fixtureKey) {
+        return Map.entry(className,
+                new IsolationExceptionMetadata(reason, writesDatabase, cleanupMechanism, fixtureKey));
+    }
+
+    private record IsolationExceptionMetadata(String reason, boolean writesDatabase,
+                                              String cleanupMechanism, String fixtureKey) {
+    }
 
     @Test
     void surefireのrunOrderはrandomである() throws Exception {
@@ -186,7 +181,11 @@ class TestIsolationAuditTest {
                     || hasTag(meta, className, PERFORMANCE_TAG)) {
                 continue;
             }
-            if (NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST.contains(className)) {
+            if (NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST.containsKey(className)) {
+                IsolationExceptionMetadata exception = NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST.get(className);
+                if (exception.writesDatabase() && !hasConcreteCleanupMechanism(className)) {
+                    offenders.add(className);
+                }
                 continue;
             }
             if (!hasTransactional(className)) {
@@ -197,6 +196,47 @@ class TestIsolationAuditTest {
         assertThat(offenders)
                 .as("非mysql SpringBootTest は @Transactional（または allowlist）必須: %s", offenders)
                 .isEmpty();
+    }
+
+    @Test
+    void allowlistは理由だけでなく実annotationまたは実cleanupを要求する() {
+        assertThat(NON_TRANSACTIONAL_SPRING_BOOT_ALLOWLIST).isNotEmpty()
+                .allSatisfy((className, metadata) -> {
+                    assertThat(metadata.reason()).isNotBlank();
+                    assertThat(metadata.cleanupMechanism()).isNotBlank();
+                    assertThat(metadata.fixtureKey()).isNotBlank();
+                    if (metadata.writesDatabase()) {
+                        assertThat(metadata.cleanupMechanism()).doesNotContain("DB書込なし");
+                        assertThat(hasTransactional(className) || hasConcreteCleanupMechanism(className))
+                                .as("allowlistのcleanup metadataだけでは共有DBを許可しない: %s", className)
+                                .isTrue();
+                    }
+                });
+    }
+
+    private static boolean hasConcreteCleanupMechanism(String className) {
+        if (hasTransactional(className)) {
+            return true;
+        }
+        Path source = Path.of("src", "test", "java", className.replace('.', File.separatorChar) + ".java");
+        try {
+            if (!Files.exists(source)) {
+                return false;
+            }
+            String text = Files.readString(source, StandardCharsets.UTF_8);
+            boolean hasAfterEach = text.contains("@AfterEach") || text.contains("AfterEach");
+            boolean hasNarrowCleanup = text.contains("cleanup")
+                    || text.contains("restore")
+                    || text.contains("reset")
+                    || text.contains("DELETE FROM")
+                    || text.contains("deleteBy")
+                    || text.contains("removeBy")
+                    || text.contains(".delete(")
+                    || text.contains(".remove(");
+            return hasAfterEach && hasNarrowCleanup;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private static boolean hasTransactional(String className) {

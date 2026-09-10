@@ -24,6 +24,8 @@ public class ReviewedProjectDto {
 
     @Data
     public static class ProjectPart {
+        /** 法人を推測しないため、レビュー担当が既存顧客を明示選択する。 */
+        private Long customerId;
         private String name;
         private BigDecimal minUnitPrice;
         private BigDecimal maxUnitPrice;

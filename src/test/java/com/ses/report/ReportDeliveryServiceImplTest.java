@@ -15,8 +15,9 @@ import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
-import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
 import com.ses.service.report.ReportDeliveryIssueService;
@@ -57,7 +58,8 @@ class ReportDeliveryServiceImplTest {
     private ReportDeliveryDocumentRegistrar documentRegistrar;
     private ReportDeliveryIssueService deliveryIssueService;
     private DocumentService archiveService;
-    private NotificationService notificationService;
+    private DocumentMapper documentMapper;
+    private DocumentVersionMapper documentVersionMapper;
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private ReportDeliveryServiceImpl service;
 
@@ -65,6 +67,7 @@ class ReportDeliveryServiceImplTest {
     void setUp() {
         runMapper = mock(ReportRunMapper.class);
         deliveryMapper = mock(ReportDeliveryMapper.class);
+        when(deliveryMapper.updateById(any(ReportDelivery.class))).thenReturn(1);
         notificationOutboxMapper = mock(NotificationOutboxMapper.class);
         userMapper = mock(SysUserMapper.class);
         previewService = mock(ReportRecipientPreviewService.class);
@@ -73,16 +76,17 @@ class ReportDeliveryServiceImplTest {
         documentRegistrar = mock(ReportDeliveryDocumentRegistrar.class);
         deliveryIssueService = mock(ReportDeliveryIssueService.class);
         archiveService = mock(DocumentService.class);
-        notificationService = mock(NotificationService.class);
-        when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
-                anyString(), anyString(), anyString())).thenReturn(99L);
+        documentMapper = mock(DocumentMapper.class);
+        documentVersionMapper = mock(DocumentVersionMapper.class);
+        when(archiveService.getVersionStorageKey(anyLong(), anyInt())).thenReturn("published/report.pdf");
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
         AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
         when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
         when(timezoneResolver.now("default")).thenAnswer(invocation -> LocalDateTime.now());
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
-                snapshotService, documentService, documentRegistrar, deliveryIssueService, archiveService, passwordEncoder,
-                timezoneResolver);
+                snapshotService, documentService, documentRegistrar, deliveryIssueService, archiveService,
+                documentMapper, documentVersionMapper, passwordEncoder,
+                new ObjectMapper(), timezoneResolver);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
                         List.of(new SimpleGrantedAuthority("ROLE_管理者"))));
@@ -195,12 +199,31 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setRunId(10L);
         delivery.setRecipientUserId(1L);
-        delivery.setLinkTokenHash("wrong");
+        delivery.setLinkTokenHash(sha256("token"));
         delivery.setLinkExpiresAt(LocalDateTime.now().minusMinutes(1));
         delivery.setReauthRequired(1);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(sha256("token"))).thenReturn(delivery);
 
         assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+                .hasMessageContaining("error.managementReport.linkExpired");
+        verifyNoInteractions(archiveService);
+    }
+
+    @Test
+    void downloadはdeliveryIdや誤tokenをbearerとして受け付けない() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setId(7L);
+        delivery.setRunId(10L);
+        delivery.setRecipientUserId(1L);
+        delivery.setLinkTokenHash(sha256("actual-token"));
+        delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
+        delivery.setReauthRequired(0);
+        when(deliveryMapper.selectByLinkTokenHash(sha256("7"))).thenReturn(null);
+        when(deliveryMapper.selectByLinkTokenHash(sha256("wrong-token"))).thenReturn(null);
+
+        assertThatThrownBy(() -> service.download(7L, "7", "PDF"))
+                .hasMessageContaining("error.managementReport.linkInvalid");
+        assertThatThrownBy(() -> service.download(7L, "wrong-token", "PDF"))
                 .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
     }
@@ -215,9 +238,9 @@ class ReportDeliveryServiceImplTest {
         user.setId(1L);
         user.setPassword("encoded");
         when(userMapper.selectById(1L)).thenReturn(user);
-        when(passwordEncoder.matches("secret", "encoded")).thenReturn(true);
+        when(passwordEncoder.matches("pass", "encoded")).thenReturn(true);
 
-        service.reauthenticate(7L, "secret");
+        service.reauthenticate(7L, "pass");
 
         assertThat(delivery.getReauthenticatedAt()).isNotNull();
         verify(deliveryMapper).updateById(delivery);
@@ -233,7 +256,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         ReportRecipientPreview recipient = new ReportRecipientPreview(
                 1L, "マネージャー", "DENY", "RECIPIENT_SCOPE_MISMATCH", "changed");
@@ -246,33 +269,30 @@ class ReportDeliveryServiceImplTest {
 
     @Test
     void downloadはownerと別の許可済みmanagerにも利用させる() {
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken("2", "N/A",
-                        List.of(new SimpleGrantedAuthority("ROLE_マネージャー"))));
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
         delivery.setRunId(10L);
-        delivery.setRecipientUserId(2L);
+        delivery.setRecipientUserId(1L);
         delivery.setDocumentId(20L);
         delivery.setDocumentVersionNo(1);
         delivery.setLinkTokenHash(sha256("token"));
+        delivery.setRecipientScopeHash("recipient-scope");
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
         ReportRun run = readyRun();
         run.setScopeOwnerType("ORGANIZATION");
         run.setScopeOwnerId(1L);
-        run.setOrganizationScopeJson("{\"companyWide\":false,\"organizationIds\":[10],\"directUserIds\":[]}");
         when(runMapper.selectById(10L)).thenReturn(run);
-        when(previewService.previewForRun(run)).thenReturn(preview(
-                new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "recipient-scope")));
-        when(archiveService.getVersionStorageKey(20L, 1)).thenReturn("published/report.pdf");
-        when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("pdf".getBytes(StandardCharsets.UTF_8)));
+        ReportRecipientPreview recipient = new ReportRecipientPreview(
+                1L, "マネージャー", "ALLOW", "SCOPE_MATCH", "recipient-scope");
+        when(previewService.previewForRun(any())).thenReturn(preview(recipient));
+        when(archiveService.download(20L, 1)).thenReturn(new ByteArrayInputStream("data".getBytes(StandardCharsets.UTF_8)));
 
-        ReportDownload result = service.download(7L, "token", "PDF");
+        ReportDownload download = service.download(7L, "token", "PDF");
 
-        assertThat(result.getFileName()).isEqualTo("management-report.pdf");
+        assertThat(download.getFileName()).isEqualTo("management-report.pdf");
         verify(snapshotService).scopeSnapshotOf(run);
         verify(snapshotService, never()).assertAccessible(run);
         verify(archiveService).download(20L, 1);
@@ -280,35 +300,35 @@ class ReportDeliveryServiceImplTest {
     }
 
     @Test
-    void retryが5回到達時にdeliveryをDLQへ移す() {
+    void retry5回到達時にdeliveryをDLQへ移行() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("RETRY");
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
 
         service.retry(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("FAILED");
         assertThat(delivery.getLastErrorCode()).isEqualTo("DELIVERY_DLQ");
         verify(deliveryMapper).updateById(delivery);
-        verifyNoInteractions(previewService, notificationService);
+        verifyNoInteractions(previewService);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"ENQUEUED", "PROCESSING", "PENDING", "SENT"})
+    @ValueSource(strings = {"ENQUEUED", "PROCESSING", "SENT", "PENDING"})
     void retryはdispatch中または完了済みdeliveryを再送しない(String status) {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
         delivery.setAttemptCount(1);
         delivery.setDeliveryStatus(status);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
 
         service.retry(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo(status);
         verify(deliveryMapper, never()).updateById(any(ReportDelivery.class));
-        verifyNoInteractions(previewService, notificationService, notificationOutboxMapper);
+        verifyNoInteractions(previewService, notificationOutboxMapper);
     }
 
     @Test
@@ -320,7 +340,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setAttemptCount(2);
         delivery.setDeliveryStatus("RETRY");
         delivery.setNotificationOutboxId(88L);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
@@ -330,7 +350,7 @@ class ReportDeliveryServiceImplTest {
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         verify(notificationOutboxMapper).requeueReport(88L);
-        verifyNoInteractions(notificationService);
+        verifyNoInteractions(documentRegistrar, deliveryIssueService);
     }
 
     @Test
@@ -343,10 +363,16 @@ class ReportDeliveryServiceImplTest {
         delivery.setDeliveryStatus("FAILED");
         delivery.setDocumentId(20L);
         delivery.setDocumentVersionNo(1);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+        Document document = new Document();
+        document.setId(20L);
+        DocumentVersion version = new DocumentVersion();
+        version.setVersionNo(1);
+        when(documentMapper.selectById(20L)).thenReturn(document);
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
         when(deliveryIssueService.issue(any(), eq(delivery), any(), any())).thenAnswer(invocation -> {
             ReportDelivery target = invocation.getArgument(1);
             target.setDeliveryStatus("ENQUEUED");
@@ -365,10 +391,14 @@ class ReportDeliveryServiceImplTest {
     void manualReplayはDLQの既存outboxを再利用しdedupe衝突を起こさない() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
+        delivery.setRunId(10L);
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("FAILED");
         delivery.setNotificationOutboxId(88L);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
+        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(previewService.previewForRun(any())).thenReturn(
+                preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
         when(notificationOutboxMapper.replayReport(88L)).thenReturn(1);
 
         service.manualReplay(7L);
@@ -377,7 +407,7 @@ class ReportDeliveryServiceImplTest {
         assertThat(delivery.getAttemptCount()).isEqualTo(5);
         verify(notificationOutboxMapper).replayReport(88L);
         verify(deliveryMapper).updateById(delivery);
-        verifyNoInteractions(notificationService, previewService, runMapper);
+        verifyNoInteractions(deliveryIssueService);
     }
 
     @Test
@@ -390,6 +420,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setDeliveryStatus("ENQUEUED");
         when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
 
         service.cancel(7L);
 
@@ -398,8 +429,27 @@ class ReportDeliveryServiceImplTest {
         verify(deliveryMapper).updateById(delivery);
 
         assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
-                .hasMessageContaining("error.managementReport.deliveryCancelled");
+                .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
+    }
+
+    private ReportRun readyRun() {
+        ReportRun run = new ReportRun();
+        run.setId(10L);
+        run.setStatus("SUCCEEDED");
+        run.setScopeOwnerType("COMPANY");
+        run.setScopeOwnerId(1L);
+        run.setTemplateVersionId(3L);
+        run.setScopeHash("scope");
+        run.setOrganizationScopeJson("{\"companyWide\":true,\"organizationIds\":[]}");
+        run.setRecipientPreviewHash("preview-hash");
+        try {
+            run.setRecipientSnapshotJson(new ObjectMapper().writeValueAsString(List.of(
+                    new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope"))));
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+        return run;
     }
 
     private ReportRecipientPreviewResult preview(ReportRecipientPreview recipient) {
@@ -407,27 +457,14 @@ class ReportDeliveryServiceImplTest {
                 LocalDateTime.now(), List.of(recipient));
     }
 
-    private ReportRun readyRun() {
-        ReportRun run = new ReportRun();
-        run.setId(10L);
-        run.setStatus("SUCCEEDED");
-        run.setPeriodFrom(LocalDate.of(2026, 8, 1));
-        run.setPeriodTo(LocalDate.of(2026, 8, 31));
-        run.setTemplateVersionId(3L);
-        run.setScopeHash("scope");
-        run.setOrganizationScopeJson("{\"companyWide\":true,\"organizationIds\":[]}");
-        return run;
-    }
-
     private String sha256(String value) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder();
-            for (byte b : digest) result.append(String.format("%02x", b));
-            return result.toString();
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            return sb.toString();
         } catch (Exception ex) {
-            throw new AssertionError(ex);
+            throw new IllegalStateException(ex);
         }
     }
 }

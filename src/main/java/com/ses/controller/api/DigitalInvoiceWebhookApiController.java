@@ -3,6 +3,8 @@ package com.ses.controller.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.audit.ExecutionActorContext;
+import com.ses.common.audit.ActorAttribution;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
 import com.ses.entity.DigitalInvoice;
@@ -34,6 +36,12 @@ public class DigitalInvoiceWebhookApiController {
             @RequestBody String rawBody,
             @RequestHeader(value = "X-Signature", defaultValue = "") String signature) {
         CorrelationContext.ensure();
+        return ExecutionActorContext.runAsProviderCallback(
+                CorrelationContext.get(CorrelationContext.CORRELATION_ID), null,
+                () -> receiveWebhookInternal(rawBody, signature));
+    }
+
+    private ResponseEntity<String> receiveWebhookInternal(String rawBody, String signature) {
         try {
             if (rawBody == null || rawBody.length() > MAX_BODY_LENGTH) {
                 return businessError(HttpStatus.BAD_REQUEST, "INVALID_REQUEST_BODY", "Webhookの内容が不正です。");
@@ -60,6 +68,8 @@ public class DigitalInvoiceWebhookApiController {
                     .contains(eventType)) {
                 return businessError(HttpStatus.BAD_REQUEST, "WEBHOOK_INVALID_PAYLOAD", "Webhookの内容が不正です。");
             }
+            ExecutionActorContext.set(ActorAttribution.providerCallback(
+                    CorrelationContext.get(CorrelationContext.CORRELATION_ID), eventId));
             CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, eventId);
             String eventAtStr = root.path("eventAt").asText();
             LocalDateTime eventAt;

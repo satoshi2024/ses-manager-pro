@@ -1,6 +1,7 @@
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id    BIGINT,
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
   bp_company_id      BIGINT,
@@ -20,6 +21,7 @@ CREATE TABLE t_bp_availability (
 DROP TABLE IF EXISTS t_bp_availability_ingestion;
 CREATE TABLE t_bp_availability_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id       BIGINT,
   original_file_name    VARCHAR(255),
   stored_file_name      VARCHAR(120),
   file_ext              VARCHAR(10)  NOT NULL,

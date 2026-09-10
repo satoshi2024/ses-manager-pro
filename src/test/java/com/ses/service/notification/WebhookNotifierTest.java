@@ -6,8 +6,11 @@ import com.ses.entity.Notification;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
@@ -49,7 +52,7 @@ class WebhookNotifierTest {
         Notification notification = notification("CONTRACT_END");
         assertDoesNotThrow(() -> webhookNotifier().notify(notification));
 
-        verify(restTemplate, never()).postForEntity(anyString(), any(), eq(String.class));
+        verify(restTemplate, never()).exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
     }
 
     @Test
@@ -60,27 +63,28 @@ class WebhookNotifierTest {
         Notification notification = notification("MAIL_FAILED");
         assertDoesNotThrow(() -> webhookNotifier().notify(notification));
 
-        verify(restTemplate, never()).postForEntity(anyString(), any(), eq(String.class));
+        verify(restTemplate, never()).exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
     }
 
     @Test
     void notify_対象種別なら送信される() {
         when(systemConfigService.getString("notification.webhook-url", null)).thenReturn("https://hooks.example.com/webhook");
         when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END,PROJECT_URGENT");
-        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("ok"));
 
         Notification notification = notification("CONTRACT_END");
         webhookNotifier().notify(notification);
 
-        verify(restTemplate, times(1)).postForEntity(eq("https://hooks.example.com/webhook"), any(), eq(String.class));
+        verify(restTemplate, times(1)).exchange(eq("https://hooks.example.com/webhook"), eq(HttpMethod.POST),
+                any(HttpEntity.class), eq(String.class));
     }
 
     @Test
     void notify_送信失敗時は例外が上位へ伝播しない() {
         when(systemConfigService.getString("notification.webhook-url", null)).thenReturn("https://hooks.example.com/webhook");
         when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END");
-        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenThrow(new ResourceAccessException("timeout"));
 
         Notification notification = notification("CONTRACT_END");
@@ -98,7 +102,7 @@ class WebhookNotifierTest {
         boolean delivered = webhookNotifier().notifyNow(notification);
 
         assertFalse(delivered, "検証失敗時は配信失敗(false)を返す");
-        verify(restTemplate, never()).postForEntity(anyString(), any(), eq(String.class));
+        verify(restTemplate, never()).exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
     }
 
     @Test
@@ -106,7 +110,7 @@ class WebhookNotifierTest {
         when(systemConfigService.getString("notification.webhook-url", null))
                 .thenReturn("https://hooks.example.com/webhook");
         when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END");
-        when(restTemplate.postForEntity(anyString(), any(), eq(String.class)))
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(ResponseEntity.ok("ok"));
 
         Notification notification = notification("CONTRACT_END");
@@ -114,7 +118,31 @@ class WebhookNotifierTest {
 
         assertTrue(delivered);
         verify(outboundUrlGuard, times(1)).validatePublicHttpsUrl("https://hooks.example.com/webhook");
-        verify(restTemplate, times(1)).postForEntity(eq("https://hooks.example.com/webhook"), any(), eq(String.class));
+        verify(restTemplate, times(1)).exchange(eq("https://hooks.example.com/webhook"), eq(HttpMethod.POST),
+                any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void notifyNow_同じdedupeKeyには同じ外部冪等キーを付与する() {
+        when(systemConfigService.getString("notification.webhook-url", null))
+                .thenReturn("https://hooks.example.com/webhook");
+        when(systemConfigService.getString("notification.webhook-types", "")).thenReturn("CONTRACT_END");
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("ok"));
+
+        Notification notification = notification("CONTRACT_END");
+        WebhookNotifier notifier = webhookNotifier();
+        assertTrue(notifier.notifyNow(notification));
+        assertTrue(notifier.notifyNow(notification));
+
+        ArgumentCaptor<HttpEntity> requests = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate, times(2)).exchange(eq("https://hooks.example.com/webhook"), eq(HttpMethod.POST),
+                requests.capture(), eq(String.class));
+        String first = requests.getAllValues().get(0).getHeaders().getFirst("Idempotency-Key");
+        String second = requests.getAllValues().get(1).getHeaders().getFirst("Idempotency-Key");
+        assertNotNull(first);
+        assertEquals(first, second);
+        assertFalse(first.contains(notification.getDedupeKey()));
     }
 
     @Test
@@ -131,6 +159,7 @@ class WebhookNotifierTest {
         notification.setTitle("タイトル");
         notification.setMessage("本文");
         notification.setLinkUrl("/contracts/1");
+        notification.setDedupeKey("webhook-test:" + type);
         return notification;
     }
 }

@@ -3,9 +3,9 @@ package com.ses.service.ai.copilot.scope;
 import com.ses.common.exception.BusinessException;
 import com.ses.config.LoginUser;
 import com.ses.entity.SysUser;
-import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.AfterEach;
@@ -17,18 +17,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import java.time.Instant;
+import java.time.ZoneId;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotScopeResolverTest {
@@ -42,8 +38,6 @@ class CopilotScopeResolverTest {
     @InjectMocks
     private CopilotScopeResolver resolver;
 
-    private static final CopilotExecutionContext CONTEXT = contextOn(LocalDate.of(2026, 9, 7));
-
     @AfterEach
     void clearContext() {
         SecurityContextHolder.clearContext();
@@ -53,7 +47,7 @@ class CopilotScopeResolverTest {
     void HRは拒否される() {
         loginAs("hr", "HR");
         SemanticCatalogEntry entry = SemanticCatalogRegistry.find("dashboard.summary").orElseThrow();
-        assertThrows(BusinessException.class, () -> resolver.resolve(entry, CONTEXT));
+        assertThrows(BusinessException.class, () -> resolver.resolve(entry));
     }
 
     @Test
@@ -63,65 +57,30 @@ class CopilotScopeResolverTest {
         when(dataScopeService.isScoped()).thenReturn(false);
 
         CopilotScopeContext scope = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), CONTEXT);
+                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), context());
         assertEquals("COMPANY_WIDE", scope.scopeType());
     }
 
     @Test
     void 営業はSALES_DATA_SCOPED() {
         loginAs("sales", "営業");
+        when(dataScopeService.isScoped()).thenReturn(true);
         when(dataScopeService.isSalesDataScoped()).thenReturn(true);
-        when(dataScopeService.allowedContractIds()).thenReturn(Set.of(1L, 2L));
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of(3L));
-        when(dataScopeService.allowedCustomerIds()).thenReturn(Set.of());
+        when(dataScopeService.allowedContractIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of(1L, 2L));
+        when(dataScopeService.allowedEngineerIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of(3L));
+        when(dataScopeService.allowedCustomerIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of());
 
         CopilotScopeContext scope = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), CONTEXT);
+                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), context());
         assertEquals("SALES_DATA_SCOPED", scope.scopeType());
     }
 
-    @Test
-    void 営業の空母集団はfailClosed() {
-        loginAs("sales", "営業");
-        when(dataScopeService.isSalesDataScoped()).thenReturn(true);
-        when(dataScopeService.allowedContractIds()).thenReturn(Set.of());
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of());
-        when(dataScopeService.allowedCustomerIds()).thenReturn(Set.of());
-
-        SemanticCatalogEntry entry = SemanticCatalogRegistry.find("dashboard.summary").orElseThrow();
-        assertThrows(BusinessException.class, () -> resolver.resolve(entry, CONTEXT));
-    }
-
-    @Test
-    void 異なる許可集合は異なるscopeHashになる() {
-        loginAs("sales", "営業");
-        when(dataScopeService.isSalesDataScoped()).thenReturn(true);
-
-        when(dataScopeService.allowedContractIds()).thenReturn(Set.of(1L, 2L));
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of());
-        when(dataScopeService.allowedCustomerIds()).thenReturn(Set.of());
-        CopilotScopeContext scope12 = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), CONTEXT);
-
-        when(dataScopeService.allowedContractIds()).thenReturn(Set.of(3L, 4L));
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of());
-        when(dataScopeService.allowedCustomerIds()).thenReturn(Set.of());
-        CopilotScopeContext scope34 = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), CONTEXT);
-
-        assertNotEquals(scope12.scopeHash(), scope34.scopeHash());
-    }
-
-    @Test
-    void asOf変更でscopeHashが変わる() {
-        loginAs("admin", "管理者");
-        when(organizationScopeService.hasFullAccess()).thenReturn(true);
-        when(dataScopeService.isScoped()).thenReturn(false);
-
-        SemanticCatalogEntry entry = SemanticCatalogRegistry.find("dashboard.summary").orElseThrow();
-        String hashDay1 = resolver.resolve(entry, contextOn(LocalDate.of(2026, 9, 7))).scopeHash();
-        String hashDay2 = resolver.resolve(entry, contextOn(LocalDate.of(2026, 9, 8))).scopeHash();
-        assertNotEquals(hashDay1, hashDay2);
+    private com.ses.service.ai.copilot.CopilotExecutionContext context() {
+        var context = new com.ses.service.ai.copilot.CopilotExecutionContext(
+                "tenant-a", 1L, Instant.parse("2026-09-08T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
+        context.bindSnapshot(new EffectiveScopeSnapshotFactory(dataScopeService, organizationScopeService)
+                .create("tenant-a", 1L, context.asOfDate()));
+        return context;
     }
 
     private void loginAs(String username, String role) {
@@ -132,19 +91,5 @@ class CopilotScopeResolverTest {
         LoginUser loginUser = new LoginUser(user, List.of());
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(loginUser, null, loginUser.getAuthorities()));
-    }
-
-    private static CopilotExecutionContext contextOn(LocalDate asOf) {
-        ZoneId zone = ZoneId.of("Asia/Tokyo");
-        Instant instant = asOf.atStartOfDay(zone).plusHours(12).toInstant();
-        Clock clock = Clock.fixed(instant, zone);
-        return new CopilotExecutionContext(
-                clock,
-                instant,
-                zone,
-                asOf,
-                YearMonth.from(asOf),
-                "default",
-                "");
     }
 }

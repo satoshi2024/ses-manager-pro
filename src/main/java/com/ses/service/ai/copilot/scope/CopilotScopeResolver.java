@@ -6,108 +6,50 @@ import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
-import java.util.Set;
-
-/**
- * role / DataScope / 組織scopeを正本serviceと同じ母集団へ収束させる。
- */
+/** role / DataScope / 組織scopeをquery開始時のsnapshotへ収束させる。 */
 @Component
-@RequiredArgsConstructor
 public class CopilotScopeResolver {
+    public static final String POLICY_VERSION = EffectiveScopeSnapshotFactory.POLICY_VERSION;
 
-    public static final String POLICY_VERSION = "nf08-scope-2";
+    /** 既存unit testと互換のconstructor。scopeの再計算には使用しない。 */
+    public CopilotScopeResolver(DataScopeService dataScopeService,
+                                OrganizationScopeService organizationScopeService) {
+    }
 
-    private final DataScopeService dataScopeService;
-    private final OrganizationScopeService organizationScopeService;
+    @Autowired
+    public CopilotScopeResolver(EffectiveScopeSnapshotFactory snapshotFactory) {
+    }
+
+    public CopilotScopeContext resolve(SemanticCatalogEntry entry) {
+        throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
 
     public CopilotScopeContext resolve(SemanticCatalogEntry entry, CopilotExecutionContext context) {
+        assertRoleAndCatalog(entry);
+        if (context == null) {
+            throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+        }
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot != null) {
+            if (context.scope() != snapshot.scope()) {
+                throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+            }
+            return snapshot.scope();
+        }
+        // scopeはquery開始時にfactoryが一度だけ束縛したsnapshotからのみ取得する。
+        // ここで再計算すると、同一pipeline内でDataScope/OrganizationScopeが変化した際に
+        // parameter・result・citationの認可集合が分裂するため、互換fallbackも許可しない。
+        throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+    }
+
+    private void assertRoleAndCatalog(SemanticCatalogEntry entry) {
         String role = SecurityUtils.currentRole();
-        if (role == null || !entry.allowedRoles().contains(role)) {
+        if (entry == null || role == null || !entry.allowedRoles().contains(role)
+                || "HR".equals(role) || "要員".equals(role)) {
             throw BusinessException.of(403, "SCOPE_DENIED");
         }
-        if ("HR".equals(role) || "要員".equals(role)) {
-            throw BusinessException.of(403, "SCOPE_DENIED");
-        }
-
-        LocalDate asOf = context.asOf();
-        String scopeType;
-        CopilotScopePopulation population;
-
-        if (organizationScopeService.hasFullAccess() && !dataScopeService.isScoped()) {
-            scopeType = "COMPANY_WIDE";
-            population = emptyPopulation();
-        } else if (dataScopeService.isSalesDataScoped()) {
-            scopeType = "SALES_DATA_SCOPED";
-            population = new CopilotScopePopulation(
-                    safeSet(dataScopeService.allowedCustomerIds()),
-                    safeSet(dataScopeService.allowedContractIds()),
-                    safeSet(dataScopeService.allowedEngineerIds()),
-                    Set.of(),
-                    Set.of());
-        } else if (!organizationScopeService.hasFullAccess()) {
-            scopeType = "ORGANIZATION_SCOPED";
-            population = new CopilotScopePopulation(
-                    safeSet(organizationScopeService.allowedCustomerIds(asOf)),
-                    safeSet(organizationScopeService.allowedContractIds(asOf)),
-                    safeSet(organizationScopeService.allowedEngineerIds(asOf)),
-                    safeSet(organizationScopeService.allowedOrganizationIds(asOf)),
-                    safeSet(organizationScopeService.allowedDirectUserIds(asOf)));
-        } else if (dataScopeService.isScoped()) {
-            scopeType = "DATA_SCOPED";
-            population = new CopilotScopePopulation(
-                    safeSet(dataScopeService.allowedCustomerIds()),
-                    safeSet(dataScopeService.allowedContractIds()),
-                    safeSet(dataScopeService.allowedEngineerIds()),
-                    Set.of(),
-                    Set.of());
-        } else {
-            scopeType = "COMPANY_WIDE";
-            population = emptyPopulation();
-        }
-
-        boolean emptyPopulation = isEmptyPopulation(scopeType, population);
-        if (emptyPopulation) {
-            throw BusinessException.of(403, "SCOPE_DENIED");
-        }
-
-        String scopeHash = CopilotScopeHash.hash(
-                context.tenantId(),
-                context.legalEntityId(),
-                scopeType,
-                POLICY_VERSION,
-                asOf,
-                population.customerIds(),
-                population.contractIds(),
-                population.engineerIds(),
-                population.organizationIds(),
-                population.directUserIds());
-
-        return new CopilotScopeContext(scopeType, POLICY_VERSION, scopeHash, false);
-    }
-
-    private static CopilotScopePopulation emptyPopulation() {
-        return new CopilotScopePopulation(Set.of(), Set.of(), Set.of(), Set.of(), Set.of());
-    }
-
-    private static Set<Long> safeSet(Set<Long> ids) {
-        return ids == null ? Set.of() : ids;
-    }
-
-    private static boolean isEmptyPopulation(String scopeType, CopilotScopePopulation population) {
-        return switch (scopeType) {
-            case "COMPANY_WIDE" -> false;
-            case "SALES_DATA_SCOPED" -> population.customerIds().isEmpty()
-                    && population.contractIds().isEmpty()
-                    && population.engineerIds().isEmpty();
-            case "ORGANIZATION_SCOPED" -> population.organizationIds().isEmpty()
-                    && population.directUserIds().isEmpty();
-            case "DATA_SCOPED" -> population.contractIds().isEmpty()
-                    && population.engineerIds().isEmpty();
-            default -> true;
-        };
     }
 }

@@ -23,6 +23,10 @@ public class LearningPlan extends BaseEntity {
     private LocalDate plannedStartOn;
     private LocalDate plannedEndOn;
     private BigDecimal plannedCostJpy;
+    /** 追加承認済みの上限。planned_cost_jpyの申請時snapshotは変更しない。 */
+    private BigDecimal amendedCostJpy;
+    /** 上記追加承認を特定する承認申請ID。 */
+    private Long amendmentApprovalRequestId;
     /** 実費の正本。金額・承認・会計・支払statusはExpenseRequestが所有する。 */
     private Long expenseRequestId;
     private String status;

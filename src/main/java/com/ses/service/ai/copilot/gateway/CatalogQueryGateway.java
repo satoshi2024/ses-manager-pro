@@ -29,8 +29,31 @@ public class CatalogQueryGateway {
     public TypedResultEnvelope execute(
             SemanticCatalogEntry entry,
             CopilotQueryParameters parameters,
-            CopilotScopeContext scope,
-            CopilotExecutionContext context) {
+            CopilotScopeContext scope) {
+        throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry,
+                                       CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope,
+                                       CopilotExecutionContext context) {
+        if (entry == null || !entry.enabled()) {
+            throw BusinessException.of(403, "CATALOG_DISABLED");
+        }
+        if (entry.queryId() == null || parameters == null || !entry.queryId().equals(parameters.queryId())
+                || context == null || context.effectiveScopeSnapshot() == null
+                || context.scope() == null || context.scope() != scope
+                || context.scope() != context.effectiveScopeSnapshot().scope()
+                || context.parameters() != parameters
+                || context.queryId() == null || !entry.queryId().equals(context.queryId())
+                || !context.tenantId().equals(scope.tenantId())
+                || !context.legalEntityId().equals(scope.legalEntityId())
+                || !context.asOfDate().equals(context.effectiveScopeSnapshot().asOf())
+                || context.scopeHash() == null || scope.scopeHash() == null
+                || !context.scopeHash().equals(context.effectiveScopeSnapshot().scopeHash())
+                || !context.scopeHash().equals(scope.scopeHash())) {
+            throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
         CatalogQueryAdapter adapter = adapters.get(entry.queryId());
         if (adapter == null) {
             throw BusinessException.of(404, "CATALOG_NOT_FOUND");

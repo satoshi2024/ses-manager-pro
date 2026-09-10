@@ -7,6 +7,7 @@ import com.ses.entity.Invoice;
 import com.ses.entity.InvoiceItem;
 import com.ses.entity.InvoicePayment;
 import com.ses.entity.BpPayment;
+import com.ses.entity.Customer;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.InvoiceMapper;
@@ -23,6 +24,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -63,6 +65,9 @@ public class InvoiceServiceImplTest {
     private com.ses.service.security.OrganizationScopeService organizationScopeService;
 
     @Mock
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    @Mock
     private com.ses.mapper.WorkRecordMapper workRecordMapper;
 
     @Mock
@@ -79,6 +84,14 @@ public class InvoiceServiceImplTest {
         // ServiceImpl の baseMapper フィールドを手動で注入
         ReflectionTestUtils.setField(invoiceService, "baseMapper", invoiceMapper);
         lenient().when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
+        lenient().when(legalEntityContextService.requireCurrentDate()).thenReturn(LocalDate.now());
+        Customer customer = new Customer();
+        customer.setId(1L);
+        customer.setLegalEntityId(1L);
+        lenient().when(customerMapper.selectById(anyLong())).thenReturn(customer);
+        lenient().when(invoiceMapper.selectLegalEntityIdsByWorkRecordIds(anyList()))
+                .thenAnswer(invocation -> ((List<?>) invocation.getArgument(0)).stream().map(id -> 1L).toList());
     }
 
     @Test
@@ -221,9 +234,12 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("未送付");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
+        when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
         when(invoiceItemMapper.delete(any())).thenReturn(1);
         when(invoiceMapper.deleteById(invoiceId)).thenReturn(1);
 
@@ -238,6 +254,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("入金済");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -264,6 +282,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("未送付");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -278,6 +298,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("送付済");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -292,6 +314,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("入金済");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -305,6 +329,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setStatus("送付済");
 
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -396,6 +422,7 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(55L);
         invoice.setCustomerId(7L);
+        invoice.setLegalEntityId(1L);
         invoice.setBillingMonth("2026-07");
         invoice.setStatus("送付済");
         invoice.setTotal(new BigDecimal("100000"));
@@ -419,6 +446,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setStatus("送付済");
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -450,6 +479,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
@@ -483,6 +514,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setStatus("未送付");
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -508,6 +541,8 @@ public class InvoiceServiceImplTest {
         Long invoiceId = 1L;
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
 
@@ -534,10 +569,12 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("送付済");
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setDueDate(LocalDate.now().minusDays(5));
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
-        com.ses.entity.Customer c = com.ses.entity.Customer.builder().companyName("客A").build();
+        com.ses.entity.Customer c = com.ses.entity.Customer.builder()
+                .companyName("客A").legalEntityId(1L).build();
         when(customerMapper.selectById(5L)).thenReturn(c);
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -551,6 +588,8 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setStatus("送付済");
+        invoice.setCustomerId(1L);
+        invoice.setLegalEntityId(1L);
         invoice.setDueDate(LocalDate.now().plusDays(5));
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
 
@@ -566,12 +605,13 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("一部入金");
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setInvoiceNo("INV-202607-0001");
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setDueDate(LocalDate.now().minusDays(10));
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
         com.ses.entity.Customer c = com.ses.entity.Customer.builder()
-                .companyName("客A").contactEmail("ap@example.com").build();
+                .companyName("客A").contactEmail("ap@example.com").legalEntityId(1L).build();
         when(customerMapper.selectById(5L)).thenReturn(c);
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
         when(mailService.sendWithTemplate(any(), any(), any(), any()))
@@ -589,12 +629,13 @@ public class InvoiceServiceImplTest {
         invoice.setId(invoiceId);
         invoice.setStatus("送付済");
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setInvoiceNo("INV-202607-0002");
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setDueDate(LocalDate.now().minusDays(10));
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
         when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
-                .companyName("客A").contactEmail("legacy@example.com").build());
+                .companyName("客A").contactEmail("legacy@example.com").legalEntityId(1L).build());
         when(customerContactService.resolveRecipientEmail(5L, 88L, LocalDate.now()))
                 .thenReturn("current@example.com");
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
@@ -689,8 +730,9 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
-        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(customerMapper.selectById(5L)).thenReturn(legalCustomer(5L));
         when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(systemConfigService.getString("company.name", "")).thenReturn("株式会社テスト");
         when(systemConfigService.getString("company.invoice-registration-number", "")).thenReturn("T1234567890123");
@@ -735,9 +777,10 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setTaxRate(new BigDecimal("0.10")); // 生成時点は10%
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
-        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(customerMapper.selectById(5L)).thenReturn(legalCustomer(5L));
         when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(systemConfigService.getString(any(), any())).thenReturn("");
         // 現在の設定は8%に改定済みだが、保存値(10%)が優先されること
@@ -754,9 +797,10 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setTaxRate(null); // 本対応以前の既存行
         when(invoiceMapper.selectById(invoiceId)).thenReturn(invoice);
-        when(customerMapper.selectById(5L)).thenReturn(null);
+        when(customerMapper.selectById(5L)).thenReturn(legalCustomer(5L));
         when(invoiceItemMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(systemConfigService.getString(any(), any())).thenReturn("");
         when(systemConfigService.getDecimal(any(), any())).thenReturn(new BigDecimal("0.10"));
@@ -783,6 +827,7 @@ public class InvoiceServiceImplTest {
         Invoice invoice = new Invoice();
         invoice.setId(invoiceId);
         invoice.setCustomerId(9L);
+        invoice.setLegalEntityId(1L);
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setStatus("送付済");
         when(invoiceMapper.selectOne(any())).thenReturn(invoice);
@@ -817,13 +862,14 @@ public class InvoiceServiceImplTest {
         invoice.setId(11L);
         invoice.setStatus("送付済");
         invoice.setCustomerId(5L);
+        invoice.setLegalEntityId(1L);
         invoice.setInvoiceNo("INV-R-1");
         invoice.setBillingMonth("2026-07");
         invoice.setTotal(new BigDecimal("110000"));
         invoice.setDueDate(LocalDate.now().minusDays(3));
         when(invoiceMapper.selectById(11L)).thenReturn(invoice);
         when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
-                .companyName("客A").contactEmail("ap@example.com").build());
+                .companyName("客A").contactEmail("ap@example.com").legalEntityId(1L).build());
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
         when(mailService.sendWithTemplate(any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("SMTP host secret leaked"));
@@ -842,11 +888,14 @@ public class InvoiceServiceImplTest {
         Invoice paid = new Invoice();
         paid.setId(1L);
         paid.setStatus("入金済");
+        paid.setCustomerId(1L);
+        paid.setLegalEntityId(1L);
         paid.setDueDate(LocalDate.now().minusDays(1));
         Invoice overdue = new Invoice();
         overdue.setId(2L);
         overdue.setStatus("送付済");
         overdue.setCustomerId(5L);
+        overdue.setLegalEntityId(1L);
         overdue.setInvoiceNo("INV-R-2");
         overdue.setBillingMonth("2026-07");
         overdue.setTotal(new BigDecimal("50000"));
@@ -854,7 +903,7 @@ public class InvoiceServiceImplTest {
         when(invoiceMapper.selectById(1L)).thenReturn(paid);
         when(invoiceMapper.selectById(2L)).thenReturn(overdue);
         when(customerMapper.selectById(5L)).thenReturn(com.ses.entity.Customer.builder()
-                .companyName("客B").contactEmail("b@example.com").build());
+                .companyName("客B").contactEmail("b@example.com").legalEntityId(1L).build());
         when(invoicePaymentMapper.selectList(any())).thenReturn(java.util.Collections.emptyList());
         when(mailService.sendWithTemplate(any(), any(), any(), any()))
                 .thenReturn(new com.ses.dto.mail.MailDispatchResult(99L, "QUEUED"));
@@ -877,5 +926,11 @@ public class InvoiceServiceImplTest {
         assertEquals("error.invoice.notFound",
                 InvoiceServiceImpl.reminderFailureReason(BusinessException.of("error.invoice.notFound")));
     }
-}
 
+    private Customer legalCustomer(Long id) {
+        Customer customer = new Customer();
+        customer.setId(id);
+        customer.setLegalEntityId(1L);
+        return customer;
+    }
+}

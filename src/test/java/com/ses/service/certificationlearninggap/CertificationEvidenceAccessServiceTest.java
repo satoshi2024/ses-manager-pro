@@ -5,6 +5,8 @@ import com.ses.dto.certificationlearninggap.CertificationLearningGapRow;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.EngineerCertification;
+import com.ses.entity.CertificationEvent;
+import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
@@ -44,6 +46,7 @@ class CertificationEvidenceAccessServiceTest {
     @Mock private FileScopeValidationService fileScopeValidationService;
     @Mock private EngineerAccountLinkService accountLinkService;
     @Mock private CertificationLearningGapQueryService queryService;
+    @Mock private CertificationEventMapper eventMapper;
 
     private CertificationEvidenceAccessService service;
     private EngineerCertification record;
@@ -53,10 +56,12 @@ class CertificationEvidenceAccessServiceTest {
     void setUp() {
         service = new CertificationEvidenceAccessService(certificationMapper, documentLinkMapper,
                 documentVersionMapper, documentService, fileScopeValidationService, accountLinkService,
-                queryService, Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")));
+                queryService, Clock.fixed(Instant.parse("2026-08-28T03:00:00Z"), ZoneId.of("Asia/Tokyo")), eventMapper);
         record = new EngineerCertification();
         record.setId(11L);
         record.setEngineerId(42L);
+        record.setRecordState("ACTIVE");
+        record.setCurrentFlag(1);
         version = new DocumentVersion();
         version.setId(88L);
         version.setDocumentId(77L);
@@ -65,6 +70,14 @@ class CertificationEvidenceAccessServiceTest {
         version.setContentType("application/pdf");
         version.setSha256("abc123");
         version.setScanStatus("CLEAN");
+        CertificationEvent verify = new CertificationEvent();
+        verify.setCertificationRecordId(11L);
+        verify.setEventType("VERIFY");
+        verify.setEffectiveRecordState("ACTIVE");
+        verify.setEvidenceDocumentId(77L);
+        verify.setEvidenceDocumentVersionId(88L);
+        verify.setEvidenceDocumentHash("abc123");
+        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(verify));
         when(certificationMapper.selectById(11L)).thenReturn(record);
         DocumentLink link = new DocumentLink();
         link.setDocumentId(77L);
@@ -84,7 +97,8 @@ class CertificationEvidenceAccessServiceTest {
                 new TestingAuthenticationToken("8", "n", "ROLE_HR"));
 
         assertEquals("evidence.pdf", result.fileName());
-        verify(fileScopeValidationService).assertDownloadAllowed("certification/evidence-key", 88L, "abc123");
+        verify(fileScopeValidationService).assertCertificationEvidenceDownloadAllowed(
+                "certification/evidence-key", 11L, 77L, 88L, "abc123");
         verify(documentService).download(77L, 2);
     }
 
@@ -101,5 +115,50 @@ class CertificationEvidenceAccessServiceTest {
         when(accountLinkService.findEngineerIdByUserId(101L)).thenReturn(99L);
         assertThrows(com.ses.common.exception.BusinessException.class,
                 () -> service.downloadForSelf(101L, 11L, 77L, 2));
+    }
+
+    @Test
+    void 同じdocumentの別CLEAN版はVERIFYeventのexact版と一致しないため拒否する() {
+        version.setId(89L);
+
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.downloadForSelf(100L, 11L, 77L, 2));
+    }
+
+    @Test
+    void VERIFYeventのhash不一致は拒否する() {
+        CertificationEvent event = new CertificationEvent();
+        event.setCertificationRecordId(11L);
+        event.setEventType("VERIFY");
+        event.setEffectiveRecordState("ACTIVE");
+        event.setEvidenceDocumentId(77L);
+        event.setEvidenceDocumentVersionId(88L);
+        event.setEvidenceDocumentHash("different-hash");
+        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(event));
+
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.downloadForSelf(100L, 11L, 77L, 2));
+    }
+
+    @Test
+    void VERIFYeventが無い証憑とgenericEngineerLinkだけの証憑は拒否する() {
+        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of());
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.downloadForSelf(100L, 11L, 77L, 2));
+
+        CertificationEvent verify = new CertificationEvent();
+        verify.setEventType("VERIFY");
+        verify.setEffectiveRecordState("ACTIVE");
+        verify.setEvidenceDocumentId(77L);
+        verify.setEvidenceDocumentVersionId(88L);
+        verify.setEvidenceDocumentHash("abc123");
+        when(eventMapper.selectByRecordId(11L)).thenReturn(List.of(verify));
+        DocumentLink generic = new DocumentLink();
+        generic.setDocumentId(77L);
+        generic.setTargetType("ENGINEER");
+        generic.setTargetId(42L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(generic));
+        assertThrows(com.ses.common.exception.BusinessException.class,
+                () -> service.downloadForSelf(100L, 11L, 77L, 2));
     }
 }

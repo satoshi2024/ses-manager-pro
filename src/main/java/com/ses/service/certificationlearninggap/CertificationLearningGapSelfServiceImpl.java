@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.certification.EngineerCertificationViewDto;
+import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.dto.certificationlearninggap.CertificationEvidenceView;
 import com.ses.dto.certificationlearninggap.CertificationSelfDashboard;
 import com.ses.dto.certificationlearninggap.CertificationSelfView;
@@ -26,7 +27,6 @@ import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingEnrollmentMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.EngineerAccountLinkService;
-import com.ses.service.certification.CertificationRecordStates;
 import com.ses.service.certification.EngineerCertificationService;
 import com.ses.service.training.TrainingPlanService;
 import lombok.RequiredArgsConstructor;
@@ -151,29 +151,27 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
     }
 
     @Override
-    public EngineerCertification withdrawCertification(Long actorUserId, Long recordId, Integer expectedVersion,
-                                                        String reason) {
+    public CertificationLifecycleActionView withdrawCertification(Long actorUserId, Long recordId, Integer expectedVersion,
+                                                                    String reason) {
         EngineerCertification record = ownCertification(actorUserId, recordId);
-        return certificationService.cancel(record.getId(), expectedVersion, actorUserId, reason);
+        return CertificationLifecycleActionView.from(
+                certificationService.cancel(record.getId(), expectedVersion, actorUserId, reason));
     }
 
     @Override
-    public EngineerCertification correctCertification(Long actorUserId, Long recordId, Integer expectedVersion,
-                                                       LocalDate acquiredOn, LocalDate expiresOn, String reason) {
+    public CertificationLifecycleActionView correctCertification(Long actorUserId, Long recordId, Integer expectedVersion,
+                                                                  LocalDate acquiredOn, LocalDate expiresOn, String reason) {
         EngineerCertification record = ownCertification(actorUserId, recordId);
-        return certificationService.correct(record.getId(), expectedVersion, acquiredOn, expiresOn, actorUserId, reason);
+        return CertificationLifecycleActionView.from(certificationService.correct(record.getId(), expectedVersion,
+                acquiredOn, expiresOn, actorUserId, reason));
     }
 
     @Override
-    public EngineerCertificationViewDto resubmitCertification(Long actorUserId, Long recordId,
+    public EngineerCertificationViewDto resubmitCertification(Long actorUserId, Long recordId, Integer expectedVersion,
                                                                String certificateNumberPlaintext) {
         EngineerCertification previous = ownCertification(actorUserId, recordId);
-        if (!CertificationRecordStates.CANCELLED.equals(previous.getRecordState())
-                && !CertificationRecordStates.REJECTED.equals(previous.getRecordState())) {
-            throw BusinessException.of(400, "certification.record.invalidTransition");
-        }
-        return certificationService.submitApplication(previous.getEngineerId(), previous.getCertificationId(),
-                previous.getAcquiredOn(), previous.getExpiresOn(), certificateNumberPlaintext, actorUserId, false);
+        requireExpectedVersion(expectedVersion, previous.getVersion(), "certification.record");
+        return certificationService.resubmit(recordId, expectedVersion, actorUserId, certificateNumberPlaintext, false);
     }
 
     @Override
@@ -218,23 +216,17 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
     }
 
     @Override
-    public LearningPlanSelfView resubmitPlan(Long actorUserId, Long planId) {
+    public LearningPlanSelfView resubmitPlan(Long actorUserId, Long planId, Integer expectedVersion) {
         LearningPlan previous = ownPlan(actorUserId, planId);
-        if (!TrainingPlanService.PLAN_REJECTED.equals(previous.getStatus())
-                && !TrainingPlanService.PLAN_CANCELLED.equals(previous.getStatus())) {
-            throw BusinessException.of(400, "training.plan.invalidTransition");
-        }
-        LearningPlan draft = copyPlan(previous);
-        draft.setId(null);
-        draft.setEngineerId(ownEngineerId(actorUserId));
-        draft.setStatus(null);
-        return toPlanView(trainingPlanService.createDraft(draft, actorUserId));
+        requireExpectedVersion(expectedVersion, previous.getVersion(), "training.plan");
+        return toPlanView(trainingPlanService.resubmitPlan(planId, expectedVersion, actorUserId));
     }
 
     @Override
-    public TrainingEnrollment enroll(Long actorUserId, Long planId, Long courseId) {
-        ownPlan(actorUserId, planId);
-        return trainingPlanService.enroll(planId, courseId, actorUserId);
+    public TrainingEnrollment enroll(Long actorUserId, Long planId, Integer expectedVersion, Long courseId) {
+        LearningPlan plan = ownPlan(actorUserId, planId);
+        requireExpectedVersion(expectedVersion, plan.getVersion(), "training.plan");
+        return trainingPlanService.enroll(planId, expectedVersion, courseId, actorUserId);
     }
 
     @Override
@@ -321,6 +313,16 @@ public class CertificationLearningGapSelfServiceImpl implements CertificationLea
             throw BusinessException.of(404, "error.scope.notFound");
         }
         return enrollment;
+    }
+
+    private void requireExpectedVersion(Integer expectedVersion, Integer actualVersion, String domain) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, domain + ".expectedVersionRequired");
+        }
+        int actual = actualVersion == null ? 0 : actualVersion;
+        if (!expectedVersion.equals(actual)) {
+            throw BusinessException.of(409, domain + ".optimisticLock");
+        }
     }
 
     private Long ownEngineerId(Long actorUserId) {

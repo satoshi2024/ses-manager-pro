@@ -23,6 +23,9 @@ import java.time.LocalDate;
 @TableName("t_contract")
 public class Contract extends BaseEntity {
 
+    /** 法人境界。要員・案件・顧客とのjoinでも同一値を要求する。 */
+    private Long legalEntityId;
+
     /** 契約番号 */
     private String contractNo;
 

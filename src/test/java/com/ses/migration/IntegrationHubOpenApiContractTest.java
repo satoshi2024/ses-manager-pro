@@ -21,6 +21,10 @@ class IntegrationHubOpenApiContractTest {
                 StandardCharsets.UTF_8);
         assertTrue(yaml.contains("/external-api/v1/webhooks/{provider}:"));
         assertTrue(yaml.contains("X-Provider-Event-ID"));
+        assertTrue(yaml.contains("x-must-equal-body-field: providerEventId"));
+        assertTrue(yaml.contains("required: [providerEventId, eventType]"));
+        assertTrue(yaml.contains("canonicalPayload:"));
+        assertTrue(yaml.contains("maxProperties: 27"));
         assertTrue(yaml.contains("InboundWebhookResponse"));
         assertTrue(yaml.contains("InboundConflictError"));
         assertTrue(yaml.contains("'409': [INBOUND_PAYLOAD_CONFLICT]"));

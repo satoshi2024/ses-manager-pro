@@ -4,12 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.dto.report.ReportDocumentArtifact;
 import com.ses.dto.report.ReportRecipientPreview;
+import com.ses.entity.NotificationOutbox;
 import com.ses.entity.ReportDelivery;
 import com.ses.entity.ReportRun;
+import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportDeliveryMapper;
-import com.ses.service.NotificationService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
 import com.ses.service.report.ReportDeliveryIssueService;
+import com.ses.service.report.ReportDeliveryNotificationBridge;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +34,8 @@ public class ReportDeliveryIssueServiceImpl implements ReportDeliveryIssueServic
     private static final int LINK_DAYS = 7;
 
     private final ReportDeliveryMapper deliveryMapper;
-    private final NotificationService notificationService;
+    private final NotificationOutboxMapper notificationOutboxMapper;
+    private final ReportDeliveryNotificationBridge notificationBridge;
     private final ObjectMapper objectMapper;
     private final AccountingTimezoneResolver timezoneResolver;
 
@@ -70,13 +73,20 @@ public class ReportDeliveryIssueServiceImpl implements ReportDeliveryIssueServic
         }
         try {
             String link = "/api/management-reports/deliveries/" + delivery.getId() + "/download?token=" + token;
-            Long outboxId = notificationService.publishToUserAndGetOutboxId(
+            Long outboxId = notificationBridge.publish(
                     recipient.getRecipientUserId(), "MANAGEMENT_REPORT",
                     "月次管理レポート", "snapshotを確認できます（ダウンロード時に再認証が必要です）。",
                     link, delivery.getNotificationDedupeKey(), "management-report");
+            if (outboxId == null && notificationOutboxMapper != null) {
+                NotificationOutbox existingOutbox =
+                        notificationOutboxMapper.selectByDedupeKey(delivery.getNotificationDedupeKey());
+                if (existingOutbox != null) {
+                    outboxId = existingOutbox.getId();
+                }
+            }
             if (outboxId == null) {
                 delivery.setDeliveryStatus(attempt >= MAX_ATTEMPTS ? "FAILED" : "RETRY");
-                delivery.setLastErrorCode(attempt >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_OUTBOX_UNAVAILABLE");
+                delivery.setLastErrorCode(attempt >= MAX_ATTEMPTS ? "DELIVERY_DLQ" : "DELIVERY_FAILED");
                 delivery.setLastErrorMessage("通知outboxへの登録結果を取得できませんでした");
             } else {
                 delivery.setNotificationOutboxId(outboxId);

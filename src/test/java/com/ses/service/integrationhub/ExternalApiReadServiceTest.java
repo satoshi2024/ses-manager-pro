@@ -13,6 +13,7 @@ import com.ses.dto.integrationhub.ExternalApiReadRow;
 import com.ses.dto.integrationhub.ExternalApiSnapshotItem;
 import com.ses.mapper.ExternalApiReadMapper;
 import com.ses.mapper.ExternalApiReadSnapshotMapper;
+import com.ses.service.security.LegalEntityReadinessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +39,7 @@ import static org.mockito.Mockito.when;
 class ExternalApiReadServiceTest {
     private final ExternalApiReadMapper mapper = mock(ExternalApiReadMapper.class);
     private final ExternalApiReadSnapshotMapper snapshotMapper = mock(ExternalApiReadSnapshotMapper.class);
+    private final LegalEntityReadinessService readinessService = mock(LegalEntityReadinessService.class);
     private final ExternalApiPrincipal principal = new ExternalApiPrincipal(
             "client-a", 7L, "tenant-a", 9L, "{\"projectIds\":[\"1\",\"2\",\"3\"]}", 1, "key-1", "STANDARD");
     private final ExternalApiEffectiveScope scope = new ExternalApiEffectiveScope("tenant-a", 9L, Map.of(
@@ -52,12 +54,13 @@ class ExternalApiReadServiceTest {
         properties.getPublicApi().setCursorTtlSeconds(300);
         Clock clock = Clock.fixed(Instant.parse("2026-08-30T00:00:00Z"), ZoneOffset.UTC);
         service = new ExternalApiReadService(mapper, snapshotMapper, new ExternalApiPublicIdCodec(properties),
-                new ExternalApiCursorCodec(properties), new ObjectMapper().findAndRegisterModules(), clock);
+                new ExternalApiCursorCodec(properties), new ObjectMapper().findAndRegisterModules(), clock,
+                readinessService);
     }
 
     @Test
     void listUsesOnlyEffectiveScopeAndReturnsAllowListDtoWithOpaqueCursor() {
-        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513)).thenReturn(List.of(
+        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513, 9L)).thenReturn(List.of(
                 projectRow(2L, 10L), projectRow(1L, 10L), projectRow(3L, 10L)));
 
         var response = service.listProjects(principal, scope, 2, null);
@@ -66,9 +69,8 @@ class ExternalApiReadServiceTest {
         assertTrue(response.hasMore());
         assertTrue(response.nextCursor().startsWith("v1."));
         ExternalApiProject first = response.items().get(0);
-        assertEquals("OPEN", first.status());
-        assertTrue(!first.status().contains("募集中"));
-        verify(mapper).selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513);
+        assertEquals("ACTIVE", first.status());
+        verify(mapper).selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513, 9L);
         verify(snapshotMapper, never()).selectExpiredSnapshotIds(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
         verify(snapshotMapper, never()).deleteSnapshotsById(org.mockito.ArgumentMatchers.anyList());
     }
@@ -80,8 +82,8 @@ class ExternalApiReadServiceTest {
         Clock fractionalClock = Clock.fixed(Instant.parse("2026-08-30T00:00:00.123456Z"), ZoneOffset.UTC);
         ExternalApiReadService fractionalService = new ExternalApiReadService(mapper, snapshotMapper,
                 new ExternalApiPublicIdCodec(properties), new ExternalApiCursorCodec(properties),
-                new ObjectMapper().findAndRegisterModules(), fractionalClock);
-        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513)).thenReturn(List.of(
+                new ObjectMapper().findAndRegisterModules(), fractionalClock, readinessService);
+        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513, 9L)).thenReturn(List.of(
                 projectRow(2L, 10L), projectRow(1L, 10L)));
         String cursor = fractionalService.listProjects(principal, scope, 1, null).nextCursor();
         when(snapshotMapper.selectItemsAfter(anyString(), eq(2L), eq(2))).thenReturn(List.of(
@@ -97,7 +99,7 @@ class ExternalApiReadServiceTest {
 
     @Test
     void cursorBindsScopeAndUsesLastInternalIdOnlyInsideMapper() {
-        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513)).thenReturn(List.of(
+        when(mapper.selectProjects(List.of(1L, 2L, 3L), List.of(10L), null, 513, 9L)).thenReturn(List.of(
                 projectRow(2L, 10L), projectRow(1L, 10L)));
         String cursor = service.listProjects(principal, scope, 1, null).nextCursor();
         when(snapshotMapper.selectItemsAfter(anyString(), eq(2L), eq(2))).thenReturn(List.of(
@@ -118,7 +120,7 @@ class ExternalApiReadServiceTest {
     void detailRequiresOpaqueIdFromEffectiveScopeAndDoesNotEnumerate() {
         ExternalApiPublicIdCodec codec = new ExternalApiPublicIdCodec(properties());
         String publicId = codec.encode(principal, "project", 1L);
-        when(mapper.selectProjects(List.of(1L), List.of(10L), null, 1)).thenReturn(List.of(projectRow(1L, 10L)));
+        when(mapper.selectProjects(List.of(1L), List.of(10L), null, 1, 9L)).thenReturn(List.of(projectRow(1L, 10L)));
 
         ExternalApiProject result = service.getProject(principal, scope, publicId);
 
@@ -147,7 +149,7 @@ class ExternalApiReadServiceTest {
         row.setStatus("未送付");
         row.setContractId(20L);
         row.setContractCount(2L);
-        when(mapper.selectInvoices(List.of(3L), List.of(20L, 21L), List.of(10L), null, 1))
+        when(mapper.selectInvoices(List.of(3L), List.of(20L, 21L), List.of(10L), null, 1, 9L))
                 .thenReturn(List.of(row));
 
         String publicId = new ExternalApiPublicIdCodec(properties()).encode(principal, "invoice-status", 3L);

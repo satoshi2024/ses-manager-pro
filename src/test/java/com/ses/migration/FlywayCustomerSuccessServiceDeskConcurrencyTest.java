@@ -97,6 +97,62 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
     }
 
     @Test
+    void MySQLのCSAT一意キーは同一requestの同時回答を一件へ収束させる() throws Exception {
+        migrate();
+        long requestId = insertRequestWithCustomer(88004L, "CSAT同時回答顧客");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger inserted = new AtomicInteger();
+        AtomicInteger conflicts = new AtomicInteger();
+        ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        List<Thread> workers = new ArrayList<>();
+
+        for (int i = 0; i < 2; i++) {
+            Thread worker = new Thread(() -> {
+                try (Connection connection = MYSQL.createConnection("")) {
+                    connection.setAutoCommit(false);
+                    ready.countDown();
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    try (PreparedStatement statement = connection.prepareStatement(
+                            "INSERT INTO t_customer_csat "
+                                    + "(service_request_id, customer_id, portal_user_id, score, feedback_comment) "
+                                    + "VALUES (?, 88004, 200, 5, '同時回答')")) {
+                        statement.setLong(1, requestId);
+                        statement.executeUpdate();
+                        connection.commit();
+                        inserted.incrementAndGet();
+                    } catch (SQLException duplicate) {
+                        connection.rollback();
+                        if ("23000".equals(duplicate.getSQLState())) {
+                            conflicts.incrementAndGet();
+                        } else {
+                            throw duplicate;
+                        }
+                    }
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                }
+            }, "nf02-csat-worker-" + i);
+            workers.add(worker);
+            worker.start();
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        for (Thread worker : workers) {
+            worker.join(15_000L);
+            assertTrue(!worker.isAlive(), "CSAT競合workerが終了していません");
+        }
+        assertTrue(failures.isEmpty(), failures.toString());
+        assertEquals(1, inserted.get());
+        assertEquals(1, conflicts.get());
+        try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+            assertEquals(1, queryInt(statement,
+                    "SELECT COUNT(*) FROM t_customer_csat WHERE service_request_id = " + requestId));
+        }
+    }
+
+    @Test
     void MySQLのhealthSnapshotはUPDATE_DELETEを拒否し版番号を保持する() throws Exception {
         migrate();
         long customerId = insertCustomer(88002L, "スナップショット防線テスト");
@@ -225,13 +281,19 @@ class FlywayCustomerSuccessServiceDeskConcurrencyTest {
     }
 
     private static long insertRequest() throws SQLException {
-        insertCustomer(88001L, "CASテスト顧客");
+        return insertRequestWithCustomer(88001L, "CASテスト顧客");
+    }
+
+    private static long insertRequestWithCustomer(long customerId, String customerName) throws SQLException {
+        insertCustomer(customerId, customerName);
         try (Connection connection = MYSQL.createConnection("");
              PreparedStatement statement = connection.prepareStatement(
                      "INSERT INTO t_service_request "
                              + "(request_no, customer_id, category, priority, channel, subject, description, status, reopen_count, version) "
-                             + "VALUES ('REQ-NF02-CAS-001', 88001, 'SYSTEM', 'P1', 'INTERNAL', 'CAS', 'CAS', 'RECEIVED', 0, 0)",
+                             + "VALUES (?, ?, 'SYSTEM', 'P1', 'INTERNAL', 'CAS', 'CAS', 'RECEIVED', 0, 0)",
                      Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, "REQ-NF02-CAS-" + customerId);
+            statement.setLong(2, customerId);
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {
                 assertTrue(keys.next());

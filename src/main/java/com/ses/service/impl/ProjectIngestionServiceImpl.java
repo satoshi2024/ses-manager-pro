@@ -58,8 +58,42 @@ public class ProjectIngestionServiceImpl
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ProjectIngestionService> selfProvider;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    /** 継承した汎用saveも、作成元の法人を必ず現在のsecurity contextへ束縛する。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(ProjectIngestion entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Long currentLegalEntityId = legalEntityContextService.requireCurrentLegalEntityId();
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(currentLegalEntityId, entity.getLegalEntityId());
+        }
+        entity.setLegalEntityId(currentLegalEntityId);
+        return super.save(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(ProjectIngestion entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        ProjectIngestion current = super.getById(entity.getId());
+        assertJobLegalEntity(current);
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(current.getLegalEntityId(), entity.getLegalEntityId());
+        }
+        entity.setLegalEntityId(current.getLegalEntityId());
+        return super.updateById(entity);
+    }
+
     @Override
     public ProjectIngestion createJob(MultipartFile file) {
+        requireLegalEntityContext();
         StoredFile stored = fileStorageService.store(file, FileKind.PROJECT_EMAIL);
 
         ProjectIngestion job = new ProjectIngestion();
@@ -67,6 +101,7 @@ public class ProjectIngestionServiceImpl
         job.setOriginalFileName(stored.getOriginalName());
         job.setStoredFileName(stored.getStoredName());
         job.setStatus(STATUS_PENDING);
+        job.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         this.save(job);
 
         log.info("案件メール取込ジョブを作成しました (FILE): jobId={}", job.getId());
@@ -76,10 +111,12 @@ public class ProjectIngestionServiceImpl
 
     @Override
     public ProjectIngestion createJobFromPaste(String text) {
+        requireLegalEntityContext();
         ProjectIngestion job = new ProjectIngestion();
         job.setSourceType("PASTE");
         job.setRawText(text);
         job.setStatus(STATUS_PENDING);
+        job.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         this.save(job);
 
         log.info("案件メール取込ジョブを作成しました (PASTE): jobId={}", job.getId());
@@ -104,6 +141,7 @@ public class ProjectIngestionServiceImpl
 
         ProjectIngestion job = this.getById(id);
         if (job == null) return;
+        assertJobLegalEntity(job);
 
         try {
             String text = job.getRawText();
@@ -144,6 +182,7 @@ public class ProjectIngestionServiceImpl
     @Override
     public void reparse(Long id) {
         ProjectIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         String status = job.getStatus();
         if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
@@ -154,6 +193,7 @@ public class ProjectIngestionServiceImpl
     @Override
     public void saveReview(Long id, ReviewedProjectDto dto) {
         ProjectIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         if (!STATUS_REVIEW.equals(job.getStatus())) {
             throw BusinessException.of("error.projectIngestion.invalidStatus");
         }
@@ -174,6 +214,7 @@ public class ProjectIngestionServiceImpl
     @Transactional(rollbackFor = Exception.class)
     public Long confirm(Long id, ReviewedProjectDto dto) {
         ProjectIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         if (job.getConvertedProjectId() != null) {
             throw BusinessException.of(409, "error.projectIngestion.alreadyConfirmed");
         }
@@ -185,10 +226,13 @@ public class ProjectIngestionServiceImpl
         if (pp == null || pp.getName() == null || pp.getName().isBlank()) {
             throw BusinessException.of("error.project.nameRequired");
         }
+        // 抽出したendClientNameは検証済み顧客IDではないため、親法人を推測しない。
+        if (pp.getCustomerId() == null) rejectUnboundProjectParent();
 
         // Projectエンティティ生成
         Project project = new Project();
         project.setProjectName(pp.getName());
+        project.setCustomerId(pp.getCustomerId());
         project.setUnitPriceMin(pp.getMinUnitPrice());
         project.setUnitPriceMax(pp.getMaxUnitPrice());
         project.setWorkLocation(pp.getLocation());
@@ -244,7 +288,8 @@ public class ProjectIngestionServiceImpl
 
     @Override
     public void reject(Long id, String reason) {
-        getJobOrThrow(id);
+        ProjectIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         int updated = baseMapper.update(null, new LambdaUpdateWrapper<ProjectIngestion>()
                 .eq(ProjectIngestion::getId, id)
                 .in(ProjectIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
@@ -261,6 +306,24 @@ public class ProjectIngestionServiceImpl
             throw BusinessException.of(404, "error.projectIngestion.notFound");
         }
         return job;
+    }
+
+    private void requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+    }
+
+    private void assertJobLegalEntity(ProjectIngestion job) {
+        requireLegalEntityContext();
+        if (job == null || job.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(job.getLegalEntityId());
+    }
+
+    private void rejectUnboundProjectParent() {
+        throw BusinessException.of(400, "error.project.customerRequired");
     }
 
     private boolean casStatus(Long id, String fromStatus, String toStatus) {

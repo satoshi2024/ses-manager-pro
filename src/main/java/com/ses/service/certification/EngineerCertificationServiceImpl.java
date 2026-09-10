@@ -11,6 +11,7 @@ import com.ses.entity.CertificationEvent;
 import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.CertificationMapper;
+import com.ses.mapper.CertificationContinuityGroupMapper;
 import com.ses.mapper.EngineerCertificationMapper;
 import com.ses.mapper.EngineerMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,24 +101,22 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
             throw BusinessException.of(409, "certification.record.duplicate");
         }
 
-        Long continuityGroupId;
-        if (continuityGroupMapper != null) {
-            CertificationContinuityGroup continuityGroup = new CertificationContinuityGroup();
-            continuityGroup.setTenantId(tenantId);
-            continuityGroup.setEngineerId(engineerId);
-            continuityGroup.setCertificationId(certificationId);
-            continuityGroup.setCreatedBy(actorUserId);
-            continuityGroupMapper.insert(continuityGroup);
-            continuityGroupId = continuityGroup.getId();
-        } else {
-            throw new IllegalStateException("continuityGroupMapper is required to allocate continuity_group_id");
+        if (continuityGroupMapper == null) {
+            throw BusinessException.of(503, "certification.continuity.mapperUnavailable");
+        }
+        CertificationContinuityGroup group = new CertificationContinuityGroup();
+        group.setTenantId(tenantId);
+        group.setEngineerId(engineerId);
+        group.setCertificationId(certificationId);
+        if (continuityGroupMapper.insert(group) != 1 || group.getContinuityGroupId() == null) {
+            throw BusinessException.of(503, "certification.continuity.sequenceUnavailable");
         }
 
         EngineerCertification record = new EngineerCertification();
         record.setTenantId(tenantId);
         record.setEngineerId(engineerId);
         record.setCertificationId(certificationId);
-        record.setContinuityGroupId(continuityGroupId);
+        record.setContinuityGroupId(group.getContinuityGroupId());
         record.setAcquiredOn(acquiredOn);
         record.setExpiresOn(expiresOn);
         record.setExpiryRuleVersion(certification.getRuleVersion());
@@ -141,6 +140,24 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
 
         appendEvent(record, "SUBMIT", actorUserId, null, null, null, null);
         return toViewDto(record, certification.getDisplayName(), canViewFullNumber, certificateNumberPlaintext);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public EngineerCertificationViewDto resubmit(Long recordId, Integer expectedVersion, Long actorUserId,
+                                                 String certificateNumberPlaintext, boolean canViewFullNumber) {
+        EngineerCertification previous = locked(recordId, expectedVersion);
+        if (!CertificationRecordStates.CANCELLED.equals(previous.getRecordState())
+                && !CertificationRecordStates.REJECTED.equals(previous.getRecordState())) {
+            throw BusinessException.of(400, "certification.record.invalidTransition");
+        }
+        // 元recordをversion CASで消費し、append-only履歴へ再申請操作を記録する。
+        update(previous, previous.getRecordState(), previous.getCurrentFlag(), previous.getCurrentHolderKey(),
+                previous.getAcquiredOn(), previous.getExpiresOn(), previous.getExpiryRuleVersion(),
+                nextRevision(previous), actorUserId);
+        appendEvent(previous, "RESUBMIT", actorUserId, "再申請", null, null, null);
+        return submitApplication(previous.getEngineerId(), previous.getCertificationId(), previous.getAcquiredOn(),
+                previous.getExpiresOn(), certificateNumberPlaintext, actorUserId, canViewFullNumber);
     }
 
     @Override
@@ -276,7 +293,10 @@ public class EngineerCertificationServiceImpl implements EngineerCertificationSe
         if (record == null) {
             throw BusinessException.of(404, "certification.record.notFound");
         }
-        if (expectedVersion != null && !expectedVersion.equals(record.getVersion())) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "certification.record.expectedVersionRequired");
+        }
+        if (!expectedVersion.equals(record.getVersion())) {
             throw BusinessException.of(409, "certification.record.optimisticLock");
         }
         return record;

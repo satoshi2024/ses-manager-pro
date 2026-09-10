@@ -129,6 +129,9 @@ public class CertificationLearningGapApiController {
     @PreAuthorize("hasAnyRole('管理者','HR')")
     public ApiResult<CertificationLifecycleActionView> verifyCertification(
             @PathVariable Long recordId, @RequestBody CertificationVerificationCommand command) {
+        if (command == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "certification.record.expectedVersionRequired");
+        }
         EngineerCertification record = engineerCertificationService.verify(recordId, command.expectedVersion(),
                 com.ses.common.util.SecurityUtils.currentUserId(), command.evidenceDocumentId(),
                 command.evidenceDocumentVersionId(), command.evidenceHash());
@@ -139,6 +142,9 @@ public class CertificationLearningGapApiController {
     @PreAuthorize("hasAnyRole('管理者','HR')")
     public ApiResult<CertificationLifecycleActionView> rejectCertification(
             @PathVariable Long recordId, @RequestBody CertificationStateCommand command) {
+        if (command == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "certification.record.expectedVersionRequired");
+        }
         EngineerCertification record = engineerCertificationService.reject(recordId, command.expectedVersion(),
                 com.ses.common.util.SecurityUtils.currentUserId(), command.reason());
         return ApiResult.success(CertificationLifecycleActionView.from(record));
@@ -203,6 +209,18 @@ public class CertificationLearningGapApiController {
                                                       Authentication authentication) {
         return ApiResult.success(trainingApprovalService.reject(planId, version(command),
                 com.ses.common.util.SecurityUtils.currentUserId(), comment(command), authentication));
+    }
+
+    @PostMapping("/training-plans/{planId}/amend-budget")
+    public ApiResult<LearningPlan> amendTrainingBudget(@PathVariable Long planId,
+                                                       @RequestBody BudgetAmendmentCommand command,
+                                                       Authentication authentication) {
+        if (command == null) {
+            throw com.ses.common.exception.BusinessException.of(400, "training.plan.expectedVersionRequired");
+        }
+        return ApiResult.success(trainingApprovalService.amendBudget(planId, command.expectedVersion(),
+                command.amendedCostJpy(), command.approvalRequestId(),
+                com.ses.common.util.SecurityUtils.currentUserId(), command.reason(), authentication));
     }
 
     @GetMapping("/{engineerId}/certifications/{recordId}/evidence/{documentId}/versions/{versionNo}/download")
@@ -308,6 +326,9 @@ public class CertificationLearningGapApiController {
     private String comment(ApprovalCommand command) { return command == null ? null : command.comment(); }
 
     public record ApprovalCommand(Integer expectedVersion, String comment) { }
+
+    public record BudgetAmendmentCommand(Integer expectedVersion, java.math.BigDecimal amendedCostJpy,
+                                         Long approvalRequestId, String reason) { }
 
     public record CertificationMasterRequest(String tenantId, String displayName, String issuerDisplay,
                                              String externalCode, String expiryType, Integer expiryMonths,

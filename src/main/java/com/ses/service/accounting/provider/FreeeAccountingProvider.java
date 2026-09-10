@@ -26,6 +26,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -93,6 +94,23 @@ public class FreeeAccountingProvider implements AccountingProvider {
         return base + "/token";
     }
 
+    /**
+     * 呼出し側の接続オブジェクトは古いスナップショットになり得るため、常にDBの正本を再読込する。
+     * freeeのcompany_idが欠落・不正な接続では、誤法人へのHTTP呼出しを防ぐため直ちに拒否する。
+     */
+    private IntegrationConnection requireAuthoritativeConnection(IntegrationConnection supplied) {
+        if (supplied == null || supplied.getId() == null) {
+            throw new IllegalStateException("freee接続情報が存在しません");
+        }
+        IntegrationConnection authoritative = connectionService.getById(supplied.getId());
+        Long companyId = authoritative == null ? null : authoritative.getExternalCompanyId();
+        if (authoritative == null || companyId == null || companyId <= 0) {
+            throw new IllegalStateException("freee外部事業所IDが未設定または不正です (connectionId="
+                    + supplied.getId() + ")");
+        }
+        return authoritative;
+    }
+
     @Override
     public String providerName() {
         return "freee";
@@ -100,6 +118,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult upsertSalesInvoice(IntegrationConnection connection, CanonicalSalesInvoice invoice) {
+        connection = requireAuthoritativeConnection(connection);
         log.info("Upserting sales invoice to freee: invoiceNo={}, customerCode={}, total={}",
                 invoice.getInvoiceNo(), invoice.getCustomerCode(), invoice.getTotal());
 
@@ -109,6 +128,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult cancelSalesInvoice(IntegrationConnection connection, String externalDealId, String reason) {
+        connection = requireAuthoritativeConnection(connection);
         log.info("Cancelling sales deal in freee: externalDealId={}, reason={}", externalDealId, reason);
 
         String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + connection.getExternalCompanyId();
@@ -164,6 +184,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult upsertPurchaseDeal(IntegrationConnection connection, CanonicalPurchaseDeal purchase) {
+        connection = requireAuthoritativeConnection(connection);
         log.info("Upserting purchase deal to freee: bpPaymentId={}, bpCompanyCode={}, amount={}",
                 purchase.getBpPaymentId(), purchase.getBpCompanyCode(), purchase.getAmount());
 
@@ -174,6 +195,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalDealResult upsertExpenseDeal(IntegrationConnection connection, CanonicalExpenseDeal expense) {
+        connection = requireAuthoritativeConnection(connection);
         log.info("Upserting expense deal to freee: expenseNo={}, engineerCode={}, amount={}",
                 expense.getExpenseNo(), expense.getEngineerCode(), expense.getAmount());
 
@@ -183,6 +205,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public com.ses.dto.accounting.PaymentFetchResult fetchPayments(IntegrationConnection connection, LocalDate fromDate, LocalDate toDate) {
+        connection = requireAuthoritativeConnection(connection);
         log.info("Fetching payments from freee: companyId={}, fromDate={}, toDate={}",
                 connection.getExternalCompanyId(), fromDate, toDate);
 
@@ -313,6 +336,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
 
     @Override
     public CanonicalPaymentSync fetchDealPayment(IntegrationConnection connection, String externalDealId) {
+        connection = requireAuthoritativeConnection(connection);
         String url = apiBaseUrl + "/api/1/deals/" + externalDealId + "?company_id=" + connection.getExternalCompanyId();
 
         try {
@@ -359,6 +383,7 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Override
     public boolean validateConnection(IntegrationConnection connection) {
         try {
+            connection = requireAuthoritativeConnection(connection);
             String url = apiBaseUrl + "/api/1/users/me";
             ResponseEntity<String> response = executeWith401Recovery(connection, headers -> {
                 HttpEntity<?> entity = new HttpEntity<>(headers);
@@ -374,8 +399,13 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Override
     public boolean verifyMaster(IntegrationConnection connection, String objectType, String externalId, String externalCode) {
         if (externalId == null || externalId.isBlank() || objectType == null) return false;
+        try {
+            connection = requireAuthoritativeConnection(connection);
+        } catch (IllegalStateException e) {
+            log.warn("freee master verification skipped: error_code=CONNECTION_COMPANY_ID_INVALID");
+            return false;
+        }
         Long companyId = connection.getExternalCompanyId();
-        if (companyId == null) companyId = 1L;
 
         String path;
         boolean isListSearch = false;
@@ -478,45 +508,48 @@ public class FreeeAccountingProvider implements AccountingProvider {
                                                                  String refNumber) {
         String url = apiBaseUrl + path;
         try {
-            ResponseEntity<FreeeDealCreateResponse> response = executeWith401Recovery(connection, headers -> {
+            ResponseEntity<JsonNode> response = executeWith401Recovery(connection, headers -> {
                 HttpEntity<FreeeDealCreateRequest> entity = new HttpEntity<>(request, headers);
-                return restTemplate.exchange(url, HttpMethod.POST, entity, FreeeDealCreateResponse.class);
+                return restTemplate.exchange(url, HttpMethod.POST, entity, JsonNode.class);
             });
 
             String reqId = extractRequestId(response.getHeaders());
-            FreeeDealCreateResponse body = response.getBody();
-            if (body != null && body.getDeal() != null) {
-                Long dealId = body.getDeal().getId();
-                Long actualAmount = body.getDeal().getAmount();
-
-                // 金額整合性チェック
-                if (expectedTotal != null && actualAmount != null
-                        && expectedTotal.compareTo(BigDecimal.valueOf(actualAmount)) != 0) {
-                    log.error("freee response amount mismatch: expected={}, actual={}", expectedTotal, actualAmount);
-                    return CanonicalDealResult.builder()
-                            .success(false)
-                            .externalId(String.valueOf(dealId))
-                            .providerRequestId(reqId)
-                            .errorCode("AMOUNT_MISMATCH")
-                            .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
-                            .retryable(false)
-                            .build();
-                }
-
+            JsonNode root = response.getBody();
+            JsonNode deal = root == null ? null : root.get("deal");
+            Long dealId = deal == null || !deal.isObject() ? null : parsePositiveLong(deal.get("id"));
+            if (dealId == null) {
                 return CanonicalDealResult.builder()
-                        .success(true)
+                        .success(false)
+                        .externalId(null)
+                        .providerRequestId(reqId)
+                        .errorCode("INVALID_DEAL_ID")
+                        .errorMessageSafe("freee 応答の取引IDが不正です")
+                        .retryable(false)
+                        .build();
+            }
+
+            FreeeDealDto parsedDeal = objectMapper.treeToValue(deal, FreeeDealDto.class);
+            Long actualAmount = parsedDeal.getAmount();
+
+            // 金額整合性チェック
+            if (expectedTotal != null && actualAmount != null
+                    && expectedTotal.compareTo(BigDecimal.valueOf(actualAmount)) != 0) {
+                log.error("freee response amount mismatch: expected={}, actual={}", expectedTotal, actualAmount);
+                return CanonicalDealResult.builder()
+                        .success(false)
                         .externalId(String.valueOf(dealId))
                         .providerRequestId(reqId)
-                        .responseTotal(actualAmount != null ? BigDecimal.valueOf(actualAmount) : expectedTotal)
+                        .errorCode("AMOUNT_MISMATCH")
+                        .errorMessageSafe("freee 応答金額不一致 (期待: " + expectedTotal + "円, freee: " + actualAmount + "円)")
+                        .retryable(false)
                         .build();
             }
 
             return CanonicalDealResult.builder()
-                    .success(false)
+                    .success(true)
+                    .externalId(String.valueOf(dealId))
                     .providerRequestId(reqId)
-                    .errorCode("EMPTY_RESPONSE")
-                    .errorMessageSafe("freee からの応答が空です")
-                    .retryable(false)
+                    .responseTotal(actualAmount != null ? BigDecimal.valueOf(actualAmount) : expectedTotal)
                     .build();
 
         } catch (Exception e) {
@@ -536,6 +569,12 @@ public class FreeeAccountingProvider implements AccountingProvider {
     @Override
     public Optional<String> findDealIdByRefNumber(IntegrationConnection connection, String refNumber) {
         if (connection == null || refNumber == null || refNumber.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            connection = requireAuthoritativeConnection(connection);
+        } catch (IllegalStateException e) {
+            log.warn("freee deal lookup skipped: error_code=CONNECTION_COMPANY_ID_INVALID");
             return Optional.empty();
         }
         Long expectedCompanyId = connection.getExternalCompanyId();
@@ -563,11 +602,15 @@ public class FreeeAccountingProvider implements AccountingProvider {
                         continue;
                     }
                     Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
-                    if (expectedCompanyId != null && companyId != null
-                            && !java.util.Objects.equals(companyId, expectedCompanyId)) {
+                    if (companyId == null || !java.util.Objects.equals(companyId, expectedCompanyId)) {
                         continue;
                     }
-                    matched.add(String.valueOf(d.get("id").asLong()));
+                    Long dealId = parsePositiveLong(d.get("id"));
+                    if (dealId == null) {
+                        log.warn("findDealIdByRefNumber skipped a deal without a valid id: error_code=INVALID_DEAL_ID");
+                        continue;
+                    }
+                    matched.add(String.valueOf(dealId));
                 }
                 if (deals.size() < limit) {
                     break;
@@ -613,9 +656,14 @@ public class FreeeAccountingProvider implements AccountingProvider {
                     if (deals != null && deals.isArray() && !deals.isEmpty()) {
                         for (JsonNode d : deals) {
                             if (d.has("ref_number") && refNumber.equals(d.get("ref_number").asText())) {
-                                Long dealId = d.get("id").asLong();
+                                Long dealId = parsePositiveLong(d.get("id"));
                                 Long amount = d.has("amount") ? d.get("amount").asLong() : null;
                                 Long companyId = d.has("company_id") ? d.get("company_id").asLong() : null;
+
+                                if (dealId == null) {
+                                    log.warn("Deal verification skipped a row without a valid id: error_code=INVALID_DEAL_ID");
+                                    continue;
+                                }
 
                                 boolean strictAmountMatch = expectedTotal != null && amount != null
                                         && expectedTotal.compareTo(BigDecimal.valueOf(amount)) == 0;
@@ -675,6 +723,30 @@ public class FreeeAccountingProvider implements AccountingProvider {
         }
         log.warn("No strictly matching deal found for refNumber={} after timeout, fail-closed (retryable)", refNumber);
         return null;
+    }
+
+    private Long parsePositiveLong(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        try {
+            long value;
+            if (node.isIntegralNumber()) {
+                BigInteger integerValue = node.bigIntegerValue();
+                if (integerValue.compareTo(BigInteger.ONE) < 0
+                        || integerValue.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
+                    return null;
+                }
+                value = integerValue.longValue();
+            } else if (node.isTextual()) {
+                value = Long.parseLong(node.textValue());
+            } else {
+                return null;
+            }
+            return value > 0 ? value : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private <T> ResponseEntity<T> executeWith401Recovery(IntegrationConnection connection,

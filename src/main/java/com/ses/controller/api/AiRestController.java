@@ -11,6 +11,8 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.ai.LegacyAiEndpointBoundary;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,6 +35,7 @@ public class AiRestController {
     private final ProjectService projectService;
     private final DataScopeService dataScopeService;
     private final AiConfig aiConfig;
+    private final LegacyAiEndpointBoundary endpointBoundary;
 
     /**
      * AI対話リクエスト。APIキーはサーバー側設定(ai.api-key)のみを使用するため、
@@ -79,19 +82,23 @@ public class AiRestController {
             return ApiResult.error(400, "AI機能は現在無効化されています。");
         }
         try {
+            // 文脈を必要とするresource authorizationがある場合だけ、request内で一度生成する。
+            // resourceを持たないlocal-only chatは従来どおりproviderへallowlist空で進む。
+            CopilotExecutionContext context = null;
+            if (request.getEngineerId() != null || request.getProjectId() != null) {
+                context = endpointBoundary.createContext();
+            }
             Map<String, Object> fields = new LinkedHashMap<>();
             if (request.getEngineerId() != null) {
-                dataScopeService.assertAllowedEngineer(request.getEngineerId());
-                Engineer eng = engineerService.getById(request.getEngineerId());
+                Engineer eng = endpointBoundary.assertEngineer(request.getEngineerId(), context);
                 fields.putAll(AiAllowlistFields.engineer(eng, null));
             }
             if (request.getProjectId() != null) {
-                dataScopeService.assertAllowedProject(request.getProjectId());
-                Project proj = projectService.getById(request.getProjectId());
+                Project proj = endpointBoundary.assertProject(request.getProjectId(), context);
                 fields.putAll(AiAllowlistFields.project(proj));
             }
-            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
-                    .useCase(AiGatewayRequest.USE_CHAT)
+            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.legacyChat(
+                            request.getEngineerId(), request.getProjectId(), context)
                     .trustedInstruction("SES営業アシスタントとして、ALLOWLIST_CONTEXT のみを根拠に簡潔に答えてください。HTMLは出力しないでください。")
                     .allowlistedFields(fields)
                     .untrustedSourceText(request.getPrompt())

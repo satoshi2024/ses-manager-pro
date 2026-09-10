@@ -7,6 +7,8 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.util.Map;
+
 public final class SecurityUtils {
 
     private SecurityUtils() {
@@ -68,6 +70,46 @@ public final class SecurityUtils {
             return ((UserDetails) authentication.getPrincipal()).getUsername();
         }
         return null;
+    }
+
+    /**
+     * 現在の認証principalへ明示的に束縛されたtenantだけを返す。
+     * OIDC claim、local loginの認証時束縛値、authentication details以外からは推測しない。
+     */
+    public static String currentTenantId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null) {
+            return null;
+        }
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof OidcLoginUser oidc) {
+            String claim = firstText(oidc.getClaims(), "tenant_id", "tenantId", "tenant");
+            return claim;
+        }
+        if (principal instanceof LoginUser loginUser && hasText(loginUser.getTenantId())) {
+            return loginUser.getTenantId().trim();
+        }
+        if (authentication.getDetails() instanceof Map<?, ?> details) {
+            Object tenant = details.get("tenant_id");
+            if (tenant == null) tenant = details.get("tenantId");
+            if (tenant != null && hasText(tenant.toString())) {
+                return tenant.toString().trim();
+            }
+        }
+        return null;
+    }
+
+    private static String firstText(Map<String, Object> claims, String... names) {
+        if (claims == null) return null;
+        for (String name : names) {
+            Object value = claims.get(name);
+            if (value != null && hasText(value.toString())) return value.toString().trim();
+        }
+        return null;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private static Long parseLong(String value) {

@@ -183,21 +183,34 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(
+            propagation = org.springframework.transaction.annotation.Propagation.NESTED,
+            rollbackFor = Exception.class)
+    public Long publishToUserAndGetOutboxIdWithoutDispatch(Long userId, String type, String title,
+                                                            String message, String linkUrl,
+                                                            String dedupeKey, String menuKey) {
+        // outbox側の登録例外はNESTED savepointへrollbackし、bridgeが結果式へ変換する。
+        // これにより外側の配布transactionをrollback-onlyへ汚染せず、通知だけの孤児も残さない。
+        return publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null, false);
+    }
+
+    @Override
     @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public void publishToOrganization(Long organizationId, String type, String title, String message,
                                        String linkUrl, String dedupeKey) {
         if (organizationId == null) {
             return;
         }
-        publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type), organizationId);
+        publishInternal(null, type, title, message, linkUrl, dedupeKey, menuKeyForType(type), organizationId, true);
     }
 
     private Long publishInternal(Long userId, String type, String title, String message, String linkUrl, String dedupeKey, String menuKey) {
-        return publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null);
+        return publishInternal(userId, type, title, message, linkUrl, dedupeKey, menuKey, null, true);
     }
 
     private Long publishInternal(Long userId, String type, String title, String message, String linkUrl,
-                                 String dedupeKey, String menuKey, Long organizationId) {
+                                 String dedupeKey, String menuKey, Long organizationId,
+                                 boolean dispatchAfterCommit) {
         // 宛先ユーザーも組織も解決できない業務通知を全体配信へフォールバックさせない。
         // NULL組織を許すのは、明示的なプラットフォーム共通通知(SYSTEM)だけとする。
         if (userId == null && organizationId == null && !"SYSTEM".equals(type)) {
@@ -215,14 +228,14 @@ public class NotificationServiceImpl implements NotificationService {
             notification.setOrganizationId(organizationId != null ? organizationId : resolveRecipientOrganizationId(userId));
             // dedupe_key はグローバル一意のため、宛先ユーザーごとに個別発行するイベントでは受信者を含める。
             // これがないと同一eventの2人目以降がユニーク制約で破棄される（R3R-33）。
-            notification.setDedupeKey(userId != null ? dedupeKey + "#u" + userId : dedupeKey);
+            notification.setDedupeKey(canonicalDedupeKey(userId, dedupeKey));
             notification.setCreatedAt(LocalDateTime.now(clock));
             notificationMapper.insert(notification);
 
             Long outboxId = null;
             if (notificationOutboxService != null) {
                 outboxId = notificationOutboxService.enqueue(notification);
-                if (outboxId != null) {
+                if (outboxId != null && dispatchAfterCommit) {
                     final Long dispatchOutboxId = outboxId;
                     Runnable dispatch = () -> notificationOutboxService.dispatchOne(dispatchOutboxId);
                     if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -256,6 +269,14 @@ public class NotificationServiceImpl implements NotificationService {
             // idempotent
             return null;
         }
+    }
+
+    private String canonicalDedupeKey(Long userId, String dedupeKey) {
+        if (userId == null || dedupeKey == null) {
+            return dedupeKey;
+        }
+        String suffix = "#u" + userId;
+        return dedupeKey.endsWith(suffix) ? dedupeKey : dedupeKey + suffix;
     }
 
     private List<Long> scopedIds() {

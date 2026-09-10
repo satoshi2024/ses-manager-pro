@@ -45,10 +45,19 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ScopeChangeInvalidator scopeChangeInvalidator;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long engineerId = Long.valueOf(id.toString());
+        Engineer current = getById(engineerId);
+        if (current == null) return false;
+        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
         long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
@@ -94,6 +103,14 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        if (legalEntityContextService == null || old.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(old.getLegalEntityId());
+        if (engineer.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(old.getLegalEntityId(), engineer.getLegalEntityId());
+        }
+        engineer.setLegalEntityId(old.getLegalEntityId());
         if (engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
             long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
                     .eq(Contract::getEngineerId, engineer.getId())
@@ -126,11 +143,35 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean save(Engineer entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         boolean saved = super.save(entity);
         if (saved) {
             recordAccountingHistory(entity.getId());
         }
         return saved;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(Engineer entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Engineer current = getById(entity.getId());
+        if (current == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(entity.getLegalEntityId(), current.getLegalEntityId());
+        }
+        entity.setLegalEntityId(current.getLegalEntityId());
+        boolean updated = super.updateById(entity);
+        if (updated) recordAccountingHistory(entity.getId());
+        return updated;
     }
 
     /**
@@ -157,7 +198,11 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
                 && numericEquals(currentRow.getExpectedUnitPrice(), saved.getExpectedUnitPrice())) {
             return;
         }
-        java.time.LocalDate today = java.time.LocalDate.now();
+        java.time.LocalDate today = legalEntityContextService == null
+                ? null : legalEntityContextService.requireCurrentDate();
+        if (today == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
         if (currentRow != null) {
             if (!currentRow.getValidFrom().isBefore(today)) {
                 // 同日中の複数回変更は版を増やさず最後の値で上書きする。
@@ -184,7 +229,3 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         return left.compareTo(right) == 0;
     }
 }
-
-
-
-

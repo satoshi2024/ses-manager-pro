@@ -1,8 +1,8 @@
 package com.ses.service.notification;
 
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.ses.entity.Notification;
 import com.ses.entity.NotificationOutbox;
+import com.ses.entity.ReportDelivery;
 import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.NotificationOutboxMapper;
 import org.junit.jupiter.api.Test;
@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,7 +42,11 @@ class NotificationOutboxDispatcherTest {
         NotificationOutbox claimed = row(1);
         when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(before, claimed);
         when(outboxMapper.claim(7L)).thenReturn(1);
+        when(outboxMapper.markSent(7L)).thenReturn(1);
+        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("SENT"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(true);
+        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.syncOutboxStatus(7L, "SENT", null, null)).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
@@ -62,7 +67,10 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(1), row(2));
         when(outboxMapper.claim(7L)).thenReturn(1);
         when(outboxMapper.markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
+        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("RETRY"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
+        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.syncOutboxStatus(eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
@@ -78,7 +86,10 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(4), row(5));
         when(outboxMapper.claim(7L)).thenReturn(1);
         when(outboxMapper.markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
+        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("FAILED"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
+        when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
+        when(reportDeliveryMapper.syncOutboxStatus(eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
@@ -106,10 +117,11 @@ class NotificationOutboxDispatcherTest {
     @Test
     void recoverStaleRowsは処理中の古い行を再送可能へ戻す() {
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
+        when(outboxMapper.selectStale(any(LocalDateTime.class), anyInt())).thenReturn(java.util.List.of());
 
         dispatcher.recoverStaleRows();
 
-        verify(outboxMapper).update(eq(null), any(UpdateWrapper.class));
+        verify(outboxMapper).selectStale(any(LocalDateTime.class), eq(100));
     }
 
     private NotificationOutbox row(int attempts) {
@@ -129,5 +141,17 @@ class NotificationOutboxDispatcherTest {
                 .nextAttemptAt(LocalDateTime.now())
                 .createdAt(LocalDateTime.now())
                 .build();
+    }
+
+    private NotificationOutbox rowWithStatus(String status) {
+        NotificationOutbox row = row(1);
+        row.setStatus(status);
+        return row;
+    }
+
+    private ReportDelivery reportDelivery() {
+        ReportDelivery delivery = new ReportDelivery();
+        delivery.setDeliveryStatus("PROCESSING");
+        return delivery;
     }
 }

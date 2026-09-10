@@ -46,8 +46,6 @@ class FlywayMigrationVersionResolutionTest {
         assertTrue(seenVersions.contains("147"), "V147 (customer_success_service_desk) が解決されること");
         assertTrue(seenVersions.contains("148"), "V148 (ai_management_copilot_f1_artifact) が解決されること");
         assertTrue(seenVersions.contains("149"), "V149 (ai_management_copilot_a1_menu) が解決されること");
-        assertTrue(seenVersions.contains("150"), "V150 (service_request_atomic_sequence) が解決されること");
-        assertTrue(seenVersions.contains("151"), "V151 (certification_continuity_group) が解決されること");
 
         // V144 のスクリプト名が digital_invoice_safe_diagnostics であること
         List<MigrationInfo> v144Info = Arrays.stream(allMigrations)

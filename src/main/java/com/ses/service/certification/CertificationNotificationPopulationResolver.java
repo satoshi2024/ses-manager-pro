@@ -28,15 +28,27 @@ public class CertificationNotificationPopulationResolver {
     private final EngineerAccountLinkMapper accountLinkMapper;
     private final UserOrganizationMapper userOrganizationMapper;
     private final SysUserMapper sysUserMapper;
+    private final CertificationLifecycleStateResolver lifecycleStateResolver;
 
     public CertificationNotificationPopulationResolver(LifecycleCaseMapper lifecycleCaseMapper,
                                                        EngineerAccountLinkMapper accountLinkMapper,
                                                        UserOrganizationMapper userOrganizationMapper,
                                                        SysUserMapper sysUserMapper) {
+        this(lifecycleCaseMapper, accountLinkMapper, userOrganizationMapper, sysUserMapper,
+                new CertificationLifecycleStateResolver());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CertificationNotificationPopulationResolver(LifecycleCaseMapper lifecycleCaseMapper,
+                                                       EngineerAccountLinkMapper accountLinkMapper,
+                                                       UserOrganizationMapper userOrganizationMapper,
+                                                       SysUserMapper sysUserMapper,
+                                                       CertificationLifecycleStateResolver lifecycleStateResolver) {
         this.lifecycleCaseMapper = lifecycleCaseMapper;
         this.accountLinkMapper = accountLinkMapper;
         this.userOrganizationMapper = userOrganizationMapper;
         this.sysUserMapper = sysUserMapper;
+        this.lifecycleStateResolver = lifecycleStateResolver;
     }
 
     public Population resolve(Long engineerId, LocalDate asOf) {
@@ -47,24 +59,16 @@ public class CertificationNotificationPopulationResolver {
                 .eq(LifecycleCase::getEngineerId, engineerId)
                 .orderByAsc(LifecycleCase::getAnchorDate)
                 .orderByAsc(LifecycleCase::getId));
-        LifecycleCase latestResignation = latestCompleted(cases, "RESIGNATION", asOf);
-        LifecycleCase latestReinstatement = latestCompleted(cases, "REINSTATEMENT", asOf);
-        boolean reinstatedNow = latestReinstatement != null
-                && (latestReinstatement.getCompletedAt() != null
-                ? asOf.equals(latestReinstatement.getCompletedAt().toLocalDate())
-                : asOf.equals(latestReinstatement.getAnchorDate()));
-        if (latestResignation != null && !isAfter(latestReinstatement, latestResignation)) {
+        CertificationLifecycleStateResolver.Resolution lifecycle = lifecycleStateResolver.resolve(cases, asOf);
+        if ("RESIGNED".equals(lifecycle.state())) {
             return populationFor(cases, engineerId, asOf, PopulationCase.RESIGNATION, false);
         }
-
-        boolean onLeave = cases.stream().anyMatch(item -> "LEAVE".equals(item.getLifecycleType())
-                && ("ACTIVE".equals(item.getStatus()) || "ON_HOLD".equals(item.getStatus()))
-                && !after(item.getAnchorDate(), asOf));
-        if (onLeave) {
+        if ("ON_LEAVE".equals(lifecycle.state())) {
             return populationFor(cases, engineerId, asOf, PopulationCase.LEAVE, false);
         }
         return populationFor(cases, engineerId, asOf,
-                reinstatedNow ? PopulationCase.REINSTATEMENT : PopulationCase.NORMAL, reinstatedNow);
+                lifecycle.reinstatement() ? PopulationCase.REINSTATEMENT : PopulationCase.NORMAL,
+                lifecycle.reinstatement());
     }
 
     private Population populationFor(List<LifecycleCase> cases, Long engineerId, LocalDate asOf,

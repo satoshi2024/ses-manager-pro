@@ -24,6 +24,9 @@ import java.time.LocalDate;
 @TableName("t_project")
 public class Project extends BaseEntity {
 
+    /** 法人境界。顧客・契約と同一法人であることを公開APIで検証する。 */
+    private Long legalEntityId;
+
     /**
      * 案件名
      */

@@ -15,6 +15,9 @@ import lombok.EqualsAndHashCode;
 @TableName("t_project_ingestion")
 public class ProjectIngestion extends BaseEntity {
 
+    /** 取込ジョブの作成者security contextから解決する法人ID。 */
+    private Long legalEntityId;
+
     /** PASTE / EML */
     private String sourceType;
 

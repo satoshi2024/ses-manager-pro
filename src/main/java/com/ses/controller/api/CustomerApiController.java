@@ -41,6 +41,10 @@ public class CustomerApiController {
     private final com.ses.service.security.OrganizationScopeService organizationScopeService;
     private final com.ses.service.security.AuthorizationService authorizationService;
 
+    /** 法人はpayloadではなくsecurity/org contextからのみ注入する。境界依存が無い場合もfail-closedする。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     /**
      * 顧客一覧（ページネーション）
      */
@@ -120,6 +124,7 @@ public class CustomerApiController {
         Customer customer = new Customer();
         org.springframework.beans.BeanUtils.copyProperties(customerDto, customer);
         clearLegacyContactWrite(customer);
+        requireLegalEntityContext().ifPresent(ctx -> customer.setLegalEntityId(ctx.requireCurrentLegalEntityId()));
         com.ses.common.util.EntityProtectUtil.protectForCreate(customer);
         return ApiResult.success(customerService.save(customer));
     }
@@ -138,8 +143,21 @@ public class CustomerApiController {
             throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
         }
         dataScopeService.assertAllowedCustomer(id);
+        Customer existing = customerService.getById(id);
+        if (existing == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        requireLegalEntityContext().ifPresent(ctx -> {
+            ctx.assertCurrent(existing.getLegalEntityId());
+            customer.setLegalEntityId(existing.getLegalEntityId());
+        });
         customerService.updateWithOptimisticLock(customer);
         return ApiResult.success(true);
+    }
+
+    private java.util.Optional<com.ses.service.security.LegalEntityContextService> requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw com.ses.common.exception.BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return java.util.Optional.of(legalEntityContextService);
     }
 
     /**

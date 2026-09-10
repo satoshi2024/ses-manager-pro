@@ -17,6 +17,9 @@ import java.math.BigDecimal;
 @TableName("t_lead")
 public class Lead extends BaseEntity {
 
+    /** 権威security contextから束縛される法人ID。payloadからは受け取らない。 */
+    private Long legalEntityId;
+
     /**
      * 会社名
      */

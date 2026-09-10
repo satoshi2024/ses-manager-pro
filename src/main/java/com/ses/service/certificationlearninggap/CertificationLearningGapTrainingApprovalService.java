@@ -38,6 +38,15 @@ public class CertificationLearningGapTrainingApprovalService {
         return trainingPlanService.reject(plan.getId(), expectedVersion, actorUserId, reason);
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public LearningPlan amendBudget(Long planId, Integer expectedVersion, java.math.BigDecimal amendedCostJpy,
+                                    Long approvalRequestId, Long actorUserId, String reason,
+                                    Authentication authentication) {
+        LearningPlan plan = visiblePlan(planId, authentication);
+        return trainingPlanService.amendBudget(plan.getId(), expectedVersion, amendedCostJpy,
+                approvalRequestId, actorUserId, reason);
+    }
+
     private LearningPlan visiblePlan(Long planId, Authentication authentication) {
         LearningPlan plan = planId == null ? null : planMapper.selectById(planId);
         if (plan == null) {

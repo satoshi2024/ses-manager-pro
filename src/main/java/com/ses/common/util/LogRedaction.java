@@ -16,18 +16,22 @@ public final class LogRedaction {
     private static final int MAX_STACK_FRAMES = 128;
     private static final String FALLBACK = "機密情報を含むため詳細を省略しました";
 
-    private static final Pattern PASSWORD_PATTERN = Pattern.compile(
-            "(?i)(\\b(?:db[\\s_-]+password|database[\\s_-]+password|password|passwd|pwd|client[\\s_-]+secret|api[\\s_-]+key|secret[\\s_-]+key|secret|private[\\s_-]+key)\\b)(\\s*[:=]\\s*)(['\\\"]?)([^\\s,;'\\\"]+)\\3");
+    /**
+     * 外部連携で実際に現れる key の表記ゆれを一つの規則で扱う。
+     * camelCase と snake_case/kebab-case を別々の呼出側で処理すると、
+     * 新しい連携先を追加したときに脱敏漏れが再発するため、ここを共通境界とする。
+     */
+    private static final Pattern SECRET_KEY_VALUE_PATTERN = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9])([\\\"']?)(db(?:[\\s_-]?)password|database(?:[\\s_-]?)password|password|passwd|pwd|"
+                    + "api(?:[\\s_-]?)key|client(?:[\\s_-]?)secret|private(?:[\\s_-]?)key|webhook(?:[\\s_-]?)secret|"
+                    + "secret(?:[\\s_-]?)key|secret|access(?:[\\s_-]?)token|refresh(?:[\\s_-]?)token|"
+                    + "auth(?:[\\s_-]?)token|id(?:[\\s_-]?)token|token)([\\\"']?\\s*[:=]\\s*)([\\\"']?)([^\\s,;}'\\\"]+)(\\4)");
     private static final Pattern BEARER_PATTERN = Pattern.compile("(?i)\\bBearer\\s+([A-Za-z0-9_\\-.~+/=]+)");
     private static final Pattern BASIC_PATTERN = Pattern.compile("(?i)\\bBasic\\s+([A-Za-z0-9+/=_-]+)");
     private static final Pattern AUTHORIZATION_PATTERN = Pattern.compile(
             "(?i)(\\b(?:proxy-)?authorization\\s*[:=]\\s*)(['\\\"]?)(?:Bearer|Basic)\\s+[^\\s,;'\\\"]+\\2");
     private static final Pattern JSON_AUTHORIZATION_PATTERN = Pattern.compile(
             "(?i)([\\\"']?(?:proxy-)?authorization[\\\"']?\\s*[:=]\\s*)(['\\\"]?)(Bearer|Basic)\\s+[^\\s,;'\\\"]+\\2");
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(\\b(?:access[_\\s-]*token|refresh[_\\s-]*token|auth[_\\s-]*token|id[_\\s-]*token|token)\\b)(\\s*[:=]\\s*)(['\\\"]?)([^\\s,;'\\\"]+)\\3");
-    private static final Pattern JSON_SECRET_PATTERN = Pattern.compile(
-            "(?i)([\\\"']?(?:db[\\s_-]+password|database[\\s_-]+password|password|passwd|pwd|client[\\s_-]+secret|api[\\s_-]+key|secret[\\s_-]+key|secret|private[\\s_-]+key|access[_\\s-]*token|refresh[_\\s-]*token|auth[_\\s-]*token|id[_\\s-]*token|token)[\\\"']?\\s*[:=]\\s*)(['\\\"]?)([^\\s,;'\\\"]+)\\2");
     private static final Pattern EMAIL_PATTERN = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
     private static final Pattern JDBC_PATTERN = Pattern.compile("(?i)jdbc:[A-Za-z0-9:+._-]+://[^\\s,;'\\\"]+");
     private static final Pattern SQL_BINDING_PATTERN = Pattern.compile(
@@ -72,13 +76,11 @@ public final class LogRedaction {
         }
         try {
             String result = text;
-            result = replace(result, PASSWORD_PATTERN, "$1$2$3***$3");
             result = replace(result, AUTHORIZATION_PATTERN, "$1$2***$2");
             result = replace(result, JSON_AUTHORIZATION_PATTERN, "$1$2$3 ***$2");
             result = replace(result, BEARER_PATTERN, "Bearer ***");
             result = replace(result, BASIC_PATTERN, "Basic ***");
-            result = replace(result, TOKEN_PATTERN, "$1$2$3***$3");
-            result = replace(result, JSON_SECRET_PATTERN, "$1$2***$2");
+            result = replace(result, SECRET_KEY_VALUE_PATTERN, "$1$2$3$4***$6");
             result = EMAIL_PATTERN.matcher(result).replaceAll("***@***");
             result = SQL_BINDING_PATTERN.matcher(result).replaceAll("$1[REDACTED_BINDINGS]");
             result = SQL_STATEMENT_PATTERN.matcher(result).replaceAll("[REDACTED_SQL]");

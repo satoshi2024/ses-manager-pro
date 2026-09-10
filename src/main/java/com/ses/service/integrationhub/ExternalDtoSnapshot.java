@@ -65,6 +65,8 @@ public record ExternalDtoSnapshot(String json, String payloadHash) {
             "availableTo", "skillTagCode", "publicProjectId", "status", "startDate", "endDate",
             "publicCustomerId", "publicContractId", "renewalStatus", "publicInvoiceId", "issueDate",
             "dueDate", "paidAt", "settlementStatus", "changedFieldNames", "payload");
+    /** canonicalPayloadの最大field数。OpenAPI/parserと同じallow-list cardinalityを使う。 */
+    public static final int CANONICAL_PAYLOAD_MAX_PROPERTIES = CANONICAL_PAYLOAD_FIELDS.size();
 
     private static final Set<String> RESOURCE_PAYLOAD_FIELDS = Set.of(
             "publicEngineerId", "availabilityStatus", "availableFrom", "availableTo", "skillTagCode",

@@ -12,6 +12,7 @@ import com.ses.mapper.QuotationMapper;
 import com.ses.service.QuotationService;
 import com.ses.service.security.CrmScopeService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,6 +54,8 @@ class OpportunityWriteReferenceValidationTest {
     private CustomerMapper customerMapper;
     @Mock
     private CrmScopeService crmScopeService;
+    @Mock
+    private LegalEntityContextService legalEntityContextService;
 
     private OpportunityServiceImpl service;
 
@@ -62,6 +65,8 @@ class OpportunityWriteReferenceValidationTest {
                 projectMapper, quotationMapper, quotationService, dataScopeService, customerMapper);
         ReflectionTestUtils.setField(service, "baseMapper", opportunityMapper);
         ReflectionTestUtils.setField(service, "crmScopeService", crmScopeService);
+        ReflectionTestUtils.setField(service, "legalEntityContextService", legalEntityContextService);
+        org.mockito.Mockito.lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
         org.mockito.Mockito.lenient()
                 .when(crmScopeService.isOwnerAllowed(anyLong(), any(LocalDate.class))).thenReturn(true);
     }
@@ -188,6 +193,7 @@ class OpportunityWriteReferenceValidationTest {
         Customer customer = new Customer();
         customer.setId(id);
         customer.setCompanyName("検証顧客");
+        customer.setLegalEntityId(1L);
         return customer;
     }
 
@@ -195,6 +201,7 @@ class OpportunityWriteReferenceValidationTest {
         Opportunity opportunity = new Opportunity();
         opportunity.setId(id);
         opportunity.setCustomerId(customerId);
+        opportunity.setLegalEntityId(1L);
         opportunity.setTitle("参照検証商機");
         opportunity.setStage(stage);
         opportunity.setVersion(version);

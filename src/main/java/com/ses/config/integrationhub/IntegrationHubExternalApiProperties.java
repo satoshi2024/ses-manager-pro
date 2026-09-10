@@ -22,6 +22,8 @@ public class IntegrationHubExternalApiProperties {
     private ExternalTransport externalTransport = new ExternalTransport();
     private Provider provider = new Provider();
     private Security security = new Security();
+    /** 現行の物理トポロジー。共有DBを暗黙に許可しない。 */
+    private Topology topology = new Topology();
 
     @PostConstruct
     void validateBoundaries() {
@@ -31,6 +33,10 @@ public class IntegrationHubExternalApiProperties {
         if (publicApi.enabled && (publicApi.publicIdKey == null
                 || publicApi.publicIdKey.getBytes(java.nio.charset.StandardCharsets.UTF_8).length < 32)) {
             throw new IllegalStateException("public-api.enabled=trueには32 byte以上のpublic-id-keyが必要です");
+        }
+        if (publicApi.enabled && (!"DEDICATED_DATABASE".equals(topology.mode)
+                || !StringUtils.hasText(topology.boundTenantId))) {
+            throw new IllegalStateException("公開APIはDEDICATED_DATABASEとbound-tenant-idの明示設定が必要です");
         }
         if (provider.approvedInboundProviders == null
                 || provider.approvedInboundProviders.stream().anyMatch(value -> value == null
@@ -48,6 +54,11 @@ public class IntegrationHubExternalApiProperties {
                 || publicApi.readSnapshotPurgeFixedDelayMs < 1000
                 || publicApi.readSnapshotPurgeFixedDelayMs > 86_400_000L) {
             throw new IllegalStateException("read snapshot purge設定が不正です");
+        }
+        if (publicApi.retentionPurgeBatchSize < 1 || publicApi.retentionPurgeBatchSize > 1000
+                || publicApi.retentionPurgeFixedDelayMs < 1000
+                || publicApi.retentionPurgeFixedDelayMs > 86_400_000L) {
+            throw new IllegalStateException("retention purge設定が不正です");
         }
         if (externalTransport.batchSize < 1 || externalTransport.batchSize > 32
                 || externalTransport.leaseSeconds < 1 || externalTransport.leaseSeconds > 900
@@ -84,6 +95,10 @@ public class IntegrationHubExternalApiProperties {
         private int readSnapshotPurgeBatchSize = 32;
         /** snapshot purge schedulerの実行間隔。 */
         private long readSnapshotPurgeFixedDelayMs = 60_000L;
+        /** retention/nonce purge schedulerの1回上限。 */
+        private int retentionPurgeBatchSize = 100;
+        /** retention/nonce purge schedulerの実行間隔。 */
+        private long retentionPurgeFixedDelayMs = 60_000L;
     }
 
     @Data
@@ -113,5 +128,23 @@ public class IntegrationHubExternalApiProperties {
         private List<String> trustedProxies = new ArrayList<>();
         /** LOOPBACK接続先で使用できるportのallow-list。 */
         private List<Integer> allowedLoopbackPorts = new ArrayList<>();
+    }
+
+    @Data
+    public static class Topology {
+        /** 現行正式運用は一DB一tenant。共有DBモードは未実装のため拒否する。 */
+        private String mode = "DEDICATED_DATABASE";
+        /** このプロセスが接続するDBへ束縛されたtenantの不透明な識別子。 */
+        private String boundTenantId;
+    }
+
+    /** 認証済みclientがこのDBのtenant境界へ束縛されているかを判定する。 */
+    public void assertTenantBound(String tenantId) {
+        if (!"DEDICATED_DATABASE".equals(topology.mode)
+                || !StringUtils.hasText(topology.boundTenantId)
+                || !StringUtils.hasText(tenantId)
+                || !topology.boundTenantId.equals(tenantId)) {
+            throw ExternalApiSecurityException.forbidden("FORBIDDEN_SCOPE");
+        }
     }
 }

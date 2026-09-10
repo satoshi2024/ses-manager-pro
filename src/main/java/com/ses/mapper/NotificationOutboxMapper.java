@@ -17,11 +17,24 @@ public interface NotificationOutboxMapper extends BaseMapper<NotificationOutbox>
     @Select("SELECT * FROM t_notification_outbox WHERE id = #{id}")
     NotificationOutbox selectByIdForDispatch(@Param("id") Long id);
 
+    @Select("SELECT * FROM t_notification_outbox WHERE dedupe_key = #{dedupeKey} LIMIT 1")
+    NotificationOutbox selectByDedupeKey(@Param("dedupeKey") String dedupeKey);
+
     @Select("SELECT * FROM t_notification_outbox "
             + "WHERE status IN ('PENDING','RETRY') "
             + "AND next_attempt_at <= CURRENT_TIMESTAMP "
             + "ORDER BY id LIMIT #{limit}")
     List<NotificationOutbox> selectDue(@Param("limit") int limit);
+
+    @Select("SELECT * FROM t_notification_outbox "
+            + "WHERE status = 'PROCESSING' AND locked_at IS NOT NULL "
+            + "AND locked_at < #{staleBefore} ORDER BY id LIMIT #{limit}")
+    List<NotificationOutbox> selectStale(@Param("staleBefore") LocalDateTime staleBefore,
+                                         @Param("limit") int limit);
+
+    @Select("SELECT * FROM t_notification_outbox "
+            + "WHERE reconciliation_required = 1 ORDER BY id LIMIT #{limit}")
+    List<NotificationOutbox> selectReconciliationDue(@Param("limit") int limit);
 
     @Update("UPDATE t_notification_outbox "
             + "SET status = 'PROCESSING', locked_at = CURRENT_TIMESTAMP, "
@@ -31,28 +44,44 @@ public interface NotificationOutboxMapper extends BaseMapper<NotificationOutbox>
 
     @Update("UPDATE t_notification_outbox "
             + "SET status = 'SENT', sent_at = CURRENT_TIMESTAMP, locked_at = NULL, last_error = NULL "
+            + ", reconciliation_required = 0 "
             + "WHERE id = #{id} AND status = 'PROCESSING'")
     int markSent(@Param("id") Long id);
 
     @Update("UPDATE t_notification_outbox "
             + "SET status = #{status}, next_attempt_at = #{nextAttemptAt}, "
-            + "locked_at = NULL, last_error = #{lastError} "
+            + "locked_at = NULL, last_error = #{lastError}, reconciliation_required = 0 "
             + "WHERE id = #{id} AND status = 'PROCESSING'")
     int markResult(@Param("id") Long id, @Param("status") String status,
                    @Param("nextAttemptAt") LocalDateTime nextAttemptAt,
                    @Param("lastError") String lastError);
 
+    @Update("UPDATE t_notification_outbox SET status = 'RETRY', next_attempt_at = #{now}, "
+            + "locked_at = NULL, last_error = 'STALE_PROCESSING_RECOVERED', "
+            + "reconciliation_required = 0 "
+            + "WHERE id = #{id} AND status = 'PROCESSING' AND locked_at < #{staleBefore}")
+    int recoverStale(@Param("id") Long id, @Param("staleBefore") LocalDateTime staleBefore,
+                     @Param("now") LocalDateTime now);
+
+    @Update("UPDATE t_notification_outbox SET reconciliation_required = 1, last_error = #{error} "
+            + "WHERE id = #{id}")
+    int markReconciliationRequired(@Param("id") Long id, @Param("error") String error);
+
+    @Update("UPDATE t_notification_outbox SET reconciliation_required = 0 "
+            + "WHERE id = #{id}")
+    int clearReconciliationRequired(@Param("id") Long id);
+
     /** report deliveryの通常retry用。既存outboxを再利用し、通知行を増やさない。 */
     @Update("UPDATE t_notification_outbox "
             + "SET status = 'PENDING', next_attempt_at = CURRENT_TIMESTAMP, "
-            + "locked_at = NULL, last_error = NULL, sent_at = NULL "
+            + "locked_at = NULL, last_error = NULL, sent_at = NULL, reconciliation_required = 0 "
             + "WHERE id = #{id} AND status IN ('RETRY','FAILED')")
     int requeueReport(@Param("id") Long id);
 
     /** DLQ manual replay用。outboxの試行回数だけを新しい配送世代として再開する。 */
     @Update("UPDATE t_notification_outbox "
             + "SET status = 'PENDING', attempt_count = 0, next_attempt_at = CURRENT_TIMESTAMP, "
-            + "locked_at = NULL, last_error = NULL, sent_at = NULL "
+            + "locked_at = NULL, last_error = NULL, sent_at = NULL, reconciliation_required = 0 "
             + "WHERE id = #{id} AND status IN ('RETRY','FAILED')")
     int replayReport(@Param("id") Long id);
 }

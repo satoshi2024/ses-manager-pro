@@ -351,4 +351,29 @@ class FileScopeValidationServiceTest {
                 () -> service.assertDownloadAllowed("cert-evidence-held.pdf", 100L, "abc123"));
         assertEquals("error.file.legalHoldActive", ex.getMessage());
     }
+
+    @Test
+    void 資格証憑専用境界はrecordと文書のtenantが一致しなければ拒否する() {
+        DocumentVersion version = certificationEvidenceVersion(100L, "cert-evidence-tenant.pdf", "abc123");
+        version.setTenantId("default");
+        Document document = new Document();
+        document.setDocumentType("CERTIFICATION_EVIDENCE");
+        document.setTenantId("default");
+        when(documentMapper.selectById(9100L)).thenReturn(document);
+
+        EngineerCertification record = new EngineerCertification();
+        record.setId(200L);
+        record.setTenantId("tenant-b");
+        record.setEngineerId(50L);
+        DocumentLink recordLink = new DocumentLink();
+        recordLink.setDocumentId(9100L);
+        recordLink.setTargetType("CERTIFICATION_RECORD");
+        recordLink.setTargetId(200L);
+        when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
+        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
+        loginAs("HR");
+
+        assertThrows(BusinessException.class, () -> service.assertCertificationEvidenceDownloadAllowed(
+                "cert-evidence-tenant.pdf", 200L, 9100L, 100L, "abc123"));
+    }
 }

@@ -11,6 +11,9 @@ import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.CopilotScopeContext;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,8 +39,18 @@ public class CopilotSummaryService {
     private final AiExecutionGateway aiExecutionGateway;
     private final AiArtifactVersionMapper artifactVersionMapper;
     private final ObjectMapper objectMapper;
+    private final CopilotFeatureGate featureGate;
 
-    public SummaryResponse summarize(TypedResultEnvelope envelope, String traceId) {
+    public SummaryResponse summarize(TypedResultEnvelope envelope, CopilotExecutionContext context,
+                                     CopilotScopeContext scope, String scopeHash, String traceId) {
+        if (!isBound(envelope, context, scope, scopeHash)) {
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+        }
+        try {
+            featureGate.assertQueryAllowed();
+        } catch (BusinessException ex) {
+            return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
+        }
         if (envelope == null || envelope.values() == null || envelope.values().isEmpty()) {
             return SummaryResponse.unavailable(SummaryResponse.STATUS_UNAVAILABLE);
         }
@@ -69,7 +82,8 @@ public class CopilotSummaryService {
 
         long started = System.nanoTime();
         try {
-            AiGatewayResult gatewayResult = aiExecutionGateway.execute(buildGatewayRequest(request, traceId));
+            AiGatewayResult gatewayResult = aiExecutionGateway.execute(
+                    buildGatewayRequest(request, context, scope, scopeHash, traceId));
             SummaryResponse parsed = parseProviderJson(gatewayResult.getText(), allowedClaimKeys);
             long latencyMs = (System.nanoTime() - started) / 1_000_000L;
             return new SummaryResponse(
@@ -92,7 +106,8 @@ public class CopilotSummaryService {
         }
     }
 
-    private AiGatewayRequest buildGatewayRequest(SummaryRequest request, String traceId) {
+    private AiGatewayRequest buildGatewayRequest(SummaryRequest request, CopilotExecutionContext context,
+                                                  CopilotScopeContext scope, String scopeHash, String traceId) {
         Map<String, Object> allowlisted = new LinkedHashMap<>();
         allowlisted.put("catalog.queryId", request.queryId());
         allowlisted.put("catalog.catalogVersion", request.catalogVersion());
@@ -115,7 +130,28 @@ public class CopilotSummaryService {
                 .untrustedSourceText(null)
                 .persistRun(false)
                 .requireJson(true)
+                .executionContext(context)
+                .scopeContext(scope)
+                .scopeHash(scopeHash)
                 .build();
+    }
+
+    private boolean isBound(TypedResultEnvelope envelope, CopilotExecutionContext context,
+                            CopilotScopeContext scope, String scopeHash) {
+        return envelope != null && context != null && scope != null && scopeHash != null
+                && context.effectiveScopeSnapshot() != null
+                && context.scope() == context.effectiveScopeSnapshot().scope()
+                && context.scope() == scope && context.scopeHash() != null
+                && context.scopeHash().equals(scopeHash)
+                && context.queryId() != null && context.parameters() != null
+                && context.queryId().equals(context.parameters().queryId())
+                && context.queryId().equals(envelope.queryId())
+                && context.asOf().equals(envelope.asOf())
+                && context.zoneId().getId().equals(envelope.tenantTimezone())
+                && java.util.Objects.equals(scope.tenantId(), context.tenantId())
+                && java.util.Objects.equals(scope.legalEntityId(), context.legalEntityId())
+                && envelope.scope() != null
+                && scope.scopeHash().equals(envelope.scope().hash());
     }
 
     private SummaryResponse parseProviderJson(String text, List<String> allowedClaimKeys) {

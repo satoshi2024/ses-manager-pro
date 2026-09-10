@@ -270,6 +270,7 @@ app:
   # ファイルアップロード保存先（相対パスはアプリ起動ディレクトリ基準）
   upload:
     base-path: ${UPLOAD_BASE_PATH:./uploads}
+    service-request-uploads-per-minute: ${SERVICE_REQUEST_UPLOADS_PER_MINUTE:60}
     scanner-enabled: ${FILE_SCANNER_ENABLED:true}
     scanner-host: ${FILE_SCANNER_HOST:localhost}
     scanner-port: ${FILE_SCANNER_PORT:3310}
@@ -340,6 +341,9 @@ ai:
   retention:
     redacted-days: 730
     raw-prompt-days: 0
+    scheduler-enabled: true
+    purge-batch-size: 100
+    purge-fixed-delay-ms: 86400000
   evaluation:
     min-segment-count: 5
     max-regression-pp: 5
@@ -424,6 +428,8 @@ integration:
       cursor-ttl-seconds: 300
       read-snapshot-purge-batch-size: 32
       read-snapshot-purge-fixed-delay-ms: 60000
+      retention-purge-batch-size: 100
+      retention-purge-fixed-delay-ms: 60000
     external-transport:
       enabled: false
       batch-size: 32
@@ -436,6 +442,9 @@ integration:
     security:
       trusted-proxies: []
       allowed-loopback-ports: []
+    topology:
+      mode: DEDICATED_DATABASE
+      bound-tenant-id: ${INTEGRATION_HUB_BOUND_TENANT_ID:}
     crypto:
       current-key-version: ${INTEGRATION_HUB_CRYPTO_CURRENT_KEY_VERSION:}
       keys: {}

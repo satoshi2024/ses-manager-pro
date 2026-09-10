@@ -157,18 +157,19 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         Map<Long, List<ServiceRequest>> requestsByCustomer = allRequests.stream()
                 .collect(Collectors.groupingBy(ServiceRequest::getCustomerId));
 
-        // 2. SLAクロック一括取得 (直近30日)
+        // 2. SLAクロック一括取得。created_atはround開始時刻であり、breach時刻の代替にしない。
         List<Long> allRequestIds = allRequests.stream().map(ServiceRequest::getId).toList();
         List<ServiceSlaClock> allClocks = allRequestIds.isEmpty() ? Collections.emptyList() :
                 slaClockMapper.selectList(
                         new LambdaQueryWrapper<ServiceSlaClock>()
                                 .in(ServiceSlaClock::getServiceRequestId, allRequestIds)
-                                .ge(ServiceSlaClock::getCreatedAt, thirtyDaysAgo)
                 );
 
         Set<Long> breachedRequestIds = new HashSet<>();
         for (ServiceSlaClock clk : allClocks) {
-            if (Boolean.TRUE.equals(clk.getResponseBreached()) || Boolean.TRUE.equals(clk.getResolveBreached())) {
+            boolean responseInWindow = inWindow(clk.getResponseBreachedAt(), thirtyDaysAgo, now);
+            boolean resolveInWindow = inWindow(clk.getResolveBreachedAt(), thirtyDaysAgo, now);
+            if (responseInWindow || resolveInWindow) {
                 breachedRequestIds.add(clk.getServiceRequestId());
             }
         }
@@ -331,6 +332,10 @@ public class CustomerHealthServiceImpl implements CustomerHealthService {
         }
 
         return resultMap;
+    }
+
+    private boolean inWindow(LocalDateTime value, LocalDateTime from, LocalDateTime to) {
+        return value != null && !value.isBefore(from) && !value.isAfter(to);
     }
 
     @Override

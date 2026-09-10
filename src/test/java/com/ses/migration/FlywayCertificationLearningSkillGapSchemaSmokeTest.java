@@ -39,7 +39,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertEquals("151", latestVersion, "最新マイグレーションバージョンは151であること");
+            assertTrue(Integer.parseInt(latestVersion) >= 154,
+                    "NF-03 continuity/budget migration以降まで適用されていること");
 
             for (String table : new String[]{
                     "m_certification", "m_certification_alias", "t_engineer_certification",
@@ -65,6 +66,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
 
             assertColumnExists(statement, "t_certification_event", "evidence_document_version_id");
             assertColumnExists(statement, "t_certification_event", "evidence_document_hash");
+            assertColumnExists(statement, "t_learning_plan", "amended_cost_jpy");
+            assertColumnExists(statement, "t_learning_plan", "amendment_approval_request_id");
             assertColumnExists(statement, "t_project_position_event", "skills_json");
             assertColumnExists(statement, "t_skill_gap_snapshot", "result_hash");
             assertColumnExists(statement, "t_training_course_skill", "updated_at");
@@ -75,6 +78,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertIndexExists(statement, "t_training_enrollment_expense", "uk_enrollment_expense");
             assertIndexExists(statement, "t_skill_tag_alias", "uk_skill_alias_active");
             assertForeignKeyExists(statement, "t_certification_event", "fk_cert_event_record");
+            assertForeignKeyExists(statement, "t_engineer_certification", "fk_eng_cert_continuity_group");
             assertForeignKeyExists(statement, "t_training_enrollment_expense", "fk_enroll_expense_request");
             String expenseTableDdl;
             try (ResultSet resultSet = statement.executeQuery("SHOW CREATE TABLE t_expense_request")) {

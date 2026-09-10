@@ -3,6 +3,7 @@ package com.ses.service.billing;
 import com.ses.dto.billing.CashFlowForecastDto;
 import java.math.BigDecimal;
 import java.time.YearMonth;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 
 public interface CashFlowForecastService {
     /**
@@ -19,5 +20,10 @@ public interface CashFlowForecastService {
     default CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
                                          CashFlowForecastScope scope) {
         return forecast(from, months, openingBalance);
+    }
+
+    default CashFlowForecastDto forecast(YearMonth from, int months, BigDecimal openingBalance,
+                                         CashFlowForecastScope scope, CopilotExecutionContext context) {
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
     }
 }

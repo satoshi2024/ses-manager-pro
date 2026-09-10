@@ -29,6 +29,38 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     private final ContractMapper contractMapper;
     private final InvoiceMapper invoiceMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    /** すべての通常顧客作成を権威法人へ束縛する。payloadのlegalEntityIdは無視する。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Customer entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
+        return super.save(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(Customer entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Customer current = getById(entity.getId());
+        if (current == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(entity.getLegalEntityId(), current.getLegalEntityId());
+        }
+        entity.setLegalEntityId(current.getLegalEntityId());
+        return super.updateById(entity);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean updateWithOptimisticLock(Customer customer) {
@@ -39,6 +71,13 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (current == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
+        // 法人変更は常に拒否し、保存済みの値をcanonicalとする。
+        legalEntityContextService.assertSame(current.getLegalEntityId(), customer.getLegalEntityId());
+        customer.setLegalEntityId(current.getLegalEntityId());
         // OptimisticLockerInnerInterceptor が version を検査し、成功時に +1 する。
         if (baseMapper.updateById(customer) != 1) {
             throw BusinessException.of(409, "error.common.optimisticLock");
@@ -50,6 +89,12 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long customerId = Long.valueOf(id.toString());
+        Customer current = getById(customerId);
+        if (current == null) return false;
+        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(current.getLegalEntityId());
         long projects = projectMapper.selectCount(new LambdaQueryWrapper<Project>().eq(Project::getCustomerId, customerId));
         if (projects > 0) {
             throw BusinessException.of("error.customer.delete.hasProjects", projects);
@@ -65,9 +110,5 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         return super.removeById(id);
     }
 }
-
-
-
-
 
 

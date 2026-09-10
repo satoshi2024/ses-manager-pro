@@ -34,6 +34,12 @@ public class DocumentAccessLog {
     /** 操作ユーザーID */
     private Long userId;
 
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String correlationId;
+    private String idempotencyKey;
+
     /**
      * IPアドレスのSHA-256ハッシュ（生IPは保存しない）。
      * platform-invariants §4（秘密情報非ログ出力）に準拠。

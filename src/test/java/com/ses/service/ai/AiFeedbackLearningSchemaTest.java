@@ -12,10 +12,12 @@ import com.ses.mapper.AiOutcomeMapper;
 import com.ses.mapper.AiRecommendationItemMapper;
 import com.ses.mapper.AiRecommendationRunMapper;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import javax.sql.DataSource;
@@ -63,6 +65,22 @@ class AiFeedbackLearningSchemaTest {
     private AiOutcomeMapper outcomeMapper;
     @Autowired
     private AiRecommendationRetentionService retentionService;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @AfterEach
+    void cleanupFixtures() {
+        jdbcTemplate.update("DELETE FROM t_ai_outcome WHERE item_id IN "
+                + "(SELECT id FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-isolation-%'))");
+        jdbcTemplate.update("DELETE FROM t_ai_feedback WHERE item_id IN "
+                + "(SELECT id FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-isolation-%'))");
+        jdbcTemplate.update("DELETE FROM t_ai_recommendation_item WHERE run_id IN "
+                + "(SELECT id FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-isolation-%')");
+        jdbcTemplate.update("DELETE FROM t_ai_recommendation_run WHERE trace_id LIKE 'nf10-isolation-%'");
+        jdbcTemplate.update("DELETE FROM m_ai_artifact_version WHERE use_case LIKE 'T110%'");
+    }
 
     @Test
     void tenant列とrawPrompt列が無い() throws Exception {
@@ -150,7 +168,7 @@ class AiFeedbackLearningSchemaTest {
                         .last("LIMIT 1"));
         assertNotNull(version);
 
-        String traceId = UUID.randomUUID().toString();
+        String traceId = "nf10-isolation-" + UUID.randomUUID();
         AiRecommendationRun run = new AiRecommendationRun();
         run.setTraceId(traceId);
         run.setUseCase("MATCHING");
@@ -207,7 +225,7 @@ class AiFeedbackLearningSchemaTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
-        run.setTraceId(UUID.randomUUID().toString());
+        run.setTraceId("nf10-isolation-" + UUID.randomUUID());
         run.setUseCase("MATCHING");
         run.setArtifactVersionId(version.getId());
         run.setInputHash(HASH);
@@ -246,7 +264,7 @@ class AiFeedbackLearningSchemaTest {
                         .eq(AiArtifactVersion::getStatus, "ACTIVE")
                         .last("LIMIT 1"));
         AiRecommendationRun run = new AiRecommendationRun();
-        run.setTraceId(UUID.randomUUID().toString());
+        run.setTraceId("nf10-isolation-" + UUID.randomUUID());
         run.setUseCase("CHAT");
         run.setArtifactVersionId(version.getId());
         run.setInputHash(HASH);

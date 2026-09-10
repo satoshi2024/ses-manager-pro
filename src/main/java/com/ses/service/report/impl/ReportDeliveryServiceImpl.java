@@ -1,6 +1,7 @@
 package com.ses.service.report.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.dto.report.ReportDeliveryResult;
@@ -9,6 +10,7 @@ import com.ses.dto.report.ReportRecipientPreview;
 import com.ses.dto.report.ReportRecipientPreviewResult;
 import com.ses.dto.report.ReportDocumentArtifact;
 import com.ses.dto.report.ReportScheduledDeliveryContext;
+import com.ses.entity.Document;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.ReportDelivery;
 import com.ses.entity.ReportRun;
@@ -17,6 +19,8 @@ import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.mapper.NotificationOutboxMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
 import com.ses.service.report.ReportDeliveryService;
 import com.ses.service.report.ReportDocumentService;
@@ -33,9 +37,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -49,6 +55,9 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private static final String TENANT_ID = "default";
     private static final int MAX_ATTEMPTS = 5;
     private static final int REAUTH_MINUTES = 10;
+    private static final int LINK_DAYS = 7;
+    private static final SecureRandom TOKEN_RANDOM = new SecureRandom();
+
     private final ReportRunMapper runMapper;
     private final ReportDeliveryMapper deliveryMapper;
     private final NotificationOutboxMapper notificationOutboxMapper;
@@ -59,7 +68,10 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     private final ReportDeliveryDocumentRegistrar documentRegistrar;
     private final ReportDeliveryIssueService deliveryIssueService;
     private final DocumentService documentService;
+    private final DocumentMapper documentMapper;
+    private final DocumentVersionMapper documentVersionMapper;
     private final PasswordEncoder passwordEncoder;
+    private final ObjectMapper objectMapper;
     private final AccountingTimezoneResolver timezoneResolver;
 
     @Override
@@ -71,6 +83,12 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             snapshotService.assertAccessible(run);
             ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
             assertPreviewHashMatches(requiredPreviewHash, preview.getPreviewHash());
+            if (run.getRecipientPreviewHash() != null && !run.getRecipientPreviewHash().equals(preview.getPreviewHash())) {
+                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+            }
+            if (run.getRecipientSnapshotJson() != null && !run.getRecipientSnapshotJson().equals(recipientSnapshotJson(preview))) {
+                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+            }
             return deliverRecipients(run, preview);
         });
     }
@@ -123,7 +141,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             throw BusinessException.of(403, "error.managementReport.reauthenticationFailed");
         }
         delivery.setReauthenticatedAt(now());
-        deliveryMapper.updateById(delivery);
+        updateDeliveryChecked(delivery);
     }
 
     @Override
@@ -142,10 +160,11 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            rollbackFor = Exception.class)
     public void retry(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        ReportDelivery delivery = findRequiredForReplay(deliveryId);
         if (!"RETRY".equals(delivery.getDeliveryStatus())) {
             return;
         }
@@ -153,58 +172,76 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
             delivery.setDeliveryStatus("FAILED");
             delivery.setLastErrorCode("DELIVERY_DLQ");
             delivery.setLastErrorMessage("再試行上限に達しました。手動replayが必要です。");
-            deliveryMapper.updateById(delivery);
+            updateDeliveryChecked(delivery);
             return;
         }
         ReportRun run = runMapper.selectById(delivery.getRunId());
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        assertPreviewFresh(run, preview);
         ReportRecipientPreview recipient = preview.getRecipients().stream()
                 .filter(item -> delivery.getRecipientUserId().equals(item.getRecipientUserId()))
                 .findFirst().orElseThrow(() -> BusinessException.of(403, "error.managementReport.scopeChanged"));
         if (!"ALLOW".equals(recipient.getScopeDecision())) {
             delivery.setDeliveryStatus("FAILED");
             delivery.setLastErrorCode("RECIPIENT_SCOPE_MISMATCH");
-            deliveryMapper.updateById(delivery);
+            updateDeliveryChecked(delivery);
             return;
         }
         if (delivery.getNotificationOutboxId() != null) {
             if (notificationOutboxMapper.requeueReport(delivery.getNotificationOutboxId()) == 0) {
+                reconcileReplayConflict(delivery, "DELIVERY_OUTBOX_REQUEUE_CONFLICT");
                 return;
             }
+            rotateDownloadToken(delivery);
             delivery.setDeliveryStatus("ENQUEUED");
             delivery.setLastErrorCode(null);
             delivery.setLastErrorMessage(null);
-            deliveryMapper.updateById(delivery);
+            updateDeliveryChecked(delivery);
             return;
         }
-        ReportDocumentArtifact artifact = new ReportDocumentArtifact(run.getId(), "PDF", null, null, null);
+        ReportDocumentArtifact artifact = resolveArtifact(run, delivery);
         deliveryIssueService.issue(run, delivery, recipient, artifact);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            rollbackFor = Exception.class)
     public void manualReplay(Long deliveryId) {
         requireAdmin();
-        ReportDelivery delivery = findRequired(deliveryId);
+        ReportDelivery delivery = findRequiredForReplay(deliveryId);
         if (!"FAILED".equals(delivery.getDeliveryStatus())) {
             return;
         }
         if (delivery.getNotificationOutboxId() != null) {
+            ReportRun run = runMapper.selectById(delivery.getRunId());
+            ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+            assertPreviewFresh(run, preview);
             if (notificationOutboxMapper.replayReport(delivery.getNotificationOutboxId()) == 0) {
+                reconcileReplayConflict(delivery, "DELIVERY_OUTBOX_REPLAY_CONFLICT");
                 return;
             }
+            rotateDownloadToken(delivery);
             delivery.setDeliveryStatus("ENQUEUED");
             delivery.setLastErrorCode(null);
             delivery.setLastErrorMessage(null);
-            deliveryMapper.updateById(delivery);
+            updateDeliveryChecked(delivery);
             return;
         }
         delivery.setAttemptCount(0);
         delivery.setDeliveryStatus("RETRY");
         delivery.setLastErrorCode(null);
         delivery.setLastErrorMessage(null);
-        deliveryMapper.updateById(delivery);
-        retry(deliveryId);
+        updateDeliveryChecked(delivery);
+        ReportRun run = runMapper.selectById(delivery.getRunId());
+        ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        assertPreviewFresh(run, preview);
+        ReportRecipientPreview recipient = preview.getRecipients().stream()
+                .filter(item -> delivery.getRecipientUserId().equals(item.getRecipientUserId()))
+                .findFirst().orElseThrow(() -> BusinessException.of(403, "error.managementReport.scopeChanged"));
+        if (!"ALLOW".equals(recipient.getScopeDecision())) {
+            throw BusinessException.of(403, "error.managementReport.scopeChanged");
+        }
+        deliveryIssueService.issue(run, delivery, recipient, resolveArtifact(run, delivery));
     }
 
     @Override
@@ -220,7 +257,7 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         delivery.setLinkTokenHash(null);
         delivery.setLastErrorCode("DELIVERY_CANCELLED");
         delivery.setLastErrorMessage("管理者により取消されました");
-        deliveryMapper.updateById(delivery);
+        updateDeliveryChecked(delivery);
     }
 
     @Override
@@ -235,17 +272,26 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
     }
 
     private ResolvedDownload resolveDownload(Long deliveryId, String token, String format) {
-        ReportDelivery delivery = findRequired(deliveryId);
+        ReportDelivery delivery;
+        if (token == null || token.isBlank()) {
+            delivery = deliveryMapper.selectById(deliveryId);
+        } else {
+            delivery = deliveryMapper.selectByLinkTokenHash(sha256(token));
+            if (delivery == null || !deliveryId.equals(delivery.getId())
+                    || delivery.getLinkTokenHash() == null
+                    || !delivery.getLinkTokenHash().equals(sha256(token))) {
+                throw BusinessException.of(403, "error.managementReport.linkInvalid");
+            }
+        }
+        if (delivery == null || !deliveryId.equals(delivery.getId())) {
+            throw BusinessException.of(403, "error.managementReport.linkInvalid");
+        }
         Long userId = currentUserId();
         if (!userId.equals(delivery.getRecipientUserId())) {
             throw BusinessException.of(403, "error.managementReport.scopeDenied");
         }
         if ("CANCELLED".equals(delivery.getDeliveryStatus())) {
             throw BusinessException.of(403, "error.managementReport.deliveryCancelled");
-        }
-        if (token == null || delivery.getLinkTokenHash() == null
-                || !sha256(token).equals(delivery.getLinkTokenHash())) {
-            throw BusinessException.of(403, "error.managementReport.linkInvalid");
         }
         if (delivery.getLinkExpiresAt() == null || !delivery.getLinkExpiresAt().isAfter(now())) {
             throw BusinessException.of(403, "error.managementReport.linkExpired");
@@ -258,9 +304,20 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         ReportRun run = runMapper.selectById(delivery.getRunId());
         snapshotService.scopeSnapshotOf(run);
         ReportRecipientPreviewResult preview = recipientPreviewService.previewForRun(run);
+        if (run.getRecipientPreviewHash() != null
+                && !run.getRecipientPreviewHash().equals(preview.getPreviewHash())) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
         boolean stillAllowed = preview.getRecipients().stream().anyMatch(item ->
                 userId.equals(item.getRecipientUserId()) && "ALLOW".equals(item.getScopeDecision()));
         if (!stillAllowed) {
+            throw BusinessException.of(403, "error.managementReport.scopeChanged");
+        }
+        ReportRecipientPreview currentRecipient = preview.getRecipients().stream()
+                .filter(item -> userId.equals(item.getRecipientUserId()) && "ALLOW".equals(item.getScopeDecision()))
+                .findFirst().orElseThrow(() -> BusinessException.of(403, "error.managementReport.scopeChanged"));
+        if (delivery.getRecipientScopeHash() == null
+                || !delivery.getRecipientScopeHash().equals(currentRecipient.getRecipientScopeHash())) {
             throw BusinessException.of(403, "error.managementReport.scopeChanged");
         }
 
@@ -325,6 +382,64 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
         return delivery;
     }
 
+    private ReportDelivery findRequiredForReplay(Long deliveryId) {
+        ReportDelivery delivery = deliveryMapper.selectByIdForReplay(deliveryId);
+        if (delivery == null) {
+            throw BusinessException.of(404, "error.managementReport.deliveryNotFound");
+        }
+        return delivery;
+    }
+
+    private ReportDocumentArtifact resolveArtifact(ReportRun run, ReportDelivery delivery) {
+        if (delivery.getDocumentId() != null && delivery.getDocumentVersionNo() != null) {
+            Document document = documentMapper.selectById(delivery.getDocumentId());
+            DocumentVersion version = documentVersionMapper.selectOne(new QueryWrapper<DocumentVersion>()
+                    .eq("document_id", delivery.getDocumentId())
+                    .eq("version_no", delivery.getDocumentVersionNo()));
+            if (document != null && version != null
+                    && documentService.getVersionStorageKey(document.getId(), version.getVersionNo()) != null) {
+                return new ReportDocumentArtifact(run.getId(), "PDF", version.getSha256(), document, version);
+            }
+        }
+        return documentRegistrar.registerArtifact(run.getId(), "PDF");
+    }
+
+    private void rotateDownloadToken(ReportDelivery delivery) {
+        delivery.setLinkTokenHash(sha256(randomToken()));
+        delivery.setLinkExpiresAt(now().plusDays(LINK_DAYS));
+        delivery.setReauthRequired(1);
+        delivery.setReauthenticatedAt(null);
+    }
+
+    private void reconcileReplayConflict(ReportDelivery delivery, String errorCode) {
+        delivery.setLastErrorCode(errorCode);
+        delivery.setLastErrorMessage("通知outboxの状態競合を検出したため再照合が必要です");
+        updateDeliveryChecked(delivery);
+    }
+
+    private void updateDeliveryChecked(ReportDelivery delivery) {
+        int updated = deliveryMapper.updateById(delivery);
+        if (updated > 0) {
+            return;
+        }
+        ReportDelivery current = delivery.getId() == null ? null : deliveryMapper.selectById(delivery.getId());
+        boolean terminal = "SENT".equals(delivery.getDeliveryStatus())
+                || "FAILED".equals(delivery.getDeliveryStatus())
+                || "CANCELLED".equals(delivery.getDeliveryStatus());
+        if (terminal && current != null && java.util.Objects.equals(current.getDeliveryStatus(), delivery.getDeliveryStatus())
+                && java.util.Objects.equals(current.getNotificationOutboxId(), delivery.getNotificationOutboxId())) {
+            return;
+        }
+        throw new IllegalStateException("レポート配布状態の更新に失敗しました。再照合が必要です (deliveryId="
+                + delivery.getId() + ")");
+    }
+
+    private String randomToken() {
+        byte[] bytes = new byte[32];
+        TOKEN_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
     private void requireReady(ReportRun run) {
         if (run == null || !"SUCCEEDED".equals(run.getStatus())) {
             throw BusinessException.of(400, "error.managementReport.deliveryNotReady");
@@ -351,6 +466,32 @@ public class ReportDeliveryServiceImpl implements ReportDeliveryService {
 
     private ZoneId tenantZone() {
         return timezoneResolver.resolve(TENANT_ID);
+    }
+
+    private String recipientSnapshotJson(ReportRecipientPreviewResult preview) {
+        try {
+            List<ReportRecipientPreview> sorted = preview.getRecipients() == null ? List.of()
+                    : preview.getRecipients().stream()
+                    .sorted(java.util.Comparator.comparing(ReportRecipientPreview::getRecipientUserId,
+                            java.util.Comparator.nullsLast(Long::compareTo))
+                            .thenComparing(ReportRecipientPreview::getRecipientRole,
+                                    java.util.Comparator.nullsLast(String::compareTo))
+                            .thenComparing(ReportRecipientPreview::getScopeDecision,
+                                    java.util.Comparator.nullsLast(String::compareTo)))
+                    .toList();
+            return objectMapper.writeValueAsString(sorted);
+        } catch (Exception ex) {
+            throw BusinessException.of(500, "error.managementReport.serializationFailed");
+        }
+    }
+
+    private void assertPreviewFresh(ReportRun run, ReportRecipientPreviewResult preview) {
+        if (run == null || run.getRecipientPreviewHash() == null || run.getRecipientPreviewHash().isBlank()
+                || preview == null || !run.getRecipientPreviewHash().equals(preview.getPreviewHash())
+                || run.getRecipientSnapshotJson() == null
+                || !run.getRecipientSnapshotJson().equals(recipientSnapshotJson(preview))) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
     }
 
     private String contentType(String format) {

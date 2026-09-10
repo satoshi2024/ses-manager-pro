@@ -3,6 +3,10 @@ package com.ses.service.ai;
 import com.ses.config.AiConfig;
 import com.ses.entity.AiRecommendationRun;
 import com.ses.mapper.AiRecommendationRunMapper;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -76,11 +80,16 @@ class AiExecutionGatewayPiiTest {
 
     @Test
     void workLocationの番地は送らない() {
+        CopilotExecutionContext context = matchingContext();
         gateway.execute(AiGatewayRequest.builder()
                 .useCase(AiGatewayRequest.USE_MATCHING)
                 .allowlistedFields(Map.of(
                         "project.workLocation", "東京都千代田区丸の内1-1-1",
                         "engineer.initialName", "Y.T"))
+                .executionContext(context)
+                .scopeContext(context.scope())
+                .scopeHash(context.scopeHash())
+                .resourceBearing(true)
                 .persistRun(true)
                 .requireJson(false)
                 .build());
@@ -89,6 +98,21 @@ class AiExecutionGatewayPiiTest {
         assertFalse(outbound.contains("丸の内1-1-1"));
         assertTrue(outbound.contains("東京都千代田区"));
         assertNull(WorkLocationNormalizer.normalize("丸の内1-1-1"));
+    }
+
+    private CopilotExecutionContext matchingContext() {
+        CopilotExecutionContext context = new CopilotExecutionContext(
+                "tenant-test", 1L, java.time.Instant.parse("2026-09-01T00:00:00Z"),
+                java.time.ZoneId.of("Asia/Tokyo"));
+        EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot(
+                "tenant-test", 1L, java.time.LocalDate.of(2026, 9, 1), "COMPANY_WIDE",
+                true, false, false, null, null, null, null, null, null, null, null, null,
+                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
+                "91b01054585507ec79a06893bbb7fd6180fbb86b18681f10cb7b792733ad12c6");
+        context.bindSnapshot(snapshot);
+        context.bind(AiGatewayRequest.USE_MATCHING,
+                CopilotQueryParameters.ofQuery(AiGatewayRequest.USE_MATCHING), snapshot.scope());
+        return context;
     }
 
     @Test
@@ -109,19 +133,18 @@ class AiExecutionGatewayPiiTest {
     }
 
     @Test
-    void geminiでも外部送信禁止ならmockに落とす() {
+    void 未承認providerは外部送信禁止時にfailClosedする() {
         aiConfig.setProvider("gemini");
         aiConfig.setExternalSendEnabled(false);
         try {
-            AiGatewayResult result = gateway.execute(AiGatewayRequest.builder()
+            org.junit.jupiter.api.Assertions.assertThrows(com.ses.common.exception.BusinessException.class,
+                    () -> gateway.execute(AiGatewayRequest.builder()
                     .useCase(AiGatewayRequest.USE_CHAT)
                     .trustedInstruction("hello")
                     .untrustedSourceText("ping")
                     .persistRun(false)
                     .requireJson(false)
-                    .build());
-            assertNotNull(result.getText());
-            assertFalse(result.getText().isBlank());
+                    .build()));
         } finally {
             aiConfig.setProvider("mock");
         }

@@ -2,10 +2,16 @@ package com.ses.service.ai;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.entity.AiFeedback;
+import com.ses.entity.AiArtifactVersion;
+import com.ses.entity.AiRecommendationItem;
+import com.ses.entity.AiRecommendationRun;
 import com.ses.entity.AiOutcome;
 import com.ses.entity.Proposal;
+import com.ses.mapper.AiArtifactVersionMapper;
 import com.ses.mapper.AiFeedbackMapper;
 import com.ses.mapper.AiOutcomeMapper;
+import com.ses.mapper.AiRecommendationItemMapper;
+import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.impl.AiOutcomeServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,21 +42,25 @@ class AiFeedbackOutcomeTest {
     @Autowired
     private AiOutcomeServiceImpl outcomeServiceImpl;
     @Autowired
-    private AiRecommendationRecorder recorder;
+    private AiArtifactVersionMapper artifactVersionMapper;
+    @Autowired
+    private AiRecommendationRunMapper recommendationRunMapper;
+    @Autowired
+    private AiRecommendationItemMapper recommendationItemMapper;
     @Autowired
     private AiFeedbackMapper feedbackMapper;
     @Autowired
     private AiOutcomeMapper outcomeMapper;
 
     @Test
-    void 未判断は却下ではなくfeedbackを残せる() {
+    void scopeContract未完成の旧feedbackは保存しない() {
         Long itemId = newItem();
-        AiFeedback none = feedbackService.record(itemId, null, null, null);
-        assertEquals(null, none.getDecision());
-        long rejects = feedbackMapper.selectList(null).stream()
-                .filter(f -> itemId.equals(f.getItemId()) && "REJECT".equals(f.getDecision()))
-                .count();
-        assertEquals(0, rejects);
+        BusinessException denied = assertThrows(BusinessException.class,
+                () -> feedbackService.record(new AiFeedbackService.FeedbackCommand(
+                        itemId, 1L, null, null, null), null));
+        assertEquals(403, denied.getCode());
+        assertEquals(0, feedbackMapper.selectList(null).stream()
+                .filter(f -> itemId.equals(f.getItemId())).count());
     }
 
     @Test
@@ -84,15 +95,13 @@ class AiFeedbackOutcomeTest {
     }
 
     @Test
-    void 営業は他人のrunにfeedbackできない() {
+    void contextのない旧feedbackはactorに関係なく拒否する() {
         Long itemId = newItem(10L);
         setRole("11", "営業");
         BusinessException denied = assertThrows(BusinessException.class,
-                () -> feedbackService.record(itemId, "REJECT", null, null));
+                () -> feedbackService.record(new AiFeedbackService.FeedbackCommand(
+                        itemId, 1L, "REJECT", null, null), null));
         assertEquals(403, denied.getCode());
-        setRole("10", "営業");
-        AiFeedback own = feedbackService.record(itemId, "HOLD", null, null);
-        assertEquals("HOLD", own.getDecision());
     }
 
     @Test
@@ -121,12 +130,29 @@ class AiFeedbackOutcomeTest {
     }
 
     private Long newItem(Long actorUserId) {
-        var dto = new com.ses.dto.ai.MatchResultDto();
-        dto.setProjectId(101L);
-        dto.setScore(80);
-        dto.setReason("ok");
-        recorder.recordMatch("MATCHING", actorUserId, List.of(dto));
-        return dto.getItemId();
+        AiArtifactVersion artifact = artifactVersionMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AiArtifactVersion>()
+                        .eq(AiArtifactVersion::getUseCase, "MATCHING")
+                        .eq(AiArtifactVersion::getStatus, "ACTIVE")
+                        .last("LIMIT 1"));
+        AiRecommendationRun run = new AiRecommendationRun();
+        run.setTraceId(UUID.randomUUID().toString());
+        run.setUseCase("MATCHING");
+        run.setArtifactVersionId(artifact.getId());
+        run.setActorUserId(actorUserId);
+        run.setInputHash("1".repeat(64));
+        run.setStatus("SUCCEEDED");
+        run.setStatusVersion(0);
+        recommendationRunMapper.insert(run);
+
+        AiRecommendationItem item = new AiRecommendationItem();
+        item.setRunId(run.getId());
+        item.setRankNo(1);
+        item.setTargetType("PROJECT");
+        item.setTargetId(101L);
+        item.setSelectedFlag(0);
+        recommendationItemMapper.insert(item);
+        return item.getId();
     }
 
     private static void setRole(String userId, String role) {

@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.common.exception.BusinessException;
+import com.ses.common.audit.ActorAttribution;
+import com.ses.common.audit.ExecutionActorContext;
+import com.ses.common.util.LogRedaction;
 import com.ses.common.util.SecurityUtils;
 import com.ses.config.LoginUser;
 import com.ses.dto.accounting.ManagementAccountingSummaryDto;
@@ -111,6 +114,10 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     public ReportGenerationResult generate(ReportGenerationCommand command) {
         validateCommand(command);
         if (command.systemPrincipal()) {
+            ActorAttribution actor = ExecutionActorContext.current();
+            if (actor == null || actor.actorType() != com.ses.common.audit.ActorType.SYSTEM) {
+                throw BusinessException.of(403, "error.managementReport.principalDenied");
+            }
             return withExplicitPrincipal(command.principalUserId(),
                     () -> generateInternal(command));
         }
@@ -162,7 +169,11 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         // schedulerからのdeliveryはHTTP sessionを持たない明示system principalで行う。
         // API入口はSpring Securityで保護されているため、この分岐は非HTTP実行に限定される。
         if (role == null && "SYSTEM_PRINCIPAL".equals(run.getPrincipalType())) {
-            scopeSnapshotOf(run); // 保存scopeのJSON/hash改ざんはsystem実行でもfail-closedにする。
+            ReportScopeSnapshot savedScope = scopeSnapshotOf(run);
+            withExplicitPrincipal(run.getPrincipalUserId(), () -> {
+                assertGenerationScope(savedScope, LocalDate.now(tenantZone()), true);
+                return null;
+            });
             return;
         }
         if ("管理者".equals(role)) {
@@ -182,9 +193,16 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             LocalDate asOf = LocalDate.now(tenantZone());
             Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
             Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
+            Set<Long> currentEngineers = organizationScopeService.allowedEngineerIds(asOf);
+            Set<Long> currentContracts = organizationScopeService.allowedContractIds(asOf);
+            Set<Long> currentInvoices = organizationScopeService.allowedInvoiceIds(asOf);
             if (currentOrganizations == null || currentDirectUsers == null
+                    || currentEngineers == null || currentContracts == null || currentInvoices == null
                     || !currentOrganizations.containsAll(savedOrganizations)
-                    || !currentDirectUsers.containsAll(savedDirectUsers)) {
+                    || !currentDirectUsers.containsAll(savedDirectUsers)
+                    || !currentEngineers.containsAll(readLongSet(saved.path("engineerIds")))
+                    || !currentContracts.containsAll(readLongSet(saved.path("contractIds")))
+                    || !currentInvoices.containsAll(readLongSet(saved.path("invoiceIds")))) {
                 throw BusinessException.of(403, "error.managementReport.scopeChanged");
             }
         } catch (BusinessException ex) {
@@ -237,12 +255,12 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         }
 
         LocalDateTime asOfAt = LocalDateTime.now(zone);
-        // 渡されたscopeはowner/previewの境界確認にだけ使い、entity ID母集団は必ず生成直前に
-        // 現在principalから再解決する。scheduleや再生成要求が保持する古いID集合をそのまま
-        // ReportScopeContextへ入れると、異動済みengineer/contract/invoiceが混入する。
-        ReportScopeSnapshot scope = resolveScope(permissionAsOf);
+        // schedulerは保存済みscopeを正本として使う。現在principalのscopeへ再解決すると、
+        // ownerの昇格やscope拡大で過去に承認したscheduleの母集団まで広がってしまう。
+        ReportScopeSnapshot scope = command.scopeSnapshot() != null
+                ? command.scopeSnapshot() : resolveScope(permissionAsOf);
         if (command.scopeSnapshot() != null) {
-            assertGenerationScope(command.scopeSnapshot(), permissionAsOf);
+            assertGenerationScope(command.scopeSnapshot(), permissionAsOf, command.systemPrincipal());
         }
 
         // generation直前に同一principalでrecipient scopeを再評価する。APIからhashが渡された場合は
@@ -251,6 +269,10 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 ? recipientPreviewService.preview(command.templateVersionId(), target)
                 : recipientPreviewService.previewForScope(command.templateVersionId(), target,
                 scope);
+        if ((!command.systemPrincipal() || command.scopeSnapshot() != null)
+                && (command.recipientPreviewHash() == null || command.recipientPreviewHash().isBlank())) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewRequired");
+        }
         if (command.recipientPreviewHash() != null
                 && !command.recipientPreviewHash().equals(preview.getPreviewHash())) {
             throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
@@ -263,6 +285,10 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
 
         if (run != null && !command.explicitRegeneration()
                 && "SUCCEEDED".equals(run.getStatus())) {
+            if (run.getRecipientPreviewHash() == null
+                    || !run.getRecipientPreviewHash().equals(preview.getPreviewHash())) {
+                throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+            }
             return new ReportGenerationResult(run, listSectionsWithoutLookup(run.getId()), true);
         }
         if (run == null) {
@@ -275,7 +301,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setRegenerationOfRunId(command.regenerationOfRunId());
             run.setSnapshotVersion(nextSnapshotVersion(templateVersion, periodFrom, periodTo,
                     cutoffKind, scope, command));
-            run.setPrincipalType("SYSTEM_PRINCIPAL");
+            run.setPrincipalType(command.systemPrincipal() ? "SYSTEM_PRINCIPAL" : "HUMAN_PRINCIPAL");
             run.setPrincipalUserId(command.principalUserId() != null
                     ? command.principalUserId() : SecurityUtils.currentUserId());
             run.setScopeOwnerType(scope.getOwnerType());
@@ -292,9 +318,19 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             run.setStatus("PENDING");
             run.setSnapshotSchemaVersion(SNAPSHOT_SCHEMA);
             run.setSourcePolicyHash(sha256("canonical-services-v1|" + POLICY_VERSION));
-            run.setCreatedBy(SecurityUtils.currentUserId());
+            ActorAttribution actor = ExecutionActorContext.resolve();
+            run.setCreatedBy(actor.humanUserId());
+            run.setRecipientPreviewHash(preview.getPreviewHash());
+            run.setRecipientSnapshotJson(recipientSnapshotJson(preview));
             runMapper.insert(run);
         }
+
+        if (!command.explicitRegeneration()
+                && !java.util.Objects.equals(run.getRecipientPreviewHash(), preview.getPreviewHash())) {
+            throw BusinessException.of(403, "error.managementReport.recipientPreviewStale");
+        }
+        run.setRecipientPreviewHash(preview.getPreviewHash());
+        run.setRecipientSnapshotJson(recipientSnapshotJson(preview));
 
         run.setStatus("RUNNING");
         run.setFailureCode(null);
@@ -373,7 +409,9 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     private void saveFailedSection(ReportRun run, ReportSectionSnapshot existing, String sectionKey,
                                    boolean confirmed, LocalDateTime asOfAt, LocalDate periodFrom,
                                    LocalDate periodTo, LocalDateTime attemptStartedAt, Exception ex) {
-        log.warn("[定期管理レポート] section生成失敗: runId={} section={}", run.getId(), sectionKey, ex);
+        log.warn("[定期管理レポート] section生成失敗: runId={} section={} errorCode={} exceptionType={} diagnosticId={} detail={}",
+                run.getId(), sectionKey, "SECTION_GENERATION_FAILED", LogRedaction.exceptionType(ex),
+                UUID.randomUUID(), LogRedaction.safeThrowableSummary(ex));
         ReportSectionSnapshot snapshot = existing == null ? new ReportSectionSnapshot() : existing;
         snapshot.setTenantId(TENANT_ID);
         snapshot.setRunId(run.getId());
@@ -596,7 +634,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
                 sorted(organizationScopeService.allowedInvoiceIds(asOf)));
     }
 
-    private void assertGenerationScope(ReportScopeSnapshot scope, LocalDate asOf) {
+    private void assertGenerationScope(ReportScopeSnapshot scope, LocalDate asOf, boolean systemPrincipal) {
         if (scope == null || scope.isCompanyWide()) {
             if (scope == null || !scope.isCompanyWide() || !"管理者".equals(SecurityUtils.currentRole())) {
                 throw BusinessException.of(403, "error.managementReport.scopeDenied");
@@ -604,15 +642,27 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
             return;
         }
         Long currentUserId = SecurityUtils.currentUserId();
+        // 管理者へ昇格しても、保存済みの組織境界をそのまま利用する。
+        // managerのままの場合だけ、現在権限が保存境界を包含していることを再確認する。
+        if ("管理者".equals(SecurityUtils.currentRole()) && systemPrincipal) {
+            return;
+        }
         if (!"マネージャー".equals(SecurityUtils.currentRole())
                 || currentUserId == null || !currentUserId.equals(scope.getOwnerId())) {
             throw BusinessException.of(403, "error.managementReport.scopeDenied");
         }
         Set<Long> currentOrganizations = organizationScopeService.allowedOrganizationIds(asOf);
         Set<Long> currentDirectUsers = organizationScopeService.allowedDirectUserIds(asOf);
+        Set<Long> currentEngineers = organizationScopeService.allowedEngineerIds(asOf);
+        Set<Long> currentContracts = organizationScopeService.allowedContractIds(asOf);
+        Set<Long> currentInvoices = organizationScopeService.allowedInvoiceIds(asOf);
         if (currentOrganizations == null || currentDirectUsers == null
+                || currentEngineers == null || currentContracts == null || currentInvoices == null
                 || !currentOrganizations.containsAll(scope.getOrganizationIds())
-                || !currentDirectUsers.containsAll(scope.getDirectUserIds())) {
+                || !currentDirectUsers.containsAll(scope.getDirectUserIds())
+                || !currentEngineers.containsAll(scope.getEngineerIds())
+                || !currentContracts.containsAll(scope.getContractIds())
+                || !currentInvoices.containsAll(scope.getInvoiceIds())) {
             throw BusinessException.of(403, "error.managementReport.scopeChanged");
         }
     }
@@ -663,8 +713,7 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         SecurityContext previous = SecurityContextHolder.getContext();
         Authentication authentication;
         if (userId == null) {
-            authentication = new UsernamePasswordAuthenticationToken(
-                    "report-scheduler", "N/A", List.of(new SimpleGrantedAuthority("ROLE_管理者")));
+            throw BusinessException.of(403, "error.managementReport.principalDenied");
         } else {
             SysUser user = sysUserMapper.selectById(userId);
             if (user == null || user.getStatus() == null || user.getStatus() != 1
@@ -785,6 +834,24 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw BusinessException.of(500, "error.managementReport.serializationFailed");
+        }
+    }
+
+    private String recipientSnapshotJson(ReportRecipientPreviewResult preview) {
+        try {
+            List<com.ses.dto.report.ReportRecipientPreview> sorted = preview.getRecipients() == null ? List.of()
+                    : preview.getRecipients().stream()
+                    .sorted(java.util.Comparator.comparing(
+                            com.ses.dto.report.ReportRecipientPreview::getRecipientUserId,
+                            java.util.Comparator.nullsLast(Long::compareTo))
+                            .thenComparing(com.ses.dto.report.ReportRecipientPreview::getRecipientRole,
+                                    java.util.Comparator.nullsLast(String::compareTo))
+                            .thenComparing(com.ses.dto.report.ReportRecipientPreview::getScopeDecision,
+                                    java.util.Comparator.nullsLast(String::compareTo)))
+                    .toList();
+            return objectMapper.writeValueAsString(sorted);
         } catch (Exception ex) {
             throw BusinessException.of(500, "error.managementReport.serializationFailed");
         }

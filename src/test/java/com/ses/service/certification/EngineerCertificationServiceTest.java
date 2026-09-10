@@ -173,7 +173,7 @@ class EngineerCertificationServiceTest {
         invalid.setTenantId("default");
         invalid.setEngineerId(engineer.getId());
         invalid.setCertificationId(master.getId());
-        invalid.setContinuityGroupId(group.getId());
+        invalid.setContinuityGroupId(group.getContinuityGroupId());
         invalid.setAcquiredOn(LocalDate.of(2026, 1, 1));
         invalid.setRecordState(CertificationRecordStates.ACTIVE);
         invalid.setCurrentFlag(1);
@@ -197,11 +197,11 @@ class EngineerCertificationServiceTest {
         invalid.setTenantId("default");
         invalid.setEngineerId(engineer.getId());
         invalid.setCertificationId(master.getId());
-        invalid.setContinuityGroupId(group.getId());
+        invalid.setContinuityGroupId(group.getContinuityGroupId());
         invalid.setAcquiredOn(LocalDate.of(2026, 1, 1));
         invalid.setRecordState(CertificationRecordStates.DRAFT);
         invalid.setCurrentFlag(0);
-        invalid.setCurrentHolderKey(group.getId()); // VIOLATION: current_flag=0 but current_holder_key is not null
+        invalid.setCurrentHolderKey(group.getContinuityGroupId()); // VIOLATION: current_flag=0 but current_holder_key is not null
 
         org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> engineerCertificationMapper.insert(invalid));
     }

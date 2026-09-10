@@ -15,6 +15,11 @@ import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiOutboundProbe;
 import com.ses.service.ai.AiPiiMasker;
 import com.ses.service.ai.AiTextService;
+import com.ses.service.ai.AiProductionApprovalGate;
+import com.ses.service.ai.AiProviderRegistry;
+import com.ses.service.ai.AiUseCasePolicy;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,8 +29,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -39,6 +46,13 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     private final AiArtifactVersionMapper versionMapper;
     private final AiRecommendationRunMapper runMapper;
     private final PlatformTransactionManager transactionManager;
+    /** Provider runの監査時刻。canonical business timeとは別の監査時刻として注入する。 */
+    private final Clock clock;
+
+    /** provider I/O前の必須fail-closed gate。任意注入にして境界を迂回させない。 */
+    private final AiProductionApprovalGate productionApprovalGate;
+    private final CopilotFeatureGate copilotFeatureGate;
+    private final AiProviderRegistry providerRegistry = new AiProviderRegistry();
 
     /**
      * Provider HTTP はトランザクション外。persist のみ短トランザクション（S17-P2-01）。
@@ -57,6 +71,7 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
         if (prompt.contains(AiGatewayRequest.CANARY)) {
             throw new BusinessException(400, "PII canary を外部送信できません");
         }
+        assertFinalProviderBoundary(request);
         outboundProbe.record(prompt);
         if (request.getTraceId() == null || request.getTraceId().isBlank()) {
             request.setTraceId(java.util.UUID.randomUUID().toString());
@@ -91,12 +106,78 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
     }
 
     private String callProvider(String prompt) {
-        boolean gemini = "gemini".equalsIgnoreCase(aiConfig.getProvider());
-        if (gemini && !aiConfig.isExternalSendEnabled()) {
-            return MockAiResponses.generate(prompt);
-        }
         return aiTextService.generate(prompt);
     }
+
+    /** controllerを経由しない呼出しも、provider I/O直前に最終gateを通す。 */
+    private void assertFinalProviderBoundary(AiGatewayRequest request) {
+        AiProviderRegistry.ProviderDescriptor provider = providerRegistry.requireRegistered(aiConfig.getProvider());
+        providerRegistry.assertImplementation(provider.name(), aiTextService);
+        AiUseCasePolicy.Mode policy = AiUseCasePolicy.require(request.getUseCase());
+        if (policy == AiUseCasePolicy.Mode.MANAGEMENT_COPILOT) {
+            CopilotExecutionContext context = request.getExecutionContext();
+            if (context == null || request.getScopeContext() == null || request.getScopeHash() == null
+                    || context.tenantId() == null || context.legalEntityId() == null
+                    || context.effectiveScopeSnapshot() == null
+                    || context.scope() != context.effectiveScopeSnapshot().scope()
+                    || context.scope() != request.getScopeContext()
+                    || !Objects.equals(context.tenantId(), request.getScopeContext().tenantId())
+                    || !Objects.equals(context.legalEntityId(), request.getScopeContext().legalEntityId())
+                    || context.scopeHash() == null || !context.scopeHash().equals(request.getScopeHash())
+                    || context.queryId() == null || context.parameters() == null
+                    || !context.queryId().equals(context.parameters().queryId())) {
+                throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
+            }
+            copilotFeatureGate.assertQueryAllowed();
+            productionApprovalGateAsserted();
+            return;
+        }
+
+        if (!provider.localOnly()) {
+            // legacyとoffline ingest/learningを同じ暗黙ルールで扱わない。
+            if (policy == AiUseCasePolicy.Mode.OFFLINE_LOCAL) {
+                throw new BusinessException(503, "AI_USE_CASE_DISABLED");
+            }
+            throw new BusinessException(503, "LEGACY_AI_PROVIDER_DISABLED");
+        }
+        if (policy == AiUseCasePolicy.Mode.LEGACY_LOCAL && requiresLegacyContext(request)) {
+            assertLegacyResourceContext(request);
+        }
+    }
+
+    private boolean requiresLegacyContext(AiGatewayRequest request) {
+        if (AiGatewayRequest.USE_MATCHING.equals(request.getUseCase())
+                || AiGatewayRequest.USE_PROPOSAL_DRAFT.equals(request.getUseCase())) {
+            return true;
+        }
+        return AiGatewayRequest.USE_CHAT.equals(request.getUseCase())
+                && (request.isResourceBearing() || request.hasTypedResourceFields());
+    }
+
+    private void assertLegacyResourceContext(AiGatewayRequest request) {
+        CopilotExecutionContext context = request.getExecutionContext();
+        if (context == null || context.asOf() == null || context.zoneId() == null
+                || context.tenantId() == null || context.tenantId().isBlank()
+                || context.legalEntityId() == null
+                || context.effectiveScopeSnapshot() == null
+                || context.scope() != context.effectiveScopeSnapshot().scope()
+                || context.scope() == null || context.scopeHash() == null
+                || request.getScopeContext() != context.scope()
+                || request.getScopeHash() == null
+                || !request.getScopeHash().equals(context.scopeHash())
+                || !context.scopeHash().equals(context.scope().scopeHash())
+                || !context.tenantId().equals(context.scope().tenantId())
+                || !context.legalEntityId().equals(context.scope().legalEntityId())
+                || context.queryId() == null || context.parameters() == null
+                || !context.queryId().equals(context.parameters().queryId())) {
+            throw new BusinessException(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+    }
+
+    private void productionApprovalGateAsserted() {
+        productionApprovalGate.assertProviderAllowed(aiConfig.getProvider());
+    }
+
 
     private void persistIfNeeded(AiGatewayRequest request, Map<String, Object> masked,
                                  String status, String error, long startedNanos) {
@@ -164,7 +245,10 @@ public class AiExecutionGatewayImpl implements AiExecutionGateway {
             run.setStatus(status);
             run.setStatusVersion(0);
             run.setErrorCode(error);
-            run.setCreatedAt(LocalDateTime.now());
+            run.setCreatedAt(request.getExecutionContext() == null
+                    ? LocalDateTime.now(clock)
+                    : LocalDateTime.ofInstant(request.getExecutionContext().asOf(),
+                    request.getExecutionContext().zoneId()));
             runMapper.insert(run);
         } catch (Exception ignored) {
             // 実行自体は落とさない。記録失敗は後続評価の欠損として扱う。

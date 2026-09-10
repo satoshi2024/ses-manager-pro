@@ -47,6 +47,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final EngineerStatusService engineerStatusService;
     private final WorkRecordMapper workRecordMapper;
     private final ProjectMapper projectMapper;
+    private final com.ses.mapper.CustomerMapper customerMapper;
+    private final com.ses.mapper.EngineerMapper engineerMapper;
     private final com.ses.mapper.ProjectPositionMapper positionMapper;
     private final com.ses.service.EngineerSalesService engineerSalesService;
     private final com.ses.mapper.ContractPriceHistoryMapper priceHistoryMapper;
@@ -56,9 +58,39 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     private final com.ses.service.EngineerBpAffiliationService engineerBpAffiliationService;
     private final com.ses.service.staffing.StaffingContractSyncService staffingSync;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     /** DataScope invalidation。既存テストスライス（手動構築）互換のため任意注入。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ScopeChangeInvalidator scopeChangeInvalidator;
+
+    /** generic saveも通常の契約作成境界へ束縛する。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Contract entity) {
+        if (entity == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        validate(entity);
+        boolean saved = super.save(entity);
+        if (saved) {
+            invalidateScope();
+        }
+        return saved;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(Contract entity) {
+        if (entity == null || entity.getId() == null) {
+            throw BusinessException.of(404, "error.contract.notFound");
+        }
+        Contract old = baseMapper.selectByIdForUpdate(entity.getId());
+        if (old == null) throw BusinessException.of(404, "error.contract.notFound");
+        validate(entity, old);
+        return super.updateById(entity);
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.beans.factory.ObjectProvider<com.ses.service.ai.AiOutcomeService> aiOutcomeService;
@@ -68,6 +100,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     public boolean removeById(Serializable id) {
         Contract target = this.getById(id);
         if (target == null) return false;
+        // 論理削除も法人境界を越えて実行できないよう、削除前に関連graphを再認可する。
+        validateLegalEntityRelations(target, target);
         if ("稼動中".equals(target.getStatus())) {
             throw BusinessException.of("error.contract.activeDelete");
         }
@@ -141,6 +175,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             }
         }
 
+        validateLegalEntityRelations(c, old);
+
         // staffing-capacity-planning: ポジション紐付けは案件配下の実在ポジションに限定する
         if (c.getPositionId() != null) {
             com.ses.entity.ProjectPosition position = positionMapper.selectById(c.getPositionId());
@@ -165,6 +201,33 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 throw BusinessException.of(400, "error.contract.exemptionReasonRequired");
             }
         }
+    }
+
+    /** 契約自身・要員・案件・顧客を同一の権威法人へ束縛する。 */
+    private void validateLegalEntityRelations(Contract contract, Contract old) {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Project project = contract.getProjectId() == null ? null : projectMapper.selectById(contract.getProjectId());
+        com.ses.entity.Customer customer = contract.getCustomerId() == null ? null : customerMapper.selectById(contract.getCustomerId());
+        com.ses.entity.Engineer engineer = contract.getEngineerId() == null ? null : engineerMapper.selectById(contract.getEngineerId());
+        if (project == null || customer == null || engineer == null
+                || project.getLegalEntityId() == null || customer.getLegalEntityId() == null
+                || engineer.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertSame(project.getLegalEntityId(), customer.getLegalEntityId());
+        legalEntityContextService.assertSame(project.getLegalEntityId(), engineer.getLegalEntityId());
+        if (old != null) {
+            legalEntityContextService.assertSame(old.getLegalEntityId(), project.getLegalEntityId());
+            legalEntityContextService.assertCurrent(old.getLegalEntityId());
+        } else {
+            legalEntityContextService.assertCurrent(project.getLegalEntityId());
+        }
+        if (contract.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(contract.getLegalEntityId(), project.getLegalEntityId());
+        }
+        contract.setLegalEntityId(project.getLegalEntityId());
     }
 
     @Override
@@ -393,6 +456,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (contract == null) {
             throw BusinessException.of(404, "error.contract.notFound");
         }
+        // 状態変更も契約のwrite入口であり、通常更新と同じ法人・関連行を再検証する。
+        validateLegalEntityRelations(contract, contract);
         if (newStatus == null || !ALLOWED_STATUS_TRANSITIONS
                 .getOrDefault(contract.getStatus(), Set.of()).contains(newStatus)) {
             throw BusinessException.of(409, "error.contract.statusTransitionInvalid",
@@ -417,7 +482,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             contract.setEndDate(cancelDate);
         } else if (StatusConstants.CONTRACT_ENDED.equals(newStatus) || "終了".equals(newStatus)) {
             if (contract.getEndDate() == null) {
-                contract.setEndDate(cancelDate != null ? cancelDate : LocalDate.now());
+                contract.setEndDate(cancelDate != null ? cancelDate : requireBusinessDate());
             }
         }
         contract.setStatus(newStatus);
@@ -452,6 +517,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 .eq(Contract::getProposalId, proposal.getId())
                 .last("LIMIT 1"));
         if (existing != null) {
+            // 冪等返却でも、現在の法人境界と関連行を再確認する。
+            validateLegalEntityRelations(existing, null);
             return existing;
         }
 
@@ -485,6 +552,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 .eq(Contract::getQuotationId, quotation.getId())
                 .last("LIMIT 1"));
         if (existing != null) {
+            validateLegalEntityRelations(existing, existing);
             return existing;
         }
         // 見積受注からのドラフト生成は要員必須（要員なしでは契約を作れない）。
@@ -524,6 +592,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 .eq(Contract::getOrderLineId, line.getId())
                 .last("LIMIT 1"));
         if (existing != null) {
+            validateLegalEntityRelations(existing, existing);
             return existing;
         }
         if (line.getEngineerId() == null) {
@@ -577,7 +646,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         contract.setCostPrice(BigDecimal.ZERO);
         contract.setSettlementHoursMin(src.settlementMin());
         contract.setSettlementHoursMax(src.settlementMax());
-        contract.setStartDate(LocalDate.now().plusMonths(1).withDayOfMonth(1));
+        contract.setStartDate(requireBusinessDate().plusMonths(1).withDayOfMonth(1));
         contract.setStatus("準備中");
         contract.setRemarks(src.remarks());
         // 主担当営業を引き継ぐ。退職済み(無効/削除)なら未帰属(NULL)でドラフト生成し後続の担当設定に委ねる。
@@ -602,6 +671,14 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         return contract;
     }
 
+    /** write時の会計日付は、現在tenantの会計timezoneでclock snapshotを解釈する。 */
+    private LocalDate requireBusinessDate() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return legalEntityContextService.requireCurrentDate();
+    }
+
     // ===== 契約単価の改定履歴（contract-price-history / P6） =====
 
     @Override
@@ -613,6 +690,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         if (contract == null) {
             throw BusinessException.of("error.contract.notFound");
         }
+        validateLegalEntityRelations(contract, contract);
         if (selling == null || selling.signum() < 0 || cost == null || cost.signum() < 0) {
             throw BusinessException.of("error.contract.priceRevision.invalidAmount");
         }
@@ -672,7 +750,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                         .eq("contract_id", contractId));
         com.ses.service.billing.ContractPriceResolver.ResolvedPrice current =
                 com.ses.service.billing.ContractPriceResolver.resolveFrom(
-                        contract, java.time.YearMonth.now(), fresh);
+                        contract, java.time.YearMonth.from(requireBusinessDate()), fresh);
         // 単価列だけを部分UPDATEし、他項目を巻き戻さない（R3R-29）。
         this.baseMapper.updatePriceOnly(contractId, current.getSellingPrice(), current.getCostPrice());
 
@@ -728,6 +806,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteFuturePriceRevision(Long contractId, String applyFromMonth) {
+        Contract contract = this.baseMapper.selectByIdForUpdate(contractId);
+        if (contract == null) {
+            throw BusinessException.of("error.contract.notFound");
+        }
+        validateLegalEntityRelations(contract, contract);
         java.time.YearMonth applyFrom;
         try {
             applyFrom = java.time.YearMonth.parse(applyFromMonth);
@@ -735,7 +818,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
             throw BusinessException.of("error.contract.priceRevision.invalidMonth");
         }
         // 将来予約（当月より後）のみ削除可。当月以前は精算に使われている可能性があるためロック。
-        if (!applyFrom.isAfter(java.time.YearMonth.now())) {
+        if (!applyFrom.isAfter(java.time.YearMonth.from(requireBusinessDate()))) {
             throw BusinessException.of("error.contract.priceRevision.pastLocked");
         }
         priceHistoryMapper.delete(
@@ -751,9 +834,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 && !com.ses.common.constant.RenewalState.DECISION_END.equals(decision)) {
             throw BusinessException.of(400, "error.contract.invalidRenewalDecision");
         }
-        if (this.getById(contractId) == null) {
+        Contract current = this.getById(contractId);
+        if (current == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
+        validateLegalEntityRelations(current, current);
         // updateById(エンティティ) は使えない。Contract には renewalDecision の他にも
         // salesUserId / commissionBaseType / commissionRate が @TableField(updateStrategy = ALWAYS)
         // で定義されており、空の patch エンティティを渡すとそれらも SET 句に含まれて NULL 上書き
@@ -764,8 +849,8 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                 .set("renewal_decision", decision)
                 .setSql("version = version + 1"));
         if (com.ses.common.constant.RenewalState.DECISION_CONTINUE.equals(decision)) {
-            Contract contract = this.getById(contractId);
-            recordAiOutcome(svc -> svc.onContractRenewalContinued(contract));
+            Contract updated = this.getById(contractId);
+            recordAiOutcome(svc -> svc.onContractRenewalContinued(updated));
         }
     }
 

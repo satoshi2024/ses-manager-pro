@@ -53,9 +53,11 @@ CREATE TABLE IF NOT EXISTS t_service_sla_clock (
     resolve_deadline    DATETIME NOT NULL,
     first_responded_at  DATETIME NULL,
     response_breached   TINYINT(1) NOT NULL DEFAULT 0,
+    response_breached_at DATETIME NULL,
     response_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     resolved_at         DATETIME NULL,
     resolve_breached    TINYINT(1) NOT NULL DEFAULT 0,
+    resolve_breached_at DATETIME NULL,
     resolve_warning_sent TINYINT(1) NOT NULL DEFAULT 0,
     last_response_alert_at DATETIME NULL,
     last_resolve_alert_at DATETIME NULL,
@@ -108,6 +110,10 @@ CREATE TABLE IF NOT EXISTS t_service_attachment_link (
     file_size           BIGINT NOT NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+INSERT INTO m_document_type (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+SELECT 'SERVICE_REQUEST_ATTACHMENT', 'サービスリクエスト添付', 'INCOMING', 7, 'TRANSACTION_DATE', 1
+WHERE NOT EXISTS (SELECT 1 FROM m_document_type WHERE code = 'SERVICE_REQUEST_ATTACHMENT');
 
 CREATE TABLE IF NOT EXISTS t_service_state_event (
     id                  BIGINT AUTO_INCREMENT PRIMARY KEY,

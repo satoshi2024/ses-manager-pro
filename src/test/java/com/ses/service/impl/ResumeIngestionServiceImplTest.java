@@ -7,6 +7,7 @@ import com.ses.entity.ResumeIngestion;
 import com.ses.mapper.ResumeIngestionMapper;
 import com.ses.service.EngineerService;
 import com.ses.service.SkillTagResolver;
+import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,12 +35,18 @@ public class ResumeIngestionServiceImplTest {
     @Mock
     private ObjectMapper objectMapper;
 
+    @Mock
+    private LegalEntityContextService legalEntityContextService;
+
     @InjectMocks
     private ResumeIngestionServiceImpl resumeIngestionService;
 
     @org.junit.jupiter.api.BeforeEach
     void setUp() {
         org.springframework.test.util.ReflectionTestUtils.setField(resumeIngestionService, "baseMapper", baseMapper);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                resumeIngestionService, "legalEntityContextService", legalEntityContextService);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
             new org.apache.ibatis.builder.MapperBuilderAssistant(new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""), 
             ResumeIngestion.class
@@ -51,6 +58,7 @@ public class ResumeIngestionServiceImplTest {
         Long jobId = 1L;
         ResumeIngestion job = new ResumeIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
         when(baseMapper.selectById(jobId)).thenReturn(job);
@@ -75,6 +83,7 @@ public class ResumeIngestionServiceImplTest {
         Long jobId = 1L;
         ResumeIngestion job = new ResumeIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("確定済");
 
         when(baseMapper.selectById(jobId)).thenReturn(job);
@@ -91,6 +100,7 @@ public class ResumeIngestionServiceImplTest {
         Long jobId = 1L;
         ResumeIngestion job = new ResumeIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
         when(baseMapper.selectById(jobId)).thenReturn(job);
@@ -137,6 +147,7 @@ public class ResumeIngestionServiceImplTest {
         Long jobId = 1L;
         ResumeIngestion job = new ResumeIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("確定済");
         job.setConvertedEngineerId(99L);
 
@@ -156,6 +167,7 @@ public class ResumeIngestionServiceImplTest {
         Long jobId = 1L;
         ResumeIngestion job = new ResumeIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
         when(baseMapper.selectById(jobId)).thenReturn(job);

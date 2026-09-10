@@ -19,6 +19,9 @@ import java.time.LocalDate;
 @TableName("t_bp_availability")
 public class BpAvailability extends BaseEntity {
 
+    /** 外部要員在庫を内部要員へ昇格する際の法人境界。 */
+    private Long legalEntityId;
+
     private String initialName;
     private String bpCompany;
     private Long bpCompanyId;

@@ -12,6 +12,7 @@ import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,13 +28,16 @@ class DashboardSummaryCatalogAdapter extends CatalogAdapterSupport implements Ca
     }
 
     @Override
-    public TypedResultEnvelope execute(
-            SemanticCatalogEntry entry,
-            CopilotQueryParameters parameters,
-            CopilotScopeContext scope,
-            CopilotExecutionContext context) {
-        DashboardSummaryDto summary = dashboardService.getSummary(parameters.fiscalYear());
-        String period = context.yearMonth().toString();
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    @Override
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope, CopilotExecutionContext context) {
+        requireContext(context);
+        DashboardSummaryDto summary = dashboardService.getSummary(parameters.fiscalYear(), context);
+        String period = context.asOfMonth().toString();
         List<MetricValue> values = new ArrayList<>();
         if (summary.getKpi() != null) {
             DashboardSummaryDto.KpiDto kpi = summary.getKpi();
@@ -44,6 +48,6 @@ class DashboardSummaryCatalogAdapter extends CatalogAdapterSupport implements Ca
             values.add(MetricValue.yen("kpi.unacceptedSales", kpi.getUnacceptedSales(), period, MetricBasis.ACTUAL));
             values.add(MetricValue.percent("kpi.avgAcceptanceDays", kpi.getAvgAcceptanceDays(), period, MetricBasis.ACTUAL));
         }
-        return envelope(entry, scope, context, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit());
+        return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit(), context);
     }
 }

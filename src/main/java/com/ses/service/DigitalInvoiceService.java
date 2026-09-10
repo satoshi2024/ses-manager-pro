@@ -6,6 +6,12 @@ import com.ses.entity.DigitalInvoiceEvent;
 
 public interface DigitalInvoiceService extends IService<DigitalInvoice> {
 
+    /** 受信電子請求書一覧を同一のDataScope境界で検索する。 */
+    com.baomidou.mybatisplus.extension.plugins.pagination.Page<DigitalInvoice> searchInboundInvoices(long current, long size);
+
+    /** 受信電子請求書と関連業務データの帰属を解決し、scope外を拒否する。 */
+    void assertInboundAccessAllowed(Long digitalInvoiceId);
+
     /**
      * Webhook等からのイベントを受け取り、状態を更新する。
      * @param event 受信したイベント
