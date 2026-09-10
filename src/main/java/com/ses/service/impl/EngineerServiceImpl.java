@@ -72,9 +72,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (current == null) {
             return false;
         }
-        long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
+        long active = contractMapper.selectCountForTenant(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
-                .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
+                .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE), tenantId);
         if (active > 0) {
             throw BusinessException.of("error.engineer.delete.activeContract");
         }
@@ -119,9 +119,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
             throw BusinessException.of(404, "error.scope.notFound");
         }
         if (engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
-            long active = contractMapper.selectCount(new LambdaQueryWrapper<Contract>()
+            long active = contractMapper.selectCountForTenant(new LambdaQueryWrapper<Contract>()
                     .eq(Contract::getEngineerId, engineer.getId())
-                    .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE));
+                    .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE), tenantId);
             if (StatusConstants.ENGINEER_ACTIVE.equals(engineer.getStatus()) && active == 0) {
                 throw BusinessException.of("error.engineer.statusActiveNoContract");
             }
@@ -212,4 +212,3 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         return left.compareTo(right) == 0;
     }
 }
-

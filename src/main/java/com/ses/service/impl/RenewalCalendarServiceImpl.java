@@ -43,6 +43,7 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
 
     @Override
     public RenewalCalendarResponseDto getCalendar(LocalDate from, LocalDate to) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (from == null || to == null || to.isBefore(from)) {
             throw BusinessException.of(400, "error.renewalCalendar.invalidRange");
         }
@@ -64,7 +65,7 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
         LocalDate endDateTo = to.plusDays(leadDays);
 
         List<RenewalCalendarItemDto> candidates = contractMapper.selectRenewalCalendarCandidates(
-                StatusConstants.CONTRACT_ACTIVE, endDateFrom, endDateTo, allowedIds, MAX_ITEMS + 1);
+                StatusConstants.CONTRACT_ACTIVE, endDateFrom, endDateTo, allowedIds, MAX_ITEMS + 1, tenantId);
 
         boolean truncated = candidates.size() > MAX_ITEMS;
         if (truncated) {
@@ -117,7 +118,8 @@ public class RenewalCalendarServiceImpl implements RenewalCalendarService {
         if (ids.isEmpty()) {
             return Collections.emptyMap();
         }
-        List<ContractDraftStatusDto> drafts = contractMapper.selectDraftStatusesByOriginalIds(ids);
+        List<ContractDraftStatusDto> drafts = contractMapper.selectDraftStatusesByOriginalIds(ids,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         Map<Long, Boolean> hasConfirmedByOriginalId = new HashMap<>();
         for (ContractDraftStatusDto draft : drafts) {
             // 解約(=更新が取り消された)は「確定」ではない。準備中以外なら全て確定扱いにすると、

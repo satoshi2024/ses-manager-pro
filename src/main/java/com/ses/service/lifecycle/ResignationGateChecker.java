@@ -236,10 +236,11 @@ public class ResignationGateChecker {
                 .build());
 
         // 9. 稼働中契約の終了確認 (ACTIVE_CONTRACT)
-        Long activeContractCount = contractMapper.selectCount(new LambdaQueryWrapper<com.ses.entity.Contract>()
+        long activeContractCount = contractMapper.selectCountForTenant(new LambdaQueryWrapper<com.ses.entity.Contract>()
                 .eq(com.ses.entity.Contract::getEngineerId, engineerId)
-                .eq(com.ses.entity.Contract::getStatus, "稼動中"));
-        boolean noActiveContracts = activeContractCount == null || activeContractCount == 0;
+                .eq(com.ses.entity.Contract::getStatus, "稼動中"),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+        boolean noActiveContracts = activeContractCount == 0;
         String contractMsg = noActiveContracts
                 ? "稼働中の契約なし"
                 : "稼働中の契約が " + activeContractCount + " 件残存しています。契約を終了または解約してから退社手続きを完了してください。";

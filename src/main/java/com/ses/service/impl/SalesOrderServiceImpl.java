@@ -151,8 +151,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
             dto.setSettlementMax(line.getSettlementMax());
             dto.setAmount(line.getAmount());
             dto.setRemarks(line.getRemarks());
-            Contract contract = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getOrderLineId, line.getId()).last("LIMIT 1"));
+            Contract contract = contractMapper.selectByOrderLineForTenant(line.getId(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (contract != null) {
                 dto.setContractId(contract.getId());
                 dto.setContractNo(contract.getContractNo());
@@ -416,16 +416,16 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                     lineMapper.updateById(line);
                 }
             }
-            Contract existing = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getOrderLineId, line.getId()).last("LIMIT 1"));
+            Contract existing = contractMapper.selectByOrderLineForTenant(line.getId(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (existing != null) {
                 contracts.add(existing); // 冪等: 1明細→1契約（order_line_id UNIQUE）
                 continue;
             }
             contracts.add(contractService.createDraftFromSalesOrderLine(line, order));
         }
-        boolean allDone = lines.stream().allMatch(l -> contractMapper.selectCount(
-                new LambdaQueryWrapper<Contract>().eq(Contract::getOrderLineId, l.getId())) > 0);
+        boolean allDone = lines.stream().allMatch(l -> contractMapper.selectByOrderLineForTenant(l.getId(),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()) != null);
         if (allDone && !StatusConstants.ORDER_CONTRACTED.equals(order.getStatus())) {
             changeStatus(orderId, StatusConstants.ORDER_CONTRACTED);
         }
@@ -451,8 +451,8 @@ public class SalesOrderServiceImpl extends ServiceImpl<SalesOrderMapper, SalesOr
                 addDiff(diffs, "settlementMax", "精算上限", engineerName,
                         quotation.getSettlementHoursMax(), line.getSettlementMax(), "QUOTATION");
             }
-            Contract contract = contractMapper.selectOne(new LambdaQueryWrapper<Contract>()
-                    .eq(Contract::getOrderLineId, line.getId()).last("LIMIT 1"));
+            Contract contract = contractMapper.selectByOrderLineForTenant(line.getId(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (contract != null) {
                 addDiff(diffs, "unitPrice", "単価", engineerName,
                         contract.getSellingPrice(), line.getUnitPrice(), "CONTRACT");

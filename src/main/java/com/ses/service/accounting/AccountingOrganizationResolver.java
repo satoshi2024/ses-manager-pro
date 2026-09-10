@@ -32,6 +32,7 @@ public class AccountingOrganizationResolver {
      */
     public Long resolveInvoiceOrganizationId(Invoice invoice) {
         if (invoice == null) return null;
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
 
         LocalDate asOf;
         if (invoice.getIssuedDate() != null) {
@@ -57,9 +58,9 @@ public class AccountingOrganizationResolver {
         if (items != null && !items.isEmpty()) {
             for (InvoiceItem item : items) {
                 if (item.getWorkRecordId() != null) {
-                    WorkRecord wr = workRecordMapper.selectById(item.getWorkRecordId());
+                    WorkRecord wr = workRecordMapper.selectByIdForTenant(item.getWorkRecordId(), tenantId);
                     if (wr != null && wr.getContractId() != null) {
-                        Contract contract = contractMapper.selectById(wr.getContractId());
+                        Contract contract = contractMapper.selectByIdForTenant(wr.getContractId(), tenantId);
                         if (contract != null && contract.getSalesUserId() != null) {
                             Long orgId = userOrganizationMapper.selectPrimaryOrganizationAt(contract.getSalesUserId(), asOf);
                             if (orgId != null) {
@@ -79,8 +80,10 @@ public class AccountingOrganizationResolver {
      */
     public Long resolveBpPaymentOrganizationId(BpPayment bpPayment) {
         if (bpPayment == null) return null;
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
 
-        WorkRecord wr = bpPayment.getWorkRecordId() != null ? workRecordMapper.selectById(bpPayment.getWorkRecordId()) : null;
+        WorkRecord wr = bpPayment.getWorkRecordId() != null
+                ? workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(), tenantId) : null;
         LocalDate asOf;
         if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
             asOf = YearMonth.parse(wr.getWorkMonth()).atEndOfMonth();
@@ -98,7 +101,7 @@ public class AccountingOrganizationResolver {
 
         // 優先度2: t_bp_payment.work_record_id -> t_work_record.contract_id -> t_contract.sales_user_id -> t_user_organization
         if (wr != null && wr.getContractId() != null) {
-            Contract contract = contractMapper.selectById(wr.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(wr.getContractId(), tenantId);
             if (contract != null && contract.getSalesUserId() != null) {
                 Long orgId = userOrganizationMapper.selectPrimaryOrganizationAt(contract.getSalesUserId(), asOf);
                 if (orgId != null) {

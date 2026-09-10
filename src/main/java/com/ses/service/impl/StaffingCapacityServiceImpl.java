@@ -153,10 +153,11 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
         Map<Long, List<AllocationPlan>> allocationsByEngineer = allocations.stream()
                 .collect(Collectors.groupingBy(AllocationPlan::getEngineerId));
 
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getEngineerId, engineerIds)
                 .in(Contract::getStatus,
-                        List.of(StatusConstants.CONTRACT_PREPARING, StatusConstants.CONTRACT_ACTIVE)));
+                        List.of(StatusConstants.CONTRACT_PREPARING, StatusConstants.CONTRACT_ACTIVE)),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         Map<Long, Contract> contractsById = contracts.stream()
                 .collect(Collectors.toMap(Contract::getId, c -> c, (a, b) -> a));
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
@@ -351,7 +352,8 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
         }
         Set<Long> contractIds = actuals.stream()
                 .map(AllocationPlan::getSourceContractId).collect(Collectors.toSet());
-        Map<Long, Contract> contracts = contractMapper.selectBatchIds(contractIds).stream()
+        Map<Long, Contract> contracts = contractMapper.selectByIdsForTenant(contractIds,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext()).stream()
                 .collect(Collectors.toMap(Contract::getId, c -> c, (a, b) -> a));
         boolean assumeRenew = UtilizationCalcService.resolveAssumeRenew(systemConfigService);
 
@@ -528,10 +530,11 @@ public class StaffingCapacityServiceImpl implements StaffingCapacityService {
 
     /** 退場予定要員の最終契約終了日（準備中/稼動中のend_date最大値。無ければnull=制限なし）。 */
     private LocalDate lastActiveContractEnd(Long engineerId) {
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .in(Contract::getStatus, List.of(StatusConstants.CONTRACT_PREPARING, StatusConstants.CONTRACT_ACTIVE))
-                .isNotNull(Contract::getEndDate));
+                .isNotNull(Contract::getEndDate),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return contracts.stream()
                 .map(Contract::getEndDate)
                 .max(Comparator.naturalOrder())

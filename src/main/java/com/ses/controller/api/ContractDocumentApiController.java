@@ -11,6 +11,7 @@ import com.ses.mapper.ContractTemplateMapper;
 import com.ses.service.ContractDocumentService;
 import com.ses.service.cloudsign.CloudSignArtifactService;
 import com.ses.service.cloudsign.CloudSignSyncService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -49,6 +50,10 @@ public class ContractDocumentApiController {
     }
 
     private void assertContractVisible(Long contractId) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        if (contractId == null || contractMapper.selectByIdForTenant(contractId, tenantId) == null) {
+            throw BusinessException.of(404, "error.scope.notFound");
+        }
         java.util.Set<Long> dataIds = dataScopeService.isScoped()
                 ? dataScopeService.allowedContractIds() : null;
         java.util.Set<Long> allowed = organizationScopeService.hasFullAccess()
@@ -81,14 +86,15 @@ public class ContractDocumentApiController {
 
     /** detail DTOへ親契約の契約番号と宛先会社（顧客名）を解決して付与する。 */
     private ContractDocumentDetailDto detailOf(ContractDocument doc) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         String contractNo = null;
         String company = null;
         com.ses.entity.Contract contract = doc.getContractId() == null ? null
-                : contractMapper.selectById(doc.getContractId());
+                : contractMapper.selectByIdForTenant(doc.getContractId(), tenantId);
         if (contract != null) {
             contractNo = contract.getContractNo();
             if (contract.getCustomerId() != null) {
-                com.ses.entity.Customer customer = customerMapper.selectById(contract.getCustomerId());
+                com.ses.entity.Customer customer = customerMapper.selectByIdForTenant(contract.getCustomerId(), tenantId);
                 if (customer != null) {
                     company = customer.getCompanyName();
                 }

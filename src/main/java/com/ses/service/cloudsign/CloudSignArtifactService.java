@@ -1,6 +1,5 @@
 package com.ses.service.cloudsign;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.ses.common.enums.CloudSignErrorCode;
 import com.ses.common.enums.DispatchState;
 import com.ses.common.enums.FileKind;
@@ -12,6 +11,7 @@ import com.ses.entity.ContractDocument;
 import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.service.DocumentService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
 import lombok.extern.slf4j.Slf4j;
@@ -77,19 +77,23 @@ public class CloudSignArtifactService {
 
     /** artifact未回収の締結済行をbatch処理する（poll schedulerから呼ばれる）。 */
     public int collectPending(int limit) {
+        return collectPending(limit, AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    /** inventory runnerからtenantを明示して呼び出すartifact回収本体。 */
+    public int collectPending(int limit, String tenantId) {
+        if (tenantId == null || tenantId.isBlank()
+                || !tenantId.equals(AccountingTenantContextHolder.requireTenantContext())) {
+            throw new IllegalStateException("契約書artifactのtenant contextが不正です");
+        }
         if (!properties.isEnabled()) {
             return 0;
         }
-        List<ContractDocument> pending = mapper.selectList(new LambdaQueryWrapper<ContractDocument>()
-                .eq(ContractDocument::getDispatchState, DispatchState.COMPLETED.name())
-                .and(w -> w.isNull(ContractDocument::getSignedArchiveDocumentId)
-                        .or().isNull(ContractDocument::getCertificateArchiveDocumentId))
-                .orderByAsc(ContractDocument::getId)
-                .last("LIMIT " + Math.max(1, limit)));
+        List<ContractDocument> pending = mapper.selectArtifactPendingForTenant(Math.max(1, limit), tenantId);
         int processed = 0;
         for (ContractDocument doc : pending) {
             try {
-                collectFor(doc);
+                collectFor(doc, tenantId);
                 processed++;
             } catch (RuntimeException e) {
                 log.warn("[契約書artifact] 回収失敗をbatch全体へ波及させない: docId={} error={}",
@@ -99,11 +103,11 @@ public class CloudSignArtifactService {
         return processed;
     }
 
-    private void collectFor(ContractDocument doc) {
+    private void collectFor(ContractDocument doc, String tenantId) {
         if (doc.getSignedArchiveDocumentId() == null) {
             collectSigned(doc);
             // signed処理がversionを進めた可能性があるため、certificateは最新versionで再読込する
-            doc = mapper.selectById(doc.getId());
+            doc = mapper.selectByIdForTenant(doc.getId(), tenantId);
         }
         if (doc != null && doc.getCertificateArchiveDocumentId() == null) {
             collectCertificate(doc);
@@ -365,7 +369,8 @@ public class CloudSignArtifactService {
     private DocumentRegisterRequest registerRequest(ContractDocument doc, String fileName,
                                                     String documentType, String sourceType,
                                                     String direction, String hash, ArtifactKind kind) {
-        Contract contract = contractMapper.selectById(doc.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(doc.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         return DocumentRegisterRequest.builder()
                 .documentType(documentType)
                 .title(kind.label + ": " + (contract != null && contract.getContractNo() != null

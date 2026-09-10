@@ -41,6 +41,7 @@ import com.ses.mapper.ProposalMapper;
 import com.ses.dto.engineer.EngineerSkillDetailDto;
 
 import com.ses.service.security.DataScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.UtilizationCalcService;
 
 @Service
@@ -79,6 +80,7 @@ public class DashboardServiceImpl implements DashboardService {
             // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
             sync = true)
     public DashboardSummaryDto getSummary(Integer year) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         // 1. Calculate Charts (Dynamic) and prepare for KPIs
         List<YearMonth> targetMonths = (year != null)
                 ? buildFiscalYearMonths(year)
@@ -241,9 +243,9 @@ public class DashboardServiceImpl implements DashboardService {
         // 必ず一致させるため、Engineer.status ベースの集計(下のステータス構成チャート)とは口径を分ける。
         Map<Long, List<Contract>> utilizationContractsByEngineer = existingEngineerIds.isEmpty()
                 ? Collections.emptyMap()
-                : contractMapper.selectList(new QueryWrapper<Contract>()
+                : contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
-                        .in("engineer_id", existingEngineerIds))
+                        .in("engineer_id", existingEngineerIds), tenantId)
                     .stream()
                     .filter(c -> c.getEngineerId() != null)
                     .collect(Collectors.groupingBy(Contract::getEngineerId));
@@ -467,7 +469,8 @@ public class DashboardServiceImpl implements DashboardService {
             }
             query.in("id", allowed);
         }
-        return contractMapper.selectList(query);
+        return contractMapper.selectListForTenant(query,
+                AccountingTenantContextHolder.requireTenantContext());
     }
 
     /**
@@ -497,6 +500,7 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<ContractProfitDto> getProfitAnalysis() {
+        AccountingTenantContextHolder.requireTenantContext();
         List<Contract> contracts = scopedContracts(new QueryWrapper<Contract>()
                 .in("status", "稼動中", "終了"));
         List<ContractProfitDto> result = new ArrayList<>();

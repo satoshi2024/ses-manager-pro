@@ -162,12 +162,14 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
             Page<PortalContractDto> empty = PageUtils.safePage(current, size);
             return new Page<>(empty.getCurrent(), empty.getSize(), 0);
         }
-        return contractMapper.selectPortalPageDto(PageUtils.safePage(current, size), customerId, status);
+        String tenantId = tenantId();
+        return contractMapper.selectPortalPageDto(PageUtils.safePage(current, size), customerId, status, tenantId);
     }
 
     @Override
     public PortalContractDto contract(Long contractId, Long customerId) {
-        PortalContractDto dto = contractMapper.selectPortalDetailDto(contractId, customerId);
+        String tenantId = tenantId();
+        PortalContractDto dto = contractMapper.selectPortalDetailDto(contractId, customerId, tenantId);
         if (dto == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -178,7 +180,8 @@ public class PortalCustomerServiceImpl implements PortalCustomerService {
 
     @Override
     public InputStream contractDocumentPdf(Long contractId, Long customerId) {
-        PortalContractDto dto = contractMapper.selectPortalDetailDto(contractId, customerId);
+        String tenantId = tenantId();
+        PortalContractDto dto = contractMapper.selectPortalDetailDto(contractId, customerId, tenantId);
         if (dto == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }

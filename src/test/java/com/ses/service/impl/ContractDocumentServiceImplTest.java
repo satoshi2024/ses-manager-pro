@@ -41,6 +41,7 @@ class ContractDocumentServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
         templateMapper = mock(ContractTemplateMapper.class);
         contractMapper = mock(ContractMapper.class);
         pdfFontUtils = mock(com.ses.common.util.PdfFontUtils.class);
@@ -58,6 +59,8 @@ class ContractDocumentServiceImplTest {
         ObjectProvider<DocumentService> documentServiceProvider = mock(ObjectProvider.class);
 
         ContractDocumentMapper baseMapper = mock(ContractDocumentMapper.class);
+        when(baseMapper.selectByIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> baseMapper.selectById(invocation.getArgument(0)));
 
         com.ses.config.CloudSignProperties cloudSignProperties = new com.ses.config.CloudSignProperties();
         cloudSignProperties.setEnabled(true);
@@ -67,6 +70,8 @@ class ContractDocumentServiceImplTest {
                 pdfFontUtils, cloudSignProperties, metadataMapperProvider, fileScannerProvider, documentServiceProvider);
         ReflectionTestUtils.setField(service, "baseMapper", baseMapper);
         ReflectionTestUtils.setField(service, "uploadBase", tempDir.toString());
+        when(contractMapper.selectByIdForTenant(anyLong(), eq("tenant-a")))
+                .thenAnswer(invocation -> contractMapper.selectById(invocation.getArgument(0)));
 
         try {
             com.lowagie.text.pdf.BaseFont font = com.lowagie.text.pdf.BaseFont.createFont(
@@ -75,6 +80,11 @@ class ContractDocumentServiceImplTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -131,6 +141,7 @@ class ContractDocumentServiceImplTest {
         // 三artifact分離: source downloadはpdfPathだけを対象にする（signed/certificateはartifact service）
         ContractDocument doc = new ContractDocument();
         doc.setId(11L);
+        doc.setContractId(1L);
         Path dir = tempDir.resolve("contracts").resolve("11");
         Files.createDirectories(dir);
         Path source = dir.resolve("document-11.pdf");
@@ -140,11 +151,15 @@ class ContractDocumentServiceImplTest {
 
         ContractDocumentMapper baseMapper = (ContractDocumentMapper) ReflectionTestUtils.getField(service, "baseMapper");
         when(baseMapper.selectById(11L)).thenReturn(doc);
+        Contract contract = new Contract();
+        contract.setId(1L);
+        contract.setTenantId("tenant-a");
+        when(contractMapper.selectByIdForTenant(1L, "tenant-a")).thenReturn(contract);
 
         FileSecurityMetadata ok = new FileSecurityMetadata();
         ok.setStorageState("PUBLISHED");
         ok.setScanStatus("CLEAN");
-        when(metadataMapper.selectByStoredName(eq("default"), any())).thenReturn(ok);
+        when(metadataMapper.selectByStoredName(eq("tenant-a"), any())).thenReturn(ok);
 
         byte[] result = service.download(11L);
         assertArrayEquals("source pdf".getBytes(), result);

@@ -10,6 +10,7 @@ import com.ses.mapper.SysUserMapper;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -37,6 +38,7 @@ class RenewalEscalationServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
         contractMapper = mock(ContractMapper.class);
         sysUserMapper = mock(SysUserMapper.class);
         systemConfigService = mock(SystemConfigService.class);
@@ -44,6 +46,15 @@ class RenewalEscalationServiceImplTest {
         service = new RenewalEscalationServiceImpl(contractMapper, sysUserMapper, systemConfigService, notificationService);
         when(systemConfigService.getString("renewal.escalation-days", "30:営業,14:上長")).thenReturn("30:営業,14:上長");
         when(contractMapper.selectDraftStatusesByOriginalIds(any())).thenReturn(List.of());
+        when(contractMapper.selectListForTenant(any(), anyString()))
+                .thenAnswer(invocation -> contractMapper.selectList(null));
+        when(contractMapper.selectDraftStatusesByOriginalIds(any(), anyString()))
+                .thenAnswer(invocation -> contractMapper.selectDraftStatusesByOriginalIds(invocation.getArgument(0)));
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     private Contract contract(Long id, LocalDate endDate, Long salesUserId) {

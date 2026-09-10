@@ -52,17 +52,18 @@ public class TimesheetPdfServiceImpl implements TimesheetPdfService {
 
     @Override
     public byte[] generate(Long workRecordId) {
-        WorkRecord record = workRecordMapper.selectById(workRecordId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        WorkRecord record = workRecordMapper.selectByIdForTenant(workRecordId, tenantId);
         if (record == null) {
             throw BusinessException.of("error.workRecord.notFound2");
         }
-        Contract contract = contractMapper.selectById(record.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(record.getContractId(), tenantId);
         Engineer engineer = contract != null && contract.getEngineerId() != null
-                ? engineerMapper.selectById(contract.getEngineerId()) : null;
+                ? engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenantId) : null;
         Project project = contract != null && contract.getProjectId() != null
-                ? projectMapper.selectById(contract.getProjectId()) : null;
+                ? projectMapper.selectByIdForTenant(contract.getProjectId(), tenantId) : null;
         Customer customer = contract != null && contract.getCustomerId() != null
-                ? customerMapper.selectById(contract.getCustomerId()) : null;
+                ? customerMapper.selectByIdForTenant(contract.getCustomerId(), tenantId) : null;
         List<WorkRecordDaily> dailies = workRecordDailyMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<WorkRecordDaily>()
                         .eq("work_record_id", workRecordId).orderByAsc("work_date"));

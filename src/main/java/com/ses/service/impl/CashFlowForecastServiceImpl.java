@@ -207,7 +207,8 @@ public class CashFlowForecastServiceImpl implements CashFlowForecastService {
             contractQuery.in(Contract::getId,
                     scope.contractIds().isEmpty() ? List.of(-1L) : scope.contractIds());
         }
-        List<Contract> contracts = contractMapper.selectList(contractQuery);
+        List<Contract> contracts = contractMapper.selectListForTenant(contractQuery,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
 
         MonthlyRevenueCalcService.MonthlyAmount amount =
                 monthlyRevenueCalcService.calc(month, contracts, confirmedByContractId);

@@ -87,7 +87,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (projects > 0) {
             throw BusinessException.of("error.customer.delete.hasProjects", projects);
         }
-        long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getCustomerId, customerId));
+        long contracts = contractMapper.selectCountForTenant(
+                new LambdaQueryWrapper<Contract>().eq(Contract::getCustomerId, customerId), tenantId);
         if (contracts > 0) {
             throw BusinessException.of("error.customer.delete.hasContracts", contracts);
         }
@@ -123,6 +124,5 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         return tenantOwnershipResolver.selectCustomer(tenantId, customerId);
     }
 }
-
 
 

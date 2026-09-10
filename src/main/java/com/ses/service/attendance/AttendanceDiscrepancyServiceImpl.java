@@ -239,12 +239,13 @@ public class AttendanceDiscrepancyServiceImpl implements AttendanceDiscrepancySe
         if (engineerIds.isEmpty()) {
             return result;
         }
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getEngineerId, engineerIds)
                 .le(Contract::getStartDate, target.atEndOfMonth())
                 .and(w -> w.isNull(Contract::getEndDate)
                         .or().ge(Contract::getEndDate, target.atDay(1)))
-                .in(Contract::getStatus, "稼動中", "終了"));
+                .in(Contract::getStatus, "稼動中", "終了"),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contracts.isEmpty()) {
             return result;
         }

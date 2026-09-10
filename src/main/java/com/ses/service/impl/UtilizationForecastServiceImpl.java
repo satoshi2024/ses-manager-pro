@@ -120,11 +120,11 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
         }
 
         // 2. 対象要員の契約一覧ロード (共通口径サービスと同一のステータス集合)
-        List<Contract> contracts = contractMapper.selectList(
+        List<Contract> contracts = contractMapper.selectListForTenant(
                 new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
                         .in("engineer_id", engineerIds)
-        );
+                , com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
 
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
                 .filter(c -> c.getEngineerId() != null)

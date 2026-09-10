@@ -16,6 +16,7 @@ import com.ses.mapper.CustomerContactMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.AcceptanceService;
 import com.ses.service.security.DataScopeService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -64,7 +65,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     @Transactional(rollbackFor = Exception.class)
     public Acceptance submit(Long contractId, String workMonth) {
         // ロック順: Contract -> WorkRecord -> Acceptance （reopenMonthと完全同一順序でデッドロックとTOCTOUを防ぐ）
-        Contract contract = contractId == null ? null : contractMapper.selectByIdForUpdate(contractId);
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractId == null ? null : contractMapper.selectByIdForUpdateForTenant(contractId, tenantId);
         if (contract == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
@@ -113,7 +115,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
             throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
                     acceptance.getStatus(), StatusConstants.ACCEPTANCE_ACCEPTED);
         }
-        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         com.ses.entity.CustomerContact contact = null;
         if (customerContactId != null) {
             contact = resolveEffectiveContact(customerContactId, contract == null ? null : contract.getCustomerId());
@@ -167,7 +170,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         acceptance.setSubmittedAt(LocalDateTime.now());
         acceptance.setRejectComment(null);
         baseMapper.updateById(acceptance);
-        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         notifyCustomerSubmitted(contract == null ? null : contract.getCustomerId(), acceptance.getWorkMonth());
         return acceptance;
     }
@@ -219,7 +223,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         } catch (java.io.IOException e) {
             throw BusinessException.of(400, "error.acceptance.documentReadFailed");
         }
-        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         com.ses.dto.document.DocumentRegisterRequest req =
                 com.ses.dto.document.DocumentRegisterRequest.builder()
                         .documentType("ACCEPTANCE")
@@ -315,7 +320,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
             throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
                     acceptance.getStatus(), StatusConstants.ACCEPTANCE_ACCEPTED);
         }
-        Contract contract = contractMapper.selectById(acceptance.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         com.ses.entity.CustomerContact contact = null;
         if (customerContactId != null) {
             contact = resolveEffectiveContact(customerContactId, contract == null ? null : contract.getCustomerId());
@@ -377,7 +383,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
             return;
         }
         try {
-            Contract contract = contractMapper.selectById(contractId);
+            Contract contract = contractMapper.selectByIdForTenant(contractId,
+                    AccountingTenantContextHolder.requireTenantContext());
             if (contract == null || contract.getCustomerId() == null) {
                 return;
             }
@@ -451,7 +458,7 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
     }
 
     private Acceptance requireForUpdate(Long id) {
-        Acceptance acceptance = id == null ? null : baseMapper.selectByIdForUpdate(id);
+            Acceptance acceptance = id == null ? null : baseMapper.selectByIdForUpdate(id);
         if (acceptance == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }

@@ -7,7 +7,10 @@ import com.ses.dto.contract.ContractListDto;
 import com.ses.entity.Contract;
 import com.ses.entity.Engineer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.jdbc.Sql;
@@ -30,11 +33,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Transactional
 class AnalyticsProjectionMapperIntegrationTest {
 
+    @BeforeEach
+    void bindTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("INSERT INTO m_customer (id, tenant_id, company_name, deleted_flag, version) "
+                + "VALUES (1, 'default', '分析テスト顧客', 0, 0)");
+    }
+
+    @AfterEach
+    void clearTenant() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Autowired
     private EngineerMapper engineerMapper;
 
     @Autowired
     private ContractMapper contractMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void selectCreatedAtOnly_論理削除フラグ付きで全件返す() {
@@ -66,6 +84,7 @@ class AnalyticsProjectionMapperIntegrationTest {
     @Test
     void selectActiveDateRanges_稼動中終了以外のステータスは除外される() {
         Contract activeContract = new Contract();
+        activeContract.setTenantId("default");
         activeContract.setEngineerId(1L);
         activeContract.setProjectId(1L);
         activeContract.setCustomerId(1L);
@@ -76,6 +95,7 @@ class AnalyticsProjectionMapperIntegrationTest {
         contractMapper.insert(activeContract);
 
         Contract preparingContract = new Contract();
+        preparingContract.setTenantId("default");
         preparingContract.setEngineerId(2L);
         preparingContract.setProjectId(1L);
         preparingContract.setCustomerId(1L);
@@ -100,6 +120,7 @@ class AnalyticsProjectionMapperIntegrationTest {
     @Test
     void selectPageWithNames_担当営業joinが実行でき営業名を取得できる() {
         Contract contract = new Contract();
+        contract.setTenantId("default");
         contract.setEngineerId(1L);
         contract.setProjectId(1L);
         contract.setCustomerId(1L);

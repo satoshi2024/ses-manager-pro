@@ -16,6 +16,7 @@ import com.ses.mapper.ProjectMapper;
 import com.ses.mapper.WorkRecordMapper;
 import com.ses.service.EngineerService;
 import com.ses.service.RetentionRiskService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.billing.MonthlyRevenueCalcService;
 import com.ses.service.export.ExcelExportService;
 import lombok.RequiredArgsConstructor;
@@ -203,6 +204,7 @@ public class ExportApiController {
     private void exportContractsInternal(String status, Long customerId, Long salesUserId, String contractNo,
                                          LocalDate endDateFrom, LocalDate endDateTo, String customerName,
                                          String keyword, HttpServletResponse response) throws IOException {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
 
         QueryWrapper<Contract> queryWrapper = new QueryWrapper<>();
         if (StringUtils.hasText(status)) {
@@ -251,7 +253,7 @@ public class ExportApiController {
         boolean canViewCost = authorizationService.isAllowed(
                 org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
                 "contract.cost.view");
-        assertWithinMaxRows(contractMapper.selectCount(queryWrapper));
+        assertWithinMaxRows(contractMapper.selectCountForTenant(queryWrapper, tenantId));
         prepareFileResponse(response, "契約一覧", "xlsx");
         excelExportService.streamContracts(new BatchIterable<>(lastId -> {
             QueryWrapper<Contract> batchQuery = queryWrapper.clone();
@@ -259,7 +261,7 @@ public class ExportApiController {
                 batchQuery.lt("id", lastId);
             }
             batchQuery.orderByDesc("id").last("LIMIT " + configuredBatchSize);
-            return contractMapper.selectList(batchQuery);
+            return contractMapper.selectListForTenant(batchQuery, tenantId);
         }, rows -> toContractExportDtos(rows, canViewCost), Contract::getId, configuredBatchSize), response.getOutputStream());
     }
 
@@ -364,7 +366,8 @@ public class ExportApiController {
         List<MonthlyRevenueDto> rows = new ArrayList<>();
         // 管理者の全社経路は従来どおり一括取得し、組織scope経路だけ月初asOfごとにSQLを発行する。
         if (organizationScopeService.hasFullAccess() && !dataScopeService.isScoped()) {
-            List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<>());
+            String tenantId = AccountingTenantContextHolder.requireTenantContext();
+            List<Contract> allContracts = contractMapper.selectListForTenant(new QueryWrapper<>(), tenantId);
             List<String> monthStrs = targetMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
             Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
                             new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定"))
@@ -385,7 +388,8 @@ public class ExportApiController {
             }
             QueryWrapper<Contract> contractQuery = new QueryWrapper<>();
             if (allowedContractIds != null) contractQuery.in("id", allowedContractIds);
-            List<Contract> monthContracts = contractMapper.selectList(contractQuery);
+            List<Contract> monthContracts = contractMapper.selectListForTenant(contractQuery,
+                    AccountingTenantContextHolder.requireTenantContext());
             QueryWrapper<WorkRecord> workRecordQuery = new QueryWrapper<WorkRecord>()
                     .eq("work_month", ym.toString()).eq("status", "確定");
             if (allowedContractIds != null) workRecordQuery.in("contract_id", allowedContractIds);

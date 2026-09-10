@@ -329,7 +329,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
     private WorkRecord saveHoursInternal(Long contractId, String workMonth, BigDecimal actualHours,
                                          String remarks, boolean fromDaily, Integer expectedVersion) {
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
@@ -465,7 +466,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         List<Long> contractIds = records.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
         Map<Long, Contract> lockedContracts = new java.util.HashMap<>();
         for (Long cid : contractIds) {
-            Contract lockedContract = contractMapper.selectByIdForUpdate(cid);
+            Contract lockedContract = contractMapper.selectByIdForUpdateForTenant(cid,
+                    AccountingTenantContextHolder.requireTenantContext());
             if (lockedContract != null) {
                 lockedContracts.put(cid, lockedContract);
             }
@@ -589,7 +591,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
                 || bpCompanyMapper == null) {
             throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
         }
-        Contract contract = contractMapper.selectById(record.getContractId());
+        Contract contract = contractMapper.selectByIdForTenant(record.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null || contract.getEngineerId() == null) {
             throw BusinessException.of(400, "error.bpPayment.bpCompanyRequired");
         }
@@ -660,7 +663,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
 
         List<Long> contractIds = initialRecords.stream().map(WorkRecord::getContractId).distinct().sorted().collect(Collectors.toList());
         for (Long cid : contractIds) {
-            contractMapper.selectByIdForUpdate(cid);
+            contractMapper.selectByIdForUpdateForTenant(cid,
+                    AccountingTenantContextHolder.requireTenantContext());
         }
 
         List<Long> recordIds = initialRecords.stream().map(WorkRecord::getId).sorted().collect(Collectors.toList());
@@ -741,7 +745,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             throw BusinessException.of("error.workRecord.invalidMonth");
         }
         
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
@@ -809,7 +814,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
     @Transactional(rollbackFor = Exception.class)
     public void deleteDaily(Long contractId, String workMonth, LocalDate workDate) {
         checkClosing(workMonth);
-        Contract contract = contractMapper.selectByIdForUpdate(contractId);
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId,
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
@@ -903,7 +909,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
 
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
@@ -933,7 +940,7 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
             return;
         }
         List<Long> organizationIds = contractMapper.selectOrganizationIdsByContractIds(
-                List.of(record.getContractId()));
+                List.of(record.getContractId()), AccountingTenantContextHolder.requireTenantContext());
         if (organizationIds == null) {
             return;
         }
@@ -953,7 +960,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
 
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }
@@ -998,7 +1006,8 @@ public class WorkRecordServiceImpl extends ServiceImpl<WorkRecordMapper, WorkRec
         }
         checkClosing(record.getWorkMonth());
         
-        Contract contract = contractMapper.selectByIdForUpdate(record.getContractId());
+        Contract contract = contractMapper.selectByIdForUpdateForTenant(record.getContractId(),
+                AccountingTenantContextHolder.requireTenantContext());
         if (contract == null) {
             throw BusinessException.of("error.workRecord.noContract");
         }

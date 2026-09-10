@@ -18,6 +18,7 @@ public class CloudSignDispatchScheduler {
 
     private final CloudSignDispatchService dispatchService;
     private final com.ses.config.CloudSignProperties properties;
+    private final com.ses.service.scheduler.TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "${cloudsign.dispatch-cron:*/5 * * * * *}")
     // lockAtMostForは最悪batch（pollBatchSize×各工程HTTP+mutation反映待ち）を超えること（HFP-02-BUG-01）
@@ -28,7 +29,8 @@ public class CloudSignDispatchScheduler {
         }
         long start = System.currentTimeMillis();
         try {
-            dispatchService.dispatchDue(properties.getPollBatchSize());
+            tenantAwareBatchRunner.run(tenantId ->
+                    dispatchService.dispatchDue(properties.getPollBatchSize(), tenantId));
         } catch (RuntimeException e) {
             log.warn("[契約書dispatch] scheduler run中に例外: error={}", e.getMessage());
         }

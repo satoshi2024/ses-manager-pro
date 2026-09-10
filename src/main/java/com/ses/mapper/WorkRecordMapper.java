@@ -12,6 +12,31 @@ import java.util.List;
 
 @Mapper
 public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
+    /** 契約削除・単価改定の参照件数。契約と顧客ownershipを同一SQLで検証する。 */
+    @Select("SELECT COUNT(*) FROM t_work_record w JOIN t_contract c ON c.id = w.contract_id "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
+            + "WHERE w.contract_id = #{contractId}")
+    long countByContractIdForTenant(@Param("contractId") Long contractId,
+                                    @Param("tenantId") String tenantId);
+
+    /** 単価改定対象の未確定実績を契約ownershipで限定する。 */
+    @Select("SELECT w.* FROM t_work_record w JOIN t_contract c ON c.id = w.contract_id "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
+            + "WHERE w.contract_id = #{contractId} AND w.work_month >= #{workMonth} AND w.status <> '確定'")
+    List<WorkRecord> selectUnconfirmedByContractIdForTenant(@Param("contractId") Long contractId,
+                                                            @Param("workMonth") String workMonth,
+                                                            @Param("tenantId") String tenantId);
+
+    @Select("SELECT COUNT(*) FROM t_work_record w JOIN t_contract c ON c.id = w.contract_id "
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
+            + "WHERE w.contract_id = #{contractId} AND w.status = '確定' AND w.work_month >= #{workMonth}")
+    long countConfirmedByContractIdForTenant(@Param("contractId") Long contractId,
+                                             @Param("workMonth") String workMonth,
+                                             @Param("tenantId") String tenantId);
+
     /** 承認の組織解決対象も契約・顧客ownershipでtenantを固定する。 */
     @Select("SELECT w.* FROM t_work_record w "
             + "JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0 "

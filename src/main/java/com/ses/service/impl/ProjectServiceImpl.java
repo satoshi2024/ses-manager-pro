@@ -33,7 +33,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     @Transactional(rollbackFor = Exception.class)
     public boolean removeById(Serializable id) {
         Long projectId = Long.valueOf(id.toString());
-        long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, projectId));
+        long contracts = contractMapper.selectCountForTenant(
+                new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, projectId),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (contracts > 0) {
             throw BusinessException.of("error.project.delete.hasContract");
         }
@@ -63,7 +65,9 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
     public boolean updateProjectWithSkills(com.ses.dto.project.ProjectSaveDto dto) {
         Project old = this.getById(dto.getId());
         if (old != null && old.getCustomerId() != null && !old.getCustomerId().equals(dto.getCustomerId())) {
-            long contracts = contractMapper.selectCount(new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, dto.getId()));
+            long contracts = contractMapper.selectCountForTenant(
+                    new LambdaQueryWrapper<Contract>().eq(Contract::getProjectId, dto.getId()),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (contracts > 0) {
                 throw BusinessException.of(409, "error.project.update.hasContract");
             }
@@ -103,6 +107,5 @@ public class ProjectServiceImpl extends ServiceImpl<ProjectMapper, Project> impl
         projectSkillServiceProvider.ifAvailable(service -> service.replaceSkills(projectId, request));
     }
 }
-
 
 

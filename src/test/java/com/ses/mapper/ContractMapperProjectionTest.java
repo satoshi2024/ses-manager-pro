@@ -14,7 +14,8 @@ class ContractMapperProjectionTest {
                 .getMethod("selectPageWithNames", com.baomidou.mybatisplus.extension.plugins.pagination.Page.class,
                         String.class, Long.class, Long.class, Long.class, String.class,
                         java.time.LocalDate.class, java.time.LocalDate.class, Long.class,
-                        Boolean.class, java.time.LocalDate.class, java.time.LocalDate.class, java.util.List.class)
+                        Boolean.class, java.time.LocalDate.class, java.time.LocalDate.class, java.util.List.class,
+                        String.class)
                 .getAnnotation(Select.class);
         String sql = String.join("\n", select.value());
         assertTrue(sql.contains("cu.company_name AS customerName"));
@@ -24,7 +25,7 @@ class ContractMapperProjectionTest {
     @Test
     void 管理会計契約SQLは組織scopeと直属ユーザーscopeを持つ() throws NoSuchMethodException {
         Select select = ContractMapper.class.getMethod("selectAccountingContracts", java.time.LocalDate.class,
-                java.time.LocalDate.class, boolean.class, java.util.List.class, java.util.List.class)
+                java.time.LocalDate.class, boolean.class, java.util.List.class, java.util.List.class, String.class)
                 .getAnnotation(Select.class);
         String sql = String.join("\n", select.value());
         assertTrue(sql.contains("directUserIds"));
@@ -36,7 +37,8 @@ class ContractMapperProjectionTest {
     void 管理会計絞込SQLは契約法人直属ユーザー条件を持つ() throws NoSuchMethodException {
         Select select = ContractMapper.class.getMethod("selectAccountingContractsFiltered", java.time.LocalDate.class,
                 java.time.LocalDate.class, boolean.class, java.util.List.class, java.util.List.class,
-                java.util.List.class, Long.class, Long.class, Long.class, Long.class, Long.class, Long.class)
+                java.util.List.class, Long.class, Long.class, Long.class, Long.class, Long.class, Long.class,
+                String.class)
                 .getAnnotation(Select.class);
         String sql = String.join("\n", select.value());
         assertTrue(sql.contains("allowedContractIds"));

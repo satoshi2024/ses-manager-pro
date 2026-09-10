@@ -62,10 +62,10 @@ public class SalesPerformanceServiceImpl implements SalesPerformanceService {
 
         List<SysUser> salesUsers = sysUserService.list(new QueryWrapper<SysUser>().eq("role", StatusConstants.ROLE_SALES).eq("status", 1));
 
-        List<Contract> allContracts = contractMapper.selectList(new QueryWrapper<Contract>()
+        List<Contract> allContracts = contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
                 .and(w -> w.le("start_date", endOfMonthDate).or().between("created_at", startOfMonthTime, endOfMonthTime))
-        );
+                , com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
 
         Set<Long> userIds = salesUsers.stream().map(SysUser::getId).collect(Collectors.toSet());
         for (Contract c : allContracts) {

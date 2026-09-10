@@ -75,6 +75,7 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
     public ManagementAccountingSummaryDto summary(String month, Long legalEntityId, Long organizationId,
                                                   Long costCenterId, Long customerId, Long projectId,
                                                   Long salesUserId) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         YearMonth yearMonth = com.ses.common.util.DateUtils.parseYearMonth(month);
         LocalDate monthStart = yearMonth.atDay(1);
         LocalDate monthEnd = yearMonth.atEndOfMonth();
@@ -99,7 +100,8 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
         List<ManagementAccountingContractRow> forecastRows = filtered
                 ? organizationContractRows(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers, allowedContractIds, legalEntityId,
                 organizationId, costCenterId, customerId, projectId, salesUserId)
-                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers);
+                : contractMapper.selectAccountingContracts(monthStart, monthEnd, fullAccess, queryAllowed, queryDirectUsers,
+                tenantId);
 
         Map<Long, MonthlyAccountingDimension> snapshots = visibleSnapshots(monthStart, legalEntityId,
                 organizationId, costCenterId);
@@ -123,13 +125,14 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
             List<Long> actualContractIds = confirmed.values().stream().map(WorkRecord::getContractId)
                     .filter(java.util.Objects::nonNull).distinct().toList();
             if (!actualContractIds.isEmpty()) {
-                List<Contract> actualContracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+                List<Contract> actualContracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                         .in(Contract::getId, actualContractIds)
                         .eq(customerId != null, Contract::getCustomerId, customerId)
                         .eq(projectId != null, Contract::getProjectId, projectId)
                         .eq(salesUserId != null, Contract::getSalesUserId, salesUserId)
                         .in(allowedContractIds != null, Contract::getId,
-                                allowedContractIds == null ? List.of(-1L) : allowedContractIds));
+                                 allowedContractIds == null ? List.of(-1L) : allowedContractIds),
+                        tenantId);
                 if (actualContracts != null) {
                     for (Contract actual : actualContracts) {
                         MonthlyAccountingDimension snapshot = snapshots.values().stream()
@@ -266,8 +269,9 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
                                                                             Long legalEntityId, Long organizationId,
                                                                             Long costCenterId, Long customerId,
                                                                             Long projectId, Long salesUserId) {
-        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId, organizationId,
-                costCenterId, customerId, projectId, salesUserId);
+        return contractMapper.selectAccountingContractsFiltered(start, end, full, ids, directUserIds, allowedContractIds, legalEntityId,
+                organizationId, costCenterId, customerId, projectId, salesUserId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
     }
 
     private ManagementAccountingSummaryDto emptySummary(String month) {

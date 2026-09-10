@@ -107,8 +107,9 @@ public class RetentionRiskServiceImpl implements RetentionRiskService {
 
     /** 要員ごとの直近契約終了日（最大の end_date）。Bench継続開始日の基準になる。 */
     private Map<Long, LocalDate> loadLatestContractEnd(List<Long> engineerIds) {
-        List<Contract> contracts = contractMapper.selectList(
-                new QueryWrapper<Contract>().in("engineer_id", engineerIds));
+        List<Contract> contracts = contractMapper.selectListForTenant(
+                new QueryWrapper<Contract>().in("engineer_id", engineerIds),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         Map<Long, LocalDate> latest = new HashMap<>();
         for (Contract c : contracts) {
             if (c.getEngineerId() == null || c.getEndDate() == null) {

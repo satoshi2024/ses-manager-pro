@@ -4,6 +4,7 @@ import com.ses.entity.Contract;
 import com.ses.entity.ContractPriceHistory;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractPriceHistoryMapper;
+import com.ses.service.scheduler.TenantAwareBatchRunner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -28,55 +29,50 @@ public class ContractPriceSyncService {
     private final ContractMapper contractMapper;
     private final ContractPriceHistoryMapper priceHistoryMapper;
     private final TransactionTemplate transactionTemplate;
+    private final TenantAwareBatchRunner tenantAwareBatchRunner;
 
     @Scheduled(cron = "0 0 0 * * ?")
     @SchedulerLock(name = "contractPriceSyncDaily", lockAtLeastFor = "PT1M", lockAtMostFor = "PT30M")
     public void syncCurrentPrices() {
         log.info("Starting contract price sync...");
-        
-        List<ContractPriceHistory> allHistories = priceHistoryMapper.selectList(null);
-        if (allHistories.isEmpty()) {
-            log.info("No price histories found. Sync completed.");
-            return;
-        }
-
-        Map<Long, List<ContractPriceHistory>> historyByContract = allHistories.stream()
-                .collect(Collectors.groupingBy(ContractPriceHistory::getContractId));
-
-        YearMonth currentMonth = YearMonth.now();
         int[] processCount = {0};
         int[] updateCount = {0};
+        tenantAwareBatchRunner.run(tenantId -> syncTenant(tenantId, processCount, updateCount));
 
-        for (Map.Entry<Long, List<ContractPriceHistory>> entry : historyByContract.entrySet()) {
-            Long contractId = entry.getKey();
+    log.info("契約単価同期完了。処理{}件（単価変更あり: {}件）", processCount[0], updateCount[0]);
+    }
+
+    private void syncTenant(String tenantId, int[] processCount, int[] updateCount) {
+        List<Long> contractIds = priceHistoryMapper.selectContractIdsForTenant(tenantId);
+        YearMonth currentMonth = YearMonth.now();
+        for (Long contractId : contractIds) {
             transactionTemplate.executeWithoutResult(status -> {
-                // 行ロックで通常更新と直列化し、ロック取得後に最新状態で履歴を再解決する（R3R-29）。
-                Contract contract = contractMapper.selectByIdForUpdate(contractId);
+                // 行ロックで通常更新と改定を直列化し、tenant ownershipを再検証する。
+                Contract contract = contractMapper.selectByIdForUpdateForTenant(contractId, tenantId);
                 if (contract == null) return;
-    
+                List<ContractPriceHistory> histories = priceHistoryMapper.selectByContractIdForTenant(contractId, tenantId);
                 ContractPriceResolver.ResolvedPrice resolved = ContractPriceResolver.resolveFrom(
-                        contract, currentMonth, entry.getValue());
-    
-                if (resolved.isFromHistory()) {
+                        contract, currentMonth, histories);
+                if (!resolved.isFromHistory()) return;
                 BigDecimal resolvedSelling = resolved.getSellingPrice();
                 BigDecimal resolvedCost = resolved.getCostPrice();
-
-                boolean sellingDiff = contract.getSellingPrice() == null || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
-                boolean costDiff = contract.getCostPrice() == null || contract.getCostPrice().compareTo(resolvedCost) != 0;
-
+                boolean sellingDiff = contract.getSellingPrice() == null
+                        || contract.getSellingPrice().compareTo(resolvedSelling) != 0;
+                boolean costDiff = contract.getCostPrice() == null
+                        || contract.getCostPrice().compareTo(resolvedCost) != 0;
                 if (sellingDiff || costDiff) {
                     log.info("Contract {} price changed: selling ({} -> {}), cost ({} -> {})",
                             contractId, contract.getSellingPrice(), resolvedSelling,
                             contract.getCostPrice(), resolvedCost);
-                    // 単価列だけを部分UPDATEし、他項目を旧値で上書きしない（R3R-29）。
-                    contractMapper.updatePriceOnly(contractId, resolvedSelling, resolvedCost);
+                    if (contractMapper.updatePriceOnlyForTenant(contractId, tenantId,
+                            contract.getVersion() == null ? 0 : contract.getVersion(),
+                            resolvedSelling, resolvedCost) != 1) {
+                        throw new IllegalStateException("契約単価同期のCASに失敗しました");
+                    }
                     updateCount[0]++;
                 }
-            }
-        });
-        processCount[0]++;
-    }
-    
-    log.info("契約単価同期完了。処理{}件（単価変更あり: {}件）", processCount[0], updateCount[0]);
+                processCount[0]++;
+            });
+        }
     }
 }

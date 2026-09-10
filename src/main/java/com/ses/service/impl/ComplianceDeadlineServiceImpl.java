@@ -94,7 +94,8 @@ public class ComplianceDeadlineServiceImpl implements ComplianceDeadlineService 
         Set<Long> contractIds = new LinkedHashSet<>();
         targets.forEach(f -> contractIds.add(f.getContractId()));
         List<Contract> contracts = contractIds.isEmpty() ? List.of()
-                : contractMapper.selectBatchIds(new java.util.ArrayList<>(contractIds));
+                : contractMapper.selectByIdsForTenant(new java.util.ArrayList<>(contractIds),
+                AccountingTenantContextHolder.requireTenantContext());
         java.util.Map<Long, Contract> byContract = new java.util.HashMap<>();
         String tenantId = AccountingTenantContextHolder.requireTenantContext();
         contracts.stream()

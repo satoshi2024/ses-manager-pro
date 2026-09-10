@@ -15,6 +15,7 @@ import com.ses.mapper.EngineerSalesMapper;
 import com.ses.dto.engineersales.EngineerPrimarySalesDto;
 import com.ses.service.AnalyticsService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -45,11 +46,12 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public List<UtilizationPointDto> utilizationTrend(int months) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         // Engineer/Contract の全カラムではなく、集計に必要な列だけを取得する軽量プロジェクション
         // （remarks等の大きな列を含む全件ロードを避け、大量データ時のメモリ使用量を抑える）。
         // ステータス絞り込み（稼動中/終了）もSQL側で行う。
         List<EngineerCreatedAtDto> allEngineers = engineerMapper.selectCreatedAtOnly();
-        List<ContractDateRangeDto> allContracts = contractMapper.selectActiveDateRanges();
+        List<ContractDateRangeDto> allContracts = contractMapper.selectActiveDateRanges(tenantId);
 
         List<YearMonth> targetMonths = buildTrailingMonths(months);
         List<UtilizationPointDto> result = new ArrayList<>();
@@ -105,8 +107,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
 
         List<Long> engineerIds = benchEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
-        List<Contract> contracts = contractMapper.selectList(
-                new LambdaQueryWrapper<Contract>().in(Contract::getEngineerId, engineerIds));
+        List<Contract> contracts = contractMapper.selectListForTenant(
+                new LambdaQueryWrapper<Contract>().in(Contract::getEngineerId, engineerIds),
+                AccountingTenantContextHolder.requireTenantContext());
         
         List<EngineerPrimarySalesDto> primarySales = engineerSalesMapper.selectActivePrimaryByEngineerIds(engineerIds);
         Map<Long, EngineerPrimarySalesDto> primarySalesMap = primarySales.stream()
@@ -209,14 +212,14 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         LocalDate toDate = com.ses.common.util.DateUtils.parseYearMonth(toMonth).atEndOfMonth();
 
         List<Long> engineerIds = allEngineers.stream().map(Engineer::getId).collect(Collectors.toList());
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .in(Contract::getEngineerId, engineerIds)
                 .and(wrapper -> wrapper
                         .in(Contract::getStatus, java.util.Arrays.asList("稼動中", "終了"))
                         .le(Contract::getStartDate, toDate)
                         .and(w2 -> w2.isNull(Contract::getEndDate).or().ge(Contract::getEndDate, fromDate))
                 )
-                .orderByAsc(Contract::getStartDate));
+                .orderByAsc(Contract::getStartDate), AccountingTenantContextHolder.requireTenantContext());
 
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
                 .collect(Collectors.groupingBy(Contract::getEngineerId));

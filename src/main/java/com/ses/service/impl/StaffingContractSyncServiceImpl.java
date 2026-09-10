@@ -44,7 +44,8 @@ public class StaffingContractSyncServiceImpl implements StaffingContractSyncServ
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void syncActual(Long contractId) {
-        Contract contract = contractId == null ? null : contractMapper.selectById(contractId);
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        Contract contract = contractId == null ? null : contractMapper.selectByIdForTenant(contractId, tenantId);
         if (contract == null) {
             return;
         }

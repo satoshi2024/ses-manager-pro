@@ -7,6 +7,7 @@ import com.ses.service.ContractService;
 import com.ses.service.NotificationService;
 import com.ses.service.SystemConfigService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -48,6 +50,7 @@ class ContractRenewalServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
         contractMapper = mock(ContractMapper.class);
         contractService = mock(ContractService.class);
         systemConfigService = mock(SystemConfigService.class);
@@ -62,6 +65,15 @@ class ContractRenewalServiceImplTest {
             consumer.accept(notificationService);
             return null;
         }).when(notificationServiceProvider).ifAvailable(any());
+        when(contractMapper.selectAutoRenewCandidatesForTenant(anyString(), any(), any()))
+                .thenAnswer(invocation -> contractMapper.selectList(null));
+        when(contractMapper.countRenewedDraftsIncludingDeleted(any(), anyString()))
+                .thenAnswer(invocation -> contractMapper.countRenewedDraftsIncludingDeleted(invocation.getArgument(0)));
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     private Contract sourceContract(Long id, LocalDate endDate) {

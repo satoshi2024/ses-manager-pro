@@ -526,9 +526,9 @@ public class ReportSnapshotServiceImpl implements ReportSnapshotService {
         Set<Long> engineerIds = engineers.stream().map(Engineer::getId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, List<Contract>> contractsByEngineer = engineerIds.isEmpty()
                 ? Map.of()
-                : contractMapper.selectList(new QueryWrapper<Contract>()
+                : contractMapper.selectListForTenant(new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
-                        .in("engineer_id", engineerIds))
+                        .in("engineer_id", engineerIds), currentTenant())
                 .stream()
                 .filter(contract -> contract.getEngineerId() != null)
                 .collect(Collectors.groupingBy(Contract::getEngineerId));

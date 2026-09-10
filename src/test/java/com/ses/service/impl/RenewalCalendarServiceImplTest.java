@@ -11,6 +11,7 @@ import com.ses.service.SystemConfigService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -36,6 +37,7 @@ class RenewalCalendarServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("tenant-a");
         contractMapper = mock(ContractMapper.class);
         systemConfigService = mock(SystemConfigService.class);
         dataScopeService = mock(DataScopeService.class);
@@ -45,6 +47,17 @@ class RenewalCalendarServiceImplTest {
         when(systemConfigService.getInt("notice.contract-end-days", 30)).thenReturn(30);
         when(dataScopeService.isScoped()).thenReturn(false);
         when(organizationScopeService.hasFullAccess()).thenReturn(true);
+        when(contractMapper.selectRenewalCalendarCandidates(any(), any(), any(), any(), any(), anyString()))
+                .thenAnswer(invocation -> contractMapper.selectRenewalCalendarCandidates(
+                        invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+                        invocation.getArgument(3), invocation.getArgument(4)));
+        when(contractMapper.selectDraftStatusesByOriginalIds(any(), anyString()))
+                .thenAnswer(invocation -> contractMapper.selectDraftStatusesByOriginalIds(invocation.getArgument(0)));
+    }
+
+    @AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
     }
 
     private RenewalCalendarItemDto item(Long id, LocalDate endDate, String decision) {

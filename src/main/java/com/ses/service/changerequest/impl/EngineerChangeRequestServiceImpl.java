@@ -561,10 +561,11 @@ public class EngineerChangeRequestServiceImpl implements EngineerChangeRequestSe
     }
 
     private List<PublicContract> currentPublicContracts(Long engineerId) {
-        List<Contract> contracts = contractMapper.selectList(new LambdaQueryWrapper<Contract>()
+        List<Contract> contracts = contractMapper.selectListForTenant(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, "稼動中")
-                .orderByAsc(Contract::getStartDate));
+                .orderByAsc(Contract::getStartDate),
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         return contracts.stream().map(c -> {
             String customerName = null;
             if (c.getCustomerId() != null) {

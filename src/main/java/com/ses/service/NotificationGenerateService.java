@@ -152,7 +152,7 @@ public class NotificationGenerateService {
             if (isSubmitted(row.getStatus())) {
                 continue;
             }
-            Contract contract = contractMapper.selectById(row.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(row.getContractId(), tenantId);
             if (contract == null || contract.getEngineerId() == null) {
                 continue;
             }
@@ -245,19 +245,12 @@ public class NotificationGenerateService {
     void contractEnding() {
         int days = systemConfigService.getInt("notice.contract-end-days", 30);
         LocalDate today = LocalDate.now();
-        QueryWrapper<Contract> qw = new QueryWrapper<>();
-        qw.eq("status", "稼動中")
-          .le("end_date", today.plusDays(days))
-          .ge("end_date", today);
-        List<Contract> contracts = contractMapper.selectList(qw);
+        String tenantId = tenant();
+        List<Contract> contracts = contractMapper.selectEndingForTenant(today, today.plusDays(days), tenantId);
 
         // 自動更新ドラフト生成済み(renewed_from_contract_id = 当該契約ID)の契約は更新手続きが
         // 進行中のため通知しない。判定基準は ContractRenewalServiceImpl.hasExistingDraft と同一。
-        Set<Long> renewedFromIds = contractMapper.selectList(new QueryWrapper<Contract>()
-                        .isNotNull("renewed_from_contract_id")
-                        .select("renewed_from_contract_id")).stream()
-                .map(Contract::getRenewedFromContractId)
-                .collect(Collectors.toSet());
+        Set<Long> renewedFromIds = new java.util.HashSet<>(contractMapper.selectRenewedOriginalIdsForTenant(tenantId));
         contracts = contracts.stream()
                 .filter(c -> !renewedFromIds.contains(c.getId()))
                 .collect(Collectors.toList());
@@ -293,7 +286,7 @@ public class NotificationGenerateService {
             // Find latest contract end_date or created_at
             QueryWrapper<Contract> cQw = new QueryWrapper<>();
             cQw.eq("engineer_id", e.getId()).orderByDesc("end_date").last("LIMIT 1");
-            Contract lastContract = contractMapper.selectOne(cQw);
+            Contract lastContract = contractMapper.selectLatestByEngineerForTenant(e.getId(), tenant());
             LocalDate dateToCheck = (lastContract != null && lastContract.getEndDate() != null) ? lastContract.getEndDate() : (e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate() : null);
             if (dateToCheck != null && dateToCheck.plusDays(days).isBefore(LocalDate.now())) {
                 String name = getEngineerName(e.getId());
@@ -314,7 +307,8 @@ public class NotificationGenerateService {
         for (Project p : projects) {
             String dedupeKey = "PROJECT_URGENT:" + p.getId() + ":" + todayString();
             String message = "[\"notification.msg.PROJECT_URGENT\", \"" + p.getProjectName() + "\"]";
-            for (Long organizationId : contractMapper.selectOrganizationIdsByProjectId(p.getId(), LocalDate.now())) {
+            for (Long organizationId : contractMapper.selectOrganizationIdsByProjectId(p.getId(), LocalDate.now(),
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext())) {
                 notificationService.publishToOrganization(organizationId, "PROJECT_URGENT", "急募案件",
                         message, NotificationLinks.PROJECT_LIST, dedupeKey + "#o" + organizationId);
             }
@@ -455,7 +449,7 @@ public class NotificationGenerateService {
         String workMonth = YearMonth.from(LocalDate.now()).minusMonths(offset).toString();
         List<Long> contractIds = unacceptedContractIds(workMonth);
         for (Long contractId : contractIds) {
-            Contract contract = contractMapper.selectById(contractId);
+            Contract contract = contractMapper.selectByIdForTenant(contractId, tenant());
             if (contract == null) {
                 continue;
             }
@@ -482,7 +476,7 @@ public class NotificationGenerateService {
                         .isNotNull("submitted_at")
                         .le("submitted_at", today.minusDays(days).atStartOfDay()));
         for (com.ses.entity.Acceptance acceptance : pending) {
-            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(), tenant());
             if (contract == null) {
                 continue;
             }
@@ -504,7 +498,7 @@ public class NotificationGenerateService {
         List<com.ses.entity.Acceptance> rejected = acceptanceMapper.selectList(
                 new QueryWrapper<com.ses.entity.Acceptance>().eq("status", "差戻し"));
         for (com.ses.entity.Acceptance acceptance : rejected) {
-            Contract contract = contractMapper.selectById(acceptance.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(acceptance.getContractId(), tenant());
             if (contract == null) {
                 continue;
             }
@@ -526,7 +520,7 @@ public class NotificationGenerateService {
                         .eq("status", "確定"));
         Set<Long> result = new java.util.LinkedHashSet<>();
         for (com.ses.entity.WorkRecord record : records) {
-            Contract contract = contractMapper.selectById(record.getContractId());
+            Contract contract = contractMapper.selectByIdForTenant(record.getContractId(), tenant());
             if (contract == null || Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
                 continue;
             }
@@ -541,12 +535,7 @@ public class NotificationGenerateService {
 
     /** 顧客の担当営業（その顧客の契約sales_user_idの有効営業）＋管理者。 */
     private List<Long> resolveCustomerSalesUserIds(Long customerId) {
-        List<Long> salesIds = contractMapper.selectList(
-                        new QueryWrapper<Contract>()
-                                .eq("customer_id", customerId)
-                                .isNotNull("sales_user_id")
-                                .select("sales_user_id"))
-                .stream().map(Contract::getSalesUserId).distinct().collect(Collectors.toList());
+        List<Long> salesIds = contractMapper.selectSalesUserIdsByCustomerForTenant(customerId, tenant());
         return resolveSalesRecipients(salesIds);
     }
 
@@ -589,7 +578,7 @@ public class NotificationGenerateService {
         if (history != null) {
             return history.getOrganizationId();
         }
-        com.ses.entity.Engineer engineer = engineerMapper.selectById(contract.getEngineerId());
+        com.ses.entity.Engineer engineer = engineerMapper.selectByIdForTenant(contract.getEngineerId(), tenant());
         if (engineer != null && engineer.getOrganizationId() != null) {
             return engineer.getOrganizationId();
         }

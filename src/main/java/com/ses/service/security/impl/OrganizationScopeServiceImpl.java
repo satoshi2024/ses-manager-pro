@@ -220,6 +220,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedContractIds(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         com.ses.dto.report.ReportScopeSnapshot savedScope = ReportScopeContext.current();
         if (savedScope != null) {
             return savedScope.isCompanyWide() ? Set.of()
@@ -232,7 +233,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         return Set.copyOf(contractMapper.selectContractIdsByOrganizationScope(
                 new java.util.ArrayList<>(allowedOrganizationIds(asOf)),
                 new java.util.ArrayList<>(allowedDirectUserIds(asOf)),
-                asOf == null ? LocalDate.now() : asOf));
+                asOf == null ? LocalDate.now() : asOf, tenantId));
     }
 
     @Override
@@ -254,6 +255,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
 
     @Override
     public Set<Long> allowedCustomerIds(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (hasFullAccess()) {
             return Set.of();
         }
@@ -261,11 +263,12 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         if (contractIds.isEmpty()) {
             return Set.of();
         }
-        return Set.copyOf(contractMapper.selectCustomerIdsByContractIds(new java.util.ArrayList<>(contractIds)));
+        return Set.copyOf(contractMapper.selectCustomerIdsByContractIds(new java.util.ArrayList<>(contractIds), tenantId));
     }
 
     @Override
     public Set<Long> allowedProjectIds(LocalDate asOf) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (hasFullAccess()) {
             return Set.of();
         }
@@ -273,7 +276,7 @@ public class OrganizationScopeServiceImpl implements OrganizationScopeService {
         if (contractIds.isEmpty()) {
             return Set.of();
         }
-        return Set.copyOf(contractMapper.selectProjectIdsByContractIds(new java.util.ArrayList<>(contractIds)));
+        return Set.copyOf(contractMapper.selectProjectIdsByContractIds(new java.util.ArrayList<>(contractIds), tenantId));
     }
 
     @Override
