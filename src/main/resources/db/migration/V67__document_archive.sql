@@ -152,8 +152,11 @@ INSERT IGNORE INTO m_document_type (code, name, direction, retention_years, rete
   ('QUOTATION',        '見積書',           'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('WORK_REPORT',      '作業報告書',       'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('SIGNED_PDF',       '署名済PDF',        'OUTGOING', 10, 'SIGNED_AT',        1),
-  ('ESIGN_CERT',       '合意締結証明書',   'INCOMING', 10, 'SIGNED_AT',        1),
-  ('DISPATCH_LEDGER',  '派遣元管理台帳',   'INTERNAL',  3, 'DISPATCH_END',     1);
+  ('ESIGN_CERT',                       '合意締結証明書',   'INCOMING', 10, 'SIGNED_AT',        1),
+  ('DISPATCH_LEDGER',                  '派遣元管理台帳',   'INTERNAL',  3, 'DISPATCH_END',     1),
+  ('EMPLOYMENT_CONDITIONS_STATEMENT',  '就業条件明示書',   'OUTGOING',  3, 'DISPATCH_END',     1),
+  ('DISPATCH_NOTICE',                  '派遣先通知書',     'OUTGOING',  3, 'DISPATCH_END',     1),
+  ('INDIVIDUAL_CONTRACT',              '個別契約書',       'OUTGOING',  3, 'DISPATCH_END',     1);
 
 -- ============================================================
 -- メニュー権限マッピング (m_menu / t_role_menu)

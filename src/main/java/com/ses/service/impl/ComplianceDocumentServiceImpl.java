@@ -619,6 +619,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
         com.ses.dto.document.DocumentRegisterRequest registerRequest =
                 com.ses.dto.document.DocumentRegisterRequest.builder()
                         .documentType(documentType)
+                        .direction("DISPATCH_LEDGER".equals(documentType) ? "INTERNAL" : "OUTGOING")
                         .title(messageSource.getMessage("doc.title." + documentType,
                                 null, documentType, org.springframework.context.i18n.LocaleContextHolder.getLocale()))
                         .counterpartyType("CUSTOMER")
