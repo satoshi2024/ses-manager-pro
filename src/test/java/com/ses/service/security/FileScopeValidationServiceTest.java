@@ -379,7 +379,6 @@ class FileScopeValidationServiceTest {
         Document document = new Document();
         document.setDocumentType("CERTIFICATION_EVIDENCE");
         document.setTenantId("default");
-        when(documentMapper.selectById(9100L)).thenReturn(document);
         when(documentMapper.selectOne(any())).thenReturn(document);
 
         EngineerCertification record = new EngineerCertification();
@@ -391,7 +390,6 @@ class FileScopeValidationServiceTest {
         recordLink.setTargetType("CERTIFICATION_RECORD");
         recordLink.setTargetId(200L);
         when(documentLinkMapper.selectList(any())).thenReturn(List.of(recordLink));
-        when(engineerCertificationMapper.selectById(200L)).thenReturn(record);
         when(engineerCertificationMapper.selectOne(any())).thenReturn(record);
         loginAs("HR");
 
