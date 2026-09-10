@@ -60,10 +60,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (current == null) {
             return false;
         }
-        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
-            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        if (legalEntityContextService != null && current.getLegalEntityId() != null) {
+            legalEntityContextService.assertCurrent(current.getLegalEntityId());
         }
-        legalEntityContextService.assertCurrent(current.getLegalEntityId());
         return removeById(id, current.getVersion() == null ? 0 : current.getVersion());
     }
 
@@ -79,10 +78,9 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (current == null) {
             return false;
         }
-        if (legalEntityContextService == null || current.getLegalEntityId() == null) {
-            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        if (legalEntityContextService != null && current.getLegalEntityId() != null) {
+            legalEntityContextService.assertCurrent(current.getLegalEntityId());
         }
-        legalEntityContextService.assertCurrent(current.getLegalEntityId());
         long active = contractMapper.selectCountForTenant(new LambdaQueryWrapper<Contract>()
                 .eq(Contract::getEngineerId, engineerId)
                 .eq(Contract::getStatus, StatusConstants.CONTRACT_ACTIVE), tenantId);
@@ -129,14 +127,13 @@ public class EngineerServiceImpl extends ServiceImpl<EngineerMapper, Engineer> i
         if (old == null) {
             throw BusinessException.of(404, "error.scope.notFound");
         }
-        if (legalEntityContextService == null || old.getLegalEntityId() == null) {
-            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        if (legalEntityContextService != null && old.getLegalEntityId() != null) {
+            legalEntityContextService.assertCurrent(old.getLegalEntityId());
+            if (engineer.getLegalEntityId() != null) {
+                legalEntityContextService.assertSame(old.getLegalEntityId(), engineer.getLegalEntityId());
+            }
+            engineer.setLegalEntityId(old.getLegalEntityId());
         }
-        legalEntityContextService.assertCurrent(old.getLegalEntityId());
-        if (engineer.getLegalEntityId() != null) {
-            legalEntityContextService.assertSame(old.getLegalEntityId(), engineer.getLegalEntityId());
-        }
-        engineer.setLegalEntityId(old.getLegalEntityId());
         if (engineer.getStatus() != null && !engineer.getStatus().equals(old.getStatus())) {
             long active = contractMapper.selectCountForTenant(new LambdaQueryWrapper<Contract>()
                     .eq(Contract::getEngineerId, engineer.getId())

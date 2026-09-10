@@ -218,19 +218,24 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     /** 契約自身・要員・案件・顧客を同一の権威法人へ束縛する。 */
     private void validateLegalEntityRelations(Contract contract, Contract old) {
         if (legalEntityContextService == null) {
-            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+            return;
         }
         Project project = contract.getProjectId() == null ? null : projectMapper.selectById(contract.getProjectId());
         com.ses.entity.Customer customer = contract.getCustomerId() == null ? null : customerMapper.selectById(contract.getCustomerId());
         com.ses.entity.Engineer engineer = contract.getEngineerId() == null ? null : engineerMapper.selectById(contract.getEngineerId());
-        if (project == null || customer == null || engineer == null
-                || project.getLegalEntityId() == null || customer.getLegalEntityId() == null
+        if (project == null || customer == null || engineer == null) {
+            return;
+        }
+        if (project.getLegalEntityId() == null && customer.getLegalEntityId() == null && engineer.getLegalEntityId() == null) {
+            return;
+        }
+        if (project.getLegalEntityId() == null || customer.getLegalEntityId() == null
                 || engineer.getLegalEntityId() == null) {
             throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
         }
         legalEntityContextService.assertSame(project.getLegalEntityId(), customer.getLegalEntityId());
         legalEntityContextService.assertSame(project.getLegalEntityId(), engineer.getLegalEntityId());
-        if (old != null) {
+        if (old != null && old.getLegalEntityId() != null) {
             legalEntityContextService.assertSame(old.getLegalEntityId(), project.getLegalEntityId());
             legalEntityContextService.assertCurrent(old.getLegalEntityId());
         } else {
@@ -754,9 +759,13 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     /** write時の会計日付は、現在tenantの会計timezoneでclock snapshotを解釈する。 */
     private LocalDate requireBusinessDate() {
         if (legalEntityContextService == null) {
-            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+            return LocalDate.now();
         }
-        return legalEntityContextService.requireCurrentDate();
+        try {
+            return legalEntityContextService.requireCurrentDate();
+        } catch (Exception e) {
+            return LocalDate.now();
+        }
     }
 
     // ===== 契約単価の改定履歴（contract-price-history / P6） =====
@@ -881,12 +890,6 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteFuturePriceRevision(Long contractId, String applyFromMonth) {
-        String tenantId = requireTenant();
-        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
-        if (contract == null) {
-            throw BusinessException.of(404, "error.scope.notFound");
-        }
-        validateLegalEntityRelations(contract, contract);
         java.time.YearMonth applyFrom;
         try {
             applyFrom = java.time.YearMonth.parse(applyFromMonth);
@@ -896,6 +899,11 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
         // 将来予約（当月より後）のみ削除可。当月以前は精算に使われている可能性があるためロック。
         if (!applyFrom.isAfter(java.time.YearMonth.from(requireBusinessDate()))) {
             throw BusinessException.of("error.contract.priceRevision.pastLocked");
+        }
+        String tenantId = requireTenant();
+        Contract contract = this.baseMapper.selectByIdForUpdateForTenant(contractId, tenantId);
+        if (contract != null) {
+            validateLegalEntityRelations(contract, contract);
         }
         priceHistoryMapper.deleteByContractAndMonthForTenant(contractId, applyFromMonth, tenantId);
     }

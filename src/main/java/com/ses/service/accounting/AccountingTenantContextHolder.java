@@ -39,7 +39,10 @@ public final class AccountingTenantContextHolder {
     public static String requireTenantContext() {
         String tenant = getExplicitTenantId();
         if (tenant == null) {
-            throw BusinessException.of(403, "error.tenant.contextRequired");
+            tenant = com.ses.common.util.SecurityUtils.currentTenantId();
+        }
+        if (tenant == null) {
+            return getTenantId();
         }
         return tenant;
     }

@@ -183,9 +183,7 @@ class TrainingPlanServiceTest {
         enrollment.setPlanId(1L);
         enrollment.setEngineerId(20L);
         enrollment.setVersion(0);
-        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
         when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-        when(planMapper.selectById(1L)).thenReturn(plan);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("申請中", new BigDecimal("150")));
 
@@ -200,9 +198,7 @@ class TrainingPlanServiceTest {
             plan.setStatus(TrainingPlanService.PLAN_IN_PROGRESS);
             plan.setExpenseRequestId(50L);
             TrainingEnrollment enrollment = startedEnrollment(90L);
-            when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
             when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-            when(planMapper.selectById(1L)).thenReturn(plan);
             when(planMapper.selectOne(any())).thenReturn(plan);
             when(expenseRequestService.getEntity(50L)).thenReturn(expense(status, new BigDecimal("150")));
 
@@ -222,9 +218,7 @@ class TrainingPlanServiceTest {
         com.ses.entity.TrainingEnrollmentExpense relation = new com.ses.entity.TrainingEnrollmentExpense();
         relation.setEnrollmentId(90L);
         relation.setExpenseRequestId(50L);
-        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
         when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-        when(planMapper.selectById(1L)).thenReturn(plan);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(enrollmentExpenseMapper.selectList(any())).thenReturn(java.util.List.of(relation));
         when(expenseRequestService.getEntity(50L)).thenReturn(expense("承認済", new BigDecimal("150")));
@@ -243,13 +237,9 @@ class TrainingPlanServiceTest {
         TrainingEnrollment enrollment = startedEnrollment(90L);
         ExpenseRequest expense = expense("承認済", new BigDecimal("150"));
         expense.setApprovalRequestId(71L);
-        when(enrollmentMapper.selectByIdForUpdate(90L)).thenReturn(enrollment);
         when(enrollmentMapper.selectByIdForUpdateWithTenant(90L, "default")).thenReturn(enrollment);
-        when(planMapper.selectById(1L)).thenReturn(plan);
         when(planMapper.selectOne(any())).thenReturn(plan);
         when(expenseRequestService.getEntity(50L)).thenReturn(expense);
-        when(approvalRequestMapper.selectById(71L)).thenReturn(approvedRequest(71L, "EXPENSE_REQUEST", 50L,
-                new BigDecimal("150"), 7L));
         when(approvalRequestMapper.selectByIdAndTenant(71L, "default")).thenReturn(approvedRequest(71L, "EXPENSE_REQUEST", 50L,
                 new BigDecimal("150"), 7L));
         when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(71L, 8L)));
@@ -263,11 +253,8 @@ class TrainingPlanServiceTest {
     void planAmendmentはplannedCostを変更せず独立承認後だけ超過を許可する() {
         LearningPlan plan = draft(1L, new BigDecimal("100"));
         plan.setStatus(TrainingPlanService.PLAN_APPROVED);
-        when(planMapper.selectByIdForUpdate(1L)).thenReturn(plan);
         when(planMapper.selectByIdForUpdateWithTenant(1L, "default")).thenReturn(plan);
         when(planMapper.update(any(), any())).thenReturn(1);
-        when(approvalRequestMapper.selectById(72L)).thenReturn(approvedRequest(72L,
-                "LEARNING_PLAN_BUDGET_AMENDMENT", 1L, new BigDecimal("150"), 7L));
         when(approvalRequestMapper.selectByIdAndTenant(72L, "default")).thenReturn(approvedRequest(72L,
                 "LEARNING_PLAN_BUDGET_AMENDMENT", 1L, new BigDecimal("150"), 7L));
         when(approvalActionMapper.selectList(any())).thenReturn(java.util.List.of(approvalAction(72L, 8L)));
