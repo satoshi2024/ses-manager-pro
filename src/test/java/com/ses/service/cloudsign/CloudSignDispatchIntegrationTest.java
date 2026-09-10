@@ -80,6 +80,9 @@ class CloudSignDispatchIntegrationTest {
     @Autowired
     private ContractTemplateMapper templateMapper;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @MockBean
     private CloudSignApiClient api;
 
@@ -92,6 +95,12 @@ class CloudSignDispatchIntegrationTest {
         documentMapper.delete(null);
         templateMapper.delete(null);
         contractMapper.delete(null);
+        jdbcTemplate.update("DELETE FROM t_project WHERE id = 3");
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = 3");
+        jdbcTemplate.update("DELETE FROM t_engineer WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (3, 'Dispatch Customer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_engineer (id, full_name, tenant_id, deleted_flag) VALUES (1, 'Dispatch Engineer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_project (id, project_name, customer_id, deleted_flag) VALUES (3, 'Dispatch Project', 3, 0)");
 
         ContractTemplate template = new ContractTemplate();
         template.setName("dispatch-test-template");
@@ -107,6 +116,7 @@ class CloudSignDispatchIntegrationTest {
         contract.setEngineerId(1L);
         contract.setProjectId(3L);
         contract.setCustomerId(3L);
+        contract.setTenantId("default");
         contract.setStartDate(LocalDate.now());
         contract.setSellingPrice(java.math.BigDecimal.valueOf(500000));
         contract.setCostPrice(java.math.BigDecimal.valueOf(300000));

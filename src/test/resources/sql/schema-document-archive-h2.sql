@@ -26,13 +26,17 @@ CREATE TABLE m_document_type (
 INSERT INTO m_document_type
   (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
 VALUES
+  ('CONTRACT', '契約書', 'OUTGOING', 10, 'CLOSED_AT', 1),
   ('INVOICE_OUT', '請求書（発行）', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('INVOICE_IN', '請求書（受領）', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
-  ('CONTRACT', '契約書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('QUOTATION', '見積書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('WORK_REPORT', '作業報告書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('SIGNED_PDF', '署名済PDF', 'OUTGOING', 10, 'SIGNED_AT', 1),
+  ('ESIGN_CERT', '合意締結証明書', 'INCOMING', 10, 'SIGNED_AT', 1),
+  ('DISPATCH_LEDGER', '派遣元管理台帳', 'INTERNAL', 3, 'DISPATCH_END', 1),
   ('ORDER_RECEIVED', '注文書（受領）', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
   ('ORDER_ACKNOWLEDGEMENT', '注文請書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('ACCEPTANCE', '検収書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
-  ('ESIGN_CERT', '電子署名証明書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
   ('SERVICE_REQUEST_ATTACHMENT', 'サービス依頼添付', 'INCOMING', 10, 'TRANSACTION_DATE', 1);
 
 CREATE TABLE t_document (

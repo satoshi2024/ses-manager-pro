@@ -94,6 +94,10 @@ class CloudSignArtifactIntegrationTest {
         jdbcTemplate.execute("DELETE FROM t_document_link");
         jdbcTemplate.execute("DELETE FROM t_document");
         when(fileScanner.scan(any(), any())).thenReturn(FileScanResult.clean("clean"));
+        jdbcTemplate.update("DELETE FROM t_contract WHERE id = 1");
+        jdbcTemplate.update("DELETE FROM m_customer WHERE id = 1");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, tenant_id, deleted_flag) VALUES (1, 'Artifact Customer', 'default', 0)");
+        jdbcTemplate.update("INSERT INTO t_contract (id, contract_no, customer_id, tenant_id, deleted_flag) VALUES (1, 'CON-1', 1, 'default', 0)");
     }
 
     private ContractDocument insertCompleted(String signedPath, String certPath) {
