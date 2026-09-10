@@ -779,7 +779,7 @@ public class ContractServiceImpl extends ServiceImpl<ContractMapper, Contract> i
                         contract.getSettlementHoursMax(),
                         wr.getActualHours()) : null;
                 int updated = workRecordMapper.updateBillingAndPayment(
-                        wr.getId(), wr.getActualHours(), bAmt, pAmt, wr.getVersion());
+                        wr.getId(), wr.getActualHours(), bAmt, pAmt, wr.getVersion(), tenantId);
                 if (updated != 1) {
                     throw BusinessException.of(409, "error.common.optimisticLock");
                 }

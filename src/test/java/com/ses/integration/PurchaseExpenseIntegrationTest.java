@@ -151,6 +151,7 @@ class PurchaseExpenseIntegrationTest {
         contract.setEngineerId(1L);
         contract.setProjectId(1L);
         contract.setCustomerId(1L);
+        contract.setTenantId("default");
         contract.setContractType("準委任");
         contract.setStatus("稼動中");
         contract.setStartDate(LocalDate.of(2026, 1, 1));
@@ -207,7 +208,16 @@ class PurchaseExpenseIntegrationTest {
     }
 
     /** 共有H2の別コンテキストでseed行が削除されても、固定IDに依存する既存テストの所有者を復元する。 */
-    private void ensureCanonicalOwnerRows() {
+     private void ensureCanonicalOwnerRows() {
+         Integer customerCount = jdbcTemplate.queryForObject(
+                 "SELECT COUNT(*) FROM m_customer WHERE id = 1", Integer.class);
+         if (customerCount == null || customerCount == 0) {
+             jdbcTemplate.update("INSERT INTO m_customer "
+                             + "(id, company_name, tenant_id, deleted_flag) "
+                             + "VALUES (1, '会計連携テスト顧客', 'default', 0)");
+         } else {
+             jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+         }
         Integer userCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM sys_user WHERE id = 1", Integer.class);
         if (userCount == null || userCount == 0) {

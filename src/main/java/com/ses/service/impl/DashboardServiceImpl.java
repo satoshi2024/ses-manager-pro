@@ -94,12 +94,6 @@ public class DashboardServiceImpl implements DashboardService {
         if (!queryMonths.contains(previousMonth)) queryMonths.add(previousMonth);
 
         List<String> monthStrs = queryMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
-        // 確定実績を月別に一括ロードし、月ごとに contract_id -> record へ変換する(共通口径サービスへ渡す形)。
-        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
-                new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
-        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
-                Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
-
         // チャート対象月の末日までを上限にする(旧: 当月末+1ヶ月だと下々月開始契約がFY図から欠落する)。
         // 月別の対象判定は MonthlyRevenueCalcService.isTargetInMonth に委ねる。
         LocalDate limitDate = targetMonths.get(targetMonths.size() - 1).atEndOfMonth();
@@ -110,6 +104,12 @@ public class DashboardServiceImpl implements DashboardService {
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
                 .le("start_date", limitDate);
         List<Contract> allContracts = scopedContracts(contractQuery);
+        // 確定実績は、既に解決した契約母集団とtenantの両方をSQLで限定する。
+        List<Long> contractIds = allContracts.stream().map(Contract::getId).toList();
+        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper
+                .selectConfirmedByWorkMonthsAndContractIdsForTenant(monthStrs, contractIds, tenantId)
+                .stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
+                        Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();

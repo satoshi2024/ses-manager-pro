@@ -147,7 +147,7 @@ public class NotificationGenerateService {
         YearMonth targetMonth = YearMonth.from(today).minusMonths(1);
         String workMonth = targetMonth.toString();
         String monthEnd = targetMonth.atEndOfMonth().toString();
-        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGrid(workMonth, monthEnd);
+        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGrid(workMonth, monthEnd, tenantId);
         for (WorkRecordGridDto row : rows) {
             if (isSubmitted(row.getStatus())) {
                 continue;
@@ -514,10 +514,8 @@ public class NotificationGenerateService {
 
     /** 未提出/未検収の契約ID（確定済み・検収要・検収済acceptanceが無い実績の契約）。 */
     private List<Long> unacceptedContractIds(String workMonth) {
-        List<com.ses.entity.WorkRecord> records = workRecordMapper.selectList(
-                new QueryWrapper<com.ses.entity.WorkRecord>()
-                        .eq("work_month", workMonth)
-                        .eq("status", "確定"));
+        List<com.ses.entity.WorkRecord> records = workRecordMapper.selectByWorkMonthAndStatusesForTenant(
+                workMonth, List.of("確定"), tenant());
         Set<Long> result = new java.util.LinkedHashSet<>();
         for (com.ses.entity.WorkRecord record : records) {
             Contract contract = contractMapper.selectByIdForTenant(record.getContractId(), tenant());

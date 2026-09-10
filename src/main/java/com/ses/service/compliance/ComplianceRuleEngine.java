@@ -126,6 +126,7 @@ public class ComplianceRuleEngine {
     }
 
     private ComplianceRuleContext buildContext(Contract contract) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Integer maxLayer = bpPaymentMapper.selectMaxLayerOrderByContractId(contract.getId());
         ContractComplianceProfile profile = profileMapper.selectOne(
                 new LambdaQueryWrapper<ContractComplianceProfile>()
@@ -140,9 +141,7 @@ public class ComplianceRuleEngine {
                         .eq(DocumentDelivery::getContractId, contract.getId()));
         List<WorkRecordDaily> dailies = new ArrayList<>();
         if (contract.getEngineerId() != null) {
-            List<WorkRecord> records = workRecordMapper.selectList(
-                    new LambdaQueryWrapper<WorkRecord>()
-                            .eq(WorkRecord::getContractId, contract.getId()));
+            List<WorkRecord> records = workRecordMapper.selectByContractIdForTenant(contract.getId(), tenantId);
             if (!records.isEmpty()) {
                 List<Long> recordIds = records.stream().map(WorkRecord::getId).toList();
                 dailies = workRecordDailyMapper.selectList(

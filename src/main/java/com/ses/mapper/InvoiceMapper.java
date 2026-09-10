@@ -358,8 +358,14 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
         INNER JOIN t_contract c ON w.contract_id = c.id
         INNER JOIN t_engineer e ON c.engineer_id = e.id
         INNER JOIN t_project p ON c.project_id = p.id
-        LEFT JOIN m_customer cst ON c.customer_id = cst.id
-        WHERE c.deleted_flag = 0
+        INNER JOIN m_customer cst ON c.customer_id = cst.id
+                                     AND cst.tenant_id IS NOT NULL
+                                     AND cst.tenant_id = c.tenant_id
+                                     AND cst.tenant_id = #{tenantId}
+                                     AND cst.deleted_flag = 0
+        WHERE c.tenant_id IS NOT NULL
+          AND c.tenant_id = #{tenantId}
+          AND c.deleted_flag = 0
           AND w.work_month = #{billingMonth}
           AND w.status = '確定'
           AND ((c.acceptance_required = 0 AND c.acceptance_exemption_reason IS NOT NULL AND TRIM(c.acceptance_exemption_reason) != '') OR EXISTS (
@@ -372,7 +378,42 @@ public interface InvoiceMapper extends BaseMapper<Invoice> {
               JOIN t_invoice i ON it.invoice_id = i.id AND i.deleted_flag = 0
           )
     """)
-    List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsAll(@Param("billingMonth") String billingMonth);
+    List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsAll(@Param("billingMonth") String billingMonth,
+                                                             @Param("tenantId") String tenantId);
+
+    default List<UnbilledWorkRecordDto> selectUnbilledWorkRecordsAll(String billingMonth) {
+        return selectUnbilledWorkRecordsAll(billingMonth,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+    }
+
+    /** 月次締めの未回収請求も現在tenantの顧客ownershipだけを集計する。 */
+    @Select("""
+        SELECT
+            i.id AS invoiceId,
+            i.invoice_no AS invoiceNo,
+            i.customer_id AS customerId,
+            c.company_name AS customerName,
+            i.billing_month AS billingMonth,
+            i.status AS status,
+            i.total AS total,
+            COALESCE(p.paid_total, 0) AS paidTotal,
+            i.total - COALESCE(p.paid_total, 0) AS balance,
+            i.due_date AS dueDate
+        FROM t_invoice i
+        INNER JOIN m_customer c ON c.id = i.customer_id
+          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
+          AND c.deleted_flag = 0
+        LEFT JOIN (
+            SELECT invoice_id, SUM(amount + fee) AS paid_total
+            FROM t_invoice_payment
+            GROUP BY invoice_id
+        ) p ON p.invoice_id = i.id
+        WHERE i.deleted_flag = 0
+          AND i.status <> '入金済'
+          AND i.total - COALESCE(p.paid_total, 0) > 0
+        ORDER BY i.customer_id, i.due_date
+        """)
+    List<InvoiceBalanceDto> selectOutstandingBalancesForTenant(@Param("tenantId") String tenantId);
 
     /**
      * 請求生成時に検収済acceptance行をFOR UPDATEでロックする（R09-P2-03 / design §5.3）。

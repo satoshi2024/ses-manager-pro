@@ -12,6 +12,7 @@ import com.ses.mapper.BpPaymentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.InvoiceItemMapper;
 import com.ses.mapper.WorkRecordMapper;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -83,8 +85,96 @@ class WorkRecordServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         // ServiceImpl の baseMapper フィールドを手動で注入
         ReflectionTestUtils.setField(workRecordService, "baseMapper", workRecordMapper);
+
+        // tenant-aware SQLへ移行したサービスの既存fixtureを、旧モックの期待値から明示tenant付きへ橋渡しする。
+        // 実際のMapper実装では各default委譲ではなく、tenant条件付きSQLが実行される。
+        lenient().doAnswer(inv -> workRecordMapper.selectById(inv.getArgument(0)))
+                .when(workRecordMapper).selectByIdForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectByIdForUpdate(inv.getArgument(0)))
+                .when(workRecordMapper).selectByIdForUpdateForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectByContractIdAndMonthForUpdate(
+                        inv.getArgument(0), inv.getArgument(1)))
+                .when(workRecordMapper).selectByContractIdAndMonthForUpdateForTenant(
+                        anyLong(), anyString(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectWorkMonthById(inv.getArgument(0)))
+                .when(workRecordMapper).selectWorkMonthByIdForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectByIdScoped(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3),
+                        inv.getArgument(4), inv.getArgument(5)))
+                .when(workRecordMapper).selectByIdScoped(anyLong(), any(LocalDate.class), anyBoolean(),
+                        anyList(), anyList(), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectMonthlyGrid(inv.getArgument(0), inv.getArgument(1)))
+                .when(workRecordMapper).selectMonthlyGrid(anyString(), anyString(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectMonthlyGridPage(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3), inv.getArgument(4)))
+                .when(workRecordMapper).selectMonthlyGridPage(any(), anyString(), anyString(), any(), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectMonthlyGridScoped(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3),
+                        inv.getArgument(4), inv.getArgument(5), inv.getArgument(6)))
+                .when(workRecordMapper).selectMonthlyGridScoped(anyString(), anyString(), any(LocalDate.class),
+                        anyBoolean(), anyList(), anyList(), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectMonthlyGridScopedPage(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3),
+                        inv.getArgument(4), inv.getArgument(5), inv.getArgument(6), inv.getArgument(7), inv.getArgument(8),
+                        inv.getArgument(9)))
+                .when(workRecordMapper).selectMonthlyGridScopedPage(any(), anyString(), anyString(), any(LocalDate.class),
+                        anyBoolean(), anyList(), anyList(), any(), any(), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectPendingApprovalPage(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2)))
+                .when(workRecordMapper).selectPendingApprovalPage(any(), anyString(), anyString(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectOldestPendingUpdatedAt(
+                        inv.getArgument(0), inv.getArgument(1)))
+                .when(workRecordMapper).selectOldestPendingUpdatedAt(anyString(), anyString(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectList(new QueryWrapper<WorkRecord>()))
+                .when(workRecordMapper).selectByWorkMonthAndStatusesForTenant(anyString(), anyList(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.selectEmploymentTypeByContractId(inv.getArgument(0)))
+                .when(workRecordMapper).selectEmploymentTypeByContractIdForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<WorkRecord>()))
+                .when(workRecordMapper).updateToSubmittedForTenant(anyLong(),
+                        org.mockito.ArgumentMatchers.<Integer>nullable(Integer.class), eq("default"));
+        lenient().doAnswer(inv -> {
+            com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<WorkRecord> wrapper =
+                    new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<>();
+            wrapper.set("status", "確定")
+                    .set("organization_id", inv.getArgument(2))
+                    .set("cost_center_id", inv.getArgument(3))
+                    .set("accounting_dimension_frozen", 1);
+            return workRecordMapper.update(null, wrapper);
+        }).when(workRecordMapper).updateToConfirmedForTenant(anyLong(),
+                org.mockito.ArgumentMatchers.<Integer>nullable(Integer.class),
+                org.mockito.ArgumentMatchers.<Long>nullable(Long.class),
+                org.mockito.ArgumentMatchers.<Long>nullable(Long.class), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<WorkRecord>()))
+                .when(workRecordMapper).updateToRejectedForTenant(anyLong(),
+                        org.mockito.ArgumentMatchers.<Integer>nullable(Integer.class), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.updateById((WorkRecord) inv.getArgument(0)))
+                .when(workRecordMapper).updateByIdForTenant(any(WorkRecord.class), any(), eq("default"));
+        lenient().doAnswer(inv -> workRecordMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<WorkRecord>()))
+                .when(workRecordMapper).updateToInputForTenant(anyLong(),
+                        org.mockito.ArgumentMatchers.<Integer>nullable(Integer.class), eq("default"));
+
+        lenient().doAnswer(inv -> contractMapper.selectByIdForUpdate(inv.getArgument(0)))
+                .when(contractMapper).selectByIdForUpdateForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> contractMapper.selectById(inv.getArgument(0)))
+                .when(contractMapper).selectByIdForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> contractMapper.selectOrganizationIdsByContractIds(inv.getArgument(0)))
+                .when(contractMapper).selectOrganizationIdsByContractIds(anyList(), eq("default"));
+        lenient().doAnswer(inv -> engineerMapper.selectById(inv.getArgument(0)))
+                .when(engineerMapper).selectByIdForTenant(anyLong(), eq("default"));
+        lenient().doAnswer(inv -> userOrganizationMapper.selectPrimaryOrganizationId(
+                        inv.getArgument(1), inv.getArgument(2)))
+                .when(userOrganizationMapper).selectPrimaryOrganizationIdByTenant(
+                        eq("default"), anyLong(), any(LocalDate.class));
+        lenient().doAnswer(inv -> engineerAccountLinkMapper.selectByEngineerId(inv.getArgument(0)))
+                .when(engineerAccountLinkMapper).selectByEngineerIdAndTenant(anyLong(), eq("default"));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test
@@ -572,14 +662,18 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_支払済BP支払ありで例外() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setVersion(0); r1.setStatus("確定"); r1.setContractId(1L);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+        when(contractMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
+        doReturn(Collections.singletonList(r1)).when(workRecordMapper)
+                .selectByWorkMonthAndStatusesForTenant(eq(workMonth), anyList(), eq("default"));
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
         when(bpPaymentMapper.selectCount(any())).thenReturn(1L);
@@ -594,14 +688,22 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_未払のみ成功() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setVersion(0); r1.setStatus("確定"); r1.setContractId(1L);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+        when(contractMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
+        doReturn(Collections.singletonList(r1)).when(workRecordMapper)
+                .selectByWorkMonthAndStatusesForTenant(eq(workMonth), anyList(), eq("default"));
+        doAnswer(inv -> {
+            assertThat((Integer) inv.getArgument(1)).isEqualTo(0);
+            return 1;
+        }).when(workRecordMapper).updateToInputForTenant(eq(1L), any(), eq("default"));
         doReturn(true).when(spyService).updateBatchById(any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
@@ -610,21 +712,25 @@ class WorkRecordServiceImplTest {
         spyService.reopenMonth(workMonth);
 
         assertThat(r1.getStatus()).isEqualTo("入力中");
-        verify(spyService, times(1)).updateBatchById(any());
+        verify(workRecordMapper, times(1)).updateToInputForTenant(eq(1L), eq(0), eq("default"));
         verify(bpPaymentMapper, times(1)).delete(any());
     }
 
     @Test
     void testReopenMonth_有効請求書の明細ありで例外() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setVersion(0); r1.setStatus("確定"); r1.setContractId(1L);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+        when(contractMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
+        doReturn(Collections.singletonList(r1)).when(workRecordMapper)
+                .selectByWorkMonthAndStatusesForTenant(eq(workMonth), anyList(), eq("default"));
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.singletonList("INV-202607-0001"));
 
@@ -636,14 +742,22 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_取消済み請求書のみで成功() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setVersion(0); r1.setStatus("確定"); r1.setContractId(1L);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+        when(contractMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(r1);
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
+        doReturn(Collections.singletonList(r1)).when(workRecordMapper)
+                .selectByWorkMonthAndStatusesForTenant(eq(workMonth), anyList(), eq("default"));
+        doAnswer(inv -> {
+            assertThat((Integer) inv.getArgument(1)).isEqualTo(0);
+            return 1;
+        }).when(workRecordMapper).updateToInputForTenant(eq(1L), any(), eq("default"));
         doReturn(true).when(spyService).updateBatchById(any());
         
         when(invoiceItemMapper.selectActiveInvoiceNosByWorkRecordIds(any())).thenReturn(Collections.emptyList());
@@ -652,7 +766,7 @@ class WorkRecordServiceImplTest {
         spyService.reopenMonth(workMonth);
 
         assertThat(r1.getStatus()).isEqualTo("入力中");
-        verify(spyService, times(1)).updateBatchById(any());
+        verify(workRecordMapper, times(1)).updateToInputForTenant(eq(1L), eq(0), eq("default"));
     }
 
     // ===== R4: 手動BP階層の保護 / confirm 金額同期 =====
@@ -660,11 +774,15 @@ class WorkRecordServiceImplTest {
     @Test
     void testReopenMonth_手動BP階層ありで拒否() {
         String workMonth = "2026-07";
-        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setStatus("確定"); r1.setContractId(1L);
+        WorkRecord r1 = new WorkRecord(); r1.setId(1L); r1.setVersion(0); r1.setStatus("確定"); r1.setContractId(1L);
         Contract contract = new Contract(); contract.setId(1L);
         when(contractMapper.selectByIdForUpdate(1L)).thenReturn(contract);
         when(contractMapper.selectById(1L)).thenReturn(contract);
         when(workRecordMapper.selectByIdForUpdate(1L)).thenReturn(r1);
+        when(contractMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(contract);
+        when(workRecordMapper.selectByIdForUpdateForTenant(1L, "default")).thenReturn(r1);
+        doReturn(Collections.singletonList(r1)).when(workRecordMapper)
+                .selectByWorkMonthAndStatusesForTenant(eq(workMonth), anyList(), eq("default"));
 
         WorkRecordServiceImpl spyService = spy(workRecordService);
         doReturn(Collections.singletonList(r1)).when(spyService).list(org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<WorkRecord>>any());
@@ -681,7 +799,7 @@ class WorkRecordServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("error.workRecord.manualBpDelete");
 
-        verify(spyService, never()).updateBatchById(any());
+        verify(workRecordMapper, never()).updateToInputForTenant(anyLong(), any(), eq("default"));
         verify(bpPaymentMapper, never()).delete(any());
     }
 

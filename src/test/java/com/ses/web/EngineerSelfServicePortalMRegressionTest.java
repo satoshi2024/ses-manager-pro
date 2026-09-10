@@ -447,6 +447,7 @@ class EngineerSelfServicePortalMRegressionTest {
         Customer customer = new Customer();
         customer.setCompanyName("テスト顧客-" + System.nanoTime());
         customer.setContactEmail("test" + System.nanoTime() + "@example.com");
+        customer.setTenantId("default");
         customerMapper.insert(customer);
 
         Project project = new Project();
@@ -468,6 +469,7 @@ class EngineerSelfServicePortalMRegressionTest {
         contractA.setEndDate(LocalDate.of(2026, 8, 31));
         contractA.setSellingPrice(new BigDecimal("700000"));
         contractA.setCostPrice(new BigDecimal("500000"));
+        contractA.setTenantId("default");
         contractMapper.insert(contractA);
 
         Contract contractB = new Contract();
@@ -481,6 +483,7 @@ class EngineerSelfServicePortalMRegressionTest {
         contractB.setEndDate(LocalDate.of(2026, 8, 31));
         contractB.setSellingPrice(new BigDecimal("700000"));
         contractB.setCostPrice(new BigDecimal("500000"));
+        contractB.setTenantId("default");
         contractMapper.insert(contractB);
 
         // Aが日次勤怠を登録
@@ -657,6 +660,7 @@ class EngineerSelfServicePortalMRegressionTest {
                 .password(name)
                 .realName(name)
                 .role("要員".equals(role) ? "管理者" : role)
+                .tenantId("default")
                 .status(1)
                 .build();
         sysUserMapper.insert(user);
@@ -671,6 +675,7 @@ class EngineerSelfServicePortalMRegressionTest {
                 .status("稼動中")
                 .nearestStation("新宿駅")
                 .organizationId(organizationId)
+                .tenantId("default")
                 .experienceYears(3)
                 .build();
         engineerMapper.insert(engineer);
@@ -684,6 +689,7 @@ class EngineerSelfServicePortalMRegressionTest {
         accountLinkMapper.delete(new LambdaQueryWrapper<EngineerAccountLink>()
                 .eq(EngineerAccountLink::getSysUserId, sysUserId));
         EngineerAccountLink link = new EngineerAccountLink();
+        link.setTenantId("default");
         link.setEngineerId(engineerId);
         link.setSysUserId(sysUserId);
         accountLinkMapper.insert(link);

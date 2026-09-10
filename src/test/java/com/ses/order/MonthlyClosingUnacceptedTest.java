@@ -6,6 +6,7 @@ import com.ses.mapper.SalesOrderMapper;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.NotificationGenerateService;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import com.ses.service.security.DataScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,26 +53,32 @@ class MonthlyClosingUnacceptedTest {
 
     @BeforeEach
     void setUp() {
+        AccountingTenantContextHolder.setTenantId("default");
         int offset = systemConfigService.getInt("acceptance.submission-target-month-offset", 1);
         targetWorkMonth = YearMonth.from(LocalDate.now()).minusMonths(offset).toString();
 
         String suffix = "-" + System.nanoTime();
-        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, deleted_flag) VALUES (?, 'B', 0)", "MC顧客" + suffix);
+        jdbcTemplate.update("INSERT INTO m_customer (company_name, trust_level, tenant_id, deleted_flag) VALUES (?, 'B', 'default', 0)", "MC顧客" + suffix);
         customerId = jdbcTemplate.queryForObject("SELECT id FROM m_customer WHERE company_name = ?", Long.class, "MC顧客" + suffix);
-        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, status) VALUES (?, '正社員', 'Bench')", "MC要員" + suffix);
+        jdbcTemplate.update("INSERT INTO t_engineer (full_name, employment_type, tenant_id, status) VALUES (?, '正社員', 'default', 'Bench')", "MC要員" + suffix);
         long engineerId = jdbcTemplate.queryForObject("SELECT id FROM t_engineer WHERE full_name = ?", Long.class, "MC要員" + suffix);
         jdbcTemplate.update("INSERT INTO t_project (project_name, customer_id, status) VALUES (?, ?, '募集中')", "MC案件" + suffix, customerId);
         long projectId = jdbcTemplate.queryForObject("SELECT id FROM t_project WHERE project_name = ?", Long.class, "MC案件" + suffix);
         jdbcTemplate.update(
-                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, start_date,"
+                "INSERT INTO t_contract (contract_no, engineer_id, project_id, customer_id, tenant_id, start_date,"
                         + " selling_price, cost_price, status, acceptance_required)"
-                        + " VALUES (?, ?, ?, ?, '2026-01-01', 600000, 300000, '稼動中', 1)",
+                        + " VALUES (?, ?, ?, ?, 'default', '2026-01-01', 600000, 300000, '稼動中', 1)",
                 "MC-C-" + suffix, engineerId, projectId, customerId);
         contractId = jdbcTemplate.queryForObject("SELECT id FROM t_contract WHERE contract_no = ?", Long.class, "MC-C-" + suffix);
         jdbcTemplate.update(
                 "INSERT INTO t_work_record (contract_id, work_month, actual_hours, billing_amount, status)"
                         + " VALUES (?, ?, 160.00, 600000, '確定')",
                 contractId, targetWorkMonth);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
     }
 
     @Test

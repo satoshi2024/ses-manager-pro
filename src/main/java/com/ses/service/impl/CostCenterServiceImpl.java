@@ -89,8 +89,9 @@ public class CostCenterServiceImpl extends ServiceImpl<CostCenterMapper, CostCen
                 new LambdaQueryWrapper<Invoice>().eq(Invoice::getCostCenterId, costCenterId));
         long bpPaymentReferences = bpPaymentMapper == null ? 0 : bpPaymentMapper.selectCount(
                 new LambdaQueryWrapper<BpPayment>().eq(BpPayment::getCostCenterId, costCenterId));
-        long workRecordReferences = workRecordMapper == null ? 0 : workRecordMapper.selectCount(
-                new LambdaQueryWrapper<com.ses.entity.WorkRecord>().eq(com.ses.entity.WorkRecord::getCostCenterId, costCenterId));
+        long workRecordReferences = workRecordMapper == null ? 0 : workRecordMapper.countByCostCenterIdForTenant(
+                costCenterId,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
         if (budgetReferences > 0 || snapshotReferences > 0 || engineerReferences > 0
                 || contractReferences > 0 || invoiceReferences > 0 || bpPaymentReferences > 0
                 || workRecordReferences > 0) {

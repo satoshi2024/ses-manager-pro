@@ -256,8 +256,7 @@ public class AccountingReconciliationServiceImpl implements AccountingReconcilia
         if (isManager) {
             bpPayments = bpPaymentMapper.selectForReconciliationScoped(month, new java.util.ArrayList<>(allowedOrgIds));
         } else {
-            List<WorkRecord> workRecords = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
-                    .eq(WorkRecord::getWorkMonth, month));
+            List<WorkRecord> workRecords = workRecordMapper.selectByWorkMonthForTenant(month, tenantId);
             List<Long> wrIds = workRecords.stream().map(WorkRecord::getId).toList();
             bpPayments = wrIds.isEmpty() ? Collections.emptyList() :
                     bpPaymentMapper.selectList(new LambdaQueryWrapper<BpPayment>().in(BpPayment::getWorkRecordId, wrIds));

@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,6 +81,9 @@ public class AccountingReconciliationTest {
     @Autowired
     private RestTemplate restTemplate;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
     private Customer customer;
@@ -87,6 +91,9 @@ public class AccountingReconciliationTest {
     @BeforeEach
     void setUp() {
         AccountingTenantContextHolder.setTenantId("default");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
+        jdbcTemplate.update("UPDATE m_customer SET tenant_id = 'default', deleted_flag = 0 WHERE id = 3");
+        jdbcTemplate.update("UPDATE t_contract SET tenant_id = 'default', deleted_flag = 0 WHERE id = 1");
         mockServer = MockRestServiceServer.bindTo(restTemplate).ignoreExpectOrder(true).build();
 
         connection = connectionService.getOrCreateConnection("default", null, "freee", "accounting");
@@ -100,6 +107,7 @@ public class AccountingReconciliationTest {
 
         customer = new Customer();
         customer.setCompanyName("照合テスト株式会社-" + UUID.randomUUID().toString().substring(0, 6));
+        customer.setTenantId("default");
         customerMapper.insert(customer);
     }
 

@@ -65,8 +65,9 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
     private final ObjectMapper objectMapper;
 
     private LocalDate resolveBpIssueDate(BpPayment bpPayment) {
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
         if (bpPayment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(), tenantId);
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
                 return java.time.YearMonth.parse(wr.getWorkMonth().trim()).atEndOfMonth();
             }
@@ -107,7 +108,8 @@ public class PurchaseExpensePaymentIntegrationServiceImpl implements PurchaseExp
 
         // 月次締めチェック (締め済み月への更新拒否)
         if (bpPayment.getWorkRecordId() != null) {
-            WorkRecord wr = workRecordMapper.selectById(bpPayment.getWorkRecordId());
+            WorkRecord wr = workRecordMapper.selectByIdForTenant(bpPayment.getWorkRecordId(),
+                    AccountingTenantContextHolder.requireTenantContext());
             if (wr != null && wr.getWorkMonth() != null && !wr.getWorkMonth().isBlank()) {
                 monthlyClosingService.assertOpenForUpdate(wr.getWorkMonth().trim());
             }

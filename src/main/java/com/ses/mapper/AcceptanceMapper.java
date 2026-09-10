@@ -82,7 +82,11 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
             a.version              AS version,
             c.acceptance_required  AS acceptanceRequired
         FROM t_work_record w
-        INNER JOIN t_contract c ON c.id = w.contract_id AND c.deleted_flag = 0
+        INNER JOIN t_contract c ON c.id = w.contract_id
+          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0
+        INNER JOIN m_customer mc ON mc.id = c.customer_id
+          AND mc.tenant_id IS NOT NULL AND mc.tenant_id = c.tenant_id
+          AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
         LEFT JOIN m_customer cst ON cst.id = c.customer_id
         LEFT JOIN t_project p ON p.id = c.project_id
@@ -191,7 +195,14 @@ public interface AcceptanceMapper extends BaseMapper<Acceptance> {
           </if>
         </script>
         """)
-    long countUnacceptedForClosing(@Param("workMonth") String workMonth, @Param("contractIds") List<Long> contractIds);
+    long countUnacceptedForClosing(@Param("workMonth") String workMonth,
+                                   @Param("contractIds") List<Long> contractIds,
+                                   @Param("tenantId") String tenantId);
+
+    default long countUnacceptedForClosing(String workMonth, List<Long> contractIds) {
+        return countUnacceptedForClosing(workMonth, contractIds,
+                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+    }
 
     /** dashboard用: 未検収売上（検収要・確定済・未検収済の実績の請求金額合計）。scopeは contractIds。 */
     @Select("""

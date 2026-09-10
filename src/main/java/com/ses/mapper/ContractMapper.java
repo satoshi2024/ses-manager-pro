@@ -30,7 +30,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
-            + "${ew.customSqlSegment}</script>")
+            + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     List<Contract> selectListForTenant(@org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -40,7 +40,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
-            + "${ew.customSqlSegment}</script>")
+            + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     Page<Contract> selectPageForTenant(Page<Contract> page,
                                        @org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
@@ -51,7 +51,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
-            + "${ew.customSqlSegment}</script>")
+            + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     long selectCountForTenant(@org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 

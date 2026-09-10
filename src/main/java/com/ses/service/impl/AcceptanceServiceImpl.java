@@ -77,7 +77,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
         if (Boolean.FALSE.equals(contract.getAcceptanceRequired())) {
             throw BusinessException.of(400, "error.acceptance.notRequired");
         }
-        WorkRecord workRecord = workRecordMapper.selectByContractIdAndMonthForUpdate(contractId, workMonth);
+        WorkRecord workRecord = workRecordMapper.selectByContractIdAndMonthForUpdateForTenant(
+                contractId, workMonth, tenantId);
         if (workRecord == null || !StatusConstants.WORK_RECORD_CONFIRMED.equals(workRecord.getStatus())) {
             throw BusinessException.of(409, "error.acceptance.workRecordNotConfirmed");
         }
@@ -160,7 +161,8 @@ public class AcceptanceServiceImpl extends ServiceImpl<AcceptanceMapper, Accepta
             throw BusinessException.of(409, "error.acceptance.statusTransitionInvalid",
                     acceptance.getStatus(), StatusConstants.ACCEPTANCE_SUBMITTED);
         }
-        WorkRecord workRecord = workRecordMapper.selectById(acceptance.getWorkRecordId());
+        String tenantId = AccountingTenantContextHolder.requireTenantContext();
+        WorkRecord workRecord = workRecordMapper.selectByIdForTenant(acceptance.getWorkRecordId(), tenantId);
         if (workRecord == null || !StatusConstants.WORK_RECORD_CONFIRMED.equals(workRecord.getStatus())) {
             throw BusinessException.of(409, "error.acceptance.workRecordNotConfirmed");
         }

@@ -236,6 +236,7 @@ public class AttendanceDiscrepancyServiceImpl implements AttendanceDiscrepancySe
     /** 対象月に稼働中の契約（engineer_id）のactual_hours合計を分へ換算して返す。 */
     private Map<Long, Integer> contractMinutesByEngineer(YearMonth target, Set<Long> engineerIds) {
         Map<Long, Integer> result = new HashMap<>();
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         if (engineerIds.isEmpty()) {
             return result;
         }
@@ -245,14 +246,13 @@ public class AttendanceDiscrepancyServiceImpl implements AttendanceDiscrepancySe
                 .and(w -> w.isNull(Contract::getEndDate)
                         .or().ge(Contract::getEndDate, target.atDay(1)))
                 .in(Contract::getStatus, "稼動中", "終了"),
-                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+                tenantId);
         if (contracts.isEmpty()) {
             return result;
         }
         List<Long> contractIds = contracts.stream().map(Contract::getId).toList();
-        List<WorkRecord> records = workRecordMapper.selectList(new LambdaQueryWrapper<WorkRecord>()
-                .in(WorkRecord::getContractId, contractIds)
-                .eq(WorkRecord::getWorkMonth, target.toString()));
+        List<WorkRecord> records = workRecordMapper.selectByContractIdsAndWorkMonthForTenant(
+                contractIds, target.toString(), tenantId);
         Map<Long, Long> engineerByContract = contracts.stream()
                 .collect(Collectors.toMap(Contract::getId, Contract::getEngineerId, (a, b) -> a));
         for (WorkRecord record : records) {

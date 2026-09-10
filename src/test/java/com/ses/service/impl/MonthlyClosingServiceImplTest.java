@@ -12,6 +12,7 @@ import com.ses.mapper.WorkRecordMapper;
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.SystemConfigService;
+import com.ses.service.accounting.AccountingTenantContextHolder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,16 +51,27 @@ class MonthlyClosingServiceImplTest {
 
     @BeforeEach
     void wireSnapshotService() {
+        AccountingTenantContextHolder.setTenantId("default");
         org.springframework.test.util.ReflectionTestUtils.setField(
                 service, "monthlyAccountingSnapshotService", monthlyAccountingSnapshotService);
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void clearTenantContext() {
+        AccountingTenantContextHolder.clear();
+    }
+
     private void stubEmptyAll() {
-        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString())).thenReturn(Collections.emptyList());
-        lenient().when(workRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
-        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString())).thenReturn(Collections.emptyList());
-        lenient().when(bpPaymentMapper.selectListWithDetails(anyString(), any())).thenReturn(Collections.emptyList());
-        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(Collections.emptyList());
+        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString(), eq("default")))
+                .thenReturn(Collections.emptyList());
+        lenient().when(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(anyString(), eq("default")))
+                .thenReturn(Collections.emptyList());
+        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString(), eq("default")))
+                .thenReturn(Collections.emptyList());
+        lenient().when(bpPaymentMapper.selectListWithDetailsForTenant(anyString(), any(), eq("default")))
+                .thenReturn(Collections.emptyList());
+        lenient().when(invoiceMapper.selectOutstandingBalancesForTenant(eq("default")))
+                .thenReturn(Collections.emptyList());
         lenient().when(systemConfigMapper.selectByIdForUpdate(anyString())).thenReturn(new com.ses.entity.SystemConfig());
         lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
     }
@@ -70,16 +82,17 @@ class MonthlyClosingServiceImplTest {
         entered.setWorkRecordId(5L);
         WorkRecordGridDto unentered = new WorkRecordGridDto();
         unentered.setWorkRecordId(null);
-        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString()))
+        lenient().when(workRecordMapper.selectMonthlyGrid(anyString(), anyString(), eq("default")))
                 .thenReturn(List.of(entered, unentered));
         WorkRecord wr = new WorkRecord();
         wr.setBillingAmount(new BigDecimal("1000")); // fix NPE
-        lenient().when(workRecordMapper.selectList(any())).thenReturn(List.of(wr));
+        lenient().when(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(anyString(), eq("default")))
+                .thenReturn(List.of(wr));
         UnbilledWorkRecordDto unbilled = new UnbilledWorkRecordDto();
         unbilled.setBillingAmount(new BigDecimal("2000")); // fix NPE
-        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString()))
+        lenient().when(invoiceMapper.selectUnbilledWorkRecordsAll(anyString(), eq("default")))
                 .thenReturn(List.of(unbilled));
-        lenient().when(bpPaymentMapper.selectListWithDetails(anyString(), eq("未払")))
+        lenient().when(bpPaymentMapper.selectListWithDetailsForTenant(anyString(), eq("未払"), eq("default")))
                 .thenReturn(List.of(new com.ses.dto.invoice.BpPaymentListDto()));
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(5));
@@ -88,7 +101,8 @@ class MonthlyClosingServiceImplTest {
         InvoiceBalanceDto notDue = new InvoiceBalanceDto();
         notDue.setDueDate(LocalDate.now().plusDays(5));
         notDue.setStatus("送付済");
-        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue, notDue));
+        lenient().when(invoiceMapper.selectOutstandingBalancesForTenant(eq("default")))
+                .thenReturn(List.of(overdue, notDue));
         lenient().when(systemConfigMapper.selectById(anyString())).thenReturn(new com.ses.entity.SystemConfig());
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
@@ -108,7 +122,8 @@ class MonthlyClosingServiceImplTest {
         InvoiceBalanceDto overdue = new InvoiceBalanceDto();
         overdue.setDueDate(LocalDate.now().minusDays(1));
         overdue.setStatus("送付済");
-        lenient().when(invoiceMapper.selectOutstandingBalances()).thenReturn(List.of(overdue));
+        lenient().when(invoiceMapper.selectOutstandingBalancesForTenant(eq("default")))
+                .thenReturn(List.of(overdue));
 
         MonthlyClosingSummaryDto s = service.summary("2026-06");
         assertTrue(s.isReadyToClose(), "(e)期限超過は締めを妨げない");
@@ -134,7 +149,8 @@ class MonthlyClosingServiceImplTest {
         stubEmptyAll();
         WorkRecord wr = new WorkRecord();
         wr.setBillingAmount(new BigDecimal("100"));
-        lenient().when(workRecordMapper.selectList(any())).thenReturn(List.of(wr)); // (b) 残あり
+        lenient().when(workRecordMapper.selectUnconfirmedByWorkMonthForTenant(anyString(), eq("default")))
+                .thenReturn(List.of(wr)); // (b) 残あり
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.confirmClosing("2026-06", 7L, "管理者"));

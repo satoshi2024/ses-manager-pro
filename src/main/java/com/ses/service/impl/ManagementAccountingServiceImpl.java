@@ -338,12 +338,12 @@ public class ManagementAccountingServiceImpl implements ManagementAccountingServ
 
     private Map<Long, WorkRecord> confirmedRecords(String month, java.util.Collection<Long> sourceIds) {
         Map<Long, WorkRecord> result = new HashMap<>();
-        QueryWrapper<WorkRecord> query = new QueryWrapper<WorkRecord>().eq("work_month", month).eq("status", "確定");
-        if (sourceIds != null) {
-            if (sourceIds.isEmpty()) return result;
-            query.in("id", sourceIds);
-        }
-        workRecordMapper.selectList(query).forEach(record -> result.put(record.getId(), record));
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
+        List<WorkRecord> records = sourceIds == null
+                ? workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(month), tenantId)
+                : workRecordMapper.selectConfirmedByWorkMonthAndIdsForTenant(month,
+                        new ArrayList<>(sourceIds), tenantId);
+        records.forEach(record -> result.put(record.getId(), record));
         return result;
     }
 

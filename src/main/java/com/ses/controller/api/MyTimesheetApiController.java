@@ -84,10 +84,12 @@ public class MyTimesheetApiController {
 
     @GetMapping
     public ApiResult<?> myTimesheet(@RequestParam String month) {
+        String tenantId = com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext();
         Long engineerId = currentEngineerId();
         // 不正な年月形式は400へ統一する（YearMonth.parse直呼びだと500になる／R3R-15）。
         String monthEnd = com.ses.common.util.DateUtils.parseYearMonth(month).atEndOfMonth().toString();
-        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGridForEngineer(engineerId, month, monthEnd);
+        List<WorkRecordGridDto> rows = workRecordMapper.selectMonthlyGridForEngineer(
+                engineerId, month, monthEnd, tenantId);
         List<Map<String, Object>> result = new ArrayList<>();
         for (WorkRecordGridDto row : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -97,8 +99,7 @@ public class MyTimesheetApiController {
             m.put("workRecordId", row.getWorkRecordId());
             m.put("version", row.getVersion());
             m.put("status", row.getStatus());
-            Contract c = contractMapper.selectByIdForTenant(row.getContractId(),
-                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+            Contract c = contractMapper.selectByIdForTenant(row.getContractId(), tenantId);
             if (c != null) {
                 m.put("contractStartDate", c.getStartDate());
                 m.put("contractEndDate", c.getEndDate());
@@ -114,8 +115,7 @@ public class MyTimesheetApiController {
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("month", month);
         resp.put("rows", result);
-        Engineer eng = engineerMapper.selectByIdForTenant(engineerId,
-                com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
+        Engineer eng = engineerMapper.selectByIdForTenant(engineerId, tenantId);
         if (eng != null) {
             resp.put("engineerName", eng.getFullName());
         }

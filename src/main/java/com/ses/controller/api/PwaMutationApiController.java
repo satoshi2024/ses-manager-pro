@@ -380,10 +380,9 @@ public class PwaMutationApiController {
                 throw BusinessException.of(403, "error.my.notOwner");
             }
             String month = text(payload, "workMonth", command.month());
-            WorkRecord row = workRecordMapper.selectOne(new LambdaQueryWrapper<WorkRecord>()
-                    .eq(WorkRecord::getContractId, contractId)
-                    .eq(WorkRecord::getWorkMonth, month)
-                    .last("LIMIT 1 FOR UPDATE"));
+            WorkRecord row = workRecordMapper.selectByContractIdAndMonthForUpdateForTenant(
+                    contractId, month,
+                    com.ses.service.accounting.AccountingTenantContextHolder.requireTenantContext());
             if (row == null) return new VersionSnapshot(0, Map.of("exists", false));
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("exists", true); data.put("id", row.getId()); data.put("version", value(row.getVersion()));

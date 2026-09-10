@@ -369,8 +369,9 @@ public class ExportApiController {
             String tenantId = AccountingTenantContextHolder.requireTenantContext();
             List<Contract> allContracts = contractMapper.selectListForTenant(new QueryWrapper<>(), tenantId);
             List<String> monthStrs = targetMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
-            Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
-                            new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定"))
+            List<Long> contractIds = allContracts.stream().map(Contract::getId).toList();
+            Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper
+                    .selectConfirmedByWorkMonthsAndContractIdsForTenant(monthStrs, contractIds, tenantId)
                     .stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
                             Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
             for (YearMonth ym : targetMonths) {
@@ -390,10 +391,13 @@ public class ExportApiController {
             if (allowedContractIds != null) contractQuery.in("id", allowedContractIds);
             List<Contract> monthContracts = contractMapper.selectListForTenant(contractQuery,
                     AccountingTenantContextHolder.requireTenantContext());
-            QueryWrapper<WorkRecord> workRecordQuery = new QueryWrapper<WorkRecord>()
-                    .eq("work_month", ym.toString()).eq("status", "確定");
-            if (allowedContractIds != null) workRecordQuery.in("contract_id", allowedContractIds);
-            Map<Long, WorkRecord> confirmed = workRecordMapper.selectList(workRecordQuery).stream()
+            List<WorkRecord> confirmedRecords = allowedContractIds == null
+                    ? workRecordMapper.selectConfirmedByWorkMonthsForTenant(List.of(ym.toString()),
+                            AccountingTenantContextHolder.requireTenantContext())
+                    : workRecordMapper.selectConfirmedByWorkMonthsAndContractIdsForTenant(
+                            List.of(ym.toString()), new java.util.ArrayList<>(allowedContractIds),
+                            AccountingTenantContextHolder.requireTenantContext());
+            Map<Long, WorkRecord> confirmed = confirmedRecords.stream()
                     .collect(Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1));
             rows.add(toMonthlyRevenueRow(ym, monthContracts, confirmed));
         }
