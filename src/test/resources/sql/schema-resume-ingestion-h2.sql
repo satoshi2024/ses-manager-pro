@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id       BIGINT,
   original_file_name    VARCHAR(255) NOT NULL,
   stored_file_name      VARCHAR(120) NOT NULL,
   file_ext              VARCHAR(10)  NOT NULL,

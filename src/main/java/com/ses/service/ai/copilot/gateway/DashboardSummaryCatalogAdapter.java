@@ -2,6 +2,7 @@ package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.dashboard.DashboardSummaryDto;
 import com.ses.service.DashboardService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
@@ -28,8 +29,15 @@ class DashboardSummaryCatalogAdapter extends CatalogAdapterSupport implements Ca
 
     @Override
     public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
-        DashboardSummaryDto summary = dashboardService.getSummary(parameters.fiscalYear());
-        String period = YearMonth.now().toString();
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    @Override
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope, CopilotExecutionContext context) {
+        requireContext(context);
+        DashboardSummaryDto summary = dashboardService.getSummary(parameters.fiscalYear(), context);
+        String period = context.asOfMonth().toString();
         List<MetricValue> values = new ArrayList<>();
         if (summary.getKpi() != null) {
             DashboardSummaryDto.KpiDto kpi = summary.getKpi();
@@ -40,6 +48,6 @@ class DashboardSummaryCatalogAdapter extends CatalogAdapterSupport implements Ca
             values.add(MetricValue.yen("kpi.unacceptedSales", kpi.getUnacceptedSales(), period, MetricBasis.ACTUAL));
             values.add(MetricValue.percent("kpi.avgAcceptanceDays", kpi.getAvgAcceptanceDays(), period, MetricBasis.ACTUAL));
         }
-        return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit());
+        return envelope(entry, scope, values, List.of(), MetricBasis.MIXED, false, entry.resultLimit(), context);
     }
 }

@@ -1,6 +1,8 @@
 package com.ses.controller.api;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.exception.BusinessException;
+import com.ses.entity.DigitalInvoice;
 import com.ses.service.DigitalInvoiceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,13 +14,17 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,6 +41,42 @@ class InboundDigitalInvoiceApiControllerTest {
 
     @MockBean
     private DigitalInvoiceService digitalInvoiceService;
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void inbound一覧はserviceが返したJSONページをそのままシリアライズする() throws Exception {
+        DigitalInvoice inbound = new DigitalInvoice();
+        inbound.setId(901L);
+        inbound.setDirection("RECEIVE");
+        inbound.setProfile("Standard");
+        inbound.setSpecificationVersion("1.1.3");
+        inbound.setMessageId("MSG-INBOUND-SCOPE-NULL");
+        inbound.setProviderMessageId("PROVIDER-INBOUND-SCOPE-NULL");
+        inbound.setStatus("PENDING_REVIEW");
+        Page<DigitalInvoice> page = new Page<>(1, 10);
+        page.setTotal(1);
+        page.setRecords(List.of(inbound));
+        when(digitalInvoiceService.searchInboundInvoices(1, 10)).thenReturn(page);
+
+        mockMvc.perform(get("/api/inbound-invoices").param("current", "1").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.total", is(1)))
+                .andExpect(jsonPath("$.data.records[0].direction", is("RECEIVE")))
+                .andExpect(jsonPath("$.data.records[0].messageId", is("MSG-INBOUND-SCOPE-NULL")))
+                .andExpect(jsonPath("$.data.records[0].invoiceId", nullValue()));
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void inbound一覧のscope拒否は403のJSON応答になる() throws Exception {
+        when(digitalInvoiceService.searchInboundInvoices(1, 10))
+                .thenThrow(BusinessException.of(403, "error.accessDenied"));
+
+        mockMvc.perform(get("/api/inbound-invoices").param("current", "1").param("size", "10"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
 
     @Test
     @WithMockUser(roles = "管理者")

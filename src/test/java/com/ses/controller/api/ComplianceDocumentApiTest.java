@@ -86,6 +86,11 @@ class ComplianceDocumentApiTest {
         jdbcTemplate.update("DELETE FROM m_compliance_external_reviewer_type");
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void cleanupFixtures() {
+        clearGateSeed();
+    }
+
     @Test
     void 生成するとsnapshotとdocumentとdeliveryが作成され同じ内容の再生成は増えない() throws Exception {
         long contractId = insertContractWithProfile();

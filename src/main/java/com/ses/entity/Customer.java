@@ -20,6 +20,9 @@ import lombok.*;
 @TableName("m_customer")
 public class Customer extends BaseEntity {
 
+    /** 法人境界。独立DB内で複数法人を混在させる場合も必ず設定する。 */
+    private Long legalEntityId;
+
     /**
      * 会社名
      */

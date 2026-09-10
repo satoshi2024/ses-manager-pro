@@ -206,7 +206,10 @@ public class DigitalInvoiceApiController {
             DigitalInvoice di = digitalInvoiceService.getById(id);
             if (di == null) return org.springframework.http.ResponseEntity.notFound().build();
             CorrelationContext.put(CorrelationContext.INVOICE_ID, di.getInvoiceId());
-            if (di.getInvoiceId() != null) {
+            if ("RECEIVE".equals(di.getDirection())) {
+                // 受信行はinvoiceIdがレビュー前にNULLでも、関連先解決を含むservice境界で認可する。
+                digitalInvoiceService.assertInboundAccessAllowed(id);
+            } else if (di.getInvoiceId() != null) {
                 Invoice invoice = invoiceService.getById(di.getInvoiceId());
                 if (invoice == null) return org.springframework.http.ResponseEntity.notFound().build();
                 dataScopeService.assertAllowedCustomer(invoice.getCustomerId());

@@ -22,7 +22,9 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.AiMatchingService;
+import com.ses.service.ai.AiMatchingScopeGuard;
 import com.ses.service.ai.MatchScoreCalculator;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -45,16 +47,19 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
     private final SkillTagMapper skillTagMapper;
     private final BpAvailabilityMapper bpAvailabilityMapper;
     private final ObjectMapper objectMapper;
-    private final com.ses.service.security.DataScopeService dataScopeService;
+    private final AiMatchingScopeGuard matchingScopeGuard;
     private final AiExecutionGateway aiExecutionGateway;
 
     @Override
     public List<MatchResultDto> findMatchingProjects(Long engineerId) {
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedEngineer(engineerId);
-        }
+        return findMatchingProjects(engineerId, matchingScopeGuard.createContext());
+    }
+
+    @Override
+    public List<MatchResultDto> findMatchingProjects(Long engineerId, CopilotExecutionContext context) {
+        if (!matchingScopeGuard.allowsEngineer(engineerId, context)) return Collections.emptyList();
         Engineer engineer = engineerMapper.selectById(engineerId);
-        if (engineer == null) {
+        if (engineer == null || !matchingScopeGuard.sameLegalEntity(engineer.getLegalEntityId(), context)) {
             return Collections.emptyList();
         }
 
@@ -63,12 +68,12 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
                 .map(EngineerSkillDetailDto::getSkillId)
                 .collect(Collectors.toSet());
 
-        LambdaQueryWrapper<Project> pWrapper = new LambdaQueryWrapper<Project>().eq(Project::getStatus, "募集中");
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedProjectIds = dataScopeService.allowedProjectIds();
-            if (allowedProjectIds == null || allowedProjectIds.isEmpty()) {
-                return Collections.emptyList();
-            }
+        LambdaQueryWrapper<Project> pWrapper = new LambdaQueryWrapper<Project>()
+                .eq(Project::getStatus, "募集中")
+                .eq(Project::getLegalEntityId, engineer.getLegalEntityId());
+        Set<Long> allowedProjectIds = matchingScopeGuard.allowedProjectIds(context);
+        if (allowedProjectIds != null) {
+            if (allowedProjectIds.isEmpty()) return Collections.emptyList();
             pWrapper.in(Project::getId, allowedProjectIds);
         }
         List<Project> activeProjects = projectMapper.selectList(pWrapper);
@@ -111,7 +116,7 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
             fillMatchExplanation(dto, AiAllowlistFields.merge(
                     AiAllowlistFields.engineer(engineer, engSkills),
                     AiAllowlistFields.project(p),
-                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore(), context);
             results.add(dto);
         }
 
@@ -124,11 +129,14 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
 
     @Override
     public List<MatchResultDto> findMatchingEngineers(Long projectId) {
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedProject(projectId);
-        }
+        return findMatchingEngineers(projectId, matchingScopeGuard.createContext());
+    }
+
+    @Override
+    public List<MatchResultDto> findMatchingEngineers(Long projectId, CopilotExecutionContext context) {
+        if (!matchingScopeGuard.allowsProject(projectId, context)) return Collections.emptyList();
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || !matchingScopeGuard.sameLegalEntity(project.getLegalEntityId(), context)) {
             return Collections.emptyList();
         }
 
@@ -138,12 +146,12 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
         Set<Long> mustIds = pSkills.stream().filter(s -> Integer.valueOf(1).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
         Set<Long> niceIds = pSkills.stream().filter(s -> Integer.valueOf(0).equals(s.getIsMust())).map(ProjectSkill::getSkillId).collect(Collectors.toSet());
 
-        LambdaQueryWrapper<Engineer> eWrapper = new LambdaQueryWrapper<Engineer>().in(Engineer::getStatus, Arrays.asList("Bench", "提案中"));
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
-            if (allowedEngineerIds == null || allowedEngineerIds.isEmpty()) {
-                return Collections.emptyList();
-            }
+        LambdaQueryWrapper<Engineer> eWrapper = new LambdaQueryWrapper<Engineer>()
+                .in(Engineer::getStatus, Arrays.asList("Bench", "提案中"))
+                .eq(Engineer::getLegalEntityId, project.getLegalEntityId());
+        Set<Long> allowedEngineerIds = matchingScopeGuard.allowedEngineerIds(context);
+        if (allowedEngineerIds != null) {
+            if (allowedEngineerIds.isEmpty()) return Collections.emptyList();
             eWrapper.in(Engineer::getId, allowedEngineerIds);
         }
         List<Engineer> candidates = engineerMapper.selectList(eWrapper);
@@ -190,16 +198,18 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
                             .map(id -> tagNameMap.getOrDefault(id, ""))
                             .filter(n -> n != null && !n.isBlank())
                             .collect(Collectors.joining(","))),
-                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore(), context);
             results.add(dto);
         }
 
         // BpAvailability (BP要員)
         LambdaQueryWrapper<BpAvailability> bpWrapper = new LambdaQueryWrapper<BpAvailability>()
-                .eq(BpAvailability::getStatus, "提案可能");
+                .eq(BpAvailability::getStatus, "提案可能")
+                .eq(BpAvailability::getLegalEntityId, project.getLegalEntityId());
         List<BpAvailability> externalBps = bpAvailabilityMapper.selectList(bpWrapper);
         
         for (BpAvailability bp : externalBps) {
+            if (!matchingScopeGuard.allowsBp(bp, project, context)) continue;
             Set<Long> bpSkills = new HashSet<>();
             try {
                 if (bp.getSkillsJson() != null) {
@@ -240,7 +250,7 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
                             .filter(n -> n != null && !n.isBlank())
                             .collect(Collectors.joining(","))),
                     AiAllowlistFields.project(project),
-                    AiAllowlistFields.ruleScore(score)), score.getTotalScore());
+                    AiAllowlistFields.ruleScore(score)), score.getTotalScore(), context);
             results.add(dto);
         }
 
@@ -251,10 +261,10 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
         return results;
     }
 
-    private void fillMatchExplanation(MatchResultDto dto, Map<String, Object> fields, int defaultScore) {
+    private void fillMatchExplanation(MatchResultDto dto, Map<String, Object> fields, int defaultScore,
+                                      CopilotExecutionContext context) {
         try {
-            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
-                    .useCase(AiGatewayRequest.USE_MATCHING)
+            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.legacyMatching(context)
                     .trustedInstruction("""
                             あなたはSES営業アシスタントです。ALLOWLIST_CONTEXT のみを根拠に
                             マッチ理由とアピールポイントをJSONで返してください。HTMLは禁止です。
@@ -266,7 +276,7 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
                     .build());
             parseAiResponseIntoDto(result.getText(), dto, defaultScore);
         } catch (Exception e) {
-            log.warn("AI text generation failed for match explanation", e);
+            log.warn("AI match explanation failed: category=PIPELINE_ERROR safety=REDACTED");
             dto.setReason("AI解析に失敗しました");
             dto.setSellingPoints("アピールポイントの生成に失敗しました");
         }
@@ -296,10 +306,16 @@ public class GeminiMatchingServiceImpl implements AiMatchingService {
                 dto.setScore(root.get("score").asInt());
             }
         } catch (Exception e) {
-            log.warn("Failed to parse AI response: {}", aiResponse, e);
+            log.warn("AI response parse failed: category=PARSE_ERROR responseBytes={} safety=REDACTED",
+                    responseByteLength(aiResponse));
             dto.setReason("AIによる理由生成結果の解析に失敗しました。");
             dto.setSellingPoints("解析失敗");
         }
+    }
+
+    private static int responseByteLength(String response) {
+        return response == null ? 0
+                : response.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 
 }

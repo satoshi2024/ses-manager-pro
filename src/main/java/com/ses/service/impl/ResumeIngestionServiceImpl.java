@@ -64,8 +64,42 @@ public class ResumeIngestionServiceImpl
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ResumeIngestionService> selfProvider;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    /** 継承した汎用saveも、作成元の法人を必ず現在のsecurity contextへ束縛する。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(ResumeIngestion entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Long currentLegalEntityId = legalEntityContextService.requireCurrentLegalEntityId();
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(currentLegalEntityId, entity.getLegalEntityId());
+        }
+        entity.setLegalEntityId(currentLegalEntityId);
+        return super.save(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(ResumeIngestion entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        ResumeIngestion current = super.getById(entity.getId());
+        assertJobLegalEntity(current);
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(current.getLegalEntityId(), entity.getLegalEntityId());
+        }
+        entity.setLegalEntityId(current.getLegalEntityId());
+        return super.updateById(entity);
+    }
+
     @Override
     public ResumeIngestion createJob(MultipartFile file, Long candidateId) {
+        requireLegalEntityContext();
         // ファイル保存
         StoredFile stored = fileStorageService.store(file, FileKind.SKILL_SHEET);
 
@@ -79,6 +113,7 @@ public class ResumeIngestionServiceImpl
         job.setFileExt(ext);
         job.setStatus(STATUS_PENDING);
         job.setCandidateId(candidateId);
+        job.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
         this.save(job);
 
         log.info("スキルシート取込ジョブを作成しました: jobId={}, fileName={}", job.getId(), stored.getOriginalName());
@@ -110,6 +145,8 @@ public class ResumeIngestionServiceImpl
             log.error("ジョブが見つかりません: id={}", id);
             return;
         }
+        // 非同期workerでも、CAS後に法人が解決不能/変更済みなら処理を続行しない。
+        assertJobLegalEntity(job);
 
         try {
             // 1. テキスト抽出
@@ -149,6 +186,7 @@ public class ResumeIngestionServiceImpl
     @Override
     public void reparse(Long id) {
         ResumeIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         String status = job.getStatus();
         if (!STATUS_REVIEW.equals(status) && !STATUS_FAILED.equals(status)) {
             throw BusinessException.of("error.resume.invalidStatus");
@@ -159,6 +197,7 @@ public class ResumeIngestionServiceImpl
     @Override
     public void saveReview(Long id, ReviewedResumeDto dto) {
         ResumeIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         if (!STATUS_REVIEW.equals(job.getStatus())) {
             throw BusinessException.of("error.resume.invalidStatus");
         }
@@ -180,6 +219,7 @@ public class ResumeIngestionServiceImpl
     public Long confirm(Long id, ReviewedResumeDto dto) {
         // 1. ジョブ確認 + 二重確定ガード
         ResumeIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         if (job.getConvertedEngineerId() != null) {
             throw BusinessException.of(409, "error.resume.alreadyConfirmed");
         }
@@ -210,6 +250,7 @@ public class ResumeIngestionServiceImpl
         engineer.setExperienceYears(ep.getExperienceYears());
         engineer.setJapaneseLevel(ep.getJapaneseLevel());
         engineer.setResumeSummary(ep.getResumeSummary());
+        engineer.setLegalEntityId(job.getLegalEntityId());
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         Long engineerId = engineer.getId();
@@ -286,7 +327,8 @@ public class ResumeIngestionServiceImpl
 
     @Override
     public void reject(Long id, String reason) {
-        getJobOrThrow(id);
+        ResumeIngestion job = getJobOrThrow(id);
+        assertJobLegalEntity(job);
         int updated = baseMapper.update(null, new LambdaUpdateWrapper<ResumeIngestion>()
                 .eq(ResumeIngestion::getId, id)
                 .in(ResumeIngestion::getStatus, STATUS_PENDING, STATUS_PARSING, STATUS_REVIEW, STATUS_FAILED)
@@ -306,6 +348,20 @@ public class ResumeIngestionServiceImpl
             throw BusinessException.of(404, "error.resume.notFound");
         }
         return job;
+    }
+
+    private void requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+    }
+
+    private void assertJobLegalEntity(ResumeIngestion job) {
+        requireLegalEntityContext();
+        if (job == null || job.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(job.getLegalEntityId());
     }
 
     /**

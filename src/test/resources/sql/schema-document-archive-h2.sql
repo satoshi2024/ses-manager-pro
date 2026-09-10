@@ -23,6 +23,16 @@ CREATE TABLE m_document_type (
   CONSTRAINT uk_document_type_code UNIQUE (code)
 );
 
+INSERT INTO m_document_type
+  (code, name, direction, retention_years, retention_start_rule, legal_hold_supported)
+VALUES
+  ('INVOICE_OUT', '請求書（発行）', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('INVOICE_IN', '請求書（受領）', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
+  ('CONTRACT', '契約書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('ORDER_RECEIVED', '注文書（受領）', 'INCOMING', 10, 'TRANSACTION_DATE', 1),
+  ('ESIGN_CERT', '電子署名証明書', 'OUTGOING', 10, 'TRANSACTION_DATE', 1),
+  ('SERVICE_REQUEST_ATTACHMENT', 'サービス依頼添付', 'INCOMING', 10, 'TRANSACTION_DATE', 1);
+
 CREATE TABLE t_document (
   id                         BIGINT        AUTO_INCREMENT PRIMARY KEY,
   tenant_id                  VARCHAR(100)  NOT NULL DEFAULT 'default',
@@ -42,6 +52,11 @@ CREATE TABLE t_document (
   legal_hold_flag            TINYINT       NOT NULL DEFAULT 0,
   version                    BIGINT        NOT NULL DEFAULT 1,
   created_by                 BIGINT,
+  actor_type                 VARCHAR(20),
+  confirmation_source        VARCHAR(40),
+  human_user_id              BIGINT,
+  correlation_id             VARCHAR(128),
+  idempotency_key            VARCHAR(190),
   created_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   updated_at                 TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   deleted_flag               TINYINT       NOT NULL DEFAULT 0
@@ -63,7 +78,12 @@ CREATE TABLE t_document_version (
   external_id           VARCHAR(200),
   scan_status           VARCHAR(30)   NOT NULL DEFAULT 'PENDING',
   change_reason         VARCHAR(500),
-  created_by            BIGINT        NOT NULL,
+  created_by            BIGINT,
+  actor_type            VARCHAR(20),
+  confirmation_source   VARCHAR(40),
+  human_user_id         BIGINT,
+  correlation_id        VARCHAR(128),
+  idempotency_key       VARCHAR(190),
   created_at            TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   updated_at            TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
   deleted_flag          TINYINT       NOT NULL DEFAULT 0,
@@ -89,7 +109,12 @@ CREATE TABLE t_document_access_log (
   document_id BIGINT       NOT NULL,
   version_id  BIGINT,
   action      VARCHAR(30)  NOT NULL,
-  user_id     BIGINT       NOT NULL,
+  user_id     BIGINT,
+  actor_type  VARCHAR(20),
+  confirmation_source VARCHAR(40),
+  human_user_id BIGINT,
+  correlation_id VARCHAR(128),
+  idempotency_key VARCHAR(190),
   ip_hash     VARCHAR(64),
   occurred_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -1,6 +1,7 @@
 package com.ses.service.ai.copilot.gateway;
 
 import com.ses.dto.billing.CashFlowForecastDto;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.parameter.CopilotQueryParameters;
 import com.ses.service.ai.copilot.result.MetricBasis;
@@ -9,7 +10,7 @@ import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.billing.CashFlowForecastScope;
 import com.ses.service.billing.CashFlowForecastService;
-import com.ses.service.security.OrganizationScopeService;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -24,7 +25,6 @@ import java.util.List;
 class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements CatalogQueryAdapter {
 
     private final CashFlowForecastService cashFlowForecastService;
-    private final OrganizationScopeService organizationScopeService;
 
     @Override
     public String queryId() {
@@ -33,10 +33,18 @@ class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements Ca
 
     @Override
     public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters, CopilotScopeContext scope) {
-        YearMonth from = parameters.fromMonth() == null ? YearMonth.now() : parameters.fromMonth();
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    @Override
+    public TypedResultEnvelope execute(SemanticCatalogEntry entry, CopilotQueryParameters parameters,
+                                       CopilotScopeContext scope, CopilotExecutionContext context) {
+        requireContext(context);
+        YearMonth from = parameters.fromMonth() == null
+                ? context.asOfMonth() : parameters.fromMonth();
         int months = parameters.forecastMonths() == null ? 6 : parameters.forecastMonths();
-        CashFlowForecastScope cashFlowScope = resolveCashFlowScope();
-        CashFlowForecastDto forecast = cashFlowForecastService.forecast(from, months, null, cashFlowScope);
+        CashFlowForecastScope cashFlowScope = resolveCashFlowScope(context);
+        CashFlowForecastDto forecast = cashFlowForecastService.forecast(from, months, null, cashFlowScope, context);
 
         List<MetricValue> values = new ArrayList<>();
         if (forecast.getMonths() != null) {
@@ -54,22 +62,29 @@ class CashFlowForecastCatalogAdapter extends CatalogAdapterSupport implements Ca
             values.add(metricYen("cashflow.reconciliation.invoicedSubtotal", rec.getInvoicedSubtotal(), rec.getMonth()));
             values.add(metricYen("cashflow.reconciliation.difference", rec.getDifference(), rec.getMonth()));
         }
-        return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit());
+        return envelope(entry, scope, values, List.of(), MetricBasis.FORECAST, false, entry.resultLimit(), context);
     }
 
-    private CashFlowForecastScope resolveCashFlowScope() {
-        if (organizationScopeService.hasFullAccess()) {
+    private CashFlowForecastScope resolveCashFlowScope(CopilotExecutionContext context) {
+        EffectiveScopeSnapshot snapshot = context == null ? null : context.effectiveScopeSnapshot();
+        if (snapshot == null || context.scope() != snapshot.scope()) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        if ("COMPANY_WIDE".equals(snapshot.scopeType())) {
             return null;
         }
-        LocalDate asOf = LocalDate.now();
         return new CashFlowForecastScope(
                 false,
-                new ArrayList<>(organizationScopeService.allowedInvoiceIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedContractIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedEngineerIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedOrganizationIds(asOf)),
-                new ArrayList<>(organizationScopeService.allowedDirectUserIds(asOf)),
-                asOf);
+                list(snapshot.invoiceIds()),
+                list(snapshot.contractIds()),
+                list(snapshot.engineerIds()),
+                list(snapshot.organizationIds()),
+                list(snapshot.directUserIds()),
+                snapshot.asOf());
+    }
+
+    private List<Long> list(java.util.Set<Long> values) {
+        return values == null ? List.of() : new ArrayList<>(values);
     }
 
     private MetricValue metricYen(String key, BigDecimal amount, String period) {

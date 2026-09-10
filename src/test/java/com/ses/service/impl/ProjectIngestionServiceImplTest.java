@@ -13,6 +13,7 @@ import com.ses.service.ProjectService;
 import com.ses.service.ProjectSkillService;
 import com.ses.service.SkillTagResolver;
 import com.ses.service.ai.ProjectParseService;
+import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +41,7 @@ public class ProjectIngestionServiceImplTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private ObjectProvider<ProjectIngestionService> selfProvider;
     @Mock private ProjectIngestionMapper projectIngestionMapper;
+    @Mock private LegalEntityContextService legalEntityContextService;
 
     @InjectMocks
     private ProjectIngestionServiceImpl service;
@@ -51,6 +53,8 @@ public class ProjectIngestionServiceImplTest {
         var assistant = new org.apache.ibatis.builder.MapperBuilderAssistant(configuration, "");
         com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(assistant, ProjectIngestion.class);
         ReflectionTestUtils.setField(service, "baseMapper", projectIngestionMapper);
+        ReflectionTestUtils.setField(service, "legalEntityContextService", legalEntityContextService);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
     }
 
     @Test
@@ -58,6 +62,7 @@ public class ProjectIngestionServiceImplTest {
         Long jobId = 1L;
         ProjectIngestion job = new ProjectIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
         
         when(projectIngestionMapper.selectById(jobId)).thenReturn(job);
@@ -65,6 +70,7 @@ public class ProjectIngestionServiceImplTest {
 
         ReviewedProjectDto dto = new ReviewedProjectDto();
         ReviewedProjectDto.ProjectPart projectPart = new ReviewedProjectDto.ProjectPart();
+        projectPart.setCustomerId(10L);
         projectPart.setName("Test Project");
         dto.setProject(projectPart);
 
@@ -86,6 +92,7 @@ public class ProjectIngestionServiceImplTest {
         Long jobId = 1L;
         ProjectIngestion job = new ProjectIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
         job.setConvertedProjectId(100L); // Already confirmed
         
@@ -93,6 +100,7 @@ public class ProjectIngestionServiceImplTest {
 
         ReviewedProjectDto dto = new ReviewedProjectDto();
         ReviewedProjectDto.ProjectPart projectPart = new ReviewedProjectDto.ProjectPart();
+        projectPart.setCustomerId(10L);
         projectPart.setName("Test Project");
         dto.setProject(projectPart);
 
@@ -105,6 +113,7 @@ public class ProjectIngestionServiceImplTest {
         Long jobId = 1L;
         ProjectIngestion job = new ProjectIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
         
         when(projectIngestionMapper.selectById(jobId)).thenReturn(job);
@@ -113,6 +122,7 @@ public class ProjectIngestionServiceImplTest {
 
         ReviewedProjectDto dto = new ReviewedProjectDto();
         ReviewedProjectDto.ProjectPart projectPart = new ReviewedProjectDto.ProjectPart();
+        projectPart.setCustomerId(10L);
         projectPart.setName("Test Project");
         dto.setProject(projectPart);
 
@@ -132,6 +142,7 @@ public class ProjectIngestionServiceImplTest {
         Long jobId = 1L;
         ProjectIngestion job = new ProjectIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
         
         when(projectIngestionMapper.selectById(jobId)).thenReturn(job);

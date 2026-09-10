@@ -20,6 +20,9 @@ import java.time.LocalDate;
 @TableName("t_opportunity")
 public class Opportunity extends BaseEntity {
 
+    /** 顧客と同一であることをwrite boundaryで検証する法人ID。 */
+    private Long legalEntityId;
+
     /**
      * 顧客ID
      */

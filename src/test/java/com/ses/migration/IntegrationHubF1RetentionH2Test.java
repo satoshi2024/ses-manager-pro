@@ -101,6 +101,21 @@ class IntegrationHubF1RetentionH2Test {
     }
 
     @Test
+    void 未期限到来のterminal行はpurge対象にならない() {
+        long subscriptionId = insertSubscription("retention-future-client", "https://example.invalid/future");
+        long deliveryId = insertDelivery(subscriptionId, "retention-future-client", "delivery-future",
+                "SUCCEEDED_PAYLOAD_30D", LocalDateTime.of(2026, 9, 1, 12, 0));
+        LocalDateTime now = LocalDateTime.of(2026, 8, 30, 12, 0);
+
+        ApiRetentionPurgeService.PurgeReport report = retentionPurgeService.purgeExpired(
+                "DELIVERY", "SUCCEEDED_PAYLOAD_30D", now, 10);
+
+        assertEquals(0, report.purged());
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_api_delivery WHERE id = ?", Integer.class, deliveryId));
+    }
+
+    @Test
     void activeLease中は削除せずlease期限後にversion条件付きで削除する() {
         long subscriptionId = insertSubscription("lease-client", "https://example.invalid/lease");
         long deliveryId = insertDelivery(subscriptionId, "lease-client", "delivery-lease", "FAILED_DLQ_PAYLOAD_90D",

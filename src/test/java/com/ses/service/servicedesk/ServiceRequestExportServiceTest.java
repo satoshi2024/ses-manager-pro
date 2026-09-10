@@ -71,4 +71,21 @@ class ServiceRequestExportServiceTest {
         assertTrue(csvText.contains("CSVエクスポート検証問い合わせ"), "作成した問い合わせデータが含まれていること");
         assertTrue(csvText.contains(testCustomer.getCompanyName()), "顧客名が含まれていること");
     }
+
+    @Test
+    @DisplayName("CSVのユーザー入力フィールドは数式として解釈されないこと")
+    void testExportCsv_neutralizesFormulaFields() {
+        Customer formulaCustomer = Customer.builder().companyName("=1+1").build();
+        customerMapper.insert(formulaCustomer);
+        ServiceRequestCreateRequest req = ServiceRequestCreateRequest.builder()
+                .customerId(formulaCustomer.getId()).category("BILLING").priority("P2")
+                .subject("+cmd").description("@SUM(A1)\r\n次の行").build();
+        serviceRequestService.createRequest(req, 100L, false, null);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        exportService.exportRequestsToCsv(baos, null, null, null, null, formulaCustomer.getId());
+        String csvText = new String(baos.toByteArray(), 3, baos.size() - 3, StandardCharsets.UTF_8);
+        assertTrue(csvText.contains("'=1+1"));
+        assertTrue(csvText.contains("'+cmd"));
+    }
 }

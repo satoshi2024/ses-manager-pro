@@ -63,10 +63,10 @@ class ExternalApiReadSnapshotIntegrationTest {
         jdbcTemplate.update("UPDATE t_project SET status = ?, customer_id = ?, deleted_flag = 1 WHERE id = ?",
                 "クローズ", CUSTOMER_B, PROJECT_A);
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag, legal_entity_id)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?)
                 """, PROJECT_INSERTED_AFTER_FIRST_PAGE, "inserted-after-first-page", CUSTOMER_A, "募集中",
-                LocalDate.of(2026, 3, 1), LocalDate.of(2026, 10, 31));
+                LocalDate.of(2026, 3, 1), LocalDate.of(2026, 10, 31), 91L);
 
         ExternalApiListResponse<ExternalApiProject> second = service.listProjects(
                 PRINCIPAL, SCOPE, 1, first.nextCursor());
@@ -81,14 +81,14 @@ class ExternalApiReadSnapshotIntegrationTest {
     }
 
     private void insertFixture() {
-        jdbcTemplate.update("INSERT INTO m_customer (id, company_name) VALUES (?, ?), (?, ?)",
-                CUSTOMER_A, "snapshot-customer-a", CUSTOMER_B, "snapshot-customer-b");
+        jdbcTemplate.update("INSERT INTO m_customer (id, company_name, legal_entity_id) VALUES (?, ?, ?), (?, ?, ?)",
+                CUSTOMER_A, "snapshot-customer-a", 91L, CUSTOMER_B, "snapshot-customer-b", 91L);
         jdbcTemplate.update("""
-                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag)
-                VALUES (?, ?, ?, ?, ?, ?, 0), (?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO t_project (id, project_name, customer_id, status, start_date, end_date, deleted_flag, legal_entity_id)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?), (?, ?, ?, ?, ?, ?, 0, ?)
                 """, PROJECT_A, "snapshot-project-a", CUSTOMER_A, "募集中",
-                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31),
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), 91L,
                 PROJECT_B, "snapshot-project-b", CUSTOMER_A, "選考中",
-                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 11, 30));
+                LocalDate.of(2026, 2, 1), LocalDate.of(2026, 11, 30), 91L);
     }
 }

@@ -2,6 +2,8 @@ package com.ses.dto.document;
 
 import lombok.Builder;
 import lombok.Data;
+import com.ses.common.audit.ActorType;
+import com.ses.common.audit.ConfirmationSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -72,6 +74,21 @@ public class DocumentRegisterRequest {
      * 未指定時は従来どおり認証userから自動補完される。
      */
     private Long createdBy;
+
+    /** 監査主体。SYSTEM/PROVIDER登録ではcreatedByを要求しない。 */
+    private ActorType actorType;
+
+    /** 監査チャネル。actorTypeとの組み合わせをサービス境界で検証する。 */
+    private ConfirmationSource confirmationSource;
+
+    /** 人間主体の場合だけ設定する監査ユーザーID。 */
+    private Long humanUserId;
+
+    /** 分散処理を追跡する相関ID。 */
+    private String correlationId;
+
+    /** 登録処理の冪等キー。 */
+    private String idempotencyKey;
 
     // ---- 業務リンク情報 ----
 

@@ -17,16 +17,20 @@ import com.ses.service.ai.copilot.result.MetricValue;
 import com.ses.service.ai.copilot.result.TypedResultEnvelope;
 import com.ses.service.ai.copilot.scope.CopilotScopeContext;
 import com.ses.service.ai.copilot.scope.CopilotScopeResolver;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import com.ses.service.ai.copilot.summary.CopilotSummaryService;
 import com.ses.service.ai.copilot.summary.SummaryResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,20 +61,32 @@ class CopilotQueryServiceTest {
     private CitationAuthorizationService citationAuthorizationService;
     @Mock
     private CopilotSummaryService copilotSummaryService;
+    @Mock
+    private CopilotExecutionContextFactory contextFactory;
+    @Mock
+    private CopilotFeatureGate featureGate;
 
-    @InjectMocks
     private CopilotQueryService copilotQueryService;
+
+    @BeforeEach
+    void setUp() {
+        copilotQueryService = new CopilotQueryService(
+                aiConfig, intentParser, parameterBinder, scopeResolver, catalogQueryGateway,
+                copilotRunService, citationAuthorizationService, copilotSummaryService,
+                contextFactory, featureGate);
+    }
 
     @Test
     void flag無効は503() {
-        when(aiConfig.isManagementCopilotEnabled()).thenReturn(false);
+        org.mockito.Mockito.doThrow(BusinessException.of(503, "disabled"))
+                .when(featureGate).assertQueryAllowed();
         assertThrows(BusinessException.class, () -> copilotQueryService.query("稼働率"));
     }
 
     @Test
     void SQL風入力はunsupported() {
-        when(aiConfig.isManagementCopilotEnabled()).thenReturn(true);
-        when(aiConfig.isExternalSendEnabled()).thenReturn(false);
+        Mockito.doNothing().when(featureGate).assertQueryAllowed();
+        when(contextFactory.create()).thenReturn(context());
         when(intentParser.parse(anyString())).thenReturn(new IntentParser.ParsedIntent("UNSUPPORTED", "CATALOG_NOT_FOUND"));
 
         var result = copilotQueryService.query("select * from t_engineer");
@@ -78,67 +94,32 @@ class CopilotQueryServiceTest {
     }
 
     @Test
-    void 成功時はtypedResultを返す() {
-        when(aiConfig.isManagementCopilotEnabled()).thenReturn(true);
-        when(aiConfig.isExternalSendEnabled()).thenReturn(false);
+    void provisionalCatalogはtypedResultを返さずdisabled() {
+        CopilotExecutionContext queryContext = context();
+        Mockito.doNothing().when(featureGate).assertQueryAllowed();
+        when(contextFactory.create()).thenReturn(queryContext);
         when(intentParser.parse("稼働率")).thenReturn(new IntentParser.ParsedIntent("dashboard.utilization-forecast", "SUPPORTED"));
-        when(parameterBinder.bind(anyString(), anyString())).thenReturn(
-                new com.ses.service.ai.copilot.parameter.CopilotQueryParameters(
-                        "dashboard.utilization-forecast", null, 3, null, null));
-        when(scopeResolver.resolve(any())).thenReturn(
-                new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash", false));
-        when(catalogQueryGateway.execute(any(), any(), any())).thenReturn(sampleEnvelope());
-        when(parameterBinder.parameterHash(any())).thenReturn("param");
-        when(copilotRunService.recordQueryRun(any(), anyString(), anyString(), anyInt()))
-                .thenReturn(new CopilotRunService.CopilotRunRecord(1L, "trace-1", "dashboard.utilization-forecast", "nf08-provisional-1"));
-        when(citationAuthorizationService.authorizeAll(any())).thenReturn(List.of(
-                new ResolvedCitationDto("dashboard.utilization-forecast", "稼働率予測", "/dashboard", true)));
-        when(copilotSummaryService.summarize(any(), anyString())).thenReturn(new SummaryResponse(
-                "登録された指標キーを確認しました。",
-                List.of("forecast.utilization.2026-09"),
-                SummaryResponse.STATUS_SUCCEEDED,
-                "mock",
-                1L,
-                null,
-                null));
 
-        var result = copilotQueryService.query("稼働率");
-        assertEquals("SUCCEEDED", result.status());
-        assertEquals("dashboard.utilization-forecast", result.queryId());
-        assertEquals(1, result.result().values().size());
-        assertEquals(1, result.citations().size());
-        assertTrue(result.summary().available());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> copilotQueryService.query("稼働率"));
+        assertEquals(403, ex.getCode());
     }
 
     @Test
-    void summary失敗時もtypedResultは維持する() {
-        when(aiConfig.isManagementCopilotEnabled()).thenReturn(true);
-        when(aiConfig.isExternalSendEnabled()).thenReturn(false);
+    void provisionalCatalogはsummary前にdisabled() {
+        Mockito.doNothing().when(featureGate).assertQueryAllowed();
+        when(contextFactory.create()).thenReturn(context());
         when(intentParser.parse("稼働率")).thenReturn(new IntentParser.ParsedIntent("dashboard.utilization-forecast", "SUPPORTED"));
-        when(parameterBinder.bind(anyString(), anyString())).thenReturn(
-                new com.ses.service.ai.copilot.parameter.CopilotQueryParameters(
-                        "dashboard.utilization-forecast", null, 3, null, null));
-        when(scopeResolver.resolve(any())).thenReturn(
-                new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION, "hash", false));
-        when(catalogQueryGateway.execute(any(), any(), any())).thenReturn(sampleEnvelope());
-        when(parameterBinder.parameterHash(any())).thenReturn("param");
-        when(copilotRunService.recordQueryRun(any(), anyString(), anyString(), anyInt()))
-                .thenReturn(new CopilotRunService.CopilotRunRecord(1L, "trace-1", "dashboard.utilization-forecast", "nf08-provisional-1"));
-        when(citationAuthorizationService.authorizeAll(any())).thenReturn(List.of());
-        when(copilotSummaryService.summarize(any(), anyString())).thenReturn(SummaryResponse.unavailable("PROVIDER_429"));
 
-        var result = copilotQueryService.query("稼働率");
-
-        assertEquals("SUCCEEDED", result.status());
-        assertEquals(1, result.result().values().size());
-        assertFalse(result.summary().available());
-        assertEquals("PROVIDER_429", result.summary().providerStatus());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> copilotQueryService.query("稼働率"));
+        assertEquals(403, ex.getCode());
     }
 
     @Test
     void salesPerformanceはdisabledで403() {
-        when(aiConfig.isManagementCopilotEnabled()).thenReturn(true);
-        when(aiConfig.isExternalSendEnabled()).thenReturn(false);
+        Mockito.doNothing().when(featureGate).assertQueryAllowed();
+        when(contextFactory.create()).thenReturn(context());
         when(intentParser.parse("営業成績")).thenReturn(new IntentParser.ParsedIntent("sales-performance.monthly", "SUPPORTED"));
 
         assertThrows(BusinessException.class, () -> copilotQueryService.query("営業成績"));
@@ -161,5 +142,22 @@ class CopilotQueryServiceTest {
                 List.of("dashboard.utilization-forecast"),
                 new CopilotLimitInfo(200, false),
                 "1");
+    }
+
+    private CopilotExecutionContext context() {
+        CopilotExecutionContext context = new CopilotExecutionContext("tenant-a", 1L,
+                Instant.parse("2026-09-08T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
+        EffectiveScopeSnapshot snapshot = new EffectiveScopeSnapshot(
+                "tenant-a", 1L, context.asOfDate(), "COMPANY_WIDE", true, false, false,
+                null, null, null, null, null, null, null, null, null,
+                EffectiveScopeSnapshotFactory.POLICY_VERSION, false, "ALL",
+                "5b64c70bf1618ee7f063e89a5a3b4b7022740dcda0b43477d56ed64540efe076");
+        context.bindSnapshot(snapshot);
+        return context;
+    }
+
+    private CopilotScopeContext scope() {
+        return new CopilotScopeContext("COMPANY_WIDE", CopilotScopeResolver.POLICY_VERSION,
+                "hash", false, "tenant-a", 1L, "ALL");
     }
 }

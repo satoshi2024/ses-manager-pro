@@ -3,6 +3,7 @@ package com.ses.service.csv.impl;
 import com.ses.dto.csv.CsvImportResultDto;
 import com.ses.entity.Engineer;
 import com.ses.service.EngineerService;
+import com.ses.service.security.LegalEntityContextService;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
@@ -28,14 +29,19 @@ class EngineerCsvServiceImplTest {
 
     private EngineerCsvServiceImpl service;
     private EngineerService engineerService;
+    private LegalEntityContextService legalEntityContextService;
 
     @BeforeEach
     void setUp() {
         engineerService = Mockito.mock(EngineerService.class);
+        legalEntityContextService = Mockito.mock(LegalEntityContextService.class);
+        when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
         when(engineerService.save(any(Engineer.class))).thenReturn(true);
         ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
         Validator validator = factory.getValidator();
         service = new EngineerCsvServiceImpl(engineerService, validator);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "legalEntityContextService", legalEntityContextService);
     }
 
     @Test

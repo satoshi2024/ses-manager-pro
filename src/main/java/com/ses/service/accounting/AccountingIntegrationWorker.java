@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.entity.IntegrationConnection;
 import com.ses.entity.IntegrationJob;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
 import com.ses.service.integration.IntegrationConnectionService;
@@ -57,6 +58,11 @@ public class AccountingIntegrationWorker {
     @Scheduled(fixedDelay = 5000)
     @SchedulerLock(name = "accountingProcessDueJobs", lockAtLeastFor = "PT1S", lockAtMostFor = "PT4M")
     public void processDueJobs() {
+        ExecutionActorContext.runAsSystem("accounting-integration-worker", "SCHEDULER_POLL",
+                this::processDueJobsInternal);
+    }
+
+    private void processDueJobsInternal() {
         List<IntegrationJob> dueJobs;
         try {
             dueJobs = jobService.listDueJobs(10);
@@ -91,6 +97,11 @@ public class AccountingIntegrationWorker {
     @Scheduled(fixedDelay = 60_000)
     @SchedulerLock(name = "accountingRecoverStaleRunning", lockAtLeastFor = "PT1S", lockAtMostFor = "PT2M")
     public void recoverStaleRunning() {
+        ExecutionActorContext.runAsSystem("accounting-integration-worker", "SCHEDULER_POLL",
+                this::recoverStaleRunningInternal);
+    }
+
+    private void recoverStaleRunningInternal() {
         List<IntegrationJob> stale;
         try {
             stale = jobService.listStaleRunningJobs(RUNNING_LEASE_MINUTES);
@@ -139,6 +150,13 @@ public class AccountingIntegrationWorker {
 
     /** ジョブ種別ごとに適切な process メソッドへ dispatch する (P1-01)。 */
     public void dispatchJob(IntegrationJob job) {
+        ExecutionActorContext.runAsSystem(
+                job == null ? "accounting-integration-worker" : job.getCorrelationId(),
+                job == null || job.getId() == null ? "SCHEDULER_POLL" : "job:" + job.getId(),
+                () -> dispatchJobInternal(job));
+    }
+
+    private void dispatchJobInternal(IntegrationJob job) {
         if (job == null || job.getJobType() == null) return;
 
         switch (job.getJobType()) {

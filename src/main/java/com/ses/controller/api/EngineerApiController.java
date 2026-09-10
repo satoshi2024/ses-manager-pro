@@ -28,6 +28,9 @@ public class EngineerApiController {
     private final com.ses.service.RetentionRiskService retentionRiskService;
     private final com.ses.service.EngineerAccountLinkService engineerAccountLinkService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     /**
      * エンジニア一覧（ページネーション）
      */
@@ -204,6 +207,7 @@ public class EngineerApiController {
     public ApiResult<Engineer> save(@Valid @RequestBody com.ses.dto.engineer.EngineerSaveDto engineerDto) {
         Engineer engineer = new Engineer();
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
+        requireLegalEntityContext().ifPresent(ctx -> engineer.setLegalEntityId(ctx.requireCurrentLegalEntityId()));
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
         return ApiResult.success(engineer);
@@ -215,7 +219,20 @@ public class EngineerApiController {
         org.springframework.beans.BeanUtils.copyProperties(engineerDto, engineer);
         engineer.setId(id);
         assertEngineerVisible(id);
+        Engineer existing = engineerService.getById(id);
+        if (existing == null) throw com.ses.common.exception.BusinessException.of(404, "error.scope.notFound");
+        requireLegalEntityContext().ifPresent(ctx -> {
+            ctx.assertCurrent(existing.getLegalEntityId());
+            engineer.setLegalEntityId(existing.getLegalEntityId());
+        });
         return ApiResult.success(engineerService.updateWithStatusGuard(engineer));
+    }
+
+    private java.util.Optional<com.ses.service.security.LegalEntityContextService> requireLegalEntityContext() {
+        if (legalEntityContextService == null) {
+            throw com.ses.common.exception.BusinessException.of(503, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        return java.util.Optional.of(legalEntityContextService);
     }
 
     /**

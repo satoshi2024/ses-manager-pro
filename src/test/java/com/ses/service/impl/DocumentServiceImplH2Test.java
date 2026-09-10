@@ -18,6 +18,7 @@ import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayInputStream;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -99,5 +100,27 @@ class DocumentServiceImplH2Test {
         Document updated = documentMapper.selectById(doc.getId());
         assertEquals("CONFIRMED", updated.getStatus());
         assertEquals(2L, updated.getVersion());
+    }
+
+    @Test
+    void H2DB_confirmは取引日から10年の保存期限を永続化する() {
+        LocalDate transactionDate = LocalDate.of(2026, 8, 1);
+        var req = DocumentRegisterRequest.builder()
+                .documentType("INVOICE_OUT")
+                .sourceType("GENERATED")
+                .businessKey("INV-RETENTION-001")
+                .versionDiscriminator("v1")
+                .direction("OUTGOING")
+                .transactionDate(transactionDate)
+                .build();
+
+        Document doc = documentService.registerGenerated(req,
+                new ByteArrayInputStream("PDF_BYTES".getBytes()));
+        documentService.confirm(doc.getId());
+
+        Document updated = documentMapper.selectById(doc.getId());
+        assertEquals("INVOICE_OUT", updated.getDocumentType());
+        assertEquals(transactionDate.plusYears(10), updated.getRetentionUntil());
+        assertNotNull(documentVersionMapper.findLatestByDocumentId(doc.getId()));
     }
 }

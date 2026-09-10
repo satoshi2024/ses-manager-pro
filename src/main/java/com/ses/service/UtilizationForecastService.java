@@ -2,6 +2,7 @@ package com.ses.service;
 
 import com.ses.dto.dashboard.UtilizationForecastDto;
 import java.time.YearMonth;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 
 /**
  * 将来稼働率・Bench予測サービス（FR-07）
@@ -20,4 +21,9 @@ public interface UtilizationForecastService {
     default UtilizationForecastDto getForecast(YearMonth from, int months) {
         return getForecast(months);
     }
+
+    default UtilizationForecastDto getForecast(YearMonth from, int months, CopilotExecutionContext context) {
+        throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
 }

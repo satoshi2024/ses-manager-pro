@@ -16,6 +16,7 @@ import com.ses.mapper.ContractDocumentMapper;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.ContractTemplateMapper;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -112,6 +113,18 @@ class CloudSignDispatchIntegrationTest {
         contract.setStatus("準備中");
         contractMapper.insert(contract);
         contractId = contract.getId();
+    }
+
+    @AfterEach
+    void cleanupFixture() {
+        if (contractId != null) {
+            documentMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ContractDocument>()
+                    .eq("contract_id", contractId));
+            contractMapper.deleteById(contractId);
+        }
+        if (templateId != null) {
+            templateMapper.deleteById(templateId);
+        }
     }
 
     private Path writeSourcePdf(String name, String content) throws Exception {

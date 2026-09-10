@@ -3,6 +3,7 @@ package com.ses.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import jakarta.annotation.PostConstruct;
 
 /**
  * AI連携設定クラス
@@ -23,6 +24,9 @@ public class AiConfig {
      * 経営コパイロット専用feature flag。既定は無効。
      */
     private boolean managementCopilotEnabled = false;
+
+    /** 実providerを許可するための独立・監査可能な承認項目。全項目の明示trueが必要。 */
+    private ProductionGates productionGates = new ProductionGates();
 
     /**
      * AIプロバイダー名（例: openai, gemini, claude）
@@ -63,10 +67,21 @@ public class AiConfig {
     private Retention retention = new Retention();
     private Evaluation evaluation = new Evaluation();
 
+    @PostConstruct
+    void validateRetentionBoundary() {
+        if (retention == null || retention.rawPromptDays != 0
+                || retention.purgeBatchSize < 1 || retention.purgeBatchSize > 1000
+                || retention.purgeFixedDelayMs < 1000 || retention.purgeFixedDelayMs > 86_400_000L) {
+            throw new IllegalStateException("AI raw prompt retentionは0、purge設定はboundedである必要があります");
+        }
+    }
+
     @Data
     public static class Retention {
         private int redactedDays = 730;
         private int rawPromptDays = 0;
+        private int purgeBatchSize = 100;
+        private long purgeFixedDelayMs = 86_400_000L;
     }
 
     @Data
@@ -74,5 +89,19 @@ public class AiConfig {
         private int minSegmentCount = 5;
         private int maxRegressionPp = 5;
         private double maxLatencyP95Multiplier = 2.0;
+    }
+
+    @Data
+    public static class ProductionGates {
+        private boolean ownerApproved;
+        private boolean approvedCatalog;
+        private boolean allowedRoles;
+        private boolean providerContract;
+        private boolean nf07Approved;
+        private boolean dg08Approved;
+        private boolean existingAiProductionGate;
+        private boolean retentionApproved;
+        private boolean costLimitApproved;
+        private boolean humanEscalation;
     }
 }

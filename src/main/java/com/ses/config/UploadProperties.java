@@ -35,4 +35,10 @@ public class UploadProperties {
     private int scannerConnectTimeoutMs = 2000;
 
     private int scannerReadTimeoutMs = 10000;
+
+    /** サービスデスク添付の上限（バイト）。 */
+    private long serviceRequestMaxFileSizeBytes = 10 * 1024 * 1024L;
+
+    /** 内部サービスデスク添付の1ユーザーあたり1分間の受付上限。0以下は無制限。 */
+    private int serviceRequestUploadsPerMinute = 60;
 }

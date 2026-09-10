@@ -319,5 +319,25 @@ public class JpPintRenderer {
         org.xml.sax.InputSource is = new org.xml.sax.InputSource(new StringReader(xml));
         return builder.parse(is);
     }
-}
 
+    /**
+     * 受信XMLを同一DOMから再シリアライズし、冪等判定用の正規化表現を作る。
+     * 入力文字列の空白・宣言・改行だけを差異として扱わず、受信したDOMを正本にする。
+     */
+    public String canonicalize(Document document) throws Exception {
+        if (document == null) {
+            throw new IllegalArgumentException("XML文書がnullです。");
+        }
+        document.normalizeDocument();
+        TransformerFactory tf = TransformerFactory.newInstance();
+        tf.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "");
+        tf.setAttribute("http://javax.xml.XMLConstants/property/accessExternalStylesheet", "");
+        Transformer transformer = tf.newTransformer();
+        transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+        transformer.setOutputProperty(OutputKeys.INDENT, "no");
+        transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
+        StringWriter writer = new StringWriter();
+        transformer.transform(new DOMSource(document), new StreamResult(writer));
+        return writer.toString();
+    }
+}

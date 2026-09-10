@@ -27,6 +27,38 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
     private final SkillTagResolver skillTagResolver;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
+    /** 内部BP在庫作成も権威法人へ束縛する。portal入力の法人値は採用しない。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(BpAvailability entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        entity.setLegalEntityId(legalEntityContextService.requireCurrentLegalEntityId());
+        return super.save(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(BpAvailability entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        BpAvailability existing = super.getById(entity.getId());
+        if (existing == null || existing.getLegalEntityId() == null) {
+            throw BusinessException.of(404, "error.bpAvailability.notFound");
+        }
+        legalEntityContextService.assertCurrent(existing.getLegalEntityId());
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(existing.getLegalEntityId(), entity.getLegalEntityId());
+        }
+        entity.setLegalEntityId(existing.getLegalEntityId());
+        return super.updateById(entity);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Engineer promoteToEngineer(Long id) {
@@ -37,6 +69,10 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
         if (availability.getPromotedEngineerId() != null) {
             throw BusinessException.of(409, "error.bpAvailability.alreadyPromoted");
         }
+        if (legalEntityContextService == null || availability.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(availability.getLegalEntityId());
 
         Engineer engineer = new Engineer();
         engineer.setFullName(availability.getInitialName() != null ? availability.getInitialName() : "未設定");
@@ -49,6 +85,7 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
             engineer.setExpectedUnitPrice(new BigDecimal(availability.getUnitPrice()));
         }
         engineer.setStatus("Bench");
+        engineer.setLegalEntityId(availability.getLegalEntityId());
         
         com.ses.common.util.EntityProtectUtil.protectForCreate(engineer);
         engineerService.save(engineer);
@@ -91,6 +128,7 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
         java.time.LocalDateTime threshold = java.time.LocalDateTime.now().minusDays(60);
         com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<BpAvailability> wrapper = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
         wrapper.eq(BpAvailability::getStatus, "提案可能")
+               .isNotNull(BpAvailability::getLegalEntityId)
                .lt(BpAvailability::getUpdatedAt, threshold)
                .set(BpAvailability::getStatus, "失効");
         this.update(wrapper);
@@ -99,6 +137,14 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void review(Long id, boolean approved, String comment) {
+        BpAvailability availability = this.getById(id);
+        if (availability == null) {
+            throw BusinessException.of(404, "error.bpAvailability.notFound");
+        }
+        if (legalEntityContextService == null || availability.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(availability.getLegalEntityId());
         // 状態CAS（design §6.3）: 未確認→提案可能/却下。二重reviewの敗者は0件で409。
         String next = approved
                 ? com.ses.service.portal.impl.PortalBpServiceImpl.AVAILABILITY_ACTIVE
@@ -109,10 +155,6 @@ public class BpAvailabilityServiceImpl extends ServiceImpl<BpAvailabilityMapper,
                 .set(BpAvailability::getStatus, next)
                 .set(comment != null && !comment.isBlank(), BpAvailability::getRemarks, comment == null ? null : comment.trim()));
         if (!updated) {
-            BpAvailability availability = this.getById(id);
-            if (availability == null) {
-                throw BusinessException.of(404, "error.bpAvailability.notFound");
-            }
             throw BusinessException.of(409, "error.portal.bp.availabilityReviewed");
         }
     }

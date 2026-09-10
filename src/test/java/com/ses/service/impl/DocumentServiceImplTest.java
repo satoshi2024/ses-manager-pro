@@ -89,6 +89,18 @@ class DocumentServiceImplTest {
         lenient().when(authorizationServiceProvider.getIfAvailable()).thenReturn(null);
         lenient().when(engineerAccountLinkServiceProvider.getIfAvailable()).thenReturn(null);
         lenient().when(organizationScopeServiceProvider.getIfAvailable()).thenReturn(null);
+        org.mockito.stubbing.Answer<DocumentType> documentTypeAnswer = invocation -> {
+            String code = invocation.getArgument(0, String.class);
+            DocumentType type = new DocumentType();
+            type.setCode(code);
+            type.setDirection(("INVOICE_IN".equals(code) || "ORDER_RECEIVED".equals(code)
+                    || "ESIGN_CERT".equals(code) || "SERVICE_REQUEST_ATTACHMENT".equals(code))
+                    ? "INCOMING" : "OUTGOING");
+            type.setRetentionYears(10);
+            type.setRetentionStartRule("TRANSACTION_DATE");
+            return type;
+        };
+        lenient().when(documentTypeMapper.selectActiveByCode(anyString())).thenAnswer(documentTypeAnswer);
 
         // ObjectProvider は型消去で @InjectMocks が取り違えるため、コンストラクタで明示配線する
         sut = new DocumentServiceImpl(
@@ -300,7 +312,7 @@ class DocumentServiceImplTest {
                 .sourceType("RECEIVED")
                 .businessKey("CONTRACT:5")
                 .versionDiscriminator("v2")
-                .direction("INCOMING")
+                .direction("OUTGOING")
                 .originalName("contract_v2.pdf")
                 .build();
 
@@ -328,7 +340,7 @@ class DocumentServiceImplTest {
                 .sourceType("RECEIVED")
                 .businessKey("CONTRACT:5")
                 .versionDiscriminator("v2")
-                .direction("INCOMING")
+                .direction("OUTGOING")
                 .build();
 
         BusinessException ex = assertThrows(BusinessException.class, () ->
@@ -421,7 +433,7 @@ class DocumentServiceImplTest {
         type.setCode("CONTRACT");
         type.setRetentionYears(10);
         type.setRetentionStartRule("CLOSED_AT");
-        when(documentTypeMapper.selectOne(any())).thenReturn(type);
+        when(documentTypeMapper.selectActiveByCode(anyString())).thenReturn(type);
 
         LocalDate result = sut.computeRetentionUntil(doc);
 

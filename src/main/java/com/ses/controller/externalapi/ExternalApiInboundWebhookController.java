@@ -160,7 +160,7 @@ public class ExternalApiInboundWebhookController {
             throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
         }
         String value = values.nextElement();
-        if (values.hasMoreElements() || value == null || value.isBlank() || value.length() > 160) {
+        if (values.hasMoreElements() || value == null || value.isBlank() || value.length() > 128) {
             throw ExternalApiSecurityException.invalid("REQUEST_INVALID");
         }
         return value;

@@ -56,7 +56,7 @@ public final class CsvUtils {
      * Excel上で文字列になり、合計・並べ替え・グラフが一切効かなくなる。
      * 数式として解釈されうるのは数値として解釈できない文字列だけである。
      */
-    static String sanitizeForSpreadsheet(String field) {
+    public static String sanitizeForSpreadsheet(String field) {
         if (field == null || field.isEmpty()) {
             return field;
         }
@@ -180,4 +180,3 @@ public final class CsvUtils {
         }
     }
 }
-

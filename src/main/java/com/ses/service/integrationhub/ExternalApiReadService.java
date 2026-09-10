@@ -16,7 +16,7 @@ import com.ses.dto.integrationhub.ExternalApiReadRow;
 import com.ses.dto.integrationhub.ExternalApiSnapshotItem;
 import com.ses.mapper.ExternalApiReadMapper;
 import com.ses.mapper.ExternalApiReadSnapshotMapper;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +34,6 @@ import java.util.function.Function;
 
 /** A1 read service。唯一の入力はF2が作成したimmutable effective scopeである。 */
 @Service
-@RequiredArgsConstructor
 public class ExternalApiReadService {
     private static final int MAX_LIMIT = 100;
     private static final int MAX_SNAPSHOT_ITEMS = 512;
@@ -46,98 +45,132 @@ public class ExternalApiReadService {
     private final ExternalApiCursorCodec cursorCodec;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final com.ses.service.security.LegalEntityReadinessService legalEntityReadinessService;
+
+    @Autowired
+    public ExternalApiReadService(ExternalApiReadMapper mapper, ExternalApiReadSnapshotMapper snapshotMapper,
+                                  ExternalApiPublicIdCodec publicIdCodec, ExternalApiCursorCodec cursorCodec,
+                                  ObjectMapper objectMapper, Clock clock,
+                                  com.ses.service.security.LegalEntityReadinessService legalEntityReadinessService) {
+        this.mapper = mapper;
+        this.snapshotMapper = snapshotMapper;
+        this.publicIdCodec = publicIdCodec;
+        this.cursorCodec = cursorCodec;
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.legalEntityReadinessService = legalEntityReadinessService;
+    }
 
     @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiEngineerAvailability> listEngineerAvailability(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
+        assertLegalEntityReadiness();
         List<Long> engineerIds = requiredIds(scope, "engineerIds");
         return page(principal, scope, "/external-api/v1/engineer-availability", limit, cursor,
-                (afterId, fetchLimit) -> mapper.selectEngineers(engineerIds, afterId, fetchLimit),
+                (afterId, fetchLimit) -> mapper.selectEngineers(engineerIds, afterId, fetchLimit,
+                        principal.legalEntityId()),
                 row -> toEngineer(principal, row), ExternalApiEngineerAvailability.class);
     }
 
     public ExternalApiEngineerAvailability getEngineerAvailability(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, String publicId) {
+        assertLegalEntityReadiness();
         Long id = resolveId(principal, "engineer-availability", publicId, requiredIds(scope, "engineerIds"));
         if (id == null) return null;
-        return mapper.selectEngineers(List.of(id), null, 1).stream()
+        return mapper.selectEngineers(List.of(id), null, 1, principal.legalEntityId()).stream()
                 .findFirst().map(row -> toEngineer(principal, row)).orElse(null);
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiProject> listProjects(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
+        assertLegalEntityReadiness();
         List<Long> projectIds = requiredIds(scope, "projectIds");
         List<Long> customerIds = optionalIds(scope, "customerIds");
         return page(principal, scope, "/external-api/v1/projects", limit, cursor,
-                (afterId, fetchLimit) -> mapper.selectProjects(projectIds, customerIds, afterId, fetchLimit),
+                (afterId, fetchLimit) -> mapper.selectProjects(projectIds, customerIds, afterId, fetchLimit,
+                        principal.legalEntityId()),
                 row -> toProject(principal, row), ExternalApiProject.class);
     }
 
     public ExternalApiProject getProject(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, String publicId) {
+        assertLegalEntityReadiness();
         Long id = resolveId(principal, "project", publicId, requiredIds(scope, "projectIds"));
         if (id == null) return null;
         List<Long> customerIds = optionalIds(scope, "customerIds");
-        return mapper.selectProjects(List.of(id), customerIds, null, 1).stream()
+        return mapper.selectProjects(List.of(id), customerIds, null, 1, principal.legalEntityId()).stream()
                 .findFirst().map(row -> toProject(principal, row)).orElse(null);
     }
 
     public ExternalApiCountResponse countProjects(ExternalApiPrincipal principal, ExternalApiEffectiveScope scope) {
+        assertLegalEntityReadiness();
         List<Long> projectIds = requiredIds(scope, "projectIds");
-        return new ExternalApiCountResponse(mapper.countProjects(projectIds, optionalIds(scope, "customerIds")),
+        return new ExternalApiCountResponse(mapper.countProjects(projectIds, optionalIds(scope, "customerIds"),
+                        principal.legalEntityId()),
                 clock.instant());
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiContractStatus> listContractStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
+        assertLegalEntityReadiness();
         List<Long> contractIds = requiredIds(scope, "contractIds");
         List<Long> projectIds = optionalIds(scope, "projectIds");
         return page(principal, scope, "/external-api/v1/contract-statuses", limit, cursor,
-                (afterId, fetchLimit) -> mapper.selectContracts(contractIds, projectIds, afterId, fetchLimit),
+                (afterId, fetchLimit) -> mapper.selectContracts(contractIds, projectIds, afterId, fetchLimit,
+                        principal.legalEntityId()),
                 row -> toContract(principal, row), ExternalApiContractStatus.class);
     }
 
     public ExternalApiContractStatus getContractStatus(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, String publicId) {
+        assertLegalEntityReadiness();
         Long id = resolveId(principal, "contract-status", publicId, requiredIds(scope, "contractIds"));
         if (id == null) return null;
-        return mapper.selectContracts(List.of(id), optionalIds(scope, "projectIds"), null, 1).stream()
+        return mapper.selectContracts(List.of(id), optionalIds(scope, "projectIds"), null, 1,
+                principal.legalEntityId()).stream()
                 .findFirst().map(row -> toContract(principal, row)).orElse(null);
     }
 
     public ExternalApiCountResponse countContractStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope) {
+        assertLegalEntityReadiness();
         List<Long> contractIds = requiredIds(scope, "contractIds");
-        return new ExternalApiCountResponse(mapper.countContracts(contractIds, optionalIds(scope, "projectIds")),
+        return new ExternalApiCountResponse(mapper.countContracts(contractIds, optionalIds(scope, "projectIds"),
+                        principal.legalEntityId()),
                 clock.instant());
     }
 
     @Transactional(rollbackFor = Exception.class)
     public ExternalApiListResponse<ExternalApiInvoiceStatus> listInvoiceStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, int limit, String cursor) {
+        assertLegalEntityReadiness();
         List<Long> invoiceIds = requiredIds(scope, "invoiceIds");
         List<Long> contractIds = optionalIds(scope, "contractIds");
         List<Long> customerIds = requiredIds(scope, "customerIds");
         return page(principal, scope, "/external-api/v1/invoice-statuses", limit, cursor,
-                (afterId, fetchLimit) -> mapper.selectInvoices(invoiceIds, contractIds, customerIds, afterId, fetchLimit),
+                (afterId, fetchLimit) -> mapper.selectInvoices(invoiceIds, contractIds, customerIds, afterId, fetchLimit,
+                        principal.legalEntityId()),
                 row -> toInvoice(principal, row), ExternalApiInvoiceStatus.class);
     }
 
     public ExternalApiInvoiceStatus getInvoiceStatus(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope, String publicId) {
+        assertLegalEntityReadiness();
         Long id = resolveId(principal, "invoice-status", publicId, requiredIds(scope, "invoiceIds"));
         if (id == null) return null;
-        return mapper.selectInvoices(List.of(id), optionalIds(scope, "contractIds"), requiredIds(scope, "customerIds"), null, 1).stream()
+        return mapper.selectInvoices(List.of(id), optionalIds(scope, "contractIds"), requiredIds(scope, "customerIds"),
+                null, 1, principal.legalEntityId()).stream()
                 .findFirst().map(row -> toInvoice(principal, row)).orElse(null);
     }
 
     public ExternalApiCountResponse countInvoiceStatuses(
             ExternalApiPrincipal principal, ExternalApiEffectiveScope scope) {
+        assertLegalEntityReadiness();
         List<Long> invoiceIds = requiredIds(scope, "invoiceIds");
         return new ExternalApiCountResponse(mapper.countInvoices(invoiceIds, optionalIds(scope, "contractIds"),
-                        requiredIds(scope, "customerIds")),
+                        requiredIds(scope, "customerIds"), principal.legalEntityId()),
                 clock.instant());
     }
 
@@ -184,6 +217,13 @@ public class ExternalApiReadService {
                     digest, snapshotId, asOf.getEpochSecond(), lastId, expiresAt));
         }
         return new ExternalApiListResponse<>(items, nextCursor, hasMore, asOf);
+    }
+
+    private void assertLegalEntityReadiness() {
+        if (legalEntityReadinessService == null) {
+            throw new IllegalStateException("LEGAL_ENTITY_READINESS_UNAVAILABLE");
+        }
+        legalEntityReadinessService.assertReady();
     }
 
     private <T> ExternalApiListResponse<T> pageFromSnapshot(ExternalApiPrincipal principal, String route,

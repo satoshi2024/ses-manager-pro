@@ -19,13 +19,17 @@ import com.ses.service.EngineerSalesService;
 import com.ses.service.SystemConfigService;
 import com.ses.service.UtilizationCalcService;
 import com.ses.service.UtilizationForecastService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.Clock;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -53,6 +57,7 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
     private final DataScopeService dataScopeService;
     /** 当月値がダッシュボードKPIと一致することを保証する共通口径サービス(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
+    private final Clock clock;
     /** report schedulerの保存済みscopeを含め、画面と同じ組織母集団で予測する。 */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private OrganizationScopeService organizationScopeService;
@@ -68,24 +73,51 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
             // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
             sync = true)
     public UtilizationForecastDto getForecast(int months) {
-        return getForecast(YearMonth.from(LocalDate.now()), months);
+        return getForecastAt(serverMonth(), months, null);
     }
 
     @Override
     public UtilizationForecastDto getForecast(YearMonth from, int months) {
+        return getForecastAt(from, months, null);
+    }
+
+    @Override
+    public UtilizationForecastDto getForecast(YearMonth from, int months,
+                                              CopilotExecutionContext context) {
+        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
+        return getForecastAt(snapshot.asOfMonth(), months, snapshot.legalEntityId(),
+                snapshot.asOf(), snapshot);
+    }
+
+    private UtilizationForecastDto getForecastAt(YearMonth from, int months, Long legalEntityId) {
+        return getForecastAt(from, months, legalEntityId, from == null ? null : from.atEndOfMonth());
+    }
+
+    private UtilizationForecastDto getForecastAt(YearMonth from, int months, Long legalEntityId,
+                                                 java.time.LocalDate scopeAsOf) {
+        return getForecastAt(from, months, legalEntityId, scopeAsOf, null);
+    }
+
+    private UtilizationForecastDto getForecastAt(YearMonth from, int months, Long legalEntityId,
+                                                 java.time.LocalDate scopeAsOf,
+                                                 EffectiveScopeSnapshot scopeSnapshot) {
         int forecastMonths = months > 0 ? Math.min(months, 12) : 3;
 
         // 1. 権限スコープと対象要員の取得 (Requirement 3.2: DataScopeService に従う)
-        List<Engineer> allEngineers = engineerMapper.selectList(new QueryWrapper<>());
-        YearMonth currentYm = from == null ? YearMonth.from(LocalDate.now()) : from;
-        if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
+        QueryWrapper<Engineer> engineerQuery = new QueryWrapper<>();
+        engineerQuery.eq(legalEntityId != null, "legal_entity_id", legalEntityId);
+        applyIdFilter(engineerQuery, "id", scopeSnapshot == null ? null : scopeSnapshot.engineerIds());
+        List<Engineer> allEngineers = engineerMapper.selectList(engineerQuery);
+        YearMonth currentYm = from == null ? serverMonth() : from;
+        if (scopeSnapshot == null && organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
             Set<Long> allowedEngineerIds = organizationScopeService.allowedEngineerIds(currentYm.atEndOfMonth());
             allEngineers = allEngineers.stream()
                     .filter(e -> e.getId() != null && allowedEngineerIds.contains(e.getId()))
                     .collect(Collectors.toList());
         }
-        if (dataScopeService.isScoped()) {
-            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds();
+        if (scopeSnapshot == null && dataScopeService.isScoped()) {
+            Set<Long> allowedEngineerIds = dataScopeService.allowedEngineerIds(
+                    scopeAsOf == null ? currentYm.atEndOfMonth() : scopeAsOf);
             allEngineers = allEngineers.stream()
                     .filter(e -> e.getId() != null && allowedEngineerIds.contains(e.getId()))
                     .collect(Collectors.toList());
@@ -120,11 +152,12 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
         }
 
         // 2. 対象要員の契約一覧ロード (共通口径サービスと同一のステータス集合)
-        List<Contract> contracts = contractMapper.selectList(
-                new QueryWrapper<Contract>()
+        QueryWrapper<Contract> contractQuery = new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
                         .in("engineer_id", engineerIds)
-        );
+                        .eq(legalEntityId != null, "legal_entity_id", legalEntityId);
+        applyIdFilter(contractQuery, "id", scopeSnapshot == null ? null : scopeSnapshot.contractIds());
+        List<Contract> contracts = contractMapper.selectList(contractQuery);
 
         Map<Long, List<Contract>> contractsByEngineer = contracts.stream()
                 .filter(c -> c.getEngineerId() != null)
@@ -150,7 +183,7 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
 
         // 5. ロールオフ予定要員抽出 (当月以降に契約終了し、翌月Bench化する要員)
         List<UtilizationForecastDto.RolloffEngineerDto> rolloffList = extractRolloffEngineers(
-                allEngineers, contractsByEngineer, targetMonths, assumeRenew
+                allEngineers, contractsByEngineer, targetMonths, assumeRenew, legalEntityId, scopeSnapshot
         );
 
         return UtilizationForecastDto.builder()
@@ -166,7 +199,9 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
             List<Engineer> allEngineers,
             Map<Long, List<Contract>> contractsByEngineer,
             List<YearMonth> targetMonths,
-            boolean assumeRenew) {
+            boolean assumeRenew,
+            Long legalEntityId,
+            EffectiveScopeSnapshot scopeSnapshot) {
 
         List<UtilizationForecastDto.RolloffEngineerDto> result = new ArrayList<>();
         if (allEngineers.isEmpty()) {
@@ -240,10 +275,24 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
         List<Long> salesUserIds = candidates.stream().map(c -> c.contract.getSalesUserId()).filter(Objects::nonNull).distinct().collect(Collectors.toList());
 
         Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() :
-                projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
+                (scopeSnapshot == null
+                        ? (legalEntityId == null
+                        ? projectMapper.selectBatchIds(projectIds)
+                        : projectMapper.selectList(new QueryWrapper<Project>()
+                                .in("id", projectIds)
+                                .eq("legal_entity_id", legalEntityId)))
+                        : filteredProjects(projectIds, legalEntityId, scopeSnapshot))
+                        .stream().collect(Collectors.toMap(Project::getId, p -> p));
 
         Map<Long, Customer> customerMap = customerIds.isEmpty() ? Collections.emptyMap() :
-                customerMapper.selectBatchIds(customerIds).stream().collect(Collectors.toMap(Customer::getId, c -> c));
+                (scopeSnapshot == null
+                        ? (legalEntityId == null
+                        ? customerMapper.selectBatchIds(customerIds)
+                        : customerMapper.selectList(new QueryWrapper<Customer>()
+                                .in("id", customerIds)
+                                .eq("legal_entity_id", legalEntityId)))
+                        : filteredCustomers(customerIds, legalEntityId, scopeSnapshot))
+                        .stream().collect(Collectors.toMap(Customer::getId, c -> c));
 
         Map<Long, SysUser> sysUserMap = salesUserIds.isEmpty() ? Collections.emptyMap() :
                 sysUserMapper.selectBatchIds(salesUserIds).stream().collect(Collectors.toMap(SysUser::getId, u -> u));
@@ -290,5 +339,53 @@ public class UtilizationForecastServiceImpl implements UtilizationForecastServic
         // 終了日順でソート
         result.sort(Comparator.comparing(UtilizationForecastDto.RolloffEngineerDto::getEndDate));
         return result;
+    }
+
+    private YearMonth serverMonth() {
+        Clock source = clock == null ? Clock.system(ZoneId.of("Asia/Tokyo")) : clock;
+        return YearMonth.from(source.instant().atZone(ZoneId.of("Asia/Tokyo")));
+    }
+
+    private EffectiveScopeSnapshot requireSnapshot(CopilotExecutionContext context) {
+        if (context == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot == null || context.scope() != snapshot.scope()
+                || !context.tenantId().equals(snapshot.tenantId())
+                || !context.legalEntityId().equals(snapshot.legalEntityId())
+                || !context.asOfDate().equals(snapshot.asOf())) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_SCOPE_MISMATCH");
+        }
+        return snapshot;
+    }
+
+    private List<Project> filteredProjects(List<Long> ids, Long legalEntityId,
+                                           EffectiveScopeSnapshot snapshot) {
+        QueryWrapper<Project> query = new QueryWrapper<Project>()
+                .in("id", ids)
+                .eq(legalEntityId != null, "legal_entity_id", legalEntityId);
+        applyIdFilter(query, "id", snapshot.projectIds());
+        return projectMapper.selectList(query);
+    }
+
+    private List<Customer> filteredCustomers(List<Long> ids, Long legalEntityId,
+                                             EffectiveScopeSnapshot snapshot) {
+        QueryWrapper<Customer> query = new QueryWrapper<Customer>()
+                .in("id", ids)
+                .eq(legalEntityId != null, "legal_entity_id", legalEntityId);
+        applyIdFilter(query, "id", snapshot.customerIds());
+        return customerMapper.selectList(query);
+    }
+
+    private void applyIdFilter(QueryWrapper<?> query, String column, Set<Long> ids) {
+        if (ids == null) {
+            return;
+        }
+        if (ids.isEmpty()) {
+            query.apply("1 = 0");
+        } else {
+            query.in(column, ids);
+        }
     }
 }

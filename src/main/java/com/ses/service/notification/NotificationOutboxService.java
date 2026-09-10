@@ -7,12 +7,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 /** 通知の外部配信をcommit後に実行し、失敗時は指数backoffで再送する。 */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class NotificationOutboxService {
 
@@ -39,6 +41,7 @@ public class NotificationOutboxService {
                 .status("PENDING")
                 .attemptCount(0)
                 .nextAttemptAt(now)
+                .reconciliationRequired(0)
                 .createdAt(now)
                 .build();
         try {
@@ -58,12 +61,29 @@ public class NotificationOutboxService {
     /** schedulerからdue行をまとめて処理する。各行のclaim・送信・更新は独立transactionで行う。 */
     public int dispatchDue(int requestedLimit) {
         int limit = Math.max(1, Math.min(requestedLimit, 100));
-        dispatcher.recoverStaleRows();
+        try {
+            dispatcher.recoverStaleRows();
+        } catch (Exception e) {
+            // stale recoveryの障害でdue行全体を止めず、次回recoveryへ繰り越す。
+            log.error("通知outboxのstale recoveryに失敗しました: exceptionClass={}", e.getClass().getName());
+        }
+        try {
+            dispatcher.reconcilePending();
+        } catch (Exception e) {
+            // reconciliationの障害で同一batchの新規due行を止めない。
+            log.error("通知outboxのreconciliationに失敗しました: exceptionClass={}", e.getClass().getName());
+        }
         List<NotificationOutbox> due = outboxMapper.selectDue(limit);
         int processed = 0;
         for (NotificationOutbox row : due) {
-            if (dispatcher.dispatchOne(row.getId())) {
-                processed++;
+            try {
+                if (dispatcher.dispatchOne(row.getId())) {
+                    processed++;
+                }
+            } catch (Exception e) {
+                // 1行の状態障害で同一batchの他行を止めず、対象行はtransaction rollback後に再試行させる。
+                log.error("通知outboxの1行処理に失敗しました: outboxId={} exceptionClass={}",
+                        row.getId(), e.getClass().getName());
             }
         }
         return processed;

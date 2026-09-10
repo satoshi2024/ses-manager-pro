@@ -29,10 +29,10 @@ import com.ses.mapper.TrainingEnrollmentMapper;
 import com.ses.service.EngineerService;
 import com.ses.service.SkillGapService;
 import com.ses.service.certification.CertificationNumberCryptoService;
+import com.ses.service.certification.CertificationLifecycleStateResolver;
 import com.ses.service.security.AuthorizationService;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -55,7 +55,6 @@ import java.util.stream.Collectors;
  * detail/count/exportが別々のscope実装を持たないことが重要な境界である。
  */
 @Service
-@RequiredArgsConstructor
 public class CertificationLearningGapQueryServiceImpl implements CertificationLearningGapQueryService {
 
     private static final String PII_ACTION = "certification.pii.view";
@@ -77,6 +76,54 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
     private final CertificationNumberCryptoService numberCryptoService;
     private final DocumentLinkMapper documentLinkMapper;
     private final DocumentVersionMapper documentVersionMapper;
+    private final CertificationLifecycleStateResolver lifecycleStateResolver;
+    private final java.time.Clock clock;
+
+    /** 既存の直接生成互換。新しいSpring経路ではClockを注入する。 */
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+                                                    OrganizationScopeService organizationScopeService,
+                                                    AuthorizationService authorizationService,
+                                                    EngineerCertificationMapper certificationRecordMapper,
+                                                    CertificationMapper certificationMapper, LearningPlanMapper learningPlanMapper,
+                                                    TrainingEnrollmentMapper enrollmentMapper, TrainingCourseMapper courseMapper,
+                                                    LifecycleCaseMapper lifecycleCaseMapper, SkillGapService skillGapService,
+                                                    CertificationNumberCryptoService numberCryptoService,
+                                                    DocumentLinkMapper documentLinkMapper, DocumentVersionMapper documentVersionMapper) {
+        this(engineerService, dataScopeService, organizationScopeService, authorizationService, certificationRecordMapper,
+                certificationMapper, learningPlanMapper, enrollmentMapper, courseMapper, lifecycleCaseMapper, skillGapService,
+                numberCryptoService, documentLinkMapper, documentVersionMapper, new CertificationLifecycleStateResolver(),
+                java.time.Clock.system(java.time.ZoneId.of("Asia/Tokyo")));
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CertificationLearningGapQueryServiceImpl(EngineerService engineerService, DataScopeService dataScopeService,
+                                                    OrganizationScopeService organizationScopeService,
+                                                    AuthorizationService authorizationService,
+                                                    EngineerCertificationMapper certificationRecordMapper,
+                                                    CertificationMapper certificationMapper, LearningPlanMapper learningPlanMapper,
+                                                    TrainingEnrollmentMapper enrollmentMapper, TrainingCourseMapper courseMapper,
+                                                    LifecycleCaseMapper lifecycleCaseMapper, SkillGapService skillGapService,
+                                                    CertificationNumberCryptoService numberCryptoService,
+                                                    DocumentLinkMapper documentLinkMapper, DocumentVersionMapper documentVersionMapper,
+                                                    CertificationLifecycleStateResolver lifecycleStateResolver,
+                                                    java.time.Clock clock) {
+        this.engineerService = engineerService;
+        this.dataScopeService = dataScopeService;
+        this.organizationScopeService = organizationScopeService;
+        this.authorizationService = authorizationService;
+        this.certificationRecordMapper = certificationRecordMapper;
+        this.certificationMapper = certificationMapper;
+        this.learningPlanMapper = learningPlanMapper;
+        this.enrollmentMapper = enrollmentMapper;
+        this.courseMapper = courseMapper;
+        this.lifecycleCaseMapper = lifecycleCaseMapper;
+        this.skillGapService = skillGapService;
+        this.numberCryptoService = numberCryptoService;
+        this.documentLinkMapper = documentLinkMapper;
+        this.documentVersionMapper = documentVersionMapper;
+        this.lifecycleStateResolver = lifecycleStateResolver;
+        this.clock = clock;
+    }
 
     @Override
     public Page<CertificationLearningGapRow> page(CertificationLearningGapFilter filter, long current, long size,
@@ -122,7 +169,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     @Override
     public Set<Long> visibleEngineerIds(LocalDate asOf) {
-        LocalDate date = asOf == null ? LocalDate.now() : asOf;
+        LocalDate date = asOf == null ? LocalDate.now(clock) : asOf;
         Set<Long> dataIds = dataScopeService.isScoped() ? safeSet(dataScopeService.allowedEngineerIds()) : null;
         if (organizationScopeService.hasFullAccess()) {
             return dataIds == null ? null : Set.copyOf(dataIds);
@@ -162,7 +209,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
             return List.of();
         }
         Set<Long> engineerIds = engineers.stream().map(Engineer::getId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, String> lifecycleStates = lifecycleStates(engineerIds);
+        Map<Long, String> lifecycleStates = lifecycleStates(engineerIds, filter.asOf());
         engineers = engineers.stream()
                 .filter(e -> matchesLifecycle(lifecycleStates.getOrDefault(e.getId(), DEFAULT_LIFECYCLE), filter.lifecycleState()))
                 .toList();
@@ -209,10 +256,10 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
 
     private CertificationLearningGapFilter normalize(CertificationLearningGapFilter filter) {
         if (filter == null) {
-            return new CertificationLearningGapFilter(null, null, null, null, null, LocalDate.now(), null,
+            return new CertificationLearningGapFilter(null, null, null, null, null, LocalDate.now(clock), null,
                     SkillGapService.DemandSource.COMBINED);
         }
-        LocalDate asOf = filter.asOf() == null ? LocalDate.now() : filter.asOf();
+        LocalDate asOf = filter.asOf() == null ? LocalDate.now(clock) : filter.asOf();
         SkillGapService.DemandSource source = filter.demandSource() == null
                 ? SkillGapService.DemandSource.COMBINED : filter.demandSource();
         return new CertificationLearningGapFilter(filter.engineerId(), filter.engineerName(), filter.engineerStatus(),
@@ -316,7 +363,7 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                 .toList();
     }
 
-    private Map<Long, String> lifecycleStates(Set<Long> engineerIds) {
+    private Map<Long, String> lifecycleStates(Set<Long> engineerIds, LocalDate asOf) {
         if (engineerIds.isEmpty()) return Map.of();
         List<LifecycleCase> cases = lifecycleCaseMapper.selectList(new LambdaQueryWrapper<LifecycleCase>()
                 .in(LifecycleCase::getEngineerId, engineerIds)
@@ -324,26 +371,13 @@ public class CertificationLearningGapQueryServiceImpl implements CertificationLe
                 .ne(LifecycleCase::getStatus, "CANCELLED")
                 .orderByDesc(LifecycleCase::getAnchorDate)
                 .orderByDesc(LifecycleCase::getId));
+        Map<Long, List<LifecycleCase>> byEngineer = cases.stream()
+                .collect(Collectors.groupingBy(LifecycleCase::getEngineerId));
         Map<Long, String> result = new HashMap<>();
-        for (LifecycleCase lifecycleCase : cases) {
-            result.putIfAbsent(lifecycleCase.getEngineerId(), lifecycleState(lifecycleCase));
+        for (Long engineerId : engineerIds) {
+            result.put(engineerId, lifecycleStateResolver.resolve(byEngineer.getOrDefault(engineerId, List.of()), asOf).state());
         }
         return result;
-    }
-
-    private String lifecycleState(LifecycleCase lifecycleCase) {
-        if ("RESIGNATION".equals(lifecycleCase.getLifecycleType()) && "COMPLETED".equals(lifecycleCase.getStatus())) {
-            return RESIGNED;
-        }
-        if ("LEAVE".equals(lifecycleCase.getLifecycleType())
-                && ("ACTIVE".equals(lifecycleCase.getStatus()) || "ON_HOLD".equals(lifecycleCase.getStatus())
-                || "COMPLETED".equals(lifecycleCase.getStatus()))) {
-            return ON_LEAVE;
-        }
-        if ("REINSTATEMENT".equals(lifecycleCase.getLifecycleType()) && "COMPLETED".equals(lifecycleCase.getStatus())) {
-            return DEFAULT_LIFECYCLE;
-        }
-        return "PENDING";
     }
 
     private boolean matchesLifecycle(String actual, String requested) {

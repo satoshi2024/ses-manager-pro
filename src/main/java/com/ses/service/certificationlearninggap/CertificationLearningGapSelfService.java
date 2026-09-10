@@ -1,10 +1,10 @@
 package com.ses.service.certificationlearninggap;
 
 import com.ses.dto.certification.EngineerCertificationViewDto;
+import com.ses.dto.certification.CertificationLifecycleActionView;
 import com.ses.dto.certificationlearninggap.CertificationSelfDashboard;
 import com.ses.dto.certificationlearninggap.CertificationSelfView;
 import com.ses.dto.certificationlearninggap.LearningPlanSelfView;
-import com.ses.entity.EngineerCertification;
 import com.ses.entity.LearningPlan;
 import com.ses.entity.Certification;
 import com.ses.entity.TrainingCourse;
@@ -35,13 +35,13 @@ public interface CertificationLearningGapSelfService {
 
     CertificationEvidenceUpload uploadEvidence(Long actorUserId, Long recordId, MultipartFile file);
 
-    EngineerCertification withdrawCertification(Long actorUserId, Long recordId, Integer expectedVersion,
-                                                String reason);
+    CertificationLifecycleActionView withdrawCertification(Long actorUserId, Long recordId, Integer expectedVersion,
+                                                            String reason);
 
-    EngineerCertification correctCertification(Long actorUserId, Long recordId, Integer expectedVersion,
-                                               LocalDate acquiredOn, LocalDate expiresOn, String reason);
+    CertificationLifecycleActionView correctCertification(Long actorUserId, Long recordId, Integer expectedVersion,
+                                                          LocalDate acquiredOn, LocalDate expiresOn, String reason);
 
-    EngineerCertificationViewDto resubmitCertification(Long actorUserId, Long recordId,
+    EngineerCertificationViewDto resubmitCertification(Long actorUserId, Long recordId, Integer expectedVersion,
                                                        String certificateNumberPlaintext);
 
     List<LearningPlanSelfView> learningPlans(Long actorUserId);
@@ -56,9 +56,9 @@ public interface CertificationLearningGapSelfService {
 
     LearningPlan withdrawPlan(Long actorUserId, Long planId, Integer expectedVersion, String reason);
 
-    LearningPlanSelfView resubmitPlan(Long actorUserId, Long planId);
+    LearningPlanSelfView resubmitPlan(Long actorUserId, Long planId, Integer expectedVersion);
 
-    TrainingEnrollment enroll(Long actorUserId, Long planId, Long courseId);
+    TrainingEnrollment enroll(Long actorUserId, Long planId, Integer expectedVersion, Long courseId);
 
     TrainingEnrollment startEnrollment(Long actorUserId, Long enrollmentId, Integer expectedVersion);
 

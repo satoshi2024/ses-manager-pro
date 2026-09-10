@@ -2,88 +2,54 @@ package com.ses.service.ai.copilot.scope;
 
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.LocalDate;
-import java.util.HexFormat;
-import java.util.Set;
-
-/**
- * role / DataScope / 組織scopeを正本serviceと同じ母集団へ収束させる。
- */
+/** role / DataScope / 組織scopeをquery開始時のsnapshotへ収束させる。 */
 @Component
-@RequiredArgsConstructor
 public class CopilotScopeResolver {
+    public static final String POLICY_VERSION = EffectiveScopeSnapshotFactory.POLICY_VERSION;
 
-    public static final String POLICY_VERSION = "nf08-scope-1";
+    /** 既存unit testと互換のconstructor。scopeの再計算には使用しない。 */
+    public CopilotScopeResolver(DataScopeService dataScopeService,
+                                OrganizationScopeService organizationScopeService) {
+    }
 
-    private final DataScopeService dataScopeService;
-    private final OrganizationScopeService organizationScopeService;
+    @Autowired
+    public CopilotScopeResolver(EffectiveScopeSnapshotFactory snapshotFactory) {
+    }
 
     public CopilotScopeContext resolve(SemanticCatalogEntry entry) {
+        throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+    }
+
+    public CopilotScopeContext resolve(SemanticCatalogEntry entry, CopilotExecutionContext context) {
+        assertRoleAndCatalog(entry);
+        if (context == null) {
+            throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+        }
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot != null) {
+            if (context.scope() != snapshot.scope()) {
+                throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+            }
+            return snapshot.scope();
+        }
+        // scopeはquery開始時にfactoryが一度だけ束縛したsnapshotからのみ取得する。
+        // ここで再計算すると、同一pipeline内でDataScope/OrganizationScopeが変化した際に
+        // parameter・result・citationの認可集合が分裂するため、互換fallbackも許可しない。
+        throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
+    }
+
+    private void assertRoleAndCatalog(SemanticCatalogEntry entry) {
         String role = SecurityUtils.currentRole();
-        if (role == null || !entry.allowedRoles().contains(role)) {
+        if (entry == null || role == null || !entry.allowedRoles().contains(role)
+                || "HR".equals(role) || "要員".equals(role)) {
             throw BusinessException.of(403, "SCOPE_DENIED");
-        }
-        if ("HR".equals(role) || "要員".equals(role)) {
-            throw BusinessException.of(403, "SCOPE_DENIED");
-        }
-
-        String scopeType;
-        boolean emptyPopulation = false;
-        int populationMarker;
-
-        if (organizationScopeService.hasFullAccess() && !dataScopeService.isScoped()) {
-            scopeType = "COMPANY_WIDE";
-            populationMarker = -1;
-        } else if (dataScopeService.isSalesDataScoped()) {
-            scopeType = "SALES_DATA_SCOPED";
-            populationMarker = sizeOf(
-                    dataScopeService.allowedContractIds(),
-                    dataScopeService.allowedEngineerIds(),
-                    dataScopeService.allowedCustomerIds());
-            emptyPopulation = populationMarker == 0;
-        } else if (!organizationScopeService.hasFullAccess()) {
-            scopeType = "ORGANIZATION_SCOPED";
-            LocalDate asOf = LocalDate.now();
-            populationMarker = sizeOf(
-                    organizationScopeService.allowedOrganizationIds(asOf),
-                    organizationScopeService.allowedDirectUserIds(asOf));
-            emptyPopulation = populationMarker == 0;
-        } else if (dataScopeService.isScoped()) {
-            scopeType = "DATA_SCOPED";
-            populationMarker = sizeOf(dataScopeService.allowedContractIds(), dataScopeService.allowedEngineerIds());
-            emptyPopulation = populationMarker == 0;
-        } else {
-            scopeType = "COMPANY_WIDE";
-            populationMarker = -1;
-        }
-
-        String scopeHash = sha256(scopeType + "|" + POLICY_VERSION + "|" + populationMarker);
-        return new CopilotScopeContext(scopeType, POLICY_VERSION, scopeHash, emptyPopulation);
-    }
-
-    private static int sizeOf(Set<?> first, Set<?> second) {
-        return (first == null ? 0 : first.size()) + (second == null ? 0 : second.size());
-    }
-
-    private static int sizeOf(Set<?> first, Set<?> second, Set<?> third) {
-        return sizeOf(first, second) + (third == null ? 0 : third.size());
-    }
-
-    private static String sha256(String value) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (Exception ex) {
-            return "0".repeat(64);
         }
     }
 }

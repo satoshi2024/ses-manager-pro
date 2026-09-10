@@ -252,7 +252,7 @@ class UtilizationForecastServiceTest {
     @Test
     void testGetForecast_DataScopeService_Restricted() {
         when(dataScopeService.isScoped()).thenReturn(true);
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of(1L));
+        when(dataScopeService.allowedEngineerIds(any(LocalDate.class))).thenReturn(Set.of(1L));
 
         Engineer e1 = createEngineer(1L, "Eng One");
         Engineer e2 = createEngineer(2L, "Eng Two");

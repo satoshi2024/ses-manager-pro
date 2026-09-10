@@ -46,6 +46,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLConnection;
 import java.io.InputStream;
@@ -76,6 +78,7 @@ public class PortalCustomerServiceDeskApiController {
     private final EngineerMapper engineerMapper;
     private final AccountingTimezoneResolver timezoneResolver;
     private final Clock clock;
+    private final com.ses.service.servicedesk.ServiceRequestAttachmentService attachmentService;
 
     private Long customerId() {
         PortalLoginUser user = authorizationService.requireUser();
@@ -240,6 +243,14 @@ public class PortalCustomerServiceDeskApiController {
         return ApiResult.success(null);
     }
 
+    @PostMapping(value = "/{id}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResult<ServiceAttachmentLink> uploadAttachment(@PathVariable Long id,
+                                                              @RequestPart("file") MultipartFile file,
+                                                              @RequestParam(required = false) Long commentId) {
+        authorizationService.assertPermission(authorizationService.requireUser(), "service-desk.create");
+        return ApiResult.success(attachmentService.uploadPortal(id, commentId, file, customerId(), portalUserId()));
+    }
+
     /**
      * ポータル添付ファイルダウンロード
      */
@@ -262,7 +273,7 @@ public class PortalCustomerServiceDeskApiController {
             throw BusinessException.of(404, "error.notFound");
         }
         fileScopeValidationService.assertPortalServiceRequestDownloadAllowed(
-                storageKey, id, customerId(), link.getDocumentId());
+                storageKey, id, customerId(), link.getDocumentId(), link);
         InputStream stream = documentService.download(link.getDocumentId(), null);
         Resource resource = new InputStreamResource(stream);
 

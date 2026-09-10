@@ -8,12 +8,16 @@ import com.ses.dto.servicedesk.ServiceCommentCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestCreateRequest;
 import com.ses.dto.servicedesk.ServiceRequestStatusChangeRequest;
 import com.ses.entity.DocumentVersion;
+import com.ses.entity.Document;
+import com.ses.entity.DocumentLink;
 import com.ses.entity.Engineer;
 import com.ses.entity.PortalOrganization;
 import com.ses.entity.ServiceAttachmentLink;
 import com.ses.entity.ServiceRequest;
 import com.ses.mapper.CustomerMapper;
 import com.ses.mapper.DocumentVersionMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ServiceAttachmentLinkMapper;
 import com.ses.service.DocumentService;
@@ -68,6 +72,12 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
 
     @Autowired
     private DocumentVersionMapper documentVersionMapper;
+
+    @Autowired
+    private DocumentMapper documentMapper;
+
+    @Autowired
+    private DocumentLinkMapper documentLinkMapper;
 
     @Autowired
     private ServiceAttachmentLinkMapper attachmentLinkMapper;
@@ -310,7 +320,23 @@ class PortalCustomerServiceDeskApiTest extends PortalTestSupport {
     @DisplayName("ポータル添付はDocumentServiceとCLEAN検証を通過した場合だけダウンロードできること")
     void testAttachmentDownload_requiresCleanDocumentVersion() throws Exception {
         DocumentVersion version = new DocumentVersion();
+        Document document = new Document();
+        document.setId(9001L);
+        document.setTenantId("default");
+        document.setDocumentType("SERVICE_REQUEST_ATTACHMENT");
+        document.setDirection("INCOMING");
+        document.setStatus("DRAFT");
+        document.setLegalHoldFlag(0);
+        document.setVersion(1L);
+        documentMapper.insert(document);
+        DocumentLink documentLink = new DocumentLink();
+        documentLink.setDocumentId(9001L);
+        documentLink.setTargetType("SERVICE_REQUEST");
+        documentLink.setTargetId(customerARequest.getId());
+        documentLinkMapper.insert(documentLink);
+
         version.setDocumentId(9001L);
+        version.setTenantId("default");
         version.setVersionNo(1);
         version.setStorageKey("service-desk-clean-" + unique());
         version.setScanStatus("CLEAN");

@@ -43,7 +43,7 @@ public class ManagementReportDeliveryApiController {
 
     @GetMapping("/deliveries/{deliveryId}/download")
     public ResponseEntity<InputStreamResource> download(@PathVariable Long deliveryId,
-                                                        @RequestParam String token,
+                                                        @RequestParam(required = false) String token,
                                                         @RequestParam(defaultValue = "PDF") String format) {
         ReportDownload download = deliveryService.download(deliveryId, token, format);
         return ResponseEntity.ok()
@@ -54,7 +54,7 @@ public class ManagementReportDeliveryApiController {
 
     @GetMapping("/deliveries/{deliveryId}/preview")
     public ResponseEntity<InputStreamResource> preview(@PathVariable Long deliveryId,
-                                                       @RequestParam String token,
+                                                       @RequestParam(required = false) String token,
                                                        @RequestParam(defaultValue = "PDF") String format) {
         ReportDownload download = deliveryService.preview(deliveryId, token, format);
         return ResponseEntity.ok()

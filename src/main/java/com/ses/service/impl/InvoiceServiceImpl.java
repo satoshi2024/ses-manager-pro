@@ -33,12 +33,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Objects;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
@@ -92,9 +94,57 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Autowired
     private CustomerContactService customerContactService;
 
+    /** 請求生成時の法人は顧客payloadではなく組織/security contextから解決する。 */
+    @Autowired(required = false)
+    private com.ses.service.security.LegalEntityContextService legalEntityContextService;
+
     @Autowired
     private org.springframework.beans.factory.ObjectProvider<com.ses.service.portal.PortalNotificationService>
             portalNotificationServiceProvider;
+
+    /** generic invoice saveも顧客法人との再認可を通す。 */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean save(Invoice entity) {
+        if (entity == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Customer customer = entity.getCustomerId() == null ? null : customerMapper.selectById(entity.getCustomerId());
+        if (customer == null || customer.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(customer.getLegalEntityId());
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(entity.getLegalEntityId(), customer.getLegalEntityId());
+        }
+        entity.setLegalEntityId(customer.getLegalEntityId());
+        return super.save(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateById(Invoice entity) {
+        if (entity == null || entity.getId() == null || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Invoice current = baseMapper.selectById(entity.getId());
+        if (current == null) throw BusinessException.of(404, "error.invoice.notFound");
+        assertInvoiceLegalEntity(current);
+        if (entity.getLegalEntityId() != null) {
+            legalEntityContextService.assertSame(entity.getLegalEntityId(), current.getLegalEntityId());
+        }
+        entity.setLegalEntityId(current.getLegalEntityId());
+        return super.updateById(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeById(java.io.Serializable id) {
+        Invoice current = id == null ? null : baseMapper.selectById(id);
+        if (current == null) return false;
+        assertInvoiceLegalEntity(current);
+        return super.removeById(id);
+    }
 
     @Autowired(required = false)
     private org.springframework.transaction.PlatformTransactionManager transactionManager;
@@ -109,6 +159,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     public Invoice generate(Long customerId, String billingMonth) {
         assertSalesDataScopeCustomer(customerId);
         checkClosing(billingMonth);
+        Customer customer = customerMapper.selectById(customerId);
+        Long legalEntityId = customer == null ? null : customer.getLegalEntityId();
+        if (legalEntityContextService == null || customer == null || legalEntityId == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(legalEntityId);
         LocalDate billingAsOf = com.ses.common.util.DateUtils.parseYearMonth(billingMonth).atDay(1);
         List<UnbilledWorkRecordDto> unbilledList;
         if (organizationScopeService != null && !organizationScopeService.hasFullAccess()) {
@@ -129,6 +185,13 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         List<Long> workRecordIds = unbilledList.stream()
                 .map(UnbilledWorkRecordDto::getWorkRecordId)
                 .collect(java.util.stream.Collectors.toList());
+        List<Long> rowLegalEntities = baseMapper.selectLegalEntityIdsByWorkRecordIds(workRecordIds);
+        if (rowLegalEntities == null || rowLegalEntities.size() != workRecordIds.size()
+                || rowLegalEntities.stream().anyMatch(java.util.Objects::isNull)
+                || rowLegalEntities.stream().distinct().count() != 1
+                || !Objects.equals(rowLegalEntities.get(0), legalEntityId)) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_MISMATCH");
+        }
         long lockedAccepted = baseMapper.lockAcceptedAcceptancesByWorkRecordIds(workRecordIds).size();
         long requiredAcceptance = baseMapper.countAcceptanceRequiredWorkRecords(workRecordIds);
         if (lockedAccepted != requiredAcceptance) {
@@ -148,6 +211,9 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
 
         Invoice invoice = new Invoice();
         invoice.setCustomerId(customerId);
+        // 法人境界は請求生成時に解決済みの顧客法人をそのまま保存する。
+        // request/customer payload由来の値は使わず、後続の公開readでも再利用できる不変の境界とする。
+        invoice.setLegalEntityId(legalEntityId);
         invoice.setBillingMonth(billingMonth);
         invoice.setSubtotal(subtotal);
         invoice.setTax(tax);
@@ -155,7 +221,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         // 生成時点の適用税率を保存する(税率改定後も過去請求書の表示・保存税額が矛盾しないように)。
         invoice.setTaxRate(taxRate);
         invoice.setStatus("未送付");
-        invoice.setIssuedDate(LocalDate.now());
+        invoice.setIssuedDate(legalEntityContextService.requireCurrentDate());
         invoice.setDueDate(calcDueDate(billingMonth,
                 systemConfigService.getString("billing.payment-due-rule", "next-month-end")));
 
@@ -189,6 +255,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             invoice.setInvoiceNo(generateInvoiceNo(billingMonth));
             try {
+                // 採番競合リトライの各試行でも、最終INSERT直前に法人境界を再確認する。
+                assertInvoiceLegalEntity(invoice);
                 this.baseMapper.insert(invoice);
                 return;
             } catch (DuplicateKeyException e) {
@@ -230,6 +298,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         // 完済（入金済）からの手動状態変更は拒否する（入金行由来の最終状態を保護）。
@@ -244,7 +313,12 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         }
 
         invoice.setStatus(status);
-        this.updateById(invoice);
+        // この行は直前の FOR UPDATE で取得し、法人・DataScope・締め状態を
+        // 既に検証済みの同一エンティティであるため、再SELECTを挟まず更新する。
+        // updateById(entity) の再読込は通常の外部更新には必要だが、ここでは
+        // Mockito/H2を含む読み取りスナップショットとの二重読込を避け、ロック中の
+        // 行に対する検証済み更新を維持する。
+        updateLoadedInvoice(invoice);
         // R4.1: 請求書の公開（送付済）を顧客portal組織へ通知（失敗は業務を妨げない）
         if ("送付済".equals(status) && invoice.getCustomerId() != null) {
             com.ses.service.portal.PortalNotificationService notification =
@@ -274,6 +348,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertInvoiceWriteScope(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
@@ -316,6 +391,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
         if ("入金済".equals(invoice.getStatus()) && listPayments(invoiceId).isEmpty()) {
             throw BusinessException.of("error.invoice.legacyPaidData");
@@ -540,21 +616,23 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
-        if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), LocalDate.now())) {
+        LocalDate today = legalEntityContextService.requireCurrentDate();
+        if (!InvoiceService.isOverdue(invoice.getStatus(), invoice.getDueDate(), today)) {
             throw BusinessException.of("error.invoice.reminderNotAllowed");
         }
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
         String to = contactId != null && customerContactService != null
-                ? customerContactService.resolveRecipientEmail(invoice.getCustomerId(), contactId, LocalDate.now())
+                ? customerContactService.resolveRecipientEmail(invoice.getCustomerId(), contactId, today)
                 : customer != null ? customer.getContactEmail() : null;
         if (to == null || to.isBlank()) {
             throw BusinessException.of("error.invoice.customerEmailMissing");
         }
 
         BigDecimal balance = invoice.getTotal().subtract(sumPaid(invoiceId));
-        long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), LocalDate.now());
+        long overdueDays = ChronoUnit.DAYS.between(invoice.getDueDate(), today);
 
         Map<String, String> params = new java.util.HashMap<>();
         params.put("customerName", customer.getCompanyName());
@@ -636,6 +714,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
         checkClosing(invoice.getBillingMonth());
         List<InvoicePaymentResponse> payments = listPayments(id);
@@ -653,6 +732,7 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         if (invoice == null) {
             throw BusinessException.of("error.invoice.notFound");
         }
+        assertInvoiceLegalEntity(invoice);
         assertSalesDataScopeCustomer(invoice.getCustomerId());
 
         Customer customer = customerMapper.selectById(invoice.getCustomerId());
@@ -689,6 +769,30 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         }
     }
 
+    /** 請求書の全更新経路を、保存済み顧客法人と現在の権威法人へ再束縛する。 */
+    private void assertInvoiceLegalEntity(Invoice invoice) {
+        if (legalEntityContextService == null || invoice == null
+                || invoice.getLegalEntityId() == null || invoice.getCustomerId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        Customer customer = customerMapper.selectById(invoice.getCustomerId());
+        if (customer == null || customer.getLegalEntityId() == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        legalEntityContextService.assertCurrent(invoice.getLegalEntityId());
+        legalEntityContextService.assertSame(invoice.getLegalEntityId(), customer.getLegalEntityId());
+    }
+
+    /** FOR UPDATEで取得し、直前に法人境界を検証した請求書を更新する。 */
+    private boolean updateLoadedInvoice(Invoice invoice) {
+        if (invoice == null || invoice.getId() == null || invoice.getLegalEntityId() == null
+                || legalEntityContextService == null) {
+            throw BusinessException.of(403, "LEGAL_ENTITY_CONTEXT_REQUIRED");
+        }
+        assertInvoiceLegalEntity(invoice);
+        return super.updateById(invoice);
+    }
+
     /** 入金書込では請求書の対象月時点の組織scopeを必ず先に検証する。 */
     private void assertInvoiceWriteScope(Invoice invoice) {
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
@@ -721,11 +825,11 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
     @Override
     public java.util.List<com.ses.dto.mail.BulkReminderRowResult> sendReminders(
             java.util.List<Long> invoiceIds, Long templateId, java.time.LocalDate asOf) {
-        java.time.LocalDate targetDate = asOf != null ? asOf : java.time.LocalDate.now();
         java.util.List<com.ses.dto.mail.BulkReminderRowResult> results = new java.util.ArrayList<>();
         if (invoiceIds == null || invoiceIds.isEmpty()) {
             return results;
         }
+        java.time.LocalDate targetDate = asOf != null ? asOf : legalEntityContextService.requireCurrentDate();
 
         // 同一リクエスト内の重複IDは冪等にSKIP。各請求は独立の短トランザクションで処理する。
         java.util.Set<Long> seen = new java.util.HashSet<>();
@@ -762,6 +866,8 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
             if (invoice == null) {
                 return new com.ses.dto.mail.BulkReminderRowResult(id, "FAILED", "error.invoice.notFound", null);
             }
+            assertInvoiceLegalEntity(invoice);
+            assertSalesDataScopeCustomer(invoice.getCustomerId());
             if ("入金済".equals(invoice.getStatus())) {
                 return new com.ses.dto.mail.BulkReminderRowResult(
                         id, "SKIPPED", "error.invoice.reminderAlreadyPaid", null);
@@ -826,4 +932,3 @@ public class InvoiceServiceImpl extends ServiceImpl<InvoiceMapper, Invoice> impl
         return "error.invoice.reminderFailed";
     }
 }
-

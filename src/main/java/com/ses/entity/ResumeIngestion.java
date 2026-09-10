@@ -15,6 +15,9 @@ import lombok.EqualsAndHashCode;
 @TableName("t_resume_ingestion")
 public class ResumeIngestion extends BaseEntity {
 
+    /** 取込ジョブと確定先要員を同一法人へ束縛する。 */
+    private Long legalEntityId;
+
     /** アップロード時の元ファイル名 */
     private String originalFileName;
 

@@ -29,11 +29,7 @@ public class InboundDigitalInvoiceApiController {
             @RequestParam(defaultValue = "10") long size) {
 
         try {
-            Page<DigitalInvoice> page = PageUtils.safePage(current, size);
-            digitalInvoiceService.lambdaQuery()
-                    .eq(DigitalInvoice::getDirection, "RECEIVE")
-                    .orderByDesc(DigitalInvoice::getReceivedAt)
-                    .page(page);
+            Page<DigitalInvoice> page = digitalInvoiceService.searchInboundInvoices(current, size);
             return ApiResult.success(page);
         } catch (BusinessException e) {
             throw e;
@@ -51,6 +47,7 @@ public class InboundDigitalInvoiceApiController {
     public ApiResult<InboundPurchaseRequest> reviewInvoice(@PathVariable Long id, @RequestParam String action) {
         CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, id);
         try {
+            digitalInvoiceService.assertInboundAccessAllowed(id);
             if ("ACCEPT".equalsIgnoreCase(action)) {
                 InboundPurchaseRequest request = digitalInvoiceService.acceptInboundReview(id);
                 return ApiResult.success(request);

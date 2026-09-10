@@ -34,9 +34,13 @@ public class ServiceSlaClockDto {
 
     private Boolean responseBreached;
 
+    private LocalDateTime responseBreachedAt;
+
     private LocalDateTime resolvedAt;
 
     private Boolean resolveBreached;
+
+    private LocalDateTime resolveBreachedAt;
 
     private Integer totalPauseMinutes;
 

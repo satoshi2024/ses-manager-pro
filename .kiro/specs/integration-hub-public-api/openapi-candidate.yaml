@@ -429,7 +429,10 @@ paths:
           schema:
             type: string
             minLength: 1
-            maxLength: 160
+            maxLength: 128
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: Must be byte-for-byte equal to body.providerEventId.
+          x-must-equal-body-field: providerEventId
       requestBody:
         required: true
         content:
@@ -437,12 +440,27 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [eventType]
+              required: [providerEventId, eventType]
               properties:
+                providerEventId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+                  description: Must be byte-for-byte equal to X-Provider-Event-ID.
                 eventType:
                   type: string
                   minLength: 1
                   maxLength: 100
+                  pattern: '^[A-Za-z][A-Za-z0-9._:-]{0,99}$'
+                provider:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  pattern: '^[A-Za-z0-9._~-]{1,100}$'
+                  description: Optional provider echo; when present it must equal the path provider.
+                canonicalPayload:
+                  $ref: '#/components/schemas/CanonicalPayload'
       responses:
         '200':
           description: Duplicate delivery of an already terminal inbound event
@@ -868,6 +886,164 @@ components:
         resultCode:
           type: string
           maxLength: 64
+    CanonicalPayload:
+      type: object
+      additionalProperties: false
+      maxProperties: 27
+      description: >-
+        Optional structured provider payload. Its allow-list and scalar rules are
+        identical to ExternalDtoSnapshot.CANONICAL_PAYLOAD_FIELDS; raw provider
+        fields are rejected. Null is accepted for an optional scalar.
+      properties:
+        providerEventId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        provider:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        eventType:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        receivedAt:
+          type: string
+          nullable: true
+          format: date-time
+        signatureResult:
+          type: string
+          nullable: true
+          enum: [VALID, INVALID, REPLAY, MALFORMED]
+        processingStatus:
+          type: string
+          nullable: true
+          enum: [RECEIVED, PROCESSING, PROCESSED, DUPLICATE, CONFLICT, DLQ, FAILED]
+        resultCode:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+        publicResourceId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        publicEngineerId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        availabilityStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]
+        availableFrom:
+          type: string
+          nullable: true
+          format: date
+        availableTo:
+          type: string
+          nullable: true
+          format: date
+        skillTagCode:
+          type: array
+          nullable: true
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 64
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        publicProjectId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        status:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+        startDate:
+          type: string
+          nullable: true
+          format: date
+        endDate:
+          type: string
+          nullable: true
+          format: date
+        publicCustomerId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        publicContractId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        renewalStatus:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+        publicInvoiceId:
+          type: string
+          nullable: true
+          maxLength: 128
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        issueDate:
+          type: string
+          nullable: true
+          format: date
+        dueDate:
+          type: string
+          nullable: true
+          format: date
+        paidAt:
+          type: string
+          nullable: true
+          format: date-time
+        settlementStatus:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+        changedFieldNames:
+          type: array
+          nullable: true
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 128
+            enum: [publicEngineerId, availabilityStatus, availableFrom, availableTo, skillTagCode,
+                   publicProjectId, status, startDate, endDate, publicCustomerId, publicContractId,
+                   renewalStatus, publicInvoiceId, issueDate, dueDate, paidAt, settlementStatus]
+        payload:
+          type: object
+          additionalProperties: false
+          maxProperties: 17
+          properties:
+            publicEngineerId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            availabilityStatus: {type: string, nullable: true, enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]}
+            availableFrom: {type: string, nullable: true, format: date}
+            availableTo: {type: string, nullable: true, format: date}
+            skillTagCode: {type: array, nullable: true, maxItems: 50, items: {type: string, maxLength: 64, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}}
+            publicProjectId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            status: {type: string, nullable: true, maxLength: 64, pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
+            startDate: {type: string, nullable: true, format: date}
+            endDate: {type: string, nullable: true, format: date}
+            publicCustomerId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            publicContractId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            renewalStatus: {type: string, nullable: true, maxLength: 64, pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
+            publicInvoiceId: {type: string, nullable: true, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'}
+            issueDate: {type: string, nullable: true, format: date}
+            dueDate: {type: string, nullable: true, format: date}
+            paidAt: {type: string, nullable: true, format: date-time}
+            settlementStatus: {type: string, nullable: true, maxLength: 64, pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
     BadRequestError:
       type: object
       additionalProperties: false

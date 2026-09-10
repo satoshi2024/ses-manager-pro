@@ -14,6 +14,10 @@ import com.ses.mapper.LearningPlanMapper;
 import com.ses.mapper.TrainingCourseMapper;
 import com.ses.mapper.TrainingEnrollmentExpenseMapper;
 import com.ses.mapper.TrainingEnrollmentMapper;
+import com.ses.mapper.ApprovalActionMapper;
+import com.ses.mapper.ApprovalRequestMapper;
+import com.ses.entity.ApprovalAction;
+import com.ses.entity.ApprovalRequest;
 import com.ses.service.MonthlyClosingService;
 import com.ses.service.approval.ApprovalEngineService;
 import com.ses.service.expense.ExpenseRequestService;
@@ -26,6 +30,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 学習計画とenrollmentの業務状態を管理する。
@@ -43,6 +48,12 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
     private final ApprovalEngineService approvalEngineService;
     private final MonthlyClosingService monthlyClosingService;
     private final Clock clock;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ApprovalRequestMapper approvalRequestMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ApprovalActionMapper approvalActionMapper;
 
     public TrainingPlanServiceImpl(LearningPlanMapper planMapper, TrainingCourseMapper courseMapper,
                                    TrainingEnrollmentMapper enrollmentMapper,
@@ -203,8 +214,66 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TrainingEnrollment enroll(Long planId, Long courseId, Long actorUserId) {
-        LearningPlan plan = requirePlan(planId);
+    public LearningPlan amendBudget(Long planId, Integer expectedVersion, BigDecimal amendedCostJpy,
+                                    Long approvalRequestId, Long actorUserId, String reason) {
+        requireReason(reason);
+        LearningPlan plan = lockPlan(planId, expectedVersion);
+        if (!PLAN_APPROVED.equals(plan.getStatus()) && !PLAN_IN_PROGRESS.equals(plan.getStatus())) {
+            throw BusinessException.of(400, "training.plan.invalidTransition");
+        }
+        if (amendedCostJpy == null || plan.getPlannedCostJpy() == null
+                || amendedCostJpy.compareTo(plan.getPlannedCostJpy()) < 0
+                || amendedCostJpy.scale() > 0) {
+            throw BusinessException.of(400, "training.expense.invalidAmendment");
+        }
+        assertIndependentApprovedRequest(approvalRequestId, "LEARNING_PLAN_BUDGET_AMENDMENT", plan.getId(),
+                amendedCostJpy, actorUserId);
+        int version = value(plan.getVersion());
+        int updated = planMapper.update(null, new UpdateWrapper<LearningPlan>()
+                .eq("id", plan.getId()).eq("version", version)
+                .set("amended_cost_jpy", amendedCostJpy)
+                .set("amendment_approval_request_id", approvalRequestId)
+                .set("version", version + 1)
+                .set("updated_by", actorUserId)
+                .set("updated_at", LocalDateTime.now(clock)));
+        if (updated != 1) {
+            throw BusinessException.of(409, "training.plan.optimisticLock");
+        }
+        plan.setAmendedCostJpy(amendedCostJpy);
+        plan.setAmendmentApprovalRequestId(approvalRequestId);
+        plan.setVersion(version + 1);
+        plan.setUpdatedBy(actorUserId);
+        appendEvent(plan, "PLAN_AMENDED", actorUserId, reason, amendedCostJpy);
+        return plan;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public LearningPlan resubmitPlan(Long planId, Integer expectedVersion, Long actorUserId) {
+        LearningPlan previous = lockPlan(planId, expectedVersion);
+        if (!PLAN_REJECTED.equals(previous.getStatus()) && !PLAN_CANCELLED.equals(previous.getStatus())) {
+            throw BusinessException.of(400, "training.plan.invalidTransition");
+        }
+        casPlan(previous, previous.getStatus(), previous.getExpenseRequestId(), previous.getApprovalRequestId(),
+                actorUserId);
+        appendEvent(previous, "PLAN_RESUBMIT", actorUserId, "再申請", previous.getPlannedCostJpy());
+
+        LearningPlan draft = new LearningPlan();
+        draft.setTenantId(previous.getTenantId());
+        draft.setEngineerId(previous.getEngineerId());
+        draft.setTitle(previous.getTitle());
+        draft.setGoalDescription(previous.getGoalDescription());
+        draft.setAttainmentCriteria(previous.getAttainmentCriteria());
+        draft.setPlannedStartOn(previous.getPlannedStartOn());
+        draft.setPlannedEndOn(previous.getPlannedEndOn());
+        draft.setPlannedCostJpy(previous.getPlannedCostJpy());
+        return createDraft(draft, actorUserId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TrainingEnrollment enroll(Long planId, Integer expectedVersion, Long courseId, Long actorUserId) {
+        LearningPlan plan = lockPlan(planId, expectedVersion);
         if (!PLAN_APPROVED.equals(plan.getStatus()) && !PLAN_IN_PROGRESS.equals(plan.getStatus())) {
             throw BusinessException.of(400, "training.plan.approvalRequired");
         }
@@ -233,7 +302,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         enrollmentMapper.insert(enrollment);
 
         if (plan.getExpenseRequestId() != null) {
-            linkExpense(enrollment.getId(), plan.getExpenseRequestId(), actorUserId, "plan費用正本");
+            linkExpense(enrollment.getId(), enrollment.getVersion(), plan.getExpenseRequestId(), actorUserId, "plan費用正本");
         }
         return enrollment;
     }
@@ -272,17 +341,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         if (completedOn == null || (score != null && (score.signum() < 0 || score.compareTo(new BigDecimal("100")) > 0))) {
             throw BusinessException.of(400, "training.enrollment.invalidResult");
         }
-        if (plan.getExpenseRequestId() != null) {
-            ExpenseRequest expense = expenseRequestService.getEntity(plan.getExpenseRequestId());
-            if (expense == null || !isExpenseApprovedOrPaid(expense.getStatus())) {
-                throw BusinessException.of(409, "training.plan.approvalPending");
-            }
-            if (expense.getAmount() != null && plan.getPlannedCostJpy() != null
-                    && expense.getAmount().compareTo(plan.getPlannedCostJpy()) > 0
-                    && !isExpenseApprovedOrPaid(expense.getStatus())) {
-                throw BusinessException.of(409, "training.expense.amendmentRequired");
-            }
-        }
+        validateEnrollmentExpenses(enrollment, plan, actorUserId);
         updateEnrollment(enrollment, ENROLLMENT_COMPLETED, completedOn, score, actorUserId);
         casPlan(plan, PLAN_COMPLETED, plan.getExpenseRequestId(), plan.getApprovalRequestId(), actorUserId);
         appendEvent(plan, "ENROLLMENT_COMPLETED", actorUserId, null, enrollment.getPlannedCostSnapshot());
@@ -307,9 +366,9 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TrainingEnrollmentExpense linkExpense(Long enrollmentId, Long expenseRequestId, Long actorUserId,
-                                                 String reason) {
-        TrainingEnrollment enrollment = enrollmentMapper.selectById(enrollmentId);
+    public TrainingEnrollmentExpense linkExpense(Long enrollmentId, Integer expectedVersion, Long expenseRequestId,
+                                                 Long actorUserId, String reason) {
+        TrainingEnrollment enrollment = lockEnrollment(enrollmentId, expectedVersion);
         if (enrollment == null || expenseRequestId == null) {
             throw BusinessException.of(404, "training.enrollment.notFound");
         }
@@ -321,12 +380,7 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         }
         assertOpen(expense.getExpenseDate());
         LearningPlan plan = requirePlan(enrollment.getPlanId());
-        if (plan.getPlannedCostJpy() != null && expense.getAmount().compareTo(plan.getPlannedCostJpy()) > 0
-                && !ExpenseRequestService.STATUS_APPROVED.equals(expense.getStatus())
-                && !ExpenseRequestService.STATUS_ACCOUNTING_SENT.equals(expense.getStatus())
-                && !ExpenseRequestService.STATUS_PAID.equals(expense.getStatus())) {
-            throw BusinessException.of(409, "training.expense.amendmentRequired");
-        }
+        validateExpenseBudget(plan, expense, actorUserId);
         long duplicate = enrollmentExpenseMapper.selectCount(new LambdaQueryWrapper<TrainingEnrollmentExpense>()
                 .eq(TrainingEnrollmentExpense::getEnrollmentId, enrollmentId)
                 .eq(TrainingEnrollmentExpense::getExpenseRequestId, expenseRequestId));
@@ -361,7 +415,10 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         if (plan == null) {
             throw BusinessException.of(404, "training.plan.notFound");
         }
-        if (expectedVersion != null && !expectedVersion.equals(plan.getVersion())) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "training.plan.expectedVersionRequired");
+        }
+        if (!expectedVersion.equals(plan.getVersion())) {
             throw BusinessException.of(409, "training.plan.optimisticLock");
         }
         return plan;
@@ -401,7 +458,10 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         if (enrollment == null) {
             throw BusinessException.of(404, "training.enrollment.notFound");
         }
-        if (expectedVersion != null && !expectedVersion.equals(enrollment.getVersion())) {
+        if (expectedVersion == null) {
+            throw BusinessException.of(400, "training.enrollment.expectedVersionRequired");
+        }
+        if (!expectedVersion.equals(enrollment.getVersion())) {
             throw BusinessException.of(409, "training.enrollment.optimisticLock");
         }
         return enrollment;
@@ -452,6 +512,78 @@ public class TrainingPlanServiceImpl implements TrainingPlanService {
         return ExpenseRequestService.STATUS_APPROVED.equals(status)
                 || ExpenseRequestService.STATUS_ACCOUNTING_SENT.equals(status)
                 || ExpenseRequestService.STATUS_PAID.equals(status);
+    }
+
+    /** linkExpenseとcompleteEnrollmentで共有する、実費と追加承認の一貫した検証。 */
+    private void validateEnrollmentExpenses(TrainingEnrollment enrollment, LearningPlan plan, Long actorUserId) {
+        if (plan.getExpenseRequestId() != null) {
+            ExpenseRequest expense = expenseRequestService.getEntity(plan.getExpenseRequestId());
+            validateExpenseBudget(plan, expense, actorUserId);
+        }
+        List<TrainingEnrollmentExpense> relations = enrollmentExpenseMapper.selectList(
+                new LambdaQueryWrapper<TrainingEnrollmentExpense>()
+                        .eq(TrainingEnrollmentExpense::getEnrollmentId, enrollment.getId()));
+        if (relations == null) {
+            return;
+        }
+        for (TrainingEnrollmentExpense relation : relations) {
+            if (relation.getExpenseRequestId() == null
+                    || (plan.getExpenseRequestId() != null
+                    && plan.getExpenseRequestId().equals(relation.getExpenseRequestId()))) {
+                continue;
+            }
+            validateExpenseBudget(plan, expenseRequestService.getEntity(relation.getExpenseRequestId()), actorUserId);
+        }
+    }
+
+    private void validateExpenseBudget(LearningPlan plan, ExpenseRequest expense, Long actorUserId) {
+        if (expense == null || !isExpenseApprovedOrPaid(expense.getStatus())) {
+            throw BusinessException.of(409, "training.plan.approvalPending");
+        }
+        if (plan.getPlannedCostJpy() == null || expense.getAmount() == null
+                || expense.getAmount().compareTo(plan.getPlannedCostJpy()) <= 0) {
+            return;
+        }
+        boolean planAmended = plan.getAmendedCostJpy() != null
+                && expense.getAmount().compareTo(plan.getAmendedCostJpy()) <= 0
+                && plan.getAmendmentApprovalRequestId() != null;
+        boolean independentExpenseApproval = expense.getApprovalRequestId() != null
+                && !expense.getApprovalRequestId().equals(plan.getApprovalRequestId());
+        if ((planAmended && isIndependentApprovedRequest(plan.getAmendmentApprovalRequestId(),
+                "LEARNING_PLAN_BUDGET_AMENDMENT", plan.getId(), plan.getAmendedCostJpy(), actorUserId))
+                || (independentExpenseApproval && isIndependentApprovedRequest(expense.getApprovalRequestId(),
+                "EXPENSE_REQUEST", expense.getId(), expense.getAmount(), actorUserId))) {
+            return;
+        }
+        throw BusinessException.of(409, "training.expense.amendmentRequired");
+    }
+
+    private void assertIndependentApprovedRequest(Long approvalRequestId, String targetType, Long targetId,
+                                                  BigDecimal amount, Long actorUserId) {
+        if (!isIndependentApprovedRequest(approvalRequestId, targetType, targetId, amount, actorUserId)) {
+            throw BusinessException.of(409, "training.expense.additionalApprovalRequired");
+        }
+    }
+
+    private boolean isIndependentApprovedRequest(Long approvalRequestId, String targetType, Long targetId,
+                                                 BigDecimal amount, Long actorUserId) {
+        if (approvalRequestMapper == null || approvalActionMapper == null || approvalRequestId == null) {
+            return false;
+        }
+        ApprovalRequest approval = approvalRequestMapper.selectById(approvalRequestId);
+        if (approval == null || !"approved".equalsIgnoreCase(approval.getStatus())
+                || !targetType.equals(approval.getTargetType()) || !java.util.Objects.equals(targetId, approval.getTargetId())
+                || amount == null || approval.getAmountSnapshot() == null
+                || approval.getAmountSnapshot().compareTo(amount) != 0) {
+            return false;
+        }
+        if (actorUserId != null && actorUserId.equals(approval.getApplicantId())) {
+            return false;
+        }
+        return approvalActionMapper.selectList(new LambdaQueryWrapper<ApprovalAction>()
+                        .eq(ApprovalAction::getRequestId, approvalRequestId)
+                        .eq(ApprovalAction::getAction, "APPROVE"))
+                .stream().anyMatch(action -> !java.util.Objects.equals(action.getApproverUserId(), approval.getApplicantId()));
     }
 
     private void requireReason(String reason) {

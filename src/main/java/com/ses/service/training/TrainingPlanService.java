@@ -35,7 +35,19 @@ public interface TrainingPlanService {
 
     LearningPlan cancelPlan(Long planId, Integer expectedVersion, Long actorUserId, String reason);
 
-    TrainingEnrollment enroll(Long planId, Long courseId, Long actorUserId);
+    /** 申請時snapshotを保持したまま、独立承認済みの追加予算上限を記録する。 */
+    LearningPlan amendBudget(Long planId, Integer expectedVersion, BigDecimal amendedCostJpy,
+                             Long approvalRequestId, Long actorUserId, String reason);
+
+    /** 却下・取消済みplanの再申請を、元planのversion CASと追記eventで一度だけ受け付ける。 */
+    LearningPlan resubmitPlan(Long planId, Integer expectedVersion, Long actorUserId);
+
+    TrainingEnrollment enroll(Long planId, Integer expectedVersion, Long courseId, Long actorUserId);
+
+    /** 旧呼出し互換。新規経路ではexpectedVersion必須。 */
+    default TrainingEnrollment enroll(Long planId, Long courseId, Long actorUserId) {
+        return enroll(planId, null, courseId, actorUserId);
+    }
 
     TrainingEnrollment startEnrollment(Long enrollmentId, Integer expectedVersion, Long actorUserId);
 
@@ -44,6 +56,12 @@ public interface TrainingPlanService {
 
     TrainingEnrollment cancelEnrollment(Long enrollmentId, Integer expectedVersion, Long actorUserId, String reason);
 
-    TrainingEnrollmentExpense linkExpense(Long enrollmentId, Long expenseRequestId, Long actorUserId,
-                                          String reason);
+    TrainingEnrollmentExpense linkExpense(Long enrollmentId, Integer expectedVersion, Long expenseRequestId,
+                                          Long actorUserId, String reason);
+
+    /** 旧呼出し互換。新規経路ではexpectedVersion必須。 */
+    default TrainingEnrollmentExpense linkExpense(Long enrollmentId, Long expenseRequestId, Long actorUserId,
+                                                  String reason) {
+        return linkExpense(enrollmentId, null, expenseRequestId, actorUserId, reason);
+    }
 }

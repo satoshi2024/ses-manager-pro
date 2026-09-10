@@ -5,7 +5,7 @@ import lombok.Data;
 
 import java.io.InputStream;
 
-/** scope・token・再認証確認後のdownload stream。 */
+/** 認証済みsessionまたは旧tokenのhash照合、scope・再認証確認後のdownload stream。 */
 @Data
 @AllArgsConstructor
 public class ReportDownload {

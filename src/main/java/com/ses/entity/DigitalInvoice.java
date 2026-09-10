@@ -29,6 +29,12 @@ public class DigitalInvoice {
     private Long contractId;
     private String matchStatus;
 
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String correlationId;
+    private String idempotencyKey;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     
@@ -51,4 +57,3 @@ public class DigitalInvoice {
     @TableField(exist = false)
     private Integer sendActiveSlot;
 }
-

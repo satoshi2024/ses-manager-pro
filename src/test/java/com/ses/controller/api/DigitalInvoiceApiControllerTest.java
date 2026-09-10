@@ -7,6 +7,7 @@ import com.ses.entity.Invoice;
 import com.ses.entity.PeppolParticipant;
 import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceService;
+import com.ses.service.DocumentService;
 import com.ses.service.InvoiceService;
 import com.ses.service.PeppolParticipantService;
 import com.ses.service.invoice.InvoiceDeliveryDispatcher;
@@ -31,6 +32,8 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,6 +65,9 @@ class DigitalInvoiceApiControllerTest {
 
     @MockBean
     private InvoiceDeliveryDispatcher deliveryDispatcher;
+
+    @MockBean
+    private DocumentService documentService;
 
     @Test
     @WithMockUser(roles = "管理者")
@@ -167,6 +173,27 @@ class DigitalInvoiceApiControllerTest {
 
         mockMvc.perform(get("/api/digital-invoices/" + di.getId() + "/xml"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "マネージャー")
+    void invoiceIdがNULLのscope外受信XMLはDocumentServiceを呼ばず403にする() throws Exception {
+        DigitalInvoice inbound = new DigitalInvoice();
+        inbound.setDirection("RECEIVE");
+        inbound.setProfile("Standard");
+        inbound.setSpecificationVersion("1.1.3");
+        inbound.setMessageId("MSG-SCOPE-DENIED-NULL-INVOICE");
+        inbound.setProviderMessageId("PROVIDER-SCOPE-DENIED");
+        inbound.setStatus("PENDING_REVIEW");
+        inbound.setXmlDocumentId(8801L);
+        digitalInvoiceService.save(inbound);
+        doThrow(BusinessException.of(403, "error.accessDenied"))
+                .when(digitalInvoiceService).assertInboundAccessAllowed(inbound.getId());
+
+        mockMvc.perform(get("/api/digital-invoices/" + inbound.getId() + "/xml"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+        verify(documentService, never()).download(anyLong(), org.mockito.ArgumentMatchers.isNull());
     }
 
     @Test

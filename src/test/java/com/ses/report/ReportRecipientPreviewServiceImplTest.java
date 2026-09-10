@@ -6,6 +6,7 @@ import com.ses.config.LoginUser;
 import com.ses.entity.ReportTemplateVersion;
 import com.ses.entity.SysUser;
 import com.ses.mapper.ReportTemplateVersionMapper;
+import com.ses.mapper.RoleMenuMapper;
 import com.ses.mapper.SysUserMapper;
 import com.ses.service.report.impl.ReportRecipientPreviewServiceImpl;
 import com.ses.service.security.OrganizationScopeService;
@@ -77,6 +78,49 @@ class ReportRecipientPreviewServiceImplTest {
                 .thenReturn(Set.of(10L, 11L), Set.of(10L));
         when(scopeService.allowedDirectUserIds(any(LocalDate.class)))
                 .thenReturn(Set.of(), Set.of());
+
+        assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.managementReport.recipientScopeDenied");
+    }
+
+    @Test
+    void 不正roleのみのrecipient設定は既定の管理者へフォールバックしない() {
+        ReportTemplateVersion version = publishedVersion();
+        version.setRecipientConfigJson("{\"roles\":[\"営業\"]}");
+        when(versionMapper.selectById(3L)).thenReturn(version);
+
+        assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("error.managementReport.recipientConfigInvalid");
+    }
+
+    @Test
+    void 営業とマネージャーの混在設定はマネージャーだけを候補にする() {
+        ReportTemplateVersion version = publishedVersion();
+        version.setRecipientConfigJson("{\"roles\":[\"営業\",\"マネージャー\"]}");
+        SysUser recipient = user(2L, "マネージャー");
+        when(versionMapper.selectById(3L)).thenReturn(version);
+        when(userMapper.selectList(any())).thenReturn(List.of(recipient));
+        when(scopeService.allowedOrganizationIds(any(LocalDate.class))).thenReturn(Set.of(10L), Set.of(10L));
+        when(scopeService.allowedDirectUserIds(any(LocalDate.class))).thenReturn(Set.of(), Set.of());
+
+        var result = service.preview(3L, YearMonth.of(2026, 8));
+
+        assertThat(result.getRecipients()).singleElement().extracting(item -> item.getRecipientRole())
+                .isEqualTo("マネージャー");
+    }
+
+    @Test
+    void managementReportメニューを持たない候補者は配布対象にならない() {
+        RoleMenuMapper menuMapper = mock(RoleMenuMapper.class);
+        when(menuMapper.selectMenuKeysByRole("マネージャー")).thenReturn(List.of("dashboard"));
+        service = new ReportRecipientPreviewServiceImpl(versionMapper, userMapper, scopeService,
+                new ObjectMapper(), menuMapper);
+        ReportTemplateVersion version = publishedVersion();
+        SysUser recipient = user(2L, "マネージャー");
+        when(versionMapper.selectById(3L)).thenReturn(version);
+        when(userMapper.selectList(any())).thenReturn(List.of(recipient));
 
         assertThatThrownBy(() -> service.preview(3L, YearMonth.of(2026, 8)))
                 .isInstanceOf(BusinessException.class)

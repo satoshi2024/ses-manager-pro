@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.exception.SafeErrorPolicy;
+import com.ses.common.audit.ActorAttribution;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
 import com.ses.dto.invoice.CanonicalInvoice;
@@ -13,6 +15,11 @@ import com.ses.entity.DigitalInvoice;
 import com.ses.entity.DigitalInvoiceEvent;
 import com.ses.entity.Invoice;
 import com.ses.mapper.DigitalInvoiceMapper;
+import com.ses.mapper.DigitalInvoiceEventMapper;
+import com.ses.mapper.SalesOrderMapper;
+import com.ses.mapper.EngineerBpAffiliationMapper;
+import com.ses.service.security.DataScopeService;
+import com.ses.common.util.SecurityUtils;
 import com.ses.service.ContractService;
 import com.ses.service.CustomerService;
 import com.ses.service.DigitalInvoiceEventService;
@@ -40,6 +47,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.UUID;
+import java.util.List;
+import java.util.Collections;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -53,6 +63,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private static final String JOB_CREDIT_NOTE = "DIGITAL_INVOICE_CREDIT_NOTE";
 
     private final DigitalInvoiceEventService digitalInvoiceEventService;
+    private final DigitalInvoiceEventMapper digitalInvoiceEventMapper;
     private final PeppolParticipantService peppolParticipantService;
     private final JpPintValidator validator;
     private final JpPintRenderer renderer;
@@ -63,10 +74,94 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     private final DocumentService documentService;
     private final CustomerService customerService;
     private final ContractService contractService;
+    private final SalesOrderMapper salesOrderMapper;
+    private final EngineerBpAffiliationMapper engineerBpAffiliationMapper;
+    private final DataScopeService dataScopeService;
+
+    @Override
+    public com.baomidou.mybatisplus.extension.plugins.pagination.Page<DigitalInvoice> searchInboundInvoices(long current, long size) {
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<DigitalInvoice> requested =
+                com.ses.common.util.PageUtils.safePage(current, size);
+        LambdaQueryWrapper<DigitalInvoice> query = new LambdaQueryWrapper<DigitalInvoice>()
+                .eq(DigitalInvoice::getDirection, "RECEIVE")
+                .orderByDesc(DigitalInvoice::getReceivedAt);
+        if (!dataScopeService.isScoped() || "管理者".equals(SecurityUtils.currentRole())) {
+            return lambdaQuery().eq(DigitalInvoice::getDirection, "RECEIVE")
+                    .orderByDesc(DigitalInvoice::getReceivedAt).page(requested);
+        }
+        // 関連先が複数テーブルに分散しているため、まず対象集合を取得してから
+        // 同一のaccess predicateで絞り込み、ページ母集団自体を漏らさない。
+        List<DigitalInvoice> visible = list(query).stream()
+                .filter(this::isInboundAccessAllowed)
+                .toList();
+        long from = Math.min((requested.getCurrent() - 1) * requested.getSize(), visible.size());
+        long to = Math.min(from + requested.getSize(), visible.size());
+        requested.setTotal(visible.size());
+        requested.setRecords(from >= to ? Collections.emptyList() : visible.subList((int) from, (int) to));
+        return requested;
+    }
+
+    @Override
+    public void assertInboundAccessAllowed(Long digitalInvoiceId) {
+        DigitalInvoice invoice = digitalInvoiceId == null ? null : getById(digitalInvoiceId);
+        if (invoice == null || !"RECEIVE".equals(invoice.getDirection())) {
+            throw BusinessException.of(404, "error.invoice.notFound");
+        }
+        if ("管理者".equals(SecurityUtils.currentRole()) || !dataScopeService.isScoped()) {
+            return;
+        }
+        if (!isInboundAccessAllowed(invoice)) {
+            throw BusinessException.of(403, "error.accessDenied");
+        }
+    }
+
+    private boolean isInboundAccessAllowed(DigitalInvoice invoice) {
+        if (invoice == null || !"RECEIVE".equals(invoice.getDirection())) {
+            return false;
+        }
+        boolean hasResolvedOwner = false;
+        boolean allowed = true;
+        if (invoice.getContractId() != null) {
+            hasResolvedOwner = true;
+            allowed &= dataScopeService.allowedContractIds().contains(invoice.getContractId());
+        }
+        if (invoice.getInvoiceId() != null) {
+            Invoice linked = invoiceService.getById(invoice.getInvoiceId());
+            if (linked == null || linked.getCustomerId() == null) return false;
+            hasResolvedOwner = true;
+            allowed &= dataScopeService.allowedCustomerIds().contains(linked.getCustomerId());
+        }
+        if (invoice.getPurchaseOrderId() != null) {
+            com.ses.entity.SalesOrder order = salesOrderMapper.selectById(invoice.getPurchaseOrderId());
+            if (order == null || order.getCustomerId() == null) return false;
+            hasResolvedOwner = true;
+            allowed &= dataScopeService.allowedCustomerIds().contains(order.getCustomerId());
+        }
+        if (invoice.getSupplierCompanyId() != null) {
+            List<com.ses.entity.EngineerBpAffiliation> affiliations = engineerBpAffiliationMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.EngineerBpAffiliation>()
+                            .eq(com.ses.entity.EngineerBpAffiliation::getBpCompanyId, invoice.getSupplierCompanyId())
+                            .isNull(com.ses.entity.EngineerBpAffiliation::getValidTo));
+            if (affiliations.isEmpty()) return false;
+            hasResolvedOwner = true;
+            allowed &= affiliations.stream().map(com.ses.entity.EngineerBpAffiliation::getEngineerId)
+                    .allMatch(dataScopeService.allowedEngineerIds()::contains);
+        }
+        // scope根拠が一つもない行は、supplier/PO/contractの未解決状態を含めて拒否する。
+        return hasResolvedOwner && allowed;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void processProviderEvent(DigitalInvoiceEvent event) {
+        if (ExecutionActorContext.current() == null
+                || com.ses.common.audit.ActorType.HUMAN.equals(ExecutionActorContext.current().actorType())) {
+            ExecutionActorContext.runAsProviderCallback(
+                    CorrelationContext.get(CorrelationContext.CORRELATION_ID),
+                    event == null ? null : event.getProviderEventId(),
+                    () -> processProviderEvent(event));
+            return;
+        }
         if (event == null || event.getDigitalInvoiceId() == null) {
             throw new BusinessException(400, "error.invoice.webhookFailed");
         }
@@ -81,6 +176,7 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         event.setEventType(eventType);
         event.setEventAt(event.getEventAt() == null ? LocalDateTime.now() : event.getEventAt());
         event.setPayloadHash(safePayloadHash(event.getPayloadHash()));
+        applyActor(event);
         CorrelationContext.put(CorrelationContext.DIGITAL_INVOICE_ID, event.getDigitalInvoiceId());
         CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, safeEventId);
         if (!Boolean.TRUE.equals(event.getSignatureValid())) {
@@ -88,14 +184,27 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             return;
         }
 
-        long count = digitalInvoiceEventService.lambdaQuery()
+        DigitalInvoiceEvent existingEvent = digitalInvoiceEventService.lambdaQuery()
                 .eq(DigitalInvoiceEvent::getProviderEventId, event.getProviderEventId())
-                .count();
-        if (count > 0) {
+                .one();
+        if (existingEvent != null) {
+            if (!event.getDigitalInvoiceId().equals(existingEvent.getDigitalInvoiceId())
+                    || !safePayloadHash(event.getPayloadHash()).equals(existingEvent.getPayloadHash())) {
+                throw new BusinessException(409, "Webhookイベントの内容が既存イベントと一致しません。");
+            }
             return;
         }
-
-        digitalInvoiceEventService.save(event);
+        try {
+            digitalInvoiceEventService.save(event);
+        } catch (DuplicateKeyException duplicate) {
+            // UNIQUE(provider_event_id)を正本とし、同時再送は既存イベントへ収束する。
+            DigitalInvoiceEvent winner = digitalInvoiceEventService.lambdaQuery()
+                    .eq(DigitalInvoiceEvent::getProviderEventId, event.getProviderEventId()).one();
+            if (winner != null && safePayloadHash(event.getPayloadHash()).equals(winner.getPayloadHash())) {
+                return;
+            }
+            throw new BusinessException(409, "Webhookイベントの内容が既存イベントと一致しません。");
+        }
 
         DigitalInvoice invoice = getById(event.getDigitalInvoiceId());
         if (invoice != null) {
@@ -167,11 +276,17 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
     @Override
     public void processSendJob(Long jobId) {
+        ExecutionActorContext.runAsSystem(CorrelationContext.get(CorrelationContext.CORRELATION_ID),
+                String.valueOf(jobId), () -> processSendJobInternal(jobId));
+    }
+
+    private void processSendJobInternal(Long jobId) {
         com.ses.entity.IntegrationJob job = integrationJobService.claimJob(jobId);
         if (job == null) {
             return;
         }
 
+        ExecutionActorContext.set(ActorAttribution.schedulerPoll(job.getCorrelationId(), String.valueOf(jobId)));
         CorrelationContext.beginJob(jobId, job.getCorrelationId());
         DigitalInvoice di = null;
         try {
@@ -260,11 +375,17 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
 
     @Override
     public void processCreditNoteJob(Long jobId) {
+        ExecutionActorContext.runAsSystem(CorrelationContext.get(CorrelationContext.CORRELATION_ID),
+                String.valueOf(jobId), () -> processCreditNoteJobInternal(jobId));
+    }
+
+    private void processCreditNoteJobInternal(Long jobId) {
         com.ses.entity.IntegrationJob job = integrationJobService.claimJob(jobId);
         if (job == null) {
             return;
         }
 
+        ExecutionActorContext.set(ActorAttribution.schedulerPoll(job.getCorrelationId(), String.valueOf(jobId)));
         CorrelationContext.beginJob(jobId, job.getCorrelationId());
         DigitalInvoice cn = null;
         try {
@@ -488,19 +609,63 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void processInboundInvoice(String providerMessageId, String eventId, String xmlContent,
                                       String rawPayloadHash, LocalDateTime eventAt) {
+        if (ExecutionActorContext.current() == null
+                || com.ses.common.audit.ActorType.HUMAN.equals(ExecutionActorContext.current().actorType())) {
+            ExecutionActorContext.runAsProviderCallback(
+                    CorrelationContext.get(CorrelationContext.CORRELATION_ID), eventId,
+                    () -> processInboundInvoice(providerMessageId, eventId, xmlContent, rawPayloadHash, eventAt));
+            return;
+        }
         String safeProviderMessageId = CorrelationContext.safeIdentifier(providerMessageId);
         String safeEventId = CorrelationContext.safeIdentifier(eventId);
         if (safeProviderMessageId == null || safeEventId == null) {
             throw new BusinessException(400, "error.invoice.webhookFailed");
         }
+        if (xmlContent == null || xmlContent.isBlank()) {
+            throw new BusinessException(400, "error.invoice.webhookFailed");
+        }
         String safePayloadHash = safePayloadHash(rawPayloadHash);
         CorrelationContext.put(CorrelationContext.PROVIDER_OPERATION_ID, safeEventId);
-        if (lambdaQuery().eq(DigitalInvoice::getProviderMessageId, safeProviderMessageId).count() > 0) {
+
+        // 受信XMLは保存・冪等判定より先に実際のDOMへ変換し、正規化シリアライズのhashを固定する。
+        org.w3c.dom.Document parsed;
+        String canonicalPayloadHash;
+        String invoiceNo;
+        LocalDate issueDate;
+        try {
+            parsed = renderer.parseSecurely(xmlContent);
+            canonicalPayloadHash = DigestUtils.sha256Hex(renderer.canonicalize(parsed));
+            invoiceNo = firstText(parsed, "ID");
+            issueDate = parseDate(firstText(parsed, "IssueDate"));
+            if (invoiceNo == null || invoiceNo.isBlank()) {
+                invoiceNo = "MSG-" + safeProviderMessageId;
+            }
+        } catch (Exception e) {
+            log.warn("受信XMLの正規化・照合に失敗: providerMessageId={} eventId={} category=BUSINESS errorCode={} exceptionClass={} detail={}",
+                    safeProviderMessageId, safeEventId, "INBOUND_PARSE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
+            throw new BusinessException(400, "error.invoice.webhookFailed", e);
+        }
+
+        DigitalInvoice existingMessage = lambdaQuery()
+                .eq(DigitalInvoice::getProviderMessageId, safeProviderMessageId).one();
+        if (existingMessage != null) {
+            assertInboundReplayCompatible(existingMessage, safeEventId, safePayloadHash, canonicalPayloadHash);
             return;
         }
-        if (digitalInvoiceEventService.lambdaQuery().eq(DigitalInvoiceEvent::getPayloadHash, safePayloadHash).count() > 0) {
+
+        // 別providerMessageIdでも同一messageIdを再送した場合は、実XMLのhashが一致するときだけ収束させる。
+        DigitalInvoice existingMessageId = lambdaQuery()
+                .eq(DigitalInvoice::getMessageId, invoiceNo)
+                .eq(DigitalInvoice::getDirection, "RECEIVE").one();
+        if (existingMessageId != null) {
+            DigitalInvoiceEvent existingEvent = findLatestInboundEvent(existingMessageId.getId());
+            if (existingEvent == null || !safePayloadHash.equals(existingEvent.getPayloadHash())
+                    || !canonicalPayloadHash.equals(existingEvent.getCanonicalPayloadHash())) {
+                throw new BusinessException(409, "受信電文の内容が既存電文と一致しません。");
+            }
             return;
         }
 
@@ -509,16 +674,53 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         di.setProviderMessageId(safeProviderMessageId);
         di.setSpecificationVersion("1.1.3");
         di.setProfile(PROFILE_STANDARD);
+        di.setMessageId(invoiceNo);
+        applyActor(di);
+
+        if (parsed != null) {
+            try {
+                applyInboundMatch(di, parsed);
+            } catch (Exception e) {
+                di.setStatus("REJECTED_AUTO");
+                di.setMatchStatus("UNMATCHED");
+            }
+        }
+
+        di.setReceivedAt(eventAt != null ? eventAt : LocalDateTime.now());
+        try {
+            // 業務行を先にinsertする。後続のarchive/eventが失敗すれば同一TXで
+            // DigitalInvoiceとDocumentをまとめてrollbackし、孤児archiveを残さない。
+            save(di);
+        } catch (DuplicateKeyException duplicate) {
+            // provider_message_id/message_idのDB UNIQUEを最終的な同時実行判定にする。
+            DigitalInvoice winner = baseMapper.selectByProviderMessageIdForUpdate(safeProviderMessageId);
+            if (winner != null) {
+                assertInboundReplayCompatible(winner, safeEventId, safePayloadHash, canonicalPayloadHash);
+                return;
+            }
+            DigitalInvoice messageWinner = baseMapper.selectInboundByMessageIdForUpdate(invoiceNo);
+            if (messageWinner != null && sameInboundPayload(messageWinner, safePayloadHash, canonicalPayloadHash)) {
+                return;
+            }
+            throw new BusinessException(409, "受信電文の一意制約競合を検証できません。", duplicate);
+        }
 
         try {
             com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                    .documentType("INVOICE")
+                    .documentType("INVOICE_IN")
                     .direction("INCOMING")
                     .sourceType("RECEIVED")
                     .businessKey("DIGITAL_INVOICE:" + safeProviderMessageId)
                     .versionDiscriminator("1")
                     .originalName(safeProviderMessageId + ".xml")
                     .contentType("application/xml")
+                    .transactionDate(issueDate)
+                    .targetType(inboundDocumentTargetType(di))
+                    .targetId(inboundDocumentTargetId(di))
+                    .actorType(com.ses.common.audit.ActorType.PROVIDER)
+                    .confirmationSource(com.ses.common.audit.ConfirmationSource.PROVIDER_CALLBACK)
+                    .correlationId(CorrelationContext.get(CorrelationContext.CORRELATION_ID))
+                    .idempotencyKey(safeEventId)
                     .build();
             com.ses.entity.Document docEntity = documentService.registerReceived(
                     req, new java.io.ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)));
@@ -526,33 +728,11 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         } catch (Exception e) {
             log.error("受信XMLのアーカイブに失敗: providerMessageId={} eventId={} category=SYSTEM errorCode={} exceptionClass={} detail={}",
                     safeProviderMessageId, safeEventId, "ARCHIVE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
-            throw new BusinessException(500, "XMLのアーカイブに失敗しました。");
+            throw new BusinessException(500, "XMLのアーカイブに失敗しました。", e);
         }
-
-        di.setMessageId("MSG-" + UUID.randomUUID());
-
-        try {
-            org.w3c.dom.Document doc = renderer.parseSecurely(xmlContent);
-            String invoiceNo = firstText(doc, "ID");
-            if (invoiceNo == null || invoiceNo.isBlank()) {
-                invoiceNo = di.getMessageId();
-            }
-            di.setMessageId(invoiceNo);
-
-            if (lambdaQuery().eq(DigitalInvoice::getMessageId, invoiceNo).eq(DigitalInvoice::getDirection, "RECEIVE").count() > 0) {
-                return;
-            }
-
-            applyInboundMatch(di, doc);
-        } catch (Exception e) {
-            log.warn("受信XMLのパース・照合に失敗: providerMessageId={} eventId={} category=BUSINESS errorCode={} exceptionClass={} detail={}",
-                    safeProviderMessageId, safeEventId, "INBOUND_PARSE_FAILED", LogRedaction.exceptionType(e), LogRedaction.safeThrowableSummary(e));
-            di.setStatus("REJECTED_AUTO");
-            di.setMatchStatus("UNMATCHED");
+        if (!updateById(di)) {
+            throw new BusinessException(409, "受信電子請求書の更新競合が発生しました。");
         }
-
-        di.setReceivedAt(eventAt != null ? eventAt : LocalDateTime.now());
-        save(di);
 
         DigitalInvoiceEvent event = new DigitalInvoiceEvent();
         event.setDigitalInvoiceId(di.getId());
@@ -560,13 +740,26 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         event.setEventType("RECEIVED");
         event.setEventAt(eventAt != null ? eventAt : LocalDateTime.now());
         event.setPayloadHash(safePayloadHash);
+        event.setCanonicalPayloadHash(canonicalPayloadHash);
         event.setSignatureValid(true);
-        digitalInvoiceEventService.save(event);
+        applyActor(event);
+        try {
+            digitalInvoiceEventService.save(event);
+        } catch (DuplicateKeyException duplicate) {
+            DigitalInvoiceEvent existing = digitalInvoiceEventService.lambdaQuery()
+                    .eq(DigitalInvoiceEvent::getProviderEventId, safeEventId).one();
+            if (existing == null || !di.getId().equals(existing.getDigitalInvoiceId())
+                    || !safePayloadHash.equals(existing.getPayloadHash())
+                    || !canonicalPayloadHash.equals(existing.getCanonicalPayloadHash())) {
+                throw new BusinessException(409, "Webhookイベントの内容が既存イベントと一致しません。", duplicate);
+            }
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public InboundPurchaseRequest acceptInboundReview(Long digitalInvoiceId) {
+        assertInboundAccessAllowed(digitalInvoiceId);
         DigitalInvoice di = getById(digitalInvoiceId);
         if (di == null || !"RECEIVE".equals(di.getDirection())) {
             throw new BusinessException("対象が見つかりません。");
@@ -608,6 +801,45 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
             throw new BusinessException("ステータス更新の競合が発生しました。");
         }
         return request;
+    }
+
+    private void assertInboundReplayCompatible(DigitalInvoice invoice, String eventId,
+                                                String payloadHash, String canonicalPayloadHash) {
+        if (invoice == null || !"RECEIVE".equals(invoice.getDirection())) {
+            throw new BusinessException(409, "受信電文の方向が既存電文と一致しません。");
+        }
+        // 先行するconsistent readで作られたREPEATABLE READのsnapshotに閉じ込めず、
+        // 一意制約競合後の勝者イベントを現在値として読み取る。
+        DigitalInvoiceEvent existing = digitalInvoiceEventMapper
+                .selectByInvoiceIdAndProviderEventIdForUpdate(invoice.getId(), eventId);
+        if (!sameInboundEvent(existing, payloadHash, canonicalPayloadHash)) {
+            log.warn("受信再送の整合性検証失敗: digitalInvoiceId={} providerEventId={} existingEventId={} "
+                            + "existingEventType={} payloadHashMatch={} canonicalPayloadHashMatch={} category=BUSINESS errorCode=INBOUND_REPLAY_CONFLICT",
+                    invoice.getId(), CorrelationContext.safeIdentifier(eventId), existing == null ? null : existing.getId(),
+                    existing == null ? null : existing.getEventType(),
+                    existing != null && Objects.equals(payloadHash, existing.getPayloadHash()),
+                    existing != null && Objects.equals(canonicalPayloadHash, existing.getCanonicalPayloadHash()));
+            throw new BusinessException(409, "受信電文のイベントIDまたは内容が既存電文と一致しません。");
+        }
+    }
+
+    private boolean sameInboundPayload(DigitalInvoice invoice, String payloadHash, String canonicalPayloadHash) {
+        DigitalInvoiceEvent existing = findLatestInboundEvent(invoice == null ? null : invoice.getId());
+        return sameInboundEvent(existing, payloadHash, canonicalPayloadHash);
+    }
+
+    private boolean sameInboundEvent(DigitalInvoiceEvent event, String payloadHash, String canonicalPayloadHash) {
+        return event != null
+                && "RECEIVED".equals(event.getEventType())
+                && Objects.equals(payloadHash, event.getPayloadHash())
+                && Objects.equals(canonicalPayloadHash, event.getCanonicalPayloadHash());
+    }
+
+    private DigitalInvoiceEvent findLatestInboundEvent(Long digitalInvoiceId) {
+        if (digitalInvoiceId == null) {
+            return null;
+        }
+        return digitalInvoiceEventMapper.selectLatestInboundForUpdate(digitalInvoiceId);
     }
 
     /** 仕入候補の受け渡し境界。支払確定ジョブは起動しない。 */
@@ -658,6 +890,38 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
                 di.setStatus("REJECTED_AUTO");
             }
         }
+    }
+
+    private String inboundDocumentTargetType(DigitalInvoice invoice) {
+        if (invoice.getContractId() != null) return "CONTRACT";
+        if (invoice.getPurchaseOrderId() != null) return "SALES_ORDER";
+        if (invoice.getInvoiceId() != null) return "CUSTOMER";
+        if (invoice.getSupplierCompanyId() != null) {
+            List<com.ses.entity.EngineerBpAffiliation> affiliations = engineerBpAffiliationMapper.selectList(
+                    new LambdaQueryWrapper<com.ses.entity.EngineerBpAffiliation>()
+                            .eq(com.ses.entity.EngineerBpAffiliation::getBpCompanyId, invoice.getSupplierCompanyId())
+                            .isNull(com.ses.entity.EngineerBpAffiliation::getValidTo));
+            if (!affiliations.isEmpty()) return "ENGINEER";
+        }
+        return null;
+    }
+
+    private Long inboundDocumentTargetId(DigitalInvoice invoice) {
+        if (invoice.getContractId() != null) return invoice.getContractId();
+        if (invoice.getPurchaseOrderId() != null) return invoice.getPurchaseOrderId();
+        if (invoice.getInvoiceId() != null) {
+            Invoice linked = invoiceService.getById(invoice.getInvoiceId());
+            return linked == null ? null : linked.getCustomerId();
+        }
+        if (invoice.getSupplierCompanyId() != null) {
+            com.ses.entity.EngineerBpAffiliation affiliation = engineerBpAffiliationMapper.selectOne(
+                    new LambdaQueryWrapper<com.ses.entity.EngineerBpAffiliation>()
+                            .eq(com.ses.entity.EngineerBpAffiliation::getBpCompanyId, invoice.getSupplierCompanyId())
+                            .isNull(com.ses.entity.EngineerBpAffiliation::getValidTo)
+                            .last("LIMIT 1"));
+            return affiliation == null ? null : affiliation.getEngineerId();
+        }
+        return null;
     }
 
     private Long resolveContractId(String contractRef) {
@@ -749,14 +1013,23 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
     }
 
     private void archiveOutboundXml(DigitalInvoice di, String originalName, String xml, String businessKey) {
+        Invoice invoice = di.getInvoiceId() == null ? null : invoiceService.getById(di.getInvoiceId());
+        ActorAttribution actor = ExecutionActorContext.resolve();
         com.ses.dto.document.DocumentRegisterRequest req = com.ses.dto.document.DocumentRegisterRequest.builder()
-                .documentType("INVOICE")
+                .documentType("INVOICE_OUT")
                 .direction("OUTGOING")
                 .sourceType("GENERATED")
                 .businessKey(businessKey)
                 .versionDiscriminator("1")
                 .originalName(originalName)
                 .contentType("application/xml")
+                .transactionDate(invoice == null ? null : invoice.getIssuedDate())
+                .actorType(actor.actorType())
+                .confirmationSource(actor.confirmationSource())
+                .humanUserId(actor.humanUserId())
+                .createdBy(actor.humanUserId())
+                .correlationId(actor.correlationId())
+                .idempotencyKey(businessKey)
                 .build();
         try {
             com.ses.entity.Document docEntity = documentService.registerGenerated(
@@ -774,8 +1047,29 @@ public class DigitalInvoiceServiceImpl extends ServiceImpl<DigitalInvoiceMapper,
         }
     }
 
+    private void applyActor(DigitalInvoice invoice) {
+        ActorAttribution actor = ExecutionActorContext.resolve();
+        invoice.setActorType(actor.actorType().name());
+        invoice.setConfirmationSource(actor.confirmationSource().name());
+        invoice.setHumanUserId(actor.humanUserId());
+        invoice.setCorrelationId(actor.correlationId());
+        invoice.setIdempotencyKey(actor.idempotencyKey());
+    }
+
+    private void applyActor(DigitalInvoiceEvent event) {
+        ActorAttribution actor = ExecutionActorContext.resolve();
+        event.setActorType(actor.actorType().name());
+        event.setConfirmationSource(actor.confirmationSource().name());
+        event.setHumanUserId(actor.humanUserId());
+        event.setCorrelationId(actor.correlationId());
+        event.setIdempotencyKey(actor.idempotencyKey());
+    }
+
     private static String firstText(org.w3c.dom.Document doc, String localName) {
         NodeList nodes = doc.getElementsByTagNameNS("*", localName);
+        if (nodes.getLength() == 0) {
+            nodes = doc.getElementsByTagName(localName);
+        }
         if (nodes.getLength() == 0) {
             return null;
         }

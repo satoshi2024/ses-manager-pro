@@ -15,7 +15,8 @@ import com.ses.service.ai.AiExecutionGateway;
 import com.ses.service.ai.AiGatewayRequest;
 import com.ses.service.ai.AiGatewayResult;
 import com.ses.service.ai.ProposalDraftService;
-import com.ses.service.security.DataScopeService;
+import com.ses.service.ai.LegacyAiEndpointBoundary;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,16 +41,28 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
     private final EngineerSkillMapper engineerSkillMapper;
     private final ProjectMapper projectMapper;
     private final ProjectSkillMapper projectSkillMapper;
-    private final DataScopeService dataScopeService;
     private final AiExecutionGateway aiExecutionGateway;
     private final ObjectMapper objectMapper;
 
+    /** controller外からの直接呼出しも同じ法人・組織・営業scopeを必ず通す。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private LegacyAiEndpointBoundary endpointBoundary;
+
     @Override
     public ProposalDraftDto generateDraft(Long engineerId, Long projectId) {
-        if (dataScopeService.isScoped()) {
-            dataScopeService.assertAllowedEngineer(engineerId);
-            dataScopeService.assertAllowedProject(projectId);
+        if (endpointBoundary == null) {
+            throw BusinessException.of(503, "AI_SCOPE_BOUNDARY_UNAVAILABLE");
         }
+        return generateDraft(engineerId, projectId, endpointBoundary.createContext());
+    }
+
+    @Override
+    public ProposalDraftDto generateDraft(Long engineerId, Long projectId,
+                                          CopilotExecutionContext context) {
+        if (endpointBoundary == null || context == null) {
+            throw BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        endpointBoundary.assertSameLegalEntity(engineerId, projectId, context);
 
         Engineer engineer = engineerMapper.selectById(engineerId);
         if (engineer == null) {
@@ -88,8 +101,7 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
         );
 
         try {
-            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.builder()
-                    .useCase(AiGatewayRequest.USE_PROPOSAL_DRAFT)
+            AiGatewayResult result = aiExecutionGateway.execute(AiGatewayRequest.legacyProposalDraft(context)
                     .taskMarker("[TASK:PROPOSAL_DRAFT]")
                     .trustedInstruction("""
                             あなたは優秀なSES営業担当です。ALLOWLIST_CONTEXT のみを根拠に、
@@ -112,7 +124,7 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("Failed to generate proposal draft", e);
+            log.error("AI proposal draft failed: category=PIPELINE_ERROR safety=REDACTED");
             throw BusinessException.of(500, "error.ai.unexpected");
         }
     }
@@ -147,8 +159,14 @@ public class ProposalDraftServiceImpl implements ProposalDraftService {
             }
             return dto;
         } catch (Exception e) {
-            log.error("Failed to parse AI response: {}", aiResponse, e);
+            log.warn("AI response parse failed: category=PARSE_ERROR responseBytes={} safety=REDACTED",
+                    responseByteLength(aiResponse));
             throw BusinessException.of(500, "error.ai.parseError");
         }
+    }
+
+    private static int responseByteLength(String response) {
+        return response == null ? 0
+                : response.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     }
 }

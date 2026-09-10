@@ -6,6 +6,7 @@ import com.ses.dto.ai.CopilotQueryResult;
 import com.ses.dto.ai.ResolvedCitationDto;
 import com.ses.service.ai.AiOfflineEvaluationService;
 import com.ses.service.ai.copilot.CopilotQueryService;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
 import com.ses.service.ai.copilot.citation.CitationAuthorizationService;
 import com.ses.service.ai.copilot.result.CopilotFreshnessInfo;
 import com.ses.service.ai.copilot.result.CopilotLimitInfo;
@@ -29,6 +30,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -52,6 +54,9 @@ class CopilotApiControllerTest {
 
     @MockBean
     private AiOfflineEvaluationService offlineEvaluationService;
+
+    @MockBean
+    private CopilotFeatureGate featureGate;
 
     @Test
     void flagが無効なら503() throws Exception {
@@ -124,5 +129,16 @@ class CopilotApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.available").value(false))
                 .andExpect(jsonPath("$.data.route").doesNotExist());
+    }
+
+    @Test
+    void citation入口もfeatureFlag無効なら503() throws Exception {
+        doThrow(new BusinessException(503, "経営コパイロットは現在無効化されています。"))
+                .when(featureGate).assertCitationAllowed();
+
+        mockMvc.perform(get("/api/copilot/citations")
+                        .param("key", "dashboard.summary"))
+                .andExpect(status().is(503))
+                .andExpect(jsonPath("$.code").value(503));
     }
 }

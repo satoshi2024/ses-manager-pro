@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS t_notification_outbox (
   next_attempt_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   locked_at        DATETIME,
   last_error       VARCHAR(1000),
+  reconciliation_required BOOLEAN NOT NULL DEFAULT FALSE,
   sent_at          DATETIME,
   created_at       DATETIME     DEFAULT CURRENT_TIMESTAMP
 );

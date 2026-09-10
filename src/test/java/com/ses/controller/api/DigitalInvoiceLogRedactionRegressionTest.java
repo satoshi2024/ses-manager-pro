@@ -51,6 +51,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -361,6 +362,7 @@ class DigitalInvoiceLogRedactionRegressionTest {
     @WithMockUser(roles = "管理者")
     @DisplayName("受信ACCEPT例外パス: ログ・レスポンスに機密を出さず診断情報を記録")
     void 受入例外で機密を隠し診断情報を残す() throws Exception {
+        doNothing().when(digitalInvoiceService).assertInboundAccessAllowed(999L);
         doThrow(new RuntimeException(compositeSecretExceptionMessage()))
                 .when(digitalInvoiceService).acceptInboundReview(999L);
 

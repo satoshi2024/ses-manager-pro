@@ -392,6 +392,7 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public byte[] download(Long contractId, Long deliveryId) {
         Contract contract = requireVisibleContract(contractId);
         requireAnyContractRole();
@@ -608,7 +609,9 @@ public class ComplianceDocumentServiceImpl implements ComplianceDocumentService 
             accessLog.setOccurredAt(LocalDateTime.now());
             documentAccessLogMapper.insert(accessLog);
         } catch (Exception e) {
-            log.warn("document access logの記録に失敗しました（documentId={}）", documentId, e);
+            log.error("文書アクセス監査ログの記録に失敗したためダウンロードをロールバックします: documentId={} exceptionClass={}",
+                    documentId, e.getClass().getName());
+            throw new BusinessException(500, "文書アクセス監査ログの記録に失敗しました。", e);
         }
     }
 

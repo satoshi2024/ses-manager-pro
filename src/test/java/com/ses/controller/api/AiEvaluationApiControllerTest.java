@@ -94,6 +94,16 @@ class AiEvaluationApiControllerTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    @WithMockUser(username = "admin", roles = "管理者")
+    void オフライン評価runはfeatureFlag無効なら503() throws Exception {
+        mockMvc.perform(post("/api/ai/evaluations/run")
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"candidateVersionId\":1,\"baselineVersionId\":2}"))
+                .andExpect(status().isServiceUnavailable());
+    }
+
     private AiEvaluationDashboardDto data(MvcResult result) throws Exception {
         var tree = objectMapper.readTree(result.getResponse().getContentAsString());
         return objectMapper.treeToValue(tree.get("data"), AiEvaluationDashboardDto.class);

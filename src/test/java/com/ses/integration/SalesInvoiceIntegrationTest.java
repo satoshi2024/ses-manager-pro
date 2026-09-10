@@ -12,9 +12,11 @@ import com.ses.service.integration.IntegrationConnectionService;
 import com.ses.service.integration.IntegrationJobService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -63,12 +65,32 @@ class SalesInvoiceIntegrationTest {
     private com.ses.mapper.SystemConfigMapper systemConfigMapper;
 
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private RestTemplate restTemplate;
 
     private MockRestServiceServer mockServer;
     private IntegrationConnection connection;
     private Customer customer;
     private Invoice invoice;
+
+    @AfterEach
+    void cleanupFixtures() {
+        if (invoice != null && invoice.getId() != null) {
+            invoiceService.removeById(invoice.getId());
+            jdbcTemplate.update("DELETE FROM t_invoice_item WHERE invoice_id = ?", invoice.getId());
+        }
+        if (customer != null && customer.getId() != null) {
+            customerService.removeById(customer.getId());
+        }
+        if (connection != null && connection.getId() != null) {
+            jdbcTemplate.update("DELETE FROM t_integration_job_event WHERE job_id IN "
+                    + "(SELECT id FROM t_integration_job WHERE connection_id = ?)", connection.getId());
+            jdbcTemplate.update("DELETE FROM t_integration_job WHERE connection_id = ?", connection.getId());
+            jdbcTemplate.update("DELETE FROM m_external_mapping WHERE connection_id = ?", connection.getId());
+        }
+    }
 
     @BeforeEach
     void setUp() {

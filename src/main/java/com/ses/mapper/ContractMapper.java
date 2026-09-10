@@ -184,6 +184,21 @@ public interface ContractMapper extends BaseMapper<Contract> {
           </if>
           <if test="costCenterId != null">AND c.cost_center_id = #{costCenterId}</if>
           <if test="legalEntityId != null">AND ou.legal_entity_id = #{legalEntityId}</if>
+          <if test="legalEntityId != null">
+            AND c.legal_entity_id = #{legalEntityId}
+            AND EXISTS (SELECT 1 FROM t_engineer scoped_engineer
+                        WHERE scoped_engineer.id = c.engineer_id
+                          AND scoped_engineer.deleted_flag = 0
+                          AND scoped_engineer.legal_entity_id = #{legalEntityId})
+            AND EXISTS (SELECT 1 FROM t_project scoped_project
+                        WHERE scoped_project.id = c.project_id
+                          AND scoped_project.deleted_flag = 0
+                          AND scoped_project.legal_entity_id = #{legalEntityId})
+            AND EXISTS (SELECT 1 FROM m_customer scoped_customer
+                        WHERE scoped_customer.id = c.customer_id
+                          AND scoped_customer.deleted_flag = 0
+                          AND scoped_customer.legal_entity_id = #{legalEntityId})
+          </if>
           <if test="organizationId != null">AND COALESCE(e.organization_id, uo.organization_id) = #{organizationId}</if>
           <if test="fullAccess == false">
             <choose>

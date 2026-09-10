@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class ExternalApiInboundWebhookParser {
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("[A-Za-z0-9._~-]{1,100}");
-    private static final Pattern EVENT_ID_PATTERN = Pattern.compile("[A-Za-z0-9._~:-]{1,160}");
+    private static final Pattern EVENT_ID_PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
     private static final Pattern EVENT_TYPE_PATTERN = Pattern.compile("[A-Za-z][A-Za-z0-9._:-]{0,99}");
     private static final Set<String> INPUT_FIELDS = Set.of(
             "providerEventId", "provider", "eventType", "canonicalPayload");
@@ -66,7 +66,8 @@ public class ExternalApiInboundWebhookParser {
             }
             String eventType = requiredText(root, "eventType", EVENT_TYPE_PATTERN);
             JsonNode canonicalPayload = root.get("canonicalPayload");
-            if (canonicalPayload != null && !canonicalPayload.isObject()) {
+            if (canonicalPayload != null && (!canonicalPayload.isObject()
+                    || canonicalPayload.size() > ExternalDtoSnapshot.CANONICAL_PAYLOAD_MAX_PROPERTIES)) {
                 throw invalid();
             }
 

@@ -6,6 +6,7 @@ import com.ses.entity.BpAvailability;
 import com.ses.entity.BpAvailabilityIngestion;
 import com.ses.mapper.BpAvailabilityIngestionMapper;
 import com.ses.service.BpAvailabilityService;
+import com.ses.service.security.LegalEntityContextService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,9 +36,18 @@ public class BpAvailabilityIngestionServiceImplTest {
     @Mock
     private ObjectMapper objectMapper;
 
+    @Mock
+    private LegalEntityContextService legalEntityContextService;
+
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(ingestionService, "baseMapper", ingestionMapper);
+        ReflectionTestUtils.setField(ingestionService, "legalEntityContextService", legalEntityContextService);
+        lenient().when(legalEntityContextService.requireCurrentLegalEntityId()).thenReturn(1L);
+        com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                new org.apache.ibatis.builder.MapperBuilderAssistant(
+                        new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                BpAvailabilityIngestion.class);
     }
 
     @Test
@@ -45,6 +55,7 @@ public class BpAvailabilityIngestionServiceImplTest {
         Long jobId = 100L;
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
 
         when(ingestionMapper.selectById(jobId)).thenReturn(job);
@@ -70,6 +81,7 @@ public class BpAvailabilityIngestionServiceImplTest {
         Long jobId = 100L;
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("要確認");
         job.setConvertedAvailabilityId(999L); // Already confirmed
 
@@ -88,6 +100,7 @@ public class BpAvailabilityIngestionServiceImplTest {
         Long jobId = 100L;
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("取込待ち");
 
         when(ingestionMapper.selectById(jobId)).thenReturn(job);
@@ -103,6 +116,7 @@ public class BpAvailabilityIngestionServiceImplTest {
         Long jobId = 100L;
         BpAvailabilityIngestion job = new BpAvailabilityIngestion();
         job.setId(jobId);
+        job.setLegalEntityId(1L);
         job.setStatus("確定済"); // Cannot reject completed job
 
         when(ingestionMapper.selectById(jobId)).thenReturn(job);

@@ -23,6 +23,7 @@ CREATE TABLE t_mail_delivery (
 DROP TABLE IF EXISTS m_customer CASCADE;
 CREATE TABLE m_customer (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id   BIGINT,
   company_name      VARCHAR(200) NOT NULL,
   company_name_kana VARCHAR(200),
   contact_person    VARCHAR(100),
@@ -43,6 +44,7 @@ DROP TABLE IF EXISTS t_engineer CASCADE;
 
 CREATE TABLE t_engineer (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id     BIGINT,
   full_name           VARCHAR(100),
   full_name_kana      VARCHAR(100),
   initial_name        VARCHAR(10),
@@ -168,6 +170,7 @@ CREATE TABLE t_notification_read (
 DROP TABLE IF EXISTS t_project CASCADE;
 CREATE TABLE t_project (
   id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id   BIGINT,
   project_name      VARCHAR(200) NOT NULL,
   customer_id       BIGINT,
   commercial_flow   VARCHAR(50),
@@ -193,6 +196,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_project_source_opportunity ON t_project(sou
 DROP TABLE IF EXISTS t_contract CASCADE;
 CREATE TABLE t_contract (
   id                      BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id         BIGINT,
   contract_no             VARCHAR(50),
   proposal_id             BIGINT,
   engineer_id             BIGINT,
@@ -394,6 +398,7 @@ CREATE TABLE t_work_record (
 DROP TABLE IF EXISTS t_invoice CASCADE;
 CREATE TABLE t_invoice (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id BIGINT,
   invoice_no    VARCHAR(30) NOT NULL UNIQUE,
   customer_id   BIGINT NOT NULL,
   billing_month CHAR(7) NOT NULL,
@@ -519,6 +524,7 @@ CREATE TABLE t_customer_contact (
 
 CREATE TABLE t_lead (
   id                       BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id          BIGINT,
   company_name             VARCHAR(200) NOT NULL,
   company_name_normalized  VARCHAR(200),
   contact_name             VARCHAR(100),
@@ -540,6 +546,7 @@ CREATE TABLE t_lead (
 
 CREATE TABLE t_opportunity (
   id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id        BIGINT,
   customer_id            BIGINT NOT NULL,
   title                  VARCHAR(200) NOT NULL,
   stage                  VARCHAR(30) NOT NULL DEFAULT '見込',
@@ -800,6 +807,7 @@ CREATE TABLE t_contract_price_history (
 DROP TABLE IF EXISTS t_resume_ingestion;
 CREATE TABLE t_resume_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id       BIGINT,
   original_file_name    VARCHAR(255) NOT NULL,
   stored_file_name      VARCHAR(120) NOT NULL,
   file_ext              VARCHAR(10)  NOT NULL,
@@ -821,6 +829,7 @@ CREATE TABLE t_resume_ingestion (
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id     BIGINT,
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),
@@ -841,6 +850,7 @@ CREATE TABLE t_project_ingestion (
 DROP TABLE IF EXISTS t_bp_availability;
 CREATE TABLE t_bp_availability (
   id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id    BIGINT,
   initial_name       VARCHAR(50),
   bp_company         VARCHAR(120),
   bp_company_id      BIGINT,
@@ -860,6 +870,7 @@ CREATE TABLE t_bp_availability (
 DROP TABLE IF EXISTS t_bp_availability_ingestion;
 CREATE TABLE t_bp_availability_ingestion (
   id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id       BIGINT,
   original_file_name    VARCHAR(255),
   stored_file_name      VARCHAR(120),
   file_ext              VARCHAR(10)  NOT NULL,
@@ -2828,6 +2839,11 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     purchase_order_id BIGINT NULL,
     contract_id BIGINT NULL,
     match_status VARCHAR(20) NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2843,6 +2859,7 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
         END
     ),
     UNIQUE KEY uk_digital_invoice_message (message_id),
+    UNIQUE KEY uk_digital_invoice_provider_message (provider_message_id),
     UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, profile, specification_version, send_active_slot)
 );
 
@@ -2853,7 +2870,13 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     event_type VARCHAR(50) NOT NULL,
     event_at DATETIME NOT NULL,
     payload_hash VARCHAR(64) NOT NULL,
+    canonical_payload_hash VARCHAR(64),
     signature_valid TINYINT(1) NOT NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)
@@ -2878,4 +2901,15 @@ CREATE TABLE t_pwa_client_mutation (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at DATETIME,
     CONSTRAINT uk_pwa_client_mutation_user_request UNIQUE (user_id, client_request_id)
+);
+CREATE TABLE IF NOT EXISTS t_legal_entity_backfill_audit (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    entity_type VARCHAR(40) NOT NULL,
+    entity_id BIGINT NOT NULL,
+    previous_legal_entity_id BIGINT,
+    resolved_legal_entity_id BIGINT,
+    decision VARCHAR(20) NOT NULL,
+    reason VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_legal_entity_backfill_audit UNIQUE (entity_type, entity_id, decision)
 );

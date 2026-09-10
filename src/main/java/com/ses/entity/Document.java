@@ -104,4 +104,10 @@ public class Document extends BaseEntity {
     /** 作成者ユーザーID */
     @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
+
+    private String actorType;
+    private String confirmationSource;
+    private Long humanUserId;
+    private String correlationId;
+    private String idempotencyKey;
 }

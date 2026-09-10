@@ -5,6 +5,7 @@ import com.ses.config.LoginUser;
 import com.ses.entity.SysUser;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogEntry;
 import com.ses.service.ai.copilot.catalog.SemanticCatalogRegistry;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshotFactory;
 import com.ses.service.security.DataScopeService;
 import com.ses.service.security.OrganizationScopeService;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,8 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
+import java.time.Instant;
+import java.time.ZoneId;
 
 @ExtendWith(MockitoExtension.class)
 class CopilotScopeResolverTest {
@@ -54,21 +57,30 @@ class CopilotScopeResolverTest {
         when(dataScopeService.isScoped()).thenReturn(false);
 
         CopilotScopeContext scope = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow());
+                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), context());
         assertEquals("COMPANY_WIDE", scope.scopeType());
     }
 
     @Test
     void 営業はSALES_DATA_SCOPED() {
         loginAs("sales", "営業");
+        when(dataScopeService.isScoped()).thenReturn(true);
         when(dataScopeService.isSalesDataScoped()).thenReturn(true);
-        when(dataScopeService.allowedContractIds()).thenReturn(Set.of(1L, 2L));
-        when(dataScopeService.allowedEngineerIds()).thenReturn(Set.of(3L));
-        when(dataScopeService.allowedCustomerIds()).thenReturn(Set.of());
+        when(dataScopeService.allowedContractIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of(1L, 2L));
+        when(dataScopeService.allowedEngineerIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of(3L));
+        when(dataScopeService.allowedCustomerIds(org.mockito.ArgumentMatchers.any())).thenReturn(Set.of());
 
         CopilotScopeContext scope = resolver.resolve(
-                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow());
+                SemanticCatalogRegistry.find("dashboard.summary").orElseThrow(), context());
         assertEquals("SALES_DATA_SCOPED", scope.scopeType());
+    }
+
+    private com.ses.service.ai.copilot.CopilotExecutionContext context() {
+        var context = new com.ses.service.ai.copilot.CopilotExecutionContext(
+                "tenant-a", 1L, Instant.parse("2026-09-08T00:00:00Z"), ZoneId.of("Asia/Tokyo"));
+        context.bindSnapshot(new EffectiveScopeSnapshotFactory(dataScopeService, organizationScopeService)
+                .create("tenant-a", 1L, context.asOfDate()));
+        return context;
     }
 
     private void loginAs(String username, String role) {

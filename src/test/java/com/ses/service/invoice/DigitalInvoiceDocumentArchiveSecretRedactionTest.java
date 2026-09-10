@@ -21,10 +21,14 @@ import com.ses.service.impl.DocumentServiceImpl;
 import com.ses.service.impl.FileStorageServiceImpl;
 import com.ses.service.integration.IntegrationJobService;
 import com.ses.service.invoice.provider.DigitalInvoiceProvider;
+import com.ses.service.invoice.provider.DigitalInvoiceProviderResponse;
 import com.ses.service.security.FileScanResult;
 import com.ses.service.security.FileScanner;
+import com.ses.SesManagerApplication;
 import com.ses.entity.FileSecurityMetadata;
 import com.ses.service.storage.DocumentStorage;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,6 +54,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 
 /**
@@ -57,7 +62,7 @@ import static org.mockito.Mockito.when;
  * 機密情報ログ秘匿化（Redaction）回帰テスト。
  * DocumentService を MockBean にせず、実クラスを経由した例外処理での安全な診断ログ出力を検証する。
  */
-@SpringBootTest
+@SpringBootTest(classes = SesManagerApplication.class)
 @ActiveProfiles("test")
 @Transactional
 @DisplayName("電子請求書XMLアーカイブ時のDocumentService/FileStorageService機密秘匿化テスト")
@@ -95,6 +100,12 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
 
     @Autowired
     private IntegrationJobService integrationJobService;
+
+    @Autowired
+    private DocumentMapper documentMapper;
+
+    @Autowired
+    private DocumentVersionMapper documentVersionMapper;
 
     @MockBean
     private DigitalInvoiceProvider digitalInvoiceProvider;
@@ -134,6 +145,8 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
 
         when(fileScanner.scan(any(Path.class), any(FileKind.class)))
                 .thenReturn(FileScanResult.clean("1.0"));
+        doNothing().when(documentStorage).put(anyString(), any(InputStream.class), anyBoolean());
+        doNothing().when(documentStorage).promote(anyString());
     }
 
     @AfterEach
@@ -200,6 +213,49 @@ class DigitalInvoiceDocumentArchiveSecretRedactionTest {
                         && e.getFormattedMessage().contains("errorCode=ARCHIVE_FAILED")
                         && e.getFormattedMessage().contains("exceptionClass="));
         assertThat(foundDiag).as("DigitalInvoiceServiceImplに受信アーカイブ失敗の診断ログが記録されていること").isTrue();
+    }
+
+    @Test
+    @DisplayName("送信XMLはINVOICE_OUTとして実DBへ保存される")
+    void 送信XMLを実DocumentService経由で保存し文書種別を確認する() {
+        when(digitalInvoiceProvider.sendInvoiceWithMetadata(anyString(), anyString(), anyString()))
+                .thenReturn(new DigitalInvoiceProviderResponse("provider-persist-out", "operation-out", "request-out", 200, "OK"));
+
+        Customer customer = createCustomer("Real Archive Out Co");
+        verifiedParticipant(customer, "part-archive-out");
+        Invoice invoice = createInvoice(customer, "INV-ARCHIVE-OUT-1");
+        DigitalInvoice digitalInvoice = digitalInvoiceService.enqueueInvoiceForSend(
+                invoice.getId(), "1.1.3", customer.getId());
+        com.ses.entity.IntegrationJob job = integrationJobService.getLatestJob(
+                "t_digital_invoice", digitalInvoice.getId(), "DIGITAL_INVOICE_SEND");
+
+        digitalInvoiceService.processSendJob(job.getId());
+
+        DigitalInvoice saved = digitalInvoiceService.getById(digitalInvoice.getId());
+        com.ses.entity.Document document = documentMapper.selectById(saved.getXmlDocumentId());
+        assertThat(document).isNotNull();
+        assertThat(document.getDocumentType()).isEqualTo("INVOICE_OUT");
+        assertThat(document.getDirection()).isEqualTo("OUTGOING");
+        assertThat(documentVersionMapper.findLatestByDocumentId(document.getId())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("受信XMLはINVOICE_INとして実DBへ保存される")
+    void 受信XMLを実DocumentService経由で保存し文書種別を確認する() {
+        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Invoice>"
+                + "<ID>INV-ARCHIVE-IN-1</ID><IssueDate>2026-08-01</IssueDate></Invoice>";
+
+        digitalInvoiceService.processInboundInvoice("provider-persist-in", "event-persist-in", xml,
+                org.apache.commons.codec.digest.DigestUtils.sha256Hex(xml), LocalDateTime.of(2026, 8, 2, 10, 0));
+
+        DigitalInvoice saved = digitalInvoiceService.lambdaQuery()
+                .eq(DigitalInvoice::getProviderMessageId, "provider-persist-in").one();
+        assertThat(saved).isNotNull();
+        com.ses.entity.Document document = documentMapper.selectById(saved.getXmlDocumentId());
+        assertThat(document).isNotNull();
+        assertThat(document.getDocumentType()).isEqualTo("INVOICE_IN");
+        assertThat(document.getDirection()).isEqualTo("INCOMING");
+        assertThat(documentVersionMapper.findLatestByDocumentId(document.getId())).isNotNull();
     }
 
     @Test

@@ -1,9 +1,15 @@
 package com.ses.migration;
 
 import org.flywaydb.core.Flyway;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.core.io.support.EncodedResource;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import com.ses.test.MySQLContainer;
+import com.ses.service.security.LegalEntityReadinessService;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -46,6 +52,14 @@ class FlywayMigrationSmokeTest {
     @SuppressWarnings("resource")
     static final MySQLContainer<?> LEGACY_V78 = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ses_manager_legacy_v78")
+            .withUsername("root")
+            .withPassword("ses");
+
+    /** V158のbackfill/readiness検証はseed行を変更しない専用DBで行う。 */
+    @Container
+    @SuppressWarnings("resource")
+    static final MySQLContainer<?> READINESS_MYSQL = new MySQLContainer<>("mysql:8.0")
+            .withDatabaseName("ses_manager_readiness")
             .withUsername("root")
             .withPassword("ses");
 
@@ -107,6 +121,20 @@ class FlywayMigrationSmokeTest {
                      "t_external_api_audit", "t_api_delivery_replay_audit"}) {
                 assertTableExists(st, table);
             }
+            assertTableExists(st, "t_legal_entity_backfill_audit");
+            // NF-05 A1: read resourceはpublic ID/cursorだけに依存せず、SQLの法人境界を持つ。
+            for (String table : new String[]{"m_customer", "t_engineer", "t_project", "t_contract", "t_invoice"}) {
+                assertColumnExists(st, table, "legal_entity_id");
+            }
+            for (String table : new String[]{"t_lead", "t_opportunity", "t_resume_ingestion",
+                    "t_project_ingestion", "t_bp_availability", "t_bp_availability_ingestion"}) {
+                assertColumnExists(st, table, "legal_entity_id");
+            }
+            assertIndexExists(st, "m_customer", "idx_customer_legal_entity");
+            assertIndexExists(st, "t_engineer", "idx_engineer_legal_entity");
+            assertIndexExists(st, "t_project", "idx_project_legal_entity_customer");
+            assertIndexExists(st, "t_contract", "idx_contract_legal_entity_relation");
+            assertIndexExists(st, "t_invoice", "idx_invoice_legal_entity_customer");
             assertIndexExists(st, "t_api_usage_bucket", "uk_api_usage_subject");
             assertIndexExists(st, "t_api_nonce_replay", "uk_api_nonce_client_hash");
             assertIndexExists(st, "t_api_delivery", "uk_api_delivery_event_generation");
@@ -759,6 +787,89 @@ class FlywayMigrationSmokeTest {
             assertColumnExists(st, "m_customer", "version");
             assertColumnExists(st, "t_work_record", "version");
         }
+    }
+
+    @Test
+    void V158のbackfillは確定関係だけ更新し未解決行を監査する() throws Exception {
+        Flyway.configure()
+                .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+
+        try (Connection connection = MYSQL.createConnection("")) {
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate("DELETE FROM t_legal_entity_backfill_audit WHERE entity_id IN (981001,981002,981003,981004)");
+                statement.executeUpdate("DELETE FROM t_contract WHERE id = 981003");
+                statement.executeUpdate("DELETE FROM t_project WHERE id = 981002");
+                statement.executeUpdate("DELETE FROM t_engineer WHERE id = 981001");
+                statement.executeUpdate("DELETE FROM m_customer WHERE id IN (981000,981004)");
+                statement.executeUpdate("INSERT INTO m_customer (id, legal_entity_id, company_name, deleted_flag) VALUES (981000, 7401, 'V158 customer', 0), (981004, NULL, 'V158 unresolved customer', 0)");
+                statement.executeUpdate("INSERT INTO t_engineer (id, legal_entity_id, full_name, employment_type, status, deleted_flag) VALUES (981001, 7401, 'V158 engineer', '正社員', 'Bench', 0)");
+                statement.executeUpdate("INSERT INTO t_project (id, legal_entity_id, project_name, customer_id, status, deleted_flag) VALUES (981002, NULL, 'V158 project', 981000, '募集中', 0)");
+                statement.executeUpdate("INSERT INTO t_contract (id, legal_entity_id, contract_no, engineer_id, project_id, customer_id, contract_type, start_date, selling_price, cost_price, status, deleted_flag) VALUES (981003, NULL, 'V158-C-001', 981001, 981002, 981000, '準委任', '2026-08-01', 1, 1, '準備中', 0)");
+            }
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(
+                    new ClassPathResource("db/migration/V158__nf05_legal_entity_backfill_audit.sql")));
+            try (Statement statement = connection.createStatement()) {
+                assertEquals(7401L, queryLong(statement, "SELECT legal_entity_id FROM t_project WHERE id=981002"));
+                assertEquals(7401L, queryLong(statement, "SELECT legal_entity_id FROM t_contract WHERE id=981003"));
+                assertEquals(1L, queryLong(statement, "SELECT COUNT(*) FROM t_legal_entity_backfill_audit WHERE entity_type='CUSTOMER' AND entity_id=981004 AND decision='UNRESOLVED'"));
+            }
+        } finally {
+            try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
+                statement.executeUpdate("DELETE FROM t_legal_entity_backfill_audit WHERE entity_id IN (981001,981002,981003,981004)");
+                statement.executeUpdate("DELETE FROM t_contract WHERE id = 981003");
+                statement.executeUpdate("DELETE FROM t_project WHERE id = 981002");
+                statement.executeUpdate("DELETE FROM t_engineer WHERE id = 981001");
+                statement.executeUpdate("DELETE FROM m_customer WHERE id IN (981000,981004)");
+            }
+        }
+    }
+
+    @Test
+    void V158の再実行と起動後readinessは不明法人と不整合graphをfailClosedする() throws Exception {
+        Flyway.configure()
+                .dataSource(READINESS_MYSQL.getJdbcUrl(), READINESS_MYSQL.getUsername(), READINESS_MYSQL.getPassword())
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(
+                READINESS_MYSQL.getJdbcUrl(), READINESS_MYSQL.getUsername(), READINESS_MYSQL.getPassword()));
+        // V2 seedの旧NULLはこの専用DBで明示的に解決し、起動後投入分を分離して測定する。
+        jdbc.update("UPDATE m_customer SET legal_entity_id = 7401 WHERE legal_entity_id IS NULL AND deleted_flag = 0");
+        jdbc.update("UPDATE t_engineer SET legal_entity_id = 7401 WHERE legal_entity_id IS NULL AND deleted_flag = 0");
+        jdbc.update("UPDATE t_project SET legal_entity_id = 7401 WHERE legal_entity_id IS NULL AND deleted_flag = 0");
+        jdbc.update("UPDATE t_contract SET legal_entity_id = 7401 WHERE legal_entity_id IS NULL AND deleted_flag = 0");
+        jdbc.update("UPDATE t_invoice SET legal_entity_id = 7401 WHERE legal_entity_id IS NULL AND deleted_flag = 0");
+        LegalEntityReadinessService readiness = new LegalEntityReadinessService(jdbc);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(readiness::assertReady);
+
+        jdbc.update("INSERT INTO m_customer (id, legal_entity_id, company_name, deleted_flag) VALUES (982500, 7401, 'NF05 unique customer', 0), (982508, NULL, 'NF05 unresolved customer', 0)");
+        jdbc.update("INSERT INTO t_engineer (id, legal_entity_id, full_name, employment_type, status, deleted_flag) VALUES (982501, 7401, 'NF05 engineer A', '正社員', 'Bench', 0), (982505, 7402, 'NF05 engineer B', '正社員', 'Bench', 0)");
+        jdbc.update("INSERT INTO t_project (id, legal_entity_id, project_name, customer_id, status, deleted_flag) VALUES (982502, NULL, 'NF05 resolvable project', 982500, '募集中', 0), (982509, 7402, 'NF05 mismatched project', 982500, '募集中', 0)");
+        jdbc.update("INSERT INTO t_contract (id, legal_entity_id, contract_no, engineer_id, project_id, customer_id, contract_type, start_date, selling_price, cost_price, status, deleted_flag) VALUES (982503, NULL, 'NF05-C-001', 982501, 982502, 982500, '準委任', '2026-08-01', 100, 50, '準備中', 0), (982506, NULL, 'NF05-C-002', 982505, 982502, 982500, '準委任', '2026-08-01', 100, 50, '準備中', 0)");
+        jdbc.update("INSERT INTO t_invoice (id, invoice_no, legal_entity_id, customer_id, billing_month, subtotal, tax, total, status, issued_date, deleted_flag) VALUES (982507, 'NF05-I-001', NULL, 982500, '2026-08', 100, 10, 110, '未送付', '2026-08-31', 0)");
+
+        // Flywayが既に適用済みでもV158のDDL/監査は再実行可能で、推測不能行はNULLのまま監査される。
+        try (Connection connection = READINESS_MYSQL.createConnection("")) {
+            ScriptUtils.executeSqlScript(connection, new EncodedResource(
+                    new ClassPathResource("db/migration/V158__nf05_legal_entity_backfill_audit.sql")));
+        }
+        assertEquals(7401L, jdbc.queryForObject("SELECT legal_entity_id FROM t_project WHERE id=982502", Long.class));
+        assertEquals(7401L, jdbc.queryForObject("SELECT legal_entity_id FROM t_contract WHERE id=982503", Long.class));
+        assertEquals(7401L, jdbc.queryForObject("SELECT legal_entity_id FROM t_invoice WHERE id=982507", Long.class));
+        assertEquals(1L, jdbc.queryForObject("SELECT COUNT(*) FROM t_legal_entity_backfill_audit WHERE entity_type='CUSTOMER' AND entity_id=982508 AND decision='UNRESOLVED'", Long.class));
+        assertEquals(1L, jdbc.queryForObject("SELECT COUNT(*) FROM t_legal_entity_backfill_audit WHERE entity_type='CONTRACT' AND entity_id=982506 AND decision='UNRESOLVED'", Long.class));
+        // 新規の未解決行、複数法人候補の契約、customer-project不整合をreadinessが即時検出する。
+        assertThrows(com.ses.common.exception.BusinessException.class, readiness::assertReady);
+
+        jdbc.update("DELETE FROM t_invoice WHERE id=982507");
+        jdbc.update("DELETE FROM t_contract WHERE id IN (982503, 982506)");
+        jdbc.update("DELETE FROM t_project WHERE id IN (982502, 982509)");
+        jdbc.update("DELETE FROM t_engineer WHERE id IN (982501, 982505)");
+        jdbc.update("DELETE FROM m_customer WHERE id IN (982500, 982508)");
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(readiness::assertReady);
     }
 
     @Test

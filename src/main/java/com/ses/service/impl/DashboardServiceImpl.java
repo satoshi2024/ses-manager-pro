@@ -22,7 +22,9 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.Clock;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -42,6 +44,8 @@ import com.ses.dto.engineer.EngineerSkillDetailDto;
 
 import com.ses.service.security.DataScopeService;
 import com.ses.service.UtilizationCalcService;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.scope.EffectiveScopeSnapshot;
 
 @Service
 @RequiredArgsConstructor
@@ -69,6 +73,7 @@ public class DashboardServiceImpl implements DashboardService {
     private com.ses.mapper.AcceptanceMapper acceptanceMapper;
     /** 当月稼働率は将来稼働率予測(FR-07)と同一の共通口径サービスで算出する(Requirement 1.3)。 */
     private final UtilizationCalcService utilizationCalcService;
+    private final Clock clock;
 
     @Override
     @org.springframework.cache.annotation.Cacheable(
@@ -79,12 +84,27 @@ public class DashboardServiceImpl implements DashboardService {
             // (キャッシュ・スタンピード)、キャッシュ有りの方が遅いという事故になる。
             sync = true)
     public DashboardSummaryDto getSummary(Integer year) {
+        return getSummaryAt(year, serverToday(), null);
+    }
+
+    @Override
+    public DashboardSummaryDto getSummary(Integer year, CopilotExecutionContext context) {
+        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
+        return getSummaryAt(year, snapshot.asOf(), snapshot.legalEntityId(), snapshot);
+    }
+
+    private DashboardSummaryDto getSummaryAt(Integer year, LocalDate asOf, Long legalEntityId) {
+        return getSummaryAt(year, asOf, legalEntityId, null);
+    }
+
+    private DashboardSummaryDto getSummaryAt(Integer year, LocalDate asOf, Long legalEntityId,
+                                              EffectiveScopeSnapshot scopeSnapshot) {
         // 1. Calculate Charts (Dynamic) and prepare for KPIs
         List<YearMonth> targetMonths = (year != null)
                 ? buildFiscalYearMonths(year)
-                : buildTrailingMonths(6);
+                : buildTrailingMonths(6, asOf);
 
-        YearMonth currentMonth = YearMonth.from(LocalDate.now());
+        YearMonth currentMonth = YearMonth.from(asOf);
         YearMonth previousMonth = currentMonth.minusMonths(1);
 
         List<YearMonth> queryMonths = new ArrayList<>(targetMonths);
@@ -93,11 +113,6 @@ public class DashboardServiceImpl implements DashboardService {
 
         List<String> monthStrs = queryMonths.stream().map(YearMonth::toString).collect(Collectors.toList());
         // 確定実績を月別に一括ロードし、月ごとに contract_id -> record へ変換する(共通口径サービスへ渡す形)。
-        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(
-                new QueryWrapper<WorkRecord>().in("work_month", monthStrs).eq("status", "確定")
-        ).stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
-                Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
-
         // チャート対象月の末日までを上限にする(旧: 当月末+1ヶ月だと下々月開始契約がFY図から欠落する)。
         // 月別の対象判定は MonthlyRevenueCalcService.isTargetInMonth に委ねる。
         LocalDate limitDate = targetMonths.get(targetMonths.size() - 1).atEndOfMonth();
@@ -107,7 +122,19 @@ public class DashboardServiceImpl implements DashboardService {
         QueryWrapper<Contract> contractQuery = new QueryWrapper<Contract>()
                 .in("status", Arrays.asList("稼動中", "終了", "解約"))
                 .le("start_date", limitDate);
-        List<Contract> allContracts = scopedContracts(contractQuery);
+        List<Contract> allContracts = scopedContracts(contractQuery, asOf, legalEntityId, scopeSnapshot);
+
+        // WorkRecord自身に法人列を持たせず、法人境界は親契約のSQL predicateで解決する。
+        QueryWrapper<WorkRecord> workRecordQuery = new QueryWrapper<WorkRecord>()
+                .in("work_month", monthStrs).eq("status", "確定");
+        if (legalEntityId != null) {
+            workRecordQuery.apply("contract_id IN (SELECT id FROM t_contract WHERE legal_entity_id = {0} AND deleted_flag = 0)",
+                    legalEntityId);
+        }
+        applyIdFilter(workRecordQuery, "contract_id", scopeSnapshot == null ? null : scopeSnapshot.contractIds());
+        Map<String, Map<Long, WorkRecord>> confirmedByMonth = workRecordMapper.selectList(workRecordQuery)
+                .stream().collect(Collectors.groupingBy(WorkRecord::getWorkMonth,
+                        Collectors.toMap(WorkRecord::getContractId, w -> w, (w1, w2) -> w1)));
 
         List<String> monthLabels = new ArrayList<>();
         List<Long> salesData = new ArrayList<>();
@@ -139,7 +166,11 @@ public class DashboardServiceImpl implements DashboardService {
                             StatusConstants.PROPOSAL_FIRST_INTERVIEW,
                             StatusConstants.PROPOSAL_SECOND_INTERVIEW,
                             StatusConstants.PROPOSAL_WAITING_RESULT));
-            Set<Long> allowedPipelineEngineerIds = effectiveEngineerIds();
+            if (legalEntityId != null) {
+                proposalQuery.apply("engineer_id IN (SELECT id FROM t_engineer WHERE legal_entity_id = {0} AND deleted_flag = 0)",
+                        legalEntityId);
+            }
+            Set<Long> allowedPipelineEngineerIds = effectiveEngineerIds(asOf, scopeSnapshot);
             if (allowedPipelineEngineerIds != null) {
                 if (allowedPipelineEngineerIds.isEmpty()) {
                     proposalQuery.apply("1 = 0");
@@ -147,12 +178,13 @@ public class DashboardServiceImpl implements DashboardService {
                     proposalQuery.in("engineer_id", allowedPipelineEngineerIds);
                 }
             }
+            applyIdFilter(proposalQuery, "id", scopeSnapshot == null ? null : scopeSnapshot.proposalIds());
             List<Proposal> openProposals = proposalMapper.selectList(proposalQuery);
             Map<String, BigDecimal> rates = loadWinRates();
             long pipelinePerMonth = computePipelinePerMonth(openProposals, rates);
             if (!openProposals.isEmpty() && pipelinePerMonth > 0) {
                 // 開始月仮定はドラフト規約（成約→翌月1日開始）と同一。
-                YearMonth assumedStart = YearMonth.from(LocalDate.now()).plusMonths(1);
+                YearMonth assumedStart = currentMonth.plusMonths(1);
                 List<Long> forecastData = new ArrayList<>();
                 for (int i = 0; i < targetMonths.size(); i++) {
                     YearMonth ym = targetMonths.get(i);
@@ -193,7 +225,7 @@ public class DashboardServiceImpl implements DashboardService {
         List<Contract> activeContracts = allContracts.stream().filter(c -> "稼動中".equals(c.getStatus())).collect(Collectors.toList());
 
         // 退場予定は Engineer.status ではなく、下部の退場予定リストと同じ契約終了日ベースで集計する。
-        LocalDate now = LocalDate.now();
+        LocalDate now = asOf;
         LocalDate next30Days = now.plusDays(30);
         List<Contract> retiringContracts = new ArrayList<>(activeContracts.stream()
                 .filter(c -> c.getEngineerId() != null && c.getEndDate() != null
@@ -210,8 +242,11 @@ public class DashboardServiceImpl implements DashboardService {
                 .collect(Collectors.toSet());
 
         // 2. Base counts and KPI (Requirement 3.2: DataScopeService / R3.3: 組織scopeに従う)
-        Set<Long> allowedEngineerIds = effectiveEngineerIds();
+        Set<Long> allowedEngineerIds = effectiveEngineerIds(asOf, scopeSnapshot);
         QueryWrapper<Engineer> engineerQuery = new QueryWrapper<>();
+        if (legalEntityId != null) {
+            engineerQuery.eq("legal_entity_id", legalEntityId);
+        }
         if (allowedEngineerIds != null) {
             if (allowedEngineerIds.isEmpty()) {
                 engineerQuery.apply("1 = 0");
@@ -243,8 +278,11 @@ public class DashboardServiceImpl implements DashboardService {
                 ? Collections.emptyMap()
                 : contractMapper.selectList(new QueryWrapper<Contract>()
                         .in("status", UtilizationCalcService.targetContractStatuses())
-                        .in("engineer_id", existingEngineerIds))
-                    .stream()
+                        .in("engineer_id", existingEngineerIds)
+                        .eq(legalEntityId != null, "legal_entity_id", legalEntityId))
+                        .stream()
+                        .filter(c -> scopeSnapshot == null || scopeSnapshot.contractIds() == null
+                                || scopeSnapshot.contractIds().contains(c.getId()))
                     .filter(c -> c.getEngineerId() != null)
                     .collect(Collectors.groupingBy(Contract::getEngineerId));
 
@@ -260,7 +298,9 @@ public class DashboardServiceImpl implements DashboardService {
         long grossProfit = currentAmount.getProfit();
         double profitMargin = totalRevenue > 0 ? (double) grossProfit / totalRevenue * 100 : 0.0;
 
-        boolean isScoped = dataScopeService.isScoped() ||
+        boolean isScoped = scopeSnapshot != null
+                ? !"COMPANY_WIDE".equals(scopeSnapshot.scopeType())
+                : dataScopeService.isScoped() ||
                 (organizationScopeService != null && !organizationScopeService.hasFullAccess());
         String scopeType = isScoped ? "LIMITED" : "COMPANY";
         String scopeDisplayName = isScoped ? "対象範囲" : "全社";
@@ -269,7 +309,7 @@ public class DashboardServiceImpl implements DashboardService {
         long unacceptedSales = 0L;
         double avgAcceptanceDays = 0.0;
         if (acceptanceMapper != null && !com.ses.common.util.SecurityUtils.isHrRole()) {
-            List<Long> scopeContractIds = kpiScopeContractIds(allContracts);
+            List<Long> scopeContractIds = kpiScopeContractIds(allContracts, scopeSnapshot);
             java.math.BigDecimal unaccepted = acceptanceMapper.sumUnacceptedSales(scopeContractIds);
             if (unaccepted != null) {
                 unacceptedSales = unaccepted.longValue();
@@ -339,9 +379,11 @@ public class DashboardServiceImpl implements DashboardService {
             Map<Long, String> topSkillMap = topSkills.stream()
                     .collect(Collectors.toMap(EngineerSkillDetailDto::getEngineerId, EngineerSkillDetailDto::getSkillName, (s1, s2) -> s1));
 
-            Map<Long, Long> proposingMap = proposalMapper.selectList(new QueryWrapper<com.ses.entity.Proposal>()
+            QueryWrapper<com.ses.entity.Proposal> proposingQuery = new QueryWrapper<com.ses.entity.Proposal>()
                     .in("engineer_id", engineerIds)
-                    .notIn("status", "成約", "見送り")).stream()
+                    .notIn("status", "成約", "見送り");
+            applyIdFilter(proposingQuery, "id", scopeSnapshot == null ? null : scopeSnapshot.proposalIds());
+            Map<Long, Long> proposingMap = proposalMapper.selectList(proposingQuery).stream()
                     .collect(Collectors.groupingBy(com.ses.entity.Proposal::getEngineerId, Collectors.counting()));
 
             for (Contract c : retiringContracts) {
@@ -431,9 +473,9 @@ public class DashboardServiceImpl implements DashboardService {
         return months;
     }
 
-    private List<YearMonth> buildTrailingMonths(int count) {
+    private List<YearMonth> buildTrailingMonths(int count, LocalDate asOf) {
         List<YearMonth> months = new ArrayList<>();
-        YearMonth current = YearMonth.from(LocalDate.now());
+        YearMonth current = YearMonth.from(asOf);
         for (int i = count - 1; i >= 0; i--) {
             months.add(current.minusMonths(i));
         }
@@ -449,6 +491,17 @@ public class DashboardServiceImpl implements DashboardService {
      */
     /** KPIのscope母集団（契約ID）。unscopedならnull=全件。 */
     private List<Long> kpiScopeContractIds(List<Contract> contracts) {
+        return kpiScopeContractIds(contracts, null);
+    }
+
+    private List<Long> kpiScopeContractIds(List<Contract> contracts, EffectiveScopeSnapshot scopeSnapshot) {
+        if (scopeSnapshot != null) {
+            if (scopeSnapshot.contractIds() == null
+                    && "COMPANY_WIDE".equals(scopeSnapshot.scopeType())) {
+                return null;
+            }
+            return contracts == null ? List.of() : contracts.stream().map(Contract::getId).toList();
+        }
         if (!dataScopeService.isScoped()
                 && (organizationScopeService == null || organizationScopeService.hasFullAccess())) {
             return null; // 全件
@@ -460,12 +513,33 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private List<Contract> scopedContracts(QueryWrapper<Contract> query) {
-        Set<Long> allowed = effectiveContractIds();
+        return scopedContracts(query, serverToday());
+    }
+
+    private List<Contract> scopedContracts(QueryWrapper<Contract> query, LocalDate asOf) {
+        return scopedContracts(query, asOf, null);
+    }
+
+    private List<Contract> scopedContracts(QueryWrapper<Contract> query, LocalDate asOf, Long legalEntityId) {
+        return scopedContracts(query, asOf, legalEntityId, null);
+    }
+
+    private List<Contract> scopedContracts(QueryWrapper<Contract> query, LocalDate asOf, Long legalEntityId,
+                                           EffectiveScopeSnapshot scopeSnapshot) {
+        if (legalEntityId != null) {
+            query.eq("legal_entity_id", legalEntityId);
+        }
+        Set<Long> allowed = scopeSnapshot == null ? effectiveContractIds(asOf) : scopeSnapshot.contractIds();
         if (allowed != null) {
             if (allowed.isEmpty()) {
                 return Collections.emptyList();
             }
             query.in("id", allowed);
+        }
+        if (scopeSnapshot != null) {
+            applyIdFilter(query, "engineer_id", scopeSnapshot.engineerIds());
+            applyIdFilter(query, "project_id", scopeSnapshot.projectIds());
+            applyIdFilter(query, "customer_id", scopeSnapshot.customerIds());
         }
         return contractMapper.selectList(query);
     }
@@ -475,30 +549,65 @@ public class DashboardServiceImpl implements DashboardService {
      * （{@code OrganizationScopeService} の結合規則）。
      */
     private Set<Long> effectiveContractIds() {
+        return effectiveContractIds(serverToday());
+    }
+
+    private Set<Long> effectiveContractIds(LocalDate asOf) {
         Set<Long> dataIds = dataScopeService != null && dataScopeService.isScoped()
-                ? dataScopeService.allowedContractIds() : null;
+                ? dataScopeService.allowedContractIds(asOf) : null;
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
             return dataIds;
         }
         return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedContractIds(LocalDate.now()), dataIds);
+                organizationScopeService.allowedContractIds(asOf), dataIds);
     }
 
     /** 要員の実効母集団。nullは「制限なし」。 */
     private Set<Long> effectiveEngineerIds() {
+        return effectiveEngineerIds(serverToday());
+    }
+
+    private Set<Long> effectiveEngineerIds(LocalDate asOf) {
+        return effectiveEngineerIds(asOf, null);
+    }
+
+    private Set<Long> effectiveEngineerIds(LocalDate asOf, EffectiveScopeSnapshot scopeSnapshot) {
+        if (scopeSnapshot != null) {
+            return scopeSnapshot.engineerIds();
+        }
         Set<Long> dataIds = dataScopeService != null && dataScopeService.isScoped()
-                ? dataScopeService.allowedEngineerIds() : null;
+                ? dataScopeService.allowedEngineerIds(asOf) : null;
         if (organizationScopeService == null || organizationScopeService.hasFullAccess()) {
             return dataIds;
         }
         return organizationScopeService.intersectWithDataScope(
-                organizationScopeService.allowedEngineerIds(LocalDate.now()), dataIds);
+                organizationScopeService.allowedEngineerIds(asOf), dataIds);
     }
 
     @Override
     public List<ContractProfitDto> getProfitAnalysis() {
+        return getProfitAnalysisAt(serverToday());
+    }
+
+    @Override
+    public List<ContractProfitDto> getProfitAnalysis(
+            CopilotExecutionContext context) {
+        EffectiveScopeSnapshot snapshot = requireSnapshot(context);
+        return getProfitAnalysisAt(snapshot.asOf(), snapshot.legalEntityId(), snapshot);
+    }
+
+    private List<ContractProfitDto> getProfitAnalysisAt(LocalDate asOf) {
+        return getProfitAnalysisAt(asOf, null);
+    }
+
+    private List<ContractProfitDto> getProfitAnalysisAt(LocalDate asOf, Long legalEntityId) {
+        return getProfitAnalysisAt(asOf, legalEntityId, null);
+    }
+
+    private List<ContractProfitDto> getProfitAnalysisAt(LocalDate asOf, Long legalEntityId,
+                                                        EffectiveScopeSnapshot scopeSnapshot) {
         List<Contract> contracts = scopedContracts(new QueryWrapper<Contract>()
-                .in("status", "稼動中", "終了"));
+                .in("status", "稼動中", "終了"), asOf, legalEntityId, scopeSnapshot);
         List<ContractProfitDto> result = new ArrayList<>();
 
         List<Long> engineerIds = contracts.stream()
@@ -513,9 +622,19 @@ public class DashboardServiceImpl implements DashboardService {
                 .collect(Collectors.toList());
 
         Map<Long, Engineer> engineerMap = engineerIds.isEmpty() ? Collections.emptyMap() :
-                engineerMapper.selectBatchIds(engineerIds).stream().collect(Collectors.toMap(Engineer::getId, e -> e));
+                (legalEntityId == null
+                        ? engineerMapper.selectBatchIds(engineerIds)
+                        : engineerMapper.selectList(new QueryWrapper<Engineer>()
+                                .in("id", engineerIds)
+                                .eq("legal_entity_id", legalEntityId)))
+                        .stream().collect(Collectors.toMap(Engineer::getId, e -> e));
         Map<Long, Project> projectMap = projectIds.isEmpty() ? Collections.emptyMap() :
-                projectMapper.selectBatchIds(projectIds).stream().collect(Collectors.toMap(Project::getId, p -> p));
+                (legalEntityId == null
+                        ? projectMapper.selectBatchIds(projectIds)
+                        : projectMapper.selectList(new QueryWrapper<Project>()
+                                .in("id", projectIds)
+                                .eq("legal_entity_id", legalEntityId)))
+                        .stream().collect(Collectors.toMap(Project::getId, p -> p));
 
         for (Contract c : contracts) {
             Engineer e = c.getEngineerId() != null ? engineerMap.get(c.getEngineerId()) : null;
@@ -549,5 +668,38 @@ public class DashboardServiceImpl implements DashboardService {
                 Comparator.nullsLast(Comparator.reverseOrder())));
 
         return result;
+    }
+
+    private LocalDate serverToday() {
+        Clock source = clock == null ? Clock.system(ZoneId.of("Asia/Tokyo")) : clock;
+        return LocalDate.ofInstant(source.instant(), ZoneId.of("Asia/Tokyo"));
+    }
+
+    private EffectiveScopeSnapshot requireSnapshot(CopilotExecutionContext context) {
+        if (context == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        EffectiveScopeSnapshot snapshot = context.effectiveScopeSnapshot();
+        if (snapshot == null) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_REQUIRED");
+        }
+        if (context.scope() != snapshot.scope()
+                || !context.tenantId().equals(snapshot.tenantId())
+                || !context.legalEntityId().equals(snapshot.legalEntityId())
+                || !context.asOfDate().equals(snapshot.asOf())) {
+            throw com.ses.common.exception.BusinessException.of(403, "EXECUTION_CONTEXT_SCOPE_MISMATCH");
+        }
+        return snapshot;
+    }
+
+    private void applyIdFilter(QueryWrapper<?> query, String column, Set<Long> ids) {
+        if (ids == null) {
+            return;
+        }
+        if (ids.isEmpty()) {
+            query.apply("1 = 0");
+        } else {
+            query.in(column, ids);
+        }
     }
 }

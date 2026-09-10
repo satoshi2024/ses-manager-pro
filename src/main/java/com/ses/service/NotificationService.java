@@ -29,6 +29,16 @@ public interface NotificationService {
         return null;
     }
 
+    /**
+     * 配布本体が別transactionで通知outboxを確定するための登録専用経路。
+     * 通常のafterCommit dispatchは呼出し側のtransactionがcommitした後に行う。
+     */
+    default Long publishToUserAndGetOutboxIdWithoutDispatch(Long userId, String type, String title,
+                                                              String message, String linkUrl,
+                                                              String dedupeKey, String menuKey) {
+        return publishToUserAndGetOutboxId(userId, type, title, message, linkUrl, dedupeKey, menuKey);
+    }
+
     /** 組織固有の全体通知。organizationId=nullはプラットフォーム共通通知に限定する。 */
     void publishToOrganization(Long organizationId, String type, String title, String message,
                                String linkUrl, String dedupeKey);

@@ -84,7 +84,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             // 1. 初回応答期限超過チェック
             if (!responseWasBreached && clk.getFirstRespondedAt() == null
                     && clk.getResponseDeadline() != null && !clk.getResponseDeadline().isAfter(now)) {
-                clk.setResponseBreached(true);
+                markResponseBreach(clk, now);
                 clockUpdated = true;
                 breachedCount++;
                 notices.add(new SlaNotice("RESPONSE", "FIRST", "SLA初回応答期限超過",
@@ -99,7 +99,7 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
             // 2. 解決目標期限超過チェック
             if (!resolveWasBreached && clk.getResolvedAt() == null
                     && clk.getResolveDeadline() != null && !clk.getResolveDeadline().isAfter(now)) {
-                clk.setResolveBreached(true);
+                markResolveBreach(clk, now);
                 clockUpdated = true;
                 breachedCount++;
                 notices.add(new SlaNotice("RESOLVE", "FIRST", "SLA解決目標期限超過",
@@ -145,8 +145,10 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
                         .eq(ServiceSlaClock::getId, clk.getId())
                         .eq(ServiceSlaClock::getVersion, version)
                         .set(ServiceSlaClock::getResponseBreached, clk.getResponseBreached())
+                        .set(ServiceSlaClock::getResponseBreachedAt, clk.getResponseBreachedAt())
                         .set(ServiceSlaClock::getResponseWarningSent, clk.getResponseWarningSent())
                         .set(ServiceSlaClock::getResolveBreached, clk.getResolveBreached())
+                        .set(ServiceSlaClock::getResolveBreachedAt, clk.getResolveBreachedAt())
                         .set(ServiceSlaClock::getResolveWarningSent, clk.getResolveWarningSent())
                         .set(ServiceSlaClock::getLastResponseAlertAt, clk.getLastResponseAlertAt())
                         .set(ServiceSlaClock::getLastResolveAlertAt, clk.getLastResolveAlertAt())
@@ -233,6 +235,20 @@ public class ServiceSlaMonitoringServiceImpl implements ServiceSlaMonitoringServ
 
     private boolean dueForWarning(LocalDateTime deadline, LocalDateTime now) {
         return deadline != null && deadline.isAfter(now) && !deadline.minusMinutes(30).isAfter(now);
+    }
+
+    private void markResponseBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResponseBreached(true);
+        if (clockRow.getResponseBreachedAt() == null) {
+            clockRow.setResponseBreachedAt(breachedAt);
+        }
+    }
+
+    private void markResolveBreach(ServiceSlaClock clockRow, LocalDateTime breachedAt) {
+        clockRow.setResolveBreached(true);
+        if (clockRow.getResolveBreachedAt() == null) {
+            clockRow.setResolveBreachedAt(breachedAt);
+        }
     }
 
     private boolean shouldContinue(LocalDateTime lastAlertAt, LocalDateTime now) {

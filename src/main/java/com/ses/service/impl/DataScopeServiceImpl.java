@@ -114,6 +114,13 @@ public class DataScopeServiceImpl implements DataScopeService {
     }
 
     @Override
+    public Set<Long> allowedEngineerIds(java.time.LocalDate asOf) {
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if (isOrganizationScoped()) return organizationScope().allowedEngineerIds(asOf);
+        return computeEngineerIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
     public Set<Long> allowedContractIds() {
         if (isOrganizationScoped()) {
             return organizationScope().allowedContractIds(java.time.LocalDate.now());
@@ -123,7 +130,8 @@ public class DataScopeServiceImpl implements DataScopeService {
 
     @Override
     public Set<Long> allowedContractIdsAsOf(java.time.LocalDate asOf) {
-        java.time.LocalDate date = asOf == null ? java.time.LocalDate.now() : asOf;
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        java.time.LocalDate date = asOf;
         if (isOrganizationScoped()) {
             return organizationScope().allowedContractIds(date);
         }
@@ -132,10 +140,22 @@ public class DataScopeServiceImpl implements DataScopeService {
     }
 
     @Override
+    public Set<Long> allowedContractIds(java.time.LocalDate asOf) {
+        return allowedContractIdsAsOf(asOf);
+    }
+
+    @Override
     public Set<Long> allowedProposalIds() {
         if (isOrganizationScoped()) {
             return organizationScope().allowedProposalIds(java.time.LocalDate.now());
         }
+        return computeProposalIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
+    public Set<Long> allowedProposalIds(java.time.LocalDate asOf) {
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if (isOrganizationScoped()) return organizationScope().allowedProposalIds(asOf);
         return computeProposalIds(SecurityUtils.currentUserId());
     }
 
@@ -148,10 +168,24 @@ public class DataScopeServiceImpl implements DataScopeService {
     }
 
     @Override
+    public Set<Long> allowedCustomerIds(java.time.LocalDate asOf) {
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if (isOrganizationScoped()) return organizationScope().allowedCustomerIds(asOf);
+        return computeCustomerIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
     public Set<Long> allowedProjectIds() {
         if (isOrganizationScoped()) {
             return organizationScope().allowedProjectIds(java.time.LocalDate.now());
         }
+        return computeProjectIds(SecurityUtils.currentUserId());
+    }
+
+    @Override
+    public Set<Long> allowedProjectIds(java.time.LocalDate asOf) {
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if (isOrganizationScoped()) return organizationScope().allowedProjectIds(asOf);
         return computeProjectIds(SecurityUtils.currentUserId());
     }
 
@@ -162,6 +196,17 @@ public class DataScopeServiceImpl implements DataScopeService {
         }
         if (!isScoped()) return Collections.emptySet();
         Set<Long> contracts = allowedContractIds();
+        if (contracts.isEmpty()) return Collections.emptySet();
+        List<Long> ids = contractMapper.selectOrganizationIdsByContractIds(new java.util.ArrayList<>(contracts));
+        return ids == null ? Collections.emptySet() : new HashSet<>(ids);
+    }
+
+    @Override
+    public Set<Long> allowedOrganizationIds(java.time.LocalDate asOf) {
+        if (asOf == null) throw com.ses.common.exception.BusinessException.of(403, "TIME_CONTEXT_REQUIRED");
+        if (isOrganizationScoped()) return organizationScope().allowedOrganizationIds(asOf);
+        if (!isScoped()) return Collections.emptySet();
+        Set<Long> contracts = allowedContractIds(asOf);
         if (contracts.isEmpty()) return Collections.emptySet();
         List<Long> ids = contractMapper.selectOrganizationIdsByContractIds(new java.util.ArrayList<>(contracts));
         return ids == null ? Collections.emptySet() : new HashSet<>(ids);

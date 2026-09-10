@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
     purchase_order_id BIGINT NULL,
     contract_id BIGINT NULL,
     match_status VARCHAR(20) NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -51,6 +56,7 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice (
         END
     ),
     UNIQUE KEY uk_digital_invoice_message (message_id),
+    UNIQUE KEY uk_digital_invoice_provider_message (provider_message_id),
     UNIQUE KEY uk_digital_invoice_send (invoice_id, direction, profile, specification_version, send_active_slot)
 );
 
@@ -61,7 +67,13 @@ CREATE TABLE IF NOT EXISTS t_digital_invoice_event (
     event_type VARCHAR(50) NOT NULL,
     event_at DATETIME NOT NULL,
     payload_hash VARCHAR(64) NOT NULL,
+    canonical_payload_hash VARCHAR(64),
     signature_valid TINYINT(1) NOT NULL,
+    actor_type VARCHAR(20) NULL,
+    confirmation_source VARCHAR(40) NULL,
+    human_user_id BIGINT NULL,
+    correlation_id VARCHAR(128) NULL,
+    idempotency_key VARCHAR(190) NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_by VARCHAR(50) NULL,
     UNIQUE KEY uk_digital_invoice_event_provider (provider_event_id)

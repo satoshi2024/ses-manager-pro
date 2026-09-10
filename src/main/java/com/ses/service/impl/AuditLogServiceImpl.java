@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.common.audit.ActorType;
 import com.ses.common.audit.ActorAttribution;
 import com.ses.common.audit.ConfirmationSource;
-import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AuditLog;
 import com.ses.common.util.CorrelationContext;
 import com.ses.common.util.LogRedaction;
@@ -89,16 +88,12 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     private void applyRequestAttribution(AuditLog entry) {
-        Long userId = SecurityUtils.currentUserId();
-        if (userId != null && userId > 0) {
-            entry.setActorType(ActorType.HUMAN.name());
-            entry.setConfirmationSource(ConfirmationSource.MANUAL_API.name());
-            entry.setHumanUserId(userId);
-        } else {
-            entry.setActorType(ActorType.LEGACY_UNRESOLVED.name());
-            entry.setConfirmationSource(ConfirmationSource.LEGACY_UNRESOLVED.name());
-            entry.setHumanUserId(null);
-        }
+        ActorAttribution actor = com.ses.common.audit.ExecutionActorContext.resolve();
+        entry.setActorType(actor.actorType().name());
+        entry.setConfirmationSource(actor.confirmationSource().name());
+        entry.setHumanUserId(actor.humanUserId());
+        entry.setCorrelationId(actor.correlationId());
+        entry.setIdempotencyKey(actor.idempotencyKey());
     }
 
     @Override
@@ -116,7 +111,11 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     private void applyContext(AuditLog entry) {
-        entry.setCorrelationId(CorrelationContext.get(CorrelationContext.CORRELATION_ID));
+        String correlationId = CorrelationContext.get(CorrelationContext.CORRELATION_ID);
+        if (correlationId != null) entry.setCorrelationId(correlationId);
+        if (entry.getIdempotencyKey() == null) {
+            entry.setIdempotencyKey(CorrelationContext.get(CorrelationContext.PROVIDER_OPERATION_ID));
+        }
         entry.setInvoiceId(CorrelationContext.get(CorrelationContext.INVOICE_ID));
         entry.setDigitalInvoiceId(CorrelationContext.get(CorrelationContext.DIGITAL_INVOICE_ID));
         entry.setJobId(CorrelationContext.get(CorrelationContext.JOB_ID));

@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS t_project_ingestion;
 CREATE TABLE t_project_ingestion (
   id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+  legal_entity_id     BIGINT,
   source_type         VARCHAR(10) NOT NULL,
   original_file_name  VARCHAR(255),
   stored_file_name    VARCHAR(120),

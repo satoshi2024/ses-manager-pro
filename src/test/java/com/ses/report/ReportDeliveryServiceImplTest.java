@@ -15,10 +15,12 @@ import com.ses.mapper.ReportDeliveryMapper;
 import com.ses.mapper.NotificationOutboxMapper;
 import com.ses.mapper.ReportRunMapper;
 import com.ses.mapper.SysUserMapper;
+import com.ses.mapper.DocumentMapper;
+import com.ses.mapper.DocumentVersionMapper;
 import com.ses.service.DocumentService;
-import com.ses.service.NotificationService;
 import com.ses.service.report.ReportDocumentService;
 import com.ses.service.report.ReportDeliveryDocumentRegistrar;
+import com.ses.service.report.ReportDeliveryNotificationBridge;
 import com.ses.service.report.ReportRecipientPreviewService;
 import com.ses.service.report.ReportSnapshotService;
 import com.ses.service.accounting.AccountingTimezoneResolver;
@@ -55,7 +57,9 @@ class ReportDeliveryServiceImplTest {
     private ReportDocumentService documentService;
     private ReportDeliveryDocumentRegistrar documentRegistrar;
     private DocumentService archiveService;
-    private NotificationService notificationService;
+    private ReportDeliveryNotificationBridge notificationBridge;
+    private DocumentMapper documentMapper;
+    private DocumentVersionMapper documentVersionMapper;
     private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private ReportDeliveryServiceImpl service;
 
@@ -63,6 +67,7 @@ class ReportDeliveryServiceImplTest {
     void setUp() {
         runMapper = mock(ReportRunMapper.class);
         deliveryMapper = mock(ReportDeliveryMapper.class);
+        when(deliveryMapper.updateById(any(ReportDelivery.class))).thenReturn(1);
         notificationOutboxMapper = mock(NotificationOutboxMapper.class);
         userMapper = mock(SysUserMapper.class);
         previewService = mock(ReportRecipientPreviewService.class);
@@ -70,15 +75,19 @@ class ReportDeliveryServiceImplTest {
         documentService = mock(ReportDocumentService.class);
         documentRegistrar = mock(ReportDeliveryDocumentRegistrar.class);
         archiveService = mock(DocumentService.class);
-        notificationService = mock(NotificationService.class);
-        when(notificationService.publishToUserAndGetOutboxId(anyLong(), anyString(), anyString(), anyString(),
+        notificationBridge = mock(ReportDeliveryNotificationBridge.class);
+        when(notificationBridge.publish(anyLong(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyString())).thenReturn(99L);
+        documentMapper = mock(DocumentMapper.class);
+        documentVersionMapper = mock(DocumentVersionMapper.class);
+        when(archiveService.getVersionStorageKey(anyLong(), anyInt())).thenReturn("published/report.pdf");
         passwordEncoder = mock(org.springframework.security.crypto.password.PasswordEncoder.class);
         AccountingTimezoneResolver timezoneResolver = mock(AccountingTimezoneResolver.class);
         when(timezoneResolver.resolve("default")).thenReturn(java.time.ZoneId.of("Asia/Tokyo"));
         when(timezoneResolver.now("default")).thenAnswer(invocation -> LocalDateTime.now());
         service = new ReportDeliveryServiceImpl(runMapper, deliveryMapper, notificationOutboxMapper, userMapper, previewService,
-                snapshotService, documentService, documentRegistrar, archiveService, notificationService, passwordEncoder,
+                snapshotService, documentService, documentRegistrar, archiveService, documentMapper, documentVersionMapper,
+                notificationBridge, passwordEncoder,
                 new ObjectMapper(), timezoneResolver);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("1", "N/A",
@@ -107,8 +116,11 @@ class ReportDeliveryServiceImplTest {
 
         assertThat(result.getDeliveries()).hasSize(1);
         assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        org.mockito.ArgumentCaptor<String> linkCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(notificationBridge).publish(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+                linkCaptor.capture(), any(), eq("management-report"));
+        assertThat(linkCaptor.getValue()).contains("/api/management-reports/deliveries/")
+                .doesNotContain("token=").doesNotContain("delivery:").doesNotContain("preview-hash");
     }
 
     @Test
@@ -128,7 +140,7 @@ class ReportDeliveryServiceImplTest {
 
         assertThat(result.getDeliveries()).containsExactly(existing);
         verify(documentRegistrar, never()).registerArtifact(anyLong(), anyString());
-        verifyNoInteractions(notificationService);
+        verifyNoInteractions(notificationBridge);
     }
 
     @Test
@@ -157,8 +169,8 @@ class ReportDeliveryServiceImplTest {
         assertThat(result.getDeliveries().get(0).getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(result.getDeliveries().get(0).getLinkTokenHash()).hasSize(64);
         verify(deliveryMapper, atLeastOnce()).updateById(existing);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        verify(notificationBridge).publish(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+                contains("/download"), any(), eq("management-report"));
     }
 
     @Test
@@ -167,13 +179,25 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setRunId(10L);
         delivery.setRecipientUserId(1L);
-        delivery.setLinkTokenHash("wrong");
+        delivery.setLinkTokenHash(sha256("token"));
         delivery.setLinkExpiresAt(LocalDateTime.now().minusMinutes(1));
         delivery.setReauthRequired(1);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(sha256("token"))).thenReturn(delivery);
 
         assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
+                .hasMessageContaining("error.managementReport.linkExpired");
+        verifyNoInteractions(archiveService);
+    }
+
+    @Test
+    void downloadはdeliveryIdや誤tokenをbearerとして受け付けない() {
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(null);
+
+        assertThatThrownBy(() -> service.download(7L, "delivery:7", "PDF"))
                 .hasMessageContaining("error.managementReport.linkInvalid");
+        assertThatThrownBy(() -> service.download(7L, "wrong-token", "PDF"))
+                .hasMessageContaining("error.managementReport.linkInvalid");
+        verify(deliveryMapper, times(2)).selectByLinkTokenHash(anyString());
         verifyNoInteractions(archiveService);
     }
 
@@ -205,7 +229,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         ReportRecipientPreview recipient = new ReportRecipientPreview(
                 1L, "マネージャー", "DENY", "RECIPIENT_SCOPE_MISMATCH", "changed");
@@ -228,10 +252,11 @@ class ReportDeliveryServiceImplTest {
         delivery.setDocumentId(20L);
         delivery.setDocumentVersionNo(1);
         delivery.setLinkTokenHash(sha256("token"));
+        delivery.setRecipientScopeHash("recipient-scope");
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setReauthRequired(1);
         delivery.setReauthenticatedAt(LocalDateTime.now());
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
         ReportRun run = readyRun();
         run.setScopeOwnerType("ORGANIZATION");
         run.setScopeOwnerId(1L);
@@ -256,14 +281,14 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("RETRY");
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
 
         service.retry(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("FAILED");
         assertThat(delivery.getLastErrorCode()).isEqualTo("DELIVERY_DLQ");
         verify(deliveryMapper).updateById(delivery);
-        verifyNoInteractions(previewService, notificationService);
+        verifyNoInteractions(previewService, notificationBridge);
     }
 
     @ParameterizedTest
@@ -273,13 +298,13 @@ class ReportDeliveryServiceImplTest {
         delivery.setId(7L);
         delivery.setAttemptCount(1);
         delivery.setDeliveryStatus(status);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
 
         service.retry(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo(status);
         verify(deliveryMapper, never()).updateById(any(ReportDelivery.class));
-        verifyNoInteractions(previewService, notificationService, notificationOutboxMapper);
+        verifyNoInteractions(previewService, notificationBridge, notificationOutboxMapper);
     }
 
     @Test
@@ -291,7 +316,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setAttemptCount(2);
         delivery.setDeliveryStatus("RETRY");
         delivery.setNotificationOutboxId(88L);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
@@ -301,7 +326,7 @@ class ReportDeliveryServiceImplTest {
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         verify(notificationOutboxMapper).requeueReport(88L);
-        verifyNoInteractions(notificationService);
+        verifyNoInteractions(notificationBridge);
     }
 
     @Test
@@ -314,27 +339,37 @@ class ReportDeliveryServiceImplTest {
         delivery.setDeliveryStatus("FAILED");
         delivery.setDocumentId(20L);
         delivery.setDocumentVersionNo(1);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
         when(runMapper.selectById(10L)).thenReturn(readyRun());
         when(previewService.previewForRun(any())).thenReturn(
                 preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
+        Document document = new Document();
+        document.setId(20L);
+        DocumentVersion version = new DocumentVersion();
+        version.setVersionNo(1);
+        when(documentMapper.selectById(20L)).thenReturn(document);
+        when(documentVersionMapper.selectOne(any())).thenReturn(version);
 
         service.manualReplay(7L);
 
         assertThat(delivery.getDeliveryStatus()).isEqualTo("ENQUEUED");
         assertThat(delivery.getAttemptCount()).isEqualTo(1);
-        verify(notificationService).publishToUserAndGetOutboxId(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
-                contains("/download?token="), any(), eq("management-report"));
+        verify(notificationBridge).publish(eq(2L), eq("MANAGEMENT_REPORT"), any(), any(),
+                contains("/download"), any(), eq("management-report"));
     }
 
     @Test
     void manualReplayはDLQの既存outboxを再利用しdedupe衝突を起こさない() {
         ReportDelivery delivery = new ReportDelivery();
         delivery.setId(7L);
+        delivery.setRunId(10L);
         delivery.setAttemptCount(5);
         delivery.setDeliveryStatus("FAILED");
         delivery.setNotificationOutboxId(88L);
-        when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByIdForReplay(7L)).thenReturn(delivery);
+        when(runMapper.selectById(10L)).thenReturn(readyRun());
+        when(previewService.previewForRun(any())).thenReturn(
+                preview(new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope")));
         when(notificationOutboxMapper.replayReport(88L)).thenReturn(1);
 
         service.manualReplay(7L);
@@ -343,7 +378,7 @@ class ReportDeliveryServiceImplTest {
         assertThat(delivery.getAttemptCount()).isEqualTo(5);
         verify(notificationOutboxMapper).replayReport(88L);
         verify(deliveryMapper).updateById(delivery);
-        verifyNoInteractions(notificationService, previewService, runMapper);
+        verifyNoInteractions(notificationBridge);
     }
 
     @Test
@@ -356,6 +391,7 @@ class ReportDeliveryServiceImplTest {
         delivery.setLinkExpiresAt(LocalDateTime.now().plusDays(1));
         delivery.setDeliveryStatus("ENQUEUED");
         when(deliveryMapper.selectById(7L)).thenReturn(delivery);
+        when(deliveryMapper.selectByLinkTokenHash(anyString())).thenReturn(delivery);
 
         service.cancel(7L);
 
@@ -364,7 +400,7 @@ class ReportDeliveryServiceImplTest {
         verify(deliveryMapper).updateById(delivery);
 
         assertThatThrownBy(() -> service.download(7L, "token", "PDF"))
-                .hasMessageContaining("error.managementReport.deliveryCancelled");
+                .hasMessageContaining("error.managementReport.linkInvalid");
         verifyNoInteractions(archiveService);
     }
 
@@ -382,6 +418,13 @@ class ReportDeliveryServiceImplTest {
         run.setTemplateVersionId(3L);
         run.setScopeHash("scope");
         run.setOrganizationScopeJson("{\"companyWide\":true,\"organizationIds\":[]}");
+        run.setRecipientPreviewHash("preview-hash");
+        try {
+            run.setRecipientSnapshotJson(new ObjectMapper().writeValueAsString(List.of(
+                    new ReportRecipientPreview(2L, "マネージャー", "ALLOW", "SCOPE_MATCH", "scope"))));
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
         return run;
     }
 

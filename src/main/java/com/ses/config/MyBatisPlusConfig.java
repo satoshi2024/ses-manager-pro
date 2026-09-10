@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
-import com.ses.common.util.SecurityUtils;
+import com.ses.common.audit.ExecutionActorContext;
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -70,7 +70,16 @@ public class MyBatisPlusConfig {
             LocalDateTime now = LocalDateTime.now();
             this.strictInsertFill(metaObject, "createdAt", LocalDateTime.class, now);
             this.strictInsertFill(metaObject, "updatedAt", LocalDateTime.class, now);
-            this.strictInsertFill(metaObject, "createdBy", Long.class, SecurityUtils.currentUserId());
+            // background workerはSecurityContextに残った人間ユーザーを監査主体へ流用しない。
+            Long humanUserId = ExecutionActorContext.resolve().humanUserId();
+            if (metaObject.hasSetter("createdBy")) {
+                Class<?> createdByType = metaObject.getSetterType("createdBy");
+                if (Long.class.equals(createdByType) || long.class.equals(createdByType)) {
+                    this.strictInsertFill(metaObject, "createdBy", Long.class, humanUserId);
+                } else if (String.class.equals(createdByType) && humanUserId != null) {
+                    this.strictInsertFill(metaObject, "createdBy", String.class, String.valueOf(humanUserId));
+                }
+            }
         }
 
         /**

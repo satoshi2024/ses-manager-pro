@@ -12,6 +12,7 @@ import com.ses.service.accounting.provider.CsvAccountingExportProvider;
 import com.ses.service.accounting.provider.FreeeAccountingProvider;
 import com.ses.service.integration.IntegrationConnectionService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.ExpectedCount;
@@ -58,8 +60,27 @@ class FreeeAccountingProviderTest {
     @Autowired
     private Environment environment;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private MockRestServiceServer mockServer;
     private IntegrationConnection testConnection;
+
+    @AfterEach
+    void cleanupFixture() {
+        jdbcTemplate.update("DELETE FROM t_integration_job_event WHERE job_id IN "
+                + "(SELECT id FROM t_integration_job WHERE connection_id IN "
+                + "(SELECT id FROM m_integration_connection WHERE tenant_id = 'test-tenant' "
+                + "AND provider = 'freee' AND product = 'accounting'))");
+        jdbcTemplate.update("DELETE FROM t_integration_job WHERE connection_id IN "
+                + "(SELECT id FROM m_integration_connection WHERE tenant_id = 'test-tenant' "
+                + "AND provider = 'freee' AND product = 'accounting')");
+        jdbcTemplate.update("DELETE FROM m_external_mapping WHERE connection_id IN "
+                + "(SELECT id FROM m_integration_connection WHERE tenant_id = 'test-tenant' "
+                + "AND provider = 'freee' AND product = 'accounting')");
+        jdbcTemplate.update("DELETE FROM m_integration_connection WHERE tenant_id = 'test-tenant' "
+                + "AND provider = 'freee' AND product = 'accounting'");
+    }
 
     @BeforeEach
     void setUp() {
@@ -73,6 +94,7 @@ class FreeeAccountingProviderTest {
                 .expiresIn(3600L)
                 .build();
         connectionService.saveTokens(testConnection.getId(), tokens, 99999L, "テスト事業所", 1L);
+        testConnection = connectionService.getById(testConnection.getId());
     }
 
     @Test
@@ -119,6 +141,38 @@ class FreeeAccountingProviderTest {
         assertThat(result.getExternalId()).isEqualTo("55555");
         assertThat(result.getProviderRequestId()).isEqualTo("req-freee-uuid-001");
         assertThat(result.getResponseTotal()).isEqualByComparingTo("1100000");
+    }
+
+    @Test
+    @DisplayName("2xx正常応答: deal IDの欠落・null・非正値・小数・不正文字列・範囲外はfail-closed")
+    void upsertSalesInvoice_invalidDealIdInNormalResponse_failClosed() {
+        List<String> responses = List.of(
+                "{}",
+                "{\"deal\":{\"amount\":500000}}",
+                "{\"deal\":{\"id\":null,\"amount\":500000}}",
+                "{\"deal\":{\"id\":0,\"amount\":500000}}",
+                "{\"deal\":{\"id\":-1,\"amount\":500000}}",
+                "{\"deal\":{\"id\":1.5,\"amount\":500000}}",
+                "{\"deal\":{\"id\":\"not-a-number\",\"amount\":500000}}",
+                "{\"deal\":{\"id\":9223372036854775808,\"amount\":500000}}"
+        );
+
+        for (int index = 0; index < responses.size(); index++) {
+            mockServer.expect(ExpectedCount.once(), requestTo("https://api.freee.co.jp/api/1/deals"))
+                    .andExpect(method(HttpMethod.POST))
+                    .andRespond(withSuccess(responses.get(index), MediaType.APPLICATION_JSON));
+        }
+
+        for (int index = 0; index < responses.size(); index++) {
+            CanonicalDealResult result = freeeProvider.upsertSalesInvoice(
+                    testConnection, timeoutInvoice("INV-INVALID-DEAL-ID-" + index, 1000L + index));
+
+            assertThat(result.isSuccess()).as("response index=%s", index).isFalse();
+            assertThat(result.getExternalId()).as("response index=%s", index).isNull();
+            assertThat(result.getErrorCode()).as("response index=%s", index).isEqualTo("INVALID_DEAL_ID");
+        }
+
+        mockServer.verify();
     }
 
     @Test
@@ -455,6 +509,44 @@ class FreeeAccountingProviderTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getExternalId()).isEqualTo("998877");
         assertThat(result.getErrorMessageSafe()).contains("タイムアウト後に外部照合により取引作成を確認");
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 取引ID欠落行は金額・法人一致でも成功扱いにしない")
+    void unknownOutcome_missingDealId_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-MISSING-DEAL-ID", 899L);
+        expectDealCreateTimeout();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"deals\": [{\"ref_number\": \"INV-MISSING-DEAL-ID\", "
+                                + "\"amount\": 500000, \"company_id\": 99999}]}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
+    }
+
+    @Test
+    @DisplayName("タイムアウト未知結果照合: 小数の取引IDは金額・法人一致でも成功扱いにしない")
+    void unknownOutcome_fractionalDealId_failClosed() {
+        CanonicalSalesInvoice invoice = timeoutInvoice("INV-FRACTIONAL-DEAL-ID", 900L);
+        expectDealCreateTimeout();
+        mockServer.expect(requestTo("https://api.freee.co.jp/api/1/deals?company_id=99999&limit=100&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"deals\": [{\"id\": 1.5, \"ref_number\": \"INV-FRACTIONAL-DEAL-ID\", "
+                                + "\"amount\": 500000, \"company_id\": 99999}]}",
+                        MediaType.APPLICATION_JSON));
+
+        CanonicalDealResult result = freeeProvider.upsertSalesInvoice(testConnection, invoice);
+
+        mockServer.verify();
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.isRetryable()).isTrue();
     }
 
     @Test

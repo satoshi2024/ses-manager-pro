@@ -2,12 +2,11 @@ package com.ses.service.report;
 
 import com.ses.dto.report.ReportDocumentArtifact;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * delivery本流TXから文書生成（file I/O）を分離する。registerは独立TXでcommitし、
- * 後続の通知失敗でdocument登録までrollbackしない。
+ * delivery本流TXへ文書登録を参加させる。通知・outboxが失敗した場合に
+ * documentだけが先にcommitされる孤児を作らない。
  */
 @Component
 public class ReportDeliveryDocumentRegistrar {
@@ -18,7 +17,7 @@ public class ReportDeliveryDocumentRegistrar {
         this.reportDocumentService = reportDocumentService;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public ReportDocumentArtifact registerArtifact(Long runId, String format) {
         return reportDocumentService.register(runId, format);
     }

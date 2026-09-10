@@ -38,6 +38,34 @@ class ExternalApiInboundWebhookParserTest {
     }
 
     @Test
+    void providerとcanonicalPayloadを省略した最小合法requestを受理する() {
+        ExternalApiInboundWebhookParser.Parsed parsed = parser.parse(
+                "provider-a", "evt-minimal",
+                "{\"providerEventId\":\"evt-minimal\",\"eventType\":\"health.ping\"}"
+                        .getBytes(StandardCharsets.UTF_8),
+                LocalDateTime.of(2026, 8, 31, 12, 0));
+
+        assertTrue(parsed.snapshot().json().contains("\"providerEventId\":\"evt-minimal\""));
+        assertFalse(parsed.snapshot().json().contains("canonicalPayload"));
+    }
+
+    @Test
+    void canonicalPayloadの未知nestedFieldとscalar型違いは400契約で拒否する() {
+        assertThrows(com.ses.config.integrationhub.ExternalApiSecurityException.class, () -> parser.parse(
+                "provider-a", "evt-nested",
+                ("{\"providerEventId\":\"evt-nested\",\"eventType\":\"health.ping\","
+                        + "\"canonicalPayload\":{\"payload\":{\"internalDatabaseId\":1}}}")
+                        .getBytes(StandardCharsets.UTF_8),
+                LocalDateTime.of(2026, 8, 31, 12, 0)));
+        assertThrows(com.ses.config.integrationhub.ExternalApiSecurityException.class, () -> parser.parse(
+                "provider-a", "evt-type",
+                ("{\"providerEventId\":\"evt-type\",\"eventType\":\"health.ping\","
+                        + "\"canonicalPayload\":{\"status\":{\"nested\":true}}}")
+                        .getBytes(StandardCharsets.UTF_8),
+                LocalDateTime.of(2026, 8, 31, 12, 0)));
+    }
+
+    @Test
     void providerEventId不一致と未知fieldをfailClosedする() {
         assertThrows(RuntimeException.class, () -> parser.parse("provider-a", "evt-1",
                 ("{\"providerEventId\":\"evt-2\",\"eventType\":\"resource.changed\"}")
@@ -45,6 +73,12 @@ class ExternalApiInboundWebhookParserTest {
         assertThrows(RuntimeException.class, () -> parser.parse("provider-a", "evt-1",
                 "{\"providerEventId\":\"evt-1\",\"eventType\":\"resource.changed\",\"payload\":{}}"
                         .getBytes(StandardCharsets.UTF_8), LocalDateTime.now()));
+        assertThrows(RuntimeException.class, () -> parser.parse("provider-a", "evt-1",
+                "{\"eventType\":\"resource.changed\"}".getBytes(StandardCharsets.UTF_8), LocalDateTime.now()));
+        assertThrows(RuntimeException.class, () -> parser.parse("provider-a", "evt-1",
+                "{\"providerEventId\":\"evt-1\"}".getBytes(StandardCharsets.UTF_8), LocalDateTime.now()));
+        assertThrows(RuntimeException.class, () -> parser.parse("provider-a", "evt-1",
+                "{\"providerEventId\":\"evt-1\",\"eventType\":\"resource.changed\",\"canonicalPayload\":[]}".getBytes(StandardCharsets.UTF_8), LocalDateTime.now()));
     }
 
     @Test

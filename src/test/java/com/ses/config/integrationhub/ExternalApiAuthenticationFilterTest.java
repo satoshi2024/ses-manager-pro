@@ -126,6 +126,8 @@ class ExternalApiAuthenticationFilterTest {
         properties.getPublicApi().setEnabled(true);
         properties.getExternalTransport().setEnabled(false);
         properties.getProvider().setMode(IntegrationHubExternalApiProperties.ProviderMode.MOCK);
+        properties.getTopology().setMode("DEDICATED_DATABASE");
+        properties.getTopology().setBoundTenantId("tenant-a");
         return new ExternalApiAuthenticationFilter(providerOf(properties), providerOf(new ExternalApiSourceIpResolver()),
                 providerOf(clientService), providerOf(credentialService), providerOf(nonceService), providerOf(crypto),
                 providerOf(Clock.fixed(NOW, ZoneOffset.UTC)), new ObjectMapper());

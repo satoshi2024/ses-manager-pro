@@ -3,18 +3,13 @@ package com.ses.service.ai.impl;
 import com.ses.common.exception.BusinessException;
 import com.ses.common.util.SecurityUtils;
 import com.ses.entity.AiFeedback;
-import com.ses.entity.AiRecommendationItem;
-import com.ses.entity.AiRecommendationRun;
-import com.ses.mapper.AiFeedbackMapper;
-import com.ses.mapper.AiRecommendationItemMapper;
-import com.ses.mapper.AiRecommendationRunMapper;
 import com.ses.service.ai.AiFeedbackService;
-import com.ses.service.ai.AiPiiMasker;
+import com.ses.service.ai.copilot.CopilotExecutionContext;
+import com.ses.service.ai.copilot.CopilotFeatureGate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.Set;
 
 @Service
@@ -27,61 +22,38 @@ public class AiFeedbackServiceImpl implements AiFeedbackService {
 
     private static final Set<String> DECISIONS = Set.of("ACCEPT", "REJECT", "HOLD");
 
-    private final AiFeedbackMapper feedbackMapper;
-    private final AiRecommendationItemMapper itemMapper;
-    private final AiRecommendationRunMapper runMapper;
+    private final CopilotFeatureGate featureGate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public AiFeedback record(Long itemId, String decision, String reasonCode, String comment) {
-        if (itemId == null) {
-            throw new BusinessException(400, "itemId は必須です");
+    public AiFeedback record(FeedbackCommand command, CopilotExecutionContext context) {
+        // この旧推薦feedbackのscope binding schema/reauthorization contractは未完成。
+        // feature flagだけでなくservice直呼出しも停止し、itemId/runIdだけでの認可・更新を防ぐ。
+        if (command == null || command.itemId() == null || command.runId() == null
+                || context == null || context.effectiveScopeSnapshot() == null
+                || context.scope() == null || context.scope() != context.effectiveScopeSnapshot().scope()
+                || context.queryId() == null || context.parameters() == null
+                || !context.queryId().equals(context.parameters().queryId())
+                || !context.tenantId().equals(context.effectiveScopeSnapshot().tenantId())
+                || !context.legalEntityId().equals(context.effectiveScopeSnapshot().legalEntityId())
+                || !context.asOfDate().equals(context.effectiveScopeSnapshot().asOf())
+                || context.scopeHash() == null
+                || context.effectiveScopeSnapshot().scopeHash() == null
+                || context.scope().scopeHash() == null
+                || !context.scopeHash().equals(context.effectiveScopeSnapshot().scopeHash())
+                || !context.scopeHash().equals(context.scope().scopeHash())
+                || SecurityUtils.currentUserId() == null) {
+            throw BusinessException.of(403, "SCOPE_CONTEXT_REQUIRED");
         }
-        AiRecommendationItem item = itemMapper.selectById(itemId);
-        if (item == null) {
-            throw new BusinessException(404, "推薦候補が見つかりません");
-        }
-        AiRecommendationRun run = runMapper.selectById(item.getRunId());
-        if (run == null) {
-            throw new BusinessException(404, "推薦候補が見つかりません");
-        }
-        assertCanRecord(run);
-        if (decision != null && !decision.isBlank() && !DECISIONS.contains(decision)) {
+        if (command.decision() != null && !command.decision().isBlank()
+                && !DECISIONS.contains(command.decision())) {
             throw new BusinessException(400, "decision が不正です");
         }
-        if (reasonCode != null && !reasonCode.isBlank() && !REASON_CODES.contains(reasonCode)) {
+        if (command.reasonCode() != null && !command.reasonCode().isBlank()
+                && !REASON_CODES.contains(command.reasonCode())) {
             throw new BusinessException(400, "reasonCode が不正です");
         }
-        AiFeedback feedback = new AiFeedback();
-        feedback.setItemId(itemId);
-        feedback.setDecision(decision == null || decision.isBlank() ? null : decision);
-        feedback.setReasonCode(reasonCode == null || reasonCode.isBlank() ? null : reasonCode);
-        String redacted = AiPiiMasker.stripHtml(comment);
-        if (redacted != null && redacted.length() > 500) {
-            redacted = redacted.substring(0, 500);
-        }
-        feedback.setCommentRedacted(redacted);
-        feedback.setDecidedBy(SecurityUtils.currentUserId());
-        feedback.setDecidedAt(LocalDateTime.now());
-        feedbackMapper.insert(feedback);
-        if ("ACCEPT".equals(feedback.getDecision())) {
-            item.setSelectedFlag(1);
-            itemMapper.updateById(item);
-        }
-        return feedback;
-    }
-
-    private static void assertCanRecord(AiRecommendationRun run) {
-        String role = SecurityUtils.currentRole();
-        if ("管理者".equals(role) || "マネージャー".equals(role)) {
-            return;
-        }
-        if ("営業".equals(role)) {
-            Long userId = SecurityUtils.currentUserId();
-            if (userId != null && userId.equals(run.getActorUserId())) {
-                return;
-            }
-        }
-        throw BusinessException.of(403, "error.accessDenied");
+        featureGate.assertQueryAllowed();
+        throw BusinessException.of(503, "AI_FEEDBACK_SCOPE_CONTRACT_REQUIRED");
     }
 }

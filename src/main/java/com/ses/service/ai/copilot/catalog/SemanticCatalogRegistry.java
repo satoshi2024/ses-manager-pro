@@ -59,27 +59,27 @@ public final class SemanticCatalogRegistry {
         Map<String, SemanticCatalogEntry> map = new LinkedHashMap<>();
         map.put("dashboard.summary", entry(
                 "dashboard.summary",
-                true,
+                false,
                 Set.of("管理者", "マネージャー", "営業"),
                 List.of("dashboard.summary")));
         map.put("dashboard.profit-analysis", entry(
                 "dashboard.profit-analysis",
-                true,
+                false,
                 Set.of("管理者", "マネージャー"),
                 List.of("dashboard.profit-analysis")));
         map.put("dashboard.utilization-forecast", entry(
                 "dashboard.utilization-forecast",
-                true,
+                false,
                 Set.of("管理者", "マネージャー", "営業"),
                 List.of("dashboard.utilization-forecast")));
         map.put("management-accounting.summary", entry(
                 "management-accounting.summary",
-                true,
+                false,
                 Set.of("管理者", "マネージャー"),
                 List.of("management-accounting.summary")));
         map.put("cashflow.forecast", entry(
                 "cashflow.forecast",
-                true,
+                false,
                 Set.of("管理者", "マネージャー"),
                 List.of("cashflow.forecast")));
         // DataScope統合完了まで常に無効（requirements R5 / design §4.2）

@@ -2,6 +2,7 @@ package com.ses.service.impl;
 
 import com.ses.mapper.SystemConfigMapper;
 import com.ses.service.SystemConfigService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,6 +34,12 @@ class SystemConfigCommitOrderingTest {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @AfterEach
+    void restoreFixture() {
+        new TransactionTemplate(transactionManager)
+                .executeWithoutResult(status -> systemConfigService.put("company_name", "SES Manager Pro", "会社名"));
+    }
 
     private boolean await(CountDownLatch latch) {
         try {

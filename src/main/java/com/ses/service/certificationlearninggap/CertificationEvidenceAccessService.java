@@ -6,6 +6,8 @@ import com.ses.dto.certificationlearninggap.CertificationLearningGapFilter;
 import com.ses.entity.DocumentLink;
 import com.ses.entity.DocumentVersion;
 import com.ses.entity.EngineerCertification;
+import com.ses.entity.CertificationEvent;
+import com.ses.mapper.CertificationEventMapper;
 import com.ses.mapper.DocumentLinkMapper;
 import com.ses.mapper.DocumentVersionMapper;
 import com.ses.mapper.EngineerCertificationMapper;
@@ -13,9 +15,9 @@ import com.ses.service.DocumentService;
 import com.ses.service.EngineerAccountLinkService;
 import com.ses.service.SkillGapService;
 import com.ses.service.security.impl.FileScopeValidationService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.io.InputStream;
 import java.time.Clock;
@@ -24,7 +26,6 @@ import java.util.Objects;
 
 /** 資格証憑のdownload境界。typed link・版/hash・CLEAN・legal holdを毎回再検証する。 */
 @Service
-@RequiredArgsConstructor
 public class CertificationEvidenceAccessService {
 
     private final EngineerCertificationMapper certificationMapper;
@@ -35,6 +36,40 @@ public class CertificationEvidenceAccessService {
     private final EngineerAccountLinkService accountLinkService;
     private final CertificationLearningGapQueryService queryService;
     private final Clock clock;
+    private final CertificationEventMapper eventMapper;
+
+    /** 既存の単体テスト／直接利用互換。Springは下記9引数constructorを使用する。 */
+    public CertificationEvidenceAccessService(EngineerCertificationMapper certificationMapper,
+                                              DocumentLinkMapper documentLinkMapper,
+                                              DocumentVersionMapper documentVersionMapper,
+                                              DocumentService documentService,
+                                              FileScopeValidationService fileScopeValidationService,
+                                              EngineerAccountLinkService accountLinkService,
+                                              CertificationLearningGapQueryService queryService,
+                                              Clock clock) {
+        this(certificationMapper, documentLinkMapper, documentVersionMapper, documentService,
+                fileScopeValidationService, accountLinkService, queryService, clock, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public CertificationEvidenceAccessService(EngineerCertificationMapper certificationMapper,
+                                              DocumentLinkMapper documentLinkMapper,
+                                              DocumentVersionMapper documentVersionMapper,
+                                              DocumentService documentService,
+                                              FileScopeValidationService fileScopeValidationService,
+                                              EngineerAccountLinkService accountLinkService,
+                                              CertificationLearningGapQueryService queryService,
+                                              Clock clock, CertificationEventMapper eventMapper) {
+        this.certificationMapper = certificationMapper;
+        this.documentLinkMapper = documentLinkMapper;
+        this.documentVersionMapper = documentVersionMapper;
+        this.documentService = documentService;
+        this.fileScopeValidationService = fileScopeValidationService;
+        this.accountLinkService = accountLinkService;
+        this.queryService = queryService;
+        this.clock = clock;
+        this.eventMapper = eventMapper;
+    }
 
     public EvidenceDownload downloadForManagement(Long engineerId, Long recordId, Long documentId, Integer versionNo,
                                                   Authentication authentication) {
@@ -60,6 +95,9 @@ public class CertificationEvidenceAccessService {
         if (documentId == null || versionNo == null) {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
+        if (!"ACTIVE".equals(record.getRecordState()) || !Integer.valueOf(1).equals(record.getCurrentFlag())) {
+            throw BusinessException.of(403, "certification.evidence.linkRequired");
+        }
         boolean linked = documentLinkMapper.selectList(new LambdaQueryWrapper<DocumentLink>()
                         .eq(DocumentLink::getDocumentId, documentId)
                         .eq(DocumentLink::getTargetType, "CERTIFICATION_RECORD")
@@ -68,18 +106,45 @@ public class CertificationEvidenceAccessService {
         if (!linked) {
             throw BusinessException.of(403, "certification.evidence.linkRequired");
         }
+        CertificationEvent verifyEvent = currentVerifyEvent(record.getId());
+        if (verifyEvent == null
+                || !Objects.equals(verifyEvent.getEvidenceDocumentId(), documentId)) {
+            throw BusinessException.of(403, "certification.evidence.versionMismatch");
+        }
         DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
                 .eq(DocumentVersion::getDocumentId, documentId).eq(DocumentVersion::getVersionNo, versionNo));
         if (version == null || !"CLEAN".equals(version.getScanStatus())) {
             throw BusinessException.of(403, "error.file.scanNotReady");
         }
+        if (!Objects.equals(verifyEvent.getEvidenceDocumentVersionId(), version.getId())
+                || !StringUtils.hasText(verifyEvent.getEvidenceDocumentHash())
+                || !Objects.equals(verifyEvent.getEvidenceDocumentHash().toLowerCase(java.util.Locale.ROOT),
+                version.getSha256() == null ? null : version.getSha256().toLowerCase(java.util.Locale.ROOT))) {
+            throw BusinessException.of(403, "certification.evidence.versionMismatch");
+        }
         String storageKey = documentService.getVersionStorageKey(documentId, versionNo);
         if (storageKey == null) {
             throw BusinessException.of(404, "error.document.versionNotFound");
         }
-        fileScopeValidationService.assertDownloadAllowed(storageKey, version.getId(), version.getSha256());
+        fileScopeValidationService.assertCertificationEvidenceDownloadAllowed(
+                storageKey, record.getId(), documentId, version.getId(), version.getSha256());
         return new EvidenceDownload(documentId, versionNo, version.getOriginalName(), version.getContentType(),
                 documentService.download(documentId, versionNo));
+    }
+
+    private CertificationEvent currentVerifyEvent(Long recordId) {
+        if (eventMapper == null || recordId == null) {
+            throw BusinessException.of(403, "certification.evidence.versionMismatch");
+        }
+        java.util.List<CertificationEvent> events = eventMapper.selectByRecordId(recordId);
+        if (events == null) {
+            return null;
+        }
+        return events.stream()
+                .filter(event -> "VERIFY".equals(event.getEventType()))
+                .reduce((first, second) -> second)
+                .filter(event -> "ACTIVE".equals(event.getEffectiveRecordState()))
+                .orElse(null);
     }
 
     private EngineerCertification record(Long recordId) {

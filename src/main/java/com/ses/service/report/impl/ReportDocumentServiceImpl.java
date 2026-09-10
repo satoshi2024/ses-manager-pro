@@ -1,8 +1,8 @@
 package com.ses.service.report.impl;
 
 import com.ses.common.exception.BusinessException;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.common.util.PdfFontUtils;
-import com.ses.common.util.SecurityUtils;
 import com.ses.dto.document.DocumentRegisterRequest;
 import com.ses.dto.report.ReportDocumentArtifact;
 import com.ses.entity.Document;
@@ -91,9 +91,12 @@ public class ReportDocumentServiceImpl implements ReportDocumentService {
                 .versionDiscriminator(run.getSourcePolicyHash() + ":" + normalized)
                 .originalName("management-report-" + run.getPeriodFrom().toString().substring(0, 7) + "." + extension)
                 .contentType(contentType)
-                // schedulerはHTTP sessionを持たないため、非HTTP実行ではrunの監査principalを使う。
-                .createdBy(SecurityUtils.currentUserId() != null
-                        ? SecurityUtils.currentUserId() : run.getPrincipalUserId())
+                .actorType(ExecutionActorContext.resolve().actorType())
+                .confirmationSource(ExecutionActorContext.resolve().confirmationSource())
+                .humanUserId(ExecutionActorContext.resolve().humanUserId())
+                .correlationId(ExecutionActorContext.resolve().correlationId())
+                .idempotencyKey(ExecutionActorContext.resolve().idempotencyKey())
+                .createdBy(ExecutionActorContext.resolve().humanUserId())
                 .build();
         Document document = documentService.registerGenerated(request, new java.io.ByteArrayInputStream(bytes));
         if (document != null && "DRAFT".equals(document.getStatus())) {

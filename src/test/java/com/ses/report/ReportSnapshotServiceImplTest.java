@@ -2,6 +2,7 @@ package com.ses.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ses.dto.dashboard.DashboardSummaryDto;
+import com.ses.common.audit.ExecutionActorContext;
 import com.ses.dto.report.ReportGenerationCommand;
 import com.ses.dto.report.ReportGenerationResult;
 import com.ses.dto.report.ReportRecipientPreviewResult;
@@ -11,6 +12,7 @@ import com.ses.entity.Engineer;
 import com.ses.entity.ReportSectionAttempt;
 import com.ses.entity.ReportSectionSnapshot;
 import com.ses.entity.ReportTemplateVersion;
+import com.ses.entity.SysUser;
 import com.ses.mapper.ContractMapper;
 import com.ses.mapper.EngineerMapper;
 import com.ses.mapper.ReportRunMapper;
@@ -159,7 +161,7 @@ class ReportSnapshotServiceImplTest {
     @Test
     void 月末runは対象期間とAsiaTokyoを保存し同一retryでsnapshotを重複生成しない() {
         ReportGenerationCommand command = ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報");
+                3L, YearMonth.of(2026, 8), "速報", "preview-1");
 
         ReportGenerationResult first = service.generate(command);
         ReportGenerationResult retry = service.generate(command);
@@ -180,7 +182,7 @@ class ReportSnapshotServiceImplTest {
     @Test
     void 確定版は月次締め未完了なら生成しない() {
         assertThatThrownBy(() -> service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "確定")))
+                3L, YearMonth.of(2026, 8), "確定", "preview-1")))
                 .hasMessageContaining("error.managementReport.closingRequired");
     }
 
@@ -194,7 +196,7 @@ class ReportSnapshotServiceImplTest {
         when(sectionMapper.selectOne(any())).thenReturn(null);
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報"));
+                3L, YearMonth.of(2026, 8), "速報", "preview-1"));
 
         assertThat(result.getRun().getStatus()).isEqualTo("PARTIAL");
         assertThat(result.getSections()).hasSize(2)
@@ -207,7 +209,7 @@ class ReportSnapshotServiceImplTest {
         when(dashboardService.getSummary(anyInt())).thenThrow(new IllegalStateException("source failure"));
 
         ReportGenerationCommand command = ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報");
+                3L, YearMonth.of(2026, 8), "速報", "preview-1");
         service.generate(command);
         service.generate(command);
 
@@ -229,7 +231,7 @@ class ReportSnapshotServiceImplTest {
         when(sectionMapper.selectOne(any())).thenReturn(null);
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                        3L, YearMonth.of(2026, 8), "速報").forRegenerationOf(99L));
+                        3L, YearMonth.of(2026, 8), "速報", "preview-1").forRegenerationOf(99L));
 
         assertThat(result.isReused()).isFalse();
         assertThat(result.getRun().getRegenerationOfRunId()).isEqualTo(99L);
@@ -249,7 +251,7 @@ class ReportSnapshotServiceImplTest {
         when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(50L));
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "速報"));
+                3L, YearMonth.of(2026, 8), "速報", "preview-1"));
 
         assertThat(result.getRun().getScopeOwnerType()).isEqualTo("ORGANIZATION");
         assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
@@ -274,13 +276,65 @@ class ReportSnapshotServiceImplTest {
         when(scopeService.allowedContractIds(any())).thenReturn(Set.of(23L));
         when(scopeService.allowedInvoiceIds(any())).thenReturn(Set.of(24L));
 
-        ReportGenerationResult result = service.generate(ReportGenerationCommand.scheduled(
-                3L, YearMonth.of(2026, 8), "速報", 5L, 7L));
+        ReportGenerationResult result = ExecutionActorContext.runAsSystem(
+                "report-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 7L)));
 
         assertThat(result.getRun().getScopeOwnerId()).isEqualTo(7L);
         assertThat(result.getRun().getOrganizationScopeJson()).contains("\"organizationIds\":[20]");
         assertThat(result.getRun().getOrganizationScopeJson()).contains("\"engineerIds\":[22]");
         assertThat(result.getRun().getOrganizationScopeJson()).doesNotContain("30", "40", "50");
+    }
+
+    @Test
+    void scheduledRunはprincipalがnullならadminへ昇格せず拒否する() {
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-null-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, null))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは存在しないprincipalを拒否する() {
+        when(userMapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-invalid-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 999L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは無効化されたprincipalを拒否する() {
+        SysUser disabled = new SysUser();
+        disabled.setId(1000L);
+        disabled.setRole("管理者");
+        disabled.setStatus(0);
+        when(userMapper.selectById(1000L)).thenReturn(disabled);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-disabled-principal-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 1000L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
+    }
+
+    @Test
+    void scheduledRunは許可されないroleのprincipalを拒否する() {
+        SysUser sales = new SysUser();
+        sales.setId(1001L);
+        sales.setRole("営業");
+        sales.setStatus(1);
+        when(userMapper.selectById(1001L)).thenReturn(sales);
+
+        assertThatThrownBy(() -> ExecutionActorContext.runAsSystem(
+                "report-disallowed-role-test", "SCHEDULER_POLL",
+                () -> service.generate(ReportGenerationCommand.scheduled(
+                        3L, YearMonth.of(2026, 8), "速報", 5L, 1001L))))
+                .hasMessageContaining("error.managementReport.principalDenied");
     }
 
     @Test
@@ -298,7 +352,7 @@ class ReportSnapshotServiceImplTest {
                 .thenReturn(new UtilizationCalcService.UtilizationSnapshot(8, 2, 10, 80.0));
 
         ReportGenerationResult result = service.generate(ReportGenerationCommand.manual(
-                3L, YearMonth.of(2026, 8), "確定"));
+                3L, YearMonth.of(2026, 8), "確定", "preview-1"));
 
         assertThat(result.getSections()).singleElement().satisfies(section -> {
             assertThat(section.getFactType()).isEqualTo("実績");

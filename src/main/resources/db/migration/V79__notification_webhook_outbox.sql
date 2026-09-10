@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS t_notification_outbox (
     next_attempt_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '次回送信可能時刻',
     locked_at         DATETIME NULL COMMENT '処理claim時刻',
     last_error        VARCHAR(1000) NULL COMMENT '直近の送信失敗理由',
+    reconciliation_required TINYINT NOT NULL DEFAULT 0 COMMENT 'report delivery再照合要否',
     sent_at           DATETIME NULL COMMENT '送信完了時刻',
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
     UNIQUE KEY uk_notification_outbox_dedupe (dedupe_key),

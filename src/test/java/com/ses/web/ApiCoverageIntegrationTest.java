@@ -62,11 +62,12 @@ class ApiCoverageIntegrationTest extends BaseIntegrationTest {
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(matchEngBody))
-                .andExpect(status().isOk());
+                // legal_entity_idが未解決のfixtureはlegacy AI境界でもfail-closedする。
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get("/api/ai/matching/project/1")
                         .with(csrf()))
-                .andExpect(status().isOk());
+                .andExpect(status().isNotFound());
     }
 
     @Test
