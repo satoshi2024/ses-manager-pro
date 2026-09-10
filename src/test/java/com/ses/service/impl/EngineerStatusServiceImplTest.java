@@ -34,15 +34,21 @@ class EngineerStatusServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.ses.service.accounting.AccountingTenantContextHolder.setTenantId("default");
         engineerStatusService = new EngineerStatusServiceImpl(engineerMapper, proposalMapper, contractMapper);
         engineer = new Engineer();
         engineer.setId(1L);
         engineer.setStatus("Bench");
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        com.ses.service.accounting.AccountingTenantContextHolder.clear();
+    }
+
     @Test
     void testOnProposalCreated() {
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         
         engineerStatusService.onProposalCreated(1L);
 
@@ -53,7 +59,7 @@ class EngineerStatusServiceImplTest {
     @Test
     void testOnProposalCreated_NotBench() {
         engineer.setStatus("稼動中");
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         
         engineerStatusService.onProposalCreated(1L);
 
@@ -63,7 +69,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testOnContractActive() {
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         
         engineerStatusService.onContractActive(1L);
 
@@ -73,7 +79,7 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testReleaseIfIdle_HasProposals() {
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         when(proposalMapper.selectCount(any())).thenReturn(1L);
 
         engineerStatusService.releaseIfIdle(1L);
@@ -83,9 +89,9 @@ class EngineerStatusServiceImplTest {
 
     @Test
     void testReleaseIfIdle_HasContracts() {
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         when(proposalMapper.selectCount(any())).thenReturn(0L);
-        when(contractMapper.selectCount(any())).thenReturn(1L);
+        when(contractMapper.countActiveByEngineerForTenant(eq(1L), any())).thenReturn(1L);
 
         engineerStatusService.releaseIfIdle(1L);
 
@@ -95,9 +101,9 @@ class EngineerStatusServiceImplTest {
     @Test
     void testReleaseIfIdle_Idle() {
         engineer.setStatus("提案中");
-        when(engineerMapper.selectByIdForUpdate(1L)).thenReturn(engineer);
+        when(engineerMapper.selectByIdForUpdateForTenant(eq(1L), any())).thenReturn(engineer);
         when(proposalMapper.selectCount(any())).thenReturn(0L);
-        when(contractMapper.selectCount(any())).thenReturn(0L);
+        when(contractMapper.countActiveByEngineerForTenant(eq(1L), any())).thenReturn(0L);
 
         engineerStatusService.releaseIfIdle(1L);
 
