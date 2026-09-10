@@ -112,7 +112,7 @@ class UtilizationForecastServiceTest {
         // E2: 稼働中 (今月末終了, autoRenew=0 -> m1ロールオフ候補)
         Contract c2 = createContract(2L, 2L, currentYm.atDay(1), currentYm.atEndOfMonth(), 0);
 
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
 
         // 担当営業マッピング
         EngineerPrimarySalesDto salesDto = new EngineerPrimarySalesDto(2L, 99L, "Sales Rep 1");
@@ -172,7 +172,7 @@ class UtilizationForecastServiceTest {
         Contract c2 = createContract(2L, 1L, nextYm.atDay(1), nextYm.atEndOfMonth(), 1);
         c2.setStatus(StatusConstants.CONTRACT_PREPARING);
 
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1, c2));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1, c2));
 
         UtilizationForecastDto result = forecastService.getForecast(3);
 
@@ -190,7 +190,7 @@ class UtilizationForecastServiceTest {
 
         // c1: 今月末で終了だが autoRenew=1 かつ assumeRenew=true
         Contract c1 = createContract(1L, 1L, currentYm.atDay(1), currentYm.atEndOfMonth(), 1);
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         UtilizationForecastDto result = forecastService.getForecast(3);
 
@@ -212,7 +212,7 @@ class UtilizationForecastServiceTest {
 
         // c1: autoRenew=1 だが assumeRenew=false 設定のため更新なしとみなす
         Contract c1 = createContract(1L, 1L, currentYm.atDay(1), currentYm.atEndOfMonth(), 1);
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         when(engineerSalesService.mapPrimaryByEngineerIds(any())).thenReturn(Collections.emptyMap());
 
@@ -234,7 +234,7 @@ class UtilizationForecastServiceTest {
         // c1: autoRenew=1 だが renewalDecision='END' (更新不可確定)
         Contract c1 = createContract(1L, 1L, currentYm.atDay(1), currentYm.atEndOfMonth(), 1);
         c1.setRenewalDecision("END");
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         when(engineerSalesService.mapPrimaryByEngineerIds(any())).thenReturn(Collections.emptyMap());
 
@@ -259,7 +259,7 @@ class UtilizationForecastServiceTest {
         when(engineerMapper.selectList(any())).thenReturn(List.of(e1, e2));
 
         Contract c1 = createContract(1L, 1L, LocalDate.now().minusMonths(1), null, 1);
-        when(contractMapper.selectList(any())).thenReturn(List.of(c1));
+        when(contractMapper.selectListForTenant(any(), any())).thenReturn(List.of(c1));
 
         UtilizationForecastDto result = forecastService.getForecast(3);
 
