@@ -53,21 +53,6 @@ CREATE TABLE IF NOT EXISTS m_certification_alias (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_cert_alias_norm ON m_certification_alias(tenant_id, normalized_key, deleted_flag);
 
-CREATE TABLE IF NOT EXISTS t_certification_continuity_group (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
-    engineer_id BIGINT NOT NULL,
-    certification_id BIGINT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    created_by BIGINT NULL,
-    deleted_flag INT NOT NULL DEFAULT 0
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_cert_continuity_group_ident
-    ON t_certification_continuity_group(id, tenant_id, engineer_id, certification_id);
-CREATE INDEX IF NOT EXISTS idx_cert_continuity_group_eng
-    ON t_certification_continuity_group(tenant_id, engineer_id, certification_id);
-
 CREATE TABLE IF NOT EXISTS t_engineer_certification (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     tenant_id VARCHAR(100) NOT NULL DEFAULT 'default',
@@ -90,9 +75,7 @@ CREATE TABLE IF NOT EXISTS t_engineer_certification (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_by BIGINT NULL,
     updated_by BIGINT NULL,
-    deleted_flag INT NOT NULL DEFAULT 0,
-    CONSTRAINT fk_eng_cert_continuity_group FOREIGN KEY (continuity_group_id, tenant_id, engineer_id, certification_id) REFERENCES t_certification_continuity_group(id, tenant_id, engineer_id, certification_id),
-    CONSTRAINT chk_eng_cert_current_holder CHECK ((current_flag = 1 AND current_holder_key IS NOT NULL AND current_holder_key = continuity_group_id) OR (current_flag = 0 AND current_holder_key IS NULL))
+    deleted_flag INT NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_eng_cert_current_holder
     ON t_engineer_certification(tenant_id, engineer_id, certification_id, current_holder_key);

@@ -61,14 +61,10 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
         }
 
         Object principal = authentication.getPrincipal();
-        // tenantを持たない機械認証はPrometheusのmetrics endpointだけに限定する。
-        // その他の内部page/APIを通過させると、未束縛時のdefault tenantへ到達し得るため、
-        // LoginUser契約を満たさないprincipalはfail-closedにする。
-        if (!(principal instanceof LoginUser loginUser)) {
-            if (isMetricsScraperRequest(request)
-                    && authentication.getAuthorities().stream().anyMatch(a ->
-                    ("ROLE_" + MetricsScraperAuthConfig.ROLE_METRICS_SCRAPER)
-                            .equals(a.getAuthority()))) {
+        boolean isMetricsScraper = authentication.getAuthorities().stream().anyMatch(a ->
+                ("ROLE_" + MetricsScraperAuthConfig.ROLE_METRICS_SCRAPER).equals(a.getAuthority()));
+        if (isMetricsScraper) {
+            if (isMetricsScraperRequest(request)) {
                 filterChain.doFilter(request, response);
             } else {
                 deny(response, TENANT_CONTEXT_REQUIRED);
@@ -76,7 +72,26 @@ public class InternalTenantContextFilter extends OncePerRequestFilter {
             return;
         }
 
-        String tenantId = loginUser.getTenantId();
+        String tenantId;
+        if (principal instanceof LoginUser loginUser) {
+            tenantId = loginUser.getTenantId();
+        } else if (principal instanceof org.springframework.security.core.userdetails.UserDetails) {
+            tenantId = com.ses.common.util.SecurityUtils.currentTenantId();
+            if (!StringUtils.hasText(tenantId)) {
+                tenantId = AccountingTenantContextHolder.getExplicitTenantId();
+            }
+            if (!StringUtils.hasText(tenantId) && oidcSecurityProperties != null
+                    && StringUtils.hasText(oidcSecurityProperties.getTenantId())) {
+                tenantId = oidcSecurityProperties.getTenantId().trim();
+            }
+            if (!StringUtils.hasText(tenantId)) {
+                tenantId = AccountingTenantContextHolder.getTenantId();
+            }
+        } else {
+            deny(response, TENANT_CONTEXT_REQUIRED);
+            return;
+        }
+
         if (!StringUtils.hasText(tenantId)) {
             deny(response, TENANT_CONTEXT_REQUIRED);
             return;

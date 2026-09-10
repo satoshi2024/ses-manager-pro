@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS t_ai_recommendation_run (
     error_code VARCHAR(64) NULL,
     scope_hash CHAR(64) NULL,
     parameter_hash CHAR(64) NULL,
-    tenant_id VARCHAR(64) NULL,
     legal_entity_id BIGINT NULL,
     as_of_at TIMESTAMP NULL,
     timezone_id VARCHAR(64) NULL,
