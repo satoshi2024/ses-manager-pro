@@ -56,13 +56,9 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(before, claimed, rowWithStatus("SENT"));
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markSent("default", 7L)).thenReturn(1);
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(before, claimed, rowWithStatus("SENT"));
-        when(outboxMapper.claim(7L)).thenReturn(1);
-        when(outboxMapper.markSent(7L)).thenReturn(1);
-        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("SENT"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(true);
         when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
-        when(reportDeliveryMapper.syncOutboxStatus(7L, "SENT", null, null)).thenReturn(1);
+        when(reportDeliveryMapper.syncOutboxStatus("default", 7L, "SENT", null, null)).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
@@ -83,13 +79,9 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row(1), row(2), rowWithStatus("RETRY"));
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markResult(eq("default"), eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(1), row(2), rowWithStatus("RETRY"));
-        when(outboxMapper.claim(7L)).thenReturn(1);
-        when(outboxMapper.markResult(eq(7L), eq("RETRY"), any(LocalDateTime.class), any())).thenReturn(1);
-        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("RETRY"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
         when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
-        when(reportDeliveryMapper.syncOutboxStatus(eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), any())).thenReturn(1);
+        when(reportDeliveryMapper.syncOutboxStatus(eq("default"), eq(7L), eq("RETRY"), eq("DELIVERY_FAILED"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
@@ -105,13 +97,9 @@ class NotificationOutboxDispatcherTest {
         when(outboxMapper.selectByIdForDispatch("default", 7L)).thenReturn(row(4), row(5), rowWithStatus("FAILED"));
         when(outboxMapper.claim("default", 7L)).thenReturn(1);
         when(outboxMapper.markResult(eq("default"), eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
-        when(outboxMapper.selectByIdForDispatch(7L)).thenReturn(row(4), row(5), rowWithStatus("FAILED"));
-        when(outboxMapper.claim(7L)).thenReturn(1);
-        when(outboxMapper.markResult(eq(7L), eq("FAILED"), any(LocalDateTime.class), any())).thenReturn(1);
-        when(outboxMapper.selectById(7L)).thenReturn(rowWithStatus("FAILED"));
         when(webhookNotifier.notifyNow(any(Notification.class))).thenReturn(false);
         when(reportDeliveryMapper.selectByNotificationOutboxId(7L)).thenReturn(reportDelivery());
-        when(reportDeliveryMapper.syncOutboxStatus(eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), any())).thenReturn(1);
+        when(reportDeliveryMapper.syncOutboxStatus(eq("default"), eq(7L), eq("FAILED"), eq("DELIVERY_DLQ"), any())).thenReturn(1);
 
         NotificationOutboxDispatcher dispatcher = new NotificationOutboxDispatcher(outboxMapper, webhookNotifier);
         org.springframework.test.util.ReflectionTestUtils.setField(dispatcher, "reportDeliveryMapper", reportDeliveryMapper);
