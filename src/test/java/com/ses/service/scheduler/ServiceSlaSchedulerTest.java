@@ -172,11 +172,13 @@ class ServiceSlaSchedulerTest {
         projectMapper.insert(project);
 
         Engineer engineer = new Engineer();
+        engineer.setTenantId("default");
         engineer.setFullName("Test Engineer " + UUID.randomUUID());
         engineer.setEmploymentType("正社員");
         engineerMapper.insert(engineer);
 
         SysUser salesUser = new SysUser();
+        salesUser.setTenantId("default");
         salesUser.setUsername("sales_" + UUID.randomUUID());
         salesUser.setPassword("pass123");
         salesUser.setRealName("Sales Rep");

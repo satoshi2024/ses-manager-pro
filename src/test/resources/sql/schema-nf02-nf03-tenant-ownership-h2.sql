@@ -54,3 +54,10 @@ CREATE INDEX IF NOT EXISTS idx_project_customer_version
 ALTER TABLE t_contract ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(100);
 CREATE INDEX IF NOT EXISTS idx_contract_tenant_customer_status_sales
     ON t_contract (tenant_id, customer_id, status, sales_user_id, deleted_flag, id);
+
+-- V172相当。契約の要員・案件・顧客・営業ownership監査を高速化する。
+-- 不明・衝突行はtenantを推測せず、resolverから不可視のまま修復キューで扱う。
+CREATE INDEX IF NOT EXISTS idx_contract_tenant_reference
+    ON t_contract (tenant_id, customer_id, engineer_id, project_id, sales_user_id, deleted_flag, id);
+CREATE INDEX IF NOT EXISTS idx_user_org_tenant_owner
+    ON t_user_organization (tenant_id, user_id, organization_id, deleted_flag, id);

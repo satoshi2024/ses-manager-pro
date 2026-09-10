@@ -24,12 +24,58 @@ import java.time.LocalDate;
 @Mapper
 public interface ContractMapper extends BaseMapper<Contract> {
 
+    /** 契約と関連する要員・案件・営業のownershipをSQL境界で固定する。 */
+    String CONTRACT_REFERENCE_OWNERSHIP_C = ""
+            + " AND EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = c.engineer_id"
+            + " AND e.tenant_id IS NOT NULL AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0)"
+            + " AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id"
+            + " AND p.customer_id = c.customer_id AND p.deleted_flag = 0"
+            + " AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu"
+            + " WHERE pu.id = p.created_by AND pu.tenant_id IS NOT NULL"
+            + " AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))"
+            + " AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su"
+            + " WHERE su.id = c.sales_user_id AND su.tenant_id IS NOT NULL"
+            + " AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0)) ";
+
+    String CONTRACT_REFERENCE_OWNERSHIP_CT = ""
+            + " AND EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = ct.engineer_id"
+            + " AND e.tenant_id IS NOT NULL AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0)"
+            + " AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = ct.project_id"
+            + " AND p.customer_id = ct.customer_id AND p.deleted_flag = 0"
+            + " AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu"
+            + " WHERE pu.id = p.created_by AND pu.tenant_id IS NOT NULL"
+            + " AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))"
+            + " AND (ct.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su"
+            + " WHERE su.id = ct.sales_user_id AND su.tenant_id IS NOT NULL"
+            + " AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0)) ";
+
+    String CONTRACT_REFERENCE_OWNERSHIP_UNQUALIFIED = ""
+            + " AND EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = engineer_id"
+            + " AND e.tenant_id IS NOT NULL AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0)"
+            + " AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = project_id"
+            + " AND p.customer_id = customer_id AND p.deleted_flag = 0"
+            + " AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu"
+            + " WHERE pu.id = p.created_by AND pu.tenant_id IS NOT NULL"
+            + " AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))"
+            + " AND (sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su"
+            + " WHERE su.id = sales_user_id AND su.tenant_id IS NOT NULL"
+            + " AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0)) ";
+
+    /** 組織scopeの関連行は要員・連携ユーザー・所属のtenantを全て一致させる。 */
+    String TENANT_LINK_ORGANIZATION_OWNERSHIP = ""
+            + " AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0"
+            + " AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id"
+            + " AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)"
+            + " AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}"
+            + " AND uo.user_id = l.sys_user_id ";
+
     /** 任意の検索条件を保ったまま、契約・顧客のownershipをSQL境界で強制する。 */
     @Select("<script>SELECT c.* FROM t_contract c "
             + "WHERE c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
+            + CONTRACT_REFERENCE_OWNERSHIP_C
             + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     List<Contract> selectListForTenant(@org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
@@ -40,6 +86,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
+            + CONTRACT_REFERENCE_OWNERSHIP_C
             + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     Page<Contract> selectPageForTenant(Page<Contract> page,
                                        @org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
@@ -51,6 +98,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND c.deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0) "
+            + CONTRACT_REFERENCE_OWNERSHIP_C
             + "<if test='ew != null and ew.nonEmptyOfWhere'>AND ${ew.sqlSegment}</if></script>")
     long selectCountForTenant(@org.apache.ibatis.annotations.Param(Constants.WRAPPER) Wrapper<Contract> wrapper,
                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
@@ -59,6 +107,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("<script>SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
+            + CONTRACT_REFERENCE_OWNERSHIP_C
             + "<choose><when test='ids != null and ids.size() > 0'>AND c.id IN "
             + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
             + "</when><otherwise>AND 1 = 0</otherwise></choose></script>")
@@ -68,7 +117,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "WHERE ct.id = #{id} AND ct.customer_id = #{customerId} "
-            + "AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0")
+            + "AND ct.tenant_id IS NOT NULL AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_CT)
     Contract selectByIdForCustomerAndTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                              @org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
@@ -76,7 +126,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "WHERE ct.id = #{id} AND ct.tenant_id IS NOT NULL AND ct.tenant_id = #{tenantId} "
-            + "AND ct.deleted_flag = 0")
+            + "AND ct.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_CT)
     Contract selectByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -84,7 +135,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "WHERE ct.id = #{id} AND ct.tenant_id IS NOT NULL AND ct.tenant_id = #{tenantId} "
-            + "AND ct.deleted_flag = 0 FOR UPDATE")
+            + "AND ct.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_CT + " FOR UPDATE")
     Contract selectByIdForUpdateForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -95,6 +147,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
         FROM t_contract c INNER JOIN m_customer mc ON mc.id = c.customer_id
              AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         WHERE c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0
+        """ + CONTRACT_REFERENCE_OWNERSHIP_C + """
         <if test="allowedIds != null">
           <choose>
             <when test="allowedIds.size() > 0">AND c.id IN <foreach collection="allowedIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
@@ -132,8 +185,15 @@ public interface ContractMapper extends BaseMapper<Contract> {
                version = version + 1
          WHERE id = #{contract.id} AND tenant_id IS NOT NULL AND tenant_id = #{tenantId}
            AND version = #{expectedVersion} AND deleted_flag = 0
-           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id
-                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+            AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id
+                        AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+            AND EXISTS (SELECT 1 FROM t_engineer e WHERE e.id = engineer_id
+                        AND e.tenant_id IS NOT NULL AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0)
+            AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = project_id
+                        AND p.customer_id = customer_id AND p.deleted_flag = 0)
+            AND (sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su
+                        WHERE su.id = sales_user_id AND su.tenant_id IS NOT NULL
+                          AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
         """)
     int updateByIdForTenant(@org.apache.ibatis.annotations.Param("contract") Contract contract,
                             @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
@@ -144,7 +204,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "updated_at = CURRENT_TIMESTAMP WHERE id = #{id} AND tenant_id IS NOT NULL "
             + "AND tenant_id = #{tenantId} AND version = #{expectedVersion} AND deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id "
-            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)")
+            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)"
+            + CONTRACT_REFERENCE_OWNERSHIP_UNQUALIFIED)
     int deleteByIdForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                             @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                             @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion);
@@ -155,7 +216,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "WHERE id = #{id} AND tenant_id IS NOT NULL AND tenant_id = #{tenantId} "
             + "AND version = #{expectedVersion} AND deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id "
-            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)")
+            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)"
+            + CONTRACT_REFERENCE_OWNERSHIP_UNQUALIFIED)
     int updateStatusForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                               @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion,
@@ -168,7 +230,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "WHERE id = #{id} AND tenant_id IS NOT NULL AND tenant_id = #{tenantId} "
             + "AND version = #{expectedVersion} AND deleted_flag = 0 "
             + "AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id "
-            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)")
+            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)"
+            + CONTRACT_REFERENCE_OWNERSHIP_UNQUALIFIED)
     int updateRenewalDecisionForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                        @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion,
@@ -179,7 +242,8 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "updated_at = CURRENT_TIMESTAMP, version = version + 1 WHERE id = #{id} "
             + "AND tenant_id IS NOT NULL AND tenant_id = #{tenantId} AND version = #{expectedVersion} "
             + "AND deleted_flag = 0 AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = customer_id "
-            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)")
+            + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)"
+            + CONTRACT_REFERENCE_OWNERSHIP_UNQUALIFIED)
     int updatePriceOnlyForTenant(@org.apache.ibatis.annotations.Param("id") Long id,
                                  @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                  @org.apache.ibatis.annotations.Param("expectedVersion") Integer expectedVersion,
@@ -199,7 +263,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT COUNT(*) FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.engineer_id = #{engineerId} "
             + "AND c.status = '稼動中' AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} "
-            + "AND c.deleted_flag = 0")
+            + "AND c.deleted_flag = 0" + CONTRACT_REFERENCE_OWNERSHIP_C)
     long countActiveByEngineerForTenant(@org.apache.ibatis.annotations.Param("engineerId") Long engineerId,
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -208,62 +272,67 @@ public interface ContractMapper extends BaseMapper<Contract> {
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.auto_renew = 1 "
             + "AND c.status = '稼動中' AND c.end_date IS NOT NULL AND c.end_date >= #{today} "
-            + "AND c.end_date <= #{horizon} ORDER BY c.id")
+            + "AND c.end_date <= #{horizon}" + CONTRACT_REFERENCE_OWNERSHIP_C + " ORDER BY c.id")
     List<Contract> selectAutoRenewCandidatesForTenant(@org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                                        @org.apache.ibatis.annotations.Param("today") LocalDate today,
                                                        @org.apache.ibatis.annotations.Param("horizon") LocalDate horizon);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.proposal_id = #{sourceId} "
-            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 LIMIT 1")
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " LIMIT 1")
     Contract selectByProposalForTenant(@org.apache.ibatis.annotations.Param("sourceId") Long sourceId,
                                        @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.quotation_id = #{sourceId} "
-            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 LIMIT 1")
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " LIMIT 1")
     Contract selectByQuotationForTenant(@org.apache.ibatis.annotations.Param("sourceId") Long sourceId,
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.order_line_id = #{sourceId} "
-            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 LIMIT 1")
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " LIMIT 1")
     Contract selectByOrderLineForTenant(@org.apache.ibatis.annotations.Param("sourceId") Long sourceId,
                                         @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.status = '稼動中' "
-            + "AND c.end_date BETWEEN #{today} AND #{horizon} ORDER BY c.id")
+            + "AND c.end_date BETWEEN #{today} AND #{horizon}"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " ORDER BY c.id")
     List<Contract> selectEndingForTenant(@org.apache.ibatis.annotations.Param("today") LocalDate today,
                                           @org.apache.ibatis.annotations.Param("horizon") LocalDate horizon,
                                           @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT DISTINCT c.renewed_from_contract_id FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
-            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.renewed_from_contract_id IS NOT NULL")
+            + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.renewed_from_contract_id IS NOT NULL"
+            + CONTRACT_REFERENCE_OWNERSHIP_C)
     List<Long> selectRenewedOriginalIdsForTenant(@org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.engineer_id = #{engineerId} "
             + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
-            + "ORDER BY c.end_date DESC LIMIT 1")
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " ORDER BY c.end_date DESC LIMIT 1")
     Contract selectLatestByEngineerForTenant(@org.apache.ibatis.annotations.Param("engineerId") Long engineerId,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT DISTINCT c.sales_user_id FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.customer_id = #{customerId} "
             + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
-            + "AND c.sales_user_id IS NOT NULL")
+            + "AND c.sales_user_id IS NOT NULL" + CONTRACT_REFERENCE_OWNERSHIP_C)
     List<Long> selectSalesUserIdsByCustomerForTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                                       @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     /** SLA通知の顧客担当営業候補を、契約・顧客の両方の帰属で限定する。 */
     @Select("SELECT ct.* FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
-            + "WHERE ct.customer_id = #{customerId} AND ct.tenant_id = #{tenantId} "
+            + "WHERE ct.customer_id = #{customerId} AND ct.tenant_id IS NOT NULL AND ct.tenant_id = #{tenantId} "
             + "AND ct.status = '稼動中' AND ct.sales_user_id IS NOT NULL "
-            + "AND ct.deleted_flag = 0 ORDER BY ct.id DESC")
+            + "AND ct.deleted_flag = 0" + CONTRACT_REFERENCE_OWNERSHIP_CT + " ORDER BY ct.id DESC")
     List<Contract> selectActiveByCustomerAndTenant(
             @org.apache.ibatis.annotations.Param("customerId") Long customerId,
             @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
@@ -271,21 +340,23 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT COUNT(*) FROM t_contract ct INNER JOIN m_customer c ON c.id = ct.customer_id "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "WHERE ct.customer_id = #{customerId} AND ct.engineer_id = #{engineerId} "
-            + "AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0")
+            + "AND ct.tenant_id IS NOT NULL AND ct.tenant_id = #{tenantId} AND ct.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_CT)
     long countByCustomerAndEngineerForTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                              @org.apache.ibatis.annotations.Param("engineerId") Long engineerId,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT c.* FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
-            + "WHERE c.customer_id = #{customerId} AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
+            + "WHERE c.customer_id = #{customerId} AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
             + "AND c.deleted_flag = 0 AND mc.deleted_flag = 0 AND c.cost_center_id IS NOT NULL "
-            + "ORDER BY c.id DESC LIMIT 10")
+            + CONTRACT_REFERENCE_OWNERSHIP_C + " ORDER BY c.id DESC LIMIT 10")
     List<Contract> selectByCustomerAndTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT COUNT(*) FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
-            + "WHERE c.customer_id = #{customerId} AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
-            + "AND c.status = #{status} AND c.deleted_flag = 0 AND mc.deleted_flag = 0")
+            + "WHERE c.customer_id = #{customerId} AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND mc.tenant_id = #{tenantId} "
+            + "AND c.status = #{status} AND c.deleted_flag = 0 AND mc.deleted_flag = 0"
+            + CONTRACT_REFERENCE_OWNERSHIP_C)
     long countByCustomerAndTenant(@org.apache.ibatis.annotations.Param("customerId") Long customerId,
                                   @org.apache.ibatis.annotations.Param("tenantId") String tenantId,
                                   @org.apache.ibatis.annotations.Param("status") String status);
@@ -306,13 +377,18 @@ public interface ContractMapper extends BaseMapper<Contract> {
         <script>
         SELECT DISTINCT c.id
         FROM t_contract c
-        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_accounting_history h ON h.engineer_id = e.id
              AND h.deleted_flag = 0
              AND h.valid_from &lt;= #{asOf}
              AND (h.valid_to IS NULL OR h.valid_to &gt;= #{asOf})
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+               AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{asOf}
              AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
@@ -320,6 +396,11 @@ public interface ContractMapper extends BaseMapper<Contract> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND c.project_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+                      AND p.customer_id = c.customer_id AND p.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND (
             <if test="organizationIds != null and organizationIds.size() > 0">
               CASE WHEN h.id IS NULL THEN COALESCE(e.organization_id, uo.organization_id)
@@ -344,14 +425,24 @@ public interface ContractMapper extends BaseMapper<Contract> {
         <script>
         SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id) AS organization_id
         FROM t_contract c
-        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+               AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0 AND uo.valid_to IS NULL
         WHERE c.deleted_flag = 0
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND c.project_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+                      AND p.customer_id = c.customer_id AND p.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
           AND c.id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>
         </script>
@@ -362,14 +453,16 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("<script>SELECT DISTINCT c.customer_id FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.customer_id IS NOT NULL AND c.id IN "
-            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + "</script>")
     List<Long> selectCustomerIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids,
                                               @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("<script>SELECT DISTINCT c.project_id FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
             + "AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 AND c.project_id IS NOT NULL AND c.id IN "
-            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+            + "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach>"
+            + CONTRACT_REFERENCE_OWNERSHIP_C + "</script>")
     List<Long> selectProjectIdsByContractIds(@org.apache.ibatis.annotations.Param("ids") List<Long> ids,
                                              @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -378,9 +471,14 @@ public interface ContractMapper extends BaseMapper<Contract> {
         <script>
         SELECT DISTINCT COALESCE(e.organization_id, uo.organization_id)
         FROM t_contract c
-        JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = e.id
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+               AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{asOf}
              AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
@@ -388,6 +486,10 @@ public interface ContractMapper extends BaseMapper<Contract> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+                      AND p.customer_id = c.customer_id AND p.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND COALESCE(e.organization_id, uo.organization_id) IS NOT NULL
         </script>
         """)
@@ -404,9 +506,14 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
                COALESCE(e.organization_id, uo.organization_id) AS organizationId
         FROM t_contract c
-        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+               AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart}
              AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
@@ -414,6 +521,12 @@ public interface ContractMapper extends BaseMapper<Contract> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_engineer e2 WHERE e2.id = c.engineer_id
+                      AND e2.tenant_id IS NOT NULL AND e2.tenant_id = #{tenantId} AND e2.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+                      AND p.customer_id = c.customer_id AND p.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND c.status != '準備中'
           AND c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
@@ -454,9 +567,14 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.selling_price AS sellingPrice, c.cost_price AS costPrice, c.status,
                COALESCE(e.organization_id, uo.organization_id) AS organizationId
         FROM t_contract c
-        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         LEFT JOIN t_engineer_account_link l ON l.engineer_id = c.engineer_id
+             AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+             AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+               AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
         LEFT JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
+             AND uo.tenant_id IS NOT NULL AND uo.tenant_id = #{tenantId}
              AND uo.primary_flag = 1 AND uo.deleted_flag = 0
              AND uo.valid_from &lt;= #{monthStart}
              AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{monthStart})
@@ -465,6 +583,12 @@ public interface ContractMapper extends BaseMapper<Contract> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+                      AND p.customer_id = c.customer_id AND p.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_engineer e2 WHERE e2.id = c.engineer_id
+                      AND e2.tenant_id IS NOT NULL AND e2.tenant_id = #{tenantId} AND e2.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= #{monthStart})
           <if test="customerId != null">AND c.customer_id = #{customerId}</if>
@@ -516,18 +640,21 @@ public interface ContractMapper extends BaseMapper<Contract> {
     @Select("SELECT c.engineer_id, c.start_date, c.end_date FROM t_contract c " +
             "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 " +
             "WHERE c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 " +
-            "AND c.status IN ('稼動中','終了') AND c.engineer_id IS NOT NULL AND c.start_date IS NOT NULL")
+            "AND c.status IN ('稼動中','終了') AND c.engineer_id IS NOT NULL AND c.start_date IS NOT NULL"
+            + CONTRACT_REFERENCE_OWNERSHIP_C)
     List<ContractDateRangeDto> selectActiveDateRanges(@org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT MAX(c.contract_no) FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.tenant_id IS NOT NULL "
-            + "AND c.tenant_id = #{tenantId} AND c.contract_no LIKE CONCAT(#{prefix}, '%')")
+            + "AND c.tenant_id = #{tenantId} AND c.contract_no LIKE CONCAT(#{prefix}, '%')"
+            + CONTRACT_REFERENCE_OWNERSHIP_C)
     String selectMaxContractNoIncludingDeleted(@org.apache.ibatis.annotations.Param("prefix") String prefix,
                                                 @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
     @Select("SELECT COUNT(*) FROM t_contract c JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 WHERE c.renewed_from_contract_id = #{originalId} "
-            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}")
+            + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}"
+            + CONTRACT_REFERENCE_OWNERSHIP_C)
     int countRenewedDraftsIncludingDeleted(@org.apache.ibatis.annotations.Param("originalId") Long originalId,
                                             @org.apache.ibatis.annotations.Param("tenantId") String tenantId);
 
@@ -564,15 +691,22 @@ public interface ContractMapper extends BaseMapper<Contract> {
                 SELECT 1 FROM t_document_link dl
                 INNER JOIN t_document_version dv ON dv.document_id = dl.document_id
                     AND dv.scan_status = 'CLEAN' AND dv.deleted_flag = 0
-                WHERE dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
+                WHERE dl.tenant_id IS NOT NULL AND dl.tenant_id = #{tenantId}
+                  AND dv.tenant_id IS NOT NULL AND dv.tenant_id = #{tenantId}
+                  AND dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
             ) AS contractDocumentAvailable
         FROM t_contract c
-        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
-        LEFT JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+        INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON p.id = c.project_id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+                AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         WHERE c.deleted_flag = 0
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           AND c.customer_id = #{customerId}
           <if test="status != null and status != ''">AND c.status = #{status}</if>
         ORDER BY c.id DESC
@@ -610,15 +744,22 @@ public interface ContractMapper extends BaseMapper<Contract> {
                 SELECT 1 FROM t_document_link dl
                 INNER JOIN t_document_version dv ON dv.document_id = dl.document_id
                     AND dv.scan_status = 'CLEAN' AND dv.deleted_flag = 0
-                WHERE dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
+                WHERE dl.tenant_id IS NOT NULL AND dl.tenant_id = #{tenantId}
+                  AND dv.tenant_id IS NOT NULL AND dv.tenant_id = #{tenantId}
+                  AND dl.target_type = 'CONTRACT' AND dl.target_id = c.id AND dl.deleted_flag = 0
             ) AS contractDocumentAvailable
         FROM t_contract c
-        LEFT JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
-        LEFT JOIN t_project p ON p.id = c.project_id AND p.deleted_flag = 0
+        INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON p.id = c.project_id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+                AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         WHERE c.id = #{id} AND c.deleted_flag = 0 AND c.customer_id = #{customerId}
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND EXISTS (SELECT 1 FROM m_customer mc WHERE mc.id = c.customer_id
                       AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0)
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+                      AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
         """)
     com.ses.dto.portal.PortalContractDto selectPortalDetailDto(@org.apache.ibatis.annotations.Param("id") Long id,
             @org.apache.ibatis.annotations.Param("customerId") Long customerId,
@@ -633,13 +774,19 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.sales_user_id AS salesUserId, su.real_name AS salesUserName,
                e.full_name AS engineerName, cu.company_name AS customerName, p.project_name AS projectName
         FROM t_contract c
-        LEFT JOIN t_engineer e ON c.engineer_id = e.id AND e.deleted_flag = 0
-        LEFT JOIN m_customer cu ON c.customer_id = cu.id AND cu.deleted_flag = 0
-        LEFT JOIN t_project p ON c.project_id = p.id AND p.deleted_flag = 0
-        LEFT JOIN sys_user su ON c.sales_user_id = su.id AND su.deleted_flag = 0
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN m_customer cu ON c.customer_id = cu.id AND cu.tenant_id IS NOT NULL
+             AND cu.tenant_id = #{tenantId} AND cu.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+                AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
+        LEFT JOIN sys_user su ON c.sales_user_id = su.id AND su.tenant_id IS NOT NULL
+             AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0
         WHERE c.deleted_flag = 0
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND cu.tenant_id = #{tenantId}
+          AND cu.tenant_id IS NOT NULL AND cu.tenant_id = #{tenantId}
+          AND (c.sales_user_id IS NULL OR su.id IS NOT NULL)
           <if test="status != null and status != ''">AND c.status = #{status}</if>
           <if test="customerId != null">AND c.customer_id = #{customerId}</if>
           <if test="engineerId != null">AND c.engineer_id = #{engineerId}</if>
@@ -680,12 +827,19 @@ public interface ContractMapper extends BaseMapper<Contract> {
                c.sales_user_id AS salesUserId, su.real_name AS salesUserName,
                e.full_name AS engineerName, cu.company_name AS customerName
         FROM t_contract c
-        LEFT JOIN t_engineer e ON c.engineer_id = e.id AND e.deleted_flag = 0
-        LEFT JOIN m_customer cu ON c.customer_id = cu.id AND cu.deleted_flag = 0
-        LEFT JOIN sys_user su ON c.sales_user_id = su.id AND su.deleted_flag = 0
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+             AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN m_customer cu ON c.customer_id = cu.id AND cu.tenant_id IS NOT NULL
+             AND cu.tenant_id = #{tenantId} AND cu.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+                AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
+        LEFT JOIN sys_user su ON c.sales_user_id = su.id AND su.tenant_id IS NOT NULL
+             AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0
         WHERE c.deleted_flag = 0
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND cu.tenant_id = #{tenantId}
+          AND cu.tenant_id IS NOT NULL AND cu.tenant_id = #{tenantId}
+          AND (c.sales_user_id IS NULL OR su.id IS NOT NULL)
           AND c.status = #{status}
           AND c.end_date IS NOT NULL
           AND c.end_date &gt;= #{endDateFrom}
@@ -715,6 +869,7 @@ public interface ContractMapper extends BaseMapper<Contract> {
         WHERE c.deleted_flag = 0 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND renewed_from_contract_id IN
         <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach>
+          """ + CONTRACT_REFERENCE_OWNERSHIP_C + """
         </script>
         """)
     java.util.List<ContractDraftStatusDto> selectDraftStatusesByOriginalIds(

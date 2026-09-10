@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * NF-03 F1-1〜A2のMySQL smoke。V116〜V171のDDL shape・seed・FKを実MySQLで検証する。
+ * NF-03 F1-1〜A2のMySQL smoke。V116〜V172のDDL shape・seed・FKを実MySQLで検証する。
  */
 @Tag("mysql")
 @Testcontainers(disabledWithoutDocker = true)
@@ -46,7 +46,7 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
         try (Connection connection = MYSQL.createConnection(""); Statement statement = connection.createStatement()) {
             String latestVersion = queryString(statement,
                     "SELECT version FROM flyway_schema_history WHERE version IS NOT NULL ORDER BY installed_rank DESC LIMIT 1");
-            assertTrue(Integer.parseInt(latestVersion) >= 171,
+            assertTrue(Integer.parseInt(latestVersion) >= 172,
                     "NF-02/NF-03の最新tenant/CAS migration以降まで適用されていること");
 
             for (String table : new String[]{
@@ -88,6 +88,8 @@ class FlywayCertificationLearningSkillGapSchemaSmokeTest {
             assertIndexExists(statement, "t_bp_availability", "idx_bp_availability_tenant_population");
             assertIndexExists(statement, "t_engineer_account_link", "idx_engineer_account_link_tenant_owner");
             assertIndexExists(statement, "t_contract", "idx_contract_tenant_customer_status_sales");
+            assertIndexExists(statement, "t_contract", "idx_contract_tenant_reference");
+            assertIndexExists(statement, "t_user_organization", "idx_user_org_tenant_owner");
             for (String table : new String[]{"t_ai_recommendation_run", "t_ai_recommendation_item",
                     "t_ai_feedback", "t_ai_outcome"}) {
                 assertColumnExists(statement, table, "tenant_id");

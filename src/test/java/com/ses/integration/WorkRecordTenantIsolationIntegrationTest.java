@@ -1,5 +1,6 @@
 package com.ses.integration;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ses.BaseIntegrationTest;
 import com.ses.config.LoginUser;
 import com.ses.entity.Contract;
@@ -152,6 +153,34 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
                 .containsExactly(tenantA.contractId());
     }
 
+    @Test
+    void 契約の要員案件営業ownership不一致は全ての勤怠母集団から除外する() {
+        Contract engineerMismatch = contractWithReferences(tenantA, tenantA.customerId(),
+                tenantB.engineerId(), tenantA.projectId(), null, "要員tenant不一致");
+        Contract projectMismatch = contractWithReferences(tenantA, tenantA.customerId(),
+                tenantA.engineerId(), tenantB.projectId(), null, "案件customer不一致");
+        Contract salesMismatch = contractWithReferences(tenantA, tenantA.customerId(),
+                tenantA.engineerId(), tenantA.projectId(), tenantB.user().getId(), "営業tenant不一致");
+        workRecord(engineerMismatch, "提出済");
+        workRecord(projectMismatch, "提出済");
+        workRecord(salesMismatch, "提出済");
+
+        String tenant = tenantA.tenantId();
+        String monthEnd = YearMonth.parse(tenantA.workMonth()).atEndOfMonth().toString();
+        assertThat(workRecordMapper.selectMonthlyGrid(tenantA.workMonth(), monthEnd, tenant))
+                .extracting(com.ses.dto.WorkRecordGridDto::getContractId)
+                .containsExactly(tenantA.contractId());
+        assertThat(workRecordMapper.selectMonthlyGridPage(new Page<>(1, 20),
+                tenantA.workMonth(), monthEnd, null, null, tenant).getTotal()).isEqualTo(1);
+        assertThat(workRecordMapper.selectPendingApprovalPage(new Page<>(1, 20),
+                tenantA.workMonth(), monthEnd, tenant).getTotal()).isEqualTo(1);
+        assertThat(workRecordMapper.selectMonthlyGridForEngineer(tenantB.engineerId(), tenantA.workMonth(), monthEnd, tenant))
+                .isEmpty();
+        assertThat(contractMapper.selectByIdForTenant(engineerMismatch.getId(), tenant)).isNull();
+        assertThat(contractMapper.selectByIdForTenant(projectMismatch.getId(), tenant)).isNull();
+        assertThat(contractMapper.selectByIdForTenant(salesMismatch.getId(), tenant)).isNull();
+    }
+
     private Fixture fixture(String tenantId, String label) {
         SysUser user = new SysUser();
         user.setUsername("wr-" + tenantId);
@@ -197,7 +226,8 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
         link.setEngineerId(engineer.getId());
         link.setSysUserId(user.getId());
         accountLinkMapper.insert(link);
-        return new Fixture(tenantId, month, user, engineer.getId(), contract.getId(), record.getId());
+        return new Fixture(tenantId, month, user, customer.getId(), project.getId(), engineer.getId(),
+                contract.getId(), record.getId());
     }
 
     private Customer customer(String tenantId, String name) {
@@ -220,6 +250,24 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
         contract.setCustomerId(customerId);
         contract.setProjectId(project.getId());
         contract.setEngineerId(owner.engineerId());
+        contract.setContractType("準委任");
+        contract.setStatus("稼動中");
+        contract.setStartDate(YearMonth.parse(owner.workMonth()).atDay(1).minusMonths(1));
+        contract.setSellingPrice(new BigDecimal("600000"));
+        contract.setCostPrice(new BigDecimal("400000"));
+        contractMapper.insert(contract);
+        return contract;
+    }
+
+    private Contract contractWithReferences(Fixture owner, Long customerId, Long engineerId,
+                                            Long projectId, Long salesUserId, String label) {
+        Contract contract = new Contract();
+        contract.setTenantId(owner.tenantId());
+        contract.setContractNo("WR-" + owner.tenantId() + "-" + label);
+        contract.setCustomerId(customerId);
+        contract.setProjectId(projectId);
+        contract.setEngineerId(engineerId);
+        contract.setSalesUserId(salesUserId);
         contract.setContractType("準委任");
         contract.setStatus("稼動中");
         contract.setStartDate(YearMonth.parse(owner.workMonth()).atDay(1).minusMonths(1));
@@ -256,7 +304,7 @@ class WorkRecordTenantIsolationIntegrationTest extends BaseIntegrationTest {
                 principal.getAuthorities()));
     }
 
-    private record Fixture(String tenantId, String workMonth, SysUser user, Long engineerId,
-                           Long contractId, Long workRecordId) {
+    private record Fixture(String tenantId, String workMonth, SysUser user, Long customerId,
+                           Long projectId, Long engineerId, Long contractId, Long workRecordId) {
     }
 }

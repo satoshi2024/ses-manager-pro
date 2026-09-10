@@ -13,6 +13,18 @@ import java.util.List;
 
 @Mapper
 public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
+    /** 勤怠が参照する契約・要員・案件・営業のownershipを一つのSQL条件で固定する。 */
+    String CONTRACT_OWNERSHIP = ""
+            + " AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id"
+            + " AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)"
+            + " AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id"
+            + " AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0"
+            + " AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0"
+            + " WHERE pu0.id = p0.created_by AND pu0.tenant_id IS NOT NULL"
+            + " AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))"
+            + " AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0"
+            + " WHERE su0.id = c.sales_user_id AND su0.tenant_id IS NOT NULL"
+            + " AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0)) ";
     /** 原価部門削除参照も契約・顧客ownershipを現在tenantへ固定する。 */
     @Select("SELECT COUNT(*) FROM t_work_record w "
             + "INNER JOIN t_contract c ON c.id = w.contract_id "
@@ -20,7 +32,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "INNER JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id IS NOT NULL AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.cost_center_id = #{costCenterId}")
+            + "WHERE w.cost_center_id = #{costCenterId}" + CONTRACT_OWNERSHIP)
     long countByCostCenterIdForTenant(@Param("costCenterId") Long costCenterId,
                                       @Param("tenantId") String tenantId);
 
@@ -29,7 +41,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0 "
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.contract_id = #{contractId}")
+            + "WHERE w.contract_id = #{contractId}" + CONTRACT_OWNERSHIP)
     long countByContractIdForTenant(@Param("contractId") Long contractId,
                                     @Param("tenantId") String tenantId);
 
@@ -39,7 +51,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE w.contract_id = #{contractId} AND w.work_month >= #{workMonth} "
-            + "AND w.status <> '確定'")
+            + "AND w.status <> '確定'" + CONTRACT_OWNERSHIP)
     List<WorkRecord> selectUnconfirmedByContractIdForTenant(@Param("contractId") Long contractId,
                                                             @Param("workMonth") String workMonth,
                                                             @Param("tenantId") String tenantId);
@@ -49,7 +61,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE w.contract_id = #{contractId} AND w.status = '確定' "
-            + "AND w.work_month >= #{workMonth}")
+            + "AND w.work_month >= #{workMonth}" + CONTRACT_OWNERSHIP)
     long countConfirmedByContractIdForTenant(@Param("contractId") Long contractId,
                                              @Param("workMonth") String workMonth,
                                              @Param("tenantId") String tenantId);
@@ -61,7 +73,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.id = #{id}")
+            + "WHERE w.id = #{id}" + CONTRACT_OWNERSHIP)
     WorkRecord selectByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     /** 月次snapshotの実績も契約の顧客ownershipでtenantを固定する。 */
@@ -72,7 +84,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE w.work_month = #{workMonth} AND w.status = '確定' "
-            + "ORDER BY w.id")
+            + CONTRACT_OWNERSHIP + " ORDER BY w.id")
     List<WorkRecord> selectConfirmedByWorkMonthForTenant(@Param("workMonth") String workMonth,
                                                          @Param("tenantId") String tenantId);
 
@@ -82,7 +94,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.id = #{id}")
+            + "WHERE w.id = #{id}" + CONTRACT_OWNERSHIP)
     String selectWorkMonthByIdForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT w.* FROM t_work_record w "
@@ -91,7 +103,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.id = #{id} FOR UPDATE")
+            + "WHERE w.id = #{id}" + CONTRACT_OWNERSHIP + " FOR UPDATE")
     WorkRecord selectByIdForUpdateForTenant(@Param("id") Long id, @Param("tenantId") String tenantId);
 
     @Select("SELECT w.* FROM t_work_record w "
@@ -101,7 +113,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE w.contract_id = #{contractId} AND w.work_month = #{workMonth} "
-            + "FOR UPDATE")
+            + CONTRACT_OWNERSHIP + " FOR UPDATE")
     WorkRecord selectByContractIdAndMonthForUpdateForTenant(@Param("contractId") Long contractId,
                                                              @Param("workMonth") String workMonth,
                                                              @Param("tenantId") String tenantId);
@@ -112,7 +124,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.contract_id = #{contractId} AND w.work_month = #{workMonth}")
+            + "WHERE w.contract_id = #{contractId} AND w.work_month = #{workMonth}"
+            + CONTRACT_OWNERSHIP)
     WorkRecord selectByContractIdAndMonthForTenant(@Param("contractId") Long contractId,
                                                    @Param("workMonth") String workMonth,
                                                    @Param("tenantId") String tenantId);
@@ -123,7 +136,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL "
             + "AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
             + "WHERE w.contract_id = #{contractId} "
-            + "ORDER BY w.work_month, w.id")
+            + CONTRACT_OWNERSHIP + " ORDER BY w.work_month, w.id")
     List<WorkRecord> selectByContractIdForTenant(@Param("contractId") Long contractId,
                                                  @Param("tenantId") String tenantId);
 
@@ -162,17 +175,22 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.reject_comment AS rejectComment,
             w.version AS version
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
-        INNER JOIN t_project p ON c.project_id = p.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+          AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+            AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
         WHERE c.start_date <= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date >= CONCAT(#{workMonth}, '-01'))
           AND c.status IN ('稼動中', '終了')
-          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND c.deleted_flag = 0
-        ORDER BY c.id DESC
+           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
+           AND c.deleted_flag = 0
+           AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+             AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
+         ORDER BY c.id DESC
     """)
     List<WorkRecordGridDto> selectMonthlyGrid(@Param("workMonth") String workMonth,
                                               @Param("monthEnd") String monthEnd,
@@ -210,17 +228,22 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.reject_comment AS rejectComment,
             w.version AS version
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
-        INNER JOIN t_project p ON c.project_id = p.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+          AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+            AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
         WHERE c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= CONCAT(#{workMonth}, '-01'))
           AND c.status IN ('稼動中', '終了')
-          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND c.deleted_flag = 0
-          <if test="keyword != null and keyword != ''">
+           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
+           AND c.deleted_flag = 0
+           AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+             AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
+           <if test="keyword != null and keyword != ''">
             AND (
               LOWER(COALESCE(e.full_name, '')) LIKE CONCAT('%', LOWER(#{keyword}), '%')
               OR LOWER(COALESCE(p.project_name, '')) LIKE CONCAT('%', LOWER(#{keyword}), '%')
@@ -263,17 +286,22 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.billing_amount AS billingAmount, w.payment_amount AS paymentAmount,
             w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment, w.version AS version
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
-        INNER JOIN t_project p ON c.project_id = p.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+          AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+            AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
         WHERE c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= CONCAT(#{workMonth}, '-01'))
           AND c.status IN ('稼動中', '終了')
-          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND c.deleted_flag = 0
-          <if test="dataScopeContractIds != null">
+           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
+           AND c.deleted_flag = 0
+           AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+             AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
+           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
           </if>
           <if test="fullAccess == false">
@@ -286,7 +314,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                        AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                          AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                         AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                         AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -296,7 +326,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                     AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                       AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                     AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                     AND uo.user_id IN <foreach collection="allowedDirectUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -341,17 +373,22 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.billing_amount AS billingAmount, w.payment_amount AS paymentAmount,
             w.status AS status, w.remarks AS remarks, w.reject_comment AS rejectComment, w.version AS version
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
-        INNER JOIN t_project p ON c.project_id = p.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+          AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+            AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
         WHERE c.start_date &lt;= #{monthEnd}
           AND (c.end_date IS NULL OR c.end_date &gt;= CONCAT(#{workMonth}, '-01'))
           AND c.status IN ('稼動中', '終了')
-          AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
-          AND c.deleted_flag = 0
-          <if test="dataScopeContractIds != null">
+           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
+           AND c.deleted_flag = 0
+           AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+             AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
+           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
           </if>
           <if test="fullAccess == false">
@@ -364,7 +401,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                        AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                          AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                         AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                         AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -374,7 +413,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                     AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                       AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                     AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                     AND uo.user_id IN <foreach collection="allowedDirectUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -430,10 +471,17 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         SELECT w.* FROM t_work_record w
         INNER JOIN t_contract c ON c.id = w.contract_id
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId} AND c.deleted_flag = 0
-        INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.deleted_flag = 0
+        INNER JOIN t_engineer e ON e.id = c.engineer_id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         WHERE w.id = #{id}
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+            AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+              AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+            AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="contractId" open="(" separator="," close=")">#{contractId}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
           </if>
@@ -447,7 +495,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                        AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                          AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                         AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                         AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>)
@@ -457,7 +507,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                     AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                       AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                     AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                     AND uo.user_id IN <foreach collection="allowedDirectUserIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>)
@@ -509,8 +561,11 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             w.reject_comment AS rejectComment,
             w.version AS version
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
-        INNER JOIN t_project p ON c.project_id = p.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
+        INNER JOIN t_project p ON c.project_id = p.id AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+          AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+            AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0))
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         LEFT JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
@@ -520,6 +575,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           AND c.status IN ('稼動中', '終了')
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+            AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
         ORDER BY c.id DESC
     """)
     List<WorkRecordGridDto> selectMonthlyGridForEngineer(@Param("engineerId") Long engineerId,
@@ -536,12 +593,19 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
     @Select("""
         SELECT e.employment_type
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         WHERE c.id = #{contractId}
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+            AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+              AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+            AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
     """)
     String selectEmploymentTypeByContractIdForTenant(@Param("contractId") Long contractId,
                                                      @Param("tenantId") String tenantId);
@@ -562,7 +626,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             e.full_name AS engineerName,
             w.updated_at AS updatedAt
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         INNER JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
@@ -572,6 +637,12 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
           AND w.status = '提出済'
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+            AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+              AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+            AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
         ORDER BY w.updated_at ASC, w.id ASC
         """)
     Page<com.ses.dto.workrecord.PendingApprovalItemDto> selectPendingApprovalPage(
@@ -596,7 +667,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             e.full_name AS engineerName,
             w.updated_at AS updatedAt
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         INNER JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
@@ -606,6 +678,12 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
           AND w.status = '提出済'
+          AND EXISTS (SELECT 1 FROM t_project p WHERE p.id = c.project_id
+            AND p.customer_id = c.customer_id AND p.deleted_flag = 0
+            AND (p.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu WHERE pu.id = p.created_by
+              AND pu.tenant_id IS NOT NULL AND pu.tenant_id = #{tenantId} AND pu.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su WHERE su.id = c.sales_user_id
+            AND su.tenant_id IS NOT NULL AND su.tenant_id = #{tenantId} AND su.deleted_flag = 0))
           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
           </if>
@@ -619,7 +697,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                        AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                          AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                         AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                         AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -629,7 +709,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                     AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                       AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                     AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                     AND uo.user_id IN <foreach collection="allowedDirectUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -675,6 +757,14 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
           AND w.status = '提出済'
+          AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+            AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+          AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+            AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+            AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+              AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+            AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
         """)
     java.time.LocalDateTime selectOldestPendingUpdatedAt(
             @Param("workMonth") String workMonth,
@@ -691,7 +781,8 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         <script>
         SELECT MIN(w.updated_at)
         FROM t_contract c
-        INNER JOIN t_engineer e ON c.engineer_id = e.id
+        INNER JOIN t_engineer e ON c.engineer_id = e.id AND e.tenant_id IS NOT NULL
+          AND e.tenant_id = #{tenantId} AND e.deleted_flag = 0
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         INNER JOIN t_work_record w ON c.id = w.contract_id AND w.work_month = #{workMonth}
@@ -701,6 +792,12 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
           AND c.deleted_flag = 0
           AND w.status = '提出済'
+          AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+            AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+            AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+              AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+          AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+            AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
           <if test="dataScopeContractIds != null">
             <choose><when test="dataScopeContractIds.size() > 0">AND c.id IN <foreach collection="dataScopeContractIds" item="id" open="(" separator="," close=")">#{id}</foreach></when><otherwise>AND 1 = 0</otherwise></choose>
           </if>
@@ -714,7 +811,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
                     (w.accounting_dimension_frozen IS NULL OR w.accounting_dimension_frozen &lt;&gt; 1)
                     AND e.organization_id IS NULL
                     AND EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                      WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                        AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                          AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                         AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                         AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                         AND uo.organization_id IN <foreach collection="allowedOrganizationIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -724,7 +823,9 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               <if test="allowedDirectUserIds != null and allowedDirectUserIds.size() > 0">
                 <if test="allowedOrganizationIds != null and allowedOrganizationIds.size() > 0">OR</if>
                 EXISTS (SELECT 1 FROM t_engineer_account_link l JOIN t_user_organization uo ON uo.user_id = l.sys_user_id
-                  WHERE l.engineer_id = c.engineer_id AND l.tenant_id = #{tenantId}
+                   WHERE l.engineer_id = c.engineer_id AND l.tenant_id IS NOT NULL AND l.tenant_id = #{tenantId} AND l.deleted_flag = 0
+                     AND EXISTS (SELECT 1 FROM sys_user lu WHERE lu.id = l.sys_user_id
+                       AND lu.tenant_id IS NOT NULL AND lu.tenant_id = #{tenantId} AND lu.deleted_flag = 0)
                     AND uo.tenant_id = #{tenantId} AND uo.deleted_flag = 0
                     AND uo.valid_from &lt;= #{asOf} AND (uo.valid_to IS NULL OR uo.valid_to &gt;= #{asOf})
                     AND uo.user_id IN <foreach collection="allowedDirectUserIds" item="id" open="(" separator="," close=")">#{id}</foreach>)
@@ -772,6 +873,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             </when>
             <otherwise>(NULL)</otherwise>
           </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         </script>
         """)
@@ -788,6 +890,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
         INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.tenant_id IS NOT NULL
           AND mc.tenant_id = c.tenant_id AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0
         WHERE w.work_month = #{workMonth} AND w.status <> '確定'
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         """)
     List<WorkRecord> selectUnconfirmedByWorkMonthForTenant(@Param("workMonth") String workMonth,
@@ -800,7 +903,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             + "INNER JOIN m_customer mc ON mc.id = c.customer_id "
             + "AND mc.tenant_id IS NOT NULL AND mc.tenant_id = c.tenant_id "
             + "AND mc.tenant_id = #{tenantId} AND mc.deleted_flag = 0 "
-            + "WHERE w.work_month = #{workMonth} ORDER BY w.id ASC")
+            + "WHERE w.work_month = #{workMonth}" + CONTRACT_OWNERSHIP + " ORDER BY w.id ASC")
     List<WorkRecord> selectByWorkMonthForTenant(@Param("workMonth") String workMonth,
                                                 @Param("tenantId") String tenantId);
 
@@ -821,6 +924,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             </when>
             <otherwise>(NULL)</otherwise>
           </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         </script>
         """)
@@ -845,6 +949,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             </when>
             <otherwise>(NULL)</otherwise>
           </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         </script>
         """)
@@ -876,6 +981,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             </when>
             <otherwise>(NULL)</otherwise>
           </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         </script>
         """)
@@ -901,6 +1007,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
           </when>
           <otherwise>(NULL)</otherwise>
         </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id
         </script>
         """)
@@ -925,6 +1032,7 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
             </when>
             <otherwise>(NULL)</otherwise>
           </choose>
+        """ + CONTRACT_OWNERSHIP + """
         ORDER BY w.id ASC
         </script>
         """)
@@ -957,7 +1065,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
         </script>
         """)
     int updateByIdForTenant(@Param("record") WorkRecord record,
@@ -978,7 +1094,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
         """)
     int updateToSubmittedForTenant(@Param("id") Long id,
                                    @Param("expectedVersion") Integer expectedVersion,
@@ -999,7 +1123,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
         """)
     int updateToConfirmedForTenant(@Param("id") Long id,
                                    @Param("expectedVersion") Integer expectedVersion,
@@ -1020,7 +1152,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
         """)
     int updateToRejectedForTenant(@Param("id") Long id,
                                   @Param("expectedVersion") Integer expectedVersion,
@@ -1039,7 +1179,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
         """)
     int updateToInputForTenant(@Param("id") Long id,
                                @Param("expectedVersion") Integer expectedVersion,
@@ -1059,7 +1207,15 @@ public interface WorkRecordMapper extends BaseMapper<WorkRecord> {
               WHERE c.id = w.contract_id
                 AND c.tenant_id IS NOT NULL AND c.tenant_id = #{tenantId}
                 AND c.deleted_flag = 0
-          )
+                AND EXISTS (SELECT 1 FROM t_engineer e0 WHERE e0.id = c.engineer_id
+                  AND e0.tenant_id IS NOT NULL AND e0.tenant_id = #{tenantId} AND e0.deleted_flag = 0)
+                AND EXISTS (SELECT 1 FROM t_project p0 WHERE p0.id = c.project_id
+                  AND p0.customer_id = c.customer_id AND p0.deleted_flag = 0
+                  AND (p0.created_by IS NULL OR EXISTS (SELECT 1 FROM sys_user pu0 WHERE pu0.id = p0.created_by
+                    AND pu0.tenant_id IS NOT NULL AND pu0.tenant_id = #{tenantId} AND pu0.deleted_flag = 0)))
+                AND (c.sales_user_id IS NULL OR EXISTS (SELECT 1 FROM sys_user su0 WHERE su0.id = c.sales_user_id
+                  AND su0.tenant_id IS NOT NULL AND su0.tenant_id = #{tenantId} AND su0.deleted_flag = 0))
+           )
     """)
     int updateBillingAndPayment(@Param("id") Long id,
                                 @Param("actualHours") java.math.BigDecimal actualHours,
