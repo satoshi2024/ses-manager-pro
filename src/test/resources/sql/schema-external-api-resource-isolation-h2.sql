@@ -22,3 +22,9 @@ CREATE TABLE IF NOT EXISTS t_legal_entity_backfill_audit (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_legal_entity_backfill_audit UNIQUE (entity_type, entity_id, decision)
 );
+
+UPDATE m_customer SET legal_entity_id = 1 WHERE legal_entity_id IS NULL;
+UPDATE t_engineer SET legal_entity_id = 1 WHERE legal_entity_id IS NULL;
+UPDATE t_project SET legal_entity_id = 1 WHERE legal_entity_id IS NULL;
+UPDATE t_contract SET legal_entity_id = 1 WHERE legal_entity_id IS NULL;
+UPDATE t_invoice SET legal_entity_id = 1 WHERE legal_entity_id IS NULL;
