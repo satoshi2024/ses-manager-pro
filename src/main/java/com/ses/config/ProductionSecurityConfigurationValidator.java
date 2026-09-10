@@ -135,13 +135,15 @@ public class ProductionSecurityConfigurationValidator implements ApplicationRunn
             errors.add("有効なbreak-glass管理者usernameをちょうど2件設定してください");
             return;
         }
+        String tenantId = StringUtils.hasText(oidcProperties.getTenantId())
+                ? oidcProperties.getTenantId().trim() : "default";
         for (String username : usernames) {
             SysUser user = sysUserMapper.selectByUsername(username);
             if (user == null || !ADMIN_ROLE.equals(user.getRole()) || !Integer.valueOf(1).equals(user.getStatus())) {
                 errors.add("break-glass usernameは有効な管理者ユーザーでなければなりません: " + username);
                 continue;
             }
-            if (userMfaMapper.countEnrolled(oidcProperties.getTenantId(), user.getId()) != 1) {
+            if (userMfaMapper.countEnrolled(tenantId, user.getId()) != 1) {
                 errors.add("break-glass usernameはMFA enrollment完了済みでなければなりません: " + username);
             }
         }
